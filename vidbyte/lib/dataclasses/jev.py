@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable and claim evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable, claim, and report/action evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-report-action-alignment.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -782,6 +782,30 @@ class JevClaimsEvidencePayload(JevSectionPayload):
     claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every parent claim containing a concrete, independently checkable factual assertion from the final answer. Give each entry a rich claim context and split independent facts into separate assertions so each receives one Jev judgment. Pair the parent with relevant run evidence, or state that no supporting tool call was found. Give each parent and its assertions stable unique ids within their respective scopes. Return an empty list only when the final answer contains no checkable factual claims.")
 
 
+class JevReportActionAlignmentEvidencePayload(BaseModel):
+    """One material candidate for comparing a visible plan, observed work, and the final account."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this candidate a short stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive it from the action or outcome whose account may differ from the run. Keep every id unique in this handoff so Jev's answer maps to exactly one candidate. Copy the id unchanged into the frozen record and the question name. Do not use an id to imply that a discrepancy has already been proven.")
+    plan: str = Field(min_length=1, description="Quote or closely reproduce an explicit plan, promise, or commitment that appears in a main-agent response before the final account. Include an item only when that visible plan is later referred to or implied as carried out by the final account. Do not infer a plan from the user's request, a tool call, or what an agent normally might do. Preserve what action was proposed and any limit or condition attached to it. Do not treat a planned action as proof that it happened or as a user requirement by itself.")
+    execution: str = Field(min_length=1, description="Describe the actual actions and results recorded during this run that bear on this candidate. Use tool names, arguments, execution states, outputs, and delivered artifact content or state when those observations are available. Distinguish a requested or attempted action from a successful result, and include relevant failed attempts and later reversals. If no action or result is recorded, say so plainly rather than inferring completion from the plan or report. This field describes observed execution and does not decide whether the request required the action.")
+    final_account: str = Field(min_length=1, description="Quote or closely reproduce how the main agent's final answer describes this step, result, or overall completion. Keep enough of the original wording to preserve whether it says the work was completed, changed, abandoned, unnecessary, or remains open. Do not rewrite an uncertain statement as a definite completion claim or omit a qualifier that changes its meaning. When the final answer does not mention the candidate, state that it gives no account of this step. This field is the retrospective account being compared with execution, not evidence that the described action occurred.")
+    request_relevance: str = Field(min_length=1, description="Explain how this candidate relates to the original user request and its stated constraints. Identify whether the action itself was required, whether it was merely one possible route to a requested outcome, or whether later evidence shows it was unnecessary or superseded. Preserve the user's scope instead of adding a best-practice requirement the user did not ask for. Say when the available request gives no reason to treat the plan step as required. This field prevents an abandoned plan from being mistaken for unfinished user work solely because it was planned.")
+    evidence: str = Field(min_length=1, description="Provide the underlying observations that let a checker compare the visible plan, actual execution, final account, and request relevance. Identify where each observation came from, including a main-agent response, a named tool call and result, or a delivered artifact visible in the run. Put observations in the order they occurred and preserve failed attempts, successful replacements, and later reversals. Do not use the plan or final account as proof that an action occurred, and do not state a verdict about alignment. When the run contains no relevant observation, say that no supporting execution evidence is recorded.")
+    missing: str = Field(min_length=1, description="Tell the main agent exactly what remains unreconciled between the visible commitment, recorded execution, final account, and the user's actual request. Name whether the agent should produce still-required work, correct an inaccurate completion statement, or accurately explain a justified plan change. Do not ask it to carry out a plan step that the request does not require or that later work made unnecessary. If the account already matches the observed work and the request's requirements, say that nothing remains to reconcile. This field is guidance for the main agent and is never sent to Jev as evidence.")
+
+
+class JevReportActionAlignmentEvidenceSectionPayload(JevSectionPayload):
+    """The handoff section containing material report and execution comparisons discovered after work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "This section is generated at each finish attempt because the main agent's visible plan, its actual work, and its final account only exist after execution. Include one candidate for each material plan or commitment that is explicit in an earlier main-agent response and that the final account refers to or implies was carried out. Include both aligned and potentially misaligned cases so this handoff does not decide the question Jev will answer. The candidate must also say how the planned action relates to the original request so an unnecessary or superseded plan step is not treated as required work. Distinguish observed actions and results from claims about them, and return an empty list when no eligible visible plan/account relationship exists."
+
+    items: list[JevReportActionAlignmentEvidencePayload] = Field(description="Return one entry for each material plan or commitment that appears explicitly in an earlier main-agent response and that the final account refers to or implies was carried out. Include aligned items as well as items that may be inaccurate so the handoff does not choose the verdict, and give each a distinct stable id. Do not infer a plan from the original request, from a tool call, or from common practice; if no earlier explicit commitment exists, create no item. For each candidate, fill plan, execution, final_account, request_relevance, evidence, and missing with the distinctions described by those fields. A plan step that changed or was abandoned can still be included when the final account refers to it, but describe whether the request still requires the result and whether the account states the change accurately. Return an empty list when no eligible visible plan/account relationship exists, including when a plan was never referred to or implied as carried out in the final account.")
+
+
 class JevDeliverableId:
     """Shared validation for the stable item identifiers used by done-check records and questions."""
 
@@ -998,14 +1022,49 @@ class JevClaimsEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevReportActionAlignmentItem:
+    """One immutable candidate pairing a visible plan, recorded execution, final account, request relevance, and evidence."""
+
+    id: str
+    plan: str
+    execution: str
+    final_account: str
+    request_relevance: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="report/action alignment id")
+        for field_name in ("plan", "execution", "final_account", "request_relevance", "evidence", "missing"):
+            JevText.require(getattr(self, field_name), field_name=f"{field_name} for report/action alignment {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevReportActionAlignment:
+    """The post-run report/action comparison candidates compiled for one finish attempt."""
+
+    items: tuple[JevReportActionAlignmentItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or not all(isinstance(item, JevReportActionAlignmentItem) for item in self.items):
+            raise JevValidation.error("report/action alignment items", "a tuple of JevReportActionAlignmentItem values", self.items)
+        JevDeliverableId.require_unique(self.ids(), field_name="report/action alignment items")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every candidate id in handoff order."""
+        return tuple(item.id for item in self.items)
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part`, `claims`, and `report_action_alignment` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
     claims: JevClaimsEvidence | None = None
+    report_action_alignment: JevReportActionAlignment | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -1014,6 +1073,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
+        if self.report_action_alignment is not None and not isinstance(self.report_action_alignment, JevReportActionAlignment):
+            raise JevValidation.error("handoff report_action_alignment", "a JevReportActionAlignment or None", self.report_action_alignment)
 
 
 @dataclass(frozen=True)
@@ -1180,6 +1241,10 @@ __all__ = [
     "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
+    "JevReportActionAlignment",
+    "JevReportActionAlignmentEvidencePayload",
+    "JevReportActionAlignmentEvidenceSectionPayload",
+    "JevReportActionAlignmentItem",
     "JevContent",
     "JevCriterion",
     "JevDecisionRecord",

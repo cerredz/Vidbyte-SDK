@@ -31,6 +31,8 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevReportActionAlignment,
+    JevReportActionAlignmentItem,
     JevRunStateRecord,
     JevSpecialist,
 )
@@ -57,6 +59,8 @@ __all__ = [
     "JevHandoffRecord",
     "JevPreflightPreset",
     "JevPresetResult",
+    "JevReportActionAlignment",
+    "JevReportActionAlignmentItem",
     "JevRunStateRecord",
     "JevRuntime",
     "JevRuntimeSettings",

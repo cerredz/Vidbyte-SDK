@@ -21,6 +21,32 @@ Hand whole tasks to specialists with `JevAgentSettings.agents`: each `JevSpecial
 
 Enable done checks with `JevRuntimeSettings(continual=JevContinualSettings(checks=...))`. With `JevDoneCheck.MULTI_PART`, `JevRunState` lists the separate deliverables the request asks for, and each time the main agent tries to finish, `JevHandoff` compiles the evidence for each one and Jev judges, in one request holding every enabled check's questions, whether each was produced in full. A deliverable below `JEV_MULTI_PART_THRESHOLD` sends the main agent back to work in the same loop, at most `JevContinualSettings.max_continuations` times (default `JEV_DONE_MAX_CONTINUATIONS`); every failure fails open. `agent.response.run_state`, `handoff`, `done`, and `continuations` report the outcome. The questions live in `vidbyte/lib/jev/done/`.
 
+`JevDoneCheck.REPORT_ACTION_ALIGNMENT` is an opt-in check for drift between an explicit plan in an earlier main-agent response, recorded execution, and the final account. It checks only plan items that the final account refers to or implies were carried out, and uses the original request to distinguish required outcomes from optional plan steps. A changed or abandoned plan can pass when the final account accurately describes it and the request does not still require the result. Each eligible item is checked in the same batched Jev request as any other enabled checks; an unsupported account goes back to the main agent with only that item and its missing evidence or required work.
+
+```python
+from vidbyte import JevAgent, JevAgentSettings, JevContinualSettings, JevDoneCheck, JevRuntimeSettings
+
+agent = JevAgent(
+    JevAgentSettings(
+        name="researcher",
+        system_prompt="Research carefully and report what you actually did.",
+        provider="openai",
+        model_name="gpt-4.1",
+    ),
+    JevRuntimeSettings(
+        continual=JevContinualSettings(
+            checks=(JevDoneCheck.REPORT_ACTION_ALIGNMENT,),
+            max_continuations=2,
+        ),
+    ),
+)
+reply = agent.run("Compare the two approaches and recommend one.")
+alignment = agent.response.done[JevDoneCheck.REPORT_ACTION_ALIGNMENT]
+print(alignment.passed, alignment.incomplete)
+```
+
+`agent.response.handoff.report_action_alignment` contains the frozen plan, execution, final-account, relevance, evidence, and missing records for that finish attempt. `JevDoneCheck.CLAIMS` remains the separate check for individual factual assertions in the final answer.
+
 Do not add a generic `decisions` collection or runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions inside this package.
 
-See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, `docs/design/jev-specialist-routing.md`, `docs/design/jev-multipart-done-criteria.md`, and `skills/jev-agent/SKILL.md`.
+See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, `docs/design/jev-specialist-routing.md`, `docs/design/jev-multipart-done-criteria.md`, `docs/design/jev-report-action-alignment.md`, and `skills/jev-agent/SKILL.md`.

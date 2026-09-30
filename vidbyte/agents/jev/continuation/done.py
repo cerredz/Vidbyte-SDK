@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-report-action-alignment.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -75,6 +75,10 @@ class JevDoneContinuation(JevContinuation):
         )
 
     def _explain(self, result: JevDoneResult) -> tuple[str, str]:
+        # @intent failed-check-feedback-is-question-specific
+        # Each enabled check owns a different evidence boundary, so its feedback must use that check's typed handoff and failed ids.
+        # Keeping the cases aligned with the question registry avoids continuing on an unrelated claim or plan item.
+        # A future check must add its own focused explanation here or its failed result could send the main agent back without usable work.
         # Returns one failed check's part of the message: its failed Jev questions, and the focus lines; one commented case per check.
         match result.check:
             case JevDoneCheck.MULTI_PART:
@@ -106,6 +110,29 @@ class JevDoneContinuation(JevContinuation):
                     assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.REPORT_ACTION_ALIGNMENT:
+                # Return only explicit plan items whose account may be inaccurate, paired with the required correction or remaining work.
+                # @intent a-report-mismatch-focuses-one-plan-item
+                # A plan step is not user-required by itself; continue only on what the user's request still requires,
+                # and let an accurate account of an optional plan change stand.
+                alignment = None if self.run_state.handoff is None else self.run_state.handoff.report_action_alignment
+                candidates = {} if alignment is None else {item.id: item for item in alignment.items}
+                question = JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    item = candidates[identifier]
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+                    focus.append("\n".join((
+                        f"- Earlier plan or commitment: {item.plan}",
+                        f"  Recorded execution: {item.execution}",
+                        f"  Final account: {item.final_account}",
+                        f"  Relevance to the original request: {item.request_relevance}",
+                        f"  Recorded evidence: {item.evidence}",
+                        f"  Reconcile by completing any still-required result or correcting the account: {item.missing}",
+                    )))
                 return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
