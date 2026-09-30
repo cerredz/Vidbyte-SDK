@@ -361,6 +361,8 @@ class JevRunState(BaseAgent):
         if evidence.outstanding_continuation is not None or evidence.failed_retrievals:
             return "Traversal is incomplete: an outstanding continuation or failed retrieval remains in the trace.", True
         if evidence.unit_type != obligation.unit:
+            if obligation.expected_total is not None:
+                return f"The user explicitly requested {obligation.expected_total} {obligation.unit} units, but the handoff's identifiers are typed as {evidence.unit_type or 'unknown'}; code cannot compare these units, and terminal evidence does not establish the requested count.", True
             if evidence.terminal_evidence is None:
                 return "The handoff does not establish that visited identifiers use the requested unit type, and no affirmative terminal signal establishes exhaustion.", True
             return "Code did not compare visited identifiers with a total because their unit type does not match the obligation; Jev must judge the supplied affirmative terminal signal against the requested scope.", False
