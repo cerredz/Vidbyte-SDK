@@ -15,3 +15,6 @@ from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuesti
 from vidbyte.lib.jev.done.output_count import OutputCountSatisfiedQuestion
 
 __all__ = ["ClaimsSupportedQuestion", "DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion", "OutputCountSatisfiedQuestion"]
+from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
+
+__all__ = ["DONE_STATE", "ClaimsSupportedQuestion", "JevDoneRegistry", "MultiPartDeliveredQuestion", "ProblemsResolvedQuestion"]
