@@ -17,12 +17,13 @@ from typing import Any
 from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
-from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, tool
+from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, JevRuntimeSettings, tool
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
 from vidbyte.lib.enums import JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
+from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.tools.catalog import Tools
@@ -54,6 +55,18 @@ class ScriptedDecisionRunner:
             raw={},
             usage={"input_tokens": 15, "output_tokens": 3},
         )
+
+
+def _helper_class(scripted: ScriptedDecisionRunner) -> type:
+    """Stands in for the helper transport while keeping its production score method active."""
+    class ScriptedDecisionHelper:
+        score_noul = staticmethod(DecisionModelHelper.score_noul)
+        noul_passes = staticmethod(DecisionModelHelper.noul_passes)
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> ScriptedDecisionRunner:  # type: ignore[misc]
+            return scripted
+
+    return ScriptedDecisionHelper
 
 
 class ScriptedGenerativeRunner:
@@ -102,26 +115,31 @@ def _settings(**overrides: Any) -> JevAgentSettings:
     return JevAgentSettings(**values)
 
 
+def _runtime_settings(**overrides: Any) -> JevRuntimeSettings:
+    """Builds a valid Jev runtime settings object with caller-provided overrides."""
+    return JevRuntimeSettings(**overrides)
+
+
 class JevToolSelectorSettingsTests(unittest.TestCase):
     """Pins the public preset name and valid threshold range."""
 
     def test_normalizes_tool_selector_and_accepts_probability_endpoints(self) -> None:
         # [Edge Case] both endpoints are probabilities and strings use the same stable public name.
-        self.assertEqual(_settings(preflight=("tool_selector",)).preflight, (JevPreflightPreset.TOOL_SELECTOR,))
-        self.assertEqual(_settings(tool_selector_threshold=0).tool_selector_threshold, 0.0)
-        self.assertEqual(_settings(tool_selector_threshold=1).tool_selector_threshold, 1.0)
+        self.assertEqual(_runtime_settings(preflight=("tool_selector",)).preflight, (JevPreflightPreset.TOOL_SELECTOR,))
+        self.assertEqual(_runtime_settings(tool_selector_threshold=0).tool_selector_threshold, 0.0)
+        self.assertEqual(_runtime_settings(tool_selector_threshold=1).tool_selector_threshold, 1.0)
 
     def test_rejects_out_of_range_and_non_probability_values(self) -> None:
         # [Hidden Failure] bool is an int in Python and NaN evades ordinary range comparisons.
         for value in (-0.01, 1.01, True, float("nan"), float("inf"), "0.5"):
             with self.subTest(value=value), self.assertRaises(ConfigurationError):
-                _settings(tool_selector_threshold=value)
+                _runtime_settings(tool_selector_threshold=value)
 
     def test_rejects_duplicate_or_unknown_presets(self) -> None:
         # [Edge Case] each capability runs at most once and unsupported names fail during construction.
         for presets in (("tool_selector", "tool_selector"), ("unknown",)):
             with self.subTest(presets=presets), self.assertRaises(ConfigurationError):
-                _settings(preflight=presets)
+                _runtime_settings(preflight=presets)
 
 
 class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
@@ -143,7 +161,7 @@ class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
         decision_runner = ScriptedDecisionRunner({"tool_selector.0": 0.4, "tool_selector.1": 0.399})
         selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.4)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper", new=_helper_class(decision_runner)):
             selected = await selector.run("Find the architecture notes.", catalog)
 
         self.assertEqual(catalog.names(), ("search", "calendar"))
@@ -164,7 +182,7 @@ class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
         decision_runner = ScriptedDecisionRunner(omit_answer="tool_selector.0")
         selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.2)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper", new=_helper_class(decision_runner)):
             selected = await selector.run("Look up the record.", catalog)
 
         self.assertEqual(selected.names(), catalog.names())
@@ -181,7 +199,7 @@ class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
         selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.2)
 
         with patch(
-            "vidbyte.agents.jev.preflight.DecisionModelRunner",
+            "vidbyte.agents.jev.preflight.DecisionModelHelper",
             side_effect=ProviderRequestError("provider unavailable", provider="typesafe"),
         ):
             selected = await selector.run("Look up the record.", catalog)
@@ -212,15 +230,14 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
             RawResponse({"output": [{"type": "function_call", "name": "hide", "arguments": '{"query": "x"}', "call_id": "hidden"}]}),
             RawResponse({"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "complete"}]}),
         )
-        settings = _settings(
-            tools=(keep, hide),
+        runtime_settings = _runtime_settings(
             preflight=(JevPreflightPreset.TOOL_SELECTOR,),
             decision=DecisionModelConfig(api_key="test-key"),
             tool_selector_threshold=0.2,
         )
-        agent = bind_test_runner(JevAgent(settings), generative_runner)
+        agent = bind_test_runner(JevAgent(_settings(tools=(keep, hide)), runtime_settings), generative_runner)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper", new=_helper_class(decision_runner)):
             reply = await agent.arun("Search the relevant records.")
 
         for model_call in generative_runner.calls:
@@ -238,7 +255,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         generative_runner = ScriptedGenerativeRunner()
         agent = bind_test_runner(JevAgent(_settings()), generative_runner)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner") as decision_runner:
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper") as decision_runner:
             reply = await agent.arun("Answer normally.")
 
         decision_runner.assert_not_called()

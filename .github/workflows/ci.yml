@@ -1,10 +1,11 @@
 name: CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  # TEMPORARILY DISABLED: automatic triggers removed (`workflow_call` is kept
+  # because it never runs automatically; it only preserves the reusable
+  # contract publish.yml depends on). Re-enable by reverting the
+  # temporarily-disable-github-actions commit.
+  workflow_dispatch:
   workflow_call:
 
 permissions:
