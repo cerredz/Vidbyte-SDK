@@ -1,7 +1,7 @@
 """FILE: tests/test_jev_preflight.py
 
 PURPOSE: Verifies JevAgent's preflight gate and clarity preset deterministically without live model calls.
-ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the specialist Choice question and the specialist hand-off, the JevPresets flags, the JevPreflightRegistry, DecisionModelRunner.score_noul, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
+ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the specialist Choice question and the specialist hand-off, the JevPresets flags, the JevPreflightRegistry, DecisionModelHelper request and scoring behavior, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace only the external boundaries while production settings, registry, gate, and runtime wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new preset, question, threshold boundary, match case, and availability policy.
 KNOWN EDGE CASES: The TypeSafe credential is cleared explicitly and no test may contact TypeSafe or a generative provider.
@@ -62,15 +62,15 @@ from vidbyte.lib.dataclasses.jev import (
 )
 from vidbyte.lib.enums import JevPreflightQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
+from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
 from vidbyte.lib.jev.preflight import CLARITY_QUESTIONS, SpecialistQuestion
 from vidbyte.lib.jev.preflight.clarity import IGNORE_CLAIMS, JUDGE_MEANING, REQUEST_STATE
 from vidbyte.lib.runners import TextModelResponse
-from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse
 
-_RUNNER_PATH = "vidbyte.agents.jev.gate.gate.DecisionModelRunner"
-_TOOL_SELECTOR_RUNNER_PATH = "vidbyte.agents.jev.preflight.DecisionModelRunner"
+_RUNNER_PATH = "vidbyte.agents.jev.gate.gate.DecisionModelHelper"
+_TOOL_SELECTOR_RUNNER_PATH = "vidbyte.agents.jev.preflight.DecisionModelHelper"
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SENTENCE_END = re.compile(r"[.?]'?(?=\s+[A-Z`]|$)")
 # A quoted example inside prose: a quote that is not an apostrophe inside a word.
@@ -126,9 +126,10 @@ class ScriptedDecisionRunner:
 
 
 def _runner_class(scripted: ScriptedDecisionRunner) -> type:
-    # Stands in for DecisionModelRunner: construction returns the scripted runner, while score_noul stays real.
+    # Stands in for DecisionModelHelper: construction returns the scripted runner, while score_noul stays real.
     class ScriptedRunnerClass:
-        score_noul = staticmethod(DecisionModelRunner.score_noul)
+        score_noul = staticmethod(DecisionModelHelper.score_noul)
+        noul_passes = staticmethod(DecisionModelHelper.noul_passes)
 
         def __new__(cls, *args: Any, **kwargs: Any) -> ScriptedDecisionRunner:  # type: ignore[misc]
             return scripted
@@ -387,28 +388,31 @@ class JevPreflightRegistryTests(unittest.TestCase):
             _runtime_settings(preflight=("clarity", JevPreflightPreset.CLARITY))
 
 
-class DecisionModelRunnerScoreTests(unittest.TestCase):
+class DecisionModelHelperScoreTests(unittest.TestCase):
     """Pin the noul scoring that turns a set of answers into a yes or no against a threshold."""
 
-    # [Review 4110233707] scoring against the threshold lives on DecisionModelRunner.
+    # Scoring and threshold handling for Jev questions have one canonical shared implementation.
 
     def test_mean_probability_is_compared_to_the_threshold(self) -> None:
         answers = {"a": _answer("a", 0.9), "b": _answer("b", 0.6)}
-        verdict = DecisionModelRunner.score_noul(answers, ("a", "b"), 0.75)
+        verdict = DecisionModelHelper.score_noul(answers, ("a", "b"), 0.75)
         assert verdict is not None
         self.assertAlmostEqual(verdict.score, 0.75)
         self.assertTrue(verdict.passed)
         self.assertEqual(tuple(verdict.answers), ("a", "b"))
-        failing = DecisionModelRunner.score_noul(answers, ("a", "b"), 0.76)
+        failing = DecisionModelHelper.score_noul(answers, ("a", "b"), 0.76)
         assert failing is not None
         self.assertFalse(failing.passed)
+        self.assertTrue(DecisionModelHelper.noul_passes(answers, "a", 0.9))
+        self.assertFalse(DecisionModelHelper.noul_passes(answers, "a", 0.91))
+        self.assertIsNone(DecisionModelHelper.noul_passes(answers, "missing", 0.5))
 
     def test_one_answer_below_the_veto_fails_a_passing_mean(self) -> None:
         # Research tip T23: a mean lifted by easy yes answers must not hide one clear no.
         answers = {"a": _answer("a", 0.99), "b": _answer("b", 0.99), "c": _answer("c", 0.15)}
-        without = DecisionModelRunner.score_noul(answers, ("a", "b", "c"), 0.7)
-        vetoed = DecisionModelRunner.score_noul(answers, ("a", "b", "c"), 0.7, 0.2)
-        at_veto = DecisionModelRunner.score_noul(answers, ("a", "b", "c"), 0.7, 0.15)
+        without = DecisionModelHelper.score_noul(answers, ("a", "b", "c"), 0.7)
+        vetoed = DecisionModelHelper.score_noul(answers, ("a", "b", "c"), 0.7, 0.2)
+        at_veto = DecisionModelHelper.score_noul(answers, ("a", "b", "c"), 0.7, 0.15)
         assert without is not None and vetoed is not None and at_veto is not None
         self.assertTrue(without.passed)
         self.assertFalse(vetoed.passed)
@@ -417,10 +421,25 @@ class DecisionModelRunnerScoreTests(unittest.TestCase):
 
     def test_missing_or_non_noul_answers_make_no_verdict(self) -> None:
         choice = JevAnswer(question_name="b", question_type=JevQuestionType.CHOICE, choice="x", probabilities={"x": 1.0}, confidence=1.0)
-        self.assertIsNone(DecisionModelRunner.score_noul({"a": _answer("a", 0.9)}, ("a", "b"), 0.5))
-        self.assertIsNone(DecisionModelRunner.score_noul({"a": _answer("a", 0.9), "b": choice}, ("a", "b"), 0.5))
-        self.assertIsNone(DecisionModelRunner.score_noul(None, ("a",), 0.5))
-        self.assertIsNone(DecisionModelRunner.score_noul({}, (), 0.5))
+        self.assertIsNone(DecisionModelHelper.score_noul({"a": _answer("a", 0.9)}, ("a", "b"), 0.5))
+        self.assertIsNone(DecisionModelHelper.score_noul({"a": _answer("a", 0.9), "b": choice}, ("a", "b"), 0.5))
+        self.assertIsNone(DecisionModelHelper.score_noul(None, ("a",), 0.5))
+        self.assertIsNone(DecisionModelHelper.score_noul({}, (), 0.5))
+
+
+class DecisionModelHelperRequestTests(unittest.IsolatedAsyncioTestCase):
+    """Pin that the shared helper delegates request transport and preserves normalized answers."""
+
+    async def test_arun_sends_the_request_through_the_decision_runner(self) -> None:
+        question = JevQuestion(name="clarity.target", question_type=JevQuestionType.NOUL, instructions="Is the target clear?")
+        request = JevDecisionRequest(state="Rename the field.", questions=(question,))
+        runner = ScriptedDecisionRunner({question.name: 0.9})
+
+        with patch("vidbyte.lib.jev.decision.DecisionModelRunner", return_value=runner):
+            response = await DecisionModelHelper(DecisionModelConfig(api_key="test-key")).arun(request)
+
+        self.assertEqual(runner.requests, [request])
+        self.assertIn(question.name, response.answers)
 
 
 class JevPreflightGateTests(unittest.TestCase):
@@ -516,8 +535,20 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(reply.structured, JevClarification)
         self.assertEqual(reply.metadata["strategy"], JEV_PREFLIGHT_STRATEGY_NAME)
         self.assertEqual(generative.calls, [])
-        self.assertEqual(len(decision.requests), 1)
-        self.assertEqual(len(decision.requests[0].questions), len(_CLARITY_KEYS))
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        expected_names = tuple(key.value for key in _CLARITY_KEYS)
+        self.assertEqual(
+            len(actual_batches),
+            1,
+            msg=f"Jev preflight must send every enabled fixed question in one request; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
+        )
+        if not actual_batches:
+            return
+        self.assertEqual(
+            actual_batches[0],
+            expected_names,
+            msg=f"The single Jev preflight request must contain each enabled question exactly once; expected {expected_names!r}, observed {actual_batches[0]!r}.",
+        )
         self.assertEqual(clarifier.calls[0], "Build it")
         for key in ("clarity.object", "clarity.target"):
             self.assertIn(JevPreflightRegistry.get(key).gap, clarifier.systems[0])
@@ -660,7 +691,21 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generative.calls, [])
         self.assertEqual(agent.response.specialist, "database")
         self.assertEqual(agent.response.output, "migration written")
-        self.assertEqual(len(decision.requests), 1)
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        self.assertEqual(
+            len(actual_batches),
+            1,
+            msg=f"Jev preflight must include the specialist choice in its single request with all enabled fixed questions; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
+        )
+        if not actual_batches:
+            return
+        actual_names = actual_batches[0]
+        expected_names = (*(key.value for key in _CLARITY_KEYS), JEV_SPECIALIST_QUESTION_NAME)
+        self.assertEqual(
+            actual_names,
+            expected_names,
+            msg=f"Jev preflight must batch all clarity questions and the specialist question together; expected {expected_names!r}, observed {actual_names!r}.",
+        )
 
     async def test_none_keeps_the_main_agent_on_the_task(self) -> None:
         specialist, specialist_runner = _specialist()
@@ -711,7 +756,7 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         gate_decision = ScriptedDecisionRunner({})
         selector_decision = ScriptedDecisionRunner({"tool_selector.0": 0.9, "tool_selector.1": 0.05})
         agent = self._agent(ScriptedGenerativeRunner("done"), preflight=("clarity", "tool_selector"), tools=(keep, hide))
-        with patch(_RUNNER_PATH, new=_runner_class(gate_decision)), patch(_TOOL_SELECTOR_RUNNER_PATH, return_value=selector_decision):
+        with patch(_RUNNER_PATH, new=_runner_class(gate_decision)), patch(_TOOL_SELECTOR_RUNNER_PATH, new=_runner_class(selector_decision)):
             reply = await agent.arun("Search the relevant records for the March invoice.")
 
         self.assertEqual(tuple(question.name for question in gate_decision.requests[0].questions), tuple(key.value for key in _CLARITY_KEYS))

@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/jev/done/done.py
 
 PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question and threshold, plus validation of the done checks a user enables.
-ROLE IN CODEBASE: JevRuntimeSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
+ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
-COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep scoring in DecisionModelRunner.score_noul and the actions taken on answers in JevRunState, not here.
+COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -14,18 +14,26 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
-from vidbyte.lib.constants.jev import JEV_MULTI_PART_THRESHOLD
+from vidbyte.lib.constants.jev import (
+    JEV_CLAIMS_THRESHOLD,
+    JEV_MULTI_PART_THRESHOLD,
+    JEV_TARGET_OUTCOME_THRESHOLD,
+    JEV_PROBLEMS_RESOLVED_THRESHOLD,
+)
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
+from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 
 
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion()})
-    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD})
+    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(), JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion()})
+    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.TARGET_OUTCOME: JEV_TARGET_OUTCOME_THRESHOLD, JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD})
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:
@@ -61,13 +69,13 @@ class JevDoneRegistry:
         # Settings construction calls this, so a typo, a bare string, or a repeated check fails when the
         # agent is built instead of silently asking Jev the wrong (or duplicated) questions at every finish.
         if isinstance(values, (str, bytes)):
-            raise ConfigurationError("JevRuntimeSettings.done must be an iterable of Jev done checks, not a string.", details={"received": repr(values)})
+            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks, not a string.", details={"received": repr(values)})
         try:
             checks = tuple(cls.resolve(value) for value in values)
         except TypeError as exc:
-            raise ConfigurationError("JevRuntimeSettings.done must be an iterable of Jev done checks.", details={"received": type(values).__name__}) from exc
+            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks.", details={"received": type(values).__name__}) from exc
         if len(set(checks)) != len(checks):
-            raise ConfigurationError("JevRuntimeSettings.done cannot enable the same check twice.", details={"received": [check.value for check in checks]})
+            raise ConfigurationError("JevContinualSettings.checks cannot enable the same check twice.", details={"received": [check.value for check in checks]})
         for check in checks:
             cls.question(check)
             cls.threshold(check)

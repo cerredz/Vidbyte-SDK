@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_done.py
 
-PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas and their field descriptions, the records built from them, the multi-part done question and its registry, the two generative prompts, the handoff's context window, and JevRuntime's finish-attempt behavior (pass, send back to work, bounded continuations, and fail-open paths).
-ROLE IN CODEBASE: Pins the review of PR #452: records and enums live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, JevRunState composes one schema from the enabled checks, JevHandoff reads the main agent's window through a ContextManager, and Jev judges one deliverable at a time with a fixed question.
+PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas, request-derived and post-run claim records, both fixed questions, the shared state description, the handoff context, batched Jev requests, and continuation and fail-open behavior.
+ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, the handoff reads the main agent's window through ContextManager, and every enabled check's questions share one Jev request.
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
-COMMON MODIFICATION PATTERNS: Add a case for every new done check, section, question, threshold boundary, and availability policy.
+COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
 """
 
@@ -25,30 +25,59 @@ from unittest.mock import patch
 from pydantic import BaseModel
 
 from lint.core.discovery import SourceFile
-from lint.rules.s062_no_implicit_string_concatenation import ImplicitConcatenationScanner
+from lint.rules.s062_no_implicit_string_concatenation import (
+    ImplicitConcatenationScanner,
+)
 from tests.agent_test_support import bind_test_runner
 from vidbyte import (
     BaseAgent,
     JevAgent,
     JevAgentSettings,
+    JevClaimAssertion,
+    JevClaimContext,
+    JevClaimEvidence,
+    JevClaimIdentity,
+    JevClaimKind,
+    JevClaimScope,
+    JevClaimsEvidence,
+    JevContinualSettings,
     JevDoneCheck,
+    JevProblemResolutionItem,
+    JevProblemsResolvedEvidence,
     JevRuntimeSettings,
     JevSpecialist,
 )
+from vidbyte.agents.jev.continuation import JevContinuation, JevDoneContinuation
 from vidbyte.agents.jev.done import JevHandoff, JevRunState
-from vidbyte.context.primitives import ResponseContextItem, TextContextItem, ToolCallContextItem
+from vidbyte.context.primitives import (
+    ResponseContextItem,
+    TextContextItem,
+    ToolCallContextItem,
+)
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import (
+    JEV_CLAIMS_THRESHOLD,
+    JEV_DONE_CLAIM_FIELD,
+    JEV_DONE_CLAIMS_FIELD,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
+    JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
+    JEV_DONE_PROBLEMS_RESOLVED_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_PROBLEMS_RESOLVED_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevBrief,
+    JevClaimAssertionPayload,
+    JevClaimContextPayload,
+    JevClaimEvidencePayload,
+    JevClaimIdentityPayload,
+    JevClaimScopePayload,
+    JevClaimsEvidencePayload,
     JevCriterion,
     JevDecisionRequest,
     JevDeliverable,
@@ -60,30 +89,42 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
+    JevProblemEvidencePayload,
+    JevProblemsResolvedEvidencePayload,
     JevRunStatePayload,
     JevRunStateRecord,
     JevSectionPayload,
 )
 from vidbyte.lib.enums import JevDoneQuestionKey, JevQuestionType, ModelProvider
+from vidbyte.lib.enums.jev import JevProblemCheckItemType
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevDoneRegistry
-from vidbyte.lib.jev.done import DONE_STATE, MultiPartDeliveredQuestion
+from vidbyte.lib.jev.decision import DecisionModelHelper
+from vidbyte.lib.jev.done import (
+    DONE_STATE,
+    ClaimsSupportedQuestion,
+    MultiPartDeliveredQuestion,
+    ProblemsResolvedQuestion,
+)
 from vidbyte.lib.runners import TextModelResponse
-from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.types import ToolCallContext, ToolCallState, ToolResult
 
-_RUNNER_PATH = "vidbyte.agents.jev.done.run_state.DecisionModelRunner"
+_RUNNER_PATH = "vidbyte.agents.jev.done.run_state.DecisionModelHelper"
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SENTENCE_END = re.compile(r"[.?](?=\s+[A-Z`]|$)")
 _REQUEST = "Add a --dry-run flag to the deploy CLI and document it in the README."
-_STATE = {
+_CLAIMED_FINAL_ANSWER = "I updated README.md to document --dry-run and added a test for the deploy command."
+_BASE_STATE = {
     "goal": "The deploy CLI can preview a deploy without changing anything, and users can read how.",
     "objective": "A working --dry-run flag in the deploy CLI and a README section that documents it.",
     "mission": "Change only the deploy CLI and its README, and keep every existing flag working.",
     "what_not_to_do": ["Do not change other commands."],
+}
+_STATE = {
+    **_BASE_STATE,
     "multi_part": {
         "deliverables": [
             {"id": "dry_run_flag", "description": "A --dry-run flag on the deploy CLI.", "completion_signal": "The deploy CLI accepts --dry-run and prints the planned changes without applying them."},
@@ -99,6 +140,61 @@ _HANDOFF = {
         ]
     }
 }
+_CLAIMS = {
+    "claims": [
+        {
+            "id": "readme_updated",
+            "claim": {
+                "identity": {"title": "README updated", "description": "The final answer says README.md was updated to document --dry-run.", "intent": None},
+                "scope": {"scope": "README.md's --dry-run documentation", "qualifications": []},
+                "kind": "artifact_change",
+                "output": "README.md documentation for --dry-run",
+                "assertions": [{"id": "doc_added", "statement": "README.md was updated to document --dry-run.", "completion_criteria": "A successful recorded edit to README.md contains an explanation of --dry-run."}],
+            },
+            "evidence": "Tool call edit_file(path='README.md', content='--dry-run previews a deploy') state=succeeded; output='README.md updated with that explanation'.",
+            "missing": "Nothing is missing.",
+        },
+        {
+            "id": "deploy_test_added",
+            "claim": {
+                "identity": {"title": "Deploy test added", "description": "The final answer says a test was added for the deploy command.", "intent": None},
+                "scope": {"scope": "A test for the deploy command", "qualifications": []},
+                "kind": "artifact_change",
+                "output": "A deploy command test",
+                "assertions": [{"id": "doc_added", "statement": "A test was added for the deploy command.", "completion_criteria": "A successful recorded edit writes a test for the deploy command."}],
+            },
+            "evidence": "No supporting tool call was found.",
+            "missing": "No tool call shows a test file being written or edited.",
+        },
+    ]
+}
+_CLAIMS_HANDOFF = {"claims": _CLAIMS}
+_COMBINED_HANDOFF = {**_HANDOFF, **_CLAIMS_HANDOFF}
+_PROBLEM_ITEM = {
+    "id": "format_failure",
+    "kind": "problem",
+    "title": "Formatter failure",
+    "description": "The formatter failed while validating the requested change.",
+    "scope": "Formatting for src/deploy.py",
+    "qualifications": "Only the current requested change.",
+    "repair": "A formatting edit was applied and the formatter was rerun.",
+    "verification": "The formatter completed successfully after the edit with exit status 0.",
+    "evidence": "Tool call format(src/deploy.py) failed; edit succeeded; later format(src/deploy.py) succeeded with exit status 0.",
+    "missing": "Nothing is missing.",
+}
+_REQUEST_ITEM = {
+    "id": "original_request_completion",
+    "kind": "request_completion",
+    "title": "Original request complete",
+    "description": "Add the dry-run flag and document it in the README after resolving the formatter failure.",
+    "scope": "Both the CLI flag and README explanation.",
+    "qualifications": "Complete both requested outputs.",
+    "repair": "After repairing the formatter failure, the CLI and README edits were completed.",
+    "verification": "The run evidence shows the flag and README documentation in the final work.",
+    "evidence": "Tool calls show the CLI edit and README edit succeeded after the formatter repair.",
+    "missing": "Nothing is missing.",
+}
+_PROBLEMS_HANDOFF = {"problems_resolved": {"items": [_PROBLEM_ITEM, _REQUEST_ITEM]}}
 
 
 class ScriptedGenerativeRunner:
@@ -121,7 +217,7 @@ class ScriptedGenerativeRunner:
 
 
 class ScriptedDecisionRunner:
-    """Records every decision request and answers each deliverable from a script of P(yes) values per finish attempt."""
+    """Records each decision request and answers every done-item question from scripted P(yes) values keyed by item id."""
 
     def __init__(self, script: Mapping[str, list[float]], *, error: Exception | None = None) -> None:
         self.script = {key: list(values) for key, values in script.items()}
@@ -132,17 +228,19 @@ class ScriptedDecisionRunner:
         self.requests.append(request)
         if self.error is not None:
             raise self.error
-        assert isinstance(request.state, Mapping)
-        values = self.script[str(request.state[JEV_DONE_DELIVERABLE_FIELD])]
-        yes = values.pop(0) if len(values) > 1 else values[0]
-        answers = {question.name: _answer(question.name, yes) for question in request.questions}
+        answers = {}
+        for question in request.questions:
+            values = self.script[question.name.split(".", 2)[-1]]
+            yes = values.pop(0) if len(values) > 1 else values[0]
+            answers[question.name] = _answer(question.name, yes)
         return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-1.13.0", answers=answers, raw={}, usage={"input_tokens": 100, "output_tokens": 10})
 
 
 def _runner_class(scripted: ScriptedDecisionRunner) -> type:
-    # Stands in for DecisionModelRunner: construction returns the scripted runner, while score_noul stays real.
+    # Stands in for DecisionModelHelper: construction returns the scripted runner, while score_noul stays real.
     class ScriptedRunnerClass:
-        score_noul = staticmethod(DecisionModelRunner.score_noul)
+        score_noul = staticmethod(DecisionModelHelper.score_noul)
+        noul_passes = staticmethod(DecisionModelHelper.noul_passes)
 
         def __new__(cls, *args: Any, **kwargs: Any) -> ScriptedDecisionRunner:  # type: ignore[misc]
             return scripted
@@ -161,7 +259,7 @@ def _settings(**overrides: Any) -> JevAgentSettings:
 
 
 def _jev(done: tuple[Any, ...] = (JevDoneCheck.MULTI_PART,), **settings: Any) -> JevAgent:
-    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig(api_key="test-key"), done=done))
+    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig(api_key="test-key"), continual=JevContinualSettings(checks=done)))
 
 
 def _sentences(text: str) -> int:
@@ -174,7 +272,7 @@ def _descriptions(model: type[BaseModel]) -> dict[str, str]:
 
 def _prompt_sections(prompt: Prompt) -> dict[str, str]:
     text = Prompts().get(prompt)
-    sections = re.split(r"^# (\w+)\s*$", text, flags=re.M)[1:]
+    sections = re.split(r"^# (\w+)\s*$", text, flags=re.MULTILINE)[1:]
     return {sections[index]: sections[index + 1].strip() for index in range(0, len(sections), 2)}
 
 
@@ -191,11 +289,16 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        for model in (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload):
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload)
+        for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertIn(_sentences(description), range(4, 7))
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload):
+        for model in (JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload):
+            for name, description in _descriptions(model).items():
+                with self.subTest(model=model.__name__, field=name):
+                    self.assertEqual(_sentences(description), 5)
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -221,25 +324,66 @@ class JevDoneRecordTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             JevRunStateRecord("goal", " ", "mission")
 
+    def test_claim_evidence_requires_unique_claim_ids_and_preserves_an_empty_list(self) -> None:
+        context = JevClaimContext(
+            identity=JevClaimIdentity("README updated", "README.md documents --dry-run."),
+            scope=JevClaimScope("README.md's --dry-run documentation"),
+            kind=JevClaimKind.ARTIFACT_CHANGE,
+            output="README.md section",
+            assertions=(JevClaimAssertion("docs_added", "README.md documents --dry-run.", "The recorded README content explains --dry-run."),),
+        )
+        claim = JevClaimEvidence("readme_updated", context, "edit_file succeeded for README.md", "Nothing is missing.")
+        self.assertEqual(JevClaimsEvidence((claim,)).ids(), ("readme_updated",))
+        self.assertEqual(JevClaimsEvidence((claim,)).assertion_ids(), ("readme_updated.docs_added",))
+        self.assertEqual(JevClaimsEvidence().ids(), ())
+        with self.assertRaises(ConfigurationError):
+            JevClaimsEvidence((claim, claim))
+        with self.assertRaises(ConfigurationError):
+            JevClaimEvidence("Readme", "claim", "evidence", "missing")
+        with self.assertRaises(ConfigurationError):
+            JevClaimContext(context.identity, context.scope, context.kind, context.output, (context.assertions[0], context.assertions[0]))
+        with self.assertRaises(ConfigurationError):
+            JevClaimAssertion("bad.id", "statement", "criterion")
+
+    def test_problem_evidence_requires_exactly_one_reserved_request_item(self) -> None:
+        problem = JevProblemResolutionItem(**{**_PROBLEM_ITEM, "kind": JevProblemCheckItemType.PROBLEM})
+        completion = JevProblemResolutionItem(**{**_REQUEST_ITEM, "kind": JevProblemCheckItemType.REQUEST_COMPLETION})
+        record = JevProblemsResolvedEvidence((problem, completion))
+        self.assertEqual(record.problem_ids(), ("format_failure",))
+        self.assertEqual(record.ids(), ("format_failure", "original_request_completion"))
+        with self.assertRaises(ConfigurationError):
+            JevProblemsResolvedEvidence((problem,))
+        with self.assertRaises(ConfigurationError):
+            JevProblemsResolvedEvidence((problem, completion, completion))
+        with self.assertRaises(ConfigurationError):
+            JevProblemsResolvedEvidence((JevProblemResolutionItem(**{**_PROBLEM_ITEM, "id": "original_request_completion", "kind": JevProblemCheckItemType.PROBLEM}), completion))
+
 
 class JevDoneSchemaTests(unittest.TestCase):
     """Pin that one JevRunState and one JevHandoff compose their schemas from the enabled checks."""
 
-    def test_run_state_schema_adds_one_described_section_per_enabled_check(self) -> None:
-        # [Review 4116740515, 4116749760] one class, no class per shape: enabling an enum option adds its section.
+    def test_run_state_schema_contains_only_checks_with_request_derived_items(self) -> None:
+        # CLAIMS are statements written after work, so the run-state model must not predict them from the request.
         self.assertEqual(set(JevRunState.schema(()).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
         schema = JevRunState.schema((JevDoneCheck.MULTI_PART,))
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
-        self.assertEqual(set(JevRunState._SECTIONS), set(JevDoneCheck))
+        self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS, JevDoneCheck.PROBLEMS_RESOLVED)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.TARGET_OUTCOME})
 
-    def test_handoff_schema_is_general_with_a_tailored_section_per_check(self) -> None:
-        # [Review 4116760518, 4116773073] the handoff is general; the multi-part evidence shape is tailored to its check.
+    def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
+        # Request-derived deliverables and post-run-derived claims both need evidence sections in the handoff.
         self.assertEqual(JevHandoff.schema(()).model_fields, {})
         schema = JevHandoff.schema((JevDoneCheck.MULTI_PART,))
         self.assertTrue(issubclass(schema, JevHandoffPayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartEvidencePayload.SECTION)
         self.assertEqual(set(JevDeliverableEvidencePayload.model_fields), {"id", "evidence", "missing"})
+        claim_schema = JevHandoff.schema((JevDoneCheck.CLAIMS,))
+        self.assertEqual(claim_schema.model_fields["claims"].description, JevClaimsEvidencePayload.SECTION)
+        problem_schema = JevHandoff.schema((JevDoneCheck.PROBLEMS_RESOLVED,))
+        self.assertEqual(problem_schema.model_fields[JEV_DONE_PROBLEMS_RESOLVED_FIELD].description, JevProblemsResolvedEvidencePayload.SECTION)
+        self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
+        self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
 
     def test_agents_are_built_once_in_the_jev_agent_constructor(self) -> None:
@@ -250,13 +394,42 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(agent.run_state.tools.names(), agent.run_state.handoff_writer.tools.names())
         self.assertIsNone(_jev(done=()).run_state)
 
+    def test_the_continuation_is_a_jev_continuation_subclass_built_once(self) -> None:
+        # [Review 4117849112] the runtime calls a JevContinuation subclass instead of holding continuation logic.
+        agent = _jev()
+        self.assertIsInstance(agent.continuation, JevDoneContinuation)
+        self.assertIsInstance(agent.continuation, JevContinuation)
+        assert agent.continuation is not None
+        self.assertIs(agent.continuation.run_state, agent.run_state)
+        self.assertIsNone(_jev(done=()).continuation)
+
     def test_done_checks_are_runtime_settings_validated_by_the_registry(self) -> None:
         # The #469 split: a setting that configures Jev's own decisions belongs on JevRuntimeSettings.
-        self.assertEqual(JevRuntimeSettings(done=("multi_part",)).done, (JevDoneCheck.MULTI_PART,))
+        self.assertEqual(JevContinualSettings(checks=("multi_part",)).checks, (JevDoneCheck.MULTI_PART,))
         self.assertNotIn("done", JevAgentSettings.__dataclass_fields__)
         for bad in ("multi_part", ("multi_part", "multi_part"), ("everything",), 3):
             with self.subTest(bad=bad), self.assertRaises(ConfigurationError):
-                JevRuntimeSettings(done=bad)
+                JevContinualSettings(checks=bad)
+        with self.assertRaises(ConfigurationError):
+            JevRuntimeSettings(continual=(JevDoneCheck.MULTI_PART,))  # type: ignore[arg-type]
+
+    def test_continual_settings_expose_the_continuation_limits(self) -> None:
+        # [Review 4117820116] the settings key is "continual", and the user sets the continuation and token limits.
+        self.assertIn("continual", JevRuntimeSettings.__dataclass_fields__)
+        self.assertNotIn("done", JevRuntimeSettings.__dataclass_fields__)
+        defaults = JevContinualSettings()
+        self.assertEqual((defaults.checks, defaults.max_continuations), ((), JEV_DONE_MAX_CONTINUATIONS))
+        continual = JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,), max_continuations=0, run_state_max_iterations=3, run_state_max_tokens=5_000, handoff_max_iterations=4, handoff_max_tokens=9_000)
+        agent = JevAgent(_settings(), JevRuntimeSettings(continual=continual))
+        assert agent.run_state is not None
+        assert agent.continuation is not None
+        self.assertEqual(agent.continuation.max_continuations, 0)
+        self.assertEqual((agent.run_state.agent_loop_settings.max_iterations, agent.run_state.agent_loop_settings.max_tokens), (3, 5_000))
+        handoff = agent.run_state.handoff_writer.agent_loop_settings
+        self.assertEqual((handoff.max_iterations, handoff.max_tokens), (4, 9_000))
+        for field_name, bad in (("max_continuations", -1), ("max_continuations", True), ("run_state_max_tokens", 0), ("handoff_max_iterations", 2.5)):
+            with self.subTest(field=field_name, bad=bad), self.assertRaises(ConfigurationError):
+                JevContinualSettings(**{field_name: bad})
 
 
 class JevDoneQuestionTests(unittest.TestCase):
@@ -269,15 +442,16 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual(MultiPartDeliveredQuestion(), self.question)
         self.assertEqual(JevDoneRegistry.question(JevDoneCheck.MULTI_PART), self.question)
         self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.MULTI_PART), JEV_MULTI_PART_THRESHOLD)
-        rendered = self.question.to_question()
-        self.assertEqual((rendered.name, rendered.question_type), (JevDoneQuestionKey.MULTI_PART_DELIVERED.value, JevQuestionType.NOUL))
+        rendered = self.question.to_question("readme_docs")
+        self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.readme_docs", JevQuestionType.NOUL))
+        self.assertIn("with id `readme_docs`?", str(rendered.instructions))
 
     def test_brief_follows_the_skill_layout_with_one_string_per_section(self) -> None:
         brief = self.question.instructions
         self.assertIsInstance(brief, JevBrief)
         self.assertIn(_sentences(brief.introduction), (2, 3))
         self.assertEqual(brief.state, DONE_STATE)
-        for field_name in (JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD):
+        for field_name in (JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD):
             self.assertIn(f"`{field_name}`", DONE_STATE)
         self.assertEqual((len(brief.definitions), len(brief.rules)), (1, 1))
         self.assertTrue(brief.question.startswith("Does `evidence` show") and brief.question.endswith("?"))
@@ -299,6 +473,33 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertTrue(true_side.startswith(false_side.rstrip(".")))
         self.assertIn("--verbose prints every step", true_side)
 
+    def test_problems_resolved_question_is_registered_and_requires_revalidation_then_original_completion(self) -> None:
+        question = ProblemsResolvedQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.PROBLEMS_RESOLVED), JEV_PROBLEMS_RESOLVED_THRESHOLD)
+        self.assertEqual(question.key, JevDoneQuestionKey.PROBLEMS_RESOLVED_FIXED)
+        self.assertIn("revalidation", question.instructions.rules[0])
+        self.assertIn("original user request", question.instructions.rules[0])
+        self.assertIn("problems_resolved", question.instructions.state)
+        self.assertIn("after repairs", question.gap)
+        self.assertGreater(len(question.instructions.render()), 1_000)
+
+    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
+    def test_problems_resolved_question_carries_at_least_two_thousand_tokens(self) -> None:
+        import tiktoken
+
+        question = ProblemsResolvedQuestion()
+        parts = [question.instructions.render(), question.gap]
+        for criterion in (question.when_true, question.when_false):
+            parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+
+    def test_problems_resolved_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/problems_resolved.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
     def test_question_carries_at_least_two_thousand_tokens(self) -> None:
         import tiktoken
@@ -311,6 +512,47 @@ class JevDoneQuestionTests(unittest.TestCase):
     def test_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
         rel = "vidbyte/lib/jev/done/multi_part.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
+    def test_claims_question_is_registered_and_asks_once_for_each_answer_claim(self) -> None:
+        question = ClaimsSupportedQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.CLAIMS), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.CLAIMS), JEV_CLAIMS_THRESHOLD)
+        rendered = question.to_question("readme_updated.doc_added")
+        self.assertEqual(rendered.name, f"{JevDoneQuestionKey.CLAIMS_SUPPORTED.value}.readme_updated.doc_added")
+        self.assertIn("claims` entry named `readme_updated.doc_added`", str(rendered.instructions))
+        self.assertIn("`claims`", DONE_STATE)
+        self.assertEqual((len(question.instructions.definitions), len(question.instructions.rules)), (6, 1))
+        self.assertTrue(question.instructions.question.startswith("Does `evidence` support"))
+
+    def test_claims_criteria_form_a_tool_evidence_minimal_pair(self) -> None:
+        question = ClaimsSupportedQuestion()
+        self.assertTrue(question.when_true.what.startswith("Choose true when `evidence` supports"))
+        self.assertTrue(question.when_false.what.startswith("Choose false when `evidence` does not support"))
+        self.assertEqual(question.when_true.easy[0].split("; state=")[0], question.when_false.easy[0].split("; state=")[0])
+        self.assertEqual(question.when_true.boundary[0].split("; output=")[0], question.when_false.boundary[0].split("; output=")[0])
+        self.assertIn("state=succeeded", question.when_true.easy[0])
+        self.assertIn("state=failed", question.when_false.easy[0])
+        self.assertIn("exit status 0", question.when_true.boundary[0])
+        self.assertIn("exit status 1", question.when_false.boundary[0])
+        for side, other, criterion in (("true", "false", question.when_true), ("false", "true", question.when_false)):
+            self.assertTrue(criterion.not_for.endswith(f"belongs to {other}."))
+            self.assertEqual((len(criterion.easy), len(criterion.boundary)), (1, 1))
+
+    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
+    def test_claims_question_carries_at_least_two_thousand_tokens(self) -> None:
+        import tiktoken
+
+        question = ClaimsSupportedQuestion()
+        parts = [question.instructions.render(), question.gap]
+        for criterion in (question.when_true, question.when_false):
+            parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+
+    def test_claims_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/claims.py"
         text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
@@ -335,6 +577,11 @@ class JevDonePromptTests(unittest.TestCase):
             self.assertNotIn("deliverable", text)
         self.assertIn("evidence of a specific shape", Prompts().get(Prompt.JEV_HANDOFF_SYSTEM_PROMPT))
 
+    def test_continuation_prompt_repairs_then_returns_to_original_request(self) -> None:
+        prompt = Prompts().get(Prompt.JEV_CONTINUATION_CONTINUE_PROMPT)
+        self.assertIn("fully repair it and successfully revalidate", prompt)
+        self.assertIn("return to the original request and complete every remaining part", prompt)
+
 
 class JevHandoffWindowTests(unittest.TestCase):
     """Pin that the handoff reads the main agent's window through the SDK's context manager (review 4116765507)."""
@@ -352,9 +599,18 @@ class JevHandoffWindowTests(unittest.TestCase):
 class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Verify the finish-attempt check, continuation, cap, and fail-open behavior through JevAgent."""
 
-    def _agent(self, *, state: str = json.dumps(_STATE), handoff: str = json.dumps(_HANDOFF), state_error: Exception | None = None, **settings: Any) -> tuple[JevAgent, ScriptedGenerativeRunner, ScriptedGenerativeRunner, ScriptedGenerativeRunner]:
-        main, state_runner, handoff_runner = ScriptedGenerativeRunner("All done."), ScriptedGenerativeRunner(state, error=state_error), ScriptedGenerativeRunner(handoff)
-        agent = bind_test_runner(_jev(**settings), main)
+    def _agent(
+        self,
+        *,
+        done: tuple[Any, ...] = (JevDoneCheck.MULTI_PART,),
+        final_answer: str = "All done.",
+        state: str = json.dumps(_STATE),
+        handoff: str = json.dumps(_HANDOFF),
+        state_error: Exception | None = None,
+        **settings: Any,
+    ) -> tuple[JevAgent, ScriptedGenerativeRunner, ScriptedGenerativeRunner, ScriptedGenerativeRunner]:
+        main, state_runner, handoff_runner = ScriptedGenerativeRunner(final_answer), ScriptedGenerativeRunner(state, error=state_error), ScriptedGenerativeRunner(handoff)
+        agent = bind_test_runner(_jev(done=done, **settings), main)
         assert agent.run_state is not None
         bind_test_runner(agent.run_state, state_runner)
         bind_test_runner(agent.run_state.handoff_writer, handoff_runner)
@@ -362,8 +618,11 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _decision(readme: list[float], flag: float = 0.95, **kwargs: Any) -> ScriptedDecisionRunner:
-        deliverables = _STATE["multi_part"]["deliverables"]  # type: ignore[index]
-        return ScriptedDecisionRunner({deliverables[0]["description"]: [flag], deliverables[1]["description"]: readme}, **kwargs)
+        return ScriptedDecisionRunner({"dry_run_flag": [flag], "readme_docs": readme}, **kwargs)
+
+    @staticmethod
+    def _claims_decision(readme: list[float], deploy_test: list[float], **kwargs: Any) -> ScriptedDecisionRunner:
+        return ScriptedDecisionRunner({"readme_updated.doc_added": readme, "deploy_test_added.doc_added": deploy_test}, **kwargs)
 
     async def test_complete_run_finishes_after_one_check(self) -> None:
         decision = self._decision([0.9])
@@ -381,25 +640,251 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.passed and result.available)
         self.assertEqual(result.incomplete, ())
         self.assertEqual(response.continuations, 0)
-        self.assertEqual((result.usage.input_tokens, result.usage.output_tokens), (200, 20))
+        self.assertEqual((result.usage.input_tokens, result.usage.output_tokens), (100, 10))
         self.assertNotIn("done", reply.metadata)
 
-    async def test_each_jev_request_holds_one_deliverable_and_only_its_evidence(self) -> None:
-        # [Review 4116786437] the request, the deliverable from the run state, and its handoff evidence go to a fixed question.
+    async def test_problem_repair_check_rechecks_after_handoff_and_returns_to_original_request(self) -> None:
+        # The first finish fails an observed problem; the same loop receives focused repair guidance and checks again.
+        decision = ScriptedDecisionRunner({"format_failure": [0.2, 0.97], "original_request_completion": [0.96, 0.98]})
+        agent, main, state_runner, handoff_runner = self._agent(
+            done=(JevDoneCheck.PROBLEMS_RESOLVED,),
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(_PROBLEMS_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), len(state_runner.calls), len(handoff_runner.calls), len(decision.requests)), (2, 1, 2, 2))
+        assert agent.response.handoff is not None and agent.response.handoff.problems_resolved is not None
+        self.assertEqual(agent.response.handoff.problems_resolved.problem_ids(), ("format_failure",))
+        result = agent.response.done[JevDoneCheck.PROBLEMS_RESOLVED]
+        self.assertTrue(result.available and result.passed)
+        feedback = main.messages[1][0]["content"]
+        self.assertIn(ProblemsResolvedQuestion().gap, feedback)
+        self.assertIn("revalidate", feedback)
+        self.assertIn(_REQUEST, feedback)
+        self.assertIn("original request", feedback.lower())
+        request_state = decision.requests[0].state
+        assert isinstance(request_state, Mapping)
+        items = request_state[JEV_DONE_PROBLEMS_RESOLVED_FIELD]["items"]
+        self.assertEqual(set(items), {"format_failure", "original_request_completion"})
+        self.assertEqual(set(items["format_failure"]), {"identity", "scope", "kind", "repair", "assertion", "evidence"})
+        self.assertNotIn("missing", str(request_state))
+        self.assertEqual(len(decision.requests[0].questions), 2)
+        self.assertEqual(len(decision.requests[1].questions), 2)
+
+    async def test_problem_check_batches_with_other_enabled_checks(self) -> None:
+        decision = ScriptedDecisionRunner({
+            "dry_run_flag": [0.97],
+            "readme_docs": [0.97],
+            "format_failure": [0.97],
+            "original_request_completion": [0.97],
+        })
+        combined = {**_HANDOFF, **_PROBLEMS_HANDOFF}
+        agent, *_ = self._agent(done=(JevDoneCheck.MULTI_PART, JevDoneCheck.PROBLEMS_RESOLVED), handoff=json.dumps(combined))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        self.assertEqual(len(decision.requests[0].questions), 4)
+        self.assertTrue(all(item.passed for item in agent.response.done.values()))
+        self.assertEqual(set(decision.requests[0].state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_PROBLEMS_RESOLVED_FIELD})
+
+    async def test_problem_check_focuses_failed_original_request_item(self) -> None:
+        decision = ScriptedDecisionRunner({"format_failure": [0.97], "original_request_completion": [0.2, 0.97]})
+        agent, main, *_ = self._agent(done=(JevDoneCheck.PROBLEMS_RESOLVED,), state=json.dumps(_BASE_STATE), handoff=json.dumps(_PROBLEMS_HANDOFF))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        focus = main.messages[1][0]["content"].split("# Focus", 1)[1]
+        self.assertIn("request_completion", focus)
+        self.assertIn("complete every remaining requested part after any repairs", focus)
+        self.assertNotIn("Fully repair this problem", focus)
+        self.assertTrue(agent.response.done[JevDoneCheck.PROBLEMS_RESOLVED].passed)
+
+    async def test_no_observed_problem_still_requires_original_request_completion(self) -> None:
+        completion_only = {"problems_resolved": {"items": [_REQUEST_ITEM]}}
+        decision = ScriptedDecisionRunner({"original_request_completion": [0.98]})
+        agent, *_ = self._agent(done=(JevDoneCheck.PROBLEMS_RESOLVED,), state=json.dumps(_BASE_STATE), handoff=json.dumps(completion_only))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        self.assertEqual(len(decision.requests[0].questions), 1)
+        self.assertTrue(agent.response.done[JevDoneCheck.PROBLEMS_RESOLVED].passed)
+
+    async def test_problem_handoff_without_required_completion_item_fails_open(self) -> None:
+        malformed = {"problems_resolved": {"items": [_PROBLEM_ITEM]}}
+        decision = ScriptedDecisionRunner({"format_failure": [0.98]})
+        agent, main, _, handoff_runner = self._agent(done=(JevDoneCheck.PROBLEMS_RESOLVED,), state=json.dumps(_BASE_STATE), handoff=json.dumps(malformed))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), len(handoff_runner.calls), len(decision.requests)), (1, 1, 0))
+        self.assertIsNone(agent.response.handoff)
+        result = agent.response.done[JevDoneCheck.PROBLEMS_RESOLVED]
+        self.assertFalse(result.available)
+        self.assertTrue(result.passed)
+
+    async def test_one_jev_request_holds_every_enabled_checks_questions(self) -> None:
+        # [Review 4117808663] the enabled checks' questions are combined and sent to Jev at once with the handoff.
         decision = self._decision([0.9])
         agent, *_ = self._agent()
         with patch(_RUNNER_PATH, new=_runner_class(decision)):
             await agent.arun(_REQUEST)
 
-        self.assertEqual(len(decision.requests), 2)
-        states = [request.state for request in decision.requests]
-        for state, entry, evidence in zip(states, _STATE["multi_part"]["deliverables"], _HANDOFF["multi_part"]["deliverables"], strict=True):  # type: ignore[index]
-            assert isinstance(state, Mapping)
-            self.assertEqual(set(state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD})
-            self.assertEqual(state[JEV_DONE_REQUEST_FIELD], _REQUEST)
-            self.assertEqual(state[JEV_DONE_DELIVERABLE_FIELD], entry["description"])
-            self.assertEqual(state[JEV_DONE_EVIDENCE_FIELD], evidence["evidence"])
-        self.assertEqual({request.questions[0].name for request in decision.requests}, {JevDoneQuestionKey.MULTI_PART_DELIVERED.value})
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        self.assertEqual(
+            len(actual_batches),
+            1,
+            msg=f"Jev continuation must send all enabled done-check questions for a finish attempt in one request; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
+        )
+        if not actual_batches:
+            return
+        request = decision.requests[0]
+        state = request.state
+        assert isinstance(state, Mapping)
+        self.assertEqual(set(state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD})
+        self.assertEqual(state[JEV_DONE_REQUEST_FIELD], _REQUEST)
+        entries = state[JEV_DONE_DELIVERABLES_FIELD]
+        for entry, evidence in zip(_STATE["multi_part"]["deliverables"], _HANDOFF["multi_part"]["deliverables"], strict=True):  # type: ignore[index]
+            self.assertEqual(set(entries[entry["id"]]), {JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD})
+            self.assertEqual(entries[entry["id"]][JEV_DONE_DELIVERABLE_FIELD], entry["description"])
+            self.assertEqual(entries[entry["id"]][JEV_DONE_EVIDENCE_FIELD], evidence["evidence"])
+        prefix = JevDoneQuestionKey.MULTI_PART_DELIVERED.value
+        expected_names = (f"{prefix}.dry_run_flag", f"{prefix}.readme_docs")
+        self.assertEqual(
+            actual_batches[0],
+            expected_names,
+            msg=f"The single Jev continuation request must contain one question for every required deliverable exactly once; expected {expected_names!r}, observed {actual_batches[0]!r}.",
+        )
+
+    async def test_claims_check_uses_final_answer_claims_and_tool_evidence(self) -> None:
+        decision = self._claims_decision([0.95], [0.92])
+        agent, main, state_runner, handoff_runner = self._agent(
+            done=(JevDoneCheck.CLAIMS,),
+            final_answer=_CLAIMED_FINAL_ANSWER,
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(_CLAIMS_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            reply = await agent.arun(_REQUEST)
+
+        self.assertEqual(reply.content, _CLAIMED_FINAL_ANSWER)
+        self.assertEqual((len(main.calls), len(state_runner.calls), len(handoff_runner.calls), len(decision.requests)), (1, 1, 1, 1))
+        assert agent.response.run_state is not None
+        assert agent.response.handoff is not None and agent.response.handoff.claims is not None
+        self.assertIsNone(agent.response.run_state.multi_part)
+        self.assertEqual(agent.response.handoff.claims.ids(), ("readme_updated", "deploy_test_added"))
+        request = decision.requests[0]
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_CLAIMS_FIELD})
+        claim_entries = request.state[JEV_DONE_CLAIMS_FIELD]
+        self.assertEqual(set(claim_entries), {"readme_updated.doc_added", "deploy_test_added.doc_added"})
+        self.assertEqual(set(claim_entries["readme_updated.doc_added"][JEV_DONE_CLAIM_FIELD]), {"identity", "scope", "kind", "output", "assertion"})
+        self.assertEqual(claim_entries["readme_updated.doc_added"][JEV_DONE_CLAIM_FIELD]["identity"]["title"], "README updated")
+        self.assertEqual(claim_entries["readme_updated.doc_added"][JEV_DONE_CLAIM_FIELD]["assertion"]["completion_criteria"], "A successful recorded edit to README.md contains an explanation of --dry-run.")
+        self.assertEqual(claim_entries["readme_updated.doc_added"][JEV_DONE_EVIDENCE_FIELD], _CLAIMS["claims"][0]["evidence"])
+        prefix = JevDoneQuestionKey.CLAIMS_SUPPORTED.value
+        self.assertEqual([question.name for question in request.questions], [f"{prefix}.readme_updated.doc_added", f"{prefix}.deploy_test_added.doc_added"])
+        result = agent.response.done[JevDoneCheck.CLAIMS]
+        self.assertTrue(result.passed and result.available)
+        self.assertEqual(result.incomplete, ())
+
+    async def test_claims_failure_focuses_only_the_unsupported_claims(self) -> None:
+        decision = self._claims_decision([0.99], [0.2])
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.CLAIMS,),
+            final_answer=_CLAIMED_FINAL_ANSWER,
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(_CLAIMS_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertGreater(len(main.calls), 1)
+        feedback = main.messages[1][0]["content"]
+        self.assertIn(ClaimsSupportedQuestion().gap, feedback)
+        self.assertIn("Unsupported assertion (doc_added): A test was added for the deploy command.", feedback)
+        self.assertIn("No tool call shows a test file being written or edited.", feedback)
+        self.assertNotIn("README updated", feedback.split("# Focus", 1)[1])
+        result = agent.response.done[JevDoneCheck.CLAIMS]
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("deploy_test_added",))
+
+    async def test_claims_score_assertions_separately_and_focus_only_the_failed_sibling(self) -> None:
+        handoff = json.loads(json.dumps(_CLAIMS_HANDOFF))
+        first_claim = handoff["claims"]["claims"][0]["claim"]
+        first_claim["assertions"].append({
+            "id": "content_visible",
+            "statement": "The updated README content is visible in the final file.",
+            "completion_criteria": "A recorded read of README.md shows the updated content.",
+        })
+        decision = ScriptedDecisionRunner({
+            "readme_updated.doc_added": [0.99],
+            "readme_updated.content_visible": [0.2],
+            "deploy_test_added.doc_added": [0.99],
+        })
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.CLAIMS,),
+            final_answer=_CLAIMED_FINAL_ANSWER,
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.CLAIMS]
+        self.assertEqual(set(result.answers), {"readme_updated.doc_added", "readme_updated.content_visible", "deploy_test_added.doc_added"})
+        self.assertEqual(result.incomplete, ("readme_updated",))
+        focus = main.messages[1][0]["content"].split("# Focus", 1)[1]
+        self.assertIn("Unsupported assertion (content_visible)", focus)
+        self.assertNotIn("Unsupported assertion (doc_added)", focus)
+
+    async def test_empty_claim_list_passes_without_a_decision_request(self) -> None:
+        empty_claims_handoff = {"claims": {"claims": []}}
+        decision = self._claims_decision([0.1], [0.1])
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.CLAIMS,),
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(empty_claims_handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Explain what --dry-run means.")
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        self.assertTrue(agent.response.done[JevDoneCheck.CLAIMS].passed)
+        assert agent.response.handoff is not None and agent.response.handoff.claims is not None
+        self.assertEqual(agent.response.handoff.claims.ids(), ())
+
+    async def test_empty_claims_add_no_questions_when_another_check_is_enabled(self) -> None:
+        empty_claims_handoff = {**_HANDOFF, "claims": {"claims": []}}
+        decision = self._decision([0.96])
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.MULTI_PART, JevDoneCheck.CLAIMS),
+            handoff=json.dumps(empty_claims_handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        self.assertTrue(all(question.name.startswith(f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.") for question in decision.requests[0].questions))
+        self.assertTrue(agent.response.done[JevDoneCheck.CLAIMS].passed)
+
+    async def test_claims_and_multi_part_questions_share_one_jev_request(self) -> None:
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.95], "readme_docs": [0.92], "readme_updated.doc_added": [0.97], "deploy_test_added.doc_added": [0.91]})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.MULTI_PART, JevDoneCheck.CLAIMS),
+            final_answer=_CLAIMED_FINAL_ANSWER,
+            handoff=json.dumps(_COMBINED_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_CLAIMS_FIELD})
+        self.assertEqual(len(request.questions), 4)
+        self.assertTrue(all(result.passed for result in agent.response.done.values()))
 
     async def test_handoff_receives_the_request_state_and_main_agent_window(self) -> None:
         agent, _, _, handoff_runner = self._agent()
@@ -418,11 +903,27 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply.content, "All done.")
         self.assertEqual((len(main.calls), len(handoff_runner.calls)), (2, 2))
-        feedback = json.dumps(main.messages[1])
-        self.assertIn("README documentation for the --dry-run flag.", feedback)
+        prefix = JevDoneQuestionKey.MULTI_PART_DELIVERED.value
+        expected_names = (f"{prefix}.dry_run_flag", f"{prefix}.readme_docs")
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        self.assertEqual(
+            actual_batches,
+            [expected_names, expected_names],
+            msg=f"Each Jev continuation finish attempt must issue exactly one complete batch; expected {[expected_names, expected_names]!r}, observed {actual_batches!r}.",
+        )
+        feedback = main.messages[1][0]["content"]
+        # [Review 4117856441] the original prompt, the run state, the handoff, and the failed Jev questions, with focus on what is missing.
+        for section in ("# Original request", "# Run state", "# Handoff", "# Failed checks", "# Focus"):
+            self.assertIn(section, feedback)
+        self.assertIn(_REQUEST, feedback)
+        self.assertIn('"objective":', feedback)
+        self.assertIn("No part of the run concerns the README.", feedback)
         self.assertIn(MultiPartDeliveredQuestion().gap, feedback)
+        self.assertIn("with id `readme_docs`? Jev's answer: no", feedback)
         self.assertIn("The README section for --dry-run.", feedback)
-        self.assertNotIn("A --dry-run flag on the deploy CLI.", feedback)
+        focus = feedback.split("# Focus", 1)[1]
+        self.assertIn("README documentation for the --dry-run flag.", focus)
+        self.assertNotIn("A --dry-run flag on the deploy CLI.", focus)
         self.assertEqual(agent.response.continuations, 1)
         self.assertTrue(agent.response.done[JevDoneCheck.MULTI_PART].passed)
 
@@ -482,7 +983,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_decision_credentials_fail_open(self) -> None:
         main = ScriptedGenerativeRunner("All done.")
-        agent = bind_test_runner(JevAgent(_settings(), JevRuntimeSettings(done=(JevDoneCheck.MULTI_PART,))), main)
+        agent = bind_test_runner(JevAgent(_settings(), JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,)))), main)
         assert agent.run_state is not None
         bind_test_runner(agent.run_state, ScriptedGenerativeRunner(json.dumps(_STATE)))
         bind_test_runner(agent.run_state.handoff_writer, ScriptedGenerativeRunner(json.dumps(_HANDOFF)))
@@ -522,7 +1023,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 answer = JevAnswer(question_name=question.name, question_type=JevQuestionType.CHOICE, choice="database", probabilities={"database": 1.0, "none": 0.0}, confidence=1.0)
                 return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-1.13.0", answers={question.name: answer}, raw={})
 
-        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", new=_runner_class(ChoosingRunner({}))):
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelHelper", new=_runner_class(ChoosingRunner({}))):
             reply = await agent.arun("Add a migration for the email column.")
 
         self.assertEqual(reply.content, "migration written")

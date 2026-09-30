@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
 PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state, applies the tool selector, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
-ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook with JevRunState.check.
+ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
 KNOWN EDGE CASES: With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here.
@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.preflight import JevPreflightTools
@@ -39,10 +40,11 @@ class JevRuntime(AgentRuntime):
         runtime_settings: JevRuntimeSettings | None = None,
         preflight: JevPreflightGate | None = None,
         run_state: JevRunState | None = None,
+        continuation: JevContinuation | None = None,
         response: JevResponse | None = None,
         **kwargs: Any,
     ) -> None:
-        # Retains the validated runtime settings, the gate, the done checks, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
+        # Retains the validated runtime settings, the gate, the done checks, the continuation, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
         # @intent jev-runtime-needs-jev-agent
         # AgentRuntimeType.JEV is selectable by string, so a generic BaseAgent can reach this class
         # without them; refusing here names JevAgent instead of failing later on a None field.
@@ -58,6 +60,7 @@ class JevRuntime(AgentRuntime):
         self.runtime_settings = runtime_settings
         self.preflight = preflight
         self.run_state = run_state
+        self.continuation = continuation
         self.response = response
         super().__init__(**kwargs)
 
@@ -129,16 +132,13 @@ class JevRuntime(AgentRuntime):
         ))
 
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
-        """Run the enabled done checks on a finish attempt and send the main agent back to work when one fails."""
-        # @intent a-failed-done-check-keeps-the-same-loop
-        # The feedback joins this loop's own messages, so the main agent keeps its history, tools, and budgets
-        # and finishes the missing work instead of starting a second run that has forgotten the first.
-        if self.run_state is None:
+        """Ask the continuation whether this finish attempt continues the loop, and let it shape what the main agent reads next."""
+        # @intent continuation-logic-lives-in-the-continuation
+        # The owner asked the runtime to only ask "should we continue?" and then "continue", so every reason to
+        # continue and every message it sends lives in a JevContinuation subclass, never in this runtime.
+        if self.continuation is None or not await self.continuation.should_continue(result.output, state.iteration_outputs, state.call_contexts):
             return False
-        feedback = await self.run_state.check(result.output, state.iteration_outputs, state.call_contexts)
-        if feedback is None:
-            return False
-        messages.append({"role": "user", "content": feedback})
+        self.continuation.continue_(messages)
         return True
 
 

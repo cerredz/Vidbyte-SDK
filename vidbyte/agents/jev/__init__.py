@@ -5,15 +5,25 @@ ROLE IN CODEBASE: This is the public package boundary imported by vidbyte.agents
 ARCHITECTURE NOTE: The agent types plus the preflight flag and done-check enums and result records are public; they are re-exported from vidbyte.lib, while preflight and done questions, JevPreflightGate, JevRunState, JevHandoff, decision records, and provider transport stay in their lower-level packages.
 COMMON MODIFICATION PATTERNS: Export a named capability settings type only when it becomes part of the supported JevAgent API.
 KNOWN EDGE CASES: Importing this package must not resolve credentials or construct a TypeSafe decision runner.
-RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 """
 
 from vidbyte.agents.jev.agent import JevAgent
 from vidbyte.agents.jev.runtime import JevRuntime
-from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
+from vidbyte.agents.jev.settings import (
+    JevAgentSettings,
+    JevContinualSettings,
+    JevRuntimeSettings,
+)
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevClaimAssertion,
+    JevClaimContext,
+    JevClaimEvidence,
+    JevClaimIdentity,
+    JevClaimScope,
+    JevClaimsEvidence,
     JevClarification,
     JevClarifyingQuestion,
     JevDeliverable,
@@ -21,17 +31,36 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevProblemResolutionItem,
+    JevProblemsResolvedEvidence,
     JevRunStateRecord,
     JevSpecialist,
+    JevTargetOutcome,
+    JevTargetOutcomeEvidence,
+    JevTargetOutcomeEvidenceItem,
+    JevTargetOutcomeItem,
 )
-from vidbyte.lib.enums.jev import JevDoneCheck, JevPreflightPreset
+from vidbyte.lib.enums.jev import (
+    JevClaimKind,
+    JevDoneCheck,
+    JevPreflightPreset,
+    JevProblemCheckItemType,
+)
 
 __all__ = [
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
+    "JevClaimAssertion",
+    "JevClaimContext",
+    "JevClaimEvidence",
+    "JevClaimIdentity",
+    "JevClaimKind",
+    "JevClaimScope",
+    "JevClaimsEvidence",
     "JevClarification",
     "JevClarifyingQuestion",
+    "JevContinualSettings",
     "JevDeliverable",
     "JevDeliverableEvidence",
     "JevDoneCheck",
@@ -39,8 +68,15 @@ __all__ = [
     "JevHandoffRecord",
     "JevPreflightPreset",
     "JevPresetResult",
+    "JevProblemCheckItemType",
+    "JevProblemResolutionItem",
+    "JevProblemsResolvedEvidence",
     "JevRunStateRecord",
     "JevRuntime",
     "JevRuntimeSettings",
     "JevSpecialist",
+    "JevTargetOutcome",
+    "JevTargetOutcomeEvidence",
+    "JevTargetOutcomeEvidenceItem",
+    "JevTargetOutcomeItem",
 ]
