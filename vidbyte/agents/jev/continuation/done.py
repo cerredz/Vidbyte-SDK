@@ -4,8 +4,8 @@ PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done ch
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
-KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. NEGATIVE_COVERAGE continuation focus names the requested target and inspection signal without asking the main agent to manufacture a finding. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -106,6 +106,21 @@ class JevDoneContinuation(JevContinuation):
                     assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.NEGATIVE_COVERAGE:
+                # Focus only targets whose clean or incomplete report lacks visible inspection evidence.
+                question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+                state = None if self.run_state.record is None else self.run_state.record.negative_coverage
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.negative_coverage
+                targets = {} if state is None else {item.id: item for item in state.inspections}
+                missing = {} if handoff is None else {item.id: item.missing for item in handoff.inspections}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    target = targets[identifier]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+                    focus.append(f"- Inspect the requested target: {target.target}. Evidence that meets the request: {target.inspection_signal}")
                 return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:

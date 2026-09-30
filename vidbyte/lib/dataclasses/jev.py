@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable and claim evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable, claim, and negative-coverage evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -720,6 +720,51 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
 
 
+class JevNegativeCoverageTargetPayload(BaseModel):
+    """One research, audit, review, testing, or source-inspection target requested by the user."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short stable identifier for this requested inspection target, using lowercase letters, digits, and underscores. It must be unique among the targets and is copied exactly into the handoff so one question addresses this target alone. Derive it from the target's subject instead of its position in the list. Keep it under sixty-four characters. Never use this id to add a target the user did not ask to inspect.")
+    target: str = Field(min_length=1, description="The target names the file, source, subject, system, test selection, or other thing the user asked to inspect. Preserve the exact breadth and qualifiers in the request, including 'all', named subsets, or specified versions. Include enough context to recognize what material counts as this target. Do not turn a request for inspection into a request to produce any particular finding. Do not include unrelated targets.")
+    inspection_signal: str = Field(min_length=1, description="The inspection signal says what visible action or evidence would show that this target was actually inspected. Ground it in the user's request and the kind of target, such as reading the named source, running the requested tests, or examining the specified material. It describes evidence of review, not a successful result or a non-empty finding list. Keep the requested scope intact, so evidence about a sample does not show inspection of an entire target. This signal guides the handoff writer and does not itself prove that inspection happened.")
+
+
+class JevNegativeCoveragePayload(JevSectionPayload):
+    """The request-derived targets whose no-findings conclusions need inspection evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The negative-coverage section lists targets the user explicitly asked the agent to inspect, such as research subjects, audit scopes, review targets, tests, or source files. The later done check focuses on a narrow reporting risk: saying or implying that a requested target has no findings or is clear when the run does not show that it was inspected. It also checks an explicit report that a requested inspection remains incomplete, so the continuation can ask the agent to finish it. A target is an inspection subject, not a required finding, and an empty findings list is a valid outcome when supported by inspection. Fill this section from the request before the main agent starts, and do not add work that the request does not ask to inspect."
+
+    inspections: list[JevNegativeCoverageTargetPayload] = Field(description="The inspections list contains one entry for each distinct target the user directly asks the agent to examine, review, audit, research, inspect, or test for findings. Keep separate targets separate when inspecting one does not establish that another was inspected. Combine only repeated references to the same target and preserve the broadest scope the user actually requested. Exclude ordinary implementation deliverables and targets mentioned only as background unless the request asks for their inspection. Return an empty list when the request asks for no inspection.")
+
+
+class JevNegativeCoverageEvidencePayload(JevSectionPayload):
+    """The run evidence and final-answer conclusion associated with each requested inspection target."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The negative-coverage evidence section reports, for every requested inspection target, what the final answer says about findings and what the run shows about actually inspecting the target. It exists to catch an unsupported all-clear conclusion when the user asked for inspection, while allowing a properly inspected target to have no findings. It also records when the answer honestly says that inspection was not completed, because that requested work remains a useful continuation focus. The section contains observations from the run and the answer, not a verdict about whether the done check should pass. Include every target from the run-state section, even when the agent did no inspection and reported no conclusion."
+
+    inspections: list[JevNegativeCoverageEvidenceItemPayload] = Field(description="The inspections list has exactly one entry for every target in the run state's negative-coverage section, with the same ids and order. Each entry quotes or closely describes any no-findings, all-clear, or incomplete statement in the final answer and separately reports run evidence that the requested target was examined. Include command, test, tool, source, or answer evidence only when it visibly bears on that target and requested scope. An empty finding result is not evidence that an inspection occurred. Never omit a target or borrow inspection evidence from a different target.")
+
+
+class JevNegativeCoverageEvidenceItemPayload(BaseModel):
+    """One target's inspection evidence, absence conclusion, and explicit incompletion report."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is copied exactly from one request-derived inspection target. It connects this evidence to the single target Jev judges. Every requested inspection target must appear once, in order, and no other ids are permitted. Do not invent an id or rename one to fit the final answer. This field associates evidence but does not decide whether it is sufficient.")
+    inspection: str = Field(min_length=1, description="Inspection describes the run evidence that shows whether the requested target was actually examined. Cite visible tool calls, opened or quoted source, test commands and results, retrieved material, or another concrete observation in the recorded run. State plainly when the run shows no inspection evidence for this target. A result that says zero findings counts only when there is also evidence that the target was examined at the requested scope. Do not treat a plan or promise to inspect as an inspection.")
+    negative_conclusion: str = Field(description="The negative conclusion quotes or closely describes any final-answer wording that says or implies there were no findings, no issues, nothing notable, an all-clear result, or that the target was clean. Include only the target's conclusion and preserve qualifiers such as 'in the files checked' or 'based on the sample'. Use an empty string when the final answer makes no such conclusion for this target. Do not infer a negative conclusion merely from silence or from a missing list of findings. The wording is evidence of what was reported, not evidence that the inspection happened.")
+    incomplete_report: str = Field(description="The incomplete report quotes or describes a final-answer statement that the requested inspection was not performed, was only partly performed, or remains blocked or unfinished. Preserve which part of the target remains unchecked and any stated limitation. Use an empty string when the answer does not explicitly report incomplete inspection. Do not confuse an honest incomplete report with an all-clear conclusion. This field helps continuation finish work the user asked for and is not evidence that the target was inspected.")
+    missing: str = Field(min_length=1, description="Missing states the gap between the requested inspection signal and the inspection evidence visible in the run. Name the target portion, source, test, or review action that lacks evidence, and say when nothing is missing. Do not ask the agent to manufacture a finding or change an evidence-supported empty result. Keep this note actionable for continuation and faithful to the request's scope. This is the handoff writer's own summary and is kept out of Jev's evidence fields.")
+
+
+JevNegativeCoverageEvidencePayload.model_rebuild()
+
+
 class JevClaimIdentityPayload(BaseModel):
     """The title, meaning, and stated purpose of a final-answer claim."""
 
@@ -833,10 +878,40 @@ class JevMultiPart:
 
 
 @dataclass(frozen=True, slots=True)
+class JevNegativeCoverageTarget:
+    """One requested target and the visible signal that would show it was inspected."""
+
+    id: str
+    target: str
+    inspection_signal: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="negative-coverage target id")
+        JevText.require(self.target, field_name=f"negative-coverage target {self.id!r}")
+        JevText.require(self.inspection_signal, field_name=f"inspection signal of target {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevNegativeCoverage:
+    """Inspection targets extracted from the request before the main agent starts work."""
+
+    inspections: tuple[JevNegativeCoverageTarget, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.inspections, tuple) or not all(isinstance(item, JevNegativeCoverageTarget) for item in self.inspections):
+            raise JevValidation.error("negative-coverage inspections", "a tuple of JevNegativeCoverageTarget values", self.inspections)
+        JevDeliverableId.require_unique(self.ids(), field_name="negative-coverage inspections")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return target ids in request order."""
+        return tuple(item.id for item in self.inspections)
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
+    `multi_part` and `negative_coverage` are set only when their respective done checks are enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -844,6 +919,7 @@ class JevRunStateRecord:
     mission: str
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
+    negative_coverage: JevNegativeCoverage | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -856,6 +932,8 @@ class JevRunStateRecord:
             JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+        if self.negative_coverage is not None and not isinstance(self.negative_coverage, JevNegativeCoverage):
+            raise JevValidation.error("run state negative_coverage", "a JevNegativeCoverage or None", self.negative_coverage)
 
 
 @dataclass(frozen=True, slots=True)
@@ -888,6 +966,42 @@ class JevMultiPartEvidence:
     def ids(self) -> tuple[str, ...]:
         """Return every evidence entry's deliverable id in order."""
         return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevNegativeCoverageEvidenceItem:
+    """The run's inspection evidence and final-answer conclusion for one requested target."""
+
+    id: str
+    inspection: str
+    negative_conclusion: str
+    incomplete_report: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="negative-coverage evidence id")
+        JevText.require(self.inspection, field_name=f"inspection evidence for target {self.id!r}")
+        for name in ("negative_conclusion", "incomplete_report"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise JevValidation.error(f"{name} of target {self.id!r}", "a string (empty when absent)", value)
+        JevText.require(self.missing, field_name=f"missing of target {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevNegativeCoverageEvidence:
+    """One handoff evidence entry per request-derived inspection target."""
+
+    inspections: tuple[JevNegativeCoverageEvidenceItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.inspections, tuple) or not all(isinstance(item, JevNegativeCoverageEvidenceItem) for item in self.inspections):
+            raise JevValidation.error("negative-coverage evidence", "a tuple of JevNegativeCoverageEvidenceItem values", self.inspections)
+        JevDeliverableId.require_unique(self.ids(), field_name="negative-coverage evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return evidenced target ids in handoff order."""
+        return tuple(item.id for item in self.inspections)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1001,11 +1115,12 @@ class JevClaimsEvidence:
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part`, `claims`, and `negative_coverage` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
     claims: JevClaimsEvidence | None = None
+    negative_coverage: JevNegativeCoverageEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -1014,6 +1129,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
+        if self.negative_coverage is not None and not isinstance(self.negative_coverage, JevNegativeCoverageEvidence):
+            raise JevValidation.error("handoff negative_coverage", "a JevNegativeCoverageEvidence or None", self.negative_coverage)
 
 
 @dataclass(frozen=True)
@@ -1164,22 +1281,22 @@ __all__ = [
     "JevAgentResponse",
     "JevAnswer",
     "JevBrief",
-    "JevClarification",
-    "JevClarificationPayload",
-    "JevClarifyingQuestion",
-    "JevClarifyingQuestionPayload",
-    "JevClaimEvidence",
-    "JevClaimEvidencePayload",
     "JevClaimAssertion",
     "JevClaimAssertionPayload",
     "JevClaimContext",
     "JevClaimContextPayload",
+    "JevClaimEvidence",
+    "JevClaimEvidencePayload",
     "JevClaimIdentity",
     "JevClaimIdentityPayload",
     "JevClaimScope",
     "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
+    "JevClarification",
+    "JevClarificationPayload",
+    "JevClarifyingQuestion",
+    "JevClarifyingQuestionPayload",
     "JevContent",
     "JevCriterion",
     "JevDecisionRecord",
@@ -1199,6 +1316,14 @@ __all__ = [
     "JevMultiPartEvidence",
     "JevMultiPartEvidencePayload",
     "JevMultiPartPayload",
+    "JevNegativeCoverage",
+    "JevNegativeCoverageEvidence",
+    "JevNegativeCoverageEvidenceItem",
+    "JevNegativeCoverageEvidenceItemPayload",
+    "JevNegativeCoverageEvidencePayload",
+    "JevNegativeCoveragePayload",
+    "JevNegativeCoverageTarget",
+    "JevNegativeCoverageTargetPayload",
     "JevNoulScore",
     "JevOption",
     "JevPreflightQuestion",

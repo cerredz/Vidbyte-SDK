@@ -21,6 +21,8 @@ Hand whole tasks to specialists with `JevAgentSettings.agents`: each `JevSpecial
 
 Enable done checks with `JevRuntimeSettings(continual=JevContinualSettings(checks=...))`. With `JevDoneCheck.MULTI_PART`, `JevRunState` lists the separate deliverables the request asks for, and each time the main agent tries to finish, `JevHandoff` compiles the evidence for each one and Jev judges, in one request holding every enabled check's questions, whether each was produced in full. A deliverable below `JEV_MULTI_PART_THRESHOLD` sends the main agent back to work in the same loop, at most `JevContinualSettings.max_continuations` times (default `JEV_DONE_MAX_CONTINUATIONS`); every failure fails open. `agent.response.run_state`, `handoff`, `done`, and `continuations` report the outcome. The questions live in `vidbyte/lib/jev/done/`.
 
+With `JevDoneCheck.NEGATIVE_COVERAGE`, the run state lists targets the user explicitly asked to inspect. The handoff pairs each target with visible run evidence of inspection and any final-answer no-findings, all-clear, or explicitly incomplete report. The check sends a target back only when the answer reports it clear or incomplete without inspection evidence; a supported clean result passes and no finding is required.
+
 Do not add a generic `decisions` collection or runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions inside this package.
 
-See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, `docs/design/jev-specialist-routing.md`, `docs/design/jev-multipart-done-criteria.md`, and `skills/jev-agent/SKILL.md`.
+See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, `docs/design/jev-specialist-routing.md`, `docs/design/jev-multipart-done-criteria.md`, `docs/design/jev-negative-coverage.md`, and `skills/jev-agent/SKILL.md`.

@@ -4,8 +4,8 @@ PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it 
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
-KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. NEGATIVE_COVERAGE only creates targets for inspection explicitly requested by the user; missing inspection evidence without a negative or incomplete report does not fail that check. Like the JevAgent that owns it, one instance serves one run at a time.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -43,6 +43,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_INSPECTION_FIELD,
+    JEV_DONE_NEGATIVE_COVERAGE_FIELD,
     JEV_DONE_REQUEST_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -53,6 +55,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevHandoffRecord,
     JevMultiPart,
     JevMultiPartPayload,
+    JevNegativeCoverage,
+    JevNegativeCoveragePayload,
+    JevNegativeCoverageTarget,
     JevQuestion,
     JevRunStatePayload,
     JevRunStateRecord,
@@ -72,7 +77,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -230,6 +235,24 @@ class JevRunState(BaseAgent):
                             JEV_DONE_EVIDENCE_FIELD: claim.evidence,
                         }
                 return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
+            case JevDoneCheck.NEGATIVE_COVERAGE:
+                # Each requested target gets one item; final-answer conclusions and actual inspection evidence stay distinct.
+                state = None if self.record is None else self.record.negative_coverage
+                if state is None or handoff.negative_coverage is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+                evidence = {item.id: item for item in handoff.negative_coverage.inspections}
+                entries = {
+                    item.id: {
+                        "target": item.target,
+                        "inspection_signal": item.inspection_signal,
+                        JEV_DONE_INSPECTION_FIELD: evidence[item.id].inspection,
+                        "negative_conclusion": evidence[item.id].negative_conclusion,
+                        "incomplete_report": evidence[item.id].incomplete_report,
+                    }
+                    for item in state.inspections
+                }
+                return {JEV_DONE_NEGATIVE_COVERAGE_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -242,6 +265,9 @@ class JevRunState(BaseAgent):
                 # Each extracted final-answer claim must independently reach the support threshold, so one
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
+            case JevDoneCheck.NEGATIVE_COVERAGE:
+                # Every requested inspection target is checked independently; any unsupported clean or incomplete report returns to the agent.
+                return self._negative_coverage(handoff, decision)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -318,18 +344,46 @@ class JevRunState(BaseAgent):
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
+    # @intent absence-conclusions-require-inspection-evidence
+    # A clean result is useful only when the requested target was examined. This gate does not require a finding;
+    # it sends the run back only when the answer reports an all-clear or unfinished inspection without visible coverage.
+    def _negative_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        state = None if self.record is None else self.record.negative_coverage
+        evidence = None if handoff is None else handoff.negative_coverage
+        if state is None or evidence is None or sorted(state.ids()) != sorted(evidence.ids()):
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+        if not state.inspections:
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.NEGATIVE_COVERAGE)
+        identifiers = state.ids()
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+        incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.
         multi_part = None
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        negative_coverage = None
+        inspection_section = getattr(payload, JevDoneCheck.NEGATIVE_COVERAGE.value, None)
+        if isinstance(inspection_section, JevNegativeCoveragePayload):
+            negative_coverage = JevNegativeCoverage(tuple(JevNegativeCoverageTarget(item.id, item.target.strip(), item.inspection_signal.strip()) for item in inspection_section.inspections))
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            negative_coverage=negative_coverage,
             usage=self.get_usage(),
         )
 
