@@ -18,6 +18,7 @@ from vidbyte.lib.constants.jev import (
     JEV_CLAIMS_THRESHOLD,
     JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_PROBLEMS_RESOLVED_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
@@ -28,22 +29,46 @@ from vidbyte.lib.jev.done.discovered_item_coverage import (
     DiscoveredItemProcessedQuestion,
 )
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 
 
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.DISCOVERED_ITEM_COVERAGE: DiscoveredItemProcessedQuestion()})
-    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD})
-
-    _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.DISCOVERED_ITEM_COVERAGE: DiscoveredItemInventoryCompleteQuestion()})
+    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType(
+        {
+            JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(),
+            JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(),
+            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: DiscoveredItemProcessedQuestion(),
+            JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion(),
+        }
+    )
+    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType(
+        {
+            JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
+            JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD,
+            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
+            JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD,
+        }
+    )
+    _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType(
+        {
+            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: DiscoveredItemInventoryCompleteQuestion(),
+        }
+    )
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:
         """Return the fixed question one done check asks about each item it checks."""
         found = cls._questions.get(check)
         if found is None:
-            raise ConfigurationError(f"Jev done check {check!r} has no registered question.", details={"check": str(check), "registered": [item.value for item in cls._questions]})
+            raise ConfigurationError(
+                f"Jev done check {check!r} has no registered question.",
+                details={
+                    "check": str(check),
+                    "registered": [item.value for item in cls._questions],
+                },
+            )
         return found
 
     @classmethod
@@ -51,7 +76,13 @@ class JevDoneRegistry:
         """Return the P(yes) every one of the check's answers must reach for the run to finish."""
         found = cls._thresholds.get(check)
         if found is None:
-            raise ConfigurationError(f"Jev done check {check!r} has no registered threshold.", details={"check": str(check), "registered": [item.value for item in cls._thresholds]})
+            raise ConfigurationError(
+                f"Jev done check {check!r} has no registered threshold.",
+                details={
+                    "check": str(check),
+                    "registered": [item.value for item in cls._thresholds],
+                },
+            )
         return found
 
     @classmethod
@@ -59,7 +90,13 @@ class JevDoneRegistry:
         """Return the inventory-fidelity question for a check whose candidates come from run evidence."""
         found = cls._inventory_questions.get(check)
         if found is None:
-            raise ConfigurationError(f"Jev done check {check!r} has no inventory question.", details={"check": str(check), "registered": [item.value for item in cls._inventory_questions]})
+            raise ConfigurationError(
+                f"Jev done check {check!r} has no inventory question.",
+                details={
+                    "check": str(check),
+                    "registered": [item.value for item in cls._inventory_questions],
+                },
+            )
         return found
 
     @classmethod
@@ -70,7 +107,10 @@ class JevDoneRegistry:
         except ValueError as exc:
             raise ConfigurationError(
                 f"Unsupported Jev done check: {value!r}.",
-                details={"received": repr(value), "available": [item.value for item in JevDoneCheck]},
+                details={
+                    "received": repr(value),
+                    "available": [item.value for item in JevDoneCheck],
+                },
             ) from exc
 
     @classmethod
@@ -80,13 +120,22 @@ class JevDoneRegistry:
         # Settings construction calls this, so a typo, a bare string, or a repeated check fails when the
         # agent is built instead of silently asking Jev the wrong (or duplicated) questions at every finish.
         if isinstance(values, (str, bytes)):
-            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks, not a string.", details={"received": repr(values)})
+            raise ConfigurationError(
+                "JevContinualSettings.checks must be an iterable of Jev done checks, not a string.",
+                details={"received": repr(values)},
+            )
         try:
             checks = tuple(cls.resolve(value) for value in values)
         except TypeError as exc:
-            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks.", details={"received": type(values).__name__}) from exc
+            raise ConfigurationError(
+                "JevContinualSettings.checks must be an iterable of Jev done checks.",
+                details={"received": type(values).__name__},
+            ) from exc
         if len(set(checks)) != len(checks):
-            raise ConfigurationError("JevContinualSettings.checks cannot enable the same check twice.", details={"received": [check.value for check in checks]})
+            raise ConfigurationError(
+                "JevContinualSettings.checks cannot enable the same check twice.",
+                details={"received": [check.value for check in checks]},
+            )
         for check in checks:
             cls.question(check)
             cls.threshold(check)
