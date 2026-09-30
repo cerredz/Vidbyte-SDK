@@ -98,6 +98,8 @@ agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLAR
 
 The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it, and `agent.response.done[JevDoneCheck.MULTI_PART]` says whether every requested deliverable was shown produced in full.
 
+Enable the motivating-case continuation gate with `JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.MOTIVATING_CASE,)))`. It records request-named boundary conditions before work, checks the current run evidence at each finish attempt, and continues the same loop when a required case is not shown handled. The normal continuation cap and fail-open behavior apply; its records are available through `agent.response.run_state.motivating_case`, `agent.response.handoff.motivating_case`, and `agent.response.done[JevDoneCheck.MOTIVATING_CASE]`.
+
 ## Capability design example
 
 For a future `dynamic_compute` setting, expose the user-level choice and useful bounds. Keep questions such as “How much did `last_turn` add beyond `earlier_findings`?” inside the runtime. Ask about what the last turn observably did, not whether another turn will help: Jev answers observations reliably and forecasts poorly. Translate Jev's calibrated answer into a fixed compute policy, record the decision and usage, and test both continued and stopped execution. Do not expose that question as a caller-supplied rule.

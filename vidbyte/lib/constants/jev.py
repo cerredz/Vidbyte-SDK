@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-motivating-case.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -86,6 +86,10 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 JEV_MULTI_PART_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
 JEV_CLAIMS_THRESHOLD: float = 0.85
+# Each user-named motivating case must be shown exercised or inspected as allowed by the request.
+JEV_MOTIVATING_CASE_THRESHOLD: float = 0.8
+JEV_MOTIVATING_CASE_RECALL_THRESHOLD: float = 0.6
+JEV_MOTIVATING_CASE_MAX_SCENARIOS: int = 12
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -97,6 +101,8 @@ JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_CLAIMS_FIELD: str = "claims"
+JEV_DONE_MOTIVATING_CASES_FIELD: str = "motivating_cases"
+JEV_DONE_MOTIVATING_CASE_FIELD: str = "scenario"
 JEV_DONE_CLAIM_FIELD: str = "claim"
 JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
@@ -138,6 +144,9 @@ __all__ = [
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
     "JEV_DELIVERABLE_ID_PATTERN",
+    "JEV_MOTIVATING_CASE_MAX_SCENARIOS",
+    "JEV_MOTIVATING_CASE_RECALL_THRESHOLD",
+    "JEV_MOTIVATING_CASE_THRESHOLD",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
     "JEV_DONE_CLAIM_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_FIELD",
@@ -158,6 +167,8 @@ __all__ = [
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_MOTIVATING_CASE_FIELD",
+    "JEV_DONE_MOTIVATING_CASES_FIELD",
     "JEV_DONE_REQUEST_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",

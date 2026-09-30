@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-motivating-case.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -106,6 +106,22 @@ class JevDoneContinuation(JevContinuation):
                     assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.MOTIVATING_CASE:
+                # Return only the user's named boundary scenarios that Jev found unexercised.
+                question = JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE)
+                state = None if self.run_state.record is None else self.run_state.record.motivating_case
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.motivating_case
+                scenarios = {} if state is None else {item.id: item for item in state.scenarios}
+                missing = {} if handoff is None else {item.id: item.missing for item in handoff.scenarios}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    scenario = scenarios[identifier]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+                    expected = f" Expected behavior: {scenario.expected_behavior}." if scenario.expected_behavior else ""
+                    focus.append(f"- Exercise {scenario.condition} for {scenario.target}; the nearby case that does not count is {scenario.near_miss}.{expected} Allowed mode: {scenario.exercise_mode.value}.")
                 return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
