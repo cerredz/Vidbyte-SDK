@@ -4,7 +4,7 @@ Adapters for public catalogs of existing tools: MCP registries, curated catalogs
 
 ## Role in the SDK
 
-`JevAgentAlignment` uses these adapters for tool alignment (`JevAgentSettings(tool_align=JevToolAlignmentSettings(...))`). It searches every enabled catalog through `ToolCatalogs.search_all()`, reads an entry's tools with `describe()`, resolves managed installs with `connect()`, and runs direct-execute platform tools with `execute()`. `SearchMcpServersTool` uses `SmitheryCatalog` directly.
+`JevAgentAlignment` uses these adapters for tool alignment (`JevAgentSettings(alignment=JevAlignmentSettings(tool_settings=True, tool_options=JevToolAlignmentSettings(...)))`). It searches every enabled catalog through `ToolCatalogs.search_all()`, reads an entry's tools with `describe()`, resolves managed installs with `connect()`, and runs direct-execute platform tools with `execute()`. `SearchMcpServersTool` uses `SmitheryCatalog` directly.
 
 ```python
 from vidbyte.providers.tool_catalogs import ToolCatalogs

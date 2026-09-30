@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/alignment/agent.py
 
 PURPOSE: Implements JevAgentAlignment, the editor agent that uses Jev to find gaps in a JevAgent's system prompt and closes the ones it may fix before the run, and that aligns the agent's tools by attaching existing catalog tools Jev approves.
-ROLE IN CODEBASE: JevAgent builds one instance when JevAgentSettings.self_align is true or tool_align is set; JevRuntime calls align() for the prompt and align_tools() for the tools, then runs the main loop with the returned prompt and tools and finally calls release_tools().
+ROLE IN CODEBASE: JevAgent builds one instance when JevAgentSettings.alignment enables either pass; JevRuntime calls align() for the prompt and align_tools() for the tools, then runs the main loop with the returned prompt and tools and finally calls release_tools().
 ARCHITECTURE NOTE: Jev only recognizes (fixed noul questions); code gates, routes gaps, and keeps or reverts edits. The editor is an ordinary BaseAgent whose one tool writes to a run-local draft, so only the main agent's current run sees the edited prompt.
 COMMON MODIFICATION PATTERNS: Change questions in questions.py and edit rules in draft.py; keep this file to orchestration: assess, gate, edit, verify. Every tool-alignment rule lives in this class's helpers (the scout's tools only forward here): detect, needs, coverage, search, facts, open, judge, approve, attach.
 KNOWN EDGE CASES: Any Jev or editor failure returns the original prompt; a verification failure drops every edit. Like the JevAgent it serves, one instance runs one pass at a time, and the draft refuses edits citing another pass's gaps. Static answers are cached per prompt and tool list, so a warm agent asks only the request-dependent questions. Tool alignment fails open for the run (the original tools run) and closed for attaching (an unapproved tool never attaches); every MCP session it opens is either attached or closed before align_tools() returns.
@@ -183,11 +183,11 @@ class JevAgentAlignment(BaseAgent):
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
         )
-        # Tool alignment: one scout agent and one adapter per configured catalog, built only when tool_align is set.
+        # Tool alignment: one scout agent and one adapter per configured catalog, built only when its alignment switch is on.
         # @intent scout-shares-model-not-prompt
         # Like the editor, the scout calls the owner's model with a fixed prompt and four fixed tools, so no caller
         # can turn it into a general agent; catalog adapters keep their index caches across this agent's runs.
-        tool_settings = settings.tool_align
+        tool_settings = settings.alignment.tool_options if settings.alignment.tool_settings else None
         self.tool_scout: BaseAgent | None = None
         self._tool_catalogs: dict[ToolCatalogName, ToolCatalogProvider] = {}
         self._description_cache: OrderedDict[str, _DescriptionAnswers] = OrderedDict()
@@ -873,15 +873,15 @@ class JevAgentAlignment(BaseAgent):
 
     def _require_tool_settings(self) -> JevToolAlignmentSettings:
         # Returns the tool-alignment settings, refusing when the capability is off.
-        settings = self.agent_settings.tool_align
+        settings = self.agent_settings.alignment.tool_options if self.agent_settings.alignment.tool_settings else None
         if settings is None:
-            raise ConfigurationError("Tool alignment is off; set JevAgentSettings.tool_align to use align_tools().")
+            raise ConfigurationError("Tool alignment is off; set JevAgentSettings.alignment.tool_settings to use align_tools().")
         return settings
 
     def _require_tool_scout(self) -> BaseAgent:
         # Returns the scout agent built for tool alignment.
         if self.tool_scout is None:
-            raise ConfigurationError("Tool alignment is off; set JevAgentSettings.tool_align to use align_tools().")
+            raise ConfigurationError("Tool alignment is off; set JevAgentSettings.alignment.tool_settings to use align_tools().")
         return self.tool_scout
 
 def _asked(questions: Sequence[JevAlignmentQuestion], has_tools: bool) -> tuple[JevAlignmentQuestion, ...]:

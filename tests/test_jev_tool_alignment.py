@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevToolAlignmentSettings, JevToolAlignmentStatus
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevAlignmentSettings, JevToolAlignmentSettings, JevToolAlignmentStatus
 from vidbyte.agents.jev.alignment.draft import JevToolScoutPass, JevToolScoutPhase
 from vidbyte.agents.jev.alignment.questions import TOOL_QUESTIONS, JevToolQuestion
 from vidbyte.agents.jev.alignment.result import JevToolEffect, JevToolNeed, JevToolRejection
@@ -235,8 +235,9 @@ def _linear_search_pass(tool_names: Sequence[str] = ("create_issue",)) -> tuple[
 
 
 def _settings(**tool_overrides: Any) -> JevAgentSettings:
-    tool_align = JevToolAlignmentSettings(**tool_overrides)
-    return JevAgentSettings(name="assistant", system_prompt=PROMPT, provider="openai", model_name="gpt-4.1-mini", tool_align=tool_align, permission_policy=PermissionPolicy.allow_all())
+    tool_options = JevToolAlignmentSettings(**tool_overrides)
+    alignment = JevAlignmentSettings(tool_settings=True, tool_options=tool_options)
+    return JevAgentSettings(name="assistant", system_prompt=PROMPT, provider="openai", model_name="gpt-4.1-mini", alignment=alignment, permission_policy=PermissionPolicy.allow_all())
 
 
 def _agent(main: ScriptedRunner, scout: ScriptedRunner, catalog: ToolCatalogProvider | None = None, **tool_overrides: Any) -> JevAgent:
@@ -307,7 +308,7 @@ class ToolAlignmentSettingsTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             JevToolAlignmentSettings(time_budget_seconds=0)
         with self.assertRaises(ConfigurationError):
-            JevAgentSettings(name="a", system_prompt="p", provider="openai", model_name="m", tool_align="yes")  # type: ignore[arg-type]
+            JevAgentSettings(name="a", system_prompt="p", provider="openai", model_name="m", alignment="yes")  # type: ignore[arg-type]
 
     def test_secrets_and_credentials_stay_out_of_repr(self) -> None:
         # [Security] a logged settings object must never print a key.
@@ -319,14 +320,14 @@ class ToolAlignmentSettingsTests(unittest.TestCase):
 class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
     """Pins the full pass through a real JevAgent run."""
 
-    async def test_tool_align_off_makes_no_jev_call(self) -> None:
-        # [Edge Case] without tool_align the agent behaves exactly like the scaffold.
+    async def test_tool_settings_off_makes_no_jev_call(self) -> None:
+        # [Edge Case] without alignment.tool_settings the agent behaves exactly like the scaffold.
         jev = ScriptedJev()
         agent = bind_test_runner(JevAgent(JevAgentSettings(name="a", system_prompt=PROMPT, provider="openai", model_name="gpt-4.1-mini")), ScriptedRunner(_text("ok")))
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun(REQUEST)
         self.assertEqual(jev.requests, [])
-        self.assertNotIn("jev_tool_alignment", reply.metadata)
+        self.assertIsNone(agent.response.tool_alignment)
 
     async def test_request_without_outside_action_stops_after_one_call(self) -> None:
         # [Edge Case] the cheap path: one Jev request, no scout, no catalog search.
@@ -336,7 +337,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("OAuth is ...")), scout, catalog)
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Explain how OAuth works.")
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.status, JevToolAlignmentStatus.NOT_NEEDED)
         self.assertEqual(len(jev.requests), 1)
         self.assertEqual(scout.calls, [])
@@ -350,7 +351,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("I only help with engineering work.")), scout)
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Book me a flight to Paris.")
-        self.assertIs(reply.metadata["jev_tool_alignment"].status, JevToolAlignmentStatus.OUT_OF_SCOPE)
+        self.assertIs(agent.response.tool_alignment.status, JevToolAlignmentStatus.OUT_OF_SCOPE)
         self.assertEqual(scout.calls, [])
 
     async def test_need_covered_by_an_existing_tool_skips_the_search(self) -> None:
@@ -362,7 +363,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent.add_tool(_existing_tool())
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.status, JevToolAlignmentStatus.COVERED)
         self.assertEqual(result.needs[0].covered_by, ("linear_create_issue",))
         self.assertEqual(catalog.queries, [])
@@ -375,7 +376,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(main, _scout(*_linear_search_pass()))
         with patch(RUNNER_PATH, jev), patch(ATTACH_PATH, attach):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.status, JevToolAlignmentStatus.ATTACHED)
         attached = result.attached[0]
         self.assertEqual((attached.name, attached.original_name, attached.entry_id, attached.location), ("Linear__create_issue", "create_issue", "app.linear/linear", "https://mcp.linear.app/mcp"))
@@ -395,7 +396,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("I cannot open issues.")), _scout(*_linear_search_pass()))
         with patch(RUNNER_PATH, jev), patch(ATTACH_PATH, attach):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.status, JevToolAlignmentStatus.NO_MATCH)
         self.assertIs(result.rejected[0].rejection, JevToolRejection.INSTRUCTIONS_IN_DESCRIPTION)
         self.assertTrue(attach.handles[0].transport.closed)
@@ -407,7 +408,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), _scout(*_linear_search_pass()))
         with patch(RUNNER_PATH, jev), patch(ATTACH_PATH, FakeAttach([_definition(CREATE_ISSUE)])):
             reply = await agent.arun(REQUEST)
-        self.assertIs(reply.metadata["jev_tool_alignment"].rejected[0].rejection, JevToolRejection.EFFECT_NOT_ALLOWED)
+        self.assertIs(agent.response.tool_alignment.rejected[0].rejection, JevToolRejection.EFFECT_NOT_ALLOWED)
 
     async def test_declared_destructive_hint_needs_the_owners_permission(self) -> None:
         # [Security] a server's destructive hint overrides Jev's "reads", and high-impact tools need allow_high_impact.
@@ -416,7 +417,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), _scout(*_linear_search_pass()))
         with patch(RUNNER_PATH, jev), patch(ATTACH_PATH, attach):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.rejected[0].effect, JevToolEffect.SENDS_OR_DELETES)
         self.assertIs(result.rejected[0].rejection, JevToolRejection.EFFECT_NOT_ALLOWED)
         self.assertTrue(any("allow_high_impact" in action for action in result.owner_actions))
@@ -429,7 +430,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), _scout(*_linear_search_pass()), FakeCatalog(entry))
         with patch(RUNNER_PATH, ScriptedJev(APPROVE)), patch(ATTACH_PATH, attach):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.rejected[0].rejection, JevToolRejection.MISSING_CREDENTIAL)
         self.assertIn("LINEAR_API_KEY", result.owner_actions[0])
         self.assertEqual(attach.configs, [])
@@ -443,7 +444,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         with patch(RUNNER_PATH, ScriptedJev(APPROVE)), patch(ATTACH_PATH, attach):
             reply = await agent.arun(REQUEST)
         self.assertEqual(dict(attach.configs[0].headers or {}), {"Authorization": "Bearer sk-1"})
-        self.assertNotIn("sk-1", json.dumps([record.location for record in reply.metadata["jev_tool_alignment"].attached]))
+        self.assertNotIn("sk-1", json.dumps([record.location for record in agent.response.tool_alignment.attached]))
 
     async def test_local_install_kinds_are_opt_in(self) -> None:
         # [Security] a container is never started unless the owner allowed container installs.
@@ -452,7 +453,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), _scout(*_linear_search_pass()), FakeCatalog(entry))
         with patch(RUNNER_PATH, ScriptedJev(APPROVE)), patch(ATTACH_PATH, attach):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.rejected[0].rejection, JevToolRejection.INSTALL_NOT_ALLOWED)
         self.assertIn("container", result.owner_actions[0])
         self.assertEqual(attach.configs, [])
@@ -462,7 +463,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), _scout(*_linear_search_pass()))
         with patch(RUNNER_PATH, ScriptedJev(APPROVE)), patch(ATTACH_PATH, FakeAttach(fail=True)):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.rejected[0].rejection, JevToolRejection.CONNECT_FAILED)
         self.assertEqual(result.rejected[0].detail, "McpConnectionError")
         self.assertEqual(reply.content, "ok")
@@ -473,7 +474,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), scout)
         with patch(RUNNER_PATH, ScriptedJev(fail=True)):
             reply = await agent.arun(REQUEST)
-        self.assertIs(reply.metadata["jev_tool_alignment"].status, JevToolAlignmentStatus.UNAVAILABLE)
+        self.assertIs(agent.response.tool_alignment.status, JevToolAlignmentStatus.UNAVAILABLE)
         self.assertEqual(reply.content, "ok")
         self.assertEqual(scout.calls, [])
 
@@ -490,7 +491,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), _scout(*_linear_search_pass()), time_budget_seconds=0.5)
         with patch(RUNNER_PATH, SlowJev(APPROVE)), patch(ATTACH_PATH, attach):
             reply = await agent.arun(REQUEST)
-        self.assertIs(reply.metadata["jev_tool_alignment"].status, JevToolAlignmentStatus.UNAVAILABLE)
+        self.assertIs(agent.response.tool_alignment.status, JevToolAlignmentStatus.UNAVAILABLE)
         self.assertTrue(attach.handles[0].transport.closed)
 
     async def test_catalog_failure_is_recorded_per_catalog(self) -> None:
@@ -498,7 +499,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("ok")), _scout(_call("search_tool_catalogs", {"need_id": "need_1", "query": "linear"}, "s1")), FakeCatalog(fail=True))
         with patch(RUNNER_PATH, ScriptedJev(APPROVE)):
             reply = await agent.arun(REQUEST)
-        result = reply.metadata["jev_tool_alignment"]
+        result = agent.response.tool_alignment
         self.assertIs(result.status, JevToolAlignmentStatus.NO_MATCH)
         self.assertIn("503", result.provider_errors["mcp_registry"])
 
@@ -512,9 +513,9 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(1 for name in jev.asked() if name.startswith("alignment.tools.candidate.describes_only")), 1)
 
     async def test_prompt_alignment_gate_answer_is_reused(self) -> None:
-        # [Edge Case] with self_align on, the scope gate is asked once, by prompt alignment.
+        # [Edge Case] with alignment.system_prompt on, the scope gate is asked once, by prompt alignment.
         jev = ScriptedJev({"alignment.tools.detect.outside_action": 0.1})
-        settings = JevAgentSettings(name="a", system_prompt=PROMPT, provider="openai", model_name="gpt-4.1-mini", self_align=True, tool_align=JevToolAlignmentSettings())
+        settings = JevAgentSettings(name="a", system_prompt=PROMPT, provider="openai", model_name="gpt-4.1-mini", alignment=JevAlignmentSettings(system_prompt=True, tool_settings=True))
         agent = bind_test_runner(JevAgent(settings), ScriptedRunner(_text("ok")))
         with patch(RUNNER_PATH, jev):
             await agent.arun("Explain our bug triage process.")
@@ -534,7 +535,7 @@ class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(main, _scout(*search_pass), catalog)
         with patch(RUNNER_PATH, ScriptedJev(APPROVE)):
             reply = await agent.arun(REQUEST)
-        self.assertIs(reply.metadata["jev_tool_alignment"].status, JevToolAlignmentStatus.ATTACHED)
+        self.assertIs(agent.response.tool_alignment.status, JevToolAlignmentStatus.ATTACHED)
         self.assertEqual(catalog.executed, [("Linear.CreateIssue", {"title": "Login fails"}, None)])
 
 

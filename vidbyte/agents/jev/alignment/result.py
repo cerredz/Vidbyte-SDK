@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/alignment/result.py
 
 PURPOSE: Defines the immutable records JevAgentAlignment returns for one run: prompt gaps, edits, owner actions, and the prompt that ran; and, for tool alignment, the needs, attached tools, rejected candidates, and the live attachment.
-ROLE IN CODEBASE: JevRuntime attaches one JevAlignmentResult under "jev_alignment" and one JevToolAlignmentResult under "jev_tool_alignment" to the main agent's result metadata; JevToolAttachment carries the live tools and MCP sessions for exactly one run.
+ROLE IN CODEBASE: JevResponse exposes each alignment result on JevAgent.response; JevToolAttachment carries the live tools and MCP sessions for exactly one run.
 ARCHITECTURE NOTE: Records hold only run-local evidence; nothing here is written back to JevAgentSettings or later runs.
 COMMON MODIFICATION PATTERNS: Add a status member only with a matching branch in JevAgentAlignment.align and a test.
 KNOWN EDGE CASES: A non-ALIGNED status always carries the original prompt; usage is None when no Jev call reported usage. JevToolAttachment owns open MCP sessions, so JevRuntime must hand it back to JevAgentAlignment.release_tools() when the run ends, including on failure.

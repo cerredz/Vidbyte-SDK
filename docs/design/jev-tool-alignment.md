@@ -2,15 +2,15 @@
 
 ## What and why
 
-`JevAgentSettings(tool_align=JevToolAlignmentSettings(...))` lets a `JevAgent` attach tools that already exist in public tool catalogs, for one run, when the request needs something no configured tool does. Writing new tool code was rejected as too open-ended. Tools that other people publish, maintain, and run are a safer source.
+`JevAgentSettings(alignment=JevAlignmentSettings(tool_settings=True, tool_options=JevToolAlignmentSettings(...)))` lets a `JevAgent` attach tools that already exist in public tool catalogs, for one run, when the request needs something no configured tool does. The same `alignment` setting also has a `system_prompt` switch for prompt alignment. Writing new tool code was rejected as too open-ended. Tools that other people publish, maintain, and run are a safer source.
 
-The owner asked for all of the logic to live in helper methods on `JevAgentAlignment`, the self-alignment class from PR #445. This branch therefore contains #445's commits. #445 should merge first, and this PR targets `main`.
+Both alignment switches live together in `JevAlignmentSettings`: `system_prompt` enables prompt alignment and `tool_settings` enables catalog tool alignment. Catalog policy such as credentials, install kinds, and limits stays under `tool_options`, inside the same top-level setting.
 
 ## How it works
 
-`JevRuntime.arun` runs prompt alignment (when `self_align` is on), then tool alignment (when `tool_align` is set), then the inherited loop.
+`JevRuntime.arun` runs prompt alignment when `alignment.system_prompt` is on, then tool alignment when `alignment.tool_settings` is on, applies any tool selector, and enters the inherited loop. Jev's preflight gate still runs first, and a selected specialist continues to run its own agent.
 
-1. **Detect (Jev, one request).** The state is `{system_prompt, request, tools}`. It asks #445's `fit.task_in_scope` gate, unless prompt alignment already answered it, plus `tools.detect.outside_action`. If the request is out of scope, or needs no outside action, the run goes ahead with no further calls.
+1. **Detect (Jev, one request).** The state is `{system_prompt, request, tools}`. It asks `fit.task_in_scope` unless prompt alignment already answered it, plus `tools.detect.outside_action`. If the request is out of scope, or needs no outside action, the run goes ahead with no further calls.
 2. **Needs (scout, generative).** `JevAgentAlignment` builds one scout `BaseAgent` with a fixed prompt and four tools. In its first pass, the scout writes one to three needs as `{action, object, system}`. Code builds each need sentence.
 3. **Coverage (Jev, one request per need).** The state is `{request, need, need_system, tool_1..tool_n}`. It asks one question per existing tool ("does `tool_k` perform `need`?"), `need.asks_change`, and `need.names_system`. A need is covered when any tool scores at least 0.6. If every need is covered, nothing is searched.
 4. **Search (scout, generative).** The second pass handles the uncovered needs. `search_tool_catalogs` fans out to every enabled catalog provider. `describe_catalog_entry` fetches an entry's tool list. `propose_tool_candidates` shortlists tools, and may only use entry ids and tool names that search or describe returned.
@@ -26,7 +26,7 @@ The owner asked for all of the logic to live in helper methods on `JevAgentAlign
 
    A server-declared destructive hint overrides Jev's effect answer. Candidates are ranked by verified status, remote install, pinned version, fewer secrets, and `performs_need`. One entry is attached per need, capped at `max_attached_tools`.
 9. **Attach for this run.** Approved tools are bridged with a server prefix (`<entry>__<tool>`). They are added to this run-local runtime's tools and context, and closed when the run ends. Read-only tools get `ToolPermission.READ`; everything else gets `EXECUTE`, so the owner's `PermissionPolicy` still decides.
-10. **Report.** `metadata["jev_tool_alignment"]` holds a `JevToolAlignmentResult`: status, needs, attached tools, rejected candidates with reasons, owner actions, provider errors, probabilities, and summed Jev usage. When `announce=True` and the run returns no structured output, code appends a footer listing the added tools.
+10. **Report.** `JevAgent.response.alignment` and `JevAgent.response.tool_alignment` expose the two pass outcomes. The tool result includes status, needs, attached tools, rejected candidates with reasons, owner actions, provider errors, probabilities, and summed Jev usage. When `announce=True` and the run returns no structured output, code appends a footer listing the added tools.
 
 Failure policy: the run fails open (any Jev, scout, or catalog failure, or the time budget running out, means the original tools are used) and attaching fails closed (an unverified tool never attaches). Every opened session is closed.
 

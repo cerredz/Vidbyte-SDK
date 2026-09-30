@@ -10,14 +10,24 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 """
 
 from vidbyte.agents.jev.agent import JevAgent
+from vidbyte.agents.jev.alignment import (
+    JevAlignmentResult,
+    JevAlignmentStatus,
+    JevToolAlignmentResult,
+    JevToolAlignmentStatus,
+)
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
+    JevAlignmentSettings,
     JevContinualSettings,
     JevRuntimeSettings,
+    JevToolAlignmentSettings,
 )
 from vidbyte.lib.dataclasses.jev import (
+    JevAlignmentOutcome,
     JevAgentResponse,
+    JevPromptAlignmentOutcome,
     JevClaimAssertion,
     JevClaimContext,
     JevClaimEvidence,
@@ -33,6 +43,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevPresetResult,
     JevRunStateRecord,
     JevSpecialist,
+    JevToolAlignmentOutcome,
 )
 from vidbyte.lib.enums.jev import JevClaimKind, JevDoneCheck, JevPreflightPreset
 
@@ -40,6 +51,11 @@ __all__ = [
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
+    "JevAlignmentOutcome",
+    "JevAlignmentResult",
+    "JevAlignmentSettings",
+    "JevAlignmentStatus",
+    "JevPromptAlignmentOutcome",
     "JevClarification",
     "JevClarifyingQuestion",
     "JevClaimEvidence",
@@ -61,4 +77,8 @@ __all__ = [
     "JevRuntime",
     "JevRuntimeSettings",
     "JevSpecialist",
+    "JevToolAlignmentResult",
+    "JevToolAlignmentSettings",
+    "JevToolAlignmentOutcome",
+    "JevToolAlignmentStatus",
 ]

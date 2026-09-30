@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations.
+PURPOSE: Defines JevAgent's public configuration objects: JevAgentSettings for the agent and its alignment switches, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations.
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
-ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
+ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent, specialist candidates, and one JevAlignmentSettings object with prompt and tool alignment switches; JevRuntimeSettings holds the decision model, preflight flags, continuation settings, and tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
@@ -147,6 +147,24 @@ class JevToolAlignmentSettings:
     def credentials_for(self, catalog: ToolCatalogName) -> ToolCatalogCredentials | None:
         return self.catalog_credentials.get(catalog)
 
+
+@dataclass(frozen=True, slots=True)
+class JevAlignmentSettings:
+    """Select which request-time alignment passes JevAgent runs and their tool catalog policy."""
+
+    system_prompt: bool = False
+    tool_settings: bool = False
+    tool_options: JevToolAlignmentSettings = field(default_factory=JevToolAlignmentSettings)
+
+    def __post_init__(self) -> None:
+        # Keeps both visible alignment switches explicit while allowing catalog policy to be tuned separately.
+        for name in ("system_prompt", "tool_settings"):
+            if not isinstance(getattr(self, name), bool):
+                raise ConfigurationError(f"JevAlignmentSettings.{name} must be True or False.")
+        if not isinstance(self.tool_options, JevToolAlignmentSettings):
+            raise ConfigurationError("JevAlignmentSettings.tool_options must be a JevToolAlignmentSettings instance.")
+
+
 @dataclass(frozen=True, slots=True)
 class JevAgentSettings:
     """Validated settings for the agent JevAgent runs by default and the specialists Jev may hand a run to instead."""
@@ -162,6 +180,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     agents: tuple[JevSpecialist, ...] = ()
+    alignment: JevAlignmentSettings = field(default_factory=JevAlignmentSettings)
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -186,6 +205,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
         if not isinstance(self.loop, AgentLoopSettings):
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
+        if not isinstance(self.alignment, JevAlignmentSettings):
+            raise ConfigurationError("JevAgentSettings.alignment must be a JevAlignmentSettings instance.")
         self._validate_agents()
 
     def _validate_agents(self) -> None:
@@ -296,4 +317,4 @@ class JevRuntimeSettings:
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
 
-__all__ = ["JevAgentSettings", "JevContinualSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevAlignmentSettings", "JevContinualSettings", "JevRuntimeSettings", "JevToolAlignmentSettings"]

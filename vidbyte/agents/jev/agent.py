@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.jev.alignment import JevAgentAlignment
 from vidbyte.agents.jev.continuation import JevDoneContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
@@ -42,6 +43,7 @@ class JevAgent(BaseAgent):
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
         self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
         self.continuation = None if self.run_state is None else JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+        self.alignment = JevAgentAlignment(settings) if settings.alignment.system_prompt or settings.alignment.tool_settings else None
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,
@@ -63,7 +65,15 @@ class JevAgent(BaseAgent):
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
         # Passes the runtime settings, the gate, the done checks, the continuation, and the response writer built at construction to each run-local JevRuntime.
-        return {"runtime_settings": self.runtime_settings, "preflight": self.preflight, "run_state": self.run_state, "continuation": self.continuation, "response": self._response}
+        return {
+            "runtime_settings": self.runtime_settings,
+            "preflight": self.preflight,
+            "run_state": self.run_state,
+            "continuation": self.continuation,
+            "response": self._response,
+            "alignment": self.alignment,
+            "alignment_settings": self.settings.alignment,
+        }
 
 
 __all__ = ["JevAgent"]

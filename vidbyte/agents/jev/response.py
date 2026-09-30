@@ -20,8 +20,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevPromptAlignmentOutcome,
     JevRunStateRecord,
     JevSpecialist,
+    JevToolAlignmentOutcome,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
@@ -69,6 +71,14 @@ class JevResponse:
     def continued(self) -> None:
         """Record that a failed done check sent the main agent back to work."""
         self.state.continuations += 1
+
+    def alignment(self, outcome: JevPromptAlignmentOutcome) -> None:
+        """Record the system-prompt alignment outcome for this run."""
+        self.state.alignment = outcome
+
+    def tool_alignment(self, outcome: JevToolAlignmentOutcome) -> None:
+        """Record the tool-settings alignment outcome for this run."""
+        self.state.tool_alignment = outcome
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""
