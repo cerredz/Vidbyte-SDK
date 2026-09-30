@@ -1,9 +1,9 @@
 name: Publish to PyPI
 
 on:
-  push:
-    tags:
-      - "v*"
+  # TEMPORARILY DISABLED: automatic triggers removed; re-enable by reverting
+  # the temporarily-disable-github-actions commit.
+  workflow_dispatch:
 
 permissions:
   contents: read

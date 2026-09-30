@@ -29,6 +29,7 @@ from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
 from vidbyte.lib.enums import JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
+from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.tools.catalog import Tools
@@ -60,6 +61,18 @@ class ScriptedDecisionRunner:
             raw={},
             usage={"input_tokens": 15, "output_tokens": 3},
         )
+
+
+def _helper_class(scripted: ScriptedDecisionRunner) -> type:
+    """Stands in for the helper transport while keeping its production score method active."""
+    class ScriptedDecisionHelper:
+        score_noul = staticmethod(DecisionModelHelper.score_noul)
+        noul_passes = staticmethod(DecisionModelHelper.noul_passes)
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> ScriptedDecisionRunner:  # type: ignore[misc]
+            return scripted
+
+    return ScriptedDecisionHelper
 
 
 class ScriptedGenerativeRunner:
@@ -154,7 +167,7 @@ class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
         decision_runner = ScriptedDecisionRunner({"tool_selector.0": 0.4, "tool_selector.1": 0.399})
         selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.4)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper", new=_helper_class(decision_runner)):
             selected = await selector.run("Find the architecture notes.", catalog)
 
         self.assertEqual(catalog.names(), ("search", "calendar"))
@@ -175,7 +188,7 @@ class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
         decision_runner = ScriptedDecisionRunner(omit_answer="tool_selector.0")
         selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.2)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper", new=_helper_class(decision_runner)):
             selected = await selector.run("Look up the record.", catalog)
 
         self.assertEqual(selected.names(), catalog.names())
@@ -192,7 +205,7 @@ class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
         selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.2)
 
         with patch(
-            "vidbyte.agents.jev.preflight.DecisionModelRunner",
+            "vidbyte.agents.jev.preflight.DecisionModelHelper",
             side_effect=ProviderRequestError("provider unavailable", provider="typesafe"),
         ):
             selected = await selector.run("Look up the record.", catalog)
@@ -230,7 +243,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         agent = bind_test_runner(JevAgent(_settings(tools=(keep, hide)), runtime_settings), generative_runner)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper", new=_helper_class(decision_runner)):
             reply = await agent.arun("Search the relevant records.")
 
         for model_call in generative_runner.calls:
@@ -248,7 +261,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         generative_runner = ScriptedGenerativeRunner()
         agent = bind_test_runner(JevAgent(_settings()), generative_runner)
 
-        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner") as decision_runner:
+        with patch("vidbyte.agents.jev.preflight.DecisionModelHelper") as decision_runner:
             reply = await agent.arun("Answer normally.")
 
         decision_runner.assert_not_called()

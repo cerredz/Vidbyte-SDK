@@ -11,8 +11,9 @@ name: AGENTS.md placement
 # `codex login` made for that runner alone. The runner takes one job at a time,
 # so the auth.json Codex refreshes in place is never shared by concurrent jobs.
 on:
-  pull_request:
-    types: [opened, synchronize]
+  # TEMPORARILY DISABLED: automatic triggers removed; re-enable by reverting
+  # the temporarily-disable-github-actions commit.
+  workflow_dispatch:
 
 permissions:
   contents: read
