@@ -372,7 +372,7 @@ class JevRunState(BaseAgent):
         }
         incomplete = tuple(identifier for identifier, score in action_scores.items() if score >= threshold)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=max(action_scores.values()), passed=not incomplete, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=verdict.score, passed=not incomplete, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.

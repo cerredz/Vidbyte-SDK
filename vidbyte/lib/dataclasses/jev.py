@@ -1123,9 +1123,11 @@ class JevDoneQuestion:
 class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
-    `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
-    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
-    parent claims for CLAIMS; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+    `answers` holds Jev's answer per checked-item id, and `score` is their mean P(yes). `incomplete` names
+    the items that meet the check's continuation condition: low support for MULTI_PART and CLAIMS, or high
+    necessity and unfinished probabilities for GUARANTEED_NEXT_ACTIONS. CLAIMS answers use
+    `parent_id.assertion_id` keys so each assertion stays atomic. For GUARANTEED_NEXT_ACTIONS, a high score
+    can accompany a failed check because its affirmative questions describe work that remains necessary.
     With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
