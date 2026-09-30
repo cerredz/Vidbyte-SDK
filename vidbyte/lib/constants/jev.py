@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds and `vidbyte/providers/typesafe.py` builds requests from the same values.
+PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight and done-check policy values.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -56,21 +56,111 @@ JEV_NOUL_TRUE: str = "true"
 JEV_NOUL_FALSE: str = "false"
 JEV_NOUL_OPTIONS: tuple[str, ...] = (JEV_NOUL_TRUE, JEV_NOUL_FALSE)
 JEV_NOUL_YES_THRESHOLD: float = 0.5
-JEV_MULTIPART_INITIAL_ATTEMPT: int = 0
-JEV_MULTIPART_ATTEMPT_INCREMENT: int = 1
-JEV_MULTIPART_DEFAULT_PROBABILITY: float = 0.0
-JEV_MULTIPART_DONE_THRESHOLD: float = 0.8
-JEV_SCOPE_UNIT_APPLIED_THRESHOLD: float = 0.8
-JEV_SCOPE_DISCLOSED_THRESHOLD: float = 0.7
-JEV_SCOPE_CLAIMS_ALL_THRESHOLD: float = 0.5
-JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD: float = 0.5
-JEV_SCOPE_NO_WORK_PROBABILITY: float = 0.0
-JEV_SCOPE_COVERAGE_ATTEMPTS: int = 2
+
+# Preflight policy. The request is the only state field preflight questions read, and a fixed-question
+# preset's score is the mean P(yes) of its questions; below the threshold the preset fails.
+# 0.75 is a starting point, not a value tuned on a labeled set.
+JEV_PREFLIGHT_REQUEST_FIELD: str = "request"
+JEV_CLARITY_THRESHOLD: float = 0.75
+# One clarity question with P(yes) below this fails the preset on its own, so a mean pulled up by many
+# easy yes answers cannot hide one clear no. Also a starting point, not a tuned value.
+JEV_CLARITY_VETO_THRESHOLD: float = 0.2
+# A run the preflight gate stops reports this strategy name.
+JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
+# JevClarificationAgent limits: its loop and token budget, and the size of the structured reply it must
+# return (a few clarifying questions, each with a few recommended answers the user can pick from).
+JEV_CLARIFICATION_MAX_ITERATIONS: int = 25
+JEV_CLARIFICATION_MAX_TOKENS: int = 100_000
+JEV_CLARIFICATION_MAX_QUESTIONS: int = 6
+JEV_CLARIFICATION_MIN_RECOMMENDATIONS: int = 2
+JEV_CLARIFICATION_MAX_RECOMMENDATIONS: int = 4
+# Specialist choice: the question's answer key, and the way-out option that keeps the main JevAgent on the
+# run. Every specialist is one more Choice option beside `none`, so the count stops one below the vendor limit.
+JEV_SPECIALIST_QUESTION_NAME: str = "specialist"
+JEV_SPECIALIST_NONE: str = "none"
+JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
+
+# Done checks. Every enabled check asks its questions in one request on each finish attempt. A check's
+# threshold is used as both the mean threshold and veto, so one clear no is not averaged away.
+# Both thresholds are starting points, not values tuned on a labeled set.
+JEV_MULTI_PART_THRESHOLD: float = 0.8
+# Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
+JEV_CLAIMS_THRESHOLD: float = 0.85
+# Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
+# agent back to work before its answer is accepted.
+JEV_DONE_MAX_CONTINUATIONS: int = 3
+# The state fields the done questions read: the user's request, and one entry per deliverable id holding
+# the deliverable, the visible condition that shows it is done, and the evidence JevHandoff compiled for it.
+JEV_DONE_REQUEST_FIELD: str = "request"
+JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
+JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
+JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
+JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+JEV_DONE_CLAIMS_FIELD: str = "claims"
+JEV_DONE_CLAIM_FIELD: str = "claim"
+JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
+JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
+JEV_DONE_CLAIM_DESCRIPTION_FIELD: str = "description"
+JEV_DONE_CLAIM_INTENT_FIELD: str = "intent"
+JEV_DONE_CLAIM_SCOPE_FIELD: str = "scope"
+JEV_DONE_CLAIM_QUALIFICATIONS_FIELD: str = "qualifications"
+JEV_DONE_CLAIM_KIND_FIELD: str = "kind"
+JEV_DONE_CLAIM_OUTPUT_FIELD: str = "output"
+JEV_DONE_CLAIM_ASSERTION_FIELD: str = "assertion"
+JEV_DONE_CLAIM_ASSERTION_ID_FIELD: str = "id"
+JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: str = "statement"
+JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: str = "completion_criteria"
+JEV_DONE_CLAIM_ASSERTION_SEPARATOR: str = "."
+# A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
+JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
+# Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
+# so their loops stay short; the handoff reads the main agent's whole run, so its token budget is larger.
+JEV_RUN_STATE_MAX_ITERATIONS: int = 25
+JEV_RUN_STATE_MAX_TOKENS: int = 100_000
+JEV_HANDOFF_MAX_ITERATIONS: int = 25
+JEV_HANDOFF_MAX_TOKENS: int = 400_000
+
+# Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
+JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
+JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
+JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
+    "JEV_CLAIMS_THRESHOLD",
+    "JEV_CLARIFICATION_MAX_ITERATIONS",
+    "JEV_CLARIFICATION_MAX_QUESTIONS",
+    "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
+    "JEV_CLARIFICATION_MAX_TOKENS",
+    "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
+    "JEV_CLARITY_THRESHOLD",
+    "JEV_CLARITY_VETO_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
+    "JEV_DELIVERABLE_ID_PATTERN",
+    "JEV_DONE_COMPLETION_SIGNAL_FIELD",
+    "JEV_DONE_CLAIM_FIELD",
+    "JEV_DONE_CLAIM_ASSERTION_FIELD",
+    "JEV_DONE_CLAIM_ASSERTION_ID_FIELD",
+    "JEV_DONE_CLAIM_ASSERTION_SEPARATOR",
+    "JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD",
+    "JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD",
+    "JEV_DONE_CLAIMS_FIELD",
+    "JEV_DONE_CLAIM_DESCRIPTION_FIELD",
+    "JEV_DONE_CLAIM_IDENTITY_FIELD",
+    "JEV_DONE_CLAIM_INTENT_FIELD",
+    "JEV_DONE_CLAIM_KIND_FIELD",
+    "JEV_DONE_CLAIM_OUTPUT_FIELD",
+    "JEV_DONE_CLAIM_QUALIFICATIONS_FIELD",
+    "JEV_DONE_CLAIM_SCOPE_FIELD",
+    "JEV_DONE_CLAIM_TITLE_FIELD",
+    "JEV_DONE_DELIVERABLES_FIELD",
+    "JEV_DONE_DELIVERABLE_FIELD",
+    "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_REQUEST_FIELD",
+    "JEV_HANDOFF_MAX_ITERATIONS",
+    "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",
     "JEV_MAX_OPTION_NAME_CHARS",
     "JEV_MAX_QUESTIONS",
@@ -80,25 +170,23 @@ __all__ = [
     "JEV_MIN_CHOICE_OPTIONS",
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
-    "JEV_MULTIPART_ATTEMPT_INCREMENT",
-    "JEV_MULTIPART_DEFAULT_PROBABILITY",
-    "JEV_MULTIPART_DONE_THRESHOLD",
-    "JEV_MULTIPART_INITIAL_ATTEMPT",
+    "JEV_MULTI_PART_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",
     "JEV_NOUL_YES_THRESHOLD",
-    "JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD",
-    "JEV_SCOPE_CLAIMS_ALL_THRESHOLD",
-    "JEV_SCOPE_COVERAGE_ATTEMPTS",
-    "JEV_SCOPE_DISCLOSED_THRESHOLD",
-    "JEV_SCOPE_NO_WORK_PROBABILITY",
-    "JEV_SCOPE_UNIT_APPLIED_THRESHOLD",
     "JEV_NO_RETRIES",
+    "JEV_PREFLIGHT_REQUEST_FIELD",
+    "JEV_PREFLIGHT_STRATEGY_NAME",
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_RUN_STATE_MAX_ITERATIONS",
+    "JEV_RUN_STATE_MAX_TOKENS",
+    "JEV_SPECIALIST_MAX_COUNT",
+    "JEV_SPECIALIST_NONE",
+    "JEV_SPECIALIST_QUESTION_NAME",
     "JEV_STATUS_OVERLOADED",
     "JEV_STATUS_RATE_LIMITED",
     "JEV_STATUS_REQUEST_TIMEOUT",
@@ -108,4 +196,7 @@ __all__ = [
     "JEV_STATUS_UNPROCESSABLE",
     "JEV_SYSTEMONE_PATH",
     "JEV_TIMEOUT_FLOOR_SECONDS",
+    "JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD",
+    "JEV_TOOL_SELECTOR_MAX_THRESHOLD",
+    "JEV_TOOL_SELECTOR_MIN_THRESHOLD",
 ]

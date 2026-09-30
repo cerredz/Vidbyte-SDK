@@ -1,9 +1,8 @@
 name: Static policy
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  # TEMPORARILY DISABLED: automatic triggers removed; re-enable by reverting
+  # the temporarily-disable-github-actions commit.
   workflow_dispatch:
 
 permissions:

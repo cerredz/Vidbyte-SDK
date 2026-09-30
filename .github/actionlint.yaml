@@ -1,0 +1,6 @@
+# Labels of the self-hosted runners this repository targets, so actionlint
+# accepts them in runs-on. `codex` is the runner that holds a ChatGPT Codex
+# login (see .github/workflows/agents-md-placement.yml).
+self-hosted-runner:
+  labels:
+    - codex

@@ -564,9 +564,7 @@ class AgentRuntime:
                         break
                     return await self._finish_result(final, state)
 
-            if finish_attempt_continued:
-                continue
-            if contract_rejected:
+            if finish_attempt_continued or contract_rejected:
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
@@ -756,8 +754,11 @@ class AgentRuntime:
         run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
 
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
-        """Let specialized linear runtimes continue a normal finish attempt with explicit feedback."""
-        # Default runtimes accept the attempt unchanged; specialized runtimes append feedback before returning True.
+        """Let a specialized linear runtime send a normal finish attempt back to work with feedback."""
+        # Default runtimes accept every finish attempt; a specialized runtime appends its feedback to messages and returns True.
+        # @intent finish-attempts-can-continue-the-same-loop
+        # A check that runs when the model tries to finish (JevRuntime's done checks) must be able to keep this loop's
+        # messages, tool history, and budgets, so the hook sits at both finish points instead of re-running the agent.
         return False
 
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
