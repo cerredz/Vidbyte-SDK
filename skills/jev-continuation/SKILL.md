@@ -127,7 +127,7 @@ Work through the steps in order. Each is explained in detail below.
 Write down five things. If you cannot write one of them, the check is not ready.
 
 1. **The failure it catches**, in product terms. For multi-part, the failure is that the agent finished one visible part of a request and forgot another part it was asked for in passing.
-2. **The items.** A done check judges a list of items, each with a stable id, with **one question per item** (strategy 11). Multi-part's items are deliverables. The run-state writer produces the items from the request before any work starts, because producing candidates is generation.
+2. **The items.** A done check judges a list of items, each with a stable id, with **one question per item** (strategy 11). Multi-part's items are deliverables. The run-state writer produces the items from the request before any work starts, because producing candidates is generation. When a check's candidates can themselves be omitted by that writer, add a separate recognition question per actual source input that compares the source with the entire generated list; do not ask that question to generate its own replacement list.
 3. **The evidence per item.** Decide what the handoff must quote from the run so that a checker who sees only that text can judge the item. The handoff also writes a separate, human-readable `missing` for each item.
 4. **The question.** One positive yes/no question per item, in the form "Does `evidence` show …, in the entry of `<items>` with id `{item}`?". It must pass the two-second test in `asking-jev-questions`.
 5. **The action for every outcome** (strategy 25):
@@ -571,7 +571,7 @@ Your change must not raise any lint baseline count.
 
 ## 4. Important things to remember
 
-- **A check is data plus `match` cases, not a class.** It adds sections to the agents that can know its items, records, one question module, and one `case` each in `_section`, `_judge`, and `_explain`. CLAIMS items come from the post-run handoff, not the pre-run state.
+- **A check is data plus `match` cases, not a class.** It adds sections to the agents that can know its items, records, one question module, and one `case` each in `_section`, `_judge`, and `_explain`. A completeness-audited generated list may have a second registered question, one per source input, asked in the same combined Jev request. CLAIMS items come from the post-run handoff, not the pre-run state.
 - **Generative agents write, and Jev recognizes.** Listing items, writing "done when" conditions, and compiling evidence are generation, done by `JevRunState` and `JevHandoff`. Jev only answers yes or no per item. Counting, "all of them", and thresholds belong in code.
 - **One Jev request per finish attempt.** Every enabled check's questions share one state and one request. Question names `"<key>.<item_id>"` keep the answers apart. Never add a second `DecisionModelRunner` call.
 - **One item per question, and the focus rule names the id.** This keeps each answer tied to one item, so Focus names the exact missing part. The brief must say to judge only the named entry.

@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles evidence for request-derived checks including cumulative user obligations, and extracts checkable final-answer claims for CLAIMS.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window and exact supplied user turns at each finish attempt, compiles evidence for request-derived checks including cumulative user obligations, and extracts checkable final-answer claims for CLAIMS.
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
-ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims are generated from the final answer here because their item list does not exist before the main agent works.
+ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state, supplied user turns, and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Cumulative obligations get one fresh observation-only evidence summary per user turn so omitted work can still be recognized as completed after a continuation; that generative summary may omit observations. Claims are generated from the final answer here because their item list does not exist before the main agent works.
 COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
 KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims have no pre-run id list; their ids must be valid and unique within the generated claim section. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
@@ -39,6 +39,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevCumulativeObligationEvidence,
     JevCumulativeObligationEvidencePayload,
     JevCumulativeObligationsEvidence,
+    JevCumulativeUserTurnEvidence,
     JevDeliverableEvidence,
     JevHandoffPayload,
     JevHandoffRecord,
@@ -94,12 +95,15 @@ class JevHandoff(BaseAgent):
         return create_model("JevHandoffPayload", __base__=JevHandoffPayload, **sections)
 
     @staticmethod
-    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str) -> ContextManager:
-        """Build the handoff's context: the run state, then the main agent's responses and tool calls, then its final answer."""
+    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str, user_turns: Sequence[str] = ()) -> ContextManager:
+        """Build the handoff's context from state, exact supplied user turns, run responses and tool calls, and final answer."""
         # @intent the-handoff-reads-the-main-agents-window
         # The owner asked for the main agent's context window to reach the handoff through vidbyte.context, so the
         # run is passed as the SDK's own response and tool-call primitives instead of a hand-built transcript.
         items: list[ContextItem] = [TextContextItem(title=RUN_STATE_TITLE, content=run_state, source=HANDOFF_SOURCE)]
+        if user_turns:
+            turns = "\n\n".join(f"User turn {index}:\n{text}" for index, text in enumerate(user_turns))
+            items.append(TextContextItem(title="Exact user turns for cumulative obligations", content=turns, source=HANDOFF_SOURCE))
         items.extend(ResponseContextItem(content=text, sender=sender) for text in responses if text.strip())
         items.extend(ToolCallContextItem(name=call.name, arguments=dict(call.arguments), output=call.output, metadata={"state": str(getattr(call.state, "value", call.state))}) for call in calls)
         items.append(TextContextItem(title=FINAL_ANSWER_TITLE, content=final_answer if final_answer.strip() else NO_FINAL_ANSWER, source=HANDOFF_SOURCE))
@@ -140,9 +144,12 @@ class JevHandoff(BaseAgent):
             cumulative_obligations = JevCumulativeObligationsEvidence(tuple(
                 JevCumulativeObligationEvidence(item.id, item.evidence.strip(), item.missing.strip())
                 for item in obligations_section.obligations
-            ))
+            ), tuple(JevCumulativeUserTurnEvidence(item.id, item.evidence.strip()) for item in obligations_section.turns))
             expected = () if state.cumulative_obligations is None else state.cumulative_obligations.ids()
             if cumulative_obligations.ids() != expected:
+                return None
+            expected_turns = () if state.cumulative_obligations is None else tuple(f"turn_{index}" for index in range(len(state.cumulative_obligations.user_turns)))
+            if cumulative_obligations.turn_ids() != expected_turns:
                 return None
         claims = None
         claims_section = getattr(payload, JevDoneCheck.CLAIMS.value, None)

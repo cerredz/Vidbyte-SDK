@@ -1,6 +1,6 @@
 """FILE: vidbyte/agents/jev/done/run_state.py
 
-PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
+PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request (including per-source inventory audits), and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Cumulative obligations are extracted from the caller-supplied user messages in BaseAgentContext.history plus the current request; the agent's own prior replies are excluded. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
@@ -48,10 +48,13 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_OBLIGATION_ACTIVE_FIELD,
     JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_OBLIGATION_FIELD,
+    JEV_DONE_OBLIGATION_RELATED_TURNS_FIELD,
     JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD,
     JEV_DONE_OBLIGATION_STATUS_REASON_FIELD,
+    JEV_DONE_OBLIGATION_STATUS_TURN_FIELD,
     JEV_DONE_OBLIGATIONS_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_USER_TURN_EVIDENCE_FIELD,
     JEV_DONE_USER_TURNS_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -159,7 +162,8 @@ class JevRunState(BaseAgent):
         self.handoff = None
         if self.record is None:
             return ()
-        window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender)
+        obligations = None if self.record is None else self.record.cumulative_obligations
+        window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender, user_turns=() if obligations is None else obligations.user_turns)
         self.handoff = await self.handoff_writer.compile(self.request, self.record, window)
         self.response.handoff(self.handoff)
         decision = await self._ask(self.handoff)
@@ -266,22 +270,25 @@ class JevRunState(BaseAgent):
                 state = None if self.record is None else self.record.cumulative_obligations
                 if state is None or handoff.cumulative_obligations is None:
                     return {}, ()
-                if not state.obligations:
-                    return {JEV_DONE_OBLIGATIONS_FIELD: {}, JEV_DONE_USER_TURNS_FIELD: list(state.user_turns)}, ()
                 question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+                inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
                 evidence = {item.id: item.evidence for item in handoff.cumulative_obligations.obligations}
+                turn_evidence = {item.id: item.evidence for item in handoff.cumulative_obligations.turns}
                 entries = {
                     item.id: {
                         JEV_DONE_OBLIGATION_FIELD: item.instruction,
                         JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD: item.completion_signal,
                         JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD: item.source_turn,
+                        JEV_DONE_OBLIGATION_RELATED_TURNS_FIELD: list(item.related_turns),
                         JEV_DONE_OBLIGATION_ACTIVE_FIELD: item.active,
+                        JEV_DONE_OBLIGATION_STATUS_TURN_FIELD: item.status_turn,
                         JEV_DONE_OBLIGATION_STATUS_REASON_FIELD: item.status_reason,
                         JEV_DONE_EVIDENCE_FIELD: evidence[item.id],
                     }
                     for item in state.obligations
                 }
-                return {JEV_DONE_OBLIGATIONS_FIELD: entries, JEV_DONE_USER_TURNS_FIELD: list(state.user_turns)}, tuple(question.to_question(item.id) for item in state.obligations)
+                inventory_questions = tuple(inventory_question.to_question(str(index)) for index in range(len(state.user_turns)))
+                return {JEV_DONE_OBLIGATIONS_FIELD: entries, JEV_DONE_USER_TURNS_FIELD: list(state.user_turns), JEV_DONE_USER_TURN_EVIDENCE_FIELD: turn_evidence}, (*tuple(question.to_question(item.id) for item in state.obligations), *inventory_questions)
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -295,7 +302,7 @@ class JevRunState(BaseAgent):
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
             case JevDoneCheck.CUMULATIVE_OBLIGATIONS:
-                # Every active obligation must independently show its completion signal; inactive obligations are not scored.
+                # Every active obligation and every source turn's inventory must independently pass.
                 return self._cumulative_obligations(handoff, decision)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
@@ -329,18 +336,26 @@ class JevRunState(BaseAgent):
         return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _cumulative_obligations(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
-        """Score one answer per active obligation and fail open when its evidence or Jev reply is unavailable."""
+        """Score one answer per obligation and source turn, failing open when evidence or Jev replies are unavailable."""
         state = None if self.record is None else self.record.cumulative_obligations
         if state is None or handoff is None or handoff.cumulative_obligations is None:
             return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None, available=False)
-        identifiers = state.ids()
+        obligation_ids = state.ids()
+        turn_ids = tuple(f"__inventory_turn_{index}__" for index in range(len(state.user_turns)))
+        identifiers = (*obligation_ids, *turn_ids)
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None)
+            return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None, available=False)
         if decision is None:
             return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None, available=False)
         question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
         threshold = JevDoneRegistry.threshold(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
-        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in obligation_ids if question.name(identifier) in decision.answers}
+        answers.update({
+            turn_id: decision.answers[inventory_question.name(str(index))]
+            for index, turn_id in enumerate(turn_ids)
+            if inventory_question.name(str(index)) in decision.answers
+        })
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
             return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None, available=False)
@@ -407,9 +422,11 @@ class JevRunState(BaseAgent):
                     JevCumulativeObligation(
                         item.id,
                         item.source_turn,
+                        tuple(item.related_turns),
                         item.instruction.strip(),
                         item.completion_signal.strip(),
                         item.active,
+                        item.status_turn,
                         item.status_reason.strip(),
                     )
                     for item in obligations_section.obligations

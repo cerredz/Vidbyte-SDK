@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the structured clarification output), for JevAgent done checks (run-state and handoff payloads, deliverables, cumulative user obligations, claim evidence, done records, and results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the structured clarification output), for JevAgent done checks (run-state and handoff payloads, deliverables, cumulative user obligations, per-turn evidence, claim evidence, done records, and results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and structured payloads belong beside the other Jev records; request-derived obligations belong on JevRunStateRecord and only active obligation evidence belongs on JevHandoffRecord.
@@ -34,6 +34,7 @@ from vidbyte.lib.constants.jev import (
     JEV_MAX_STATE_CHARS,
     JEV_MIN_CHOICE_OPTIONS,
     JEV_MIN_OBLIGATION_STATUS_REASON_CHARS,
+    JEV_MIN_OBLIGATION_TURN_INDEX,
     JEV_MIN_SCORE_LEVELS,
     JEV_NOUL_FALSE,
     JEV_NOUL_OPTIONS,
@@ -698,9 +699,11 @@ class JevCumulativeObligationPayload(BaseModel):
 
     id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this obligation a short stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive it from what the user asked for rather than its position in the conversation. Keep it unique across all obligation entries, including entries the user later cancels or replaces. Copy it unchanged into the frozen record so evidence and Jev answers can refer to exactly this obligation.")
     source_turn: int = Field(ge=0, description="The source turn is the zero-based position of the user message that first introduced this obligation in the ordered user-turn input. The current request is the last turn and earlier turns are in the order supplied by the caller. Use the first turn that asked for this specific result, not the turn that later clarified or cancelled it. This index makes the obligation's origin visible during review and continuation without pretending omitted turns were supplied.")
+    related_turns: list[int] = Field(default_factory=list, description="Related turns are later user-message indices that clarify, narrow, or add a compatible qualification to this same obligation. Include each user turn whose wording changed or refined this requirement while remaining compatible with its source. Do not use this field for unrelated additions or cancellations; a cancellation or incompatible replacement belongs in status_turn.")
     instruction: str = Field(min_length=1, description="The instruction is the user's obligation, in the user's terms, with any clarifications from later user turns incorporated while preserving the original request's scope. It names what must be done, answered, preserved, or avoided, but does not add tasks the user never requested. Keep requirements that can be omitted independently as separate obligations, and keep qualifications attached to the obligation they limit. A reader who sees only this field should understand what the active or inactive entry refers to.")
     completion_signal: str = Field(min_length=1, description="The completion signal is the observable result that would satisfy this obligation, derived from what the user actually asked for. It states what the finished answer, changed artifact, command result, or other requested outcome must show. It must include clarifications that narrow or specify the earlier instruction, without turning suggestions or examples into requirements. Do not invent a test, file, format, or quality bar that the user did not require.")
     active: bool = Field(description="Active is true when the latest supplied user turns still require this obligation. An earlier obligation remains active when later turns add another requirement, clarify it, repeat only part of the request, or simply do not mention it again. Set it false only when a later user explicitly cancels it or explicitly replaces it with an incompatible instruction. A later clarification that can be satisfied together with the earlier instruction does not deactivate either requirement.")
+    status_turn: int | None = Field(default=None, ge=JEV_MIN_OBLIGATION_TURN_INDEX, description="The status turn is the zero-based user-message index that explicitly cancelled or incompatibly replaced this obligation. It is required for an inactive entry and must be later than source_turn; leave it null for an active entry. The turn-level inventory question uses this link to verify that an inactive status points to actual user wording.")
     status_reason: str = Field(min_length=JEV_MIN_OBLIGATION_STATUS_REASON_CHARS, description="The status reason cites the user-turn wording that supports the current active or inactive status. For an active obligation, explain that no supplied later turn explicitly cancelled or incompatibly replaced it, including when later turns omit it. For an inactive obligation, quote or closely restate the explicit cancellation or the incompatible replacement and identify its turn. Do not use the agent's omission, lack of progress, or handoff evidence as a reason to make a user obligation inactive.")
 
 
@@ -709,9 +712,9 @@ class JevCumulativeObligationsPayload(JevSectionPayload):
 
     model_config = ConfigDict(extra="forbid")
 
-    SECTION: ClassVar[str] = "The cumulative-obligations section identifies each distinct user requirement across the ordered user turns supplied for this run, including additions and clarifications. A later turn does not erase an earlier requirement by failing to repeat it; only explicit cancellation or an incompatible replacement deactivates it. Each entry preserves its source turn and the wording that explains its current status. Every entry is checked after the main agent finishes: active entries must be fulfilled, and inactive entries must have an explicit user cancellation or replacement in the supplied turns. Use only user messages supplied to this run and the current request, without inventing missing conversation history."
+    SECTION: ClassVar[str] = "The cumulative-obligations section identifies each distinct user requirement across the ordered user turns supplied for this run, including additions and clarifications. A later turn does not erase an earlier requirement by failing to repeat it; only explicit cancellation or an incompatible replacement deactivates it. Each entry preserves source_turn, any related clarification turns, and status_turn when explicitly cancelled or replaced. Every entry is checked after the main agent finishes, and a separate question compares each actual user turn against the full generated inventory so omitted obligations cannot disappear merely because the run-state writer left them out. Use only user messages supplied to this run and the current request, without inventing missing conversation history."
 
-    obligations: list[JevCumulativeObligationPayload] = Field(description="The obligations list contains one entry for each independently checkable user requirement found across the supplied user turns. Preserve the order in which each obligation first appeared and use source_turn to identify that turn. Merge later wording into the same entry when it only clarifies an existing requirement, and keep additions as separate entries when they can be completed independently. Retain cancelled and replaced entries with active false and an explicit status_reason so the checker can verify that the user actually changed the requirement. Do not turn the agent's plan, assumptions, or implementation choices into user obligations.")
+    obligations: list[JevCumulativeObligationPayload] = Field(description="The obligations list contains one entry for each independently checkable user requirement found across the supplied user turns. Preserve the order in which each obligation first appeared and use source_turn to identify that turn. Merge later wording into the same entry when it only clarifies an existing requirement, and list those clarification indices in related_turns; keep additions as separate entries when they can be completed independently. Retain cancelled and replaced entries with active false, status_turn set to the actual change turn, and a user-grounded status_reason. The independent per-turn inventory questions compare the actual turn text with this complete list, so do not omit a direct requirement because it seems minor or was not repeated. Do not turn the agent's plan, assumptions, or implementation choices into user obligations.")
 
 
 class JevHandoffPayload(BaseModel):
@@ -745,13 +748,22 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
 
 
 class JevCumulativeObligationEvidenceEntryPayload(BaseModel):
-    """Run evidence and a concrete gap for one active cumulative obligation."""
+    """Run evidence and status context for one cumulative obligation."""
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is copied exactly from one active obligation in the run state's cumulative-obligations section. Every active obligation gets exactly one evidence entry, and an inactive obligation gets none. Do not rename, merge, or invent ids because the caller matches this evidence back to the user instruction. Keep entries in the same first-request order as their active obligations.")
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is copied exactly from one obligation in the run state's cumulative-obligations section, whether active or explicitly inactive. Every obligation gets exactly one evidence entry. Do not rename, merge, or invent ids because the caller matches this evidence back to the user instruction. Keep entries in the same first-request order as all obligations.")
     evidence: str = Field(min_length=1, description="The evidence is what the main agent's run shows about this exact obligation. Quote or closely reproduce relevant response text, tool calls with arguments and outputs, and the final answer in the order they occurred. Include failed attempts and later corrections, and report the latest state without claiming that a user obligation was cancelled. When nothing in the run concerns the obligation, say so directly.")
-    missing: str = Field(min_length=1, description="The missing field names the parts of this active obligation that the evidence does not show or shows were not completed. Use the instruction and completion signal to identify a concrete answer, artifact, condition, or detail that remains. Do not mark work as cancelled because the main agent omitted it or because later user turns did not repeat it. When the evidence shows every part in its latest state, say that nothing is missing.")
+    missing: str = Field(min_length=1, description="For an active obligation, name the parts the evidence does not show or shows were not completed, using the instruction and completion signal to identify the remaining answer, artifact, condition, or detail. For an inactive obligation, say whether the run shows any relevant work but do not judge whether the user actually cancelled it; Jev compares the status reason and status_turn with the supplied messages. Do not mark work as cancelled because the main agent omitted it or later user turns did not repeat it. When an active obligation's evidence shows every part in its latest state, say that nothing is missing.")
+
+
+class JevCumulativeUserTurnEvidenceEntryPayload(BaseModel):
+    """Observed run material associated with one supplied user turn, without a completion judgment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is `turn_` followed by the zero-based index of one supplied user turn, such as `turn_0`. Include exactly one evidence entry for every turn in `user_turns` and preserve their order. Do not omit a turn because no work addressed it; state that no relevant run material was found.")
+    evidence: str = Field(min_length=1, description="Record observations from the current main-agent run that may bear on requirements in this user turn: relevant response passages, final-answer text, tool calls with arguments and outputs, and command or test results, in their run order. Quote or closely reproduce the actual observed material and identify where it appeared. Include failed attempts and later changes. Do not decide whether a user requirement was represented, fulfilled, cancelled, or missing; do not infer an action or result that the run did not show. When no run material bears on this turn, say so directly. This is a generative evidence summary and may omit observations; the Jev question must judge only the evidence actually reported here.")
 
 
 class JevCumulativeObligationEvidencePayload(JevSectionPayload):
@@ -759,9 +771,10 @@ class JevCumulativeObligationEvidencePayload(JevSectionPayload):
 
     model_config = ConfigDict(extra="forbid")
 
-    SECTION: ClassVar[str] = "The cumulative-obligation evidence section gathers what the main agent's run shows for every obligation in the run state, including entries marked inactive. Each entry is paired with the exact user instruction and completion signal it concerns. For active entries, evidence includes relevant response text, tool calls and outputs, and the final answer, in the order they occurred. For inactive entries, report the user cancellation or incompatible replacement recorded in the run state and do not imply the obligation was performed. This evidence lets the checker verify both fulfillment and whether an earlier requirement was truly cancelled."
+    SECTION: ClassVar[str] = "The cumulative-obligation evidence section gathers what the main agent's run shows for every obligation in the run state, including entries marked inactive, and separately records observed run material for every supplied user turn. Obligation entries are paired with the exact instruction and completion signal they concern. Per-turn entries gather observations that may show whether a requirement omitted from the obligation list was nevertheless completed. These are observations only, never a completion or cancellation verdict."
 
     obligations: list[JevCumulativeObligationEvidenceEntryPayload] = Field(description="The obligations list contains one evidence entry for every obligation in the run state's cumulative-obligations section, with the same ids and order. For an active obligation, report only observations that bear on it and state what remains unshown. For an inactive obligation, report the user wording that supposedly cancelled or replaced it so the checker can compare that reason with user_turns. Repeat shared evidence when it independently supports more than one obligation, but do not use evidence for one to stand in for another. Include an entry even when the run did nothing toward an active obligation.")
+    turns: list[JevCumulativeUserTurnEvidenceEntryPayload] = Field(description="The turns list contains one observation entry for every exact supplied user message and the current request, with ids `turn_0`, `turn_1`, and so on in the same order as `user_turns`. Gather current run material that may bear on any direct requirement in that turn, even if the obligation list has no corresponding entry. Include actual response text, final answer passages, tool arguments and outputs, and command or test results; retain failures and later changes. This field reports only what the run shows and does not decide whether a missing requirement was fulfilled. Never leave a turn out or infer that work happened because it was requested.")
 
 
 class JevClaimIdentityPayload(BaseModel):
@@ -882,9 +895,11 @@ class JevCumulativeObligation:
 
     id: str
     source_turn: int
+    related_turns: tuple[int, ...]
     instruction: str
     completion_signal: str
     active: bool
+    status_turn: int | None
     status_reason: str
 
     def __post_init__(self) -> None:
@@ -892,10 +907,16 @@ class JevCumulativeObligation:
         JevDeliverableId.require(self.id, field_name="cumulative obligation id")
         if isinstance(self.source_turn, bool) or not isinstance(self.source_turn, int) or self.source_turn < 0:
             raise JevValidation.error("cumulative obligation source_turn", "a non-negative integer", self.source_turn)
+        if not isinstance(self.related_turns, tuple) or any(isinstance(index, bool) or not isinstance(index, int) or index <= self.source_turn for index in self.related_turns):
+            raise JevValidation.error("cumulative obligation related_turns", "a tuple of later non-negative user-turn indices", self.related_turns)
+        if self.status_turn is not None and (isinstance(self.status_turn, bool) or not isinstance(self.status_turn, int) or self.status_turn <= self.source_turn):
+            raise JevValidation.error("cumulative obligation status_turn", "None or a later non-negative user-turn index", self.status_turn)
         for field_name in ("instruction", "completion_signal", "status_reason"):
             JevText.require(getattr(self, field_name), field_name=f"cumulative obligation {self.id!r} {field_name}")
         if not isinstance(self.active, bool):
             raise JevValidation.error("cumulative obligation active", "a boolean", self.active)
+        if (self.active and self.status_turn is not None) or (not self.active and self.status_turn is None):
+            raise JevValidation.error("cumulative obligation status_turn", "None for an active obligation and present for an inactive obligation", self.status_turn)
 
 
 @dataclass(frozen=True, slots=True)
@@ -913,8 +934,8 @@ class JevCumulativeObligations:
             raise JevValidation.error("cumulative obligation user turns", "a tuple of strings", self.user_turns)
         for index, turn in enumerate(self.user_turns):
             JevText.require(turn, field_name=f"cumulative obligation user turn[{index}]")
-        if self.user_turns and any(item.source_turn >= len(self.user_turns) for item in self.obligations):
-            raise JevValidation.error("cumulative obligation source_turn", "an index into the supplied user_turns", self.obligations)
+        if self.user_turns and any(item.source_turn >= len(self.user_turns) or any(index >= len(self.user_turns) for index in (*item.related_turns, *((item.status_turn,) if item.status_turn is not None else ()))) for item in self.obligations):
+            raise JevValidation.error("cumulative obligation turn link", "source, related, and status indices into the supplied user_turns", self.obligations)
 
     def ids(self, *, active_only: bool = False) -> tuple[str, ...]:
         """Return obligation ids in first-request order, optionally limiting them to active obligations."""
@@ -997,19 +1018,39 @@ class JevCumulativeObligationEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevCumulativeUserTurnEvidence:
+    """Observed run material associated with one supplied user turn, without a completion judgment."""
+
+    id: str
+    evidence: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="cumulative user-turn evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of cumulative user turn {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class JevCumulativeObligationsEvidence:
-    """Handoff evidence for every active obligation, in the run state's first-request order."""
+    """Handoff evidence for every obligation and supplied user turn, in their source order."""
 
     obligations: tuple[JevCumulativeObligationEvidence, ...] = ()
+    turns: tuple[JevCumulativeUserTurnEvidence, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.obligations, tuple) or not all(isinstance(item, JevCumulativeObligationEvidence) for item in self.obligations):
             raise JevValidation.error("cumulative obligations evidence", "a tuple of JevCumulativeObligationEvidence values", self.obligations)
+        if not isinstance(self.turns, tuple) or not all(isinstance(item, JevCumulativeUserTurnEvidence) for item in self.turns):
+            raise JevValidation.error("cumulative user-turn evidence", "a tuple of JevCumulativeUserTurnEvidence values", self.turns)
         JevDeliverableId.require_unique(self.ids(), field_name="cumulative obligations evidence")
+        JevDeliverableId.require_unique(self.turn_ids(), field_name="cumulative user-turn evidence")
 
     def ids(self) -> tuple[str, ...]:
         """Return each evidence id in first-request order."""
         return tuple(item.id for item in self.obligations)
+
+    def turn_ids(self) -> tuple[str, ...]:
+        """Return each source-turn evidence id in chronological order."""
+        return tuple(item.id for item in self.turns)
 
 
 @dataclass(frozen=True, slots=True)

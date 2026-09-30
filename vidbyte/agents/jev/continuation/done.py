@@ -113,13 +113,23 @@ class JevDoneContinuation(JevContinuation):
                 # A later turn may add or clarify a request without repeating everything already asked. The
                 # continuation therefore names each surviving obligation in its original user-grounded terms.
                 question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+                inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
                 state = None if self.run_state.record is None else self.run_state.record.cumulative_obligations
                 handoff = None if self.run_state.handoff is None else self.run_state.handoff.cumulative_obligations
                 obligations = {} if state is None else {item.id: item for item in state.obligations}
                 missing = {} if handoff is None else {item.id: item.missing for item in handoff.obligations}
-                failed = [question.gap]
+                failed = []
                 focus = []
                 for identifier in result.incomplete:
+                    if identifier.startswith("__inventory_turn_") and identifier.endswith("__"):
+                        index = int(identifier.removeprefix("__inventory_turn_").removesuffix("__"))
+                        failed.append(inventory_question.gap)
+                        yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                        failed.append(f"- The inventory for supplied user turn {index} was not confirmed complete (P(yes) = {yes:.2f}).")
+                        focus.append(f"- Re-read supplied user turn {index}; reconstruct every direct requirement or explicit change in that message, preserve any actual cancellation or incompatible replacement, and finish any requirement not already shown in the latest run evidence. Do not invent a specific missing task from this finding alone.")
+                        continue
+                    if not failed:
+                        failed.append(question.gap)
                     item = obligations[identifier]
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")

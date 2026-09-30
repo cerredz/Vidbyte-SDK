@@ -3,7 +3,7 @@
 PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question and threshold, plus validation of the done checks a user enables.
 ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
-COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
+COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; checks that audit a generated list against source inputs also register a per-source question in _inventory_questions. Keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
@@ -25,6 +25,7 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.cumulative_obligations import (
     CumulativeObligationFulfilledQuestion,
+    CumulativeUserTurnReconciledQuestion,
 )
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
 
@@ -33,6 +34,7 @@ class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
     _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeObligationFulfilledQuestion()})
+    _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeUserTurnReconciledQuestion()})
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD})
 
     @classmethod
@@ -49,6 +51,17 @@ class JevDoneRegistry:
         found = cls._thresholds.get(check)
         if found is None:
             raise ConfigurationError(f"Jev done check {check!r} has no registered threshold.", details={"check": str(check), "registered": [item.value for item in cls._thresholds]})
+        return found
+
+    @classmethod
+    def inventory_question(cls, check: JevDoneCheck) -> JevDoneQuestion:
+        """Return the fixed per-source inventory question for a check that audits generated candidate completeness."""
+        # @intent source-audit-questions-are-registered-beside-check-questions
+        # A preset may need fixed questions over generated candidates and independent completeness questions
+        # over their source messages; both are selected from one registry rather than assembled at runtime.
+        found = cls._inventory_questions.get(check)
+        if found is None:
+            raise ConfigurationError(f"Jev done check {check!r} has no registered inventory question.", details={"check": str(check), "registered": [item.value for item in cls._inventory_questions]})
         return found
 
     @classmethod

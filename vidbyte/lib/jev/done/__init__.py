@@ -12,8 +12,9 @@ TESTS: tests/test_jev_done.py.
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.cumulative_obligations import (
     CumulativeObligationFulfilledQuestion,
+    CumulativeUserTurnReconciledQuestion,
 )
 from vidbyte.lib.jev.done.done import JevDoneRegistry
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
 
-__all__ = ["ClaimsSupportedQuestion", "CumulativeObligationFulfilledQuestion", "DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
+__all__ = ["ClaimsSupportedQuestion", "CumulativeObligationFulfilledQuestion", "CumulativeUserTurnReconciledQuestion", "DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion"]

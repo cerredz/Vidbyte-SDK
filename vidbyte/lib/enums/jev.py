@@ -53,6 +53,7 @@ class JevDoneQuestionKey(str, Enum):
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
     CUMULATIVE_OBLIGATION_FULFILLED = "cumulative_obligations.fulfilled"
+    CUMULATIVE_USER_TURN_RECONCILED = "cumulative_obligations.user_turn_reconciled"
 
 
 class JevClaimKind(str, Enum):

@@ -116,12 +116,16 @@ JEV_DONE_CLAIM_ASSERTION_SEPARATOR: str = "."
 # The cumulative check sends one active obligation at a time, retaining source and explicit cancellation status.
 JEV_DONE_OBLIGATIONS_FIELD: str = "obligations"
 JEV_DONE_USER_TURNS_FIELD: str = "user_turns"
+JEV_DONE_USER_TURN_EVIDENCE_FIELD: str = "turn_evidence"
 JEV_DONE_OBLIGATION_FIELD: str = "obligation"
 JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD: str = "source_turn"
+JEV_DONE_OBLIGATION_RELATED_TURNS_FIELD: str = "related_turns"
+JEV_DONE_OBLIGATION_STATUS_TURN_FIELD: str = "status_turn"
 JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_OBLIGATION_ACTIVE_FIELD: str = "active"
 JEV_DONE_OBLIGATION_STATUS_REASON_FIELD: str = "status_reason"
 JEV_MIN_OBLIGATION_STATUS_REASON_CHARS: int = 1
+JEV_MIN_OBLIGATION_TURN_INDEX: int = 0
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -174,9 +178,12 @@ __all__ = [
     "JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD",
     "JEV_DONE_OBLIGATION_FIELD",
     "JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD",
+    "JEV_DONE_OBLIGATION_RELATED_TURNS_FIELD",
     "JEV_DONE_OBLIGATION_STATUS_REASON_FIELD",
+    "JEV_DONE_OBLIGATION_STATUS_TURN_FIELD",
     "JEV_DONE_OBLIGATIONS_FIELD",
     "JEV_DONE_USER_TURNS_FIELD",
+    "JEV_DONE_USER_TURN_EVIDENCE_FIELD",
     "JEV_DONE_REQUEST_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
@@ -191,6 +198,7 @@ __all__ = [
     "JEV_MODELS_PATH",
     "JEV_MULTI_PART_THRESHOLD",
     "JEV_MIN_OBLIGATION_STATUS_REASON_CHARS",
+    "JEV_MIN_OBLIGATION_TURN_INDEX",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",
