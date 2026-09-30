@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/agent.py
 
-PURPOSE: Exposes the narrow JevAgent facade backed by JevRuntime, JevAgentSettings, and JevRuntimeSettings, and owns everything its opinionated features need for a run.
-ROLE IN CODEBASE: Maps the immutable JevAgentSettings into established BaseAgent state, fixes the runtime to AgentRuntimeType.JEV (which RuntimeRegistry resolves to JevRuntime), and builds the JevPreflightGate, the JevRunState that runs the enabled done checks, the JevDoneContinuation that sends the main agent back to work when one fails, and the JevResponse writer that each run-local JevRuntime receives as parameters.
-ARCHITECTURE NOTE: JevAgent is opinionated by design; callers cannot replace its runtime or pass arbitrary BaseAgent customization kwargs. Every fixed-question preset and threshold is fixed here at construction in the gate, and every done check in JevRunState; the runtime still reads JevRuntimeSettings only for the tool selector, which keeps its own path. A JevSpecialist the gate chooses runs its own agent instead of this one.
+PURPOSE: Exposes the narrow JevAgent facade backed by JevRuntime and its validated settings, and builds the gate, optional prompt-alignment editor, done checks, continuation, and response writer its opinionated features need.
+ROLE IN CODEBASE: Maps immutable JevAgentSettings into BaseAgent state, fixes the runtime to AgentRuntimeType.JEV (resolved by RuntimeRegistry), and passes the gate, enabled run state and continuation, optional JevAgentAlignment, and JevResponse through BaseAgent's runtime-extension hook.
+ARCHITECTURE NOTE: JevAgent is opinionated by design; callers cannot replace its runtime or pass arbitrary BaseAgent customization kwargs. It builds named feature objects once at construction; JevRuntime applies them to the current run, and a selected JevSpecialist runs through its own agent.
 COMMON MODIFICATION PATTERNS: Build a new feature's run-time object here from JevAgentSettings and pass it through _runtime_extension_kwargs; report its outcome through JevResponse so it appears on `response`.
 KNOWN EDGE CASES: Jev's TypeSafe model is not the reply-generating model; settings validation prevents that provider mix-up. `response` describes only the most recent run and is replaced when the next run starts.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.jev.alignment import JevAgentAlignment
 from vidbyte.agents.jev.continuation import JevDoneContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
@@ -42,6 +43,7 @@ class JevAgent(BaseAgent):
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
         self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
         self.continuation = None if self.run_state is None else JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+        self.alignment = JevAgentAlignment(settings, runtime_settings) if settings.self_align else None
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,
@@ -63,7 +65,14 @@ class JevAgent(BaseAgent):
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
         # Passes the runtime settings, the gate, the done checks, the continuation, and the response writer built at construction to each run-local JevRuntime.
-        return {"runtime_settings": self.runtime_settings, "preflight": self.preflight, "run_state": self.run_state, "continuation": self.continuation, "response": self._response}
+        return {
+            "runtime_settings": self.runtime_settings,
+            "preflight": self.preflight,
+            "run_state": self.run_state,
+            "continuation": self.continuation,
+            "response": self._response,
+            "alignment": self.alignment,
+        }
 
 
 __all__ = ["JevAgent"]

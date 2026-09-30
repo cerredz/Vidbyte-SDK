@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/response.py
 
 PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return.
-ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
+ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; the gate and done checks report their outcomes through it, while JevRuntime records prompt-alignment and tool-selection results and asks it for the result to return.
+ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class owns how preflight, done checks, alignment, and tool selection update that record during a run.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
 KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
@@ -16,12 +16,14 @@ from vidbyte.lib.constants.jev import JEV_PREFLIGHT_STRATEGY_NAME
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevAlignmentResult,
     JevClarification,
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
     JevRunStateRecord,
     JevSpecialist,
+    JevToolSelectorResponse,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
@@ -69,6 +71,21 @@ class JevResponse:
     def continued(self) -> None:
         """Record that a failed done check sent the main agent back to work."""
         self.state.continuations += 1
+
+    # @intent alignment-outcome-visible
+    # Alignment is advisory and run-local; exposing its evidence and selected prompt lets owners inspect the adaptation
+    # without mutating the configured prompt or hiding a rewrite behind generic metadata.
+    def alignment(self, result: JevAlignmentResult, *, aligned_prompt: str) -> None:
+        """Record the alignment evidence and prompt used by the current run."""
+        self.state.alignment = result
+        self.state.aligned_prompt = aligned_prompt
+
+    # @intent tool-selection-outcome-visible
+    # Tool filtering changes the model's available actions for this run, so callers need the selection outcome to
+    # understand why a configured tool was not available.
+    def tool_selector(self, result: JevToolSelectorResponse) -> None:
+        """Record the typed outcome of the run-local tool selector."""
+        self.state.tool_selector = result
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

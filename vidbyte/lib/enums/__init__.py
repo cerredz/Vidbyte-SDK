@@ -60,11 +60,17 @@ from vidbyte.lib.enums.failure import (
     RuleErrorMode,
 )
 from vidbyte.lib.enums.jev import (
+    JevAlignmentCondition,
+    JevAlignmentQuestionKey,
+    JevAlignmentRole,
+    JevAlignmentStateKind,
+    JevAlignmentStatus,
     JevClaimKind,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevPreflightPreset,
     JevPreflightQuestionKey,
+    JevPromptSection,
     JevQuestionType,
 )
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
@@ -104,11 +110,17 @@ from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "JevAlignmentCondition",
+    "JevAlignmentQuestionKey",
+    "JevAlignmentRole",
+    "JevAlignmentStateKind",
+    "JevAlignmentStatus",
     "JevClaimKind",
     "JevDoneCheck",
     "JevDoneQuestionKey",
     "JevPreflightPreset",
     "JevPreflightQuestionKey",
+    "JevPromptSection",
     "JevQuestionType",
     "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",

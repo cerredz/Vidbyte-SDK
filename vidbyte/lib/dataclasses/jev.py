@@ -1,6 +1,6 @@
-"""FILE: vidbyte/lib/dataclasses/jev.py
+﻿"""FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable and claim evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), JevAgent preflight (the noul score, question briefs and criteria, preset results, specialists, and clarification replies), JevAgent done checks (run-state and handoff payloads, deliverable and claim evidence, and results), JevAgent self-alignment (request inputs, fixed-question descriptions, gaps, edits, and results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -22,10 +22,12 @@ from typing import TYPE_CHECKING, ClassVar, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.constants.jev import (
+    JEV_ALIGNMENT_QUESTION_PREFIX,
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
     JEV_DELIVERABLE_ID_PATTERN,
+    JEV_DYNAMIC_ALIGNMENT_PREAMBLE,
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
@@ -39,13 +41,19 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
     JEV_SPECIALIST_NONE,
+    JEV_STATIC_ALIGNMENT_PREAMBLE,
 )
 from vidbyte.lib.enums.jev import (
+    JevAlignmentCondition,
+    JevAlignmentRole,
+    JevAlignmentStateKind,
+    JevAlignmentStatus,
     JevClaimKind,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevPreflightPreset,
     JevPreflightQuestionKey,
+    JevPromptSection,
     JevQuestionType,
 )
 from vidbyte.lib.errors import ConfigurationError
@@ -53,6 +61,7 @@ from vidbyte.lib.errors import ConfigurationError
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent
     from vidbyte.agents.pricing import ProviderUsage, UsageRollup
+    from vidbyte.lib.dataclasses.jev_alignment import JevAlignmentTool, JevUsageRecord
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
 JevContent = str | Mapping[str, object] | tuple[object, ...]
@@ -1153,6 +1162,9 @@ class JevAgentResponse:
     handoff: JevHandoffRecord | None = None
     done: dict[JevDoneCheck, JevDoneResult] = field(default_factory=dict)
     continuations: int = 0
+    alignment: JevAlignmentResult | None = None
+    aligned_prompt: str | None = None
+    tool_selector: JevToolSelectorResponse | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -1160,8 +1172,151 @@ class JevAgentResponse:
         return self.clarification is not None
 
 
+@dataclass(frozen=True, slots=True)
+class JevAlignmentInput:
+    """One alignment request with the task, agent prompt, and actual SDK tool objects."""
+
+    user_prompt: str
+    system_prompt: str
+    tools: Sequence[JevAlignmentTool] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.user_prompt, str):
+            raise TypeError("JevAlignmentInput.user_prompt must be a string.")
+        if not isinstance(self.system_prompt, str) or not self.system_prompt.strip():
+            raise TypeError("JevAlignmentInput.system_prompt must be a non-blank string.")
+        if isinstance(self.tools, (str, bytes)):
+            raise TypeError("JevAlignmentInput.tools must be a sequence of Vidbyte SDK tool objects.")
+        try:
+            tools = tuple(self.tools)
+        except TypeError as exc:
+            raise TypeError("JevAlignmentInput.tools must be a sequence of Vidbyte SDK tool objects.") from exc
+        for tool in tools:
+            try:
+                descriptor = tool.spec()
+            except (AttributeError, TypeError) as exc:
+                raise TypeError("JevAlignmentInput.tools must contain Vidbyte SDK tool objects that provide spec().") from exc
+            if not isinstance(descriptor.name, str) or not isinstance(descriptor.description, str):
+                raise TypeError("Each JevAlignmentInput.tools item must return a Vidbyte ToolSpec with name and description.")
+        object.__setattr__(self, "tools", tools)
+
+    @property
+    def tool_descriptions(self) -> tuple[str, ...]:
+        """Return the public descriptions Jev needs, derived from the supplied SDK tool objects."""
+        return tuple(f"{spec.name}: {spec.description}" for spec in (tool.spec() for tool in self.tools))
+
+@dataclass(frozen=True, slots=True)
+class JevAlignmentQuestion:
+    """One recognition-only Jev question, its state scope, and code-owned action for a no answer."""
+
+    key: str
+    section: JevPromptSection | None
+    role: JevAlignmentRole
+    state: JevAlignmentStateKind
+    instructions: str
+    yes: str
+    no: str
+    fix: str
+    condition: JevAlignmentCondition = JevAlignmentCondition.ALWAYS
+
+    @property
+    def name(self) -> str:
+        """Return the stable name used to retrieve the answer."""
+        return f"{JEV_ALIGNMENT_QUESTION_PREFIX}{self.key}"
+
+    def to_jev_question(self) -> JevQuestion:
+        """Build the TypeSafe Noul record with the state contract and both explicit answer criteria."""
+        preamble = JEV_STATIC_ALIGNMENT_PREAMBLE if self.state is JevAlignmentStateKind.STATIC else JEV_DYNAMIC_ALIGNMENT_PREAMBLE
+        return JevQuestion(
+            name=self.name,
+            question_type=JevQuestionType.NOUL,
+            instructions=f"{preamble}\n\n{self.instructions}",
+            options=(JevOption(JEV_NOUL_TRUE, self.yes), JevOption(JEV_NOUL_FALSE, self.no)),
+        )
+
+@dataclass(frozen=True, slots=True)
+class JevAlignmentGap:
+    """One no answer that points to a prompt section and a concrete action."""
+
+    question: str
+    section: JevPromptSection
+    role: JevAlignmentRole
+    probability: float
+    fix: str
+
+@dataclass(frozen=True, slots=True)
+class JevPromptEdit:
+    """One additive prompt edit and whether verification kept it."""
+
+    section: JevPromptSection
+    content: str
+    fixes: tuple[str, ...]
+    kept: bool = False
+
+@dataclass(frozen=True, slots=True)
+class JevPromptEditContextItem:
+    """ContextManager item that gives one run-local prompt edit a stable registry slot."""
+
+    edit: JevPromptEdit
+    kind: str = "jev_prompt_edit"
+    title: str = "Jev prompt edit"
+    metadata: Mapping[str, object] = field(default_factory=dict)
+    primitive_frozen: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+    @property
+    def primitive_id(self) -> str:
+        """Use the edited section as the replacement key inside one draft manager."""
+        return f"jev_alignment_edit:{self.edit.section.value}"
+
+    def to_context_text(self) -> str:
+        """Render the edit for SDK context tooling without exposing it to the main agent."""
+        return self.edit.content
+
+@dataclass(frozen=True, slots=True)
+class JevAlignmentResult:
+    """Typed record of one alignment decision and the prompt selected for the run."""
+
+    status: JevAlignmentStatus
+    system_prompt: str
+    gaps: tuple[JevAlignmentGap, ...] = ()
+    edits: tuple[JevPromptEdit, ...] = ()
+    owner_actions: tuple[str, ...] = ()
+    probabilities: Mapping[str, float] = field(default_factory=dict)
+    usage: JevUsageRecord | None = None
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "probabilities", MappingProxyType(dict(self.probabilities)))
+
+@dataclass(frozen=True, slots=True)
+class JevToolSelectorResponse:
+    """Typed outcome of the Jev tool selection preflight, when it ran."""
+
+    available: bool
+    candidate_tool_count: int
+    selected_tool_count: int
+    usage: JevUsageRecord | None = None
+
+    def __post_init__(self) -> None:
+        counts = (self.candidate_tool_count, self.selected_tool_count)
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts):
+            raise ValueError("tool selector counts must be non-negative integers.")
+        if self.selected_tool_count > self.candidate_tool_count:
+            raise ValueError("selected tool count cannot exceed candidate tool count.")
+
+
 __all__ = [
     "JevAgentResponse",
+    "JevAlignmentGap",
+    "JevAlignmentInput",
+    "JevAlignmentResult",
+    "JevPromptEditContextItem",
+    "JevAlignmentQuestion",
+    "JevToolSelectorResponse",
+    "JevPromptEdit",
     "JevAnswer",
     "JevBrief",
     "JevClarification",

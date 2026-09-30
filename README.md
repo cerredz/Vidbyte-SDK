@@ -88,6 +88,29 @@ sdk.tools
 sdk.providers
 ```
 
+## JevAgent Self Alignment
+
+Opt in to request-specific system prompt alignment with `self_align=True`. After
+each run, `agent.response.alignment` contains typed evidence and
+`agent.response.aligned_prompt` is the prompt selected for that run.
+
+```python
+from vidbyte import JevAgent, JevAgentSettings
+
+agent = JevAgent(
+    JevAgentSettings(
+        name="billing-support",
+        system_prompt="You help account admins with billing questions.",
+        provider="openai",
+        model_name="gpt-4.1-mini",
+        self_align=True,
+    )
+)
+reply = await agent.arun("Why was I charged twice?")
+print(agent.response.alignment.status)
+print(agent.response.aligned_prompt)
+```
+
 ## Agent Speed Tracking
 
 Every `BaseAgent` keeps speed metrics for its most recent run. Use

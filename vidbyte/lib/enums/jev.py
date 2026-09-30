@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines the closed Jev vocabularies: the TypeSafe question types, the preflight presets and done checks a JevAgent user can enable, and the key of every preflight and done question.
+PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, done checks, alignment question and prompt-section keys, claim kinds, and every fixed preflight or done question key.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on the presets when it acts on Jev's answers, and `vidbyte/agents/jev/done/` builds enabled done-check schemas and their questions.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, the record layer, and the tool layer all read it, and the lower two may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a question type only when TypeSafe documents one, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change. Add a preflight question key together with its question dataclass in `vidbyte/lib/jev/preflight/` and its preset's key list in `vidbyte/lib/jev/presets.py`. Add a done check with the run-state and handoff sections its items require, and its question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff rather than the pre-run state.
@@ -11,7 +11,7 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, scripts/test-jev-ag
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 class JevQuestionType(str, Enum):
@@ -86,4 +86,100 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+class JevAlignmentQuestionKey(StrEnum):
+    """Stable keys for the fixed self-alignment questions asked by JevAgent."""
+
+    FIT_TASK_IN_SCOPE = "fit.task_in_scope"
+    FIT_WITHIN_BOUNDARIES = "fit.within_boundaries"
+    FIT_ROLE_KEPT = "fit.role_kept"
+    FIT_SINGLE_TASK = "fit.single_task"
+    SECTION_ROLE = "section.role"
+    SECTION_SCOPE = "section.scope"
+    SECTION_BOUNDARIES = "section.boundaries"
+    SECTION_AUDIENCE = "section.audience"
+    SECTION_TOOL_GUIDANCE = "section.tool_guidance"
+    SECTION_METHOD = "section.method"
+    SECTION_OUTPUT = "section.output"
+    SECTION_EXCEPTIONS = "section.exceptions"
+    SECTION_MIXED_REQUESTS = "section.mixed_requests"
+    SECTION_PRIORITIES = "section.priorities"
+    COVER_SCOPE_EXPLICIT = "cover.scope_explicit"
+    COVER_TERMS = "cover.terms"
+    COVER_FACTS = "cover.facts"
+    COVER_METHOD = "cover.method"
+    COVER_OUTPUT = "cover.output"
+    COVER_PERMISSIONS = "cover.permissions"
+    COVER_CONSISTENT = "cover.consistent"
+
+
+class JevPromptSection(StrEnum):
+    """Named system-prompt section considered by JevAgent self-alignment."""
+
+    ROLE = "role"
+    SCOPE = "scope"
+    BOUNDARIES = "boundaries"
+    AUDIENCE = "audience"
+    KNOWLEDGE = "knowledge"
+    PERMISSIONS = "permissions"
+    TOOLS = "tools"
+    METHOD = "method"
+    OUTPUT = "output"
+    EXCEPTIONS = "exceptions"
+    PRIORITIES = "priorities"
+    GLOSSARY = "glossary"
+
+    @property
+    def heading(self) -> str:
+        """Return the markdown heading text used for this section."""
+        return self.value.capitalize()
+
+
+class JevAlignmentRole(StrEnum):
+    """Code action taken when a fixed alignment question receives a no answer."""
+
+    GATE = "gate"
+    SIGNAL = "signal"
+    OWNER = "owner"
+    AGENT = "agent"
+
+
+class JevAlignmentStateKind(StrEnum):
+    """State fields available to one alignment question set."""
+
+    STATIC = "static"
+    DYNAMIC = "dynamic"
+
+
+class JevAlignmentCondition(StrEnum):
+    """Condition under which a fixed alignment question is applicable."""
+
+    ALWAYS = "always"
+    HAS_TOOLS = "has_tools"
+    MULTI_TASK = "multi_task"
+
+
+class JevAlignmentStatus(StrEnum):
+    """Outcome of one alignment pass."""
+
+    ALIGNED = "aligned"
+    NO_GAPS = "no_gaps"
+    OUT_OF_SCOPE = "out_of_scope"
+    EDITS_REJECTED = "edits_rejected"
+    UNAVAILABLE = "unavailable"
+    SKIPPED = "skipped"
+
+
+__all__ = [
+    "JevAlignmentCondition",
+    "JevAlignmentQuestionKey",
+    "JevAlignmentRole",
+    "JevAlignmentStateKind",
+    "JevAlignmentStatus",
+    "JevClaimKind",
+    "JevDoneCheck",
+    "JevDoneQuestionKey",
+    "JevPreflightPreset",
+    "JevPreflightQuestionKey",
+    "JevPromptSection",
+    "JevQuestionType",
+]
