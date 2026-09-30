@@ -41,6 +41,7 @@ class JevDoneCheck(str, Enum):
 
     MULTI_PART = "multi_part"
     CLAIMS = "claims"
+    INPUT_EXHAUSTION = "input_exhaustion"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -51,6 +52,7 @@ class JevDoneQuestionKey(str, Enum):
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
+    INPUT_EXHAUSTION_TRAVERSED = "input_exhaustion.traversed"
 
 
 class JevClaimKind(str, Enum):

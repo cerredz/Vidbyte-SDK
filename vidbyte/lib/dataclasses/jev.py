@@ -690,6 +690,29 @@ class JevMultiPartPayload(JevSectionPayload):
     deliverables: list[JevDeliverablePayload] = Field(description="The deliverables are the separate outputs the request asks the agent to produce, one entry per output, in the order the request asks for them. An output is separate when it could be left out while the other outputs are still produced, such as a code change, a test, a migration, a document, an example, or an explanation the user asked for in its own right. Do not split one output into smaller steps, do not merge two outputs the user asked for separately, and do not add outputs the request does not ask for, such as extra tests or documentation the user never mentioned. Steps the agent takes only to produce an output, such as reading files or running a search, are not deliverables. Return an empty list when the request asks for no output at all, such as a greeting.")
 
 
+class JevInputExhaustionObligationPayload(BaseModel):
+    """One request-derived obligation to exhaust a dynamically discovered input collection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short stable key for one collection traversal obligation. It uses lowercase letters, digits, and underscores, starts with a letter, and is unique within this section. Derive it from the collection's subject rather than a position number. Copy it unchanged into the handoff so each question maps to exactly one obligation. Keep it under sixty-four characters.")
+    collection: str = Field(min_length=1, description="The collection names the dynamically discovered or paginated source the user explicitly asks the agent to inspect completely. Preserve the source's own names and distinguish separate collections when the request names them. Do not invent a source, endpoint, or collection that the request does not state or clearly require. Describe the collection itself rather than its individual members. Keep this text stable enough for continuation feedback to identify the same work.")
+    scope: str = Field(min_length=1, description="The scope records the extent of this collection traversal required by the user's request. Preserve exhaustive words such as all, every, entire, through the end, and any stated filters or dates. Do not turn a sample or an expressly bounded subset into a request to inspect the full source. Do not widen the request beyond its own terms. This scope tells the handoff and Jev which collection's boundary matters.")
+    unit: str = Field(min_length=1, description="The unit identifies what one visited identifier represents when source totals are compared with observed work. It may be a result, record, page, batch, or another collection member named or clearly implied by the request. Use the narrowest unit that can be tied to trace evidence and a source-reported total. Do not mix page totals with record identifiers or otherwise compare unlike units. If the request leaves the unit open, state that it must be identified from the source evidence instead of guessing.")
+    expected_total: int | None = Field(ge=0, description="This is a total explicitly stated in the user's request for the named collection and the same unit recorded in `unit`. Copy it only when the request gives a numeric scope such as a stated number of pages, records, or results. Do not estimate or derive a count from examples, samples, or the source's later output. Use null when the request gives no numeric total. Code compares distinct visited identifiers with this requested boundary before using a source-reported total.")
+    exhaustion_condition: str = Field(min_length=1, description="The exhaustion condition states the observable stopping rule the user asked for or that the source protocol itself reports. It can describe reaching a known total or receiving a source response that explicitly says there are no more results. Do not treat the absence of another tool call as a stopping rule. Do not create a total, endpoint, cursor, or termination signal absent from the request. Keep this condition narrow enough to decide whether this one collection was traversed fully.")
+
+
+class JevInputExhaustionPayload(JevSectionPayload):
+    """The pre-run section listing explicit obligations to exhaust dynamic input collections."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The input-exhaustion section records each collection the request explicitly requires the agent to traverse completely, where the collection's membership or extent may be discovered during work. It separates these dynamic traversals from finite named inputs that can be checked as individual deliverables. Each entry states the collection, requested scope, traversal unit, any numeric total stated by the user, and the stopping condition that would establish exhaustion. The entries are written from the request before the main agent begins, so they must not invent a source or a universe. When the user states a total, preserve it in `expected_total` so code can compare it with distinct visited identifiers. The handoff later supplies trace evidence for every id in this section, and each id receives one Jev judgment."
+
+    collections: list[JevInputExhaustionObligationPayload] = Field(description="List one stable obligation for each dynamically discovered or paginated collection the request explicitly asks to inspect exhaustively. Preserve separate sources and scopes as separate entries when the request names them. Include the collection, scope, comparable traversal unit, any explicit requested total, and the requested or source-defined stopping condition. Do not add ordinary finite named files or a sample request to this list. Return an empty list when the request has no explicit dynamic exhaustive traversal.")
+
+
 class JevHandoffPayload(BaseModel):
     """The evidence handoff JevHandoff writes after the main agent tries to finish.
 
@@ -718,6 +741,34 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     SECTION: ClassVar[str] = "The multi-part evidence section gathers, for each deliverable the run state lists, the parts of the agent's run that show whether that deliverable was produced. A separate checker reads one entry at a time, next to the user's request and that deliverable's description and completion signal, and decides whether the deliverable is done. That checker sees nothing of the run except the evidence written here, so the evidence must be complete, specific, and faithful to what the run actually shows. The section reports observations and never gives a verdict about whether the work is complete. It is filled after the agent tries to finish, from the agent's context window."
 
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
+
+
+class JevInputExhaustionEvidencePayload(BaseModel):
+    """Trace observations JevHandoff compiles for one collection traversal obligation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is copied character for character from one input-exhaustion run-state obligation. Every expected obligation gets exactly one evidence entry, including one with no traversal activity. Do not rename, merge, omit, or invent ids. This key lets code compare the handoff with the pre-run obligation list. Keep its order the same as the run-state entries.")
+    evidence: str = Field(min_length=1, description="The evidence quotes or closely reproduces relevant observations from the main agent's actual responses, tool arguments, tool outputs, and final answer. Name the source of each observation and keep events in the order they occurred, including retries, failures, and later progress. Include only facts present in the trace and distinguish source-reported values from the agent's statements. Do not use a final-answer claim or this handoff's missing summary as proof of traversal. If the trace contains no relevant activity, state that explicitly.")
+    unit_type: str | None = Field(description="The unit type names what each listed visited identifier represents, such as a result, record, page, or batch. It must match the comparable unit in the obligation before code compares the identifier count with a reported total. Derive it from explicit trace evidence rather than guessing from a tool name. Use null when the trace does not establish a comparable unit. A mismatch or unknown value cannot prove count-based exhaustion.")
+    visited_unit_ids: list[str] = Field(description="List distinct identifiers for collection members that the trace shows the agent actually retrieved or processed. Use source identifiers where available and stable page or batch identifiers only when those are the unit being compared. Do not count a requested unit, a search snippet, a failed retrieval, a repeated identifier, or an unverified handoff claim as visited. Preserve identifiers exactly and use an empty list when no unit is trace-backed. Code deduplicates these values before comparing a source-reported total.")
+    source_reported_total: int | None = Field(ge=0, description="This is a numeric total that a source response in the trace explicitly reports for the same `unit_type` as the visited identifiers. Copy the number only when the output states it as the total for this collection and unit. Do not calculate a total from samples, page counts, estimates, or the agent's unsupported summary. Use null when no comparable source-reported total appears. A present total is compared deterministically with distinct visited ids, and it does not cancel a failed fetch or open continuation.")
+    last_position: str | None = Field(description="The last position records the latest page, cursor, offset, batch, or member identifier that a successful trace event shows the agent reached. Quote the concrete value and identify its kind when possible. Do not infer a position from the order of tool calls alone. Use null when no successful traversal position is visible. Continuation feedback uses this field to tell the main agent where to resume.")
+    outstanding_continuation: str | None = Field(description="This field records a next-page link, cursor, token, offset, continuation marker, or other source instruction still present in the latest successful response. Include the exact value or a faithful short excerpt and identify its source response. Use null only when the latest trace evidence explicitly shows no outstanding continuation or the source explicitly marks its end. Do not use null merely because the agent made no later request. A non-null value is evidence that traversal has not ended.")
+    terminal_evidence: str | None = Field(description="This field contains a source response or tool output that affirmatively marks the end of the requested collection, such as an explicit end-of-results signal or a protocol response with no next position. Quote or closely reproduce the signal and identify its source. Do not treat a first page, a sample, a search snippet, a failed call, or silence about a next page as terminal. Use null when the trace has no affirmative end signal. Jev may recognize whether the supplied signal establishes the stated exhaustion condition, but it must not invent one.")
+    failed_retrievals: list[str] = Field(description="List each retrieval of a requested collection unit that failed, timed out, was rejected, or returned no usable result and remains unresolved, with the unit or position and the trace output. Exclude a failure when a later successful retry shows that same unit was retrieved, but retain every attempt in `evidence`. Use an empty list when no unresolved collection retrieval failed. A listed failure is evidence that the traversal obligation remains incomplete. Never describe a failed attempt as a visited unit.")
+    missing: str = Field(min_length=1, description="The missing field tells the main agent which requested traversal evidence or collection work remains absent, based on the current trace and the run-state obligation. Name the unvisited units when the source identifies them, or the exact unresolved boundary such as an outstanding cursor or missing terminal response. Give a concise gap rather than restating all evidence. When a known count matches and no continuation or failure remains, say that no traversal gap is shown. This field is for continuation feedback and is never included in Jev's state.")
+    next_step: str = Field(min_length=1, description="The next step gives the main agent one actionable continuation instruction grounded in the latest trace position or gap. When a cursor, page, or offset remains, name how to resume from that value; when a retrieval failed, retry or recover that specific unit; when neither is known, identify the evidence needed to establish the source's end. Do not ask for work outside the run-state scope. If no work is missing, state that no next traversal step is indicated.")
+
+
+class JevInputExhaustionEvidenceSection(JevSectionPayload):
+    """The handoff section pairing each dynamic traversal obligation with trace observations."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The input-exhaustion evidence section reports what the current run trace shows for every dynamic collection obligation in run state. For each collection it preserves source evidence, distinct visited unit identifiers, any comparable source total, the latest position, any outstanding continuation, terminal evidence, and failed retrievals. Code adds a deterministic count comparison when the total and unit type are comparable, while Jev recognizes whether the supplied evidence establishes the stated exhaustion condition. The handoff reports observations and an actionable missing note but does not decide that a collection is exhausted. A readable handoff without completion evidence remains incomplete and can trigger a continuation; only missing or malformed evidence is unavailable. The missing note is reserved for continuation feedback and is excluded from Jev's state."
+
+    collections: list[JevInputExhaustionEvidencePayload] = Field(description="Return one evidence entry for every input-exhaustion obligation in the run state, using the exact same ids and order. Include all trace-backed traversal evidence and preserve failures, latest cursors, source totals, and affirmative terminal signals without turning silence into an end marker. Never omit an obligation because the main agent did nothing for it. Do not add collections the run state did not request. Write the missing note and next step for the main agent, not as a verdict for Jev.")
 
 
 class JevClaimIdentityPayload(BaseModel):
@@ -833,10 +884,45 @@ class JevMultiPart:
 
 
 @dataclass(frozen=True, slots=True)
+class JevInputExhaustionObligation:
+    """One request-derived collection traversal, with the scope and stopping condition that define completion."""
+
+    id: str
+    collection: str
+    scope: str
+    unit: str
+    expected_total: int | None
+    exhaustion_condition: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="input-exhaustion obligation id")
+        for field_name in ("collection", "scope", "unit", "exhaustion_condition"):
+            JevText.require(getattr(self, field_name), field_name=f"input-exhaustion {field_name} for {self.id!r}")
+        if self.expected_total is not None and (isinstance(self.expected_total, bool) or not isinstance(self.expected_total, int) or self.expected_total < 0):
+            raise JevValidation.error(f"expected total of {self.id!r}", "a non-negative integer or None", self.expected_total)
+
+
+@dataclass(frozen=True, slots=True)
+class JevInputExhaustion:
+    """The ordered set of dynamic collection traversals the user's request explicitly requires."""
+
+    collections: tuple[JevInputExhaustionObligation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.collections, tuple) or not all(isinstance(item, JevInputExhaustionObligation) for item in self.collections):
+            raise JevValidation.error("input-exhaustion collections", "a tuple of JevInputExhaustionObligation values", self.collections)
+        JevDeliverableId.require_unique(self.ids(), field_name="input-exhaustion obligations")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every stable obligation id in request order."""
+        return tuple(item.id for item in self.collections)
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
+    `multi_part` and `input_exhaustion` are set only when their done checks are enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -844,6 +930,7 @@ class JevRunStateRecord:
     mission: str
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
+    input_exhaustion: JevInputExhaustion | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -856,6 +943,8 @@ class JevRunStateRecord:
             JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+        if self.input_exhaustion is not None and not isinstance(self.input_exhaustion, JevInputExhaustion):
+            raise JevValidation.error("run state input_exhaustion", "a JevInputExhaustion or None", self.input_exhaustion)
 
 
 @dataclass(frozen=True, slots=True)
@@ -888,6 +977,61 @@ class JevMultiPartEvidence:
     def ids(self) -> tuple[str, ...]:
         """Return every evidence entry's deliverable id in order."""
         return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevInputExhaustionEvidence:
+    """Trace evidence for one dynamic traversal obligation, including boundaries and the next actionable step."""
+
+    id: str
+    evidence: str
+    unit_type: str | None
+    visited_unit_ids: tuple[str, ...]
+    source_reported_total: int | None
+    last_position: str | None
+    outstanding_continuation: str | None
+    terminal_evidence: str | None
+    failed_retrievals: tuple[str, ...]
+    missing: str
+    next_step: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="input-exhaustion evidence id")
+        JevText.require(self.evidence, field_name=f"input-exhaustion evidence of {self.id!r}")
+        if self.unit_type is not None:
+            JevText.require(self.unit_type, field_name=f"input-exhaustion unit type of {self.id!r}")
+        if not isinstance(self.visited_unit_ids, tuple):
+            raise JevValidation.error(f"visited ids of {self.id!r}", "a tuple of strings", self.visited_unit_ids)
+        for index, identifier in enumerate(self.visited_unit_ids):
+            JevText.require(identifier, field_name=f"visited id {index} of {self.id!r}")
+        if self.source_reported_total is not None and (isinstance(self.source_reported_total, bool) or not isinstance(self.source_reported_total, int) or self.source_reported_total < 0):
+            raise JevValidation.error(f"source total of {self.id!r}", "a non-negative integer or None", self.source_reported_total)
+        for field_name in ("last_position", "outstanding_continuation", "terminal_evidence"):
+            value = getattr(self, field_name)
+            if value is not None:
+                JevText.require(value, field_name=f"{field_name} of input-exhaustion evidence {self.id!r}")
+        if not isinstance(self.failed_retrievals, tuple):
+            raise JevValidation.error(f"failed retrievals of {self.id!r}", "a tuple of strings", self.failed_retrievals)
+        for index, failure in enumerate(self.failed_retrievals):
+            JevText.require(failure, field_name=f"failed retrieval {index} of {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of input-exhaustion evidence {self.id!r}")
+        JevText.require(self.next_step, field_name=f"next step of input-exhaustion evidence {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevInputExhaustionEvidenceSet:
+    """The ordered handoff observations for each request-derived dynamic collection traversal."""
+
+    collections: tuple[JevInputExhaustionEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.collections, tuple) or not all(isinstance(item, JevInputExhaustionEvidence) for item in self.collections):
+            raise JevValidation.error("input-exhaustion evidence", "a tuple of JevInputExhaustionEvidence values", self.collections)
+        JevDeliverableId.require_unique(self.ids(), field_name="input-exhaustion evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return each evidenced obligation id in handoff order."""
+        return tuple(item.id for item in self.collections)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1001,11 +1145,12 @@ class JevClaimsEvidence:
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part`, `claims`, and `input_exhaustion` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
     claims: JevClaimsEvidence | None = None
+    input_exhaustion: JevInputExhaustionEvidenceSet | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -1014,6 +1159,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
+        if self.input_exhaustion is not None and not isinstance(self.input_exhaustion, JevInputExhaustionEvidenceSet):
+            raise JevValidation.error("handoff input_exhaustion", "a JevInputExhaustionEvidenceSet or None", self.input_exhaustion)
 
 
 @dataclass(frozen=True)
@@ -1064,8 +1211,9 @@ class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
-    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
-    parent claims for CLAIMS; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART,
+    parent claims for CLAIMS, and collection obligation ids for INPUT_EXHAUSTION; CLAIMS answers use
+    `parent_id.assertion_id` keys so each assertion stays atomic.
     With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
@@ -1193,6 +1341,14 @@ __all__ = [
     "JevDoneResult",
     "JevHandoffPayload",
     "JevHandoffRecord",
+    "JevInputExhaustion",
+    "JevInputExhaustionEvidence",
+    "JevInputExhaustionEvidencePayload",
+    "JevInputExhaustionEvidenceSection",
+    "JevInputExhaustionEvidenceSet",
+    "JevInputExhaustionObligation",
+    "JevInputExhaustionObligationPayload",
+    "JevInputExhaustionPayload",
     "JevJson",
     "JevModelCard",
     "JevMultiPart",

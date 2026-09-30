@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-input-exhaustion-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -106,6 +106,24 @@ class JevDoneContinuation(JevContinuation):
                     assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.INPUT_EXHAUSTION:
+                # Name the exact dynamic collection and last observed boundary, then give the handoff's
+                # actionable next step; its missing opinion stays outside Jev's state.
+                question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+                exhaustion_state = None if self.run_state.record is None else self.run_state.record.input_exhaustion
+                exhaustion_handoff = None if self.run_state.handoff is None else self.run_state.handoff.input_exhaustion
+                obligations = {} if exhaustion_state is None else {item.id: item for item in exhaustion_state.collections}
+                observations = {} if exhaustion_handoff is None else {item.id: item for item in exhaustion_handoff.collections}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    item = obligations[identifier]
+                    observation = observations[identifier]
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {observation.missing}")
+                    position = "No successful traversal position is recorded." if observation.last_position is None else f"Last known position: {observation.last_position}."
+                    focus.append(f"- Collection: {item.collection}. Scope: {item.scope}. {position} Next step: {observation.next_step} Exhaustion condition: {item.exhaustion_condition}")
                 return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:

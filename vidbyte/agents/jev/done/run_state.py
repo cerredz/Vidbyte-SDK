@@ -3,9 +3,9 @@
 PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
-COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
+COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain(). INPUT_EXHAUSTION also derives count and traversal status from handoff observations before Jev judges each collection.
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-input-exhaustion-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -43,6 +43,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_INPUT_EXHAUSTION_FIELD,
     JEV_DONE_REQUEST_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -51,6 +52,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverable,
     JevDoneResult,
     JevHandoffRecord,
+    JevInputExhaustion,
+    JevInputExhaustionEvidence,
+    JevInputExhaustionObligation,
+    JevInputExhaustionPayload,
     JevMultiPart,
     JevMultiPartPayload,
     JevQuestion,
@@ -72,7 +77,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -230,6 +235,35 @@ class JevRunState(BaseAgent):
                             JEV_DONE_EVIDENCE_FIELD: claim.evidence,
                         }
                 return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
+            case JevDoneCheck.INPUT_EXHAUSTION:
+                # Each dynamic collection gets one question with its original boundary and the handoff's
+                # trace-backed observations; the handoff's missing opinion is reserved for continuation.
+                exhaustion_state = None if self.record is None else self.record.input_exhaustion
+                if exhaustion_state is None or handoff.input_exhaustion is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+                exhaustion_evidence = {item.id: item for item in handoff.input_exhaustion.collections}
+                exhaustion_entries: dict[str, object] = {}
+                for item in exhaustion_state.collections:
+                    observation = exhaustion_evidence[item.id]
+                    assessment, _ = self._input_exhaustion_assessment(item, observation)
+                    exhaustion_entries[item.id] = {
+                        "collection": item.collection,
+                        "scope": item.scope,
+                        "unit": item.unit,
+                        "expected_total": item.expected_total,
+                        "exhaustion_condition": item.exhaustion_condition,
+                        JEV_DONE_EVIDENCE_FIELD: observation.evidence,
+                        "visited_unit_ids": list(observation.visited_unit_ids),
+                        "source_reported_total": observation.source_reported_total,
+                        "unit_type": observation.unit_type,
+                        "last_position": observation.last_position,
+                        "outstanding_continuation": observation.outstanding_continuation,
+                        "terminal_evidence": observation.terminal_evidence,
+                        "failed_retrievals": list(observation.failed_retrievals),
+                        "deterministic_assessment": assessment,
+                    }
+                return {JEV_DONE_INPUT_EXHAUSTION_FIELD: exhaustion_entries}, tuple(question.to_question(identifier) for identifier in exhaustion_state.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -242,6 +276,9 @@ class JevRunState(BaseAgent):
                 # Each extracted final-answer claim must independently reach the support threshold, so one
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
+            case JevDoneCheck.INPUT_EXHAUSTION:
+                # Count checks stay deterministic; Jev recognizes whether the trace evidence meets the named boundary.
+                return self._input_exhaustion(handoff, decision)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -318,18 +355,92 @@ class JevRunState(BaseAgent):
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
+    def _input_exhaustion_assessment(self, obligation: JevInputExhaustionObligation, evidence: JevInputExhaustionEvidence) -> tuple[str, bool]:
+        """Describe deterministic traversal evidence and return whether it fails the requested stopping condition."""
+        distinct_count = len(set(evidence.visited_unit_ids))
+        if evidence.outstanding_continuation is not None or evidence.failed_retrievals:
+            return "Traversal is incomplete: an outstanding continuation or failed retrieval remains in the trace.", True
+        if evidence.unit_type != obligation.unit and evidence.terminal_evidence is None:
+            return "The handoff does not establish that visited identifiers use the requested unit type, and no affirmative terminal signal establishes exhaustion.", True
+        if obligation.expected_total is not None:
+            return self._requested_total_assessment(obligation, evidence, distinct_count)
+        if evidence.source_reported_total is not None:
+            return self._source_total_assessment(obligation, evidence, distinct_count)
+        if evidence.terminal_evidence is not None:
+            return "The trace includes an affirmative terminal signal for Jev to recognize against the stated exhaustion condition.", False
+        return "The handoff has no comparable source total or affirmative terminal signal, so the requested exhaustion condition is not established.", True
+
+    @staticmethod
+    def _requested_total_assessment(obligation: JevInputExhaustionObligation, evidence: JevInputExhaustionEvidence, distinct_count: int) -> tuple[str, bool]:
+        """Compare trace-backed units to the explicit total in the original request."""
+        expected = obligation.expected_total
+        if distinct_count != expected:
+            return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the user's requested total of {expected}; the counts do not match.", True
+        if expected == 0 and evidence.terminal_evidence is None and not (evidence.unit_type == obligation.unit and evidence.source_reported_total == 0):
+            return "The user requested an empty collection, but the trace has no affirmative source evidence of zero results or terminal exhaustion.", True
+        if evidence.source_reported_total is not None and evidence.unit_type == obligation.unit and evidence.source_reported_total != expected:
+            return f"Code matched the user's requested total of {expected} {obligation.unit} identifiers, while the source reports {evidence.source_reported_total}; Jev must assess this conflict against the stated scope.", False
+        return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the user's requested total of {expected}; the counts match.", False
+
+    @staticmethod
+    def _source_total_assessment(obligation: JevInputExhaustionObligation, evidence: JevInputExhaustionEvidence, distinct_count: int) -> tuple[str, bool]:
+        """Compare units to a source total or require terminal evidence for a mismatched unit type."""
+        if evidence.unit_type != obligation.unit:
+            if evidence.terminal_evidence is None:
+                return "The reported total uses a different unit type, and no affirmative terminal signal establishes the requested boundary.", True
+            return "The reported total uses a different unit type; Jev must judge the supplied affirmative terminal signal against the requested condition.", False
+        total = evidence.source_reported_total
+        if distinct_count != total:
+            return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the source-reported total of {total}; the counts do not match.", True
+        return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the source-reported total of {total}; the counts match.", False
+
+    def _input_exhaustion(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Score each traversal; readable evidence without a completion boundary is incomplete, while model failures fail open."""
+        state = None if self.record is None else self.record.input_exhaustion
+        evidence = None if handoff is None else handoff.input_exhaustion
+        if state is None or evidence is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+        if not state.collections:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None)
+        observations = {item.id: item for item in evidence.collections}
+        assessments = {item.id: self._input_exhaustion_assessment(item, observations[item.id]) for item in state.collections}
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.INPUT_EXHAUSTION)
+        identifiers = state.ids()
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+        incomplete = tuple(
+            identifier
+            for identifier in identifiers
+            if assessments[identifier][1] or DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False
+        )
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=verdict.score, passed=not incomplete, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.
         multi_part = None
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        input_exhaustion = None
+        exhaustion_section = getattr(payload, JevDoneCheck.INPUT_EXHAUSTION.value, None)
+        if isinstance(exhaustion_section, JevInputExhaustionPayload):
+            input_exhaustion = JevInputExhaustion(tuple(
+                JevInputExhaustionObligation(item.id, item.collection.strip(), item.scope.strip(), item.unit.strip(), item.expected_total, item.exhaustion_condition.strip())
+                for item in exhaustion_section.collections
+            ))
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            input_exhaustion=input_exhaustion,
             usage=self.get_usage(),
         )
 
