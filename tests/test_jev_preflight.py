@@ -47,6 +47,7 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARITY_VETO_THRESHOLD,
     JEV_PREFLIGHT_REQUEST_FIELD,
     JEV_PREFLIGHT_STRATEGY_NAME,
+    JEV_RECURRING_THRESHOLD,
     JEV_SPECIALIST_NONE,
     JEV_SPECIALIST_QUESTION_NAME,
 )
@@ -65,7 +66,12 @@ from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
 from vidbyte.lib.jev.preflight import CLARITY_QUESTIONS, SpecialistQuestion
-from vidbyte.lib.jev.preflight.clarity import IGNORE_CLAIMS, JUDGE_MEANING, REQUEST_STATE
+from vidbyte.lib.jev.preflight.clarity import (
+    IGNORE_CLAIMS,
+    JUDGE_MEANING,
+    REQUEST_STATE,
+)
+from vidbyte.lib.jev.preflight import RECURRING_QUESTIONS
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
 
@@ -76,6 +82,7 @@ _SENTENCE_END = re.compile(r"[.?]'?(?=\s+[A-Z`]|$)")
 # A quoted example inside prose: a quote that is not an apostrophe inside a word.
 _QUOTED = re.compile(r"(?<![A-Za-z])['\"][^'\"]+['\"](?![A-Za-z])")
 _CLARITY_KEYS = tuple(key for key in JevPreflightQuestionKey if key.value.startswith("clarity."))
+_RECURRING_KEYS = tuple(key for key in JevPreflightQuestionKey if key.value.startswith("recurring."))
 _PAYLOAD = {
     "questions": [
         {"question": "What should I build?", "recommendations": ["A login page", "A signup form"]},
@@ -185,6 +192,30 @@ class JevPreflightQuestionTests(unittest.TestCase):
         for question in CLARITY_QUESTIONS:
             self.assertTrue(is_dataclass(question) and isinstance(question, JevPreflightQuestion))
             self.assertEqual(type(question)(), question)
+
+    def test_recurring_work_uses_one_general_question_and_registers_it(self) -> None:
+        self.assertEqual(len(RECURRING_QUESTIONS), 1)
+        self.assertEqual(tuple(question.key for question in RECURRING_QUESTIONS), _RECURRING_KEYS)
+        for question in RECURRING_QUESTIONS:
+            with self.subTest(question=question.key.value):
+                self.assertTrue(is_dataclass(question) and isinstance(question, JevPreflightQuestion))
+                self.assertEqual(type(question)(), question)
+                brief = question.instructions
+                self.assertEqual(_sentences(brief.introduction), 2)
+                self.assertIn("`request`", brief.state)
+                self.assertEqual(len(brief.definitions), 1)
+                self.assertEqual(len(brief.rules), 1)
+                self.assertIn("no task to judge", brief.rules[0])
+                self.assertIn("ignore statements that merely describe themselves as recurring", brief.rules[0])
+                self.assertTrue(brief.question.endswith("?"))
+                self.assertIn("repeats across instances", brief.question)
+                self.assertTrue(question.when_true.not_for.endswith("belongs to false."))
+                self.assertTrue(question.when_false.not_for.endswith("belongs to true."))
+                self.assertEqual(len(question.when_true.easy), 1)
+                self.assertEqual(len(question.when_true.boundary), 1)
+                self.assertEqual(len(question.when_false.easy), 1)
+                self.assertEqual(len(question.when_false.boundary), 1)
+                self.assertEqual(_sentences(question.gap), 1)
 
     def test_questions_cover_every_clarity_key_exactly_once(self) -> None:
         self.assertEqual(tuple(question.key for question in CLARITY_QUESTIONS), _CLARITY_KEYS)
@@ -342,12 +373,20 @@ class JevPresetsTests(unittest.TestCase):
     """Pin the user-enableable flags and the policy each fixed-question flag turns on."""
 
     def test_clarity_flag_asks_every_clarity_question_at_the_named_threshold(self) -> None:
-        self.assertEqual(JevPresets.available(), (JevPreflightPreset.CLARITY, JevPreflightPreset.TOOL_SELECTOR))
+        self.assertEqual(JevPresets.available(), (JevPreflightPreset.CLARITY, JevPreflightPreset.TOOL_SELECTOR, JevPreflightPreset.RECURRING))
         definition = JevPresets.definition(JevPreflightPreset.CLARITY)
         self.assertEqual(definition.question_keys, _CLARITY_KEYS)
         self.assertEqual(definition.threshold, JEV_CLARITY_THRESHOLD)
         self.assertEqual(definition.veto, JEV_CLARITY_VETO_THRESHOLD)
         self.assertIs(definition.gate, JevPreflightQuestionKey.CLARITY_ACTION)
+
+    def test_recurring_flag_records_one_general_question_without_a_gate_or_veto(self) -> None:
+        definition = JevPresets.definition(JevPreflightPreset.RECURRING)
+        self.assertEqual(definition.question_keys, _RECURRING_KEYS)
+        self.assertEqual(definition.threshold, JEV_RECURRING_THRESHOLD)
+        self.assertIsNone(definition.veto)
+        self.assertIsNone(definition.gate)
+        self.assertEqual(tuple(question.name for question in JevPreflightRegistry.questions(JevPreflightPreset.RECURRING)), tuple(key.value for key in _RECURRING_KEYS))
 
     def test_definition_rejects_a_bad_veto_or_a_gate_outside_its_questions(self) -> None:
         keys = (JevPreflightQuestionKey.CLARITY_ACTION, JevPreflightQuestionKey.CLARITY_OBJECT)
@@ -623,6 +662,21 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.response.output, "ordinary answer")
         self.assertTrue(agent.response.results[JevPreflightPreset.CLARITY].passed)
         self.assertAlmostEqual(agent.response.results[JevPreflightPreset.CLARITY].score, JEV_CLARITY_THRESHOLD)
+
+    async def test_low_recurring_score_is_recorded_without_stopping_the_run(self) -> None:
+        decision = ScriptedDecisionRunner({key.value: 0.01 for key in _RECURRING_KEYS})
+        generative = ScriptedGenerativeRunner("ordinary answer")
+        agent = self._agent(generative, preflight=(JevPreflightPreset.RECURRING,))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            reply = await agent.arun("Summarize the latest support tickets.")
+
+        result = agent.response.results[JevPreflightPreset.RECURRING]
+        self.assertEqual(reply.content, "ordinary answer")
+        self.assertEqual(len(decision.requests), 1)
+        self.assertEqual(len(decision.requests[0].questions), 1)
+        self.assertTrue(result.passed)
+        self.assertAlmostEqual(result.score, 0.01)
+        self.assertEqual(len(generative.calls), 1)
 
     async def test_clarification_agent_failure_fails_open(self) -> None:
         for clarifier in (ScriptedGenerativeRunner(error=ProviderRequestError("down", provider="openai")), ScriptedGenerativeRunner("not json")):
