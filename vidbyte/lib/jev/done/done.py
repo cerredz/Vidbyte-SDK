@@ -18,6 +18,7 @@ from vidbyte.lib.constants.jev import (
     JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
     JEV_CLAIMS_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_PROBLEMS_RESOLVED_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
@@ -25,13 +26,14 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQuestion
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 
 
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.ASSUMPTIONS_RECONCILED: AssumptionsReconciledQuestion()})
-    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.ASSUMPTIONS_RECONCILED: JEV_ASSUMPTIONS_RECONCILED_THRESHOLD})
+    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.ASSUMPTIONS_RECONCILED: AssumptionsReconciledQuestion(), JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion()})
+    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.ASSUMPTIONS_RECONCILED: JEV_ASSUMPTIONS_RECONCILED_THRESHOLD, JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD})
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:

@@ -33,10 +33,17 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevProblemResolutionItem,
+    JevProblemsResolvedEvidence,
     JevRunStateRecord,
     JevSpecialist,
 )
-from vidbyte.lib.enums.jev import JevClaimKind, JevDoneCheck, JevPreflightPreset
+from vidbyte.lib.enums.jev import (
+    JevClaimKind,
+    JevDoneCheck,
+    JevPreflightPreset,
+    JevProblemCheckItemType,
+)
 
 __all__ = [
     "JevAgent",
@@ -61,6 +68,9 @@ __all__ = [
     "JevHandoffRecord",
     "JevPreflightPreset",
     "JevPresetResult",
+    "JevProblemCheckItemType",
+    "JevProblemResolutionItem",
+    "JevProblemsResolvedEvidence",
     "JevRunStateRecord",
     "JevRuntime",
     "JevRuntimeSettings",

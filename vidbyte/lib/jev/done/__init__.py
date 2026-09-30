@@ -13,5 +13,6 @@ from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQue
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 
-__all__ = ["DONE_STATE", "AssumptionsReconciledQuestion", "ClaimsSupportedQuestion", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
+__all__ = ["DONE_STATE", "AssumptionsReconciledQuestion", "ClaimsSupportedQuestion", "JevDoneRegistry", "MultiPartDeliveredQuestion", "ProblemsResolvedQuestion"]

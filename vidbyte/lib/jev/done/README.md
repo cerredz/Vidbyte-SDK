@@ -13,6 +13,9 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 - `assumptions_reconciled.py` holds the ASSUMPTIONS_RECONCILED question, asked once per explicit, consequential assumption that later run evidence materially changes; it judges whether dependent work was observably revised or made irrelevant.
 - Every question uses the shared state description in `multi_part.py`; `deliverables` and `claims` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `assumptions_reconciled` is present only when its check is enabled, holds post-run-derived assumption entries, and keeps the handoff's `missing` summary out of Jev's evidence state.
+- `problems_resolved.py` holds the dynamic problem-repair question, asked once per observed run problem and once for the required completion of the original request after repairs.
+- Every question uses the shared state description in `multi_part.py`; `deliverables`, `claims`, and `problems_resolved` are present only when their respective checks are enabled, so the description stays true when checks are combined.
+- `assumptions_reconciled` and `problems_resolved` are present only when enabled and are derived from post-run handoff evidence; each keeps the handoff's `missing` summary out of Jev's evidence state.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.
 - The logic that writes the run state and the handoff, asks Jev, and sends the main agent back to work is `JevRunState` and `JevHandoff` in `vidbyte/agents/jev/done/`.
