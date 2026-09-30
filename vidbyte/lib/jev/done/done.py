@@ -14,19 +14,29 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
-from vidbyte.lib.constants.jev import JEV_CLAIMS_THRESHOLD, JEV_MULTI_PART_THRESHOLD
+from vidbyte.lib.constants.jev import (
+    JEV_CLAIMS_THRESHOLD,
+    JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
+    JEV_MULTI_PART_THRESHOLD,
+)
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
+from vidbyte.lib.jev.done.discovered_item_coverage import (
+    DiscoveredItemInventoryCompleteQuestion,
+    DiscoveredItemProcessedQuestion,
+)
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
 
 
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion()})
-    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD})
+    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.DISCOVERED_ITEM_COVERAGE: DiscoveredItemProcessedQuestion()})
+    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD})
+
+    _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.DISCOVERED_ITEM_COVERAGE: DiscoveredItemInventoryCompleteQuestion()})
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:
@@ -42,6 +52,14 @@ class JevDoneRegistry:
         found = cls._thresholds.get(check)
         if found is None:
             raise ConfigurationError(f"Jev done check {check!r} has no registered threshold.", details={"check": str(check), "registered": [item.value for item in cls._thresholds]})
+        return found
+
+    @classmethod
+    def inventory_question(cls, check: JevDoneCheck) -> JevDoneQuestion:
+        """Return the inventory-fidelity question for a check whose candidates come from run evidence."""
+        found = cls._inventory_questions.get(check)
+        if found is None:
+            raise ConfigurationError(f"Jev done check {check!r} has no inventory question.", details={"check": str(check), "registered": [item.value for item in cls._inventory_questions]})
         return found
 
     @classmethod
@@ -72,6 +90,8 @@ class JevDoneRegistry:
         for check in checks:
             cls.question(check)
             cls.threshold(check)
+            if check in cls._inventory_questions:
+                cls.inventory_question(check)
         return checks
 
 

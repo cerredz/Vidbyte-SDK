@@ -41,6 +41,7 @@ class JevDoneCheck(str, Enum):
 
     MULTI_PART = "multi_part"
     CLAIMS = "claims"
+    DISCOVERED_ITEM_COVERAGE = "discovered_item_coverage"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -51,6 +52,8 @@ class JevDoneQuestionKey(str, Enum):
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
+    DISCOVERED_ITEM_PROCESSED = "discovered_item_coverage.processed"
+    DISCOVERED_ITEM_INVENTORY_COMPLETE = "discovered_item_coverage.inventory_complete"
 
 
 class JevClaimKind(str, Enum):

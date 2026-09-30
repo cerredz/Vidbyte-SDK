@@ -107,6 +107,28 @@ class JevDoneContinuation(JevContinuation):
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
                 return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.DISCOVERED_ITEM_COVERAGE:
+                # Keep omitted-inventory feedback tied to its full recorded output; item failures name only that item.
+                evidence = None if self.run_state.handoff is None else self.run_state.handoff.discovered_item_coverage
+                batches = {} if evidence is None else {batch.source_id: batch for batch in evidence.batches}
+                items = {} if evidence is None else {item.id: item for item in evidence.items()}
+                item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+                inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+                failed = []
+                focus = []
+                for identifier in result.incomplete:
+                    kind, item_id = identifier.split(":", 1)
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    if kind == "inventory":
+                        batch = batches[item_id]
+                        failed.append(f"- {inventory_question.instructions.question.format(item=item_id)} Jev's answer: no (P(yes) = {yes:.2f}). Source output:\n{batch.source_output}")
+                        listed = ", ".join(candidate.identity for candidate in batch.candidates) or "No candidates were listed."
+                        focus.append(f"- Review the complete source output for every in-scope discovered item, add any omitted item, and process each one. Current candidate inventory: {listed}")
+                        continue
+                    item = items[item_id]
+                    failed.append(f"- {item_question.instructions.question.format(item=item_id)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+                    focus.append(f"- {item.identity}. Requested: {item.requested_processing} Done when: {item.completion_criteria}")
+                return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""

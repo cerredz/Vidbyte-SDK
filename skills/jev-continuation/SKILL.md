@@ -433,7 +433,7 @@ For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.iden
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables` and `claims` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including a dynamic claims list emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `claims`, and `discovered_item_inventory` / `discovered_items` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including dynamic candidates emitted by the handoff and raw bounded outputs retained by code.
 
 Before you ship:
 

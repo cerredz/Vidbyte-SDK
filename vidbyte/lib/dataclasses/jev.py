@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable and claim evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, specialists, and clarification), for JevAgent done checks (run-state and handoff replies, deliverable, claim, and dynamic discovered-item evidence, handoff records, done questions, and results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
-COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
+COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and structured payloads belong beside the other Jev records; items derived after the run belong in handoff records, not JevRunStateRecord. Keep raw discovery outputs code-supplied and bounded so generated candidates can be checked against recorded evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
@@ -26,6 +26,8 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
     JEV_DELIVERABLE_ID_PATTERN,
+    JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS,
+    JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS,
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
@@ -720,6 +722,41 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
 
 
+class JevDiscoveredItemPayload(BaseModel):
+    """One concrete item found in one recorded tool output and its requested processing evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short stable identifier for this concrete item, written in lowercase letters, digits, and underscores and starting with a letter. It is unique across every discovery output in this finish attempt, including repeated appearances of the same item. Derive it from the item's identity rather than its position in a result list, and preserve it exactly in the inventory and evidence. Keep it under sixty-four characters and do not use source-specific numeric positions as identity when the output provides a stable record, page, issue, or file identifier. This id lets code send a separate recognition question and continuation focus for this item.")
+    identity: str = Field(min_length=1, description="Identity names the specific discovered record, page, document, search hit, issue, file, or other concrete collection member. Include a stable source-provided key or locator when the output has one, and enough title or context to distinguish the item when it does not. Preserve the source's meaningful qualifiers and do not combine sibling items into a range or group. This field identifies what the user asked to be processed, not evidence that processing happened. A checker must be able to find the same item in `source_output` from this description.")
+    requested_processing: str = Field(min_length=1, description="Requested processing states what the user's all-items instruction requires the agent to do to this one discovered item. Derive the action from the original request and the item's kind, without expanding it into extra quality work or weakening an explicit action. Keep the operation and its target together so the evidence can be checked against one item. If the request asks only to inspect or summarize each item, do not claim it asks for edits or external actions. This field is the obligation Jev checks against `processing_evidence`.")
+    completion_criteria: str = Field(min_length=1, description="Completion criteria names the visible result that counts as the requested processing for this item. It must follow the request and be concrete enough to compare with recorded responses, tool calls, and outputs. Include all parts the request requires for this item, but do not infer that an unrecorded action happened. A partial result, an intention, or a summary that gives no visible processing result does not meet the criterion. The same criterion is carried into continuation focus when this item fails.")
+    processing_evidence: str = Field(min_length=1, description="Processing evidence quotes or closely reproduces the parts of the run that show the requested action for this item. Name where each observation came from, such as a response, tool call and result, final answer passage, or command output, and preserve later failures or reversals that affect the latest result. Evidence about a neighboring item does not count unless the output clearly applies to both. A claim that the item was handled is not itself evidence when the requested result should be visible in the run. If no relevant work appears, say so plainly.")
+    missing: str = Field(min_length=1, description="Missing says what the run does not show for this one item's requested processing and gives the main agent an actionable next step. Name the exact operation, output, or result that remains unshown, using the user's scope. Do not repeat the full evidence or add unrelated work. When the evidence shows the requested result in full, state that nothing is missing. This is a handoff note for continuation and is not part of Jev's recognition state.")
+
+
+class JevDiscoveredItemBatchPayload(JevSectionPayload):
+    """The post-run section containing every bounded recorded tool output and the items derived from each."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The discovered-item section contains candidate inventories derived after work from recorded tool outputs, with one source id for every tool call, including calls whose output contains no collection. Code retains each bounded raw output directly from the run, so the handoff does not need to reproduce it. Each candidate has its identity, the processing requested by the user, the completion condition, and evidence from the run. Jev checks candidates against the original recorded output and separately checks whether the run shows requested processing for each item. When a recorded output is too large to compare safely or a source id is missing, the check is unavailable and the run is allowed to finish."
+
+    batches: list["JevDiscoveredItemBatchEntryPayload"] = Field(description="Batches provide one candidate inventory for every tool call in the recorded run, including outputs that show no collection. Each source_id is the stable call id supplied in the context window and must be copied exactly. Code pairs that id with the original raw output, so the handoff does not reproduce, truncate, or summarize source text. Candidates lists every concrete member of a collection visible in that output when the user's request asks to process the collection's members, with one entry per item and no merged or inferred items. When the output contains no such in-scope members, candidates is empty and the source still remains in the batch list. Do not omit an output or state that the inventory is complete; Jev checks the candidate list against the full source output supplied by code.")
+
+
+class JevDiscoveredItemBatchEntryPayload(BaseModel):
+    """One source call id and its generated inventory of concrete discovered items."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(min_length=1, description="The source_id identifies one tool call in the recorded run and must be copied exactly from its context metadata. It is unique within this handoff and follows the chronological order of the calls. Every tool call appears once, whether it discovered items or not. Do not invent or skip identifiers because code compares them with the original call sequence. A mismatch makes this check unavailable rather than validating a partial source set.")
+    candidates: list[JevDiscoveredItemPayload] = Field(description="Candidates contains one item for each concrete collection member visibly present in source_output that falls under the user's request to process all items. Include source-provided ids or locations in identity, and do not merge several records into one candidate. Do not include links or records merely mentioned as prose unless the request and output make them collection members to process. Use an empty list when this output contains no such collection members, and never use an empty list to conceal a partial or uncertain inventory. The separate inventory question checks whether this list accounts for the full recorded output.")
+
+
+JevDiscoveredItemBatchPayload.model_rebuild()
+
+
 class JevClaimIdentityPayload(BaseModel):
     """The title, meaning, and stated purpose of a final-answer claim."""
 
@@ -998,14 +1035,74 @@ class JevClaimsEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevDiscoveredItem:
+    """One dynamically discovered collection item, its requested operation, and observed run evidence."""
+
+    id: str
+    identity: str
+    requested_processing: str
+    completion_criteria: str
+    processing_evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="discovered item id")
+        for name in ("identity", "requested_processing", "completion_criteria", "processing_evidence", "missing"):
+            JevText.require(getattr(self, name), field_name=f"discovered item {self.id!r} {name}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevDiscoveredItemBatch:
+    """A verbatim bounded tool output and the candidate items the handoff derived from it."""
+
+    source_id: str
+    source_output: str
+    candidates: tuple[JevDiscoveredItem, ...]
+
+    def __post_init__(self) -> None:
+        JevText.require(self.source_id, field_name="discovered-item source id")
+        if not isinstance(self.source_output, str):
+            raise JevValidation.error("discovered-item source output", "a string", self.source_output)
+        if len(self.source_output) > JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS:
+            raise JevValidation.error("discovered-item source output", f"at most {JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS} characters", self.source_output)
+        if not isinstance(self.candidates, tuple) or not all(isinstance(item, JevDiscoveredItem) for item in self.candidates):
+            raise JevValidation.error("discovered-item candidates", "a tuple of JevDiscoveredItem values", self.candidates)
+        JevDeliverableId.require_unique(tuple(item.id for item in self.candidates), field_name=f"candidates in source {self.source_id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevDiscoveredItemEvidence:
+    """All tool-call outputs and the candidate inventories derived from them for one finish attempt."""
+
+    batches: tuple[JevDiscoveredItemBatch, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.batches, tuple) or not all(isinstance(item, JevDiscoveredItemBatch) for item in self.batches):
+            raise JevValidation.error("discovered-item batches", "a tuple of JevDiscoveredItemBatch values", self.batches)
+        JevDeliverableId.require_unique(tuple(item.source_id for item in self.batches), field_name="discovered-item source ids")
+        JevDeliverableId.require_unique(self.item_ids(), field_name="discovered item ids")
+        if sum(len(item.source_output) for item in self.batches) > JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS:
+            raise JevValidation.error("discovered-item source outputs", f"at most {JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS} total characters", self.batches)
+
+    def item_ids(self) -> tuple[str, ...]:
+        """Return every item id in source and item order."""
+        return tuple(item.id for batch in self.batches for item in batch.candidates)
+
+    def items(self) -> tuple[JevDiscoveredItem, ...]:
+        """Return all candidates in the order their tool outputs recorded them."""
+        return tuple(item for batch in self.batches for item in batch.candidates)
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
+    Each optional section is set only when its check is enabled and its evidence is available; `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
     claims: JevClaimsEvidence | None = None
+    discovered_item_coverage: JevDiscoveredItemEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -1014,6 +1111,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
+        if self.discovered_item_coverage is not None and not isinstance(self.discovered_item_coverage, JevDiscoveredItemEvidence):
+            raise JevValidation.error("handoff discovered_item_coverage", "a JevDiscoveredItemEvidence or None", self.discovered_item_coverage)
 
 
 @dataclass(frozen=True)
@@ -1064,8 +1163,9 @@ class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
-    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
-    parent claims for CLAIMS; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART,
+    parent claims for CLAIMS, and `inventory:source_id` or `item:item_id` references for dynamic coverage.
+    CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
     With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
@@ -1187,8 +1287,14 @@ __all__ = [
     "JevDeliverable",
     "JevDeliverableEvidence",
     "JevDeliverableEvidencePayload",
+    "JevDiscoveredItemBatchEntryPayload",
+    "JevDiscoveredItemBatchPayload",
+    "JevDiscoveredItemPayload",
     "JevDeliverableId",
     "JevDeliverablePayload",
+    "JevDiscoveredItem",
+    "JevDiscoveredItemBatch",
+    "JevDiscoveredItemEvidence",
     "JevDoneQuestion",
     "JevDoneResult",
     "JevHandoffPayload",
