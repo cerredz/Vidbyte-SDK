@@ -11,6 +11,7 @@ TESTS: tests/test_jev_done.py.
 
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
+from vidbyte.lib.jev.done.guaranteed_next_actions import GuaranteedActionNecessaryQuestion, GuaranteedActionUnfinishedQuestion
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
 
-__all__ = ["ClaimsSupportedQuestion", "DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
+__all__ = ["ClaimsSupportedQuestion", "DONE_STATE", "GuaranteedActionNecessaryQuestion", "GuaranteedActionUnfinishedQuestion", "JevDoneRegistry", "MultiPartDeliveredQuestion"]

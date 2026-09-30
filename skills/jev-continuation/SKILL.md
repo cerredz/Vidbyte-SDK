@@ -45,7 +45,7 @@ The five stages, and who does the work in each:
 |---|---|---|---|
 | (A) Run state | `JevRunState`, a generative `BaseAgent` with no tools | Generation. For checks whose items are knowable before work, it reads the user's request and lists what the check will verify. | `JevRunStateRecord`, plus `rendered` JSON |
 | (C) Handoff | `JevHandoff`, a generative `BaseAgent` with no tools | Generation. It reads the main agent's run, compiles evidence for request-derived items, and extracts final-answer claims when items only exist after work. | `JevHandoffRecord`, plus `rendered` JSON |
-| (D) Jev | `DecisionModelRunner` (TypeSafe) | Recognition only. It answers one yes/no question per item. | `DecisionModelResponse` |
+| (D) Jev | `DecisionModelRunner` (TypeSafe) | Recognition only. It answers one or more separate yes/no questions per item. | `DecisionModelResponse` |
 | (E) Judge | `JevRunState._judge` (code) | Scoring. `score_noul` applies a threshold and a veto, then lists the incomplete items. | `JevDoneResult` |
 | (F) Continue | `JevDoneContinuation` (code and a prompt asset) | Formatting. It builds one message for the main agent. | a `{"role": "user"}` message |
 
@@ -366,7 +366,7 @@ _questions = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuesti
 _thresholds = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.<CHECK>: JEV_<CHECK>_THRESHOLD})
 ```
 
-`JevDoneRegistry.validate` runs when `JevContinualSettings` is constructed. It rejects an unknown check, a repeated check, a bare string, and a check with no registered question or threshold. That is the only "settings" work a new check needs. Export the question class from `vidbyte/lib/jev/done/__init__.py`, and add a bullet for your module to `vidbyte/lib/jev/done/README.md`.
+`JevDoneRegistry.validate` runs when `JevContinualSettings` is constructed. It rejects an unknown check, a repeated check, a bare string, and a check with no registered question or threshold. A check may register multiple fixed questions when it must keep independent judgments separate. That is the only "settings" work a new check needs. Export each question class from `vidbyte/lib/jev/done/__init__.py`, and add a bullet for your module to `vidbyte/lib/jev/done/README.md`.
 
 ### Step 9: The `_SECTIONS` maps and `_record` conversions
 
@@ -431,9 +431,11 @@ Rules for your `case`:
 
 For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.identity`, `claim.scope`, `claim.kind`, `claim.output`, the selected singular `claim.assertion`, and that parent's `evidence` in the entry. Repeat the parent context for each assertion so no question depends on a sibling entry. Generate a question for every composite reference, not just for each parent id.
 
+For GUARANTEED_NEXT_ACTIONS, key each dynamic entry by its candidate id and include only `outcome`, `trigger`, `action`, and direct `evidence`. Do not include the handoff's private `necessity_basis`: the two questions separately recognize (a) whether the original request and observed trigger entail the action with no plausible authorized alternative and (b) whether the action remains unfinished. The action is incomplete only when both answers pass their required thresholds. Do not add explicit sequences, broad phase progress, future triggers, optional polish, speculative dependencies, or actions that need new authorization.
+
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables` and `claims` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including a dynamic claims list emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and optional fields for each enabled check, including `deliverables`, `claims`, and `guaranteed_next_actions`. Keep this one description true for every combination of enabled checks, including dynamic lists emitted by the handoff.
 
 Before you ship:
 
@@ -465,6 +467,8 @@ def _judge(self, check, handoff, decision):
 8. Return `JevDoneResult(check=…, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)`.
 
 For CLAIMS, use `handoff.claims.assertion_ids()` as the expected answer ids in steps 2, 4, and 5. The check passes when that assertion-id list is empty and asks no question in that case. Keep `answers` keyed by each `parent_id.assertion_id` reference, but set `incomplete` to parent claim ids when any assertion under that parent falls below threshold. Return unavailable if the handoff section or any expected Jev answer is missing.
+
+For GUARANTEED_NEXT_ACTIONS, expect two answer names for every candidate id, one under each registered question key. An absent action list passes without Jev. If any expected answer is missing, the check is unavailable and fails open. Add a candidate id to `incomplete` only when both its necessity answer and its unfinished answer reach threshold; a false or unavailable necessity judgment must never trigger continuation.
 
 `check()` then records each result through `self.response.done(result)` and returns only the failed ones. You do not touch `check()`.
 
@@ -574,6 +578,7 @@ Your change must not raise any lint baseline count.
 - **Generative agents write, and Jev recognizes.** Listing items, writing "done when" conditions, and compiling evidence are generation, done by `JevRunState` and `JevHandoff`. Jev only answers yes or no per item. Counting, "all of them", and thresholds belong in code.
 - **One Jev request per finish attempt.** Every enabled check's questions share one state and one request. Question names `"<key>.<item_id>"` keep the answers apart. Never add a second `DecisionModelRunner` call.
 - **One item per question, and the focus rule names the id.** This keeps each answer tied to one item, so Focus names the exact missing part. The brief must say to judge only the named entry.
+- **Independent judgments stay independent.** GUARANTEED_NEXT_ACTIONS uses two questions per candidate; a candidate can continue only when necessity passes and unfinished status fails. Never use the handoff's claimed necessity rationale as proof.
 - **The shared state must describe itself truthfully** for every combination of enabled checks (step 11).
 - **`evidence` goes to Jev, and `missing` goes to the main agent.** Never the reverse.
 - **The run state is written once, from the request only, before any work.** It is the fixed reference for checks with request-derived items; never predict final-answer claims there.

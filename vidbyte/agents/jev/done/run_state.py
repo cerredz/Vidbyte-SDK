@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/done/run_state.py
 
-PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
+PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed. Guaranteed-next-action candidates require separate necessity and unfinished answers.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
-COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
-KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims and observed-trigger action candidates that do not exist until after work are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write candidate state and evidence; Jev recognizes necessity and completion independently.
+COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their candidates and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain(). Checks with multiple questions must keep independent judgments and only continue under their explicit combination rule.
+KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or empty post-run candidate list passes with nothing to ask. An action candidate continues only when both its necessity and unfinished judgments pass their required sides. Like the JevAgent that owns it, one instance serves one run at a time.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-guaranteed-next-actions.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -24,6 +24,7 @@ from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_DONE_ACTION_FIELD,
     JEV_DONE_CLAIM_ASSERTION_FIELD,
     JEV_DONE_CLAIM_ASSERTION_ID_FIELD,
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
@@ -43,7 +44,11 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD,
+    JEV_DONE_OUTCOME_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_TRIGGER_FIELD,
+    JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
@@ -230,6 +235,22 @@ class JevRunState(BaseAgent):
                             JEV_DONE_EVIDENCE_FIELD: claim.evidence,
                         }
                 return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
+            case JevDoneCheck.GUARANTEED_NEXT_ACTIONS:
+                # Necessity rationale is intentionally absent: Jev sees the user request and observed evidence itself.
+                actions = handoff.guaranteed_next_actions
+                if actions is None:
+                    return {}, ()
+                questions = JevDoneRegistry.questions(check)
+                entries = {
+                    item.id: {
+                        JEV_DONE_OUTCOME_FIELD: item.outcome,
+                        JEV_DONE_TRIGGER_FIELD: item.trigger,
+                        JEV_DONE_ACTION_FIELD: item.action,
+                        JEV_DONE_EVIDENCE_FIELD: item.evidence,
+                    }
+                    for item in actions.actions
+                }
+                return {JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD: entries}, tuple(question.to_question(identifier) for question in questions for identifier in actions.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -242,6 +263,9 @@ class JevRunState(BaseAgent):
                 # Each extracted final-answer claim must independently reach the support threshold, so one
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
+            case JevDoneCheck.GUARANTEED_NEXT_ACTIONS:
+                # A candidate can trigger continuation only when necessity and unfinished status both pass.
+                return self._guaranteed_next_actions(handoff, decision)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -317,6 +341,38 @@ class JevRunState(BaseAgent):
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
+    def _guaranteed_next_actions(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Continue only for candidates Jev independently marks necessary and unfinished."""
+        # @intent necessity-is-a-hard-continuation-gate
+        # A follow-on candidate is not a command: continuation could add work the user never authorized if
+        # likely or customary work were mistaken for necessary work. Continue only when the request and
+        # observed trigger entail the action and evidence shows it remains incomplete. A false or missing
+        # necessity answer always leaves the main agent's answer standing.
+        candidates = None if handoff is None else handoff.guaranteed_next_actions
+        if candidates is None:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        if not candidates.actions:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        names = tuple(question.name(identifier) for question in (necessary, unfinished) for identifier in candidates.ids())
+        answers = {name: decision.answers[name] for name in names if name in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, names, 0.0)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        action_scores = {
+            identifier: min(
+                verdict.answers[necessary.name(identifier)].probabilities[JEV_NOUL_TRUE],
+                verdict.answers[unfinished.name(identifier)].probabilities[JEV_NOUL_TRUE],
+            )
+            for identifier in candidates.ids()
+        }
+        incomplete = tuple(identifier for identifier, score in action_scores.items() if score >= threshold)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=max(action_scores.values()), passed=not incomplete, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.

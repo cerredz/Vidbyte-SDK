@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-guaranteed-next-actions.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -106,6 +106,21 @@ class JevDoneContinuation(JevContinuation):
                     assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.GUARANTEED_NEXT_ACTIONS:
+                # Only candidates that passed necessity and failed the separate completion judgment reach here.
+                questions = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+                necessary, unfinished = questions
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.guaranteed_next_actions
+                actions = {} if handoff is None else {item.id: item for item in handoff.actions}
+                failed = [unfinished.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    item = actions[identifier]
+                    necessary_yes = result.answers[necessary.name(identifier)].probabilities[JEV_NOUL_TRUE]
+                    unfinished_yes = result.answers[unfinished.name(identifier)].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- Necessity passed: {necessary.instructions.question.format(item=identifier)} Jev P(yes) = {necessary_yes:.2f}; unfinished confirmed: {unfinished.instructions.question.format(item=identifier)} Jev P(yes) = {unfinished_yes:.2f}. Evidence gap: {item.missing}")
+                    focus.append(f"- Requested outcome: {item.outcome}\n  Observed trigger: {item.trigger}\n  Necessary action: {item.action}\n  Evidence gap: {item.missing}")
                 return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
