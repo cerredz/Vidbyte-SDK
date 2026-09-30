@@ -127,6 +127,24 @@ agent may stop). `max_iterations` / `max_tokens` / `max_tool_calls` are **ceilin
 
 **Process skill:** follow `skills/output-contracts/SKILL.md` end-to-end before opening a PR.
 
+### Add or Change a Trace Shape Prebuilt
+
+**Example:** Adding a new `ProviderTraceTranslator` for a company's published
+trace format (e.g. the OTel GenAI or OpenInference shapes), or adding a new
+destination transport under `vidbyte/providers/tracing/`.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/trace-shape-prebuilts/SKILL.md` | Process steps, the implemented-shapes table, invariants |
+| `vidbyte/trace/providers/<company>.py` | New translator implementing `ProviderTraceTranslator` |
+| `vidbyte/trace/base.py` | `_TraceFactory.resolve_translator` entry, `Trace.<company>(...)` / `Trace.<company>_session(...)` helpers |
+| `vidbyte/providers/tracing/` | New destination transport only if the destination cannot ride on the existing `OTelTracer` |
+| `docs/design/otel-genai-and-openinference-trace-shapes.md` or a new design doc | Non-trivial architecture changes |
+
+**Process skill:** follow `skills/trace-shape-prebuilts/SKILL.md` end-to-end before opening a PR.
+
 ### Add or Change Repository Artifacts
 
 **Example:** Adding or regenerating `artifacts/file_index.md`.
