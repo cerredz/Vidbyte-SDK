@@ -121,7 +121,7 @@ class JevDoneContinuation(JevContinuation):
                     item = obligations[identifier]
                     observation = observations[identifier]
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
-                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {observation.missing}")
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev P(yes) = {yes:.2f}; this obligation remains incomplete. Still missing: {observation.missing}")
                     position = "No successful traversal position is recorded." if observation.last_position is None else f"Last known position: {observation.last_position}."
                     focus.append(f"- Collection: {item.collection}. Scope: {item.scope}. {position} Next step: {observation.next_step} Exhaustion condition: {item.exhaustion_condition}")
                 return "\n".join(failed), "\n".join(focus)
