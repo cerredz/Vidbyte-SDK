@@ -46,6 +46,7 @@ print(alignment.passed, alignment.incomplete)
 ```
 
 `agent.response.handoff.report_action_alignment` contains the frozen plan, execution, final-account, relevance, evidence, and missing records for that finish attempt. `JevDoneCheck.CLAIMS` remains the separate check for individual factual assertions in the final answer.
+With `JevDoneCheck.PROBLEMS_RESOLVED`, the handoff derives one item for every problem observed during that run and one required item for completion of the original request after repairs. Jev judges every item in the same combined request; a failed problem sends the main agent back to repair and revalidate it, then return to the original request and finish remaining work. The check is opt-in, runs in the same loop, respects the same continuation cap, and fails open when evidence or Jev is unavailable.
 
 Do not add a generic `decisions` collection or runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions inside this package.
 
