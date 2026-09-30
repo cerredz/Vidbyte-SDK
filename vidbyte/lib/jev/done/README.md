@@ -10,7 +10,22 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 
 - `multi_part.py` holds the multi-part check's question, asked once per request-defined deliverable; `to_question(id)` names the deliverable id in the question and its name.
 - `claims.py` holds the CLAIMS check's question, asked once per concrete, checkable factual assertion extracted from the final answer by JevHandoff; each claim entry contains the assertion and its tool-call evidence, or an explicit lack of evidence.
+- `assumptions_reconciled.py` holds the ASSUMPTIONS_RECONCILED question, asked once per explicit, consequential assumption that later run evidence materially changes; it judges whether dependent work was observably revised or made irrelevant.
 - Every question uses the shared state description in `multi_part.py`; `deliverables` and `claims` are present only when their respective checks are enabled, so the description stays true when checks are combined.
+- `assumptions_reconciled` is present only when its check is enabled, holds post-run-derived assumption entries, and keeps the handoff's `missing` summary out of Jev's evidence state.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.
 - The logic that writes the run state and the handoff, asks Jev, and sends the main agent back to work is `JevRunState` and `JevHandoff` in `vidbyte/agents/jev/done/`.
+
+## Enable assumption reconciliation
+
+The check is opt-in through the existing `JevContinualSettings.checks` API. It extracts only explicit, consequential assumptions that later concrete run evidence changes, and judges downstream reconciliation separately from whether tool errors were repaired.
+
+```python
+from vidbyte import JevContinualSettings, JevDoneCheck
+
+continuation = JevContinualSettings(
+    checks=(JevDoneCheck.ASSUMPTIONS_RECONCILED,),
+    max_continuations=2,
+)
+```

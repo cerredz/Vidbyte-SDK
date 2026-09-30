@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles evidence for request-derived checks, and extracts checkable final-answer claims for CLAIMS.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles evidence for request-derived checks, and extracts post-run claims and changed assumptions.
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
-ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims are generated from the final answer here because their item list does not exist before the main agent works.
+ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims and assumption changes are extracted after the work because their item lists do not exist before the main agent works.
 COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
-KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims have no pre-run id list; their ids must be valid and unique within the generated claim section. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims and changed assumptions have no pre-run id list; their ids must be valid and unique within their generated sections. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -29,6 +29,9 @@ from vidbyte.context.primitives import (
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
+    JevAssumptionEvidence,
+    JevAssumptionsReconciledEvidence,
+    JevAssumptionsReconciledPayload,
     JevClaimAssertion,
     JevClaimContext,
     JevClaimEvidence,
@@ -61,7 +64,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload})
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -166,7 +169,26 @@ class JevHandoff(BaseAgent):
                 )
                 for item in claims_section.claims
             ))
-        return JevHandoffRecord(multi_part=multi_part, claims=claims, usage=self.get_usage())
+        assumptions_reconciled = None
+        assumptions_section = getattr(payload, JevDoneCheck.ASSUMPTIONS_RECONCILED.value, None)
+        if JevDoneCheck.ASSUMPTIONS_RECONCILED in self.checks:
+            if not isinstance(assumptions_section, JevAssumptionsReconciledPayload):
+                return None
+            # These candidates are created after work, so validate unique ids here rather than matching a pre-run list.
+            assumptions_reconciled = JevAssumptionsReconciledEvidence(tuple(
+                JevAssumptionEvidence(
+                    item.id,
+                    item.original_assumption.strip(),
+                    item.original_basis.strip(),
+                    item.later_observation.strip(),
+                    item.affected_work.strip(),
+                    item.revision.strip(),
+                    item.evidence.strip(),
+                    item.missing.strip(),
+                )
+                for item in assumptions_section.items
+            ))
+        return JevHandoffRecord(multi_part=multi_part, claims=claims, assumptions_reconciled=assumptions_reconciled, usage=self.get_usage())
 
 
 __all__ = ["JevHandoff"]

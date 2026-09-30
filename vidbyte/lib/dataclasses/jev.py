@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest fro
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -782,6 +782,31 @@ class JevClaimsEvidencePayload(JevSectionPayload):
     claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every parent claim containing a concrete, independently checkable factual assertion from the final answer. Give each entry a rich claim context and split independent facts into separate assertions so each receives one Jev judgment. Pair the parent with relevant run evidence, or state that no supporting tool call was found. Give each parent and its assertions stable unique ids within their respective scopes. Return an empty list only when the final answer contains no checkable factual claims.")
 
 
+class JevAssumptionEvidencePayload(BaseModel):
+    """One consequential assumption explicitly used, then contradicted by later run evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this changed assumption a stable lowercase id made of letters, digits, and underscores, beginning with a letter and no longer than sixty-four characters. Choose an id that distinguishes this premise from every other qualifying premise in the same handoff. Use the same id in the shared Jev state and in continuation feedback. Do not use a number alone or include punctuation other than underscores. This id links one Jev answer to exactly one assumption entry.")
+    original_assumption: str = Field(min_length=1, description="State the specific premise the main agent explicitly used to guide consequential work before later evidence changed it. Ground the wording in an early main-agent response or tool context that is visible in this run. Preserve its scope and certainty as the agent expressed them, without upgrading a tentative possibility into a fact. Do not infer a hidden belief from a plan, implementation choice, or outcome alone. Include an item only when the premise was used and later run evidence concretely contradicts or materially changes it.")
+    original_basis: str = Field(min_length=1, description="Describe the visible information that the main agent gave as the basis for the original assumption, quoting or closely paraphrasing its early response or tool context. Identify where that basis appears in the run so the item can be traced to an observable source. Keep the original basis distinct from later observations, even when both concern the same subject. Do not supply a plausible rationale that the agent never stated. If the run shows no explicit basis, explain that the basis was not stated while preserving only the directly visible assumption and use of it.")
+    later_observation: str = Field(min_length=1, description="Report the concrete observation later in this run that contradicts or materially changes the original assumption. Identify its source, such as a tool output, command result, document content, or later response grounded in an observation. State what the observation shows without interpreting whether the downstream work was repaired. A plan change, another unverified statement, or a possibility alone is not a concrete observation. Include the item only when this later observation changes the premise that guided the affected work.")
+    affected_work: str = Field(min_length=1, description="Name the downstream decision, artifact, conclusion, or action that depended on the original assumption. Ground the dependency in observable run context rather than assuming that work was related merely because it happened later. Identify the concrete target, such as a chosen approach, edited file, answer conclusion, or requested operation, when the run makes one visible. If evidence later indicates that the work no longer matters, preserve that work here so Jev can judge whether it was made irrelevant. Do not omit affected work because it was subsequently changed, left alone, or abandoned.")
+    revision: str = Field(min_length=1, description="Report what the run shows happened to the affected work after the later observation, using actions and results rather than a verdict. Include observable edits, changed decisions, corrected conclusions, follow-up checks, unchanged work, or an explicit reason the work became irrelevant when the run supplies it. Acknowledging the changed premise is not itself evidence that dependent work was revisited. Do not state that the assumption was reconciled, that repair was adequate, or that revalidation is required. Preserve unresolved or absent downstream action as an observation for Jev to judge.")
+    evidence: str = Field(min_length=1, description="Gather the relevant run observations for this one assumption, with source labels and in the order they occurred. Include the early response or tool context that made the premise explicit and consequential, the later concrete observation that changed it, and any later action or result concerning dependent work. Quote or closely reproduce enough context for a checker who sees only these fields to recognize whether the work was revisited. Report contradictions, unchanged outcomes, and missing observations faithfully without offering a completion verdict. The final answer's assertion that work was fixed is not evidence unless the run also shows the action or result.")
+    missing: str = Field(min_length=1, description="Write a separate, actionable summary for the main agent of what the run does not show about reconciling this changed assumption with its dependent work. Name the decision, artifact, conclusion, or consequence that appears unrevisited, or say that the evidence shows no dependent work remained relevant. Keep this field separate from the quoted observations in evidence. Do not let this summary decide Jev's answer, and do not include it in the state sent to Jev. When the run shows an observable revision or that the work is irrelevant, state what observation supports that summary without claiming more than the run shows.")
+
+
+class JevAssumptionsReconciledPayload(JevSectionPayload):
+    """The post-run assumptions section: materially changed premises and their downstream work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The assumptions section records consequential premises the main agent explicitly used and later concrete run evidence contradicted or materially changed. It is derived after the work because only the main agent's responses and tool context show which premises actually guided this run. Include each qualifying premise whether dependent work was later revised, left unchanged, or became irrelevant, because those outcomes are judged separately. Exclude uncertainty or lack of verification by itself, and exclude plan changes without a concretely changed premise. Report the assumption, its basis, the later observation, affected work, subsequent actions, and source evidence without deciding whether the work was reconciled."
+
+    items: list[JevAssumptionEvidencePayload] = Field(description="Return one item for each materially consequential assumption that the run visibly shows the main agent used and later concrete run evidence contradicted or materially changed. Require an explicit early main-agent response or tool-context source for the assumption and an identifiable downstream decision, artifact, conclusion, or action that depended on it. Include the item regardless of whether later work was revised, unchanged, abandoned, or made irrelevant; the separate Jev question judges that outcome. Do not include an assumption that was merely uncertain, unverified, or considered as a possibility, and do not treat a plan change alone as evidence of a mistaken premise. Return an empty list only when the run contains no qualifying changed assumption, not because every qualifying assumption was reconciled.")
+
+
 class JevDeliverableId:
     """Shared validation for the stable item identifiers used by done-check records and questions."""
 
@@ -998,14 +1023,50 @@ class JevClaimsEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevAssumptionEvidence:
+    """One explicitly used assumption later contradicted, its dependent work, and run observations."""
+
+    id: str
+    original_assumption: str
+    original_basis: str
+    later_observation: str
+    affected_work: str
+    revision: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="assumption evidence id")
+        for field_name in ("original_assumption", "original_basis", "later_observation", "affected_work", "revision", "evidence", "missing"):
+            JevText.require(getattr(self, field_name), field_name=f"{field_name} of assumption {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevAssumptionsReconciledEvidence:
+    """The post-run list of materially changed assumptions, with one stable item id per premise."""
+
+    items: tuple[JevAssumptionEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or not all(isinstance(item, JevAssumptionEvidence) for item in self.items):
+            raise JevValidation.error("assumptions evidence", "a tuple of JevAssumptionEvidence values", self.items)
+        JevDeliverableId.require_unique(self.ids(), field_name="assumptions evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every changed assumption id in handoff order."""
+        return tuple(item.id for item in self.items)
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part`, `claims`, and `assumptions_reconciled` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
     claims: JevClaimsEvidence | None = None
+    assumptions_reconciled: JevAssumptionsReconciledEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -1014,6 +1075,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
+        if self.assumptions_reconciled is not None and not isinstance(self.assumptions_reconciled, JevAssumptionsReconciledEvidence):
+            raise JevValidation.error("handoff assumptions_reconciled", "a JevAssumptionsReconciledEvidence or None", self.assumptions_reconciled)
 
 
 @dataclass(frozen=True)
@@ -1064,8 +1127,9 @@ class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
-    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
-    parent claims for CLAIMS; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART, parent
+    claims for CLAIMS, and changed assumption ids for ASSUMPTIONS_RECONCILED; CLAIMS answers use
+    `parent_id.assertion_id` keys so each assertion stays atomic.
     With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
@@ -1163,23 +1227,26 @@ class JevAgentResponse:
 __all__ = [
     "JevAgentResponse",
     "JevAnswer",
+    "JevAssumptionEvidence",
+    "JevAssumptionsReconciledEvidence",
+    "JevAssumptionsReconciledPayload",
     "JevBrief",
-    "JevClarification",
-    "JevClarificationPayload",
-    "JevClarifyingQuestion",
-    "JevClarifyingQuestionPayload",
-    "JevClaimEvidence",
-    "JevClaimEvidencePayload",
     "JevClaimAssertion",
     "JevClaimAssertionPayload",
     "JevClaimContext",
     "JevClaimContextPayload",
+    "JevClaimEvidence",
+    "JevClaimEvidencePayload",
     "JevClaimIdentity",
     "JevClaimIdentityPayload",
     "JevClaimScope",
     "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
+    "JevClarification",
+    "JevClarificationPayload",
+    "JevClarifyingQuestion",
+    "JevClarifyingQuestionPayload",
     "JevContent",
     "JevCriterion",
     "JevDecisionRecord",

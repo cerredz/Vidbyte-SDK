@@ -2,10 +2,10 @@
 
 PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
+ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims and changed assumptions that do not exist until after the work are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -24,6 +24,8 @@ from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_DONE_AFFECTED_WORK_FIELD,
+    JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD,
     JEV_DONE_CLAIM_ASSERTION_FIELD,
     JEV_DONE_CLAIM_ASSERTION_ID_FIELD,
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
@@ -43,7 +45,11 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_LATER_OBSERVATION_FIELD,
+    JEV_DONE_ORIGINAL_ASSUMPTION_FIELD,
+    JEV_DONE_ORIGINAL_BASIS_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_REVISION_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
@@ -230,6 +236,25 @@ class JevRunState(BaseAgent):
                             JEV_DONE_EVIDENCE_FIELD: claim.evidence,
                         }
                 return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
+            case JevDoneCheck.ASSUMPTIONS_RECONCILED:
+                # Each post-run item pairs one explicitly used premise with its later contradiction, dependent
+                # work, subsequent observations, and evidence; the handoff's `missing` summary stays out of Jev.
+                assumptions = handoff.assumptions_reconciled
+                if assumptions is None or not assumptions.items:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.ASSUMPTIONS_RECONCILED)
+                entries = {
+                    item.id: {
+                        JEV_DONE_ORIGINAL_ASSUMPTION_FIELD: item.original_assumption,
+                        JEV_DONE_ORIGINAL_BASIS_FIELD: item.original_basis,
+                        JEV_DONE_LATER_OBSERVATION_FIELD: item.later_observation,
+                        JEV_DONE_AFFECTED_WORK_FIELD: item.affected_work,
+                        JEV_DONE_REVISION_FIELD: item.revision,
+                        JEV_DONE_EVIDENCE_FIELD: item.evidence,
+                    }
+                    for item in assumptions.items
+                }
+                return {JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD: entries}, tuple(question.to_question(identifier) for identifier in assumptions.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -242,6 +267,10 @@ class JevRunState(BaseAgent):
                 # Each extracted final-answer claim must independently reach the support threshold, so one
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
+            case JevDoneCheck.ASSUMPTIONS_RECONCILED:
+                # A consequential premise can stay embedded in downstream work after concrete run evidence
+                # changes it; Jev recognizes whether later actions reconciled that work, one premise at a time.
+                return self._assumptions_reconciled(handoff, decision)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -317,6 +346,28 @@ class JevRunState(BaseAgent):
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
+    def _assumptions_reconciled(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        # A missing handoff or section makes the check unavailable and fails open; an empty item list needs no question.
+        if handoff is None or handoff.assumptions_reconciled is None:
+            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None, available=False)
+        items = handoff.assumptions_reconciled
+        if not items.items:
+            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None)
+        # Missing credentials or a failed combined request leaves the main agent's answer standing.
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.ASSUMPTIONS_RECONCILED)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.ASSUMPTIONS_RECONCILED)
+        # The combined reply holds all enabled checks; select this check's answers by its question name per assumption id.
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in items.ids() if question.name(identifier) in decision.answers}
+        # The threshold is both the mean threshold and veto, so no unresolved changed premise is averaged away.
+        verdict = DecisionModelHelper.score_noul(answers, items.ids(), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None, available=False)
+        incomplete = tuple(identifier for identifier in items.ids() if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.

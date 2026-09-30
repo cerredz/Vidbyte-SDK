@@ -194,6 +194,38 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
+### JevAgent assumption reconciliation
+
+JevAgent continuation checks are opt-in. `ASSUMPTIONS_RECONCILED` adds a finish check for explicit, consequential assumptions that later run evidence changes; it asks whether dependent work was revisited, including whether the work became irrelevant. It does not treat an unverified premise, a plan change alone, or a tool error as a qualifying assumption.
+
+```python
+from vidbyte import (
+    JevAgent,
+    JevAgentSettings,
+    JevContinualSettings,
+    JevDoneCheck,
+    JevRuntimeSettings,
+)
+
+agent = JevAgent(
+    JevAgentSettings(
+        name="researcher",
+        system_prompt="Work from observed evidence and report your conclusions.",
+        provider="openai",
+        model_name="gpt-4.1",
+    ),
+    JevRuntimeSettings(
+        continual=JevContinualSettings(
+            checks=(JevDoneCheck.ASSUMPTIONS_RECONCILED,),
+            max_continuations=2,
+        ),
+    ),
+)
+
+reply = agent.run("Inspect the available source and summarize the result.")
+print(agent.response.done[JevDoneCheck.ASSUMPTIONS_RECONCILED])
+```
+
 ### Codex Harness Agent
 
 Install the optional Codex integration when Codex should own the inner coding-agent loop while Vidbyte supplies the agent-facing configuration and result contract:

@@ -30,7 +30,7 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `response.py` (`JevResponse`) is the only writer of `JevAgentResponse`. Features report outcomes through its methods, never through result metadata.
 - `vidbyte/lib/jev/presets.py` (`JevPresets`) owns the preflight flags a user enables through `JevRuntimeSettings.preflight`, and the fixed question keys and threshold of each fixed-question flag.
 - `vidbyte/lib/jev/preflight/` is the canonical home of every fixed preflight question, one dataclass per question (`clarity.py`), the specialist Choice question (`specialist.py`), and `JevPreflightRegistry`, the registry over them (`get`, `questions`, `specialists`, `validate`). The flag and question-key enums live in `vidbyte/lib/enums/jev.py`; the preflight records live in `vidbyte/lib/dataclasses/jev.py`.
-- `vidbyte/lib/jev/done/` holds every fixed done question (`multi_part.py`, `claims.py`) and `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`). The structured-reply payloads (every field described in 4–6 sentences), the run-state, handoff, claim, and done records, and `JevDoneQuestion` live in `vidbyte/lib/dataclasses/jev.py`; `JevDoneCheck` and `JevDoneQuestionKey` live in `vidbyte/lib/enums/jev.py`.
+- `vidbyte/lib/jev/done/` holds every fixed done question (`multi_part.py`, `claims.py`, `assumptions_reconciled.py`) and `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`). The structured-reply payloads (every field described in 4–6 sentences), the run-state, handoff, claim, changed-assumption, and done records, and `JevDoneQuestion` live in `vidbyte/lib/dataclasses/jev.py`; `JevDoneCheck` and `JevDoneQuestionKey` live in `vidbyte/lib/enums/jev.py`.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`), model listing (`alist_models`), and noul scoring against a threshold (`score_noul`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
@@ -55,7 +55,7 @@ Load `skills/jev-continuation/SKILL.md` first; it explains each step below in de
 4. Add sections to the schemas that carry the check's items and convert them in the relevant `_record` methods. Add one commented case to `JevRunState._section` (the shared state and questions), `JevRunState._judge`, and `JevDoneContinuation._explain` (the failed questions and focus the main agent reads).
 5. Extend `tests/test_jev_done.py`.
 
-**Post-run-derived items:** CLAIMS cannot add a predicted list to `JevRunStateRecord`, because concrete claims do not exist until the main agent writes its final answer. Instead, add its section and typed records to `JevHandoff`, validate unique ids there, then build one question per handoff claim in `JevRunState._section`. The continuation focus must include only claims Jev marked unsupported and each claim's evidence gap.
+**Post-run-derived items:** CLAIMS cannot add a predicted list to `JevRunStateRecord`, because concrete claims do not exist until the main agent writes its final answer. ASSUMPTIONS_RECONCILED likewise derives candidates in `JevHandoff`: it includes only explicit, consequential premises later contradicted by concrete run evidence, whether dependent work was revised, left unchanged, or made irrelevant. The handoff validates unique ids, keeps `missing` separate from Jev evidence, and `JevRunState._section` builds one question per item. Continuation feedback focuses only on items Jev marked unsupported.
 
 ## Change workflow
 
@@ -93,7 +93,7 @@ settings = JevAgentSettings(
     model_name="gpt-4.1",
     agents=(JevSpecialist("schema", "Changes to the database schema and its migrations.", schema),),
 )
-agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,), max_continuations=2)))
+agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART, JevDoneCheck.ASSUMPTIONS_RECONCILED), max_continuations=2)))
 ```
 
 The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it, and `agent.response.done[JevDoneCheck.MULTI_PART]` says whether every requested deliverable was shown produced in full.

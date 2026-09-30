@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -86,6 +86,8 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 JEV_MULTI_PART_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
 JEV_CLAIMS_THRESHOLD: float = 0.85
+# Starting P(yes) threshold and veto for observable reconciliation of consequential assumptions; not calibrated.
+JEV_ASSUMPTIONS_RECONCILED_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -111,6 +113,13 @@ JEV_DONE_CLAIM_ASSERTION_ID_FIELD: str = "id"
 JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: str = "statement"
 JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: str = "completion_criteria"
 JEV_DONE_CLAIM_ASSERTION_SEPARATOR: str = "."
+# The assumption check is post-run-derived and carries one entry per explicit, consequential premise later contradicted.
+JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD: str = "assumptions_reconciled"
+JEV_DONE_ORIGINAL_ASSUMPTION_FIELD: str = "original_assumption"
+JEV_DONE_ORIGINAL_BASIS_FIELD: str = "original_basis"
+JEV_DONE_LATER_OBSERVATION_FIELD: str = "later_observation"
+JEV_DONE_AFFECTED_WORK_FIELD: str = "affected_work"
+JEV_DONE_REVISION_FIELD: str = "revision"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -127,6 +136,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_ASSUMPTIONS_RECONCILED_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -143,6 +153,12 @@ __all__ = [
     "JEV_DONE_CLAIM_ASSERTION_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_ID_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_SEPARATOR",
+    "JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD",
+    "JEV_DONE_ORIGINAL_ASSUMPTION_FIELD",
+    "JEV_DONE_ORIGINAL_BASIS_FIELD",
+    "JEV_DONE_LATER_OBSERVATION_FIELD",
+    "JEV_DONE_AFFECTED_WORK_FIELD",
+    "JEV_DONE_REVISION_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD",
     "JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD",
     "JEV_DONE_CLAIMS_FIELD",
