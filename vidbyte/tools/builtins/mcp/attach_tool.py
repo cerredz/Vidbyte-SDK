@@ -21,7 +21,13 @@ from typing import TYPE_CHECKING, Any
 from vidbyte.lib.errors import McpError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.mcp.types import McpToolPermission
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.agents.mixins import McpAttachableMixin
@@ -53,20 +59,35 @@ class AttachMcpServerTool(BaseTool):
         return ToolSpec(
             name="attach_mcp_server",
             description=(
-                "Attach a new MCP server subprocess to this agent. "
+                "Attach a new MCP server to this agent, either a remote server by its https url or a local server by its launch command. "
                 "The server's tools will be available to this agent starting from the next tool call iteration. "
-                "Use search_mcp_servers first to find the right server and its command."
+                "Use search_mcp_servers first to find the right server; pass its 'url' field when it has one. "
+                "Give exactly one of url or command, never both."
             ),
             parameters=(
+                ToolParameter(
+                    name="url",
+                    type="string",
+                    description=(
+                        "The https Streamable HTTP endpoint of a remote MCP server, such as the 'url' field returned by search_mcp_servers. "
+                        "No local process is started when you attach by url. "
+                        "Servers that require a login or an API key refuse the connection and return an error. "
+                        "Leave this empty when you attach by command."
+                    ),
+                    required=False,
+                    default=None,
+                ),
                 ToolParameter(
                     name="command",
                     type="string",
                     description=(
-                        "JSON-encoded array of command parts to launch the MCP server, "
-                        "e.g. '[\"npx\", \"-y\", \"@modelcontextprotocol/server-filesystem\", \"/tmp\"]'. "
-                        "Use the 'command' field returned by search_mcp_servers directly."
+                        "JSON-encoded array of command parts to launch a local MCP server, "
+                        "e.g. '[\"npx\", \"-y\", \"@modelcontextprotocol/server-filesystem@2025.8.21\", \"/tmp\"]'. "
+                        "The command runs on this machine, so only use a package name you have verified, pinned to a version. "
+                        "Leave this empty when you attach by url."
                     ),
-                    required=True,
+                    required=False,
+                    default=None,
                 ),
                 ToolParameter(
                     name="name",
@@ -103,14 +124,10 @@ class AttachMcpServerTool(BaseTool):
                 metadata={"source": "mcp_attach"},
             )
 
-        raw_command = call.arguments.get("command", "")
-        command = self._parse_command(str(raw_command))
-        if command is None:
-            return ToolResult.error(
-                self.name,
-                self._last_parse_error,
-                metadata={"source": "mcp_attach"},
-            )
+        target = self._parse_target(call)
+        if isinstance(target, str):
+            return ToolResult.error(self.name, target, metadata={"source": "mcp_attach"})
+        url, command = target
 
         name: str | None = call.arguments.get("name") or None
         if name is not None:
@@ -126,12 +143,10 @@ class AttachMcpServerTool(BaseTool):
             timeout = 30.0
 
         try:
-            await self._agent.attach_mcp_server(
-                command=command,
-                name=name,
-                permission=permission,
-                timeout=timeout,
-            )
+            if url is None:
+                await self._agent.attach_mcp_server(command=command, name=name, permission=permission, timeout=timeout)
+            else:
+                await self._agent.attach_mcp_server(name=name, permission=permission, timeout=timeout, url=url)
         except McpError as exc:
             return ToolResult.error(
                 self.name,
@@ -147,7 +162,7 @@ class AttachMcpServerTool(BaseTool):
 
         handles = self._agent.mcp_servers()
         handle = handles[-1] if handles else None
-        server_name = handle.name if handle else (name or " ".join(command[:2]))
+        server_name = handle.name if handle else (name or url or " ".join(command[:2]))
         tool_names = handle.tool_names if handle else ()
         summary = self._format_summary(server_name, tool_names)
         return ToolResult.success(
@@ -155,6 +170,20 @@ class AttachMcpServerTool(BaseTool):
             summary,
             metadata={"source": "mcp_attach", "tool_count": len(tool_names)},
         )
+
+    def _parse_target(self, call: ToolCall) -> tuple[str | None, list[str]] | str:
+        """Return (url, command) for exactly one attach target, or the error text to show the model."""
+        # @intent attach-exactly-one-target
+        # A url attaches a remote server and runs nothing locally; a command starts a local process. Accepting both
+        # would leave it ambiguous which one ran, so exactly one is required, and a url must be https.
+        url = str(call.arguments.get("url") or "").strip() or None
+        raw_command = call.arguments.get("command")
+        if url is not None and raw_command:
+            return "Give exactly one of url or command, not both."
+        if url is not None:
+            return (url, []) if url.startswith("https://") else "url must be an https:// MCP endpoint."
+        command = self._parse_command(str(raw_command or ""))
+        return (None, command) if command is not None else self._last_parse_error
 
     def _parse_command(self, raw: str) -> list[str] | None:
         """Parse a JSON-encoded command string into a validated list of strings."""

@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1141,6 +1141,7 @@ class JevAgentResponse:
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
     `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
+    `alignment` and `tool_alignment` hold the latest outcomes of the two optional alignment passes.
     """
 
     input: str = ""
@@ -1153,6 +1154,8 @@ class JevAgentResponse:
     handoff: JevHandoffRecord | None = None
     done: dict[JevDoneCheck, JevDoneResult] = field(default_factory=dict)
     continuations: int = 0
+    alignment: JevPromptAlignmentOutcome | None = None
+    tool_alignment: JevToolAlignmentOutcome | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -1160,7 +1163,50 @@ class JevAgentResponse:
         return self.clarification is not None
 
 
+class JevAlignmentOutcome(Protocol):
+    """Read-only common contract for Jev alignment outcomes without importing the agent layer into lib."""
+
+    @property
+    def status(self) -> str:
+        """Return the named outcome status."""
+        ...
+
+    @property
+    def detail(self) -> str | None:
+        """Return an optional explanation for the outcome."""
+        ...
+
+
+class JevPromptAlignmentOutcome(JevAlignmentOutcome, Protocol):
+    """Read-only prompt-alignment result contract exposed on JevAgent.response."""
+
+    system_prompt: str
+    gaps: tuple[Any, ...]
+    edits: tuple[Any, ...]
+    owner_actions: tuple[str, ...]
+    probabilities: Mapping[str, float]
+    usage: Any | None
+
+
+class JevToolAlignmentOutcome(JevAlignmentOutcome, Protocol):
+    """Read-only tool-alignment result contract exposed on JevAgent.response."""
+
+    needs: tuple[Any, ...]
+    attached: tuple[Any, ...]
+    rejected: tuple[Any, ...]
+    owner_actions: tuple[str, ...]
+    provider_errors: Mapping[str, str]
+    probabilities: Mapping[str, float]
+    usage: Any | None
+
+    def summary(self) -> str:
+        """Return the user-facing summary of tools attached for this request."""
+        ...
+
+
 __all__ = [
+    "JevAlignmentOutcome",
+    "JevPromptAlignmentOutcome",
     "JevAgentResponse",
     "JevAnswer",
     "JevBrief",
@@ -1210,6 +1256,7 @@ __all__ = [
     "JevRunStateRecord",
     "JevSectionPayload",
     "JevSpecialist",
+    "JevToolAlignmentOutcome",
     "JevText",
     "JevValidation",
     "TypeSafeWireQuestion",

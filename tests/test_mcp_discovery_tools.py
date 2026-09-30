@@ -1,4 +1,4 @@
-﻿"""Context Protocol Header
+"""Context Protocol Header
 
 Description:
     Tests for SearchMcpServersTool, AttachMcpServerTool, and agent binding integration.
@@ -6,7 +6,7 @@ Purpose:
     Verifies search result formatting, HTTP failure handling, command validation,
     permission mapping, agent binding lifecycle, and agent constructor binding.
 Architecture:
-    - FakeSmitheryTransport: Deterministic HTTP transport for search tests.
+    - FakeSmitheryTransport: Deterministic async HTTP transport for search and detail requests.
     - MockMcpAttachable: Minimal McpAttachableMixin stand-in for attach tests.
     - SearchMcpServersToolTests: All search tool scenarios.
     - AttachMcpServerToolTests: All attach tool scenarios.
@@ -26,7 +26,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from vidbyte.agents import BaseAgent
-from vidbyte.lib.errors import McpConnectionError
+from vidbyte.lib.constants.tool_catalogs import SMITHERY_REGISTRY_BASE_URL
+from vidbyte.lib.errors import McpConnectionError, ProviderResponseError
+from vidbyte.lib.http.transport import HttpResponse
 from vidbyte.tools import ToolCall, ToolStatus
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.mcp.search import SmitheryRegistryClient, SmitheryServerResult
@@ -39,24 +41,29 @@ from vidbyte.tools.mcp.types import McpServerHandle, McpToolPermission
 
 
 class FakeSmitheryTransport:
-    """Deterministic HTTP transport that returns configurable Smithery-shaped responses."""
+    """Deterministic async HTTP transport that answers Smithery search and detail requests."""
 
-    def __init__(self, status_code: int = 200, body: str = "", raise_exc: Exception | None = None) -> None:
-        """Configure the response this transport will return."""
+    def __init__(self, status_code: int = 200, body: str = "", raise_exc: Exception | None = None, details: Mapping[str, Mapping[str, Any]] | None = None) -> None:
+        """Configure the search response and optional per-server detail payloads."""
         self.status_code = status_code
         self.body = body
         self.raise_exc = raise_exc
+        self.details = dict(details or {})
         self.last_url: str = ""
+        self.urls: list[str] = []
 
-    def request(self, *, method: str, url: str, headers: Mapping[str, str], timeout_seconds: float = 10.0, **kwargs: Any) -> object:
-        """Return a fake HTTP response or raise a configured exception."""
+    async def request(self, *, method: str, url: str, headers: Mapping[str, str], **kwargs: Any) -> HttpResponse:
+        """Return the search body for /servers?..., a detail body for /servers/<name>, or raise a configured exception."""
         self.last_url = url
+        self.urls.append(url)
         if self.raise_exc is not None:
             raise self.raise_exc
-        response = MagicMock()
-        response.status_code = self.status_code
-        response.body = self.body
-        return response
+        path = url.split("?", 1)[0]
+        if path.startswith(f"{SMITHERY_REGISTRY_BASE_URL}/servers/"):
+            name = path.removeprefix(f"{SMITHERY_REGISTRY_BASE_URL}/servers/")
+            detail = self.details.get(name)
+            return HttpResponse(status_code=200 if detail is not None else 404, body=json.dumps(detail or {}), headers={})
+        return HttpResponse(status_code=self.status_code, body=self.body, headers={})
 
 
 def _smithery_body(servers: list[dict[str, Any]]) -> str:
@@ -172,18 +179,36 @@ class SearchMcpServersToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall("search_mcp_servers", {"query": "filesystem"}))
         self.assertEqual(result.status, ToolStatus.ERROR)
 
-    async def test_command_field_is_json_encoded_npx_string(self) -> None:
-        """[Silent Failure] command field must be a JSON-encoded string, not a raw Python list."""
-        body = _smithery_body([_make_server_entry("@modelcontextprotocol/server-filesystem", "Filesystem")])
-        tool = self._make_tool(body=body)
-        result = await tool.execute(ToolCall("search_mcp_servers", {"query": "filesystem"}))
+    async def test_results_carry_remote_url_and_never_a_derived_command(self) -> None:
+        """[Security] A Smithery name is not an npm package, so results carry the published url and no command."""
+        body = _smithery_body([_make_server_entry("github", "GitHub")])
+        detail = {
+            "qualifiedName": "github",
+            "displayName": "GitHub",
+            "connections": [
+                {
+                    "type": "http",
+                    "deploymentUrl": "https://github.run.tools",
+                    "configSchema": {"type": "object", "required": ["token"], "properties": {"token": {"type": "string", "x-from": {"header": "x-token"}}}},
+                }
+            ],
+            "tools": [{"name": "create_issue", "description": "Create an issue.", "inputSchema": {"type": "object"}}],
+        }
+        transport = FakeSmitheryTransport(body=body, details={"github": detail})
+        tool = SearchMcpServersTool(client=SmitheryRegistryClient(transport=transport))
+        result = await tool.execute(ToolCall("search_mcp_servers", {"query": "github"}))
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         items = json.loads(result.output)
-        self.assertEqual(len(items), 1)
-        # command must be a string, parseable as JSON
-        self.assertIsInstance(items[0]["command"], str)
-        parsed_command = json.loads(items[0]["command"])
-        self.assertEqual(parsed_command, ["npx", "-y", "@modelcontextprotocol/server-filesystem"])
+        self.assertNotIn("command", items[0])
+        self.assertEqual(items[0]["url"], "https://github.run.tools")
+        self.assertEqual(items[0]["required_config"], ["token"])
+
+    async def test_failed_detail_keeps_the_summary_without_url(self) -> None:
+        """[Hidden Failure] A server whose detail cannot be read is still listed, with url None."""
+        tool = self._make_tool(body=_smithery_body([_make_server_entry("@mcp/no-detail", "No detail")]))
+        result = await tool.execute(ToolCall("search_mcp_servers", {"query": "x"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertIsNone(json.loads(result.output)[0]["url"])
 
     async def test_limit_clamped_to_25(self) -> None:
         """[Edge Case] limit=100 must send pageSize=25 in the HTTP request."""
@@ -206,12 +231,12 @@ class SearchMcpServersToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["qualified_name"], "@mcp/valid-server")
 
-    def test_malformed_json_response_raises_value_error(self) -> None:
-        """[Hidden Assumption] SmitheryRegistryClient.search raises ValueError on malformed JSON."""
+    async def test_malformed_json_response_raises_provider_response_error(self) -> None:
+        """[Hidden Assumption] SmitheryRegistryClient.search raises the typed ProviderResponseError on malformed JSON."""
         transport = FakeSmitheryTransport(body="not json at all")
         client = SmitheryRegistryClient(transport=transport)
-        with self.assertRaises(ValueError):
-            client.search("something")
+        with self.assertRaises(ProviderResponseError):
+            await client.search("something")
 
     async def test_missing_displayname_falls_back_to_qualified_name(self) -> None:
         """[Silent Failure] Missing displayName must fall back to qualifiedName, not return None or empty."""
