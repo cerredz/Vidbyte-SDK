@@ -13,5 +13,7 @@ from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
 from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 
 __all__ = ["ClaimsSupportedQuestion", "DONE_STATE", "InputSetCoverageQuestion", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
+__all__ = ["DONE_STATE", "ClaimsSupportedQuestion", "JevDoneRegistry", "MultiPartDeliveredQuestion", "ProblemsResolvedQuestion"]

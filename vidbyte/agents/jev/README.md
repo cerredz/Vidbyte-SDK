@@ -23,6 +23,8 @@ Enable done checks with `JevRuntimeSettings(continual=JevContinualSettings(check
 
 Enable bounded input review with `JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.INPUT_SET_COVERAGE,)))`. After the run, inspect `agent.response.done[JevDoneCheck.INPUT_SET_COVERAGE]` and the target entries in `agent.response.run_state.input_set_coverage` and `agent.response.handoff.input_set_coverage`.
 
+With `JevDoneCheck.PROBLEMS_RESOLVED`, the handoff derives one item for every problem observed during that run and one required item for completion of the original request after repairs. Jev judges every item in the same combined request; a failed problem sends the main agent back to repair and revalidate it, then return to the original request and finish remaining work. The check is opt-in, runs in the same loop, respects the same continuation cap, and fails open when evidence or Jev is unavailable.
+
 Do not add a generic `decisions` collection or runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions inside this package.
 
 See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, `docs/design/jev-specialist-routing.md`, `docs/design/jev-multipart-done-criteria.md`, and `skills/jev-agent/SKILL.md`.

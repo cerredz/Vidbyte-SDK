@@ -52,6 +52,10 @@ class HandoffAgent(BaseAgent):
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, spec: Handoff) -> "HandoffAgent":
         """Build a handoff agent that reuses a source agent's runner and provider configuration."""
+        # @intent handoff-reuses-the-selected-runner
+        # The source agent may already own provider-specific runner state and authentication; copying its cache
+        # preserves that selected execution boundary. Rebuilding the runner can lose that state and make a
+        # handoff fail even though the source run already succeeded with the same configured provider.
         generator = cls(
             spec,
             provider=source_agent.runner_config.provider,
