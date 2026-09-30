@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines the closed Jev vocabularies: the TypeSafe question types, the preflight presets and done checks a JevAgent user can enable, and the key of every preflight and done question.
+PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, opt-in done checks, fixed question keys, and dynamic problem-item kinds.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on the presets when it acts on Jev's answers, and `vidbyte/agents/jev/done/` builds enabled done-check schemas and their questions.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, the record layer, and the tool layer all read it, and the lower two may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a question type only when TypeSafe documents one, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change. Add a preflight question key together with its question dataclass in `vidbyte/lib/jev/preflight/` and its preset's key list in `vidbyte/lib/jev/presets.py`. Add a done check with the run-state and handoff sections its items require, and its question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff rather than the pre-run state.
@@ -42,6 +42,7 @@ class JevDoneCheck(str, Enum):
     MULTI_PART = "multi_part"
     CLAIMS = "claims"
     COMPLETION_EVIDENCE = "completion_evidence"
+    PROBLEMS_RESOLVED = "problems_resolved"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -53,6 +54,7 @@ class JevDoneQuestionKey(str, Enum):
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
     COMPLETION_EVIDENCE_SUPPORTED = "completion_evidence.supported"
+    PROBLEMS_RESOLVED_FIXED = "problems_resolved.fixed"
 
 
 class JevCompletionStatus(str, Enum):
@@ -62,6 +64,13 @@ class JevCompletionStatus(str, Enum):
     INCOMPLETE = "incomplete"
     BLOCKED = "blocked"
     UNCLEAR = "unclear"
+
+
+class JevProblemCheckItemType(str, Enum):
+    """The two dynamic item kinds judged by the problem-resolution check."""
+
+    PROBLEM = "problem"
+    REQUEST_COMPLETION = "request_completion"
 
 
 class JevClaimKind(str, Enum):
@@ -97,4 +106,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevClaimKind", "JevCompletionStatus", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+__all__ = ["JevClaimKind", "JevCompletionStatus", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType"]
