@@ -14,19 +14,26 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
-from vidbyte.lib.constants.jev import JEV_CLAIMS_THRESHOLD, JEV_MULTI_PART_THRESHOLD
+from vidbyte.lib.constants.jev import (
+    JEV_CLAIMS_THRESHOLD,
+    JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
+    JEV_MULTI_PART_THRESHOLD,
+)
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
+from vidbyte.lib.jev.done.cumulative_obligations import (
+    CumulativeObligationFulfilledQuestion,
+)
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
 
 
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion()})
-    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD})
+    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeObligationFulfilledQuestion()})
+    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD})
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:

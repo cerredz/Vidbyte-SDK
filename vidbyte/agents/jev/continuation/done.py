@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -106,6 +106,27 @@ class JevDoneContinuation(JevContinuation):
                     assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.CUMULATIVE_OBLIGATIONS:
+                # Show only active obligations Jev found incomplete, tied back to their original user turn.
+                # @intent later-omission-does-not-drop-user-work
+                # A later turn may add or clarify a request without repeating everything already asked. The
+                # continuation therefore names each surviving obligation in its original user-grounded terms.
+                question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+                state = None if self.run_state.record is None else self.run_state.record.cumulative_obligations
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.cumulative_obligations
+                obligations = {} if state is None else {item.id: item for item in state.obligations}
+                missing = {} if handoff is None else {item.id: item.missing for item in handoff.obligations}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    item = obligations[identifier]
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+                    if item.active:
+                        focus.append(f"- From user turn {item.source_turn}: {item.instruction} Done when: {item.completion_signal}")
+                    else:
+                        focus.append(f"- The supplied user turns do not explicitly cancel or replace this earlier obligation. Treat it as active and finish it: {item.instruction} Done when: {item.completion_signal}")
                 return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:

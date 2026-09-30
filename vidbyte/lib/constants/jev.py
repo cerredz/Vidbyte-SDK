@@ -86,6 +86,8 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 JEV_MULTI_PART_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
 JEV_CLAIMS_THRESHOLD: float = 0.85
+# Every still-active user obligation must independently reach this P(yes); one clear no remains a veto.
+JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -111,6 +113,15 @@ JEV_DONE_CLAIM_ASSERTION_ID_FIELD: str = "id"
 JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: str = "statement"
 JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: str = "completion_criteria"
 JEV_DONE_CLAIM_ASSERTION_SEPARATOR: str = "."
+# The cumulative check sends one active obligation at a time, retaining source and explicit cancellation status.
+JEV_DONE_OBLIGATIONS_FIELD: str = "obligations"
+JEV_DONE_USER_TURNS_FIELD: str = "user_turns"
+JEV_DONE_OBLIGATION_FIELD: str = "obligation"
+JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD: str = "source_turn"
+JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
+JEV_DONE_OBLIGATION_ACTIVE_FIELD: str = "active"
+JEV_DONE_OBLIGATION_STATUS_REASON_FIELD: str = "status_reason"
+JEV_MIN_OBLIGATION_STATUS_REASON_CHARS: int = 1
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -127,6 +138,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -158,6 +170,13 @@ __all__ = [
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_OBLIGATION_ACTIVE_FIELD",
+    "JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD",
+    "JEV_DONE_OBLIGATION_FIELD",
+    "JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD",
+    "JEV_DONE_OBLIGATION_STATUS_REASON_FIELD",
+    "JEV_DONE_OBLIGATIONS_FIELD",
+    "JEV_DONE_USER_TURNS_FIELD",
     "JEV_DONE_REQUEST_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
@@ -171,6 +190,7 @@ __all__ = [
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
     "JEV_MULTI_PART_THRESHOLD",
+    "JEV_MIN_OBLIGATION_STATUS_REASON_CHARS",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",

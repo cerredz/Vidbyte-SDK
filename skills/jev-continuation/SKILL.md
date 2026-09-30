@@ -27,7 +27,7 @@ JevAgent.__init__
 
 JevRuntime.arun(message)
   ├─ JevPreflightGate.pass_(message)                        # preflight; unrelated to done checks
-  ├─ run_state.begin(message)                               # (A) write the run state ONCE, before the main loop
+  ├─ run_state.begin(message, prior_user_turns)              # (A) write the run state ONCE, before the main loop
   └─ inherited linear loop …
        └─ at every finish attempt → JevRuntime._continue_finish_attempt
             ├─ continuation.should_continue(final_answer, responses, calls)
@@ -66,11 +66,12 @@ Every stage fails open. With no run state there is no check. When the handoff or
 | `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions`, `_thresholds`, `validate`) | Register the question and the threshold. |
 | `vidbyte/lib/jev/done/__init__.py`, `README.md` | Exports and a folder guide | Export the question and list it in the README. |
 | `vidbyte/agents/jev/done/run_state.py` | `JevRunState`: `_SECTIONS`, `schema`, `begin`, `check`, `combine`, `_section`, `_judge`, `_record` | Request-derived checks add a run-state `_SECTIONS` entry and `_record` conversion; every check adds `_section` and `_judge` cases, and post-run items come from the handoff. |
+| `vidbyte/agents/jev/runtime.py` | `JevRuntime.arun` | Usually no check policy belongs here. A check that needs earlier user messages may forward only caller history entries with sender `user` into `begin`; never treat the agent's own replies as user turns. |
 | `vidbyte/agents/jev/done/handoff.py` | `JevHandoff`: `_SECTIONS`, `schema`, `window`, `compile`, `_record` | Add the handoff section and conversion; require exact run-state id matching only when the check's items were written before work. |
 | `vidbyte/agents/jev/continuation/done.py` | `JevDoneContinuation`: `should_continue`, `continue_`, `message`, `_explain` | One `case` in `_explain`. |
 | `vidbyte/agents/jev/continuation/base.py` | `JevContinuation` ABC | Nothing, unless you are writing a new continuation kind. |
 | `vidbyte/agents/jev/settings.py` | `JevContinualSettings` (`checks`, `max_continuations`, limits) | Usually nothing, because `checks` already accepts every registered member. |
-| `vidbyte/agents/jev/runtime.py`, `agent.py` | Wiring | **Nothing.** A check never touches the runtime. |
+| `vidbyte/agents/jev/runtime.py`, `agent.py` | Wiring | Usually nothing. A history-dependent check may forward caller-supplied user messages through the existing context to `JevRunState.begin`; do not add scoring or continuation policy to the runtime. |
 | `vidbyte/agents/jev/response.py` | `JevResponse` (`run_state`, `handoff`, `done`, `continued`) | Nothing. `done` is keyed by check. |
 | `vidbyte/prompts/prompts/jev_run_state/`, `jev_handoff/` | General system prompts | **Nothing.** They must stay check-agnostic, and a test enforces this. |
 | `vidbyte/prompts/prompts/jev_continuation/continue_prompt.md` | The continuation message template | Usually nothing. `_explain` fills `{failed}` and `{focus}`. |
@@ -433,7 +434,7 @@ For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.iden
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables` and `claims` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including a dynamic claims list emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request`, optional `deliverables`, optional `claims`, and (for CUMULATIVE_OBLIGATIONS) the ordered `user_turns` plus each obligation's lifecycle and evidence. Keep this one description true for every combination of enabled checks, including dynamic claims emitted by the handoff.
 
 Before you ship:
 
@@ -526,7 +527,7 @@ On the next finish attempt the whole cycle repeats:
 
 Confirm your diff does **not** touch any of these:
 
-- **`JevRuntime`** (`runtime.py`). It only asks `should_continue` and then calls `continue_`. The `@intent continuation-logic-lives-in-the-continuation` comment exists because a reviewer asked for exactly that split.
+- **`JevRuntime`** (`runtime.py`). It only asks `should_continue` and then calls `continue_`, except that a history-dependent done check may forward explicit caller-supplied user messages into `JevRunState.begin`. Do not add check scoring or continuation decisions there. The `@intent continuation-logic-lives-in-the-continuation` comment preserves that split.
 - **`JevAgent.__init__`**. It already builds `JevRunState` and `JevDoneContinuation` whenever `continual.checks` is non-empty.
 - **`JevContinualSettings`** and **`JevRuntimeSettings`**. `checks` already validates through the registry.
 - **`JevResponse`**. `done` is keyed by `JevDoneCheck`.
