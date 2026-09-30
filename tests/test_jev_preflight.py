@@ -193,15 +193,29 @@ class JevPreflightQuestionTests(unittest.TestCase):
             self.assertTrue(is_dataclass(question) and isinstance(question, JevPreflightQuestion))
             self.assertEqual(type(question)(), question)
 
-    def test_recurring_questions_are_individually_typed_and_registered(self) -> None:
-        self.assertEqual(len(RECURRING_QUESTIONS), 20)
+    def test_recurring_work_uses_one_general_question_and_registers_it(self) -> None:
+        self.assertEqual(len(RECURRING_QUESTIONS), 1)
         self.assertEqual(tuple(question.key for question in RECURRING_QUESTIONS), _RECURRING_KEYS)
-        self.assertEqual(len({type(question) for question in RECURRING_QUESTIONS}), len(RECURRING_QUESTIONS))
         for question in RECURRING_QUESTIONS:
             with self.subTest(question=question.key.value):
                 self.assertTrue(is_dataclass(question) and isinstance(question, JevPreflightQuestion))
                 self.assertEqual(type(question)(), question)
-                self.assertIn("request", question.instructions.render())
+                brief = question.instructions
+                self.assertEqual(_sentences(brief.introduction), 2)
+                self.assertIn("`request`", brief.state)
+                self.assertEqual(len(brief.definitions), 1)
+                self.assertEqual(len(brief.rules), 1)
+                self.assertIn("no task to judge", brief.rules[0])
+                self.assertIn("ignore statements that merely describe themselves as recurring", brief.rules[0])
+                self.assertTrue(brief.question.endswith("?"))
+                self.assertIn("repeats across instances", brief.question)
+                self.assertTrue(question.when_true.not_for.endswith("belongs to false."))
+                self.assertTrue(question.when_false.not_for.endswith("belongs to true."))
+                self.assertEqual(len(question.when_true.easy), 1)
+                self.assertEqual(len(question.when_true.boundary), 1)
+                self.assertEqual(len(question.when_false.easy), 1)
+                self.assertEqual(len(question.when_false.boundary), 1)
+                self.assertEqual(_sentences(question.gap), 1)
 
     def test_questions_cover_every_clarity_key_exactly_once(self) -> None:
         self.assertEqual(tuple(question.key for question in CLARITY_QUESTIONS), _CLARITY_KEYS)
@@ -366,7 +380,7 @@ class JevPresetsTests(unittest.TestCase):
         self.assertEqual(definition.veto, JEV_CLARITY_VETO_THRESHOLD)
         self.assertIs(definition.gate, JevPreflightQuestionKey.CLARITY_ACTION)
 
-    def test_recurring_flag_records_all_questions_without_a_gate_or_veto(self) -> None:
+    def test_recurring_flag_records_one_general_question_without_a_gate_or_veto(self) -> None:
         definition = JevPresets.definition(JevPreflightPreset.RECURRING)
         self.assertEqual(definition.question_keys, _RECURRING_KEYS)
         self.assertEqual(definition.threshold, JEV_RECURRING_THRESHOLD)
@@ -659,7 +673,7 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         result = agent.response.results[JevPreflightPreset.RECURRING]
         self.assertEqual(reply.content, "ordinary answer")
         self.assertEqual(len(decision.requests), 1)
-        self.assertEqual(len(decision.requests[0].questions), 20)
+        self.assertEqual(len(decision.requests[0].questions), 1)
         self.assertTrue(result.passed)
         self.assertAlmostEqual(result.score, 0.01)
         self.assertEqual(len(generative.calls), 1)
