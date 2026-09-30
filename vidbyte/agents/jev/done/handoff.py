@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles evidence for request-derived checks, and extracts checkable final-answer claims for CLAIMS.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles evidence for request-derived checks, validates exact substantive-output excerpts against their response or final-answer source, and extracts checkable final-answer claims for CLAIMS.
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
 ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims are generated from the final answer here because their item list does not exist before the main agent works.
-COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
+COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims. Required-action output excerpts must be exact substrings of the cited response or final answer.
 KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims have no pre-run id list; their ids must be valid and unique within the generated claim section. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-required-actions-done-criteria.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -41,6 +41,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevHandoffRecord,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
+    JevRequiredActionEvidence,
+    JevRequiredActionsEvidence,
+    JevRequiredActionsEvidencePayload,
     JevRunStateRecord,
     JevSectionPayload,
 )
@@ -61,14 +64,14 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
         # @intent handoff-can-only-report
         # The handoff writer compiles evidence for a checker; with no tools and a fixed prompt it can neither
         # continue the user's work nor be steered by the caller into judging it.
-        payload = self.schema(continual.checks)
+        payload = self.schema(tuple(JevDoneCheck(check) for check in continual.checks))
         super().__init__(
             name=f"{settings.name}-handoff",
             system_prompt=Prompts().get(Prompt.JEV_HANDOFF_SYSTEM_PROMPT),
@@ -97,12 +100,20 @@ class JevHandoff(BaseAgent):
         # The owner asked for the main agent's context window to reach the handoff through vidbyte.context, so the
         # run is passed as the SDK's own response and tool-call primitives instead of a hand-built transcript.
         items: list[ContextItem] = [TextContextItem(title=RUN_STATE_TITLE, content=run_state, source=HANDOFF_SOURCE)]
-        items.extend(ResponseContextItem(content=text, sender=sender) for text in responses if text.strip())
-        items.extend(ToolCallContextItem(name=call.name, arguments=dict(call.arguments), output=call.output, metadata={"state": str(getattr(call.state, "value", call.state))}) for call in calls)
+        items.extend(ResponseContextItem(content=f"response[{index}]: {text}", sender=sender) for index, text in enumerate(responses) if text.strip())
+        items.extend(
+            ToolCallContextItem(
+                name=f"trace[{index}] {call.name} state={getattr(call.state, 'value', call.state)}",
+                arguments=dict(call.arguments),
+                output=call.output,
+                metadata={"state": str(getattr(call.state, "value", call.state)), "trace_index": index},
+            )
+            for index, call in enumerate(calls)
+        )
         items.append(TextContextItem(title=FINAL_ANSWER_TITLE, content=final_answer if final_answer.strip() else NO_FINAL_ANSWER, source=HANDOFF_SOURCE))
         return ContextManager(items)
 
-    async def compile(self, request: str, state: JevRunStateRecord, window: ContextManager) -> JevHandoffRecord | None:
+    async def compile(self, request: str, state: JevRunStateRecord, window: ContextManager, calls: Sequence[ToolCallContext] = (), responses: Sequence[str] = (), final_answer: str = "") -> JevHandoffRecord | None:
         """Return evidence for every enabled check, or None when a request-derived section does not match run state."""
         self.history.clear()
         self.rendered = ""
@@ -110,7 +121,7 @@ class JevHandoff(BaseAgent):
             reply = await self.arun(AgentInput(prompt=request, context_manager=window))
             if not isinstance(reply.structured, self.payload):
                 return None
-            record = self._record(reply.structured, state)
+            record = self._record(reply.structured, state, calls, responses, final_answer)
             # The continuation hands this text back to the main agent when a check fails.
             self.rendered = "" if record is None else reply.structured.model_dump_json()
             return record
@@ -119,7 +130,7 @@ class JevHandoff(BaseAgent):
             # validation fails the done check open, exactly as a Jev outage does.
             return None
 
-    def _record(self, payload: JevHandoffPayload, state: JevRunStateRecord) -> JevHandoffRecord | None:
+    def _record(self, payload: JevHandoffPayload, state: JevRunStateRecord, calls: Sequence[ToolCallContext] = (), responses: Sequence[str] = (), final_answer: str = "") -> JevHandoffRecord | None:
         # Converts the validated reply into the frozen record, requiring one evidence entry per run-state deliverable.
         # @intent evidence-covers-exactly-the-run-state
         # Jev judges each deliverable by id, so evidence for a deliverable the state never listed, or
@@ -166,7 +177,65 @@ class JevHandoff(BaseAgent):
                 )
                 for item in claims_section.claims
             ))
-        return JevHandoffRecord(multi_part=multi_part, claims=claims, usage=self.get_usage())
+        required_actions = None
+        actions_section = getattr(payload, JevDoneCheck.REQUIRED_ACTIONS.value, None)
+        if isinstance(actions_section, JevRequiredActionsEvidencePayload):
+            required_actions = self._required_action_evidence(actions_section, responses, final_answer)
+            if not self._valid_required_action_trace(required_actions, state, calls):
+                return None
+        return JevHandoffRecord(multi_part=multi_part, claims=claims, required_actions=required_actions, usage=self.get_usage())
+
+    @classmethod
+    def _required_action_evidence(cls, section: JevRequiredActionsEvidencePayload, responses: Sequence[str], final_answer: str) -> JevRequiredActionsEvidence:
+        """Convert handoff action evidence and retain output excerpts only when their exact source is present."""
+        action_evidence: list[JevRequiredActionEvidence] = []
+        for item in section.actions:
+            output_is_cited = cls._valid_output_excerpt(item.output_source, item.output_excerpt, responses, final_answer)
+            action_evidence.append(JevRequiredActionEvidence(
+                item.id,
+                item.evidence.strip(),
+                tuple(item.trace_indices),
+                item.completion_trace_index,
+                item.missing.strip(),
+                item.output_source if output_is_cited else None,
+                item.output_excerpt.strip() if output_is_cited and item.output_excerpt is not None else None,
+            ))
+        return JevRequiredActionsEvidence(tuple(action_evidence))
+
+    @staticmethod
+    def _valid_required_action_trace(evidence: JevRequiredActionsEvidence, state: JevRunStateRecord, calls: Sequence[ToolCallContext]) -> bool:
+        """Check that action evidence matches run-state ids and cites only actual successful trace calls."""
+        expected = () if state.required_actions is None else state.required_actions.ids()
+        if evidence.ids() != expected:
+            return False
+        return all(JevHandoff._valid_action_call(item, calls) for item in evidence.actions)
+
+    @staticmethod
+    def _valid_action_call(item: JevRequiredActionEvidence, calls: Sequence[ToolCallContext]) -> bool:
+        """Validate one action's cited indices and its optional successful completion call."""
+        if any(index >= len(calls) for index in item.trace_indices):
+            return False
+        if item.completion_trace_index is None:
+            return True
+        call = calls[item.completion_trace_index]
+        return str(getattr(call.state, "value", call.state)) == "succeeded"
+
+    @staticmethod
+    def _valid_output_excerpt(source: str | None, excerpt: str | None, responses: Sequence[str], final_answer: str) -> bool:
+        """Return whether the cited excerpt appears exactly in its claimed recorded source."""
+        if source is None or excerpt is None or not excerpt.strip():
+            return False
+        if source == "final_answer":
+            text = final_answer
+        elif source.startswith("response[") and source.endswith("]"):
+            try:
+                index = int(source[9:-1])
+                text = responses[index]
+            except (ValueError, IndexError):
+                return False
+        else:
+            return False
+        return excerpt.strip() in text
 
 
 __all__ = ["JevHandoff"]

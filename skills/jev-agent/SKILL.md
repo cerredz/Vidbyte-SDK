@@ -57,6 +57,8 @@ Load `skills/jev-continuation/SKILL.md` first; it explains each step below in de
 
 **Post-run-derived items:** CLAIMS cannot add a predicted list to `JevRunStateRecord`, because concrete claims do not exist until the main agent writes its final answer. Instead, add its section and typed records to `JevHandoff`, validate unique ids there, then build one question per handoff claim in `JevRunState._section`. The continuation focus must include only claims Jev marked unsupported and each claim's evidence gap.
 
+**Required actions:** `JevDoneCheck.REQUIRED_ACTIONS` records only procedures or actions the request explicitly requires, with a stable id, observable completion condition, and predecessors only for stated order. `JevHandoff` gathers tool-call traces and can cite an exact excerpt of substantive response or final-answer output; code verifies that excerpt occurs in its named source. A successful call or verified substantive excerpt supplies direct evidence, while a completion claim alone does not. Jev judges whether the evidence meets the condition, and deterministic code requires successful tool-call indices to verify explicit ordering. Missing evidence or order fails the relevant action and focuses the same-loop continuation.
+
 ## Change workflow
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.

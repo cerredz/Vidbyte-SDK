@@ -1,12 +1,12 @@
 """FILE: tests/test_jev_done.py
 
-PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas, request-derived and post-run claim records, both fixed questions, the shared state description, the handoff context, batched Jev requests, and continuation and fail-open behavior.
+PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas, request-derived and post-run claim records, the fixed done questions, the shared state description, the handoff context, batched Jev requests, and continuation and fail-open behavior.
 ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, the handoff reads the main agent's window through ContextManager, and every enabled check's questions share one Jev request.
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
-TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-required-actions-done-criteria.md.
+TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py, tests/test_jev_done.py.
 """
 
 from __future__ import annotations
@@ -61,9 +61,12 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_ACTION_FIELD,
+    JEV_DONE_REQUIRED_ACTIONS_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_DONE_REQUEST_FIELD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_REQUIRED_ACTIONS_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
@@ -85,6 +88,14 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
+    JevRequiredAction,
+    JevRequiredActionEvidence,
+    JevRequiredActionEvidencePayload,
+    JevRequiredActionPayload,
+    JevRequiredActionsPayload,
+    JevRequiredActions,
+    JevRequiredActionsEvidence,
+    JevRequiredActionsEvidencePayload,
     JevRunStatePayload,
     JevRunStateRecord,
     JevSectionPayload,
@@ -98,6 +109,7 @@ from vidbyte.lib.jev.done import (
     DONE_STATE,
     ClaimsSupportedQuestion,
     MultiPartDeliveredQuestion,
+    RequiredActionCompletedQuestion,
 )
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -248,7 +260,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevRequiredAction, JevRequiredActions, JevRequiredActionEvidence, JevRequiredActionsEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload, JevRequiredActionPayload, JevRequiredActionsPayload, JevRequiredActionEvidencePayload, JevRequiredActionsEvidencePayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -256,7 +268,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevRequiredActionPayload, JevRequiredActionsPayload, JevRequiredActionEvidencePayload, JevRequiredActionsEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -265,7 +277,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevClaimsEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevRequiredActionsPayload, JevRequiredActionsEvidencePayload, JevClaimsEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -290,6 +302,36 @@ class JevDoneRecordTests(unittest.TestCase):
             JevMultiPart((JevDeliverable("a", "b", "c"), JevDeliverable("a", "d", "e")))
         with self.assertRaises(ConfigurationError):
             JevRunStateRecord("goal", " ", "mission")
+
+    def test_required_action_records_keep_only_valid_explicit_predecessors_and_trace_indices(self) -> None:
+        first = JevRequiredAction("review", "Review the source files", "A completed review is recorded.")
+        second = JevRequiredAction("classify", "Classify the findings", "The findings have recorded classifications.", ("review",))
+        self.assertEqual(JevRequiredActions((first, second)).ids(), ("review", "classify"))
+        with self.assertRaises(ConfigurationError):
+            JevRequiredActions((second, first))
+        with self.assertRaises(ConfigurationError):
+            JevRequiredActions((JevRequiredAction("classify", "Classify", "Classifications exist.", ("missing",)),))
+        evidence = JevRequiredActionEvidence("review", "read_file state=succeeded", (0, 2), 2, "Nothing is missing.")
+        self.assertEqual(JevRequiredActionsEvidence((evidence,)).ids(), ("review",))
+        for indices, completion in (((-1,), None), ((2, 1), None), ((0,), 1)):
+            with self.subTest(indices=indices, completion=completion), self.assertRaises(ConfigurationError):
+                JevRequiredActionEvidence("review", "trace", indices, completion, "gap")
+
+    def test_required_action_order_fails_without_successful_indices_or_when_indices_are_reversed(self) -> None:
+        actions = JevRequiredActions((
+            JevRequiredAction("review", "Review", "The review result is recorded."),
+            JevRequiredAction("classify", "Classify after review", "Each risk is classified.", ("review",)),
+        ))
+        missing = {
+            "review": JevRequiredActionEvidence("review", "No direct trace evidence.", (), None, "Review absent."),
+            "classify": JevRequiredActionEvidence("classify", "No direct trace evidence.", (), None, "Classification absent."),
+        }
+        reversed_trace = {
+            "review": JevRequiredActionEvidence("review", "trace[1] succeeded.", (1,), 1, "Nothing missing."),
+            "classify": JevRequiredActionEvidence("classify", "trace[0] succeeded.", (0,), 0, "Nothing missing."),
+        }
+        self.assertEqual(JevRunState._ordered_action_failures(actions, missing, set()), {"classify"})
+        self.assertEqual(JevRunState._ordered_action_failures(actions, reversed_trace, set()), {"classify"})
 
     def test_claim_evidence_requires_unique_claim_ids_and_preserves_an_empty_list(self) -> None:
         context = JevClaimContext(
@@ -323,7 +365,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
         self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART})
+        required = JevRunState.schema((JevDoneCheck.REQUIRED_ACTIONS,))
+        self.assertEqual(required.model_fields[JevDoneCheck.REQUIRED_ACTIONS.value].description, JevRequiredActionsPayload.SECTION)
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.REQUIRED_ACTIONS})
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
         # Request-derived deliverables and post-run-derived claims both need evidence sections in the handoff.
@@ -334,6 +378,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(set(JevDeliverableEvidencePayload.model_fields), {"id", "evidence", "missing"})
         claim_schema = JevHandoff.schema((JevDoneCheck.CLAIMS,))
         self.assertEqual(claim_schema.model_fields["claims"].description, JevClaimsEvidencePayload.SECTION)
+        required = JevHandoff.schema((JevDoneCheck.REQUIRED_ACTIONS,))
+        self.assertEqual(required.model_fields[JevDoneCheck.REQUIRED_ACTIONS.value].description, JevRequiredActionsEvidencePayload.SECTION)
+        self.assertNotIn(JevDoneCheck.REQUIRED_ACTIONS.value, JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields)
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
 
@@ -424,6 +471,30 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertTrue(true_side.startswith(false_side.rstrip(".")))
         self.assertIn("--verbose prints every step", true_side)
 
+    def test_required_actions_question_is_registered_and_asks_for_one_named_action(self) -> None:
+        question = RequiredActionCompletedQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.REQUIRED_ACTIONS), JEV_REQUIRED_ACTIONS_THRESHOLD)
+        rendered = question.to_question("classify")
+        self.assertEqual(rendered.name, f"{JevDoneQuestionKey.REQUIRED_ACTIONS_COMPLETED.value}.classify")
+        self.assertIn("required_actions` entry with id `classify`", str(rendered.instructions))
+        self.assertEqual(question.instructions.state, DONE_STATE)
+        self.assertEqual(len(question.instructions.definitions), 2)
+        self.assertEqual(len(question.instructions.rules), 2)
+        self.assertIn("explicitly asks", question.instructions.definitions[0])
+        self.assertIn("user specifically requires its use", question.instructions.definitions[1])
+        self.assertIn("Choose true only", question.instructions.rules[0])
+        self.assertIn("Explicit action order is enforced by code", question.instructions.rules[1])
+
+    def test_required_actions_criteria_have_a_passing_and_failing_tool_output_pair(self) -> None:
+        question = RequiredActionCompletedQuestion()
+        self.assertTrue(question.when_true.what.startswith("Choose true when `evidence` shows"))
+        self.assertTrue(question.when_false.what.startswith("Choose false when `evidence` does not show"))
+        self.assertEqual(question.when_true.boundary[0].replace("state=succeeded; output='3 passed'", "state=succeeded; output='3 failed'"), question.when_false.boundary[0])
+        for side, other, criterion in (("true", "false", question.when_true), ("false", "true", question.when_false)):
+            self.assertTrue(criterion.not_for.endswith(f"belongs to {other}."))
+            self.assertEqual((len(criterion.easy), len(criterion.boundary)), (1, 1))
+
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
     def test_question_carries_at_least_two_thousand_tokens(self) -> None:
         import tiktoken
@@ -480,6 +551,19 @@ class JevDoneQuestionTests(unittest.TestCase):
         text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
+    def test_required_actions_question_carries_two_thousand_tokens_and_one_literal_per_section(self) -> None:
+        import tiktoken
+
+        question = RequiredActionCompletedQuestion()
+        parts = [question.instructions.render(), question.gap]
+        for criterion in (question.when_true, question.when_false):
+            parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/required_actions.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
 
 class JevDonePromptTests(unittest.TestCase):
     """Pin both generative prompts to general identity, goal, instructions, and input sections of 6-8 sentences."""
@@ -510,9 +594,15 @@ class JevHandoffWindowTests(unittest.TestCase):
         items = JevHandoff.window('{"goal": "g"}', ("Working on it.", " "), (call,), "Done.", sender="jev").items()
         self.assertEqual([type(item) for item in items], [TextContextItem, ResponseContextItem, ToolCallContextItem, TextContextItem])
         self.assertEqual(items[0].content, '{"goal": "g"}')
-        self.assertEqual((items[1].content, items[1].sender), ("Working on it.", "jev"))
-        self.assertEqual((items[2].name, items[2].output), ("edit_file", "updated"))
+        self.assertEqual((items[1].content, items[1].sender), ("response[0]: Working on it.", "jev"))
+        self.assertEqual((items[2].name, items[2].output), ("trace[0] edit_file state=succeeded", "updated"))
         self.assertEqual(items[3].content, "Done.")
+
+    def test_output_excerpt_must_match_the_actual_source(self) -> None:
+        self.assertTrue(JevHandoff._valid_output_excerpt("final_answer", "Risk | Severity", (), "Risk | Severity\nSQL injection | High"))
+        self.assertTrue(JevHandoff._valid_output_excerpt("response[0]", "Classification: high", ("Classification: high",), "Done."))
+        self.assertFalse(JevHandoff._valid_output_excerpt("final_answer", "I classified every risk.", (), "All done."))
+        self.assertFalse(JevHandoff._valid_output_excerpt("response[1]", "table", ("response 0",), "Done."))
 
 
 class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -721,6 +811,59 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_CLAIMS_FIELD})
         self.assertEqual(len(request.questions), 4)
         self.assertTrue(all(result.passed for result in agent.response.done.values()))
+
+    async def test_required_actions_asks_per_action_and_requires_observable_explicit_order(self) -> None:
+        state = {
+            **_BASE_STATE,
+            "required_actions": {"actions": [
+                {"id": "review", "action": "Review the deployment config", "completion_signal": "The review result is recorded.", "predecessors": []},
+                {"id": "classify", "action": "Classify each risk after review", "completion_signal": "Each risk has a recorded classification.", "predecessors": ["review"]},
+            ]},
+        }
+        handoff = {"required_actions": {"actions": [
+            {"id": "review", "evidence": "No successful tool call index is available for this action.", "trace_indices": [], "completion_trace_index": None, "missing": "The run has no indexed successful review result."},
+            {"id": "classify", "evidence": "No successful tool call index is available for this action.", "trace_indices": [], "completion_trace_index": None, "missing": "The run has no indexed successful classification result."},
+        ]}}
+        decision = ScriptedDecisionRunner({"review": [0.96], "classify": [0.96]})
+        agent, main, *_ = self._agent(done=(JevDoneCheck.REQUIRED_ACTIONS,), state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Review the deployment config, then classify each risk.")
+
+        self.assertGreater(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_REQUIRED_ACTIONS_FIELD})
+        self.assertEqual([item.name for item in request.questions], [
+            f"{JevDoneQuestionKey.REQUIRED_ACTIONS_COMPLETED.value}.review",
+            f"{JevDoneQuestionKey.REQUIRED_ACTIONS_COMPLETED.value}.classify",
+        ])
+        entries = request.state[JEV_DONE_REQUIRED_ACTIONS_FIELD]
+        self.assertEqual(set(entries["review"]), {JEV_DONE_ACTION_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD})
+        result = agent.response.done[JevDoneCheck.REQUIRED_ACTIONS]
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("review", "classify"))
+        self.assertTrue(all(tuple(item.name for item in attempt.questions) == tuple(item.name for item in request.questions) for attempt in decision.requests))
+        self.assertGreater(len(main.calls), 1)
+        self.assertIn("does not show successful completion of review before classify", main.messages[1][0]["content"])
+
+    async def test_required_action_accepts_a_validated_substantive_output_excerpt_without_a_tool_call(self) -> None:
+        final_answer = "Risk | Severity\nSQL injection | High"
+        state = {
+            **_BASE_STATE,
+            "required_actions": {"actions": [
+                {"id": "classify", "action": "Classify each reported risk", "completion_signal": "Each reported risk has a severity classification.", "predecessors": []},
+            ]},
+        }
+        handoff = {"required_actions": {"actions": [
+            {"id": "classify", "evidence": "The final answer contains a risk classification table.", "trace_indices": [], "completion_trace_index": None, "output_source": "final_answer", "output_excerpt": final_answer, "missing": "Nothing is missing."},
+        ]}}
+        decision = ScriptedDecisionRunner({"classify": [0.96]})
+        agent, *_ = self._agent(done=(JevDoneCheck.REQUIRED_ACTIONS,), final_answer=final_answer, state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Classify each reported risk by severity.")
+
+        result = agent.response.done[JevDoneCheck.REQUIRED_ACTIONS]
+        self.assertTrue(result.passed)
+        self.assertEqual(result.incomplete, ())
 
     async def test_handoff_receives_the_request_state_and_main_agent_window(self) -> None:
         agent, _, _, handoff_runner = self._agent()
