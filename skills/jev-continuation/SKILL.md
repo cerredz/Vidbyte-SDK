@@ -431,9 +431,13 @@ Rules for your `case`:
 
 For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.identity`, `claim.scope`, `claim.kind`, `claim.output`, the selected singular `claim.assertion`, and that parent's `evidence` in the entry. Repeat the parent context for each assertion so no question depends on a sibling entry. Generate a question for every composite reference, not just for each parent id.
 
+For SCOPE_COVERAGE, ask once for each checked member with reported work, pairing its request quote, requested change, member noun and name, membership rule, and evidence. A member with no recorded work is an automatic continuation gap. For an every-member group found in the workspace, a missing enumeration is its own gap; do not drop it from the result because there was no item to ask Jev about.
+
+For PROBLEMS_RESOLVED, build the dynamic item list from the current finish attempt's handoff, not the pre-run state. Include one entry per observed error, failed operation, blocker, or failed validation, plus exactly one `original_request_completion` entry even if no problem occurred. Each entry has five named context groups (`identity`, `scope`, `kind`, `repair`, and `assertion`) and its run `evidence`; exclude `missing` from Jev's state. Ask once per item. A problem passes only when the run shows a complete repair and relevant successful revalidation after it. The separate request item passes only when the original request is complete after repairs. Failed focus must fully repair and revalidate the problem, then return to the original request and finish remaining work.
+
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables` and `claims` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including a dynamic claims list emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `claims`, `scope_coverage`, and `problems_resolved` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including dynamic lists emitted by the handoff.
 
 Before you ship:
 
