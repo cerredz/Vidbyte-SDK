@@ -511,13 +511,9 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         contexts=state.call_contexts,
                     )
-                elif (review_feedback := await self._finish_attempt_feedback(final, state)) is not None:
-                    # @intent finish-review-keeps-the-same-loop
-                    # A rejected finish attempt keeps its history, tools, and budgets; the assistant's
-                    # candidate answer stays visible so the feedback reads as a reply to it.
+                elif await self._continue_finish_attempt(final, state, messages):
                     if state.inner_context_window_algorithm is None:
                         messages.append(self._assistant_message(last_assistant_output))
-                    messages.append({"role": "user", "content": review_feedback})
                     continue
                 return await self._finish_result(final, state)
 
@@ -525,7 +521,7 @@ class AgentRuntime:
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
-            finish_review_continued = False
+            finish_attempt_continued = False
             for call in tool_calls:
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
@@ -563,15 +559,12 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
-                    review_feedback = await self._finish_attempt_feedback(final, state)
-                    if review_feedback is not None:
-                        # isDone has no tool result yet; the review feedback becomes that result.
-                        self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, review_feedback), state.provider, MiddlewareDecision.continue_())
-                        finish_review_continued = True
+                    if await self._continue_finish_attempt(final, state, messages):
+                        finish_attempt_continued = True
                         break
                     return await self._finish_result(final, state)
 
-            if contract_rejected or finish_review_continued:
+            if finish_attempt_continued or contract_rejected:
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
@@ -760,12 +753,13 @@ class AgentRuntime:
         base = dict(published) if isinstance(published, Mapping) else {}
         run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
 
-    async def _finish_attempt_feedback(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> str | None:
-        """Review a finish attempt before the loop returns it; feedback text continues the same loop."""
-        # Default runtimes accept every attempt. Overrides return None to accept or feedback to continue.
-        # @intent finish-review-default-accepts
-        # The base loop stays unchanged for every runtime; only subclasses that own a review policy can hold a finish attempt open.
-        return None
+    async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
+        """Let a specialized linear runtime send a normal finish attempt back to work with feedback."""
+        # Default runtimes accept every finish attempt; a specialized runtime appends its feedback to messages and returns True.
+        # @intent finish-attempts-can-continue-the-same-loop
+        # A check that runs when the model tries to finish (JevRuntime's done checks) must be able to keep this loop's
+        # messages, tool history, and budgets, so the hook sits at both finish points instead of re-running the agent.
+        return False
 
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""

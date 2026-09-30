@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/runners/decision.py
 
-PURPOSE: Semantic runner for calibrated decision models: validates a DecisionModelConfig, builds the provider adapter, runs one JevDecisionRequest, and lists the models the account can use.
-ROLE IN CODEBASE: Jev runtime capabilities and applications call this runner for programmatic decisions.
+PURPOSE: Semantic transport runner for calibrated decision models: validates a DecisionModelConfig, builds the provider adapter, runs one JevDecisionRequest, and lists the models the account can use.
+ROLE IN CODEBASE: DecisionModelHelper uses this runner to send Jev requests; other callers can use it for direct programmatic decisions.
 ARCHITECTURE NOTE: Mirrors EmbeddingModelRunner: the runner owns config validation and the transport, and `ModelProviders.decision()` owns adapter selection. Agents never build it through Runner.build, because decision models cannot drive an agent loop.
-COMMON MODIFICATION PATTERNS: Keep this a thin pass-through; request shaping belongs to vidbyte/lib/dataclasses/jev.py and wire handling to vidbyte/providers/typesafe.py.
-KNOWN EDGE CASES: Construction raises ConfigurationError when no API key resolves, which callers that must fail open treat as "decision model unavailable".
+COMMON MODIFICATION PATTERNS: Keep provider calls as thin pass-throughs; request shaping belongs to vidbyte/lib/dataclasses/jev.py and wire handling to vidbyte/providers/typesafe.py. Put shared question scoring in vidbyte/lib/jev/decision.py.
+KNOWN EDGE CASES: Construction raises ConfigurationError when no API key resolves, which callers that must fail open treat as "decision model unavailable". DecisionModelHelper.score_noul needs no key and returns None when any named answer is missing or is not a noul answer.
 RELATED DOCS: docs/design/jev-agent-scaffold.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations

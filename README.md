@@ -63,10 +63,10 @@ Install the latest alpha from PyPI:
 pip install vidbyte-sdk
 ```
 
-Pin the first public release when reproducibility matters:
+Pin a release when reproducibility matters:
 
 ```bash
-pip install vidbyte-sdk==0.1.0
+pip install vidbyte-sdk==0.2.0
 ```
 
 Verify the installed distribution and prompt assets:

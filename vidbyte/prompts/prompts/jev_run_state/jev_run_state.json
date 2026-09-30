@@ -1,0 +1,11 @@
+{
+  "name": "Jev Run State",
+  "description": "The system prompt for JevRunState, the small generative agent a JevAgent with done checks runs once before its main agent starts. It receives the user's request as its message and returns a structured run state: a central goal, objective, mission, and list of limits, plus one section for every enabled done check, each field described in the output schema. It records the request faithfully and never does any of the work. The prompt has identity, goal, instructions, and input sections.",
+  "key": "jev_run_state",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md"
+    }
+  }
+}

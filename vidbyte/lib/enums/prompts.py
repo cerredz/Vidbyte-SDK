@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 67 static prompt assets across 24
+    Defines the stable typed identifiers for all 69 static prompt assets across 27
     JSON/Markdown-backed families. This file owns identifiers only; prompt text and
     family metadata belong under ``vidbyte/prompts/prompts/``.
 
@@ -70,10 +70,12 @@ class Prompt(str, Enum):
     AGENTIC_ENGINEERING_SYSTEM_PROMPT = "agentic_engineering.system_prompt"
     AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
     HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"
-    JEV_MOTIVATING_CASE_STATE_BUILDER = "jev.motivating_case_state_builder"
-    JEV_MOTIVATING_CASE_HANDOFF_BUILDER = "jev.motivating_case_handoff_builder"
     INDEPENDENT_CRITIC_REVIEWER_SYSTEM_PROMPT = "independent_critic.reviewer_system_prompt"
     INDEPENDENT_CRITIC_REVIEW_PROMPT = "independent_critic.review_prompt"
+    JEV_CLARIFICATION_SYSTEM_PROMPT = "jev_clarification.system_prompt"
+    JEV_CONTINUATION_CONTINUE_PROMPT = "jev_continuation.continue_prompt"
+    JEV_HANDOFF_SYSTEM_PROMPT = "jev_handoff.system_prompt"
+    JEV_RUN_STATE_SYSTEM_PROMPT = "jev_run_state.system_prompt"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"

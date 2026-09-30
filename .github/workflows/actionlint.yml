@@ -1,13 +1,9 @@
 name: Actionlint
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/**"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/**"
+  # TEMPORARILY DISABLED: automatic triggers removed; re-enable by reverting
+  # the temporarily-disable-github-actions commit.
+  workflow_dispatch:
 
 permissions:
   contents: read
