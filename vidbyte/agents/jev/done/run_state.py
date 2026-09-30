@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntim
 ARCHITECTURE NOTE: The run state combines request-derived checks with post-run claims, observed problems, and discovered collection items compiled by JevHandoff at each finish attempt. It batches all enabled check questions into one Jev request; deterministic code measures recorded discovery-output bounds, while Jev checks source inventory fidelity and completion evidence.
 COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -39,6 +39,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_CLAIM_SCOPE_FIELD,
     JEV_DONE_CLAIM_TITLE_FIELD,
     JEV_DONE_CLAIMS_FIELD,
+    JEV_DONE_COMPLETION_CRITERION_FIELD,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
@@ -52,6 +53,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD,
     JEV_DONE_DISCOVERED_ITEMS_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_OBSERVED_PROXY_FIELD,
     JEV_DONE_PROBLEM_ASSERTION_FIELD,
     JEV_DONE_PROBLEM_DESCRIPTION_FIELD,
     JEV_DONE_PROBLEM_ITEMS_FIELD,
@@ -62,6 +64,10 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_PROBLEM_TITLE_FIELD,
     JEV_DONE_PROBLEMS_RESOLVED_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_TARGET_FIELD,
+    JEV_DONE_TARGET_OUTCOME_FIELD,
+    JEV_DONE_TARGET_OUTCOMES_FIELD,
+    JEV_DONE_TARGET_SCOPE_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
@@ -75,6 +81,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunStatePayload,
     JevRunStateRecord,
     JevSectionPayload,
+    JevTargetOutcome,
+    JevTargetOutcomeItem,
+    JevTargetOutcomePayload,
 )
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.enums.prompts import Prompt
@@ -90,9 +99,10 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = (
-        MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
-    )
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({
+        JevDoneCheck.MULTI_PART: JevMultiPartPayload,
+        JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload,
+    })
 
     def __init__(
         self,
@@ -105,7 +115,8 @@ class JevRunState(BaseAgent):
         # Like the preflight gate, every done-check input is fixed when JevAgent is built, so the runtime only
         # calls begin() and check() and never reads settings to decide what to ask.
         continual = runtime_settings.continual
-        payload = self.schema(continual.checks)
+        checks = tuple(JevDoneCheck(check) for check in continual.checks)
+        payload = self.schema(checks)
         super().__init__(
             name=f"{settings.name}-run-state",
             system_prompt=Prompts().get(Prompt.JEV_RUN_STATE_SYSTEM_PROMPT),
@@ -120,7 +131,7 @@ class JevRunState(BaseAgent):
             timeout_seconds=settings.timeout_seconds,
             output_schema=payload,
         )
-        self.checks = continual.checks
+        self.checks = checks
         self.decision = runtime_settings.decision
         self.response = response
         self.payload = payload
@@ -129,7 +140,7 @@ class JevRunState(BaseAgent):
         self.request = ""
         self.record: JevRunStateRecord | None = None
         self.rendered = ""
-        self.handoff: JevHandoffRecord | None = None
+        self.handoff_record: JevHandoffRecord | None = None
 
     @classmethod
     def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevRunStatePayload]:
@@ -164,6 +175,9 @@ class JevRunState(BaseAgent):
             self.record = None
         self.response.run_state(self.record)
 
+    # @intent a-failed-evidence-path-never-blocks-the-agent
+    # Every finish attempt resets and rebuilds its handoff, then records each enabled check's verdict.
+    # Missing state or an unavailable handoff leaves the check unavailable and must not strand the main run.
     async def check(
         self,
         final_answer: str,
@@ -171,23 +185,25 @@ class JevRunState(BaseAgent):
         calls: Sequence[ToolCallContext],
     ) -> tuple[JevDoneResult, ...]:
         """Run every enabled done check on this finish attempt, record every result, and return the checks that failed."""
-        self.handoff = None
+        self.handoff_record = None
         if self.record is None:
             return ()
         window = JevHandoff.window(
             self.rendered, responses, calls, final_answer, sender=self.sender
         )
         source_outputs = {
-            f"tool_call_{index}": call.output for index, call in enumerate(calls)
+            f"tool_call_{index}": call.output
+            for index, call in enumerate(calls)
+            if isinstance(call.output, str)
         }
-        self.handoff = await self.handoff_writer.compile(
+        self.handoff_record = await self.handoff_writer.compile(
             self.request, self.record, window, source_outputs
         )
-        self.response.handoff(self.handoff)
-        decision = await self._ask(self.handoff)
+        self.response.handoff(self.handoff_record)
+        decision = await self._ask(self.handoff_record)
         failed: list[JevDoneResult] = []
         for check in self.checks:
-            result = self._judge(check, self.handoff, decision)
+            result = self._judge(check, self.handoff_record, decision)
             self.response.done(result)
             if not result.passed:
                 failed.append(result)
@@ -229,148 +245,165 @@ class JevRunState(BaseAgent):
     def _section(
         self, check: JevDoneCheck, handoff: JevHandoffRecord
     ) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
-        # Returns one enabled check's part of the shared state and its questions; one commented case per check.
+        """Project one enabled check into the shared state and its fixed questions."""
         match check:
             case JevDoneCheck.MULTI_PART:
-                # One entry per deliverable, keyed by id, holds the defining material and only that deliverable's
-                # evidence (skills/asking-jev-questions T13); the handoff's own `missing` text stays out because it
-                # is the handoff writer's judgment, not the run. One question per deliverable names its id.
-                state = None if self.record is None else self.record.multi_part
-                if state is None or handoff.multi_part is None:
-                    return {}, ()
-                question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
-                evidence = {
-                    item.id: item.evidence for item in handoff.multi_part.deliverables
-                }
-                entries = {
-                    deliverable.id: {
-                        JEV_DONE_DELIVERABLE_FIELD: deliverable.description,
-                        JEV_DONE_COMPLETION_SIGNAL_FIELD: deliverable.completion_signal,
-                        JEV_DONE_EVIDENCE_FIELD: evidence[deliverable.id],
-                    }
-                    for deliverable in state.deliverables
-                }
-                return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(
-                    question.to_question(identifier) for identifier in state.ids()
-                )
+                return self._multi_part_section(handoff)
             case JevDoneCheck.CLAIMS:
-                # Claims are only knowable from the final answer, so repeat each parent context beside one
-                # atomic assertion and its tool evidence; the handoff's `missing` judgment stays out of Jev's state.
-                # @intent claims-come-from-finished-answer
-                # Generating these candidates before the main agent works would make them predictions, not claims.
-                if handoff.claims is None:
-                    return {}, ()
-                question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
-                entries: dict[str, object] = {}
-                for claim in handoff.claims.claims:
-                    for assertion in claim.claim.assertions:
-                        identifier = f"{claim.id}{JEV_DONE_CLAIM_ASSERTION_SEPARATOR}{assertion.id}"
-                        entries[identifier] = {
-                            JEV_DONE_CLAIM_FIELD: {
-                                JEV_DONE_CLAIM_IDENTITY_FIELD: {
-                                    JEV_DONE_CLAIM_TITLE_FIELD: claim.claim.identity.title,
-                                    JEV_DONE_CLAIM_DESCRIPTION_FIELD: claim.claim.identity.description,
-                                    JEV_DONE_CLAIM_INTENT_FIELD: claim.claim.identity.intent,
-                                },
-                                JEV_DONE_CLAIM_SCOPE_FIELD: {
-                                    JEV_DONE_CLAIM_SCOPE_FIELD: claim.claim.scope.scope,
-                                    JEV_DONE_CLAIM_QUALIFICATIONS_FIELD: list(
-                                        claim.claim.scope.qualifications
-                                    ),
-                                },
-                                JEV_DONE_CLAIM_KIND_FIELD: claim.claim.kind.value,
-                                JEV_DONE_CLAIM_OUTPUT_FIELD: claim.claim.output,
-                                JEV_DONE_CLAIM_ASSERTION_FIELD: {
-                                    JEV_DONE_CLAIM_ASSERTION_ID_FIELD: assertion.id,
-                                    JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: assertion.statement,
-                                    JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: assertion.completion_criteria,
-                                },
-                            },
-                            JEV_DONE_EVIDENCE_FIELD: claim.evidence,
-                        }
-                return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(
-                    question.to_question(identifier)
-                    for identifier in handoff.claims.assertion_ids()
-                )
+                return self._claims_section(handoff)
             case JevDoneCheck.DISCOVERED_ITEM_COVERAGE:
-                # Dynamic candidates come only from exact recorded outputs; the inventory question checks their
-                # fidelity, while the processing question checks each candidate's item-specific run evidence.
-                evidence = handoff.discovered_item_coverage
-                if evidence is None:
-                    return {}, ()
-                inventory_question = JevDoneRegistry.inventory_question(check)
-                item_question = JevDoneRegistry.question(check)
-                inventories = {
-                    batch.source_id: {
-                        JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD: batch.source_output,
-                        JEV_DONE_DISCOVERED_ITEM_CANDIDATES_FIELD: [
-                            {JEV_DONE_DISCOVERED_ITEM_IDENTITY_FIELD: item.identity}
-                            for item in batch.candidates
-                        ],
-                    }
-                    for batch in evidence.batches
-                }
-                items = {
-                    item.id: {
-                        JEV_DONE_DISCOVERED_ITEM_FIELD: item.identity,
-                        JEV_DONE_DISCOVERED_ITEM_ACTION_FIELD: item.requested_processing,
-                        JEV_DONE_DISCOVERED_ITEM_CRITERIA_FIELD: item.completion_criteria,
-                        JEV_DONE_DISCOVERED_ITEM_EVIDENCE_FIELD: item.processing_evidence,
-                    }
-                    for item in evidence.items()
-                }
-                questions = tuple(
-                    inventory_question.to_question(batch.source_id)
-                    for batch in evidence.batches
-                )
-                questions += tuple(
-                    item_question.to_question(identifier)
-                    for identifier in evidence.item_ids()
-                )
-                return {
-                    JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD: inventories,
-                    JEV_DONE_DISCOVERED_ITEMS_FIELD: items,
-                }, questions
+                return self._discovered_item_section(handoff)
+            case JevDoneCheck.TARGET_OUTCOME:
+                return self._target_outcome_section(handoff)
             case JevDoneCheck.PROBLEMS_RESOLVED:
-                # Dynamic episodes come from this finish attempt's handoff; missing is a handoff judgment, not evidence.
-                if handoff.problems_resolved is None:
-                    return {}, ()
-                question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
-                entries = {
-                    item.id: {
-                        "identity": {
-                            JEV_DONE_PROBLEM_TITLE_FIELD: item.title,
-                            JEV_DONE_PROBLEM_DESCRIPTION_FIELD: item.description,
+                return self._problems_resolved_section(handoff)
+        return {}, ()
+
+    def _multi_part_section(
+        self, handoff: JevHandoffRecord
+    ) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Project request deliverables with their attempt-specific evidence."""
+        state = None if self.record is None else self.record.multi_part
+        evidence = handoff.multi_part
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
+        evidence_by_id = {item.id: item.evidence for item in evidence.deliverables}
+        entries: dict[str, object] = {
+            deliverable.id: {
+                JEV_DONE_DELIVERABLE_FIELD: deliverable.description,
+                JEV_DONE_COMPLETION_SIGNAL_FIELD: deliverable.completion_signal,
+                JEV_DONE_EVIDENCE_FIELD: evidence_by_id[deliverable.id],
+            }
+            for deliverable in state.deliverables
+        }
+        return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(
+            question.to_question(identifier) for identifier in state.ids()
+        )
+
+    def _claims_section(
+        self, handoff: JevHandoffRecord
+    ) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Project final-answer assertions with their claim context and evidence."""
+        claims = handoff.claims
+        if claims is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
+        entries: dict[str, object] = {}
+        for claim in claims.claims:
+            for assertion in claim.claim.assertions:
+                identifier = f"{claim.id}{JEV_DONE_CLAIM_ASSERTION_SEPARATOR}{assertion.id}"
+                entries[identifier] = {
+                    JEV_DONE_CLAIM_FIELD: {
+                        JEV_DONE_CLAIM_IDENTITY_FIELD: {
+                            JEV_DONE_CLAIM_TITLE_FIELD: claim.claim.identity.title,
+                            JEV_DONE_CLAIM_DESCRIPTION_FIELD: claim.claim.identity.description,
+                            JEV_DONE_CLAIM_INTENT_FIELD: claim.claim.identity.intent,
                         },
-                        JEV_DONE_PROBLEM_SCOPE_FIELD: {
-                            JEV_DONE_PROBLEM_SCOPE_FIELD: item.scope,
-                            JEV_DONE_PROBLEM_QUALIFICATIONS_FIELD: item.qualifications,
+                        JEV_DONE_CLAIM_SCOPE_FIELD: {
+                            JEV_DONE_CLAIM_SCOPE_FIELD: claim.claim.scope.scope,
+                            JEV_DONE_CLAIM_QUALIFICATIONS_FIELD: list(claim.claim.scope.qualifications),
                         },
-                        JEV_DONE_PROBLEM_KIND_FIELD: item.kind.value,
-                        JEV_DONE_PROBLEM_REPAIR_FIELD: {
-                            "attempt_and_outcome": item.repair,
-                            "verification": item.verification,
+                        JEV_DONE_CLAIM_KIND_FIELD: claim.claim.kind.value,
+                        JEV_DONE_CLAIM_OUTPUT_FIELD: claim.claim.output,
+                        JEV_DONE_CLAIM_ASSERTION_FIELD: {
+                            JEV_DONE_CLAIM_ASSERTION_ID_FIELD: assertion.id,
+                            JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: assertion.statement,
+                            JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: assertion.completion_criteria,
                         },
-                        JEV_DONE_PROBLEM_ASSERTION_FIELD: {
-                            "statement": "This observed problem was fully repaired and successfully revalidated."
-                            if item.kind.value == "problem"
-                            else "The original user request was completed after any repairs.",
-                            "completion_criteria": "Run evidence shows the complete repair and a relevant successful revalidation after it."
-                            if item.kind.value == "problem"
-                            else "Run evidence shows every part of the original user request completed after the repair work.",
-                        },
-                        JEV_DONE_EVIDENCE_FIELD: item.evidence,
-                    }
-                    for item in handoff.problems_resolved.items
+                    },
+                    JEV_DONE_EVIDENCE_FIELD: claim.evidence,
                 }
-                return {
-                    JEV_DONE_PROBLEMS_RESOLVED_FIELD: {
-                        JEV_DONE_PROBLEM_ITEMS_FIELD: entries
-                    }
-                }, tuple(
-                    question.to_question(identifier)
-                    for identifier in handoff.problems_resolved.ids()
-                )
+        return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(
+            question.to_question(identifier) for identifier in claims.assertion_ids()
+        )
+
+    def _discovered_item_section(
+        self, handoff: JevHandoffRecord
+    ) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Project each bounded source inventory and discovered item with its own question."""
+        evidence = handoff.discovered_item_coverage
+        if evidence is None:
+            return {}, ()
+        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        inventories: dict[str, object] = {
+            batch.source_id: {
+                JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD: batch.source_output,
+                JEV_DONE_DISCOVERED_ITEM_CANDIDATES_FIELD: [
+                    {JEV_DONE_DISCOVERED_ITEM_IDENTITY_FIELD: item.identity}
+                    for item in batch.candidates
+                ],
+            }
+            for batch in evidence.batches
+        }
+        items: dict[str, object] = {
+            item.id: {
+                JEV_DONE_DISCOVERED_ITEM_FIELD: item.identity,
+                JEV_DONE_DISCOVERED_ITEM_ACTION_FIELD: item.requested_processing,
+                JEV_DONE_DISCOVERED_ITEM_CRITERIA_FIELD: item.completion_criteria,
+                JEV_DONE_DISCOVERED_ITEM_EVIDENCE_FIELD: item.processing_evidence,
+            }
+            for item in evidence.items()
+        }
+        questions = tuple(
+            inventory_question.to_question(batch.source_id) for batch in evidence.batches
+        ) + tuple(
+            item_question.to_question(identifier) for identifier in evidence.item_ids()
+        )
+        return {
+            JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD: inventories,
+            JEV_DONE_DISCOVERED_ITEMS_FIELD: items,
+        }, questions
+
+    # @intent target-outcome-evidence
+    # A requested target result must be judged against direct evidence for that target, not inferred from a proxy milestone.
+    # Keeping request-derived criteria beside attempt-specific evidence prevents a plan or setup step from masquerading as completion.
+    def _target_outcome_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Join request-derived target outcomes with this attempt's proxy and direct run evidence."""
+        state = None if self.record is None else self.record.target_outcome
+        evidence = handoff.target_outcome
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.TARGET_OUTCOME)
+        evidence_by_id = {item.id: item for item in evidence.items}
+        entries = {
+            item.id: {
+                JEV_DONE_TARGET_OUTCOME_FIELD: item.outcome,
+                JEV_DONE_TARGET_FIELD: item.target,
+                JEV_DONE_TARGET_SCOPE_FIELD: item.scope,
+                JEV_DONE_COMPLETION_CRITERION_FIELD: item.completion_criterion,
+                JEV_DONE_OBSERVED_PROXY_FIELD: evidence_by_id[item.id].observed_proxy,
+                JEV_DONE_EVIDENCE_FIELD: evidence_by_id[item.id].direct_evidence,
+            }
+            for item in state.items
+        }
+        return {JEV_DONE_TARGET_OUTCOMES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
+    # @intent repair-verification-boundary
+    # Each observed issue and the original request must remain independently judged; otherwise fixing one issue can hide unfinished work.
+    # Only run evidence enters Jev's state because the handoff's `missing` summary is a model judgment, not independent evidence.
+    def _problems_resolved_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Project observed problem episodes and the required original-request check into shared Jev state."""
+        evidence = handoff.problems_resolved
+        if evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
+        entries = {
+            item.id: {
+                "identity": {JEV_DONE_PROBLEM_TITLE_FIELD: item.title, JEV_DONE_PROBLEM_DESCRIPTION_FIELD: item.description},
+                JEV_DONE_PROBLEM_SCOPE_FIELD: {JEV_DONE_PROBLEM_SCOPE_FIELD: item.scope, JEV_DONE_PROBLEM_QUALIFICATIONS_FIELD: item.qualifications},
+                JEV_DONE_PROBLEM_KIND_FIELD: item.kind.value,
+                JEV_DONE_PROBLEM_REPAIR_FIELD: {"attempt_and_outcome": item.repair, "verification": item.verification},
+                JEV_DONE_PROBLEM_ASSERTION_FIELD: {
+                    "statement": "This observed problem was fully repaired and successfully revalidated." if item.kind.value == "problem" else "The original user request was completed after any repairs.",
+                    "completion_criteria": "Run evidence shows the complete repair and a relevant successful revalidation after it." if item.kind.value == "problem" else "Run evidence shows every part of the original user request completed after the repair work.",
+                },
+                JEV_DONE_EVIDENCE_FIELD: item.evidence,
+            }
+            for item in evidence.items
+        }
+        return {JEV_DONE_PROBLEMS_RESOLVED_FIELD: {JEV_DONE_PROBLEM_ITEMS_FIELD: entries}}, tuple(question.to_question(identifier) for identifier in evidence.ids())
 
     def _judge(
         self,
@@ -391,6 +424,9 @@ class JevRunState(BaseAgent):
             case JevDoneCheck.DISCOVERED_ITEM_COVERAGE:
                 # Every candidate and every source inventory must independently meet the same threshold.
                 return self._discovered_item_coverage(handoff, decision)
+            case JevDoneCheck.TARGET_OUTCOME:
+                # Each requested target outcome must be demonstrated on its actual target; a proxy alone is insufficient.
+                return self._target_outcome(handoff, decision)
             case JevDoneCheck.PROBLEMS_RESOLVED:
                 # Every observed issue and the separate original-request item must pass independently.
                 return self._problems_resolved(handoff, decision)
@@ -576,6 +612,38 @@ class JevRunState(BaseAgent):
             usage=usage,
         )
 
+    def _target_outcome(
+        self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None
+    ) -> JevDoneResult:
+        """Score every request-derived target outcome independently with the check's veto threshold."""
+        state = None if self.record is None else self.record.target_outcome
+        evidence = None if handoff is None else handoff.target_outcome
+        if state is None or evidence is None:
+            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None, available=False)
+        if not state.items:
+            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.TARGET_OUTCOME)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.TARGET_OUTCOME)
+        answers = {
+            identifier: decision.answers[question.name(identifier)]
+            for identifier in state.ids()
+            if question.name(identifier) in decision.answers
+        }
+        verdict = DecisionModelHelper.score_noul(answers, state.ids(), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None, available=False)
+        incomplete = tuple(
+            identifier for identifier in state.ids()
+            if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False
+        )
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.TARGET_OUTCOME, score=verdict.score, passed=verdict.passed,
+            answers=verdict.answers, incomplete=incomplete, usage=usage,
+        )
+
     def _problems_resolved(
         self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None
     ) -> JevDoneResult:
@@ -585,14 +653,8 @@ class JevRunState(BaseAgent):
         # fresh item set. Requiring each answer independently prevents one repaired issue from hiding another
         # unresolved issue or the original request's unfinished work; a missing answer remains unavailable.
         evidence = None if handoff is None else handoff.problems_resolved
-        if evidence is None:
-            return JevDoneResult(
-                check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False
-            )
-        if decision is None:
-            return JevDoneResult(
-                check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False
-            )
+        if evidence is None or decision is None:
+            return JevDoneResult(check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False)
         question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
         threshold = JevDoneRegistry.threshold(JevDoneCheck.PROBLEMS_RESOLVED)
         ids = evidence.ids()
@@ -603,23 +665,15 @@ class JevRunState(BaseAgent):
         }
         verdict = DecisionModelHelper.score_noul(answers, ids, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(
-                check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False
-            )
+            return JevDoneResult(check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False)
         incomplete = tuple(
-            identifier
-            for identifier in ids
-            if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold)
-            is False
+            identifier for identifier in ids
+            if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(
-            check=JevDoneCheck.PROBLEMS_RESOLVED,
-            score=verdict.score,
-            passed=verdict.passed,
-            answers=verdict.answers,
-            incomplete=incomplete,
-            usage=usage,
+            check=JevDoneCheck.PROBLEMS_RESOLVED, score=verdict.score, passed=verdict.passed,
+            answers=verdict.answers, incomplete=incomplete, usage=usage,
         )
 
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
@@ -637,6 +691,14 @@ class JevRunState(BaseAgent):
                     for item in section.deliverables
                 )
             )
+            multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        target_outcome = None
+        outcome_section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
+        if isinstance(outcome_section, JevTargetOutcomePayload):
+            target_outcome = JevTargetOutcome(tuple(
+                JevTargetOutcomeItem(item.id, item.outcome.strip(), item.target.strip(), item.scope.strip(), item.completion_criterion.strip())
+                for item in outcome_section.items
+            ))
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
@@ -645,6 +707,7 @@ class JevRunState(BaseAgent):
                 limit.strip() for limit in payload.what_not_to_do if limit.strip()
             ),
             multi_part=multi_part,
+            target_outcome=target_outcome,
             usage=self.get_usage(),
         )
 
