@@ -158,6 +158,8 @@ class ScriptedJev:
         self.configs: list[object] = []
 
     def __call__(self, config: object = None) -> ScriptedJev:
+        # @intent preserve-the-config-passed-to-the-runner-factory
+        # Tests assert the production facade forwards the exact runtime decision configuration.
         self.configs.append(config)
         return self
 
@@ -244,6 +246,8 @@ def _settings(**tool_overrides: Any) -> JevAgentSettings:
 
 
 def _agent(main: ScriptedRunner, scout: ScriptedRunner, catalog: ToolCatalogProvider | None = None, *, runtime_settings: JevRuntimeSettings | None = None, **tool_overrides: Any) -> JevAgent:
+    # @intent build-a-runnable-tool-alignment-agent
+    # Optional runtime settings let focused tests observe configuration passed to the decision runner.
     agent = bind_test_runner(JevAgent(_settings(**tool_overrides), runtime_settings), main)
     assert agent.alignment is not None and agent.alignment.tool_scout is not None
     bind_test_runner(agent.alignment.tool_scout, scout)

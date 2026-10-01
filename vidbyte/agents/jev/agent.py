@@ -15,10 +15,10 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.alignment import JevAgentAlignment
+from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
 from vidbyte.agents.jev.continuation import JevDoneContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
-from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.lib.dataclasses.jev import JevAgentResponse

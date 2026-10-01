@@ -74,8 +74,8 @@ from vidbyte.agents.jev.alignment.tool import (
 from vidbyte.agents.jev.settings import JevAgentSettings, JevToolAlignmentSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
-from vidbyte.lib.constants.jev import JEV_NOUL_YES_THRESHOLD
 from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.constants.jev import JEV_NOUL_YES_THRESHOLD
 from vidbyte.lib.constants.tool_catalogs import (
     TOOL_CATALOG_MERGED_LIMIT,
     TOOL_CATALOG_SEARCH_LIMIT,
