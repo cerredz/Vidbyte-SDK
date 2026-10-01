@@ -16,6 +16,7 @@ from typing import Any
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.alignment import JevAgentAlignment
 from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
+from vidbyte.agents.jev.bulk_work import JevBulkWork
 from vidbyte.agents.jev.continuation import JevDoneContinuation
 from vidbyte.agents.jev.done import JevRunState, JevRunStateRelation
 from vidbyte.agents.jev.gate import JevPreflightGate
@@ -41,6 +42,7 @@ class JevAgent(BaseAgent):
         self.settings = settings
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
+        self.bulk_work = JevBulkWork(settings)
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
         relation_enabled = JevPreflightPreset.RUN_STATE_RELATION in self.preflight.presets
         if relation_enabled:
@@ -93,6 +95,7 @@ class JevAgent(BaseAgent):
             "alignment": self.alignment,
             "alignment_settings": self.settings.alignment,
             "skill_preload": self.skill_preload,
+            "bulk_work": self.bulk_work,
         }
 
 

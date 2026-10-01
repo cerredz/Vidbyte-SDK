@@ -346,7 +346,7 @@ class JevPresetsTests(unittest.TestCase):
     """Pin the user-enableable flags and the policy each fixed-question flag turns on."""
 
     def test_clarity_flag_asks_every_clarity_question_at_the_named_threshold(self) -> None:
-        self.assertEqual(JevPresets.available(), (JevPreflightPreset.CLARITY, JevPreflightPreset.RUN_STATE_RELATION, JevPreflightPreset.TOOL_SELECTOR))
+        self.assertEqual(JevPresets.available(), (JevPreflightPreset.CLARITY, JevPreflightPreset.RUN_STATE_RELATION, JevPreflightPreset.TOOL_SELECTOR, JevPreflightPreset.BULK_WORK))
         definition = JevPresets.definition(JevPreflightPreset.CLARITY)
         self.assertEqual(definition.question_keys, _CLARITY_KEYS)
         self.assertEqual(definition.threshold, JEV_CLARITY_THRESHOLD)

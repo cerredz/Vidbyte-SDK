@@ -23,6 +23,7 @@ from vidbyte.agents.jev.alignment import (
     JevToolAlignmentStatus,
     JevToolAttachment,
 )
+from vidbyte.agents.jev.bulk_work import JevBulkWork
 from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
@@ -32,6 +33,7 @@ from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAlignmentSettings, JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
 from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.jev import JevBulkWorkResult
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums.jev import JevPreflightPreset
@@ -45,7 +47,7 @@ _SCOPE_ANSWERED = frozenset({JevAlignmentStatus.ALIGNED, JevAlignmentStatus.NO_G
 class JevRuntime(AgentRuntime):
     """Linear runtime seam reserved for opinionated Jev capabilities."""
 
-    def __init__(self, *, runtime_settings: JevRuntimeSettings | None = None, preflight: JevPreflightGate | None = None, run_state: JevRunState | None = None, continuation: JevContinuation | None = None, response: JevResponse | None = None, alignment: JevAgentAlignment | None = None, alignment_settings: JevAlignmentSettings | None = None, skill_preload: JevPreload | None = None, **kwargs: Any) -> None:
+    def __init__(self, *, runtime_settings: JevRuntimeSettings | None = None, preflight: JevPreflightGate | None = None, run_state: JevRunState | None = None, continuation: JevContinuation | None = None, response: JevResponse | None = None, alignment: JevAgentAlignment | None = None, alignment_settings: JevAlignmentSettings | None = None, skill_preload: JevPreload | None = None, bulk_work: JevBulkWork | None = None, **kwargs: Any) -> None:
         # @intent jev-runtime-invariants-are-validated-at-construction
         # The factory is the supported construction path, and skill preload must accompany nonempty validated skill settings.
         # Retains the validated runtime settings, the gate, the done checks, the continuation, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
@@ -56,6 +58,7 @@ class JevRuntime(AgentRuntime):
             not isinstance(runtime_settings, JevRuntimeSettings)
             or not isinstance(preflight, JevPreflightGate)
             or not isinstance(response, JevResponse)
+            or not isinstance(bulk_work, JevBulkWork)
             or not isinstance(alignment_settings, JevAlignmentSettings)
             or (alignment is not None and not isinstance(alignment, JevAgentAlignment))
             or (alignment is None and (alignment_settings.system_prompt or alignment_settings.tool_settings))
@@ -70,6 +73,7 @@ class JevRuntime(AgentRuntime):
                     "received_response": type(response).__name__,
                     "received_alignment": type(alignment).__name__,
                     "received_skill_preload": type(skill_preload).__name__,
+                    "received_bulk_work": type(bulk_work).__name__,
                 },
             )
         self.runtime_settings = runtime_settings
@@ -80,6 +84,7 @@ class JevRuntime(AgentRuntime):
         self.alignment = alignment
         self.alignment_settings = alignment_settings
         self.skill_preload = skill_preload
+        self.bulk_work = bulk_work
         super().__init__(**kwargs)
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
@@ -118,6 +123,8 @@ class JevRuntime(AgentRuntime):
             if self.run_state is not None:
                 await self.run_state.begin(message)
             context, options, selector_metadata = await self._select_tools(message, context, options)
+            context, bulk_outcome = await self._run_bulk_work(message, context)
+            context, options = self._prepare_bulk_synthesis(context, options, bulk_outcome)
 
             result = await super().arun(
                 message,
@@ -175,6 +182,29 @@ class JevRuntime(AgentRuntime):
         if selector.usage is not None:
             metadata["usage"] = {"input_tokens": selector.usage.input_tokens, "output_tokens": selector.usage.output_tokens}
         return context, run_options, metadata
+
+    async def _run_bulk_work(self, message: str, context: BaseAgentContext) -> tuple[BaseAgentContext, JevBulkWorkResult | None]:
+        # Runs bounded work only after selection and adds ordered results as immutable context data.
+        if not self.preflight.bulk_work_requested:
+            return context, None
+        outcome = await self.bulk_work.plan_and_run(message, context, self.user_tools.all())
+        self.response.bulk_work(outcome)
+        if outcome.plan_valid:
+            artifact = self.bulk_work.result_artifact(outcome)
+            context = replace(context, tools=self.tools.specs(), artifacts=(*context.artifacts, artifact))
+        return context, outcome
+
+    def _prepare_bulk_synthesis(self, context: BaseAgentContext, options: Mapping[str, Any] | None, outcome: JevBulkWorkResult | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
+        # Appends trusted synthesis instructions only for a valid plan, preserving a caller's explicit system override.
+        if outcome is None or not outcome.plan_valid:
+            return context, options
+        run_options = dict(options or {})
+        explicit_system = run_options.get("system")
+        if isinstance(explicit_system, str):
+            run_options["system"] = f"{explicit_system}\n\n{self.bulk_work.synthesis_prompt}"
+            return context, run_options
+        effective_system = context.system_prompt or self.system_prompt
+        return replace(context, system_prompt=f"{effective_system}\n\n{self.bulk_work.synthesis_prompt}"), options
 
     async def _align_tools(self, alignment: JevAgentAlignment, message: str, prompt_result: JevAlignmentResult | None) -> JevToolAttachment:
         if prompt_result is not None and prompt_result.status is JevAlignmentStatus.OUT_OF_SCOPE:

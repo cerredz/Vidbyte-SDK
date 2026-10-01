@@ -15,6 +15,8 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
 from vidbyte.lib.constants.jev import (
+    JEV_BULK_WORK_THRESHOLD,
+    JEV_BULK_WORK_VETO_THRESHOLD,
     JEV_CLARITY_THRESHOLD,
     JEV_CLARITY_VETO_THRESHOLD,
     JEV_RUN_STATE_RELATION_THRESHOLD,
@@ -56,6 +58,16 @@ class JevPresets:
                 preset=JevPreflightPreset.RUN_STATE_RELATION,
                 question_keys=(JevPreflightQuestionKey.RUN_STATE_RELATION,),
                 threshold=JEV_RUN_STATE_RELATION_THRESHOLD,
+            ),
+            JevPreflightPreset.BULK_WORK: JevPresetDefinition(
+                preset=JevPreflightPreset.BULK_WORK,
+                question_keys=(
+                    JevPreflightQuestionKey.BULK_WORK_MULTIPLE_ITEMS,
+                    JevPreflightQuestionKey.BULK_WORK_SAME_OPERATION,
+                    JevPreflightQuestionKey.BULK_WORK_INDEPENDENT_ITEMS,
+                ),
+                threshold=JEV_BULK_WORK_THRESHOLD,
+                veto=JEV_BULK_WORK_VETO_THRESHOLD,
             ),
         }
     )
