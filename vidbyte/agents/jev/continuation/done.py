@@ -103,8 +103,38 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.NEGATIVE_COVERAGE: self._explain_negative_coverage,
             JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._explain_guaranteed_next_actions,
             JevDoneCheck.REQUIRED_ACTIONS: self._explain_required_actions,
+            JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._explain_cumulative_obligations,
         }
         return handlers[result.check](result)
+
+    def _explain_cumulative_obligations(self, result: JevDoneResult) -> tuple[str, str]:
+        """Name only failed obligations or user-turn inventories and reconnect them to the user's words."""
+        question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+        state = None if self.run_state.record is None else self.run_state.record.cumulative_obligations
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.cumulative_obligations
+        obligations = {} if state is None else {item.id: item for item in state.obligations}
+        missing = {} if handoff is None else {item.id: item.missing for item in handoff.obligations}
+        failed: list[str] = []
+        focus: list[str] = []
+        for identifier in result.incomplete:
+            if identifier.startswith("__inventory_turn_") and identifier.endswith("__"):
+                index = int(identifier.removeprefix("__inventory_turn_").removesuffix("__"))
+                failed.append(inventory_question.gap)
+                yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                failed.append(f"- The inventory for supplied user turn {index} was not confirmed complete (P(yes) = {yes:.2f}).")
+                focus.append("- Re-read the supplied user turn; restore every direct requirement or explicit change, preserve actual cancellations and incompatible replacements, and finish any still-active requirement not shown in the latest run evidence. Do not invent a specific missing task from this finding alone.")
+                continue
+            if not failed:
+                failed.append(question.gap)
+            item = obligations[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+            if item.active:
+                focus.append(f"- From user turn {item.source_turn}: {item.instruction} Done when: {item.completion_signal}")
+            else:
+                focus.append(f"- Treat this earlier obligation as active because no supported cancellation or incompatible replacement is shown: {item.instruction} Done when: {item.completion_signal}")
+        return "\n".join(failed), "\n".join(focus)
 
     def _explain_guaranteed_next_actions(self, result: JevDoneResult) -> tuple[str, str]:
         """Focus only on candidates Jev found both necessary and unfinished."""

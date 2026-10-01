@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names.
+PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names. Cumulative obligations preserve requirements across the supplied chronological user turns.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
@@ -124,6 +124,8 @@ JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 JEV_PHASE_PROGRESS_THRESHOLD: float = 0.8
 # Each explicitly required action must independently reach this P(yes); starting point, not tuned.
 JEV_REQUIRED_ACTIONS_THRESHOLD: float = 0.85
+# Every active user obligation independently reaches this P(yes); a single clear no is a veto.
+JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -211,6 +213,19 @@ JEV_DONE_PHASE_REQUIRED_RESULT_FIELD: str = "required_result"
 JEV_DONE_PHASE_REQUEST_SCOPE_FIELD: str = "request_scope"
 JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD: str = "output_criterion"
 JEV_DONE_REQUIRED_ACTIONS_FIELD: str = "required_actions"
+# Cumulative obligations preserve the exact supplied turn history, each request-derived obligation, and per-turn evidence.
+JEV_DONE_OBLIGATIONS_FIELD: str = "obligations"
+JEV_DONE_USER_TURNS_FIELD: str = "user_turns"
+JEV_DONE_USER_TURN_EVIDENCE_FIELD: str = "turn_evidence"
+JEV_DONE_OBLIGATION_FIELD: str = "obligation"
+JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD: str = "source_turn"
+JEV_DONE_OBLIGATION_RELATED_TURNS_FIELD: str = "related_turns"
+JEV_DONE_OBLIGATION_STATUS_TURN_FIELD: str = "status_turn"
+JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
+JEV_DONE_OBLIGATION_ACTIVE_FIELD: str = "active"
+JEV_DONE_OBLIGATION_STATUS_REASON_FIELD: str = "status_reason"
+JEV_MIN_OBLIGATION_STATUS_REASON_CHARS: int = 1
+JEV_MIN_OBLIGATION_TURN_INDEX: int = 0
 JEV_DONE_CLAIM_FIELD: str = "claim"
 JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
@@ -352,6 +367,16 @@ __all__ = [
     "JEV_DONE_MOTIVATING_CASES_FIELD",
     "JEV_DONE_MOTIVATING_CASE_FIELD",
     "JEV_DONE_NEGATIVE_COVERAGE_FIELD",
+    "JEV_DONE_OBLIGATIONS_FIELD",
+    "JEV_DONE_USER_TURNS_FIELD",
+    "JEV_DONE_USER_TURN_EVIDENCE_FIELD",
+    "JEV_DONE_OBLIGATION_FIELD",
+    "JEV_DONE_OBLIGATION_SOURCE_TURN_FIELD",
+    "JEV_DONE_OBLIGATION_RELATED_TURNS_FIELD",
+    "JEV_DONE_OBLIGATION_STATUS_TURN_FIELD",
+    "JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD",
+    "JEV_DONE_OBLIGATION_ACTIVE_FIELD",
+    "JEV_DONE_OBLIGATION_STATUS_REASON_FIELD",
     "JEV_DONE_OBSERVED_PROXY_FIELD",
     "JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD",
     "JEV_DONE_PHASE_PROGRESS_FIELD",
@@ -395,6 +420,8 @@ __all__ = [
     "JEV_MAX_SCORE_LEVELS",
     "JEV_MAX_STATE_CHARS",
     "JEV_MIN_CHOICE_OPTIONS",
+    "JEV_MIN_OBLIGATION_STATUS_REASON_CHARS",
+    "JEV_MIN_OBLIGATION_TURN_INDEX",
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
     "JEV_MOTIVATING_CASE_MAX_SCENARIOS",
@@ -404,6 +431,7 @@ __all__ = [
     "JEV_NEGATIVE_COVERAGE_THRESHOLD",
     "JEV_OUTPUT_COUNT_THRESHOLD",
     "JEV_REQUIRED_ACTIONS_THRESHOLD",
+    "JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD",
     "JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",

@@ -3,9 +3,9 @@
 PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question or question pair and threshold, plus validation of the done checks a user enables.
 ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
-COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here. REQUIRED_ACTIONS contributes one question for each explicitly requested action.
+COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; checks that audit a generated list against source inputs also register a per-source question in _inventory_questions. Keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here. REQUIRED_ACTIONS contributes one question for each explicitly requested action.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -18,6 +18,7 @@ from vidbyte.lib.constants.jev import (
     JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
     JEV_CLAIMS_THRESHOLD,
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
+    JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
     JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
     JEV_INPUT_EXHAUSTION_THRESHOLD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
@@ -42,6 +43,10 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQuestion
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
+from vidbyte.lib.jev.done.cumulative_obligations import (
+    CumulativeObligationFulfilledQuestion,
+    CumulativeUserTurnReconciledQuestion,
+)
 from vidbyte.lib.jev.done.guaranteed_next_actions import (
     GuaranteedActionNecessaryQuestion,
     GuaranteedActionUnfinishedQuestion,
@@ -82,6 +87,10 @@ class JevDoneRegistry:
         JevDoneCheck.PHASE_PROGRESS: (PhaseProgressReachedQuestion(),),
         JevDoneCheck.OUTPUT_EXTENT: (OutputExtentSatisfiedQuestion(),),
         JevDoneCheck.REQUIRED_ACTIONS: (RequiredActionCompletedQuestion(),),
+        JevDoneCheck.CUMULATIVE_OBLIGATIONS: (CumulativeObligationFulfilledQuestion(),),
+    })
+    _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
+        JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeUserTurnReconciledQuestion(),
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
@@ -101,6 +110,7 @@ class JevDoneRegistry:
         JevDoneCheck.PHASE_PROGRESS: JEV_PHASE_PROGRESS_THRESHOLD,
         JevDoneCheck.OUTPUT_EXTENT: JEV_OUTPUT_EXTENT_THRESHOLD,
         JevDoneCheck.REQUIRED_ACTIONS: JEV_REQUIRED_ACTIONS_THRESHOLD,
+        JevDoneCheck.CUMULATIVE_OBLIGATIONS: JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
     })
 
     @classmethod
@@ -124,9 +134,10 @@ class JevDoneRegistry:
             for question_group in cls._questions.values()
             for question in question_group
             if question.key == key
-        )
+        ) + tuple(question for question in cls._inventory_questions.values() if question.key == key)
         if len(matches) != 1:
             registered = [question.key.value for group in cls._questions.values() for question in group]
+            registered.extend(question.key.value for question in cls._inventory_questions.values())
             raise ConfigurationError(
                 f"Jev done question key {key.value!r} has {len(matches)} registered questions.",
                 details={"question_key": key.value, "matches": len(matches), "registered": registered},
@@ -139,6 +150,17 @@ class JevDoneRegistry:
         found = cls._thresholds.get(check)
         if found is None:
             raise ConfigurationError(f"Jev done check {check!r} has no registered threshold.", details={"check": str(check), "registered": [item.value for item in cls._thresholds]})
+        return found
+
+    @classmethod
+    def inventory_question(cls, check: JevDoneCheck) -> JevDoneQuestion:
+        """Return the fixed per-source inventory question for a check that audits generated candidate completeness."""
+        # @intent source-audit-questions-are-registered-beside-check-questions
+        # A preset may need fixed questions over generated candidates and independent completeness questions
+        # over their source messages; both are selected from one registry rather than assembled at runtime.
+        found = cls._inventory_questions.get(check)
+        if found is None:
+            raise ConfigurationError(f"Jev done check {check!r} has no registered inventory question.", details={"check": str(check), "registered": [item.value for item in cls._inventory_questions]})
         return found
 
     @classmethod

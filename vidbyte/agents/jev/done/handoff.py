@@ -37,6 +37,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimScope,
     JevClaimsEvidence,
     JevClaimsEvidencePayload,
+    JevCumulativeObligationEvidence,
+    JevCumulativeObligationEvidencePayload,
+    JevCumulativeObligationsEvidence,
+    JevCumulativeUserTurnEvidence,
     JevCompletionEvidence,
     JevCompletionEvidenceSectionPayload,
     JevDeliverableEvidence,
@@ -111,6 +115,7 @@ class JevHandoff(BaseAgent):
 
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.GUARANTEED_NEXT_ACTIONS: JevGuaranteedNextActionsEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -141,12 +146,15 @@ class JevHandoff(BaseAgent):
         return create_model("JevHandoffPayload", __base__=JevHandoffPayload, **sections)
 
     @staticmethod
-    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str) -> ContextManager:
+    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str, user_turns: Sequence[str] = ()) -> ContextManager:
         """Build the handoff's context: the run state, then the main agent's responses and tool calls, then its final answer."""
         # @intent the-handoff-reads-the-main-agents-window
         # The owner asked for the main agent's context window to reach the handoff through vidbyte.context, so the
         # run is passed as the SDK's own response and tool-call primitives instead of a hand-built transcript.
         items: list[ContextItem] = [TextContextItem(title=RUN_STATE_TITLE, content=run_state, source=HANDOFF_SOURCE)]
+        if user_turns:
+            turns = "\n\n".join(f"User turn {index}:\n{text}" for index, text in enumerate(user_turns))
+            items.append(TextContextItem(title="Exact user turns for cumulative obligations", content=turns, source=HANDOFF_SOURCE))
         for index, text in enumerate(responses):
             if not text.strip():
                 continue
@@ -286,6 +294,7 @@ class JevHandoff(BaseAgent):
             scope_coverage = JevScopeCoverageEvidence.from_payload(scope_section, state.scope_coverage)
         return JevHandoffRecord(
             multi_part=request_records.multi_part,
+            cumulative_obligations=request_records.cumulative_obligations,
             claims=claims,
             completion_evidence=completion_evidence,
             phase_progress=request_records.phase_progress,
@@ -469,6 +478,7 @@ class JevHandoff(BaseAgent):
             expected = () if state.motivating_case is None else state.motivating_case.ids()
             if motivating_case.ids() != expected:
                 return None
+        cumulative_obligations = self._cumulative_obligations_evidence(payload, state)
         additional_records = self._request_derived_evidence_records(payload, state)
         if additional_records is None:
             return None
@@ -477,12 +487,30 @@ class JevHandoff(BaseAgent):
             phase_progress=phase_progress,
             target_outcome=target_outcome,
             motivating_case=motivating_case,
+            cumulative_obligations=cumulative_obligations,
             input_exhaustion=additional_records.input_exhaustion,
             input_set_coverage=additional_records.input_set_coverage,
             output_count=additional_records.output_count,
             output_extent=additional_records.output_extent,
             negative_coverage=additional_records.negative_coverage,
         )
+
+    @staticmethod
+    def _cumulative_obligations_evidence(payload: JevHandoffPayload, state: JevRunStateRecord) -> JevCumulativeObligationsEvidence | None:
+        """Keep generated obligation and turn evidence aligned to each supplied source index."""
+        section = getattr(payload, JevDoneCheck.CUMULATIVE_OBLIGATIONS.value, None)
+        if not isinstance(section, JevCumulativeObligationEvidencePayload):
+            return None
+        evidence = JevCumulativeObligationsEvidence(
+            tuple(JevCumulativeObligationEvidence(item.id, item.evidence.strip(), item.missing.strip()) for item in section.obligations),
+            tuple(JevCumulativeUserTurnEvidence(item.id, item.evidence.strip()) for item in section.turns),
+        )
+        request_state = state.cumulative_obligations
+        expected_obligations = () if request_state is None else request_state.ids()
+        expected_turns = () if request_state is None else tuple(f"turn_{index}" for index in range(len(request_state.user_turns)))
+        if evidence.ids() != expected_obligations or evidence.turn_ids() != expected_turns:
+            return None
+        return evidence
 
     # @intent request-derived-evidence-covers-exactly-the-state
     # New request-derived input and output obligations must remain complete when copied into the handoff.

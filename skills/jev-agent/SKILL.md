@@ -144,3 +144,7 @@ python scripts/run_ci.py
 ### Guaranteed next actions
 
 `GUARANTEED_NEXT_ACTIONS` is handoff-only: candidates are dynamic items built from an observed run trigger, not predicted request-state obligations. Keep the handoff's `necessity_basis` private. Jev receives the requested outcome, observed trigger, proposed action, and direct evidence, then answers separate necessity and unfinished questions. Continue for a candidate only when both answers meet their threshold. Exclude sequences, broad phase progress, hypothetical triggers, optional polish, speculative dependencies, and work needing new authorization.
+
+### Cumulative obligations
+
+`CUMULATIVE_OBLIGATIONS` uses only caller-supplied `AgentMessage` history entries whose sender is `user`, in their supplied order, plus the current request as the final turn. Preserve exact turn text; do not infer missing history or treat agent replies as user requirements. Attach earlier turns as context while keeping the current request as the run-state prompt, including during the single motivating-case recall rebuild. At handoff, ask once for each obligation and once for each turn's complete inventory in the same batched Jev request. Each turn inventory remains a separate required answer even when the generated obligation list is empty; a missing or low answer must continue the run.
