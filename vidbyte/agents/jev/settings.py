@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines JevAgent's public configuration objects: JevAgentSettings for the agent and its alignment switches, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations.
+PURPOSE: Defines JevAgent's public configuration objects: JevAgentSettings for the agent and alignment switches (system prompt, tool settings, and candidate skills), and JevRuntimeSettings for Jev's decision policy and continuation limits.
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
-ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent, specialist candidates, and one JevAlignmentSettings object with prompt and tool alignment switches; JevRuntimeSettings holds the decision model, preflight flags, continuation settings, and tool-selector threshold.
-COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
+ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. `JevSkillCandidate` describes inline or local-file instructions without loading their body at settings construction; `JevAlignmentSettings.skills` is the candidate list evaluated before a run.
+COMMON MODIFICATION PATTERNS: Add a named capability as a validated setting here, then build its fixed policy in the owning Jev agent module and pass it through the JevAgent runtime extension seam.
+KNOWN EDGE CASES: Candidate names must be unique within one alignment setting; each candidate must provide exactly one non-blank inline body or local file path. Local files are not read until a candidate is selected. Existing provider, specialist, preflight, and continuation validation still applies.
+RELATED DOCS: https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/jev-skill-preloading.md and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
 
 from vidbyte.agents.settings import AgentLoopSettings
@@ -56,6 +57,30 @@ _REQUIRED_CATALOG_CREDENTIALS: Mapping[ToolCatalogName, tuple[str, ...]] = {
     ToolCatalogName.PIPEDREAM: ("client_id", "client_secret", "project_id", "environment"),
 }
 _END_USER_CATALOGS = frozenset({ToolCatalogName.COMPOSIO, ToolCatalogName.PIPEDREAM, ToolCatalogName.ARCADE})
+
+
+@dataclass(frozen=True, slots=True)
+class JevSkillCandidate:
+    """One named skill Jev may select for a request; provide inline text or a local UTF-8 file path."""
+
+    name: str
+    description: str
+    content: str | None = field(default=None, repr=False)
+    path: str | Path | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ConfigurationError("JevSkillCandidate.name must be a non-blank string.")
+        if not isinstance(self.description, str) or not self.description.strip():
+            raise ConfigurationError("JevSkillCandidate.description must be a non-blank string.")
+        has_content = isinstance(self.content, str) and bool(self.content.strip())
+        has_path = isinstance(self.path, (str, Path)) and bool(str(self.path).strip())
+        if has_content == has_path:
+            raise ConfigurationError("JevSkillCandidate must provide exactly one non-blank content or path value.")
+        if self.content is not None and not isinstance(self.content, str):
+            raise ConfigurationError("JevSkillCandidate.content must be a string when provided.")
+        if self.path is not None and not isinstance(self.path, (str, Path)):
+            raise ConfigurationError("JevSkillCandidate.path must be a string or pathlib.Path when provided.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +179,7 @@ class JevAlignmentSettings:
 
     system_prompt: bool = False
     tool_settings: bool = False
+    skills: tuple[JevSkillCandidate, ...] = ()
     tool_options: JevToolAlignmentSettings = field(default_factory=JevToolAlignmentSettings)
 
     def __post_init__(self) -> None:
@@ -163,6 +189,18 @@ class JevAlignmentSettings:
                 raise ConfigurationError(f"JevAlignmentSettings.{name} must be True or False.")
         if not isinstance(self.tool_options, JevToolAlignmentSettings):
             raise ConfigurationError("JevAlignmentSettings.tool_options must be a JevToolAlignmentSettings instance.")
+        if isinstance(self.skills, (str, bytes)):
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of JevSkillCandidate values, not a string.")
+        try:
+            skills = tuple(self.skills)
+        except TypeError as exc:
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of JevSkillCandidate values.") from exc
+        if not all(isinstance(skill, JevSkillCandidate) for skill in skills):
+            raise ConfigurationError("JevAlignmentSettings.skills must contain only JevSkillCandidate values.")
+        names = [skill.name for skill in skills]
+        if len(names) != len(set(names)):
+            raise ConfigurationError("JevAlignmentSettings.skills must have unique candidate names.")
+        object.__setattr__(self, "skills", skills)
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,4 +355,4 @@ class JevRuntimeSettings:
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
 
-__all__ = ["JevAgentSettings", "JevAlignmentSettings", "JevContinualSettings", "JevRuntimeSettings", "JevToolAlignmentSettings"]
+__all__ = ["JevAgentSettings", "JevAlignmentSettings", "JevContinualSettings", "JevRuntimeSettings", "JevSkillCandidate", "JevToolAlignmentSettings"]

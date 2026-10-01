@@ -34,6 +34,14 @@ class JevPreflightPreset(str, Enum):
     TOOL_SELECTOR = "tool_selector"
 
 
+class JevSkillsPreloadStatus(str, Enum):
+    """Run-level result of selecting and loading JevAgent skill candidates."""
+
+    SELECTED = "selected"
+    NO_MATCH = "no_match"
+    UNAVAILABLE = "unavailable"
+
+
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
 # a continuation done check (run-state and handoff sections, the batched Jev question, and the continuation message).
 class JevDoneCheck(str, Enum):
@@ -86,4 +94,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType", "JevSkillsPreloadStatus"]

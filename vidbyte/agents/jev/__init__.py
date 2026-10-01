@@ -1,6 +1,6 @@
 """FILE: vidbyte/agents/jev/__init__.py
 
-PURPOSE: Exposes JevAgent, its agent and runtime settings, the JevSpecialist record, its runtime, the preflight flags and done checks, and the records a caller reads on JevAgent.response.
+PURPOSE: Exposes JevAgent, its agent/runtime settings, named alignment capabilities including skill candidates, and the records a caller reads on JevAgent.response.
 ROLE IN CODEBASE: This is the public package boundary imported by vidbyte.agents and application code.
 ARCHITECTURE NOTE: The agent types plus the preflight flag and done-check enums and result records are public; they are re-exported from vidbyte.lib, while preflight and done questions, JevPreflightGate, JevRunState, JevHandoff, decision records, and provider transport stay in their lower-level packages.
 COMMON MODIFICATION PATTERNS: Export a named capability settings type only when it becomes part of the supported JevAgent API.
@@ -22,12 +22,12 @@ from vidbyte.agents.jev.settings import (
     JevAlignmentSettings,
     JevContinualSettings,
     JevRuntimeSettings,
+    JevSkillCandidate,
     JevToolAlignmentSettings,
 )
 from vidbyte.lib.dataclasses.jev import (
-    JevAlignmentOutcome,
     JevAgentResponse,
-    JevPromptAlignmentOutcome,
+    JevAlignmentOutcome,
     JevClaimAssertion,
     JevClaimContext,
     JevClaimEvidence,
@@ -41,11 +41,19 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevPromptAlignmentOutcome,
     JevRunStateRecord,
+    JevSkillsPreloadOutcome,
+    JevSkillsPreloadResult,
     JevSpecialist,
     JevToolAlignmentOutcome,
 )
-from vidbyte.lib.enums.jev import JevClaimKind, JevDoneCheck, JevPreflightPreset
+from vidbyte.lib.enums.jev import (
+    JevClaimKind,
+    JevDoneCheck,
+    JevPreflightPreset,
+    JevSkillsPreloadStatus,
+)
 
 __all__ = [
     "JevAgent",
@@ -55,16 +63,15 @@ __all__ = [
     "JevAlignmentResult",
     "JevAlignmentSettings",
     "JevAlignmentStatus",
-    "JevPromptAlignmentOutcome",
-    "JevClarification",
-    "JevClarifyingQuestion",
-    "JevClaimEvidence",
-    "JevClaimsEvidence",
     "JevClaimAssertion",
     "JevClaimContext",
+    "JevClaimEvidence",
     "JevClaimIdentity",
     "JevClaimKind",
     "JevClaimScope",
+    "JevClaimsEvidence",
+    "JevClarification",
+    "JevClarifyingQuestion",
     "JevContinualSettings",
     "JevDeliverable",
     "JevDeliverableEvidence",
@@ -73,12 +80,17 @@ __all__ = [
     "JevHandoffRecord",
     "JevPreflightPreset",
     "JevPresetResult",
+    "JevPromptAlignmentOutcome",
     "JevRunStateRecord",
     "JevRuntime",
     "JevRuntimeSettings",
+    "JevSkillCandidate",
+    "JevSkillsPreloadOutcome",
+    "JevSkillsPreloadResult",
+    "JevSkillsPreloadStatus",
     "JevSpecialist",
+    "JevToolAlignmentOutcome",
     "JevToolAlignmentResult",
     "JevToolAlignmentSettings",
-    "JevToolAlignmentOutcome",
     "JevToolAlignmentStatus",
 ]

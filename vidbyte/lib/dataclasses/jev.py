@@ -47,6 +47,7 @@ from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevQuestionType,
+    JevSkillsPreloadStatus,
 )
 from vidbyte.lib.errors import ConfigurationError
 
@@ -1130,6 +1131,34 @@ class JevClarification:
         return "\n".join(blocks)
 
 
+@dataclass(frozen=True, slots=True)
+class JevLoadedSkill:
+    """One selected skill body for immediate, run-local context injection."""
+
+    name: str
+    content: str = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class JevSkillsPreloadResult:
+    """Redacted run outcome for skill selection; it never carries candidate instructions or local paths."""
+
+    status: JevSkillsPreloadStatus
+    selected: tuple[str, ...] = ()
+    unavailable: tuple[str, ...] = ()
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class JevSkillsPreloadBatch:
+    """Internal handoff joining redacted observability with selected run-local skill bodies."""
+
+    result: JevSkillsPreloadResult
+    loaded: tuple[JevLoadedSkill, ...] = field(default=(), repr=False)
+
+
 @dataclass(slots=True)
 class JevAgentResponse:
     """Everything JevAgent's opinionated features produced for its most recent run, read as `JevAgent.response`.
@@ -1141,7 +1170,7 @@ class JevAgentResponse:
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
     `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
-    `alignment` and `tool_alignment` hold the latest outcomes of the two optional alignment passes.
+    `alignment`, `tool_alignment`, and `skill_preload` hold the outcomes of optional per-run alignment capabilities.
     """
 
     input: str = ""
@@ -1156,6 +1185,7 @@ class JevAgentResponse:
     continuations: int = 0
     alignment: JevPromptAlignmentOutcome | None = None
     tool_alignment: JevToolAlignmentOutcome | None = None
+    skill_preload: JevSkillsPreloadOutcome | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -1204,28 +1234,38 @@ class JevToolAlignmentOutcome(JevAlignmentOutcome, Protocol):
         ...
 
 
+class JevSkillsPreloadOutcome(Protocol):
+    """Read-only contract for skill-preload results exposed on JevAgent.response."""
+
+    status: JevSkillsPreloadStatus
+    selected: tuple[str, ...]
+    unavailable: tuple[str, ...]
+    input_tokens: int | None
+    output_tokens: int | None
+    detail: str | None
+
+
 __all__ = [
-    "JevAlignmentOutcome",
-    "JevPromptAlignmentOutcome",
     "JevAgentResponse",
+    "JevAlignmentOutcome",
     "JevAnswer",
     "JevBrief",
-    "JevClarification",
-    "JevClarificationPayload",
-    "JevClarifyingQuestion",
-    "JevClarifyingQuestionPayload",
-    "JevClaimEvidence",
-    "JevClaimEvidencePayload",
     "JevClaimAssertion",
     "JevClaimAssertionPayload",
     "JevClaimContext",
     "JevClaimContextPayload",
+    "JevClaimEvidence",
+    "JevClaimEvidencePayload",
     "JevClaimIdentity",
     "JevClaimIdentityPayload",
     "JevClaimScope",
     "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
+    "JevClarification",
+    "JevClarificationPayload",
+    "JevClarifyingQuestion",
+    "JevClarifyingQuestionPayload",
     "JevContent",
     "JevCriterion",
     "JevDecisionRecord",
@@ -1240,6 +1280,7 @@ __all__ = [
     "JevHandoffPayload",
     "JevHandoffRecord",
     "JevJson",
+    "JevLoadedSkill",
     "JevModelCard",
     "JevMultiPart",
     "JevMultiPartEvidence",
@@ -1251,13 +1292,17 @@ __all__ = [
     "JevPresetDefinition",
     "JevPresetResult",
     "JevProbability",
+    "JevPromptAlignmentOutcome",
     "JevQuestion",
     "JevRunStatePayload",
     "JevRunStateRecord",
     "JevSectionPayload",
+    "JevSkillsPreloadBatch",
+    "JevSkillsPreloadOutcome",
+    "JevSkillsPreloadResult",
     "JevSpecialist",
-    "JevToolAlignmentOutcome",
     "JevText",
+    "JevToolAlignmentOutcome",
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",
