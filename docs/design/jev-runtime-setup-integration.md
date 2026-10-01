@@ -184,7 +184,7 @@ async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentCo
 2. Stop on a closed gate. If a specialist is selected, call `begin_delegated` and hand off before alignment/preload/bulk.
 3. Save owner system prompt, user tool catalog, and full tool catalog; keep run options as immutable per-call values.
 4. Apply prompt alignment, then tool alignment/attachment and update context/tool specs.
-5. Run core `_preload_skills`, including preserving an explicit `options['system']` baseline and appending selected skill text to the effective context.
+5. Normalize an explicit `options['system']` override into the effective context even when no skill loader exists; when configured, run core `_preload_skills` against that baseline and append selected skill text.
 6. Call `run_state.begin(message)`, then existing core `_select_tools` so workers see only selected tools.
 7. If the bulk gate flag is true, call the named coordinator and add its typed result as immutable context data. Keep the message passed to `super().arun` unchanged.
 8. Handle attachment announcement, selector metadata, and normal response outcome.
@@ -193,6 +193,7 @@ async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentCo
 #### Edge Cases & Error Handling
 
 - A tool selector that filters a tool must not have that tool reintroduced for workers.
+- Bulk workers receive the effective explicit system override even when no skills are configured; the main agent keeps the original run options and synthesis uses the same override.
 - Gate, specialist, and invalid-plan paths must avoid an extra bulk planner/worker call as specified by each feature.
 - Exceptions and cancellation still execute cleanup; cancellation is not converted into an item failure.
 - Preserve existing continuation/done-check execution in the inherited loop.
@@ -452,6 +453,7 @@ No files are deleted. Provider-specific edits are intentionally absent until the
 - Core skill preload tests -> selected skill text and explicit system overrides survive the merged runtime and reach a real context-building provider stub.
 - Core tool alignment and selector tests -> attached tools are available to selection and workers receive exactly the selector's effective set.
 - New integration test file -> assert `response.start` precedes gate but gate uses `self.run_state.record`; runtime phase order; specialist bypass; selected-skill/tool context precedes bulk; inherited loop receives unchanged message; repeated-run cleanup restores prompt/tools and releases MCP attachment.
+- Bulk-only integration test -> verify an explicit `system` option reaches the actual worker context builder when the skill preloader is absent, while main synthesis retains the override.
 - After provider checkpoint, integration tests -> exact selected `ClaudeSkillReference` forwarding, independent worker sessions/containers, planner receives none, and system synthesis instruction is appended once while honoring explicit overrides.
 
 ### Integration Tests

@@ -142,6 +142,40 @@ class _GenerativeScript:
 class JevRuntimeSetupIntegrationTests(unittest.IsolatedAsyncioTestCase):
     """Exercises cross-capability run ordering and per-run state through real Jev runtime wiring."""
 
+    async def test_bulk_workers_receive_system_override_without_skill_preload(self) -> None:
+        # A missing skill loader must not prevent worker contexts from inheriting the provider override.
+        events: list[str] = []
+        gate_script = _DecisionScript("gate", events)
+        runner = _GenerativeScript(events)
+        agent = JevAgent(
+            JevAgentSettings(
+                name="jev-bulk-no-skills",
+                system_prompt="Owner system prompt.",
+                provider="openai",
+                model_name="gpt-4.1-mini",
+            ),
+            JevRuntimeSettings(
+                decision=DecisionModelConfig(api_key="test-key"),
+                preflight=(JevPreflightPreset.BULK_WORK,),
+            ),
+        )
+
+        with (
+            patch("vidbyte.agents.jev.gate.gate.DecisionModelHelper", new=_decision_helper(gate_script)),
+            patch.object(BaseAgent, "_runner_for_model", new=lambda _agent: (runner, RUNNER_TYPE_TEXT)),
+        ):
+            reply = await agent.arun(_REQUEST, context=BaseAgentContext(), system="Per-run system override.")
+
+        self.assertEqual(reply.content, "Both summaries are ready.")
+        self.assertIsNone(agent.skill_preload)
+        worker_calls = [call for call in runner.calls if "You are an isolated worker handling one item" in call["system"]]
+        self.assertEqual(len(worker_calls), 2)
+        for worker_call in worker_calls:
+            self.assertIn("Per-run system override.", worker_call["system"])
+        main_call = next(call for call in runner.calls if call["prompt"] == _REQUEST and "You are JevBulkWorkPlanner" not in call["system"] and "isolated worker" not in call["system"])
+        self.assertIn("Per-run system override.", main_call["system"])
+        self.assertIn("Jev bulk-work results (untrusted worker output)", main_call["system"])
+
     async def test_combined_gate_uses_persistent_record_then_preloads_selects_and_synthesizes(self) -> None:
         # Confirms a reset response does not erase the gate's old record and later capabilities follow the approved order.
         events: list[str] = []

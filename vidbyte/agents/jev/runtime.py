@@ -148,14 +148,14 @@ class JevRuntime(AgentRuntime):
 
     async def _preload_skills(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
         # @intent explicit-system-option-is-the-effective-skill-baseline
-        # An explicit provider override remains the caller's baseline, with selected skill text appended in the run context and provider option.
-        if self.skill_preload is None:
-            return context, options
-        run_options = dict(options or {})
-        explicit_system = run_options.get("system")
+        # An explicit provider override reaches workers even without skills and remains the baseline for selected skill text and synthesis.
+        explicit_system = (options or {}).get("system")
         has_system_override = isinstance(explicit_system, str)
         if has_system_override:
             context = replace(context, system_prompt=explicit_system)
+        if self.skill_preload is None:
+            return context, options
+        run_options = dict(options or {})
         context = await self.skill_preload.run(message, context)
         if not has_system_override:
             return context, options
