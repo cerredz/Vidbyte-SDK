@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/alignment/__init__.py
 
-PURPOSE: Exposes JevAgent's alignment capabilities: the alignment agent (prompt editing and tool alignment), their result records, and the fixed question sets.
-ROLE IN CODEBASE: vidbyte.agents.jev imports JevAgentAlignment for JevAgent and JevRuntime; applications read JevAlignmentResult from run metadata.
-ARCHITECTURE NOTE: Questions, draft rules, the edit tool, and the scout tools are internal policy; callers enable the passes with JevAgentSettings(alignment=JevAlignmentSettings(system_prompt=True, tool_settings=True)).
+PURPOSE: Exposes JevAgent's alignment capabilities: prompt editing, tool alignment, and source-neutral skill preloading, along with result records and fixed question sets.
+ROLE IN CODEBASE: JevAgent and JevRuntime import the alignment classes; applications enable named capabilities through JevAlignmentSettings and read redacted outcomes from JevAgent.response.
+ARCHITECTURE NOTE: Questions, draft rules, editor/scout tools, and skill materialization are internal policy; remote skill-source adapters are not part of this package boundary.
 COMMON MODIFICATION PATTERNS: Export a record here only when applications need to read it from run metadata.
 KNOWN EDGE CASES: Importing this package performs no Jev call and needs no credentials.
 RELATED DOCS: docs/design/jev-agent-alignment.md and skills/jev-agent/SKILL.md.

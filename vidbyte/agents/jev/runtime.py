@@ -11,7 +11,7 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -23,6 +23,7 @@ from vidbyte.agents.jev.alignment import (
     JevToolAlignmentStatus,
     JevToolAttachment,
 )
+from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
 from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
@@ -30,7 +31,9 @@ from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAlignmentSettings, JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
+from vidbyte.context.primitives import TextContextItem
 from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.jev import JevLoadedSkill
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums.jev import JevPreflightPreset
@@ -66,7 +69,7 @@ class JevRuntime(AgentRuntime):
             or not isinstance(response, JevResponse)
             or not isinstance(alignment_settings, JevAlignmentSettings)
             or (alignment is not None and not isinstance(alignment, JevAgentAlignment))
-            or (alignment is None and (alignment_settings.system_prompt or alignment_settings.tool_settings))
+            or (alignment is None and (alignment_settings.system_prompt or alignment_settings.tool_settings or alignment_settings.skills))
         ):
             raise ConfigurationError(
                 "The 'jev' runtime is only available through JevAgent; construct JevAgent(JevAgentSettings(...)) instead of BaseAgent(runtime='jev').",
@@ -113,6 +116,10 @@ class JevRuntime(AgentRuntime):
             if alignment is not None and self.alignment_settings.system_prompt:
                 prompt_result, context = await self._align(alignment, message, context)
                 self.response.alignment(prompt_result)
+            if isinstance(alignment, JevSkillsPreload) and self.alignment_settings.skills:
+                batch = await alignment.preload_skills(message, self.alignment_settings.skills)
+                self.response.skill_preload(batch.result)
+                context = self._with_preloaded_skills(batch.loaded, context)
             if alignment is not None and self.alignment_settings.tool_settings:
                 attachment = await self._align_tools(alignment, message, prompt_result)
                 self.response.tool_alignment(attachment.result)
@@ -172,6 +179,13 @@ class JevRuntime(AgentRuntime):
         run_options = dict(options or {})
         run_options.pop("tools", None)
         return replace(context, tools=self.tools.specs()), run_options
+
+    @staticmethod
+    def _with_preloaded_skills(loaded: Sequence[JevLoadedSkill], context: BaseAgentContext) -> BaseAgentContext:
+        if not loaded:
+            return context
+        items = tuple(TextContextItem(title=f"Skill: {skill.name}", content=skill.content, source="jev_skill_preload") for skill in loaded)
+        return replace(context, context_items=(*context.context_items, *items))
 
     def _announced(self, result: AgentResult, attachment: JevToolAttachment) -> str:
         if not self.alignment_settings.tool_settings or not self.alignment_settings.tool_options.announce or result.structured is not None:
