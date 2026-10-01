@@ -435,7 +435,8 @@ For GUARANTEED_NEXT_ACTIONS, key each dynamic entry by its candidate id and incl
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and optional fields for each enabled check, including `deliverables`, `claims`, and `guaranteed_next_actions`. Keep this one description true for every combination of enabled checks, including dynamic lists emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and each optional section (`deliverables`, `claims`, `guaranteed_next_actions`, `target_outcomes`, and `problems_resolved`), present only when its check is enabled. Keep this description true for every combination of enabled checks, including dynamic lists emitted by the handoff.
+For PROBLEMS_RESOLVED, build the dynamic item list from the current finish attempt's handoff, not the pre-run state. Include one entry per observed error, failed operation, blocker, or failed validation, plus exactly one `original_request_completion` entry even if no problem occurred. Each entry has five named context groups (`identity`, `scope`, `kind`, `repair`, and `assertion`) and its run `evidence`; exclude `missing` from Jev's state. Ask once per item. A problem passes only when the run shows a complete repair and relevant successful revalidation after it. The separate request item passes only when the original request is complete after repairs. Failed focus must fully repair and revalidate the problem, then return to the original request and finish remaining work.
 
 Before you ship:
 
