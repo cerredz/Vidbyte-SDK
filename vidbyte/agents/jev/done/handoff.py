@@ -56,6 +56,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevMotivatingScenarioEvidence,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
+    JevNegativeCoverageEvidence,
+    JevNegativeCoverageEvidenceItem,
+    JevNegativeCoverageEvidencePayload,
     JevOutputCountEntry,
     JevOutputCountEvidence,
     JevOutputCountEvidenceItem,
@@ -97,7 +100,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoverageEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -290,6 +293,7 @@ class JevHandoff(BaseAgent):
             report_action_alignment=report_action_alignment,
             assumptions_reconciled=assumptions_reconciled,
             input_exhaustion=request_records.input_exhaustion,
+            negative_coverage=request_records.negative_coverage,
         )
 
     # @intent request-derived-evidence-covers-exactly-the-state
@@ -340,6 +344,7 @@ class JevHandoff(BaseAgent):
             input_set_coverage=additional_records.input_set_coverage,
             output_count=additional_records.output_count,
             output_extent=additional_records.output_extent,
+            negative_coverage=additional_records.negative_coverage,
         )
 
     # @intent request-derived-evidence-covers-exactly-the-state
@@ -409,12 +414,37 @@ class JevHandoff(BaseAgent):
             expected = () if state.output_extent is None else state.output_extent.ids()
             if output_extent.ids() != expected:
                 return None
+        negative_valid, negative_coverage = self._negative_coverage_evidence_record(payload, state)
+        if not negative_valid:
+            return None
         return JevHandoffRecord(
             input_exhaustion=input_exhaustion,
             input_set_coverage=input_set_coverage,
             output_count=output_count,
             output_extent=output_extent,
+            negative_coverage=negative_coverage,
         )
+
+    @staticmethod
+    def _negative_coverage_evidence_record(
+        payload: JevHandoffPayload,
+        state: JevRunStateRecord,
+    ) -> tuple[bool, JevNegativeCoverageEvidence | None]:
+        section = getattr(payload, JevDoneCheck.NEGATIVE_COVERAGE.value, None)
+        if not isinstance(section, JevNegativeCoverageEvidencePayload):
+            return state.negative_coverage is None, None
+        evidence = JevNegativeCoverageEvidence(tuple(
+            JevNegativeCoverageEvidenceItem(
+                item.id,
+                item.inspection.strip(),
+                item.negative_conclusion.strip(),
+                item.incomplete_report.strip(),
+                item.missing.strip(),
+            )
+            for item in section.inspections
+        ))
+        expected = () if state.negative_coverage is None else state.negative_coverage.ids()
+        return evidence.ids() == expected, evidence
 
     # @intent phase-evidence-matches-request-stages
     # Jev must judge every request-derived stage exactly once; a handoff omission or invented id fails open as a whole.

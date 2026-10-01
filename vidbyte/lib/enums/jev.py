@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, scope-coverage, output-extent, report/action-alignment, and assumption-reconciliation checks), motivating-case classifications, and dynamic problem-item kinds.
+PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, scope-coverage, output-extent, report/action-alignment, and assumption-reconciliation checks), motivating-case classifications, and dynamic problem-item kinds. Negative coverage is an opt-in done check with a fixed question key.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on presets, and `vidbyte/agents/jev/done/` builds enabled done-check schemas and questions.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, record layer, and tool layer all read it, and lower layers may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a TypeSafe question type only when documented, and extend validation and answer normalization with it. Add preflight keys with their fixed question dataclasses and preset registration. Add a done check together with its run-state and handoff sections and one fixed question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff.
 KNOWN EDGE CASES: `noul` is TypeSafe's spelling for a yes/no question; keep the serialized value exactly as the API expects. A question key's value is the answer name Jev returns, so it must remain unique. TOOL_SELECTOR has no question keys because it asks one question per configured tool at run time.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-continuation/SKILL.md, and https://docs.typesafe.ai/api.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-continuation/SKILL.md, and https://docs.typesafe.ai/api.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, scripts/test-jev-agent-scaffold.py, and scripts/test-jev-preflight.py.
 """
 
@@ -43,6 +43,7 @@ class JevDoneCheck(str, Enum):
     OUTPUT_COUNT = "output_count"
     CLAIMS = "claims"
     INPUT_EXHAUSTION = "input_exhaustion"
+    NEGATIVE_COVERAGE = "negative_coverage"
     TARGET_OUTCOME = "target_outcome"
     MOTIVATING_CASE = "motivating_case"
     SCOPE_COVERAGE = "scope_coverage"
@@ -66,6 +67,7 @@ class JevDoneQuestionKey(str, Enum):
     OUTPUT_COUNT_SATISFIED = "output_count.satisfied"
     CLAIMS_SUPPORTED = "claims.supported"
     INPUT_EXHAUSTION_TRAVERSED = "input_exhaustion.traversed"
+    NEGATIVE_COVERAGE_SUPPORTED = "negative_coverage.supported"
     TARGET_OUTCOME_DEMONSTRATED = "target_outcome.demonstrated"
     MOTIVATING_CASE_RECALL = "motivating_case.recall"
     MOTIVATING_CASE_EXERCISED = "motivating_case.exercised"

@@ -98,8 +98,24 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._explain_report_action_alignment,
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._explain_assumptions_reconciled,
             JevDoneCheck.INPUT_EXHAUSTION: self._explain_input_exhaustion,
+            JevDoneCheck.NEGATIVE_COVERAGE: self._explain_negative_coverage,
         }
         return handlers[result.check](result)
+
+    def _explain_negative_coverage(self, result: JevDoneResult) -> tuple[str, str]:
+        """Name requested inspection targets whose reported conclusions lack run evidence."""
+        question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+        state = None if self.run_state.record is None else self.run_state.record.negative_coverage
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.negative_coverage
+        targets = {} if state is None else {item.id: item for item in state.inspections}
+        evidence = {} if handoff is None else {item.id: item for item in handoff.inspections}
+        failed, focus = [question.gap], []
+        for identifier in result.incomplete:
+            target, observed = targets[identifier], evidence[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {observed.missing}")
+            focus.append(f"- Inspect the requested target: {target.target}. Evidence that meets the request: {target.inspection_signal}")
+        return "\n".join(failed), "\n".join(focus)
 
     def _explain_input_exhaustion(self, result: JevDoneResult) -> tuple[str, str]:
         """Give each incomplete traversal's boundary, last position, and next action."""

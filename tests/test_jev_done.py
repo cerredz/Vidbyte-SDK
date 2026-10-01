@@ -53,6 +53,10 @@ from vidbyte import (
     JevOutputCountEvidenceItem,
     JevOutputCountObligation,
     JevOutputExtent,
+    JevNegativeCoverage,
+    JevNegativeCoverageEvidence,
+    JevNegativeCoverageEvidenceItem,
+    JevNegativeCoverageTarget,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
     JevReportActionAlignment,
@@ -85,6 +89,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_INPUT_IDENTITY_FIELD,
     JEV_DONE_INPUT_SCOPE_FIELD,
     JEV_DONE_INPUT_SET_COVERAGE_FIELD,
+    JEV_DONE_NEGATIVE_COVERAGE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_DONE_OUTPUT_COUNTS_FIELD,
     JEV_DONE_PHASE_PROGRESS_FIELD,
@@ -94,6 +99,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_NEGATIVE_COVERAGE_THRESHOLD,
     JEV_OUTPUT_COUNT_THRESHOLD,
     JEV_OUTPUT_EXTENT_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
@@ -129,6 +135,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
+    JevNegativeCoverageEvidenceItemPayload,
+    JevNegativeCoverageEvidencePayload,
+    JevNegativeCoveragePayload,
+    JevNegativeCoverageTargetPayload,
     JevOutputCountEntryPayload,
     JevOutputCountEvidencePayload,
     JevOutputCountEvidencePayloadItem,
@@ -172,6 +182,7 @@ from vidbyte.lib.jev.done import (
     ClaimsSupportedQuestion,
     InputSetCoverageQuestion,
     MultiPartDeliveredQuestion,
+    NegativeCoverageSupportedQuestion,
     OutputCountSatisfiedQuestion,
     OutputExtentSatisfiedQuestion,
     ProblemsResolvedQuestion,
@@ -243,6 +254,28 @@ _INPUT_EXHAUSTION_STATE = {
         "exhaustion_condition": "The report has no pages after page 41.",
     }]},
 }
+
+_NEGATIVE_COVERAGE_REQUEST = "Inspect all cache invalidation modules for unsafe behavior."
+_NEGATIVE_COVERAGE_STATE = {
+    **_BASE_STATE,
+    "negative_coverage": {"inspections": [{
+        "id": "cache_modules",
+        "target": "all cache invalidation modules",
+        "inspection_signal": "Read each requested module and examine its invalidation behavior.",
+    }]},
+}
+
+
+def _negative_coverage_handoff(**overrides: Any) -> dict[str, Any]:
+    inspection: dict[str, Any] = {
+        "id": "cache_modules",
+        "inspection": "No source-reading or relevant test evidence appears in the recorded run.",
+        "negative_conclusion": "",
+        "incomplete_report": "",
+        "missing": "The requested cache invalidation modules have no visible inspection evidence.",
+    }
+    inspection.update(overrides)
+    return {"negative_coverage": {"inspections": [inspection]}}
 
 
 def _input_exhaustion_handoff(
@@ -479,7 +512,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevNegativeCoverageTarget, JevNegativeCoverage, JevNegativeCoverageEvidenceItem, JevNegativeCoverageEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -487,7 +520,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevNegativeCoveragePayload, JevNegativeCoverageTargetPayload, JevNegativeCoverageEvidencePayload, JevNegativeCoverageEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -496,7 +529,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevNegativeCoveragePayload, JevNegativeCoverageEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -733,10 +766,12 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(output_schema.model_fields["output_count"].description, JevOutputCountPayload.SECTION)
         extent_schema = JevRunState.schema((JevDoneCheck.OUTPUT_EXTENT,))
         self.assertEqual(extent_schema.model_fields["output_extent"].description, JevOutputExtentPayload.SECTION)
+        negative_schema = JevRunState.schema((JevDoneCheck.NEGATIVE_COVERAGE,))
+        self.assertEqual(negative_schema.model_fields[JEV_DONE_NEGATIVE_COVERAGE_FIELD].description, JevNegativeCoveragePayload.SECTION)
         completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
         self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE, JevDoneCheck.OUTPUT_COUNT, JevDoneCheck.OUTPUT_EXTENT, JevDoneCheck.INPUT_EXHAUSTION})
-        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent", "input_exhaustion"}
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE, JevDoneCheck.OUTPUT_COUNT, JevDoneCheck.OUTPUT_EXTENT, JevDoneCheck.INPUT_EXHAUSTION, JevDoneCheck.NEGATIVE_COVERAGE})
+        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent", "input_exhaustion", JEV_DONE_NEGATIVE_COVERAGE_FIELD}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
@@ -762,6 +797,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(output_schema.model_fields["output_count"].description, JevOutputCountEvidencePayload.SECTION)
         extent_schema = JevHandoff.schema((JevDoneCheck.OUTPUT_EXTENT,))
         self.assertEqual(extent_schema.model_fields["output_extent"].description, JevOutputExtentEvidencePayload.SECTION)
+        negative_schema = JevHandoff.schema((JevDoneCheck.NEGATIVE_COVERAGE,))
+        self.assertEqual(negative_schema.model_fields[JEV_DONE_NEGATIVE_COVERAGE_FIELD].description, JevNegativeCoverageEvidencePayload.SECTION)
         alignment_schema = JevHandoff.schema((JevDoneCheck.REPORT_ACTION_ALIGNMENT,))
         self.assertEqual(alignment_schema.model_fields[JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD].description, JevReportActionAlignmentEvidenceSectionPayload.SECTION)
         self.assertNotIn(JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD, JevRunState.schema(tuple(JevDoneCheck)).model_fields)
@@ -917,9 +954,25 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertIn("the work in `affected_work`", question.instructions.question)
         self.assertIn("empty list", question.instructions.rules[0])
 
+    def test_negative_coverage_question_is_registered_for_requested_inspections(self) -> None:
+        question = NegativeCoverageSupportedQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.NEGATIVE_COVERAGE), JEV_NEGATIVE_COVERAGE_THRESHOLD)
+        self.assertEqual(question.key, JevDoneQuestionKey.NEGATIVE_COVERAGE_SUPPORTED)
+        self.assertEqual(question.to_question("cache_modules").name, "negative_coverage.supported.cache_modules")
+        self.assertIn("silence", question.instructions.rules[0])
+        self.assertIn("does not show", question.gap)
+
     def test_changed_assumption_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
         rel = "vidbyte/lib/jev/done/assumptions_reconciled.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=tree)), [])
+
+    def test_negative_coverage_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/negative_coverage.py"
         text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
         tree = ast.parse(text)
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=tree)), [])
@@ -1506,6 +1559,117 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await agent.arun(_REQUEST)
 
         result = agent.response.done[JevDoneCheck.INPUT_EXHAUSTION]
+        self.assertTrue(result.passed)
+        self.assertFalse(result.available)
+        self.assertEqual((len(main.calls), len(handoff_runner.calls), len(decision.requests)), (1, 1, 0))
+
+    async def test_negative_coverage_accepts_an_evidence_backed_clean_inspection_in_one_batch(self) -> None:
+        handoff = {
+            **_HANDOFF,
+            **_negative_coverage_handoff(
+                inspection="Tool calls opened each requested cache invalidation module and the relevant tests; all were examined.",
+                negative_conclusion="No unsafe invalidation behavior was found in the reviewed modules.",
+                missing="Nothing is missing.",
+            ),
+        }
+        state = {**_STATE, **_NEGATIVE_COVERAGE_STATE}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.95], "readme_docs": [0.95], "cache_modules": [0.85]})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.MULTI_PART, JevDoneCheck.NEGATIVE_COVERAGE),
+            state=json.dumps(state),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_NEGATIVE_COVERAGE_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(len(request.questions), 3)
+        self.assertEqual(
+            set(request.state),
+            {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_NEGATIVE_COVERAGE_FIELD},
+        )
+        entry = request.state[JEV_DONE_NEGATIVE_COVERAGE_FIELD]["cache_modules"]
+        self.assertEqual(entry["target"], "all cache invalidation modules")
+        self.assertEqual(entry["inspection"], handoff["negative_coverage"]["inspections"][0]["inspection"])
+        self.assertEqual(entry["negative_conclusion"], handoff["negative_coverage"]["inspections"][0]["negative_conclusion"])
+        self.assertNotIn("missing", entry)
+        result = agent.response.done[JevDoneCheck.NEGATIVE_COVERAGE]
+        self.assertTrue(result.available and result.passed)
+
+    async def test_negative_coverage_continues_for_an_unsupported_all_clear_report(self) -> None:
+        handoff = _negative_coverage_handoff(negative_conclusion="No issues were found; all cache invalidation modules are clear.")
+        decision = ScriptedDecisionRunner({"cache_modules": [0.84, 0.95]})
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.NEGATIVE_COVERAGE,),
+            state=json.dumps(_NEGATIVE_COVERAGE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_NEGATIVE_COVERAGE_REQUEST)
+
+        self.assertEqual(agent.response.continuations, 1)
+        feedback = main.messages[1][0]["content"]
+        self.assertIn("all cache invalidation modules", feedback)
+        self.assertIn("Read each requested module", feedback)
+        self.assertIn("no visible inspection evidence", feedback)
+
+    async def test_negative_coverage_continues_for_an_explicit_incomplete_inspection(self) -> None:
+        handoff = _negative_coverage_handoff(incomplete_report="I did not inspect the legacy cache module.")
+        decision = ScriptedDecisionRunner({"cache_modules": [0.8, 0.95]})
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.NEGATIVE_COVERAGE,),
+            state=json.dumps(_NEGATIVE_COVERAGE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_NEGATIVE_COVERAGE_REQUEST)
+
+        self.assertEqual(agent.response.continuations, 1)
+        self.assertIn("all cache invalidation modules", main.messages[1][0]["content"])
+        self.assertIn("Read each requested module", main.messages[1][0]["content"])
+
+    async def test_missing_inspection_alone_does_not_fail_negative_coverage(self) -> None:
+        decision = ScriptedDecisionRunner({"cache_modules": [0.95]})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.NEGATIVE_COVERAGE,),
+            state=json.dumps(_NEGATIVE_COVERAGE_STATE),
+            handoff=json.dumps(_negative_coverage_handoff()),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_NEGATIVE_COVERAGE_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.NEGATIVE_COVERAGE]
+        self.assertTrue(result.available and result.passed)
+
+    async def test_empty_negative_coverage_passes_without_a_question(self) -> None:
+        state = {**_BASE_STATE, "negative_coverage": {"inspections": []}}
+        handoff = {"negative_coverage": {"inspections": []}}
+        decision = ScriptedDecisionRunner({})
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.NEGATIVE_COVERAGE,),
+            state=json.dumps(state),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("What is cache invalidation?")
+
+        result = agent.response.done[JevDoneCheck.NEGATIVE_COVERAGE]
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        self.assertTrue(result.available and result.passed)
+
+    async def test_negative_coverage_handoff_with_wrong_target_id_fails_open(self) -> None:
+        handoff = _negative_coverage_handoff(id="unrequested_target")
+        decision = ScriptedDecisionRunner({"cache_modules": [0.1]})
+        agent, main, _, handoff_runner = self._agent(
+            done=(JevDoneCheck.NEGATIVE_COVERAGE,),
+            state=json.dumps(_NEGATIVE_COVERAGE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_NEGATIVE_COVERAGE_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.NEGATIVE_COVERAGE]
         self.assertTrue(result.passed)
         self.assertFalse(result.available)
         self.assertEqual((len(main.calls), len(handoff_runner.calls), len(decision.requests)), (1, 1, 0))

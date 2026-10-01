@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at constru
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -22,6 +22,7 @@ from vidbyte.lib.constants.jev import (
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_MOTIVATING_CASE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_NEGATIVE_COVERAGE_THRESHOLD,
     JEV_OUTPUT_COUNT_THRESHOLD,
     JEV_OUTPUT_EXTENT_THRESHOLD,
     JEV_PHASE_PROGRESS_THRESHOLD,
@@ -40,6 +41,7 @@ from vidbyte.lib.jev.done.input_exhaustion import InputExhaustionTraversedQuesti
 from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.negative_coverage import NegativeCoverageSupportedQuestion
 from vidbyte.lib.jev.done.output_count import OutputCountSatisfiedQuestion
 from vidbyte.lib.jev.done.output_extent import OutputExtentSatisfiedQuestion
 from vidbyte.lib.jev.done.phase_progress import PhaseProgressReachedQuestion
@@ -64,6 +66,7 @@ class JevDoneRegistry:
         JevDoneCheck.COMPLETION_EVIDENCE: CompletionEvidenceSupportedQuestion(),
         JevDoneCheck.INPUT_SET_COVERAGE: InputSetCoverageQuestion(),
         JevDoneCheck.INPUT_EXHAUSTION: InputExhaustionTraversedQuestion(),
+        JevDoneCheck.NEGATIVE_COVERAGE: NegativeCoverageSupportedQuestion(),
         JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion(),
         JevDoneCheck.PHASE_PROGRESS: PhaseProgressReachedQuestion(),
         JevDoneCheck.OUTPUT_EXTENT: OutputExtentSatisfiedQuestion(),
@@ -80,6 +83,7 @@ class JevDoneRegistry:
         JevDoneCheck.COMPLETION_EVIDENCE: JEV_COMPLETION_EVIDENCE_THRESHOLD,
         JevDoneCheck.INPUT_SET_COVERAGE: JEV_INPUT_SET_COVERAGE_THRESHOLD,
         JevDoneCheck.INPUT_EXHAUSTION: JEV_INPUT_EXHAUSTION_THRESHOLD,
+        JevDoneCheck.NEGATIVE_COVERAGE: JEV_NEGATIVE_COVERAGE_THRESHOLD,
         JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD,
         JevDoneCheck.PHASE_PROGRESS: JEV_PHASE_PROGRESS_THRESHOLD,
         JevDoneCheck.OUTPUT_EXTENT: JEV_OUTPUT_EXTENT_THRESHOLD,

@@ -57,10 +57,12 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_FINAL_ACCOUNT_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
+    JEV_DONE_INSPECTION_FIELD,
     JEV_DONE_INPUT_EXHAUSTION_FIELD,
     JEV_DONE_INPUT_IDENTITY_FIELD,
     JEV_DONE_INPUT_SCOPE_FIELD,
     JEV_DONE_INPUT_SET_COVERAGE_FIELD,
+    JEV_DONE_NEGATIVE_COVERAGE_FIELD,
     JEV_DONE_LATER_OBSERVATION_FIELD,
     JEV_DONE_MOTIVATING_CASE_FIELD,
     JEV_DONE_MOTIVATING_CASES_FIELD,
@@ -139,6 +141,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevInputSetCoverage,
     JevInputSetCoveragePayload,
     JevInputTarget,
+    JevNegativeCoverage,
+    JevNegativeCoveragePayload,
+    JevNegativeCoverageTarget,
     JevMotivatingCase,
     JevMotivatingCasePayload,
     JevMotivatingScenario,
@@ -188,7 +193,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload})
 
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -418,6 +423,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment_section,
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled_section,
             JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion_section,
+            JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -432,6 +438,26 @@ class JevRunState(BaseAgent):
         evidence_by_id = {item.id: item for item in evidence.collections}
         entries = {item.id: self._input_exhaustion_entry(item, evidence_by_id[item.id]) for item in state.collections}
         return {JEV_DONE_INPUT_EXHAUSTION_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
+    def _negative_coverage_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Pair each requested inspection with current evidence and the reported negative conclusion."""
+        state = None if self.record is None else self.record.negative_coverage
+        evidence = handoff.negative_coverage
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+        evidence_by_id = {item.id: item for item in evidence.inspections}
+        entries = {
+            item.id: {
+                "target": item.target,
+                "inspection_signal": item.inspection_signal,
+                JEV_DONE_INSPECTION_FIELD: evidence_by_id[item.id].inspection,
+                "negative_conclusion": evidence_by_id[item.id].negative_conclusion,
+                "incomplete_report": evidence_by_id[item.id].incomplete_report,
+            }
+            for item in state.inspections
+        }
+        return {JEV_DONE_NEGATIVE_COVERAGE_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 
     def _input_exhaustion_entry(self, item: JevInputExhaustionObligation, observation: JevInputExhaustionEvidence) -> Mapping[str, object]:
         """Build Jev's evidence-only view for one dynamic collection traversal."""
@@ -814,11 +840,34 @@ class JevRunState(BaseAgent):
             JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment,
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled,
             JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion,
+            JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage,
         }
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
         return handler(handoff, decision)
+
+    # @intent absence-conclusions-require-inspection-evidence
+    # A clean outcome is valid when the requested target was examined; this check only rejects an unsupported all-clear or explicitly incomplete inspection.
+    def _negative_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        state = None if self.record is None else self.record.negative_coverage
+        evidence = None if handoff is None else handoff.negative_coverage
+        if state is None or evidence is None or sorted(state.ids()) != sorted(evidence.ids()):
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+        if not state.inspections:
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.NEGATIVE_COVERAGE)
+        identifiers = state.ids()
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+        incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _input_exhaustion(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         """Score each traversal while keeping deterministic gaps incomplete and Jev failures fail open."""
@@ -1247,6 +1296,7 @@ class JevRunState(BaseAgent):
 
         input_set_coverage = self._input_set_coverage_record(payload)
         input_exhaustion = self._input_exhaustion_record(payload)
+        negative_coverage = self._negative_coverage_record(payload)
 
         motivating_case = None
         motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
@@ -1296,6 +1346,7 @@ class JevRunState(BaseAgent):
             phase_progress=phase_progress,
             input_set_coverage=input_set_coverage,
             input_exhaustion=input_exhaustion,
+            negative_coverage=negative_coverage,
             output_extent=self._output_extent_record(payload),
         )
 
@@ -1314,6 +1365,14 @@ class JevRunState(BaseAgent):
             return None
         obligations = tuple(JevInputExhaustionObligation(item.id, item.collection.strip(), item.scope.strip(), item.unit.strip(), item.expected_total, item.exhaustion_condition.strip()) for item in section.collections)
         return JevInputExhaustion(obligations)
+
+    @staticmethod
+    def _negative_coverage_record(payload: JevRunStatePayload) -> JevNegativeCoverage | None:
+        section = getattr(payload, JevDoneCheck.NEGATIVE_COVERAGE.value, None)
+        if not isinstance(section, JevNegativeCoveragePayload):
+            return None
+        inspections = tuple(JevNegativeCoverageTarget(item.id, item.target.strip(), item.inspection_signal.strip()) for item in section.inspections)
+        return JevNegativeCoverage(inspections)
 
     @staticmethod
     def _output_count_record(payload: JevRunStatePayload) -> JevOutputCount | None:
