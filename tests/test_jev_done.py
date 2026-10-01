@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-completion-evidence.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-completion-evidence.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
 """
 
@@ -34,6 +34,8 @@ from vidbyte import (
     BaseAgent,
     JevAgent,
     JevAgentSettings,
+    JevAssumptionEvidence,
+    JevAssumptionsReconciledEvidence,
     JevClaimAssertion,
     JevClaimContext,
     JevClaimEvidence,
@@ -72,6 +74,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_CLAIMS_FIELD,
     JEV_DONE_COMPLETION_EVIDENCE_FIELD,
     JEV_DONE_COMPLETION_ITEM_ID,
+    JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
@@ -94,9 +97,12 @@ from vidbyte.lib.constants.jev import (
     JEV_OUTPUT_EXTENT_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
+    JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
+    JevAssumptionEvidencePayload,
+    JevAssumptionsReconciledPayload,
     JevBrief,
     JevClaimAssertionPayload,
     JevClaimContextPayload,
@@ -169,6 +175,7 @@ from vidbyte.lib.jev.done import (
     OutputExtentSatisfiedQuestion,
     ProblemsResolvedQuestion,
     ReportActionAlignmentQuestion,
+    AssumptionsReconciledQuestion,
 )
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -341,6 +348,17 @@ _REPORT_ACTION_ITEM = {
     "missing": "Nothing remains to reconcile.",
 }
 _REPORT_ACTION_HANDOFF = {"report_action_alignment": {"items": [_REPORT_ACTION_ITEM]}}
+_CHANGED_ASSUMPTION = {
+    "id": "changed_limit",
+    "original_assumption": "The endpoint accepts page_size=500.",
+    "original_basis": "An early response said the endpoint permits page_size=500.",
+    "later_observation": "A returned endpoint result reports a maximum of 100.",
+    "affected_work": "The generated client uses 500 as its default page size.",
+    "revision": "A later edit changes the default to 100, and a command result uses the new value.",
+    "evidence": "The early response names 500; the endpoint result says 100; the edit and later command result show the client now uses 100.",
+    "missing": "Nothing remains to reconcile.",
+}
+_ASSUMPTIONS_HANDOFF = {"assumptions_reconciled": {"items": [_CHANGED_ASSUMPTION]}}
 
 
 class ScriptedGenerativeRunner:
@@ -435,7 +453,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -444,7 +462,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -515,6 +533,15 @@ class JevDoneRecordTests(unittest.TestCase):
         self.assertEqual(JevHandoffRecord(report_action_alignment=alignment).report_action_alignment, alignment)
         with self.assertRaises(ConfigurationError):
             JevReportActionAlignment((item, item))
+
+    def test_changed_assumption_records_preserve_candidates_and_reject_duplicates(self) -> None:
+        item = JevAssumptionEvidence(**_CHANGED_ASSUMPTION)
+        evidence = JevAssumptionsReconciledEvidence((item,))
+        self.assertEqual(evidence.ids(), ("changed_limit",))
+        self.assertEqual(JevHandoffRecord(assumptions_reconciled=evidence).assumptions_reconciled, evidence)
+        self.assertEqual(JevAssumptionsReconciledEvidence().ids(), ())
+        with self.assertRaises(ConfigurationError):
+            JevAssumptionsReconciledEvidence((item, item))
 
     def test_claim_evidence_requires_unique_claim_ids_and_preserves_an_empty_list(self) -> None:
         context = JevClaimContext(
@@ -704,6 +731,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         alignment_schema = JevHandoff.schema((JevDoneCheck.REPORT_ACTION_ALIGNMENT,))
         self.assertEqual(alignment_schema.model_fields[JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD].description, JevReportActionAlignmentEvidenceSectionPayload.SECTION)
         self.assertNotIn(JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD, JevRunState.schema(tuple(JevDoneCheck)).model_fields)
+        assumptions_schema = JevHandoff.schema((JevDoneCheck.ASSUMPTIONS_RECONCILED,))
+        self.assertEqual(assumptions_schema.model_fields[JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD].description, JevAssumptionsReconciledPayload.SECTION)
+        self.assertNotIn(JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD, JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
@@ -842,6 +872,23 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertIn("`report_action_alignment`", question.instructions.state)
         self.assertIn("`request_relevance`", question.instructions.question)
         self.assertIn("explicit statement in an earlier response", question.instructions.definitions[0])
+
+    def test_changed_assumption_question_is_registered_and_handoff_derived(self) -> None:
+        question = AssumptionsReconciledQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.ASSUMPTIONS_RECONCILED), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.ASSUMPTIONS_RECONCILED), JEV_ASSUMPTIONS_RECONCILED_THRESHOLD)
+        self.assertEqual(question.key, JevDoneQuestionKey.ASSUMPTIONS_RECONCILED_REVISITED)
+        self.assertEqual(JEV_ASSUMPTIONS_RECONCILED_THRESHOLD, 0.8)
+        self.assertIn("assumptions_reconciled", question.instructions.state)
+        self.assertIn("the work in `affected_work`", question.instructions.question)
+        self.assertIn("empty list", question.instructions.rules[0])
+
+    def test_changed_assumption_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/assumptions_reconciled.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=tree)), [])
 
     def test_output_extent_counter_preserves_explicit_units_and_bound_direction(self) -> None:
         answer = "# Summary\nOne two three.\n# Details\nFour five."
@@ -1562,6 +1609,74 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         result = agent.response.done[JevDoneCheck.REPORT_ACTION_ALIGNMENT]
         self.assertTrue(result.passed)
         self.assertTrue(result.available)
+
+    async def test_changed_assumptions_batch_with_request_check_at_inclusive_threshold(self) -> None:
+        handoff = {**_HANDOFF, **_ASSUMPTIONS_HANDOFF}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.99], "readme_docs": [0.99], "changed_limit": [0.8]})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.MULTI_PART, JevDoneCheck.ASSUMPTIONS_RECONCILED),
+            state=json.dumps(_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(len(request.questions), 3)
+        self.assertEqual(
+            set(request.state),
+            {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD},
+        )
+        item = request.state[JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD]["items"]["changed_limit"]
+        self.assertEqual(
+            set(item),
+            {"original_assumption", "original_basis", "later_observation", "affected_work", "revision", "evidence"},
+        )
+        self.assertNotIn("missing", str(request.state))
+        self.assertTrue(all(result.passed for result in agent.response.done.values()))
+        assert agent.response.handoff is not None
+        self.assertEqual(agent.response.handoff.assumptions_reconciled.ids(), ("changed_limit",))
+
+    async def test_changed_assumption_failure_focuses_only_failed_premise(self) -> None:
+        handoff = json.loads(json.dumps(_ASSUMPTIONS_HANDOFF))
+        handoff["assumptions_reconciled"]["items"][0]["missing"] = "The dependent client default is still 500."
+        decision = ScriptedDecisionRunner({"changed_limit": [0.79]})
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.ASSUMPTIONS_RECONCILED,),
+            final_answer="The client was updated.",
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.ASSUMPTIONS_RECONCILED]
+        self.assertEqual(result.incomplete, ("changed_limit",))
+        self.assertFalse(result.passed)
+        self.assertGreater(agent.response.continuations, 0)
+        feedback = main.messages[1][0]["content"]
+        self.assertIn("Original assumption: The endpoint accepts page_size=500.", feedback)
+        self.assertIn("Original basis:", feedback)
+        self.assertIn("Later observation:", feedback)
+        self.assertIn("Affected work:", feedback)
+        self.assertIn("Later actions or results:", feedback)
+        self.assertIn("The dependent client default is still 500.", feedback)
+
+    async def test_empty_changed_assumptions_pass_without_a_question(self) -> None:
+        handoff = {"assumptions_reconciled": {"items": []}}
+        decision = ScriptedDecisionRunner({})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.ASSUMPTIONS_RECONCILED,),
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(decision.requests, [])
+        result = agent.response.done[JevDoneCheck.ASSUMPTIONS_RECONCILED]
+        self.assertTrue(result.available and result.passed)
 
     async def test_one_jev_request_holds_every_enabled_checks_questions(self) -> None:
         # [Review 4117808663] the enabled checks' questions are combined and sent to Jev at once with the handoff.

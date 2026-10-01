@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at constru
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -15,6 +15,7 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
 from vidbyte.lib.constants.jev import (
+    JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
     JEV_CLAIMS_THRESHOLD,
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
@@ -31,6 +32,7 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQuestion
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
 from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
@@ -53,6 +55,7 @@ class JevDoneRegistry:
         JevDoneCheck.OUTPUT_COUNT: OutputCountSatisfiedQuestion(),
         JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(),
         JevDoneCheck.REPORT_ACTION_ALIGNMENT: ReportActionAlignmentQuestion(),
+        JevDoneCheck.ASSUMPTIONS_RECONCILED: AssumptionsReconciledQuestion(),
         JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(),
         JevDoneCheck.MOTIVATING_CASE: MotivatingCaseExercisedQuestion(),
         JevDoneCheck.SCOPE_COVERAGE: ScopeCoverageAppliedQuestion(),
@@ -67,6 +70,7 @@ class JevDoneRegistry:
         JevDoneCheck.OUTPUT_COUNT: JEV_OUTPUT_COUNT_THRESHOLD,
         JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD,
         JevDoneCheck.REPORT_ACTION_ALIGNMENT: JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
+        JevDoneCheck.ASSUMPTIONS_RECONCILED: JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
         JevDoneCheck.TARGET_OUTCOME: JEV_TARGET_OUTCOME_THRESHOLD,
         JevDoneCheck.MOTIVATING_CASE: JEV_MOTIVATING_CASE_THRESHOLD,
         JevDoneCheck.SCOPE_COVERAGE: JEV_SCOPE_COVERAGE_THRESHOLD,

@@ -5,10 +5,11 @@ ROLE IN CODEBASE: JevRuntimeSettings and JevRunState (vidbyte/agents/jev/done/) 
 ARCHITECTURE NOTE: This folder is the one home for fixed done questions and their registry; the check vocabulary lives in vidbyte/lib/enums/jev.py, records and structured-reply payloads in vidbyte/lib/dataclasses/jev.py, and the logic that asks and acts on the questions in vidbyte/agents/jev/done/.
 COMMON MODIFICATION PATTERNS: Load skills/asking-jev-questions/SKILL.md before writing or changing any question (see README.md in this folder), then export each new check's question module here beside multi_part.
 KNOWN EDGE CASES: Importing this package builds the question registry but never resolves credentials or constructs a decision runner.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
+from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQuestion
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
@@ -25,6 +26,7 @@ from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestio
 
 __all__ = [
     "DONE_STATE",
+    "AssumptionsReconciledQuestion",
     "ClaimsSupportedQuestion",
     "CompletionEvidenceSupportedQuestion",
     "InputSetCoverageQuestion",

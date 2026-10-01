@@ -2,10 +2,10 @@
 
 PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run enabled checks, and on failure it sends the original request, run state, handoff, failed Jev questions, and focused missing work back to the main agent.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; each failed check contributes its own helper in _explain(). Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned. The cap on continuations is JevContinualSettings.max_continuations.
+ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; each failed check contributes its own helper in _explain(). Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned; changed-assumption feedback names only failed premises and their dependent work. The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -96,6 +96,7 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.OUTPUT_COUNT: self._explain_output_count,
             JevDoneCheck.OUTPUT_EXTENT: self._explain_output_extent,
             JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._explain_report_action_alignment,
+            JevDoneCheck.ASSUMPTIONS_RECONCILED: self._explain_assumptions_reconciled,
         }
         return handlers[result.check](result)
 
@@ -249,13 +250,10 @@ class JevDoneContinuation(JevContinuation):
             else:
                 gap = f"The final answer has {observed} {item.unit.value}; the request requires {item.comparator.value} {item.amount} {item.unit.value}."
             failed.append(
-                f"- {question.instructions.question.format(item=identifier)} Jev's answer: {verdict} "
-                f"(P(yes) = {probability:.2f}). Observed amount: {amount} {item.unit.value}; requested "
-                f"{item.comparator.value} {item.amount} {item.unit.value}. Still missing: {gap}"
+                f"- {question.instructions.question.format(item=identifier)} Jev's answer: {verdict} (P(yes) = {probability:.2f}). Observed amount: {amount} {item.unit.value}; requested {item.comparator.value} {item.amount} {item.unit.value}. Still missing: {gap}"
             )
             focus.append(
-                f"- Output target: {item.target}\n  Requested extent: {item.comparator.value} "
-                f"{item.amount} {item.unit.value}\n  Observed extent: {amount} {item.unit.value}"
+                f"- Output target: {item.target}\n  Requested extent: {item.comparator.value} {item.amount} {item.unit.value}\n  Observed extent: {amount} {item.unit.value}"
             )
         return "\n".join(failed), "\n".join(focus)
 
@@ -279,6 +277,29 @@ class JevDoneContinuation(JevContinuation):
                 f"  Relevance to the original request: {item.request_relevance}",
                 f"  Recorded evidence: {item.evidence}",
                 f"  Reconcile by completing any still-required result or correcting the account: {item.missing}",
+            )))
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_assumptions_reconciled(self, result: JevDoneResult) -> tuple[str, str]:
+        # @intent changed-assumption-feedback-names-failed-premises
+        # Keep continuation feedback scoped to failed items, with source context and the separate missing note.
+        # Return only failed changed premises, with dependent work and the handoff's separate gap.
+        question = JevDoneRegistry.question(JevDoneCheck.ASSUMPTIONS_RECONCILED)
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.assumptions_reconciled
+        assumptions = {} if handoff is None else {item.id: item for item in handoff.items}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            item = assumptions[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+            focus.append("\n".join((
+                f"- Original assumption: {item.original_assumption}",
+                f"  Original basis: {item.original_basis}",
+                f"  Later observation: {item.later_observation}",
+                f"  Affected work: {item.affected_work}",
+                f"  Later actions or results: {item.revision}",
+                f"  Run evidence: {item.evidence}",
             )))
         return "\n".join(failed), "\n".join(focus)
 

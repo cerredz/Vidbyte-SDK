@@ -227,6 +227,10 @@ At each finish attempt, the handoff provides evidence for each pre-run extent it
 
 The failure is checked against the original request-derived amount even when the final answer never repeats the quota. When code has an observed count, a numerically failing minimum, exact amount, or maximum fails regardless of Jev's answer. Missing measurements remain visible as unavailable in the state rather than being treated as zero. On failure, `_explain` sends the exact target, unit, comparator, requested amount, observed amount when available, and the handoff's missing note in the Focus feedback.
 
+### Post-run items: ASSUMPTIONS_RECONCILED
+
+This check uses only the handoff because the premises and dependent work are known from the complete run, not the original request. Keep each explicit consequential assumption that later concrete evidence contradicted or materially changed, including cases where dependent work was revised, left untouched, abandoned, or made irrelevant. The projection gives Jev the original assumption and basis, later observation, affected work, revision, and run evidence; the handoff's `missing` note stays in continuation feedback. Score each candidate independently at its registered threshold. An empty item list asks no question and passes; uncertainty, lack of verification, and plan changes alone are not candidates. On failure, focus only on the incomplete premise and do not demand a generic repair or validation ritual when the run already shows reconciliation.
+
 ```python
 class JevDoneCheck(str, Enum):
     MULTI_PART = "multi_part"
