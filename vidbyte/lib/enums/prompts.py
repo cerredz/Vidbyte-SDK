@@ -75,6 +75,7 @@ class Prompt(str, Enum):
     JEV_CLARIFICATION_SYSTEM_PROMPT = "jev_clarification.system_prompt"
     JEV_CONTINUATION_CONTINUE_PROMPT = "jev_continuation.continue_prompt"
     JEV_HANDOFF_SYSTEM_PROMPT = "jev_handoff.system_prompt"
+    JEV_REFINEMENT_SYSTEM_PROMPT = "jev_refinement.system_prompt"
     JEV_RUN_STATE_SYSTEM_PROMPT = "jev_run_state.system_prompt"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"

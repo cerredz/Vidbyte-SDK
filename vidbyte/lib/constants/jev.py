@@ -74,6 +74,11 @@ JEV_CLARIFICATION_MAX_TOKENS: int = 100_000
 JEV_CLARIFICATION_MAX_QUESTIONS: int = 6
 JEV_CLARIFICATION_MIN_RECOMMENDATIONS: int = 2
 JEV_CLARIFICATION_MAX_RECOMMENDATIONS: int = 4
+# JevRefinementAgent limits: its loop and token budget, and the P(yes) at or above which a clarity check is
+# shown to it as already clear; below it the check's gap sentence is shown so the agent knows what may be missing.
+JEV_REFINEMENT_MAX_ITERATIONS: int = 25
+JEV_REFINEMENT_MAX_TOKENS: int = 100_000
+JEV_REFINEMENT_CLEAR_THRESHOLD: float = 0.9
 # Specialist choice: the question's answer key, and the way-out option that keeps the main JevAgent on the
 # run. Every specialist is one more Choice option beside `none`, so the count stops one below the vendor limit.
 JEV_SPECIALIST_QUESTION_NAME: str = "specialist"
@@ -219,6 +224,9 @@ __all__ = [
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_PROBLEMS_RESOLVED_THRESHOLD",
+    "JEV_REFINEMENT_CLEAR_THRESHOLD",
+    "JEV_REFINEMENT_MAX_ITERATIONS",
+    "JEV_REFINEMENT_MAX_TOKENS",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
     "JEV_RUN_STATE_MAX_ITERATIONS",

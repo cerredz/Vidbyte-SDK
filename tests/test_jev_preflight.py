@@ -1,7 +1,7 @@
 """FILE: tests/test_jev_preflight.py
 
 PURPOSE: Verifies JevAgent's preflight gate and clarity preset deterministically without live model calls.
-ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the specialist Choice question and the specialist hand-off, the JevPresets flags, the JevPreflightRegistry, DecisionModelHelper request and scoring behavior, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
+ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the specialist Choice question and the specialist hand-off, the JevPresets flags, the JevPreflightRegistry, DecisionModelHelper request and scoring behavior, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, JevRefinementAgent with its tools, window, signal, and the refined prompt the running agent reads, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace only the external boundaries while production settings, registry, gate, and runtime wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new preset, question, threshold boundary, match case, and availability policy.
 KNOWN EDGE CASES: The TypeSafe credential is cleared explicitly and no test may contact TypeSafe or a generative provider.
@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import is_dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from lint.core.discovery import SourceFile
 from lint.rules.s062_no_implicit_string_concatenation import (
@@ -33,12 +33,16 @@ from vidbyte import (
     JevAgentResponse,
     JevAgentSettings,
     JevClarification,
+    JevContinualSettings,
+    JevDoneCheck,
     JevPreflightPreset,
+    JevRefinement,
     JevRuntimeSettings,
     JevSpecialist,
     tool,
 )
-from vidbyte.agents.jev.gate import JevClarificationAgent, JevPreflightGate
+from vidbyte.agents.jev.done import JevRunState
+from vidbyte.agents.jev.gate import JevClarificationAgent, JevPreflightGate, JevRefinementAgent
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_ITERATIONS,
@@ -47,6 +51,9 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARITY_VETO_THRESHOLD,
     JEV_PREFLIGHT_REQUEST_FIELD,
     JEV_PREFLIGHT_STRATEGY_NAME,
+    JEV_REFINEMENT_CLEAR_THRESHOLD,
+    JEV_REFINEMENT_MAX_ITERATIONS,
+    JEV_REFINEMENT_MAX_TOKENS,
     JEV_SPECIALIST_NONE,
     JEV_SPECIALIST_QUESTION_NAME,
 )
@@ -59,6 +66,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevPreflightQuestion,
     JevPresetDefinition,
     JevQuestion,
+    JevRefinementPayload,
 )
 from vidbyte.lib.enums import JevPreflightQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
@@ -81,6 +89,11 @@ _PAYLOAD = {
         {"question": "What should I build?", "recommendations": ["A login page", "A signup form"]},
         {"question": "Which project is it for?", "recommendations": ["The web app", "The mobile app", "The admin console"]},
     ]
+}
+_REFINED = {
+    "prompt": "Summarize the attached quarterly report.\n\nExpected result: five bullet points.",
+    "changes": ["Stated the expected result on its own line."],
+    "unresolved": ["The audience of the summary."],
 }
 _RENDERED = "1. What should I build?\n   - A login page\n   - A signup form\n2. Which project is it for?\n   - The web app\n   - The mobile app\n   - The admin console"
 
@@ -141,7 +154,7 @@ def _answer(name: str, yes: float) -> JevAnswer:
     return JevAnswer(question_name=name, question_type=JevQuestionType.NOUL, choice="true" if yes >= 0.5 else "false", probabilities={"true": yes, "false": 1.0 - yes}, noul=yes)
 
 
-_RUNTIME_FIELDS = ("decision", "preflight", "tool_selector_threshold")
+_RUNTIME_FIELDS = ("decision", "preflight", "continual", "tool_selector_threshold")
 
 
 def _settings(**overrides: Any) -> JevAgentSettings:
@@ -342,7 +355,7 @@ class JevPresetsTests(unittest.TestCase):
     """Pin the user-enableable flags and the policy each fixed-question flag turns on."""
 
     def test_clarity_flag_asks_every_clarity_question_at_the_named_threshold(self) -> None:
-        self.assertEqual(JevPresets.available(), (JevPreflightPreset.CLARITY, JevPreflightPreset.TOOL_SELECTOR))
+        self.assertEqual(JevPresets.available(), (JevPreflightPreset.CLARITY, JevPreflightPreset.TOOL_SELECTOR, JevPreflightPreset.REFINE))
         definition = JevPresets.definition(JevPreflightPreset.CLARITY)
         self.assertEqual(definition.question_keys, _CLARITY_KEYS)
         self.assertEqual(definition.threshold, JEV_CLARITY_THRESHOLD)
@@ -763,6 +776,145 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(selector_decision.requests), 1)
         self.assertEqual(tuple(agent.response.results), (JevPreflightPreset.CLARITY,))
         self.assertEqual(reply.metadata["jev_tool_selector"]["selected_tool_count"], 1)
+
+
+class JevRefinementAgentTests(unittest.TestCase):
+    """Pin the REFINE flag, the refinement agent's fixed limits, tools, window, and the signal it reads."""
+
+    def test_refine_requires_clarity_and_asks_jev_nothing_of_its_own(self) -> None:
+        with self.assertRaises(ConfigurationError):
+            JevRuntimeSettings(preflight=(JevPreflightPreset.REFINE,))
+        gate = _jev(preflight=("clarity", "refine")).preflight
+        self.assertEqual(gate.presets, (JevPreflightPreset.CLARITY,))
+        self.assertFalse(JevPresets.has_fixed_questions(JevPreflightPreset.REFINE))
+        request = gate.combine("Hello.")
+        assert request is not None
+        self.assertEqual(tuple(question.name for question in request.questions), tuple(key.value for key in _CLARITY_KEYS))
+
+    def test_refinement_agent_is_built_only_when_refine_is_enabled(self) -> None:
+        self.assertIsNone(_jev().preflight.refinement)
+        self.assertIsInstance(_jev(preflight=("clarity", "refine")).preflight.refinement, JevRefinementAgent)
+
+    def test_agent_uses_the_requested_limits_tools_and_structured_output(self) -> None:
+        agent = _jev(preflight=("clarity", "refine")).preflight.refinement
+        assert agent is not None
+        self.assertEqual(agent.runtime_config.max_iterations, JEV_REFINEMENT_MAX_ITERATIONS)
+        self.assertEqual(JEV_REFINEMENT_MAX_ITERATIONS, 25)
+        self.assertEqual(agent.runtime_config.max_tokens, JEV_REFINEMENT_MAX_TOKENS)
+        self.assertIs(agent.output_schema, JevRefinementPayload)
+        self.assertEqual({tool_item.name for tool_item in agent.tools}, {"assumption_check", "decision", "uncertainty", "backtrack"})
+
+    def test_reasoning_tools_write_into_the_window_the_runtime_renders(self) -> None:
+        agent = _jev(preflight=("clarity", "refine")).preflight.refinement
+        assert agent is not None
+        self.assertIs(agent.context_manager, agent.window)
+        for tool_item in agent.tools:
+            with self.subTest(tool=tool_item.name):
+                self.assertIs(tool_item._manager, agent.window)
+
+    def test_signal_reports_every_check_weakest_first_with_gaps_only_below_clear(self) -> None:
+        yes = {key.value: 0.95 for key in _CLARITY_KEYS} | {"clarity.object": 0.1, "clarity.constraints": 0.6}
+        result = JevPreflightGate._score(JevPreflightPreset.CLARITY, {name: _answer(name, value) for name, value in yes.items()})
+        item = JevRefinementAgent.context(result).items()[0]
+        lines = item.content.split("\n")
+        weakest = JevPreflightRegistry.get("clarity.object")
+        self.assertEqual(item.title, "Clarity of the request")
+        self.assertEqual(len(lines), len(_CLARITY_KEYS))
+        self.assertEqual(lines[0], f"- likely missing (10%): {weakest.instructions.question} If not: {weakest.gap}")
+        self.assertTrue(lines[1].startswith("- uncertain (60%): "))
+        self.assertTrue(all(line.startswith("- clear (95%): ") and "If not:" not in line for line in lines[2:]))
+        self.assertGreater(JEV_REFINEMENT_CLEAR_THRESHOLD, 0.6)
+
+    def test_record_requires_a_prompt_and_drops_blank_items(self) -> None:
+        payload = JevRefinementPayload.model_validate({"prompt": " Do it. ", "changes": ["", "Split parts."], "unresolved": []})
+        record = JevRefinement.from_payload(payload, "do it")
+        self.assertEqual((record.prompt, record.changes, record.unresolved), ("Do it.", ("Split parts.",), ()))
+        with self.assertRaises(ConfigurationError):
+            JevRefinement(original="do it", prompt="  ")
+
+
+class JevRefinementRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    """Verify that a clear request reaches the running agent as the refined prompt, and every failure keeps the user's message."""
+
+    _CLEAR = "Summarize the attached quarterly report in five bullets."
+
+    def _agent(self, generative: ScriptedGenerativeRunner, refiner: ScriptedGenerativeRunner | None = None, **overrides: Any) -> JevAgent:
+        overrides.setdefault("decision", DecisionModelConfig(api_key="test-key"))
+        overrides.setdefault("preflight", ("clarity", "refine"))
+        agent = bind_test_runner(_jev(**overrides), generative)
+        bind_test_runner(agent.preflight.clarification, ScriptedGenerativeRunner(json.dumps(_PAYLOAD)))
+        bind_test_runner(agent.preflight.refinement, refiner or ScriptedGenerativeRunner(json.dumps(_REFINED)))
+        return agent
+
+    async def test_clear_request_runs_the_main_agent_on_the_refined_prompt(self) -> None:
+        generative = ScriptedGenerativeRunner("summary")
+        refiner = ScriptedGenerativeRunner(json.dumps(_REFINED))
+        agent = self._agent(generative, refiner)
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({}))):
+            reply = await agent.arun(self._CLEAR)
+
+        self.assertEqual(reply.content, "summary")
+        self.assertEqual(refiner.calls, [self._CLEAR])
+        self.assertEqual(generative.calls, [_REFINED["prompt"]])
+        self.assertEqual(agent.response.input, self._CLEAR)
+        refinement = agent.response.refinement
+        assert refinement is not None
+        self.assertEqual((refinement.original, refinement.prompt), (self._CLEAR, _REFINED["prompt"]))
+        self.assertEqual(refinement.changes, tuple(_REFINED["changes"]))
+        self.assertEqual(refinement.unresolved, tuple(_REFINED["unresolved"]))
+
+    async def test_refiner_failure_keeps_the_users_message(self) -> None:
+        blank = json.dumps({"prompt": "   ", "changes": [], "unresolved": []})
+        for refiner in (ScriptedGenerativeRunner(error=ProviderRequestError("down", provider="openai")), ScriptedGenerativeRunner("not json"), ScriptedGenerativeRunner(blank)):
+            generative = ScriptedGenerativeRunner("answer")
+            agent = self._agent(generative, refiner)
+            with self.subTest(refiner=refiner.response.text), patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({}))):
+                reply = await agent.arun(self._CLEAR)
+                self.assertEqual(reply.content, "answer")
+                self.assertEqual(generative.calls, [self._CLEAR])
+                self.assertIsNone(agent.response.refinement)
+
+    async def test_unclear_or_unavailable_clarity_never_refines(self) -> None:
+        refiner = ScriptedGenerativeRunner(json.dumps(_REFINED))
+        agent = self._agent(ScriptedGenerativeRunner(), refiner)
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner(_unclear()))):
+            await agent.arun("Build it")
+        self.assertTrue(agent.response.needs_clarification)
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": ""}, clear=False):
+            generative = ScriptedGenerativeRunner("answer")
+            agent = self._agent(generative, refiner, decision=DecisionModelConfig())
+            await agent.arun(self._CLEAR)
+        self.assertEqual(refiner.calls, [])
+        self.assertEqual(generative.calls, [self._CLEAR])
+        self.assertIsNone(agent.response.refinement)
+
+    async def test_refiner_sees_only_the_current_request(self) -> None:
+        refiner = ScriptedGenerativeRunner(json.dumps(_REFINED))
+        agent = self._agent(ScriptedGenerativeRunner(), refiner)
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({}))):
+            await agent.arun(self._CLEAR)
+            await agent.arun("Translate the attached memo into French.")
+
+        refinement_agent = agent.preflight.refinement
+        assert refinement_agent is not None
+        self.assertEqual(len(refinement_agent.history), 1)
+        self.assertEqual(refiner.calls[1], "Translate the attached memo into French.")
+        self.assertEqual(refinement_agent.window.registry_items(), ())
+
+    async def test_chosen_specialist_reads_the_refined_prompt(self) -> None:
+        specialist, specialist_runner = _specialist()
+        agent = self._agent(ScriptedGenerativeRunner(), agents=(specialist,))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({}, choice={"database": 1.0}))):
+            await agent.arun(self._CLEAR)
+
+        self.assertEqual(specialist_runner.calls, [_REFINED["prompt"]])
+
+    async def test_done_checks_read_the_users_message(self) -> None:
+        agent = self._agent(ScriptedGenerativeRunner(), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,)))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({}))), patch.object(JevRunState, "begin", new=AsyncMock()) as begin:
+            await agent.arun(self._CLEAR)
+
+        begin.assert_awaited_once_with(self._CLEAR)
 
 
 if __name__ == "__main__":
