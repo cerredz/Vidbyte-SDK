@@ -99,8 +99,30 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._explain_assumptions_reconciled,
             JevDoneCheck.INPUT_EXHAUSTION: self._explain_input_exhaustion,
             JevDoneCheck.NEGATIVE_COVERAGE: self._explain_negative_coverage,
+            JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._explain_guaranteed_next_actions,
         }
         return handlers[result.check](result)
+
+    def _explain_guaranteed_next_actions(self, result: JevDoneResult) -> tuple[str, str]:
+        """Focus only on candidates Jev found both necessary and unfinished."""
+        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.guaranteed_next_actions
+        actions = {} if handoff is None else {item.id: item for item in handoff.actions}
+        failed = [unfinished.gap]
+        focus = []
+        for identifier in result.incomplete:
+            item = actions[identifier]
+            necessary_yes = result.answers[necessary.name(identifier)].probabilities[JEV_NOUL_TRUE]
+            unfinished_yes = result.answers[unfinished.name(identifier)].probabilities[JEV_NOUL_TRUE]
+            failed.append("- Necessity passed: {necessary_question} Jev P(yes) = {necessary_yes:.2f}; unfinished confirmed: {unfinished_question} Jev P(yes) = {unfinished_yes:.2f}. Evidence gap: {missing}".format(
+                necessary_question=necessary.instructions.question.format(item=identifier),
+                necessary_yes=necessary_yes,
+                unfinished_question=unfinished.instructions.question.format(item=identifier),
+                unfinished_yes=unfinished_yes,
+                missing=item.missing,
+            ))
+            focus.append(f"- Requested outcome: {item.outcome}\n  Observed trigger: {item.trigger}\n  Necessary action: {item.action}\n  Evidence gap: {item.missing}")
+        return "\n".join(failed), "\n".join(focus)
 
     def _explain_negative_coverage(self, result: JevDoneResult) -> tuple[str, str]:
         """Name requested inspection targets whose reported conclusions lack run evidence."""

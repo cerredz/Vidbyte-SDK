@@ -27,6 +27,7 @@ from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context.primitives import TextContextItem
 from vidbyte.lib.constants.jev import (
+    JEV_DONE_ACTION_FIELD,
     JEV_DONE_AFFECTED_WORK_FIELD,
     JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD,
     JEV_DONE_CLAIM_ASSERTION_FIELD,
@@ -55,6 +56,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_EXECUTION_FIELD,
     JEV_DONE_FINAL_ACCOUNT_FIELD,
+    JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
     JEV_DONE_INSPECTION_FIELD,
@@ -67,6 +69,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_MOTIVATING_CASE_FIELD,
     JEV_DONE_MOTIVATING_CASES_FIELD,
     JEV_DONE_OBSERVED_PROXY_FIELD,
+    JEV_DONE_OUTCOME_FIELD,
     JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD,
     JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD,
     JEV_DONE_OUTPUT_COUNT_DISTINCT_FIELD,
@@ -122,6 +125,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_TARGET_FIELD,
     JEV_DONE_TARGET_OUTCOME_FIELD,
     JEV_DONE_TARGET_OUTCOMES_FIELD,
+    JEV_DONE_TRIGGER_FIELD,
     JEV_DONE_TARGET_SCOPE_FIELD,
     JEV_DONE_UNFINISHED_OR_BLOCKED_FIELD,
     JEV_MOTIVATING_CASE_RECALL_THRESHOLD,
@@ -424,6 +428,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled_section,
             JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion_section,
             JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage_section,
+            JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -458,6 +463,26 @@ class JevRunState(BaseAgent):
             for item in state.inspections
         }
         return {JEV_DONE_NEGATIVE_COVERAGE_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
+    def _guaranteed_next_actions_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Ask necessity and unfinished status for each dynamic post-run candidate."""
+        # @intent handoff-necessity-rationale-is-not-jev-evidence
+        # Jev sees the request, observed trigger, action, and run evidence, then makes both judgments independently.
+        candidates = handoff.guaranteed_next_actions
+        if candidates is None or not candidates.actions:
+            return {}, ()
+        questions = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        entries = {
+            item.id: {
+                JEV_DONE_OUTCOME_FIELD: item.outcome,
+                JEV_DONE_TRIGGER_FIELD: item.trigger,
+                JEV_DONE_ACTION_FIELD: item.action,
+                JEV_DONE_EVIDENCE_FIELD: item.evidence,
+            }
+            for item in candidates.actions
+        }
+        asked = tuple(question.to_question(identifier) for question in questions for identifier in candidates.ids())
+        return {JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD: entries}, asked
 
     def _input_exhaustion_entry(self, item: JevInputExhaustionObligation, observation: JevInputExhaustionEvidence) -> Mapping[str, object]:
         """Build Jev's evidence-only view for one dynamic collection traversal."""
@@ -841,11 +866,49 @@ class JevRunState(BaseAgent):
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled,
             JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion,
             JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage,
+            JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions,
         }
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
         return handler(handoff, decision)
+
+    def _guaranteed_next_actions(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Continue only when a candidate is both necessary and independently unfinished."""
+        # @intent necessity-is-a-hard-continuation-gate
+        # A plausible but optional next step could exceed the user's authorization; only two affirmative judgments permit it.
+        candidates = None if handoff is None else handoff.guaranteed_next_actions
+        if candidates is None:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        if not candidates.actions:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        identifiers = candidates.ids()
+        expected = tuple(question.name(identifier) for question in (necessary, unfinished) for identifier in identifiers)
+        answers = {name: decision.answers[name] for name in expected if name in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, expected, 0.0)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        action_scores = {
+            identifier: min(
+                verdict.answers[necessary.name(identifier)].probabilities[JEV_NOUL_TRUE],
+                verdict.answers[unfinished.name(identifier)].probabilities[JEV_NOUL_TRUE],
+            )
+            for identifier in identifiers
+        }
+        incomplete = tuple(identifier for identifier, score in action_scores.items() if score >= threshold)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS,
+            score=verdict.score,
+            passed=not incomplete,
+            answers=verdict.answers,
+            incomplete=incomplete,
+            usage=usage,
+        )
 
     # @intent absence-conclusions-require-inspection-evidence
     # A clean outcome is valid when the requested target was examined; this check only rejects an unsupported all-clear or explicitly incomplete inspection.

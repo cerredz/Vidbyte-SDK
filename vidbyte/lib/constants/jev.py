@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract.
+PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -94,6 +94,8 @@ JEV_INPUT_SET_COVERAGE_THRESHOLD: float = 0.8
 JEV_INPUT_EXHAUSTION_THRESHOLD: float = 0.85
 # A requested inspection target with a negative or explicitly incomplete report must show matching inspection evidence.
 JEV_NEGATIVE_COVERAGE_THRESHOLD: float = 0.85
+# Each candidate must independently pass the necessity and unfinished judgments.
+JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD: float = 0.9
 # Evidence for the requested outcome must reach this P(yes), alone and in the mean; this is a starting point, not tuned.
 JEV_TARGET_OUTCOME_THRESHOLD: float = 0.8
 # Every motivating scenario must independently reach this P(yes) to pass the gate.
@@ -157,6 +159,10 @@ JEV_DONE_INPUT_TARGET_FIELD: str = "target"
 JEV_DONE_INPUT_EXHAUSTION_FIELD: str = "input_exhaustion"
 JEV_DONE_NEGATIVE_COVERAGE_FIELD: str = "negative_coverage"
 JEV_DONE_INSPECTION_FIELD: str = "inspection"
+JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD: str = "guaranteed_next_actions"
+JEV_DONE_OUTCOME_FIELD: str = "outcome"
+JEV_DONE_TRIGGER_FIELD: str = "trigger"
+JEV_DONE_ACTION_FIELD: str = "action"
 JEV_DONE_TARGET_OUTCOMES_FIELD: str = "target_outcomes"
 JEV_DONE_TARGET_OUTCOME_FIELD: str = "target_outcome"
 JEV_DONE_TARGET_FIELD: str = "target"
@@ -246,6 +252,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD",
     "JEV_INPUT_EXHAUSTION_THRESHOLD",
     "JEV_INPUT_SET_COVERAGE_THRESHOLD",
     "JEV_ASSUMPTIONS_RECONCILED_THRESHOLD",
@@ -320,6 +327,10 @@ __all__ = [
     "JEV_DONE_CLAIM_SCOPE_FIELD",
     "JEV_DONE_CLAIM_TITLE_FIELD",
     "JEV_DONE_COMPLETED_WORK_FIELD",
+    "JEV_DONE_ACTION_FIELD",
+    "JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD",
+    "JEV_DONE_OUTCOME_FIELD",
+    "JEV_DONE_TRIGGER_FIELD",
     "JEV_DONE_COMPLETION_CRITERION_FIELD",
     "JEV_DONE_COMPLETION_EVIDENCE_FIELD",
     "JEV_DONE_COMPLETION_ITEM_ID",

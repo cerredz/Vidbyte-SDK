@@ -138,3 +138,7 @@ python lint/run.py
 python scripts/run_ci.py --stage source
 python scripts/run_ci.py
 ```
+
+### Guaranteed next actions
+
+`GUARANTEED_NEXT_ACTIONS` is handoff-only: candidates are dynamic items built from an observed run trigger, not predicted request-state obligations. Keep the handoff's `necessity_basis` private. Jev receives the requested outcome, observed trigger, proposed action, and direct evidence, then answers separate necessity and unfinished questions. Continue for a candidate only when both answers meet their threshold. Exclude sequences, broad phase progress, hypothetical triggers, optional polish, speculative dependencies, and work needing new authorization.

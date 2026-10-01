@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/jev/done/done.py
 
-PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question and threshold, plus validation of the done checks a user enables.
+PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question or question pair and threshold, plus validation of the done checks a user enables.
 ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
-COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
+COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -18,6 +18,7 @@ from vidbyte.lib.constants.jev import (
     JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
     JEV_CLAIMS_THRESHOLD,
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
+    JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
     JEV_INPUT_EXHAUSTION_THRESHOLD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_MOTIVATING_CASE_THRESHOLD,
@@ -32,11 +33,18 @@ from vidbyte.lib.constants.jev import (
     JEV_TARGET_OUTCOME_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
-from vidbyte.lib.enums.jev import JevDoneCheck
+from vidbyte.lib.enums.jev import (
+    JevDoneCheck,
+    JevDoneQuestionKey,
+)
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQuestion
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
+from vidbyte.lib.jev.done.guaranteed_next_actions import (
+    GuaranteedActionNecessaryQuestion,
+    GuaranteedActionUnfinishedQuestion,
+)
 from vidbyte.lib.jev.done.input_exhaustion import InputExhaustionTraversedQuestion
 from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
@@ -54,22 +62,23 @@ from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestio
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
-        JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(),
-        JevDoneCheck.OUTPUT_COUNT: OutputCountSatisfiedQuestion(),
-        JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(),
-        JevDoneCheck.REPORT_ACTION_ALIGNMENT: ReportActionAlignmentQuestion(),
-        JevDoneCheck.ASSUMPTIONS_RECONCILED: AssumptionsReconciledQuestion(),
-        JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(),
-        JevDoneCheck.MOTIVATING_CASE: MotivatingCaseExercisedQuestion(),
-        JevDoneCheck.SCOPE_COVERAGE: ScopeCoverageAppliedQuestion(),
-        JevDoneCheck.COMPLETION_EVIDENCE: CompletionEvidenceSupportedQuestion(),
-        JevDoneCheck.INPUT_SET_COVERAGE: InputSetCoverageQuestion(),
-        JevDoneCheck.INPUT_EXHAUSTION: InputExhaustionTraversedQuestion(),
-        JevDoneCheck.NEGATIVE_COVERAGE: NegativeCoverageSupportedQuestion(),
-        JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion(),
-        JevDoneCheck.PHASE_PROGRESS: PhaseProgressReachedQuestion(),
-        JevDoneCheck.OUTPUT_EXTENT: OutputExtentSatisfiedQuestion(),
+    _questions: Mapping[JevDoneCheck, tuple[JevDoneQuestion, ...]] = MappingProxyType({
+        JevDoneCheck.MULTI_PART: (MultiPartDeliveredQuestion(),),
+        JevDoneCheck.OUTPUT_COUNT: (OutputCountSatisfiedQuestion(),),
+        JevDoneCheck.CLAIMS: (ClaimsSupportedQuestion(),),
+        JevDoneCheck.REPORT_ACTION_ALIGNMENT: (ReportActionAlignmentQuestion(),),
+        JevDoneCheck.ASSUMPTIONS_RECONCILED: (AssumptionsReconciledQuestion(),),
+        JevDoneCheck.TARGET_OUTCOME: (TargetOutcomeDemonstratedQuestion(),),
+        JevDoneCheck.MOTIVATING_CASE: (MotivatingCaseExercisedQuestion(),),
+        JevDoneCheck.SCOPE_COVERAGE: (ScopeCoverageAppliedQuestion(),),
+        JevDoneCheck.COMPLETION_EVIDENCE: (CompletionEvidenceSupportedQuestion(),),
+        JevDoneCheck.INPUT_SET_COVERAGE: (InputSetCoverageQuestion(),),
+        JevDoneCheck.INPUT_EXHAUSTION: (InputExhaustionTraversedQuestion(),),
+        JevDoneCheck.NEGATIVE_COVERAGE: (NegativeCoverageSupportedQuestion(),),
+        JevDoneCheck.GUARANTEED_NEXT_ACTIONS: (GuaranteedActionNecessaryQuestion(), GuaranteedActionUnfinishedQuestion()),
+        JevDoneCheck.PROBLEMS_RESOLVED: (ProblemsResolvedQuestion(),),
+        JevDoneCheck.PHASE_PROGRESS: (PhaseProgressReachedQuestion(),),
+        JevDoneCheck.OUTPUT_EXTENT: (OutputExtentSatisfiedQuestion(),),
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
@@ -84,6 +93,7 @@ class JevDoneRegistry:
         JevDoneCheck.INPUT_SET_COVERAGE: JEV_INPUT_SET_COVERAGE_THRESHOLD,
         JevDoneCheck.INPUT_EXHAUSTION: JEV_INPUT_EXHAUSTION_THRESHOLD,
         JevDoneCheck.NEGATIVE_COVERAGE: JEV_NEGATIVE_COVERAGE_THRESHOLD,
+        JevDoneCheck.GUARANTEED_NEXT_ACTIONS: JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
         JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD,
         JevDoneCheck.PHASE_PROGRESS: JEV_PHASE_PROGRESS_THRESHOLD,
         JevDoneCheck.OUTPUT_EXTENT: JEV_OUTPUT_EXTENT_THRESHOLD,
@@ -91,11 +101,33 @@ class JevDoneRegistry:
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:
-        """Return the fixed question one done check asks about each item it checks."""
+        """Return the first fixed question a done check asks about each item it checks."""
+        return cls.questions(check)[0]
+
+    @classmethod
+    def questions(cls, check: JevDoneCheck) -> tuple[JevDoneQuestion, ...]:
+        """Return every fixed question a done check asks about each item."""
         found = cls._questions.get(check)
-        if found is None:
+        if not found:
             raise ConfigurationError(f"Jev done check {check!r} has no registered question.", details={"check": str(check), "registered": [item.value for item in cls._questions]})
         return found
+
+    @classmethod
+    def question_for_key(cls, key: JevDoneQuestionKey) -> JevDoneQuestion:
+        """Return the unique registered question with this answer key."""
+        matches = tuple(
+            question
+            for question_group in cls._questions.values()
+            for question in question_group
+            if question.key == key
+        )
+        if len(matches) != 1:
+            registered = [question.key.value for group in cls._questions.values() for question in group]
+            raise ConfigurationError(
+                f"Jev done question key {key.value!r} has {len(matches)} registered questions.",
+                details={"question_key": key.value, "matches": len(matches), "registered": registered},
+            )
+        return matches[0]
 
     @classmethod
     def threshold(cls, check: JevDoneCheck) -> float:
@@ -131,7 +163,7 @@ class JevDoneRegistry:
         if len(set(checks)) != len(checks):
             raise ConfigurationError("JevContinualSettings.checks cannot enable the same check twice.", details={"received": [check.value for check in checks]})
         for check in checks:
-            cls.question(check)
+            cls.questions(check)
             cls.threshold(check)
         return checks
 

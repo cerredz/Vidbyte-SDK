@@ -40,6 +40,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevCompletionEvidence,
     JevCompletionEvidenceSectionPayload,
     JevDeliverableEvidence,
+    JevGuaranteedNextAction,
+    JevGuaranteedNextActions,
+    JevGuaranteedNextActionsEvidencePayload,
     JevAssumptionEvidence,
     JevAssumptionsReconciledEvidence,
     JevAssumptionsReconciledPayload,
@@ -101,6 +104,8 @@ class JevHandoff(BaseAgent):
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
     _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoverageEvidencePayload})
+
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.GUARANTEED_NEXT_ACTIONS: JevGuaranteedNextActionsEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -202,6 +207,7 @@ class JevHandoff(BaseAgent):
                 )
                 for item in claims_section.claims
             ))
+        guaranteed_next_actions = self._guaranteed_next_actions_record(payload)
         report_action_alignment = None
         alignment_section = getattr(payload, JevDoneCheck.REPORT_ACTION_ALIGNMENT.value, None)
         if isinstance(alignment_section, JevReportActionAlignmentEvidenceSectionPayload):
@@ -294,7 +300,27 @@ class JevHandoff(BaseAgent):
             assumptions_reconciled=assumptions_reconciled,
             input_exhaustion=request_records.input_exhaustion,
             negative_coverage=request_records.negative_coverage,
+            guaranteed_next_actions=guaranteed_next_actions,
         )
+
+    def _guaranteed_next_actions_record(self, payload: JevHandoffPayload) -> JevGuaranteedNextActions | None:
+        """Convert dynamic candidates without copying their private necessity rationale into Jev evidence."""
+        actions_section = getattr(payload, JevDoneCheck.GUARANTEED_NEXT_ACTIONS.value, None)
+        if not isinstance(actions_section, JevGuaranteedNextActionsEvidencePayload):
+            return None
+        # @intent generated-necessity-basis-is-not-run-evidence
+        # The record contains candidate context and direct run evidence only; Jev must decide necessity for itself.
+        return JevGuaranteedNextActions(tuple(
+            JevGuaranteedNextAction(
+                item.id,
+                item.outcome.strip(),
+                item.trigger.strip(),
+                item.action.strip(),
+                item.evidence.strip(),
+                item.missing.strip(),
+            )
+            for item in actions_section.actions
+        ))
 
     # @intent request-derived-evidence-covers-exactly-the-state
     # Each pre-run item gets exactly one handoff entry; an omission or invented id makes all evidence unavailable.

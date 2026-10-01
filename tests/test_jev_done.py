@@ -83,6 +83,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
     JEV_DONE_INPUT_EXHAUSTION_FIELD,
@@ -98,6 +99,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_REQUEST_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
+    JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
     JEV_NEGATIVE_COVERAGE_THRESHOLD,
     JEV_OUTPUT_COUNT_THRESHOLD,
@@ -189,6 +191,10 @@ from vidbyte.lib.jev.done import (
     ReportActionAlignmentQuestion,
     AssumptionsReconciledQuestion,
 )
+from vidbyte.lib.jev.done.guaranteed_next_actions import (
+    GuaranteedActionNecessaryQuestion,
+    GuaranteedActionUnfinishedQuestion,
+)
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.prompts.catalog import Prompts
@@ -276,6 +282,22 @@ def _negative_coverage_handoff(**overrides: Any) -> dict[str, Any]:
     }
     inspection.update(overrides)
     return {"negative_coverage": {"inspections": [inspection]}}
+
+
+def _guaranteed_next_actions_handoff(actions: list[dict[str, str]]) -> dict[str, Any]:
+    return {"guaranteed_next_actions": {"actions": actions}}
+
+
+def _guaranteed_next_action(identifier: str) -> dict[str, str]:
+    return {
+        "id": identifier,
+        "outcome": "The requested test passes.",
+        "trigger": "The test command failed on the requested function.",
+        "action": "Correct the function so the test passes.",
+        "necessity_basis": "The requested behavior fails and no alternative authorized route is evident.",
+        "evidence": "The recorded test command fails with the expected assertion, and no later edit or successful rerun appears.",
+        "missing": "The function correction and successful rerun are not shown.",
+    }
 
 
 def _input_exhaustion_handoff(
@@ -489,8 +511,14 @@ def _settings(**overrides: Any) -> JevAgentSettings:
     return JevAgentSettings(**values)
 
 
-def _jev(done: tuple[Any, ...] = (JevDoneCheck.MULTI_PART,), **settings: Any) -> JevAgent:
-    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig(api_key="test-key"), continual=JevContinualSettings(checks=done)))
+def _jev(
+    done: tuple[Any, ...] = (JevDoneCheck.MULTI_PART,),
+    *,
+    max_continuations: int = JEV_DONE_MAX_CONTINUATIONS,
+    **settings: Any,
+) -> JevAgent:
+    continual = JevContinualSettings(checks=done, max_continuations=max_continuations)
+    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig(api_key="test-key"), continual=continual))
 
 
 def _sentences(text: str) -> int:
@@ -963,6 +991,16 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertIn("silence", question.instructions.rules[0])
         self.assertIn("does not show", question.gap)
 
+    def test_guaranteed_next_actions_register_two_independent_questions(self) -> None:
+        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        self.assertIsInstance(necessary, GuaranteedActionNecessaryQuestion)
+        self.assertIsInstance(unfinished, GuaranteedActionUnfinishedQuestion)
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.GUARANTEED_NEXT_ACTIONS), necessary)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.GUARANTEED_NEXT_ACTIONS), JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD)
+        self.assertEqual(JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD, 0.9)
+        self.assertIn("`necessity_basis` is never sent to Jev", necessary.instructions.state)
+        self.assertIn("separate question", unfinished.instructions.introduction)
+
     def test_changed_assumption_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
         rel = "vidbyte/lib/jev/done/assumptions_reconciled.py"
@@ -1171,6 +1209,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         done: tuple[Any, ...] = (JevDoneCheck.MULTI_PART,),
+        max_continuations: int = JEV_DONE_MAX_CONTINUATIONS,
         final_answer: str = "All done.",
         state: str = json.dumps(_STATE),
         handoff: str = json.dumps(_HANDOFF),
@@ -1178,7 +1217,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         **settings: Any,
     ) -> tuple[JevAgent, ScriptedGenerativeRunner, ScriptedGenerativeRunner, ScriptedGenerativeRunner]:
         main, state_runner, handoff_runner = ScriptedGenerativeRunner(final_answer), ScriptedGenerativeRunner(state, error=state_error), ScriptedGenerativeRunner(handoff)
-        agent = bind_test_runner(_jev(done=done, **settings), main)
+        agent = bind_test_runner(_jev(done=done, max_continuations=max_continuations, **settings), main)
         assert agent.run_state is not None
         bind_test_runner(agent.run_state, state_runner)
         bind_test_runner(agent.run_state.handoff_writer, handoff_runner)
@@ -1673,6 +1712,81 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.passed)
         self.assertFalse(result.available)
         self.assertEqual((len(main.calls), len(handoff_runner.calls), len(decision.requests)), (1, 1, 0))
+
+    async def test_guaranteed_actions_require_necessity_and_unfinished_and_batch_with_other_checks(self) -> None:
+        handoff = {
+            **_HANDOFF,
+            **_guaranteed_next_actions_handoff([
+                _guaranteed_next_action("unnecessary"),
+                _guaranteed_next_action("already_done"),
+                _guaranteed_next_action("still_needed"),
+            ]),
+        }
+        decision = ScriptedDecisionRunner({
+            "dry_run_flag": [0.95],
+            "readme_docs": [0.95],
+            "unnecessary": [0.89, 0.99, 0.1, 0.1],
+            "already_done": [0.99, 0.899, 0.1, 0.1],
+            "still_needed": [0.9, 0.9, 0.1, 0.1],
+        })
+        agent, main, _, handoff_runner = self._agent(
+            done=(JevDoneCheck.MULTI_PART, JevDoneCheck.GUARANTEED_NEXT_ACTIONS),
+            max_continuations=1,
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(decision.requests), len(main.calls), len(handoff_runner.calls)), (2, 2, 2))
+        request = decision.requests[0]
+        self.assertEqual(len(request.questions), 8)
+        self.assertEqual(
+            set(request.state),
+            {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD},
+        )
+        entries = request.state[JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD]
+        self.assertEqual(set(entries), {"unnecessary", "already_done", "still_needed"})
+        self.assertNotIn("necessity_basis", str(request.state))
+        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        names = {question.name for question in request.questions}
+        for identifier in entries:
+            self.assertIn(necessary.name(identifier), names)
+            self.assertIn(unfinished.name(identifier), names)
+
+        feedback = main.messages[1][0]["content"]
+        failed_feedback = feedback.split("# Failed checks", 1)[1].split("# Focus", 1)[0]
+        self.assertIn("still_needed", failed_feedback)
+        self.assertNotIn("unnecessary", failed_feedback)
+        self.assertNotIn("already_done", failed_feedback)
+        assert agent.response.handoff is not None and agent.response.run_state is not None
+        assert agent.response.handoff.guaranteed_next_actions is not None
+        self.assertFalse(hasattr(agent.response.handoff.guaranteed_next_actions.actions[0], "necessity_basis"))
+
+        question_name = unfinished.name("still_needed")
+        missing_answer = DecisionModelResponse(
+            provider=ModelProvider.TYPESAFE,
+            model="jev-1.13.0",
+            answers={necessary.name("still_needed"): _answer(necessary.name("still_needed"), 0.99)},
+            raw={},
+        )
+        unavailable = agent.run_state._guaranteed_next_actions(agent.response.handoff, missing_answer)
+        self.assertFalse(unavailable.available)
+        self.assertTrue(unavailable.passed)
+        self.assertNotIn(question_name, unavailable.answers)
+
+    async def test_empty_guaranteed_actions_add_no_questions(self) -> None:
+        decision = ScriptedDecisionRunner({})
+        agent, main, _, _ = self._agent(
+            done=(JevDoneCheck.GUARANTEED_NEXT_ACTIONS,),
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(_guaranteed_next_actions_handoff([])),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Run the requested test.")
+
+        result = agent.response.done[JevDoneCheck.GUARANTEED_NEXT_ACTIONS]
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        self.assertTrue(result.available and result.passed)
 
     async def test_request_quantity_is_checked_even_when_final_answer_omits_a_count(self) -> None:
         decision = ScriptedDecisionRunner({"cache_examples": [0.2]})

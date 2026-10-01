@@ -1296,6 +1296,30 @@ class JevAssumptionsReconciledPayload(JevSectionPayload):
     SECTION: ClassVar[str] = "The assumptions section records consequential premises the main agent explicitly used and later concrete run evidence contradicted or materially changed. It is derived after the work because only the main agent's responses and tool context show which premises actually guided this run. Include each qualifying premise whether dependent work was later revised, left unchanged, or became irrelevant, because those outcomes are judged separately. Exclude uncertainty or lack of verification by itself, and exclude plan changes without a concretely changed premise. Report the assumption, its basis, the later observation, affected work, subsequent actions, and source evidence without deciding whether the work was reconciled."
 
     items: list[JevAssumptionEvidencePayload] = Field(description="Return one item for each materially consequential assumption that the run visibly shows the main agent used and later concrete run evidence contradicted or materially changed. Require an explicit early main-agent response or tool-context source for the assumption and an identifiable downstream decision, artifact, conclusion, or action that depended on it. Include the item regardless of whether later work was revised, unchanged, abandoned, or made irrelevant; the separate Jev question judges that outcome. Do not include an assumption that was merely uncertain, unverified, or considered as a possibility, and do not treat a plan change alone as evidence of a mistaken premise. Return an empty list only when the run contains no qualifying changed assumption, not because every qualifying assumption was reconciled.")
+
+
+class JevGuaranteedNextActionPayload(BaseModel):
+    """One candidate follow-on obligation and its observed run evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Use a unique lowercase identifier for this candidate, starting with a letter and using only letters, digits, and underscores. Keep the id stable within this response so the two Jev questions can refer to the same candidate. Do not reuse an id for a different action. The id carries no judgment about whether the action is necessary. Keep it under sixty-four characters.")
+    outcome: str = Field(min_length=1, description="Quote or closely reproduce the concrete end state the user requested. Keep the user's scope and qualifications, and do not broaden the outcome into general quality advice. This field gives Jev the goal the candidate action is claimed to serve. It is context, not evidence that the action is necessary. If the request names no concrete outcome, do not create a candidate.")
+    trigger: str = Field(min_length=1, description="Describe the condition observed in this run that is claimed to make follow-on work relevant. Cite the response, tool call, result, or final answer that shows the condition, using enough detail to locate it in `evidence`. Do not use a hypothetical, an unobserved condition, or an expectation about what may happen later. A trigger alone does not prove that the action is necessary. If the run contains no direct observation, omit the candidate.")
+    action: str = Field(min_length=1, description="Name one concrete remaining action that could address the observed trigger and satisfy the requested outcome. Keep it within the user's request and the authority already granted; do not add optional cleanup, polish, external publication, or irreversible work without authorization. Do not combine alternatives or a list of steps in one action. The field is only a proposed candidate and is not proof of necessity. If several plausible authorized actions could satisfy the outcome, omit the candidate.")
+    necessity_basis: str = Field(min_length=1, description="Explain for the handoff record why the request and observed trigger are claimed to entail this action, and why no plausible authorized alternative reaches the same outcome. This is candidate-generation rationale only and must never be copied into Jev's state or treated as proof. It must be grounded in the request and observed run, not general convention or likely usefulness. If the explanation relies on an unstated assumption, permission, or future event, omit the candidate. Jev independently judges necessity from the request and observed evidence.")
+    evidence: str = Field(min_length=1, description="Compile the direct run evidence for the trigger and whether the action has already been completed. Include relevant responses, tool calls and outputs, command or test results, and the final answer, in the order they occurred. Preserve failures and later successful attempts, and state the latest observed status of the action. Do not rely on the main agent's unsupported completion claim or on this payload's necessity rationale. When evidence is ambiguous or absent, say so plainly.")
+    missing: str = Field(min_length=1, description="State the concrete evidence gap that remains if the action has not been completed. Name the action and what the run does not show, using facts from `evidence` only. If the evidence shows that the action is complete, say that nothing is missing. Do not introduce another action, recommend optional work, or repeat the necessity rationale. This text is supplied to the main agent only when Jev independently accepts necessity and finds the action unfinished.")
+
+
+class JevGuaranteedNextActionsEvidencePayload(JevSectionPayload):
+    """Dynamic candidates for necessary follow-on obligations found in the observed run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "This section contains zero or more candidate follow-on obligations derived after the main agent has worked. Each candidate names a requested outcome, an observed trigger, one proposed action, the handoff's private rationale for proposing it, and evidence from the run. The rationale is not sent to Jev and is never proof of necessity; Jev sees the user's original request, the outcome, the trigger, the action, and direct evidence. Jev separately judges whether the action is logically required with no plausible authorized alternative and whether the action remains unfinished. The handoff must omit uncertain candidates, explicitly ordered sequences, and broad phase-progress judgments; it must not predict likely work, infer future triggers, or invent user authorization. An empty list means the handoff found no candidate it could state with this evidence."
+
+    actions: list[JevGuaranteedNextActionPayload] = Field(description="Return one candidate only when the user's request names a concrete outcome, the run directly shows a trigger that leaves that outcome unmet, and one concrete in-scope action appears to be required to reach it. Include a short private necessity rationale for audit, but Jev must independently assess necessity from the request and run evidence without receiving that rationale. Include all direct evidence needed to judge both the trigger and whether the action is already complete. Omit explicitly ordered sequences and phase-progress steps, which belong to separate checks. Omit any candidate with a plausible authorized alternative, unclear scope or permission, an unobserved condition, optional polish, or speculative dependency. Return an empty list when no candidate satisfies these conditions.")
 class JevProblemEvidencePayload(BaseModel):
     """One run-observed problem or the required original-request completion item."""
 
@@ -2394,7 +2418,6 @@ class JevCompletionEvidence:
     requested_outcomes: tuple[str, ...]
     completed_work: tuple[str, ...]
     unfinished_or_blocked: tuple[str, ...]
-
     evidence: str
     missing: str
 
@@ -2412,6 +2435,24 @@ class JevCompletionEvidence:
                 JevText.require(text, field_name=f"completion evidence {field_name}[{index}]")
         JevText.require(self.evidence, field_name="completion evidence observations")
         JevText.require(self.missing, field_name="completion evidence gap")
+
+
+@dataclass(frozen=True, slots=True)
+class JevGuaranteedNextAction:
+    """One candidate follow-on action with its request outcome, observed trigger, and evidence gap."""
+
+    id: str
+    outcome: str
+    trigger: str
+    action: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="guaranteed next action id")
+        for field_name in ("outcome", "trigger", "action", "evidence", "missing"):
+            JevText.require(getattr(self, field_name), field_name=f"{field_name} of guaranteed next action {self.id!r}")
+
 
 @dataclass(frozen=True, slots=True)
 class JevReportActionAlignmentItem:
@@ -2519,6 +2560,22 @@ class JevProblemResolutionItem:
 
 
 @dataclass(frozen=True, slots=True)
+class JevGuaranteedNextActions:
+    """Dynamic necessary follow-on candidates and their unique ids."""
+
+    actions: tuple[JevGuaranteedNextAction, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.actions, tuple) or not all(isinstance(item, JevGuaranteedNextAction) for item in self.actions):
+            raise JevValidation.error("guaranteed next actions", "a tuple of JevGuaranteedNextAction values", self.actions)
+        JevDeliverableId.require_unique(self.ids(), field_name="guaranteed next actions")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return candidate ids in handoff order."""
+        return tuple(item.id for item in self.actions)
+
+
+@dataclass(frozen=True, slots=True)
 class JevProblemsResolvedEvidence:
     """Dynamic problem evidence with exactly one original-request completion item."""
 
@@ -2551,7 +2608,7 @@ class JevProblemsResolvedEvidence:
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for enabled done checks.
 
-    Each optional typed section is present only for its check. `negative_coverage` carries one inspection account per requested target and separates inspection evidence from the final answer?s negative or incomplete report. Existing sections include `multi_part`,
+    Each optional typed section is present only for its check. `negative_coverage` carries one inspection account per requested target and separates inspection evidence from the final answer's negative or incomplete report. `guaranteed_next_actions` holds post-run candidate actions and is handoff-only. Existing sections include `multi_part`,
     `claims`, `target_outcome`, `motivating_case`, `scope_coverage`, `problems_resolved`,
     `completion_evidence`, `phase_progress`, and `input_set_coverage` and request-derived `input_exhaustion`; `output_count` carries candidate
     output units and direct evidence for numeric obligations, and `output_extent` carries text-size evidence; `report_action_alignment` and `assumptions_reconciled` carry post-run comparisons; `negative_coverage` carries per-target inspection evidence and answer reports. Completion evidence and changed assumptions are
@@ -2576,6 +2633,7 @@ class JevHandoffRecord:
     input_exhaustion: JevInputExhaustionEvidenceSet | None = None
 
     negative_coverage: JevNegativeCoverageEvidence | None = None
+    guaranteed_next_actions: JevGuaranteedNextActions | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -2595,6 +2653,7 @@ class JevHandoffRecord:
             ("handoff assumptions_reconciled", self.assumptions_reconciled, JevAssumptionsReconciledEvidence),
             ("handoff input_exhaustion", self.input_exhaustion, JevInputExhaustionEvidenceSet),
             ("handoff negative_coverage", self.negative_coverage, JevNegativeCoverageEvidence),
+            ("handoff guaranteed_next_actions", self.guaranteed_next_actions, JevGuaranteedNextActions),
         ))
 
 
@@ -2649,7 +2708,7 @@ class JevDoneResult:
     items below the check threshold or with missing work evidence. These may be deliverables for MULTI_PART,
     numeric obligations for OUTPUT_COUNT, parent claims for CLAIMS, target outcomes, motivating cases, scope
     members, request-required phases, bounded input targets, dynamic collection ids for INPUT_EXHAUSTION, observed problems, or the fixed `task_completion`
-    item for COMPLETION_EVIDENCE. CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays
+    item for COMPLETION_EVIDENCE. GUARANTEED_NEXT_ACTIONS is handoff-only: for each candidate it asks separately whether the request and observed trigger require the action and whether evidence shows the action remains unfinished; both affirmative scores must meet the threshold for any candidate to trigger continuation. CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays
     atomic. Completion evidence and assumptions-reconciled evidence are handoff-only, not request-derived run-state sections. A changed assumption remains a judgment item even when downstream work later recovered or became irrelevant. Assumptions-reconciled evidence is also handoff-only; it preserves changed premises and dependent work even when a later recovery or changed scope makes that work irrelevant.
 
     With `available=False` the run state, handoff, or Jev was unavailable, `score` is None, and the check fails
@@ -2826,6 +2885,10 @@ __all__ = [
     "JevDeliverablePayload",
     "JevDoneQuestion",
     "JevDoneResult",
+    "JevGuaranteedNextAction",
+    "JevGuaranteedNextActionPayload",
+    "JevGuaranteedNextActions",
+    "JevGuaranteedNextActionsEvidencePayload",
     "JevHandoffPayload",
     "JevHandoffRecord",
     "JevInputExhaustion",

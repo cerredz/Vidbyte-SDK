@@ -652,3 +652,7 @@ Write a new subclass in its own module under `continuation/` **only** when the r
 - Give it its own settings field. That field lives in `vidbyte/agents/jev/settings.py`, because agent settings are the one exception to the dataclass placement rule.
 
 A new kind of done check never needs a new continuation class, because `JevDoneContinuation` already runs every enabled check.
+
+### Guaranteed next actions
+
+`GUARANTEED_NEXT_ACTIONS` is handoff-only because candidates arise from observed run triggers. Key each item by its stable id and send Jev only its requested outcome, observed trigger, proposed action, and direct evidence; never include the handoff's private `necessity_basis`. Ask two independent questions per candidate: whether the request and trigger entail the action with no plausible authorized alternative, and whether the action remains unfinished. The candidate is incomplete only when both probabilities meet the registered threshold. Missing any expected answer makes the check unavailable and fail-open; an empty candidate list adds no question. Feedback names only candidates that pass both judgments and includes the evidence gap. Exclude explicit sequences, broad phase progress, future triggers, optional polish, speculative dependencies, and actions needing new authorization.
