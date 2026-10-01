@@ -237,12 +237,12 @@ await self.preflight.pass_(message, run_state=None if self.run_state is None els
 
 ### 6.5 Focused Tests and Verification Script
 
-**File(s):** `tests/test_jev_run_state_relation.py`, `scripts/test-jev-run-state-relation.py`
-**Type:** New files
+**File(s):** `tests/test_jev_run_state_relation.py`, `scripts/test-jev-run-state-relation.py`, `tests/test_jev_preflight.py`
+**Type:** New focused test files and a modified preset-registry assertion
 
 #### What it does
 
-The unit/integration tests use the production question, registry, preset, gate, runtime, response, and relation facade with scripted decision and generative runners. The executable script loads the focused suite, prints a `PASS` or `FAIL` label per case, prints `X/Y tests passed`, and exits non-zero on failure.
+The unit/integration tests use the production question, registry, preset, gate, runtime, response, and relation facade with scripted decision and generative runners. The existing preflight suite updates its available-preset expectation to include the new opt-in preset. The executable script loads the focused suite, prints a `PASS` or `FAIL` label per case, prints `X/Y tests passed`, and exits non-zero on failure.
 
 #### Interface / API
 
@@ -257,6 +257,7 @@ python scripts/test-jev-run-state-relation.py
 3. Exercise applicable and not-applicable gate outcomes, including missing or failed decision replies.
 4. Exercise JevRunStateRelation through JevRuntime for related retention, unrelated replacement, replacement failure, fresh responses, done-check behavior, and the disabled legacy path.
 5. Exercise the typed specialist seam: relation-enabled delegation retains or replaces state before delegation, the base run-state no-op does not generate state, and a closed gate never calls either begin method.
+6. Run an enabled MULTI_PART check through the main finish attempt after retaining a related record; assert that the continuation sends the preserved request and record to the handoff and reports the actual done-check result.
 
 #### Edge Cases & Error Handling
 
@@ -305,6 +306,10 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `vidbyte/agents/jev/done/relation.py` | Run-state retain-or-replace subclass |
 | CREATE | `tests/test_jev_run_state_relation.py` | Focused deterministic tests |
 | CREATE | `scripts/test-jev-run-state-relation.py` | Required executable verification script |
+| MODIFY | `tests/test_jev_preflight.py` | Include the new preset in the registry availability assertion |
+| MODIFY | `vidbyte/agents/jev/agent.py` | Construct the relation subclass when the preset is enabled and keep continuation conditional on done checks |
+| MODIFY | `vidbyte/agents/jev/done/__init__.py` | Export the relation subclass |
+| MODIFY | `vidbyte/agents/jev/done/run_state.py` | Add the typed no-op delegated-run seam for legacy state handling |
 | MODIFY | `vidbyte/lib/enums/jev.py` | Add relation preset and question key |
 | MODIFY | `vidbyte/lib/constants/jev.py` | Add the named fixed relation threshold |
 | MODIFY | `vidbyte/lib/jev/presets.py` | Register question key and threshold |
