@@ -54,7 +54,7 @@ Cached official Anthropic documentation says Skills use Messages container.skill
 1. SkillSourceKind is a closed enum with FILE, GITHUB, SKILLS_SH, and CLAUDE. ClaudeSkillType is a closed enum with CUSTOM and ANTHROPIC. A frozen SkillSource validates nonblank named fields and kind-compatible options before resolution; its explicit API key is hidden from repr.
 2. JevAlignmentSettings.skills accepts str | SkillDocument | SkillSource. Inline strings remain exact text and are never path-guessed. Source resolution occurs during preload/run, never during settings or agent construction.
 3. Source resolution is class-first and closed-dispatch. Each configured position yields exactly one result in the same position. Well-typed sources that fail provider lookup, parsing, HTTP, or ambiguity checks yield UNAVAILABLE with a safe SDK-authored detail for that index while sibling candidates continue. Malformed typed descriptors fail settings construction before resolution. Cancellation propagates. Duplicate names discovered after resolution are handled then; every member of a collision is unavailable, with no constructor-time guess based on optional source names.
-4. FILE accepts a SKILL.md path or a directory containing it. It bounds file reads, parses YAML frontmatter with existing PyYAML, requires valid name and description, and preserves the body exactly. It does not resolve or execute sibling assets.
+4. FILE accepts a SKILL.md path or a directory containing it. It bounds file reads, parses YAML frontmatter with existing PyYAML, requires valid name, description, and body, and stores the complete decoded SKILL.md text—including frontmatter and original line endings—without rewriting it. Its provenance is the resolved local path. It does not resolve or execute sibling assets.
 5. GITHUB accepts supported GitHub repository, blob, raw, and tree URLs/references. It determines the default branch through the GitHub API, honors explicit revisions, rejects ambiguous slash refs, truncated trees, unresolved selectors, and duplicate matches. It uses bounded HTTP and sends an explicit credential only to approved GitHub hosts.
 6. SKILLS_SH accepts an explicit owner/repo/skill-slug reference and resolves it through the same GitHub repository catalog. It does not call an invented skills.sh content endpoint or invoke an installer.
 7. CLAUDE lists or retrieves Claude Skills metadata with an explicit Anthropic key and optional workspace ID. It returns a typed ClaudeSkillReference(skill_id, version, type) and metadata only. It never substitutes a description for missing body text.
@@ -176,7 +176,7 @@ class SkillSourceResolver:
 #### Logic / Algorithm
 
 1. Dispatch with an explicit match on source.kind to FILE, GITHUB, SKILLS_SH, or CLAUDE; no provider plugin registry.
-2. For FILE, resolve a file path or directory's SKILL.md, stat and read under a fixed byte ceiling, parse only YAML frontmatter with installed PyYAML, and preserve the remaining body exactly.
+2. For FILE, resolve a file path or directory's SKILL.md, read under a fixed byte ceiling, parse YAML frontmatter with installed PyYAML, verify a nonblank body, store the complete decoded file unchanged, and set provenance to the resolved local path.
 3. For GITHUB, normalize approved GitHub URLs/shorthands; query repository metadata to get the true default branch; use an explicit revision when provided; use bounded tree lookup and raw/blob retrieval; reject malformed, ambiguous, or truncated results.
 4. For SKILLS_SH, parse only owner/repo/slug forms and choose the matching SKILL.md from the same GitHub catalog resolver. No CLI, installation, or invented endpoint.
 5. For CLAUDE, call official list/retrieve/version metadata endpoints using a typed API request, follow pagination within explicit bounds, and return a ClaudeSkillReference plus display metadata with text=None.
@@ -438,7 +438,7 @@ All cases run without live provider credentials. Adapter HTTP uses stub transpor
 - [Hidden Assumption] Optional skill_name is absent and the adapter must select only a unique metadata/path match.
 - [Edge Case] FILE resolves both a SKILL.md path and a directory, including minimal frontmatter/body.
 - [Hidden Failure] FILE reports over-limit, unreadable, and malformed YAML inputs as unavailable with a safe detail, without reading sibling assets.
-- [Silent Failure] FILE preserves body whitespace and code fences after removing only the frontmatter envelope.
+- [Silent Failure] FILE round-trips complete UTF-8 contents, including frontmatter, CRLF line endings, body whitespace, and code fences, while parsing metadata separately.
 - [Hidden Assumption] Missing, non-string, or blank YAML metadata is not silently replaced with defaults.
 - [Edge Case] GitHub URL forms cover repository root, explicit tree path, blob path, and raw path.
 - [Hidden Failure] GitHub transport failure, default-branch lookup failure, and truncated tree remain local to one candidate.
