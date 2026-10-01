@@ -306,7 +306,7 @@ No generic runtime hook is added. Public configuration is via `JevAgentSettings.
 
 ### 6.6 Prompt Catalog, Documentation, and Verification
 
-**File(s):** `vidbyte/lib/enums/prompts.py`, `vidbyte/prompts/prompts/jev_bulk_work/jev_bulk_work.json`, `vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md`, `vidbyte/prompts/README.md`, `vidbyte/agents/jev/README.md`, `vidbyte/lib/jev/preflight/README.md`, `tests/test_jev_bulk_work.py`, `scripts/test-jev-bulk-work.py`
+**File(s):** `vidbyte/lib/enums/prompts.py`, `vidbyte/prompts/prompts/jev_bulk_work/jev_bulk_work.json`, `vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md`, `vidbyte/prompts/README.md`, `vidbyte/agents/jev/README.md`, `vidbyte/lib/jev/preflight/README.md`, `tests/features/jev_bulk_work/FEATURE.md`, `tests/features/jev_bulk_work/README.md`, `tests/features/jev_bulk_work/test_jev_bulk_work.py`, `scripts/test-jev-bulk-work.py`
 **Type:** Modified / New
 
 #### What it does
@@ -415,7 +415,9 @@ Complete list of expected source, documentation, and test changes. Any implement
 | CREATE | `vidbyte/lib/jev/preflight/bulk_work.py` | Three fixed recognition question dataclasses. |
 | CREATE | `vidbyte/prompts/prompts/jev_bulk_work/jev_bulk_work.json` | Register planner prompt family. |
 | CREATE | `vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md` | Constrained bulk planner prompt. |
-| CREATE | `tests/test_jev_bulk_work.py` | Settings, gate, planning, workers, response, and runtime coverage. |
+| CREATE | `tests/features/jev_bulk_work/FEATURE.md` | Defines the durable behavior contract and failure inventory. |
+| CREATE | `tests/features/jev_bulk_work/README.md` | Routes future agents to the feature pack and records its test scope. |
+| CREATE | `tests/features/jev_bulk_work/test_jev_bulk_work.py` | Settings, gate, planning, workers, response, and runtime coverage. |
 | CREATE | `scripts/test-jev-bulk-work.py` | Executable Section 10 feature verification. |
 | MODIFY | `vidbyte/agents/jev/settings.py` | Add validated JevBulkSettings and nested setting. |
 | MODIFY | `vidbyte/agents/jev/agent.py` | Build and pass JevBulkWork through the runtime extension seam. |
