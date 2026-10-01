@@ -44,7 +44,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevDecisionRequest,
     JevDeliverable,
+    JevDeliverableEvidence,
+    JevHandoffRecord,
     JevMultiPart,
+    JevMultiPartEvidence,
     JevQuestion,
     JevRunStateRecord,
     JevTargetOutcome,
@@ -356,6 +359,33 @@ class JevRunStateRelationRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tuple(agent.history[:len(original_history)]), original_history)
         self.assertIs(agent.context_manager, original_context_manager)
         self.assertEqual(len(decision.requests), 1)
+
+    async def test_retained_record_runs_the_enabled_done_check_on_the_main_finish_attempt(self) -> None:
+        # Exercises the related record through JevDoneContinuation and the real done scorer after the main reply.
+        agent, main, _ = _agent(checks=(JevDoneCheck.MULTI_PART,))
+        assert isinstance(agent.run_state, JevRunStateRelation) and agent.continuation is not None
+        original = _record()
+        agent.run_state.record = original
+        agent.run_state.request = "Create the v2.1 notes."
+        agent.run_state.rendered = "{\"original\":true}"
+        handoff = JevHandoffRecord(multi_part=JevMultiPartEvidence((JevDeliverableEvidence("release_notes", "The notes describe the SDK migration.", "Nothing is missing."),)))
+        relation_decision = ScriptedDecisionRunner(probability=0.9)
+        done_decision = ScriptedDecisionRunner(probability=0.9)
+        with (
+            patch(_GATE_RUNNER_PATH, new=_decision_helper(relation_decision)),
+            patch("vidbyte.agents.jev.done.run_state.DecisionModelHelper", new=_decision_helper(done_decision)),
+            patch.object(agent.run_state.handoff_writer, "compile", new=AsyncMock(return_value=handoff)) as compile_handoff,
+        ):
+            await agent.arun("Explain a bug in the Vidbyte SDK authentication client.")
+        self.assertEqual(main.calls, ["Explain a bug in the Vidbyte SDK authentication client."])
+        self.assertIs(agent.run_state.record, original)
+        self.assertIs(agent.response.run_state, original)
+        self.assertEqual(agent.run_state.request, "Create the v2.1 notes.")
+        self.assertIs(agent.response.handoff, handoff)
+        self.assertTrue(agent.response.done[JevDoneCheck.MULTI_PART].passed)
+        self.assertEqual(done_decision.requests[0].state["request"], "Create the v2.1 notes.")
+        compile_handoff.assert_awaited_once()
+        self.assertEqual(compile_handoff.await_args.args[:2], ("Create the v2.1 notes.", original))
 
     async def test_each_repeated_run_gets_a_fresh_response_and_relation_decision(self) -> None:
         agent, main, state_runner = _agent()

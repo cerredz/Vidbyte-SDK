@@ -64,16 +64,7 @@ class JevRuntime(AgentRuntime):
         self.response = response
         super().__init__(**kwargs)
 
-    async def arun(
-        self,
-        message: str,
-        *,
-        handle: RunnerHandle,
-        context: BaseAgentContext,
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> AgentResult:
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         # Passes the current run-state record into preflight and preserves the existing delegation and main-loop order.
         """Run the preflight gate, then apply enabled run-local preflights before entering the inherited agent loop."""
         # @intent closed-gate-never-reaches-the-model
