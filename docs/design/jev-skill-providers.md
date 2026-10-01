@@ -104,7 +104,7 @@ SkillSource settings -> closed source resolver -> ordered candidates -> Jev rele
 
 ### 6.1 Source Contracts and Settings
 
-**File(s):** vidbyte/lib/enums/skills.py, vidbyte/lib/enums/__init__.py, vidbyte/lib/dataclasses/skills.py, vidbyte/lib/dataclasses/__init__.py, vidbyte/agents/jev/settings.py, vidbyte/lib/dataclasses/jev.py, vidbyte/__init__.py
+**File(s):** vidbyte/lib/enums/skills.py, vidbyte/lib/enums/__init__.py, vidbyte/lib/dataclasses/skills.py, vidbyte/lib/dataclasses/__init__.py, vidbyte/agents/jev/settings.py, vidbyte/agents/jev/__init__.py, vidbyte/agents/__init__.py, vidbyte/lib/dataclasses/jev.py, vidbyte/__init__.py
 **Type:** Modified
 
 #### What it does
@@ -383,7 +383,7 @@ JevAlignmentSettings(skills=("inline text", SkillDocument(...), SkillSource(kind
 
 ## 9. File Change Manifest
 
-Complete list of every file expected to be created, modified, or deleted. Totals: 10 create, 16 modify, 0 delete.
+Complete list of every file expected to be created, modified, or deleted. Totals: 10 create, 18 modify, 0 delete.
 
 | Action | File Path | Reason |
 |--------|-----------|--------|
@@ -404,6 +404,8 @@ Complete list of every file expected to be created, modified, or deleted. Totals
 | MODIFY | vidbyte/lib/dataclasses/__init__.py | Export source and native contracts. |
 | MODIFY | vidbyte/__init__.py | Export public SDK source and native contracts. |
 | MODIFY | vidbyte/agents/jev/settings.py | Accept explicit source descriptors without constructor fetching. |
+| MODIFY | vidbyte/agents/jev/__init__.py | Export new contracts from the Jev namespace. |
+| MODIFY | vidbyte/agents/__init__.py | Export new contracts from the agents namespace. |
 | MODIFY | vidbyte/lib/jev/preflight/skills.py | State honest metadata-only criteria for native candidates. |
 | MODIFY | vidbyte/agents/jev/alignment/skills.py | Resolve, score, preserve indexes, and select source candidates. |
 | MODIFY | vidbyte/lib/dataclasses/model_configs.py | Add per-call Claude refs/session fields to copied provider config. |
