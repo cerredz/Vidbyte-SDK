@@ -51,13 +51,13 @@ Cached official Anthropic documentation says Skills use Messages container.skill
 
 ### Functional Requirements
 
-1. SkillSourceKind is a closed enum with FILE, GITHUB, SKILLS_SH, and CLAUDE. ClaudeSkillType is a closed enum with CUSTOM and ANTHROPIC. A frozen SkillSource validates nonblank named fields and kind-compatible options before resolution; its explicit API key is hidden from repr.
+1. SkillSourceKind is a closed enum with FILE, GITHUB, SKILLS_SH, and CLAUDE. ClaudeSkillType is a closed enum with CUSTOM and ANTHROPIC. A frozen SkillSource validates nonblank named fields and kind-compatible options before resolution; location and API key are hidden from repr. Remote URL inputs reject userinfo and credential-bearing query parameters.
 2. JevAlignmentSettings.skills accepts str | SkillDocument | SkillSource. Inline strings remain exact text and are never path-guessed. Source resolution occurs during preload/run, never during settings or agent construction.
 3. Source resolution is class-first and closed-dispatch. Each configured position yields exactly one result in the same position. Well-typed sources that fail provider lookup, parsing, HTTP, or ambiguity checks yield UNAVAILABLE with a safe SDK-authored detail for that index while sibling candidates continue. Malformed typed descriptors fail settings construction before resolution. Cancellation propagates. Duplicate names discovered after resolution are handled then; every member of a collision is unavailable, with no constructor-time guess based on optional source names.
 4. FILE accepts a SKILL.md path or a directory containing it. It bounds file reads, parses YAML frontmatter with existing PyYAML, requires valid name, description, and body, and stores the complete decoded SKILL.md text—including frontmatter and original line endings—without rewriting it. Its provenance is the resolved local path. It does not resolve or execute sibling assets.
 5. GITHUB accepts supported GitHub repository, blob, raw, and tree URLs/references. It determines the default branch through the GitHub API, honors explicit revisions, rejects ambiguous slash refs, truncated trees, unresolved selectors, and duplicate matches. It uses bounded HTTP and sends an explicit credential only to approved GitHub hosts.
 6. SKILLS_SH accepts an explicit owner/repo/skill-slug reference and resolves it through the same GitHub repository catalog. It does not call an invented skills.sh content endpoint or invoke an installer.
-7. CLAUDE lists or retrieves Claude Skills metadata with an explicit Anthropic key and optional workspace ID. It returns a typed ClaudeSkillReference(skill_id, version, type) and metadata only. It never substitutes a description for missing body text.
+7. CLAUDE lists or retrieves Claude Skills metadata with an explicit Anthropic key and optional workspace ID. It returns a typed ClaudeSkillReference(skill_id, concrete_version_id, type) and metadata only. When the caller requests latest or omits a version, resolution pins the concrete ID returned by Claude so Jev classifies the version the Messages request mounts. It never substitutes a description for missing body text.
 8. SkillDocument.text may be None only when a valid Claude native reference is present. Text-backed documents keep the existing exact-text validation and source provenance behavior.
 9. Jev receives metadata and body text only for text-backed candidates. The fixed relevance question states clearly that native candidates are judged from listed metadata only. Native candidates for non-Anthropic main providers are UNAVAILABLE before scoring with detail Native Claude skills require an Anthropic model. Jev selects candidates independently; selected text is injected as before, selected native references are collected in original order.
 10. At most 20 selected native references are attached to one call. Overflow candidates are explicitly marked UNAVAILABLE with detail Anthropic supports at most 20 skills per request in their indexed results; no candidate silently disappears or shifts position.
@@ -80,7 +80,7 @@ Cached official Anthropic documentation says Skills use Messages container.skill
 
 ## 5. High-Level Design
 
-SkillSource is a caller-owned typed descriptor. JevAlignmentSettings preserves the candidate list and accepts descriptors without fetching them. During the existing preload phase, a closed SkillSourceResolver dispatches each descriptor to a narrow adapter. The FILE adapter is local; GitHub and skills.sh share GitHub catalog rules; Claude returns opaque references with metadata. Resolution produces one indexed internal candidate per configured item, including failures. Duplicate names discovered in resolved metadata are marked unavailable for every colliding index.
+SkillSource is a caller-owned typed descriptor. JevAlignmentSettings preserves the candidate list and accepts descriptors without fetching them. During the existing preload phase, a closed SkillSourceResolver dispatches each descriptor to a narrow adapter. The FILE adapter is local; GitHub and skills.sh share GitHub catalog rules; Claude returns opaque references with metadata. Remote URL userinfo and credential query parameters are rejected before any request, and location is excluded from descriptor repr. Resolution produces one indexed internal candidate per configured item, including failures. Duplicate names discovered in resolved metadata are marked unavailable for every colliding index.
 
 Jev scores only available candidates. It sees full body text for text-backed candidates, or the honest available metadata for Claude-native candidates. Selected text continues through the current BaseAgentContext system prompt. Selected native references are written to JevSkillsOutcome.claude_skills and copied into this run's named provider options by JevRuntime. Generic agent context and preload interfaces do not change.
 
@@ -119,7 +119,7 @@ class ClaudeSkillType(str, Enum): ...
 @dataclass(frozen=True, slots=True)
 class SkillSource:
     kind: SkillSourceKind
-    location: str
+    location: str = field(repr=False)
     skill_name: str | None = None
     revision: str | None = None
     version: str | None = None
@@ -349,7 +349,7 @@ class SkillSource:
     # __post_init__ validates nonblank fields and kind-compatible options.
 ~~~
 
-No migration. API keys are excluded from repr and outcomes.
+No migration. Locations and API keys are excluded from repr; credentials and source URLs are excluded from outcomes.
 
 ### 7.3 SkillDocument and JevSkillsOutcome
 
@@ -450,6 +450,8 @@ All cases run without live provider credentials. Adapter HTTP uses stub transpor
 - [Hidden Assumption] URL-looking inline strings remain literal text unless wrapped in SkillSource.
 - [Edge Case] Claude metadata supports custom and Anthropic refs with explicit versions.
 - [Hidden Failure] Claude pagination, malformed metadata, and credential rejection return one unavailable item without exposing keys.
+- [Silent Failure] A latest/default Claude lookup pins the returned concrete version ID so Jev's metadata and the mounted version cannot diverge.
+- [Hidden Assumption] A URL containing userinfo or credential query parameters is rejected before sending a request and does not appear in descriptor repr.
 - [Silent Failure] Claude description is never placed into SkillDocument.text or injected as instructions.
 - [Hidden Assumption] Workspace ID omission is accepted for a scoped credential; an explicit mismatch becomes unavailable.
 - [Edge Case] Two sources resolving to one name mark every colliding slot unavailable without reordering.
