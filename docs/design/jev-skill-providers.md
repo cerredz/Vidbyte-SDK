@@ -64,8 +64,8 @@ Cached official Anthropic documentation says Skills use Messages container.skill
 11. JevSkillResult.detail is an optional safe, SDK-authored explanation for an UNAVAILABLE result and never includes exception text, source credentials, or source content. JevSkillsOutcome.claude_skills is a typed tuple, default empty. After preload, JevRuntime reads the just-written response outcome and adds claude_skills to the current run's copied options. It does not extend BaseAgentContext or add a generic preload-options callback.
 12. TextModelRunner.arun and run accept typed per-call claude_skills and claude_skill_session, copying them into a TextModelConfig for that call. Existing runner config defaults and non-native calls are unchanged.
 13. Anthropic adds selected references under container.skills, reuses a session container ID, and adds code_execution_20250825 once while retaining local tool schemas. A conflicting caller-supplied reserved container or incompatible code-execution payload fails with a typed configuration error rather than being overwritten. Native streaming fails before transport.
-14. Anthropic validates that native-skill responses include content/container fields needed for safe continuation. Empty text is permitted only for a valid native pause_turn response. Each TextModelResponse carries optional typed ClaudeSkillSession(container_id, paused).
-15. After usage recording and after_model_response middleware, but before local tool parsing, AgentRuntime handles a typed paused session. It appends exact assistant content blocks once, reuses the container, and resumes through the ordinary bounded runtime loop. It does not append the original user prompt a second time. Completed native responses preserve the container ID and continue through normal local-tool handling; server-side code execution blocks are never executed as local tools.
+14. Anthropic validates that native-skill responses include content/container fields needed for safe continuation. Empty text is permitted only for a valid native pause_turn response. Each TextModelResponse carries optional typed ClaudeSkillSession(container_id, paused, resume_messages); paused sessions retain the exact provider request messages plus the full raw assistant content as the next provider history, while completed sessions have no resume history.
+15. After usage recording and after_model_response middleware, but before local tool parsing, AgentRuntime handles a typed native session. It updates the run-local session option; a paused session adds the exact assistant content to runtime history and resumes through the ordinary bounded loop. Anthropic uses the provider-captured resume_messages directly, preserving initial history and conversation placements without rebuilding them or appending the user prompt again. Completed native responses preserve the container ID and continue through normal local-tool handling; server-side code execution blocks are never executed as local tools.
 16. Existing limits, timeout, and cancellation govern every raw exchange. Usage and cache usage are recorded once per raw response by the existing tracker; no provider-side loop or summed replacement record is introduced.
 17. Public exports expose the source enums, source descriptor, Claude reference/session, and updated skill outcome contracts through existing SDK namespaces. A feature-specific guide documents explicit source forms and one example.
 
@@ -134,6 +134,7 @@ class ClaudeSkillReference:
 class ClaudeSkillSession:
     container_id: str
     paused: bool
+    resume_messages: tuple[Mapping[str, Any], ...] = ()
 SkillDocument.text: str | None
 JevAlignmentSettings.skills: tuple[str | SkillDocument | SkillSource, ...]
 JevSkillsOutcome.claude_skills: tuple[ClaudeSkillReference, ...] = ()
@@ -235,17 +236,17 @@ Carry selected native refs and returned container session through one typed mode
 #### Interface / API
 
 ~~~python
-async def arun(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] = (), claude_skill_session: ClaudeSkillSession | None = None) -> TextModelResponse: ...
-def run(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] = (), claude_skill_session: ClaudeSkillSession | None = None) -> TextModelResponse: ...
+async def arun(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] | None = None, claude_skill_session: ClaudeSkillSession | None = None) -> TextModelResponse: ...
+def run(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] | None = None, claude_skill_session: ClaudeSkillSession | None = None) -> TextModelResponse: ...
 ~~~
 
 #### Logic / Algorithm
 
-1. Store request-local values in a dataclasses.replace copy for the current run. Do not mutate the runner's saved defaults.
+1. Store request-local values in a dataclasses.replace copy for the current run. None for claude_skills means use the saved config default; an explicit empty tuple disables saved refs for this call. An omitted session uses the saved session default. Do not mutate runner config.
 2. On Anthropic calls with native refs, attach container.skills entries with exact type, skill_id, and version, plus the typed session ID when available.
 3. Add the required code_execution_20250825 tool once. Preserve normal caller tools in their existing order. Reject incompatible reserved caller payloads rather than overwriting container or tools data from extra_body.
 4. For a paused-session resume, send the already appended assistant content and do not append the previous prompt again. For an ordinary call, preserve normal prompt append semantics.
-5. Parse and validate container.id, content, and stop_reason; return raw response and raw usage unmodified plus a ClaudeSkillSession whose paused value matches pause_turn.
+5. Build the request payload once, then parse and validate container.id, content, and stop_reason; return raw response and raw usage unmodified plus a ClaudeSkillSession whose paused value matches pause_turn. For pause_turn only, capture the exact payload.messages followed by an assistant message containing the complete raw response.content; completed sessions carry no resume_messages.
 6. Permit empty extracted text only for a well-formed native paused response. Raise typed provider response/configuration errors for malformed responses or conflicting payloads.
 7. If native skills are configured for streaming, raise before transport.
 
@@ -268,23 +269,23 @@ Pass only the current Jev run's selected native refs to the runner and continue 
 #### Interface / API
 
 ~~~python
-def _continue_claude_skill_execution(self, response: TextModelResponse, state: AgentRuntimeState, messages: list[Mapping[str, Any]], options: dict[str, Any]) -> bool: ...
+def _continue_claude_skill_execution(self, raw_result: object, message: str, messages: list[dict[str, Any]], run_options: dict[str, Any]) -> bool: ...
 ~~~
 
 #### Logic / Algorithm
 
-1. After the Jev preload response writer records JevSkillsOutcome, read response.state.skills.claude_skills and add it to the run's copied options only when nonempty.
+1. After the Jev preload response writer records JevSkillsOutcome, read response.state.skills.claude_skills and set that exact tuple on the run's copied options, including an empty tuple to prevent config defaults from leaking into a run with no selected native refs.
 2. Generic runtime records raw usage and invokes after-model middleware exactly as today.
-3. Before ToolsFormatter.parse_tool_calls, inspect typed session state only when native refs are present.
-4. For paused=True, append the exact raw assistant content list once to runtime messages, set the next request's session/container, and continue through the main bounded loop.
-5. For paused=False, retain the returned container for later local-tool turns, then allow existing parser/runtime to process only local tool calls. Server tool blocks remain provider-side content.
+3. Before ToolsFormatter.parse_tool_calls, inspect the typed response session and the prior run-local session.
+4. If the prior session was not paused, append the dispatched user message because Anthropic included it in payload.messages. If the new session is paused, append the exact assistant content from captured resume_messages, set the next request's session/container, and continue through the main bounded loop.
+5. If the prior session was paused, do not append the user message again. Anthropic uses the newly returned session.resume_messages as the next exact provider conversation. If the new session is not paused, retain its container ID for later local-tool turns and allow normal local-tool handling. Server tool blocks remain provider-side content.
 6. Respect max iterations, token limits, timeout, middleware stop, and cancellation for each exchange. UsageTracker records each raw response exactly once; no rollup is synthesized.
 
 #### Edge Cases & Error Handling
 
 - A response without a typed Claude session follows the current path without native-specific behavior.
 - Middleware stop after a paused response exits before another request.
-- Paused content is appended once; resume does not duplicate the user prompt or flatten non-text blocks.
+- Paused content is appended once; resume does not duplicate the user prompt or flatten non-text blocks. The captured provider history also preserves pre-existing messages and conversation-window placements exactly.
 - The runtime does not dispatch server_tool_use/code execution blocks to local tools, while preserving ordinary local tool schemas and calls.
 
 ### 6.6 Public Usage Guide
@@ -469,6 +470,8 @@ All cases run without live provider credentials. Adapter HTTP uses stub transpor
 - [Edge Case] Valid paused response with empty text but structured content is accepted; final session is unpaused.
 - [Hidden Failure] Missing container ID/content is a typed provider response failure.
 - [Silent Failure] Full assistant content blocks and raw usage survive response/session handling exactly.
+- [Hidden Assumption] Conversation-window TOP/END placements and caller history survive pause/resume exactly because the provider reuses the typed captured request history.
+- [Silent Failure] Repeated pause_turn responses retain one original user prompt and append each assistant response block exactly once.
 - [Hidden Assumption] Non-native calls preserve their current payload and response behavior.
 - [Edge Case] Pause on the last allowed iteration and middleware stop after pause are bounded.
 - [Hidden Failure] Cancellation/timeout during resume propagates.
