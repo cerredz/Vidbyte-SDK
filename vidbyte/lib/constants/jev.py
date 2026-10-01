@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -102,6 +102,8 @@ JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD: float = 0.5
 JEV_COMPLETION_EVIDENCE_THRESHOLD: float = 0.85
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
+# A requested outcome stage must show progress or an evidenced blocker; this is a starting point, not a tuned value.
+JEV_PHASE_PROGRESS_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -139,6 +141,11 @@ JEV_DONE_PROBLEM_QUALIFICATIONS_FIELD: str = "qualifications"
 JEV_DONE_PROBLEM_REPAIR_FIELD: str = "repair"
 JEV_DONE_PROBLEM_VERIFICATION_FIELD: str = "verification"
 JEV_DONE_PROBLEM_ASSERTION_FIELD: str = "assertion"
+JEV_DONE_PHASE_PROGRESS_FIELD: str = "phase_progress"
+JEV_DONE_PHASE_STAGE_FIELD: str = "stage"
+JEV_DONE_PHASE_REQUIRED_RESULT_FIELD: str = "required_result"
+JEV_DONE_PHASE_REQUEST_SCOPE_FIELD: str = "request_scope"
+JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD: str = "output_criterion"
 JEV_DONE_CLAIM_FIELD: str = "claim"
 JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
@@ -217,6 +224,11 @@ __all__ = [
     "JEV_DONE_MOTIVATING_CASES_FIELD",
     "JEV_DONE_MOTIVATING_CASE_FIELD",
     "JEV_DONE_OBSERVED_PROXY_FIELD",
+    "JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD",
+    "JEV_DONE_PHASE_PROGRESS_FIELD",
+    "JEV_DONE_PHASE_REQUEST_SCOPE_FIELD",
+    "JEV_DONE_PHASE_REQUIRED_RESULT_FIELD",
+    "JEV_DONE_PHASE_STAGE_FIELD",
     "JEV_DONE_PROBLEMS_RESOLVED_FIELD",
     "JEV_DONE_PROBLEM_ASSERTION_FIELD",
     "JEV_DONE_PROBLEM_DESCRIPTION_FIELD",
@@ -262,6 +274,7 @@ __all__ = [
     "JEV_NOUL_TRUE",
     "JEV_NOUL_YES_THRESHOLD",
     "JEV_NO_RETRIES",
+    "JEV_PHASE_PROGRESS_THRESHOLD",
     "JEV_PREFLIGHT_REQUEST_FIELD",
     "JEV_PREFLIGHT_STRATEGY_NAME",
     "JEV_PREVIEW_MODEL",

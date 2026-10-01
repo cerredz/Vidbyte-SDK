@@ -77,6 +77,8 @@ Every stage fails open. With no run state there is no check. When the handoff or
 | `vidbyte/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/agents/jev/__init__.py` | Public exports | Export new records a user reads on `JevAgent.response`, as `JevDeliverable` is exported. |
 | `tests/test_jev_done.py`, `scripts/test-jev-multipart-done-criteria.py` | Tests and the focused runner | Extend the test classes, and keep the script's loader exhaustive. |
 
+**PHASE_PROGRESS is request-derived:** store the required stages and their stable ids before the main loop in `JevRunStateRecord`; require handoff evidence for exactly those same ids. Score every stage independently for substantive requested activity, not full deliverable completion. If the request yields no meaningful stages, ask no questions and pass the check.
+
 ### When to create a new file and when to extend one
 
 Create a **new file** only for:
@@ -433,13 +435,15 @@ For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.iden
 
 For SCOPE_COVERAGE, ask once for each checked member with reported work, pairing its request quote, requested change, member noun and name, membership rule, and evidence. A member with no recorded work is an automatic continuation gap. For an every-member group found in the workspace, a missing enumeration is its own gap; do not drop it from the result because there was no item to ask Jev about. One request-only breadth review runs before work for dimensions narrowly labeled one_example or single_target, and can only upgrade a scope when the combined probability for every_member and named_list reaches the fixed threshold.
 
+For PHASE_PROGRESS, ask once for each request-required stage, pairing its stage name, required result, request scope, output criterion, and handoff evidence. Match the handoff ids exactly to the run-state ids; do not let the handoff's own `missing` judgment become evidence. Empty stage lists need no question and pass. A failed stage means the run does not show substantive activity or a reported constraint for that requested stage; it does not mean every deliverable must already be complete.
+
 For MOTIVATING_CASE, write the unusual scenarios named in the request into the run state, preserving their source quotes, exact conditions, near misses, expected behavior when stated, literal inputs, and allowed exercise mode. Pair each scenario with evidence from the current finish attempt. Ask only about scenarios marked motivating or requested; implied scenarios are context and do not block. If there are no blocking scenarios, the one-time recall guard can request one bounded run-state rebuild before work starts.
 
 For PROBLEMS_RESOLVED, build the dynamic item list from the current finish attempt's handoff, not the pre-run state. Include one entry per observed error, failed operation, blocker, or failed validation, plus exactly one `original_request_completion` entry even if no problem occurred. Each entry has five named context groups (`identity`, `scope`, `kind`, `repair`, and `assertion`) and its run `evidence`; exclude `missing` from Jev's state. Ask once per item. A problem passes only when the run shows a complete repair and relevant successful revalidation after it. The separate request item passes only when the original request is complete after repairs. Failed focus must fully repair and revalidate the problem, then return to the original request and finish remaining work.
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `claims`, `scope_coverage`, `target_outcomes`, `motivating_cases`, and `problems_resolved` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including dynamic lists emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `claims`, `phase_progress`, `scope_coverage`, `target_outcomes`, `motivating_cases`, `problems_resolved`, and `completion_evidence` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including request-derived stage lists and dynamic items emitted by the handoff.
 
 Before you ship:
 

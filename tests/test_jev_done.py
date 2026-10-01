@@ -68,6 +68,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_DONE_PROBLEMS_RESOLVED_FIELD,
+    JEV_DONE_PHASE_PROGRESS_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_MULTI_PART_THRESHOLD,
@@ -95,6 +96,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
+    JevPhaseProgressEvidencePayload,
+    JevPhaseProgressPayload,
+    JevPhaseStageEvidencePayload,
+    JevPhaseStagePayload,
     JevProblemEvidencePayload,
     JevProblemsResolvedEvidencePayload,
     JevRunStatePayload,
@@ -216,6 +221,23 @@ _COMPLETION_EVIDENCE_HANDOFF = {
         }]
     }
 }
+_PHASE_STAGE = {
+    "id": "research",
+    "stage": "Research and compare deployment options",
+    "required_result": "Compare three deployment options for the requested release.",
+    "request_scope": "Three options for the requested release.",
+    "output_criterion": "The run contains a comparison of three options.",
+}
+_PHASE_STATE = {**_BASE_STATE, "phase_progress": {"stages": [_PHASE_STAGE]}}
+_PHASE_HANDOFF = {
+    "phase_progress": {
+        "stages": [{
+            "id": "research",
+            "evidence": "The run only searched for background information and made no comparison.",
+            "missing": "No comparison of three deployment options is shown.",
+        }]
+    }
+}
 
 
 class ScriptedGenerativeRunner:
@@ -310,7 +332,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -319,7 +341,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -493,10 +515,12 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(motivating_schema.model_fields["motivating_case"].description, JevMotivatingCasePayload.SECTION)
         scope_schema = JevRunState.schema((JevDoneCheck.SCOPE_COVERAGE,))
         self.assertEqual(scope_schema.model_fields["scope_coverage"].description, JevScopeCoveragePayload.SECTION)
+        phase_schema = JevRunState.schema((JevDoneCheck.PHASE_PROGRESS,))
+        self.assertEqual(phase_schema.model_fields[JEV_DONE_PHASE_PROGRESS_FIELD].description, JevPhaseProgressPayload.SECTION)
         completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
         self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME})
-        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage"}
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS})
+        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
@@ -514,6 +538,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(scope_schema.model_fields["scope_coverage"].description, JevScopeCoverageEvidencePayload.SECTION)
         completion_schema = JevHandoff.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
         self.assertEqual(completion_schema.model_fields[JEV_DONE_COMPLETION_EVIDENCE_FIELD].description, JevCompletionEvidenceSectionPayload.SECTION)
+        phase_schema = JevHandoff.schema((JevDoneCheck.PHASE_PROGRESS,))
+        self.assertEqual(phase_schema.model_fields[JEV_DONE_PHASE_PROGRESS_FIELD].description, JevPhaseProgressEvidencePayload.SECTION)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
@@ -832,7 +858,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_completion_evidence_continuation_names_the_status_and_run_gap(self) -> None:
         decision = ScriptedDecisionRunner({JEV_DONE_COMPLETION_ITEM_ID: [0.2, 0.98]})
-        agent, main, *_ = self._agent(
+        agent, main, state_runner, handoff_runner = self._agent(
             done=(JevDoneCheck.COMPLETION_EVIDENCE,),
             state=json.dumps(_BASE_STATE),
             handoff=json.dumps(_COMPLETION_EVIDENCE_HANDOFF),
@@ -847,6 +873,50 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Unfinished or blocked: The README update is not shown.", feedback)
         self.assertIn("Evidence gap: The requested README explanation is unsupported by run evidence.", feedback)
         self.assertTrue(agent.response.done[JevDoneCheck.COMPLETION_EVIDENCE].passed)
+
+    async def test_phase_progress_asks_for_request_stages_and_continues_only_for_the_failed_stage(self) -> None:
+        decision = ScriptedDecisionRunner({"research": [0.2, 0.98]})
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.PHASE_PROGRESS,),
+            state=json.dumps(_PHASE_STATE),
+            handoff=json.dumps(_PHASE_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        question = JevDoneRegistry.question(JevDoneCheck.PHASE_PROGRESS)
+        self.assertEqual(len(decision.requests), 2)
+        request = decision.requests[0]
+        self.assertEqual(tuple(item.name for item in request.questions), (question.name("research"),))
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_PHASE_PROGRESS_FIELD})
+        self.assertEqual(
+            set(request.state[JEV_DONE_PHASE_PROGRESS_FIELD]["research"]),
+            {"stage", "required_result", "request_scope", "output_criterion", "evidence"},
+        )
+        feedback = main.messages[1][0]["content"]
+        self.assertIn("Still missing: No comparison of three deployment options is shown.", feedback)
+        self.assertIn("Requested stage: Research and compare deployment options.", feedback)
+        self.assertNotIn("dry_run_flag", feedback)
+        result = agent.response.done[JevDoneCheck.PHASE_PROGRESS]
+        self.assertTrue(result.available and result.passed)
+        self.assertEqual(result.incomplete, ())
+
+    async def test_empty_phase_progress_skips_jev_and_passes(self) -> None:
+        empty_state = {**_BASE_STATE, "phase_progress": {"stages": []}}
+        empty_handoff = {"phase_progress": {"stages": []}}
+        decision = ScriptedDecisionRunner({})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.PHASE_PROGRESS,),
+            state=json.dumps(empty_state),
+            handoff=json.dumps(empty_handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(decision.requests, [])
+        result = agent.response.done[JevDoneCheck.PHASE_PROGRESS]
+        self.assertTrue(result.available and result.passed)
+        self.assertEqual(result.incomplete, ())
 
     async def test_problem_check_batches_with_other_enabled_checks(self) -> None:
         decision = ScriptedDecisionRunner({

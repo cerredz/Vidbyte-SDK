@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles request-derived evidence, and extracts final-answer claims, run-observed problem episodes, and whole-task completion status for dynamic checks.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles request-derived evidence, and extracts final-answer claims, phase evidence, run-observed problem episodes, and whole-task completion status for dynamic checks.
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
-ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims, observed problems, and completion status are derived after work; the completion-status text stays separate from observed work and never proves external work.
-COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic post-run items.
-KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or invalid handoff evidence returns None, so checks fail open. Claims and problem items have no pre-run id list; generated ids must be valid and unique, and problem evidence must include exactly one original-request completion item. Completion evidence has one stable `task_completion` item. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Phase progress evidence is matched to the request-derived stages; claims, observed problems, and completion status are derived after work.
+COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items for request-derived candidates, including phase stages; dynamic post-run items follow their own validation rules.
+KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or invalid handoff evidence returns None, so checks fail open. Phase evidence must contain exactly the request-derived stage ids. Claims and problem items have no pre-run id list; generated ids must be valid and unique, and problem evidence must include exactly one original-request completion item. Completion evidence has one stable `task_completion` item. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -47,6 +47,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevMotivatingScenarioEvidence,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
+    JevPhaseProgressEvidence,
+    JevPhaseProgressEvidencePayload,
+    JevPhaseStageEvidence,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
     JevProblemsResolvedEvidencePayload,
@@ -75,7 +78,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -139,13 +142,9 @@ class JevHandoff(BaseAgent):
         # @intent evidence-covers-exactly-the-run-state
         # Jev judges each deliverable by id, so evidence for a deliverable the state never listed, or
         # no evidence for one it did, would silently skip a check; either one makes the handoff unavailable.
-        multi_part = None
-        section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
-        if isinstance(section, JevMultiPartEvidencePayload):
-            multi_part = JevMultiPartEvidence(tuple(JevDeliverableEvidence(item.id, item.evidence.strip(), item.missing.strip()) for item in section.deliverables))
-            expected = () if state.multi_part is None else state.multi_part.ids()
-            if sorted(multi_part.ids()) != sorted(expected):
-                return None
+        request_records = self._request_evidence_records(payload, state)
+        if request_records is None:
+            return None
         claims = None
         claims_section = getattr(payload, JevDoneCheck.CLAIMS.value, None)
         if isinstance(claims_section, JevClaimsEvidencePayload):
@@ -194,17 +193,6 @@ class JevHandoff(BaseAgent):
                 evidence=item.evidence.strip(),
                 missing=item.missing.strip(),
             )
-        target_outcome = None
-        outcome_section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
-        if isinstance(outcome_section, JevTargetOutcomeEvidencePayload):
-            # Request-derived target items require one exact evidence match each; an incomplete handoff fails open.
-            target_outcome = JevTargetOutcomeEvidence(tuple(
-                JevTargetOutcomeEvidenceItem(item.id, item.observed_proxy.strip(), item.direct_evidence.strip(), item.missing.strip())
-                for item in outcome_section.items
-            ))
-            expected = () if state.target_outcome is None else state.target_outcome.ids()
-            if sorted(target_outcome.ids()) != sorted(expected):
-                return None
         problems_resolved = None
         problem_section = getattr(payload, JevDoneCheck.PROBLEMS_RESOLVED.value, None)
         if isinstance(problem_section, JevProblemsResolvedEvidencePayload):
@@ -223,6 +211,50 @@ class JevHandoff(BaseAgent):
                 )
                 for item in problem_section.items
             ))
+        scope_coverage = None
+        scope_section = getattr(payload, JevDoneCheck.SCOPE_COVERAGE.value, None)
+        if isinstance(scope_section, JevScopeCoverageEvidencePayload):
+            if state.scope_coverage is None:
+                return None
+            scope_coverage = JevScopeCoverageEvidence.from_payload(scope_section, state.scope_coverage)
+        return JevHandoffRecord(
+            multi_part=request_records.multi_part,
+            claims=claims,
+            completion_evidence=completion_evidence,
+            phase_progress=request_records.phase_progress,
+            target_outcome=request_records.target_outcome,
+            problems_resolved=problems_resolved,
+            scope_coverage=scope_coverage,
+            usage=self.get_usage(),
+            motivating_case=request_records.motivating_case,
+        )
+
+    # @intent request-derived-evidence-covers-exactly-the-state
+    # Each pre-run item gets exactly one handoff entry; an omission or invented id makes all evidence unavailable.
+    def _request_evidence_records(self, payload: JevHandoffPayload, state: JevRunStateRecord) -> JevHandoffRecord | None:
+        multi_part = None
+        section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
+        if isinstance(section, JevMultiPartEvidencePayload):
+            multi_part = JevMultiPartEvidence(tuple(JevDeliverableEvidence(item.id, item.evidence.strip(), item.missing.strip()) for item in section.deliverables))
+            expected = () if state.multi_part is None else state.multi_part.ids()
+            if sorted(multi_part.ids()) != sorted(expected):
+                return None
+        phase_progress = None
+        phase_section = getattr(payload, JevDoneCheck.PHASE_PROGRESS.value, None)
+        if isinstance(phase_section, JevPhaseProgressEvidencePayload):
+            phase_progress = self._phase_progress_record(phase_section, state)
+            if phase_progress is None:
+                return None
+        target_outcome = None
+        outcome_section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
+        if isinstance(outcome_section, JevTargetOutcomeEvidencePayload):
+            target_outcome = JevTargetOutcomeEvidence(tuple(
+                JevTargetOutcomeEvidenceItem(item.id, item.observed_proxy.strip(), item.direct_evidence.strip(), item.missing.strip())
+                for item in outcome_section.items
+            ))
+            expected = () if state.target_outcome is None else state.target_outcome.ids()
+            if sorted(target_outcome.ids()) != sorted(expected):
+                return None
         motivating_case = None
         motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
         if isinstance(motivating_section, JevMotivatingCaseEvidencePayload):
@@ -233,22 +265,24 @@ class JevHandoff(BaseAgent):
             expected = () if state.motivating_case is None else state.motivating_case.ids()
             if motivating_case.ids() != expected:
                 return None
-        scope_coverage = None
-        scope_section = getattr(payload, JevDoneCheck.SCOPE_COVERAGE.value, None)
-        if isinstance(scope_section, JevScopeCoverageEvidencePayload):
-            if state.scope_coverage is None:
-                return None
-            scope_coverage = JevScopeCoverageEvidence.from_payload(scope_section, state.scope_coverage)
         return JevHandoffRecord(
             multi_part=multi_part,
-            claims=claims,
-            completion_evidence=completion_evidence,
+            phase_progress=phase_progress,
             target_outcome=target_outcome,
-            problems_resolved=problems_resolved,
-            scope_coverage=scope_coverage,
-            usage=self.get_usage(),
             motivating_case=motivating_case,
         )
+
+    # @intent phase-evidence-matches-request-stages
+    # Jev must judge every request-derived stage exactly once; a handoff omission or invented id fails open as a whole.
+    def _phase_progress_record(self, section: JevPhaseProgressEvidencePayload, state: JevRunStateRecord) -> JevPhaseProgressEvidence | None:
+        evidence = JevPhaseProgressEvidence(tuple(
+            JevPhaseStageEvidence(item.id, item.evidence.strip(), item.missing.strip())
+            for item in section.stages
+        ))
+        expected = () if state.phase_progress is None else state.phase_progress.ids()
+        if sorted(evidence.ids()) != sorted(expected):
+            return None
+        return evidence
 
 
 
