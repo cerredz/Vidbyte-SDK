@@ -39,6 +39,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverableEvidence,
     JevHandoffPayload,
     JevHandoffRecord,
+    JevMotivatingCaseEvidence,
+    JevMotivatingCaseEvidencePayload,
+    JevMotivatingScenarioEvidence,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
     JevProblemResolutionItem,
@@ -67,7 +70,8 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload})
+
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -201,7 +205,18 @@ class JevHandoff(BaseAgent):
                 )
                 for item in problem_section.items
             ))
-        return JevHandoffRecord(multi_part=multi_part, claims=claims, target_outcome=target_outcome, problems_resolved=problems_resolved, usage=self.get_usage())
+        motivating_case = None
+        motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
+        if isinstance(motivating_section, JevMotivatingCaseEvidencePayload):
+            motivating_case = JevMotivatingCaseEvidence(tuple(
+                JevMotivatingScenarioEvidence(item.id, item.evidence.strip(), item.missing.strip())
+                for item in motivating_section.scenarios
+            ))
+            expected = () if state.motivating_case is None else state.motivating_case.ids()
+            if motivating_case.ids() != expected:
+                return None
+        return JevHandoffRecord(multi_part=multi_part, claims=claims, target_outcome=target_outcome, problems_resolved=problems_resolved, usage=self.get_usage(), motivating_case=motivating_case)
+
 
 
 __all__ = ["JevHandoff"]

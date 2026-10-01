@@ -42,6 +42,8 @@ class JevDoneCheck(str, Enum):
     MULTI_PART = "multi_part"
     CLAIMS = "claims"
     TARGET_OUTCOME = "target_outcome"
+    MOTIVATING_CASE = "motivating_case"
+
     PROBLEMS_RESOLVED = "problems_resolved"
 
 
@@ -54,7 +56,40 @@ class JevDoneQuestionKey(str, Enum):
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
     TARGET_OUTCOME_DEMONSTRATED = "target_outcome.demonstrated"
+    MOTIVATING_CASE_RECALL = "motivating_case.recall"
+    MOTIVATING_CASE_EXERCISED = "motivating_case.exercised"
+
     PROBLEMS_RESOLVED_FIXED = "problems_resolved.fixed"
+
+
+class JevBoundaryKind(str, Enum):
+    """Kinds of boundary condition a motivating-case check may describe."""
+
+    EMPTY_OR_MISSING = "empty_or_missing"
+    SIZE_OR_LIMIT = "size_or_limit"
+    REPEAT_OR_RETRY = "repeat_or_retry"
+    FAILURE_PATH = "failure_path"
+    CONFLICTING_STATE = "conflicting_state"
+    ORDERING_OR_TIMING = "ordering_or_timing"
+    ACCESS = "access"
+    FORMAT = "format"
+    OTHER = "other"
+
+
+class JevScenarioRole(str, Enum):
+    """Whether a scenario was named by the user or inferred by the state writer."""
+
+    MOTIVATING = "motivating"
+    REQUESTED = "requested"
+    IMPLIED = "implied"
+
+
+class JevExerciseMode(str, Enum):
+    """Which evidence can satisfy a motivating scenario."""
+
+    RUN = "run"
+    RUN_OR_INSPECT = "run_or_inspect"
+    INSPECT_ONLY = "inspect_only"
 
 
 class JevProblemCheckItemType(str, Enum):
@@ -97,4 +132,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole"]

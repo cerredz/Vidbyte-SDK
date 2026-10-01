@@ -16,24 +16,27 @@ from types import MappingProxyType
 
 from vidbyte.lib.constants.jev import (
     JEV_CLAIMS_THRESHOLD,
+    JEV_MOTIVATING_CASE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
-    JEV_TARGET_OUTCOME_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
+    JEV_TARGET_OUTCOME_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
+from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
-from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
+from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
 
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(), JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion()})
-    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.TARGET_OUTCOME: JEV_TARGET_OUTCOME_THRESHOLD, JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD})
+    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(), JevDoneCheck.MOTIVATING_CASE: MotivatingCaseExercisedQuestion(), JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion()})
+    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.TARGET_OUTCOME: JEV_TARGET_OUTCOME_THRESHOLD, JevDoneCheck.MOTIVATING_CASE: JEV_MOTIVATING_CASE_THRESHOLD, JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD})
+
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:

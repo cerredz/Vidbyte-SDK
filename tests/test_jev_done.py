@@ -86,6 +86,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneQuestion,
     JevDoneResult,
     JevHandoffPayload,
+    JevMotivatingCasePayload,
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
@@ -369,7 +370,11 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
         self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS, JevDoneCheck.PROBLEMS_RESOLVED)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.TARGET_OUTCOME})
+        motivating_schema = JevRunState.schema((JevDoneCheck.MOTIVATING_CASE,))
+        self.assertEqual(motivating_schema.model_fields["motivating_case"].description, JevMotivatingCasePayload.SECTION)
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.TARGET_OUTCOME})
+        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case"}
+        self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
         # Request-derived deliverables and post-run-derived claims both need evidence sections in the handoff.

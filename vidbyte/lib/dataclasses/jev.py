@@ -34,6 +34,7 @@ from vidbyte.lib.constants.jev import (
     JEV_MAX_STATE_CHARS,
     JEV_MIN_CHOICE_OPTIONS,
     JEV_MIN_SCORE_LEVELS,
+    JEV_MOTIVATING_CASE_MAX_SCENARIOS,
     JEV_NOUL_FALSE,
     JEV_NOUL_OPTIONS,
     JEV_NOUL_TRUE,
@@ -41,13 +42,16 @@ from vidbyte.lib.constants.jev import (
     JEV_SPECIALIST_NONE,
 )
 from vidbyte.lib.enums.jev import (
+    JevBoundaryKind,
     JevClaimKind,
     JevDoneCheck,
     JevDoneQuestionKey,
+    JevExerciseMode,
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevProblemCheckItemType,
     JevQuestionType,
+    JevScenarioRole,
 )
 from vidbyte.lib.errors import ConfigurationError
 
@@ -712,6 +716,35 @@ class JevTargetOutcomePayload(JevSectionPayload):
 
     items: list[JevTargetOutcomeItemPayload] = Field(description="List one item per distinct result the user asks to establish on a target whose state is separate from merely producing an answer or other requested output. Each item names the outcome, actual target, requested scope, and a faithful observable completion criterion. Do not list agent activities, tools, plans, builds, installations, or tests as outcomes unless the user requests that result itself. Do not invent a target, scope, or criterion to fill missing request details. Return an empty list when there is no applicable target outcome to judge.")
 
+class JevMotivatingScenarioPayload(BaseModel):
+    """One request-derived boundary scenario the continuation gate may check."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="A short stable id for this scenario, unique within this section and copied exactly by the handoff. Use lowercase letters, digits, and underscores, beginning with a letter. Keep the id tied to the case, not its position in the list. The same id joins this request-derived definition to evidence written after the agent works. Never rename or reuse an id for a different condition.")
+    role: JevScenarioRole = Field(description="The role says whether the request directly centers this condition, separately requests it, or only implies it. Use motivating when the user explicitly says this is the reason for the task. Use requested when the user directly asks for this case without saying it motivates the whole task. Use implied only for a condition inferred from the request but not directly required. Implied entries may be reported but do not block a finish attempt.")
+    kind: JevBoundaryKind = Field(description="The kind gives a short category for this unusual situation, such as empty input, a retry, a failure path, or conflicting state. Choose the closest category that describes the condition, not the feature or implementation area. Use other when none of the named categories fits. This label helps organize the report but does not replace the condition text that defines what Jev will judge.")
+    source_quote: str = Field(min_length=1, description="The source quote is the exact wording in the user's request that names or implies this scenario. Copy a continuous passage from the request and do not paraphrase it. This quote grounds the scenario in the user’s words and lets code reject invented conditions. Keep punctuation and wording; line wrapping and repeated whitespace may differ. Do not quote the whole request when a shorter passage names the condition.")
+    target: str = Field(min_length=1, description="The target says what component, behavior, or operation the case applies to, using the request's own names. A reader should know which part of the work must receive this input or state. Do not invent a target the request does not identify; when the target is implicit, use the nearest named feature. Keep this separate from the condition so the case can be described as applying a condition to a target.")
+    condition: str = Field(min_length=1, description="The condition describes the exact input or state that makes this scenario different from ordinary use. State observable values or relationships, including empty, missing, repeated, conflicting, out-of-order, or failed values when the request names them. Keep it specific enough that later evidence can show whether the case was actually constructed or inspected. Do not weaken the condition into a broad phrase such as edge case or unusual input.")
+    near_miss: str = Field(min_length=1, description="The near miss is a plausible easier case that resembles this scenario but does not meet its condition. Describe the exact value, state, or behavior that would make the case easier. It gives the checker a boundary example and helps distinguish the requested case from ordinary coverage. Do not use the target condition itself as the near miss, and do not invent an extra requirement for the user.")
+    expected_behavior: str = Field(description="Expected behavior is the outcome the request explicitly names for this condition, if it names one. Copy the expected result in the user's terms and keep it observable, such as a returned value, error, state change, or displayed message. Return an empty string when the request gives no expected result rather than supplying a design choice. A later check may require a test or other evidence of that outcome when this field is non-empty.")
+    literal_inputs: list[str] = Field(description="Literal inputs are exact values or short strings copied from the request that can help locate a setup or execution in the run. Include only values that identify this scenario, and return an empty list when the request names none. Do not create representative values that the user did not supply. Each value must appear verbatim in the source quote or another part of the request.")
+    exercise_mode: JevExerciseMode = Field(description="The exercise mode says what kind of evidence the request permits for this case. Use run when the case needs to be executed, run_or_inspect when either a relevant execution or inspection of the handling code can show it, and inspect_only when the request forbids or cannot require execution. Read explicit testing limits from the request; do not infer a restriction from missing credentials or a difficult environment. This field changes which evidence can satisfy the check.")
+
+
+class JevMotivatingCasePayload(JevSectionPayload):
+    """The motivating-case section of the request-derived run state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The motivating-case section records unusual input conditions the user's request explicitly asks the agent to handle. Each scenario preserves the user's wording, describes the exact condition and a nearby easier case, and states what kind of evidence may show that the case was handled. The handoff later adds evidence from the current run under the same scenario ids, and Jev checks one scenario at a time. Implied scenarios may be reported for context but cannot hold a run open. Write this section from the user's request alone before the main agent starts work."
+
+    ordinary_flow: str = Field(min_length=1, description="Ordinary flow describes the expected common case of the target feature so the unusual scenario can be distinguished from it. Write a short description grounded in the request and avoid adding implementation details not supplied by the user. The ordinary flow is context for comparison only and is not a substitute for the requested case. Do not copy the near miss into this field unless it truly is the usual path. Keep the description understandable without code knowledge that is absent from the request.")
+    testing_restriction_quote: str = Field(description="This field holds exact request wording that forbids or limits running tests or commands, or an empty string when there is no such restriction. Quote the smallest continuous passage that states the limit. Do not infer a restriction from environment limitations, missing tools, or the agent's own caution. Code validates non-empty text against the request so a fabricated restriction cannot make a missing run acceptable. The handoff and question use this only to understand which evidence the user allowed.")
+    scenarios: list[JevMotivatingScenarioPayload] = Field(max_length=JEV_MOTIVATING_CASE_MAX_SCENARIOS, description="Scenarios list the user-motivating and separately requested unusual conditions, plus clearly implied cases for context, in request order. Include only cases that change the input, state, timing, access, or failure behavior from the ordinary flow. Give every scenario a unique id and a verbatim source quote; code checks both. Do not turn normal requirements into edge cases or add hypothetical robustness work. Return an empty list when the request names no unusual condition.")
+
+
 
 class JevHandoffPayload(BaseModel):
     """The evidence handoff JevHandoff writes after the main agent tries to finish.
@@ -826,6 +859,26 @@ class JevClaimsEvidencePayload(JevSectionPayload):
     claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every parent claim containing a concrete, independently checkable factual assertion from the final answer. Give each entry a rich claim context and split independent facts into separate assertions so each receives one Jev judgment. Pair the parent with relevant run evidence, or state that no supporting tool call was found. Give each parent and its assertions stable unique ids within their respective scopes. Return an empty list only when the final answer contains no checkable factual claims.")
 
 
+class JevMotivatingScenarioEvidencePayload(BaseModel):
+    """The current run evidence and actionable gap for one motivating scenario."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id exactly matches one scenario from the run state's motivating_case section. Keep every id character-for-character so the checker can join the evidence to the definition it concerns. Include every scenario once, including cases with no related work. Do not add or merge scenarios, and keep entries in the same order as the run state. The id is only a reference and carries no judgment about whether the work succeeded.")
+    evidence: str = Field(min_length=1, description="Evidence reproduces the relevant parts of the current run that show whether this exact scenario was constructed, executed, inspected, and checked for expected behavior. Include the pertinent setup or code, tool call and output, command or test result, later changes that could make an earlier result stale, and final-answer disclosure when present. Keep failed and successful attempts in order and name where each excerpt came from. Do not rely on the agent's conclusion or claims; report only what the run contains. When no related work appears, say so plainly.")
+    missing: str = Field(min_length=1, description="Missing names the specific step the run does not show for this scenario, written as concise instructions the main agent can act on. It may identify an absent setup, a near-miss input, an unrun or failed check, a missing expected-behavior assertion, or code that was changed after the last successful run. Do not use this field as evidence for Jev; it is continuation guidance from the handoff writer. When the evidence shows the allowed form of exercise and its result in the latest state, say that nothing is missing. Do not ask for work outside the request.")
+
+
+class JevMotivatingCaseEvidencePayload(JevSectionPayload):
+    """The handoff evidence for every scenario in the run state's motivating-case section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "This section reports what the main agent's current run shows for each motivating scenario in the run state. It gives the exact scenario id, the setup or inspection evidence, the latest relevant execution outcome, and any specific part that remains unshown. It must include every scenario, including ones the agent did not work on. This evidence is compiled after each finish attempt from the same run's responses, tool calls, outputs, and final answer. It reports observations only and does not decide whether a scenario is complete."
+
+    scenarios: list[JevMotivatingScenarioEvidencePayload] = Field(description="Return one evidence entry for every scenario in the run state's motivating_case section, in the same order and with exactly the same ids. Reproduce the relevant run evidence for each case, or say no part of the run concerns it. Preserve failures and later attempts so the latest state is clear. The evidence field is what Jev reads; the missing field is only guidance for the main agent. Never omit a scenario, even when there is nothing to report, and never invent an event, command, or result.")
+
+
 class JevProblemEvidencePayload(BaseModel):
     """One run-observed problem or the required original-request completion item."""
 
@@ -886,6 +939,74 @@ class JevDeliverable:
 
 
 @dataclass(frozen=True, slots=True)
+class JevMotivatingScenario:
+    """One request-derived boundary condition, its distinguishing case, and its permitted exercise mode."""
+
+    id: str
+    role: JevScenarioRole
+    kind: JevBoundaryKind
+    source_quote: str
+    target: str
+    condition: str
+    near_miss: str
+    expected_behavior: str | None
+    literal_inputs: tuple[str, ...]
+    exercise_mode: JevExerciseMode
+
+    def __post_init__(self) -> None:
+        # Validates the stable identifier, closed vocabularies, and request-derived scenario text.
+        JevDeliverableId.require(self.id, field_name="motivating scenario id")
+        for name, enum_type in (("role", JevScenarioRole), ("kind", JevBoundaryKind), ("exercise_mode", JevExerciseMode)):
+            if not isinstance(getattr(self, name), enum_type):
+                raise JevValidation.error(f"motivating scenario {name}", f"a {enum_type.__name__} member", getattr(self, name))
+        for name in ("source_quote", "target", "condition", "near_miss"):
+            JevText.require(getattr(self, name), field_name=f"motivating scenario {self.id!r} {name}")
+        if self.expected_behavior is not None:
+            JevText.require(self.expected_behavior, field_name=f"motivating scenario {self.id!r} expected_behavior")
+        if not isinstance(self.literal_inputs, tuple):
+            raise JevValidation.error("motivating scenario literal_inputs", "a tuple of strings", self.literal_inputs)
+        for index, value in enumerate(self.literal_inputs):
+            JevText.require(value, field_name=f"motivating scenario {self.id!r} literal_inputs[{index}]")
+
+    def blocks_finish(self) -> bool:
+        """Return whether the user named this scenario as motivating or requested work."""
+        return self.role is not JevScenarioRole.IMPLIED
+
+
+@dataclass(frozen=True, slots=True)
+class JevMotivatingCase:
+    """The motivating-case section written once from the user's request."""
+
+    ordinary_flow: str
+    testing_restriction_quote: str | None
+    scenarios: tuple[JevMotivatingScenario, ...]
+    recall_guard_probability: float | None = None
+    builder_disagreement: bool = False
+
+    def __post_init__(self) -> None:
+        # Requires typed, unique scenario definitions and a tuple that cannot change during the run.
+        # @intent request-scenarios-remain-joinable
+        # Stable unique ids connect each request-derived condition to its later evidence, so the
+        # immutable record rejects malformed definitions before any completion check can read them.
+        JevText.require(self.ordinary_flow, field_name="motivating-case ordinary_flow")
+        if self.testing_restriction_quote is not None:
+            JevText.require(self.testing_restriction_quote, field_name="motivating-case testing restriction")
+        if not isinstance(self.scenarios, tuple) or not all(isinstance(item, JevMotivatingScenario) for item in self.scenarios):
+            raise JevValidation.error("motivating-case scenarios", "a tuple of JevMotivatingScenario values", self.scenarios)
+        JevDeliverableId.require_unique(tuple(item.id for item in self.scenarios), field_name="motivating-case scenarios")
+        if len(self.scenarios) > JEV_MOTIVATING_CASE_MAX_SCENARIOS:
+            raise JevValidation.error("motivating-case scenarios", f"at most {JEV_MOTIVATING_CASE_MAX_SCENARIOS} entries", len(self.scenarios))
+        if self.recall_guard_probability is not None:
+            object.__setattr__(self, "recall_guard_probability", JevProbability.require(self.recall_guard_probability, field_name="motivating-case recall guard probability"))
+        if not isinstance(self.builder_disagreement, bool):
+            raise JevValidation.error("motivating-case builder_disagreement", "a bool", self.builder_disagreement)
+
+    def ids(self, *, blocking_only: bool = False) -> tuple[str, ...]:
+        """Return scenario ids in request order, optionally omitting implied scenarios."""
+        return tuple(item.id for item in self.scenarios if not blocking_only or item.blocks_finish())
+
+
+@dataclass(frozen=True, slots=True)
 class JevMultiPart:
     """The multi-part section of a run state: every separate deliverable the request asks for, in request order."""
 
@@ -906,7 +1027,7 @@ class JevMultiPart:
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part` and `target_outcome` are set only when their respective request-derived done checks are enabled, and `usage` is JevRunState's own model usage.
+    `multi_part`, `target_outcome`, and `motivating_case` are set only when their respective request-derived done checks are enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -916,6 +1037,7 @@ class JevRunStateRecord:
     multi_part: JevMultiPart | None = None
     target_outcome: JevTargetOutcome | None = None
     usage: UsageRollup | None = None
+    motivating_case: JevMotivatingCase | None = None
 
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
@@ -929,6 +1051,8 @@ class JevRunStateRecord:
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
         if self.target_outcome is not None and not isinstance(self.target_outcome, JevTargetOutcome):
             raise JevValidation.error("run state target_outcome", "a JevTargetOutcome or None", self.target_outcome)
+        if self.motivating_case is not None and not isinstance(self.motivating_case, JevMotivatingCase):
+            raise JevValidation.error("run state motivating_case", "a JevMotivatingCase or None", self.motivating_case)
 
 
 @dataclass(frozen=True, slots=True)
@@ -961,6 +1085,7 @@ class JevTargetOutcome:
     def ids(self) -> tuple[str, ...]:
         """Return the stable ids of the requested target outcomes."""
         return tuple(item.id for item in self.items)
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -1024,6 +1149,38 @@ class JevTargetOutcomeEvidence:
     def ids(self) -> tuple[str, ...]:
         """Return the ids of the target outcomes represented by this evidence."""
         return tuple(item.id for item in self.items)
+
+@dataclass(frozen=True, slots=True)
+class JevMotivatingScenarioEvidence:
+    """Evidence and an actionable missing note for one motivating scenario."""
+
+    id: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires a stable scenario id and non-blank observations and continuation guidance.
+        JevDeliverableId.require(self.id, field_name="motivating scenario evidence id")
+        JevText.require(self.evidence, field_name=f"motivating scenario {self.id!r} evidence")
+        JevText.require(self.missing, field_name=f"motivating scenario {self.id!r} missing")
+
+
+@dataclass(frozen=True, slots=True)
+class JevMotivatingCaseEvidence:
+    """Handoff evidence for the scenarios in one finish attempt."""
+
+    scenarios: tuple[JevMotivatingScenarioEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires immutable evidence entries with unique ids so the question can map to one scenario each.
+        if not isinstance(self.scenarios, tuple) or not all(isinstance(item, JevMotivatingScenarioEvidence) for item in self.scenarios):
+            raise JevValidation.error("motivating-case evidence", "a tuple of JevMotivatingScenarioEvidence values", self.scenarios)
+        JevDeliverableId.require_unique(tuple(item.id for item in self.scenarios), field_name="motivating-case evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return all echoed scenario ids in order."""
+        return tuple(item.id for item in self.scenarios)
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -1187,8 +1344,8 @@ class JevProblemsResolvedEvidence:
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part`, `claims`, and `target_outcome` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
-    `problems_resolved` is set only when that check is enabled; all evidence sections are optional and typed.
+    Each evidence section is set only when its corresponding done check is enabled, and `usage` is JevHandoff's own model usage.
+    All sections are optional and typed, including `multi_part`, `claims`, `target_outcome`, `motivating_case`, and `problems_resolved`.
     """
 
     multi_part: JevMultiPartEvidence | None = None
@@ -1196,6 +1353,7 @@ class JevHandoffRecord:
     target_outcome: JevTargetOutcomeEvidence | None = None
     problems_resolved: JevProblemsResolvedEvidence | None = None
     usage: UsageRollup | None = None
+    motivating_case: JevMotivatingCaseEvidence | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -1207,6 +1365,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff target_outcome", "a JevTargetOutcomeEvidence or None", self.target_outcome)
         if self.problems_resolved is not None and not isinstance(self.problems_resolved, JevProblemsResolvedEvidence):
             raise JevValidation.error("handoff problems_resolved", "a JevProblemsResolvedEvidence or None", self.problems_resolved)
+        if self.motivating_case is not None and not isinstance(self.motivating_case, JevMotivatingCaseEvidence):
+            raise JevValidation.error("handoff motivating_case", "a JevMotivatingCaseEvidence or None", self.motivating_case)
 
 
 @dataclass(frozen=True)
@@ -1388,6 +1548,14 @@ __all__ = [
     "JevHandoffRecord",
     "JevJson",
     "JevModelCard",
+    "JevMotivatingCase",
+    "JevMotivatingCaseEvidence",
+    "JevMotivatingCaseEvidencePayload",
+    "JevMotivatingCasePayload",
+    "JevMotivatingScenario",
+    "JevMotivatingScenarioEvidence",
+    "JevMotivatingScenarioEvidencePayload",
+    "JevMotivatingScenarioPayload",
     "JevMultiPart",
     "JevMultiPartEvidence",
     "JevMultiPartEvidencePayload",

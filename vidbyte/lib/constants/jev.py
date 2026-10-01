@@ -88,6 +88,13 @@ JEV_MULTI_PART_THRESHOLD: float = 0.8
 JEV_CLAIMS_THRESHOLD: float = 0.85
 # Evidence for the requested outcome must reach this P(yes), alone and in the mean; this is a starting point, not tuned.
 JEV_TARGET_OUTCOME_THRESHOLD: float = 0.8
+# Every motivating scenario must independently reach this P(yes) to pass the gate.
+JEV_MOTIVATING_CASE_THRESHOLD: float = 0.8
+# A one-time raw-request recall guard may trigger one focused state rebuild above this probability.
+JEV_MOTIVATING_CASE_RECALL_THRESHOLD: float = 0.6
+# Bound scenarios returned from one request so a broad prompt cannot create an unbounded question batch.
+JEV_MOTIVATING_CASE_MAX_SCENARIOS: int = 12
+
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
@@ -107,6 +114,9 @@ JEV_DONE_TARGET_FIELD: str = "target"
 JEV_DONE_TARGET_SCOPE_FIELD: str = "scope"
 JEV_DONE_COMPLETION_CRITERION_FIELD: str = "completion_criterion"
 JEV_DONE_OBSERVED_PROXY_FIELD: str = "observed_proxy"
+JEV_DONE_MOTIVATING_CASES_FIELD: str = "motivating_cases"
+JEV_DONE_MOTIVATING_CASE_FIELD: str = "motivating_case"
+
 JEV_DONE_PROBLEMS_RESOLVED_FIELD: str = "problems_resolved"
 JEV_DONE_PROBLEM_ITEMS_FIELD: str = "items"
 JEV_DONE_PROBLEM_ID_FIELD: str = "id"
@@ -180,6 +190,8 @@ __all__ = [
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_MOTIVATING_CASES_FIELD",
+    "JEV_DONE_MOTIVATING_CASE_FIELD",
     "JEV_DONE_OBSERVED_PROXY_FIELD",
     "JEV_DONE_PROBLEMS_RESOLVED_FIELD",
     "JEV_DONE_PROBLEM_ASSERTION_FIELD",
@@ -208,6 +220,9 @@ __all__ = [
     "JEV_MIN_CHOICE_OPTIONS",
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
+    "JEV_MOTIVATING_CASE_MAX_SCENARIOS",
+    "JEV_MOTIVATING_CASE_RECALL_THRESHOLD",
+    "JEV_MOTIVATING_CASE_THRESHOLD",
     "JEV_MULTI_PART_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",

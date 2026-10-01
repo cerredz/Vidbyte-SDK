@@ -11,6 +11,7 @@ TESTS: tests/test_jev_done.py.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, ClassVar
@@ -23,6 +24,7 @@ from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.context.primitives import TextContextItem
 from vidbyte.lib.constants.jev import (
     JEV_DONE_CLAIM_ASSERTION_FIELD,
     JEV_DONE_CLAIM_ASSERTION_ID_FIELD,
@@ -44,6 +46,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_MOTIVATING_CASE_FIELD,
+    JEV_DONE_MOTIVATING_CASES_FIELD,
     JEV_DONE_OBSERVED_PROXY_FIELD,
     JEV_DONE_PROBLEM_ASSERTION_FIELD,
     JEV_DONE_PROBLEM_DESCRIPTION_FIELD,
@@ -59,6 +63,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_TARGET_OUTCOME_FIELD,
     JEV_DONE_TARGET_OUTCOMES_FIELD,
     JEV_DONE_TARGET_SCOPE_FIELD,
+    JEV_MOTIVATING_CASE_RECALL_THRESHOLD,
+    JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
@@ -66,6 +72,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverable,
     JevDoneResult,
     JevHandoffRecord,
+    JevMotivatingCase,
+    JevMotivatingCasePayload,
+    JevMotivatingScenario,
     JevMultiPart,
     JevMultiPartPayload,
     JevQuestion,
@@ -81,6 +90,7 @@ from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.jev import JevDoneRegistry
 from vidbyte.lib.jev.decision import DecisionModelHelper
+from vidbyte.lib.jev.done.motivating_case import recall_guard_request
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.types import ToolCallContext
@@ -90,7 +100,8 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload})
+
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -120,6 +131,8 @@ class JevRunState(BaseAgent):
         self.record: JevRunStateRecord | None = None
         self.rendered = ""
         self.handoff: JevHandoffRecord | None = None
+        self._recall_guard_probability: float | None = None
+        self._state_builder_disagreement = False
 
     @classmethod
     def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevRunStatePayload]:
@@ -132,18 +145,54 @@ class JevRunState(BaseAgent):
         self.request = request
         self.record = None
         self.rendered = ""
+        self._recall_guard_probability = None
+        self._state_builder_disagreement = False
         self.history.clear()
         try:
             reply = await self.arun(AgentInput(prompt=request))
             if isinstance(reply.structured, self.payload):
-                self.record = self._record(reply.structured)
-                self.rendered = reply.structured.model_dump_json()
+                run_state_payload = reply.structured
+                self._store_state(run_state_payload)
+                await self._apply_motivating_case_recall(run_state_payload)
         except VidbyteSdkError:
             # @intent a-missing-run-state-fails-open
             # Done checks are advisory, like preflight: without a state there is nothing to check against,
             # so the main agent runs and finishes exactly as it would with no done check enabled.
             self.record = None
         self.response.run_state(self.record)
+
+    def _store_state(self, payload: JevRunStatePayload) -> None:
+        # @intent run-state-payload-is-the-record-source
+        # Keep the typed request-derived record and the exact serialized state synchronized after each accepted build.
+        self.record = self._record(payload)
+        self.rendered = payload.model_dump_json()
+
+    async def _apply_motivating_case_recall(self, payload: JevRunStatePayload) -> None:
+        # @intent recall-review-is-one-guard-and-one-rebuild
+        # An empty blocking-scenario set may trigger one independent request-only question and at most one focused rewrite.
+        if not self._needs_motivating_case_recall():
+            return
+        self._recall_guard_probability = await self._motivating_case_recall_guard()
+        self._store_state(payload)
+        probability = self._recall_guard_probability
+        if probability is None or probability < JEV_MOTIVATING_CASE_RECALL_THRESHOLD:
+            return
+        self._state_builder_disagreement = True
+        self._store_state(payload)
+        self.history.clear()
+        note = TextContextItem(
+            title="Motivating-case recall review",
+            content="An independent check found that the user's original request may name an unusual condition missing from this run state. Re-read only the original request and record every directly named unusual condition in the motivating_case section. Keep source_quote and literal_inputs verbatim from the request; do not treat this note as part of the request or quote it.",
+            source="jev_run_state",
+        )
+        try:
+            revised = await self.arun(AgentInput(prompt=self.request, context_items=(note,)))
+        except VidbyteSdkError:
+            # A failed rebuild keeps the original valid state and the initial guard result.
+            return
+        if not isinstance(revised.structured, self.payload):
+            return
+        self._store_state(revised.structured)
 
     async def check(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> tuple[JevDoneResult, ...]:
         """Run every enabled done check on this finish attempt, record every result, and return the checks that failed."""
@@ -246,12 +295,46 @@ class JevRunState(BaseAgent):
                                 },
                             },
                             JEV_DONE_EVIDENCE_FIELD: claim.evidence,
-                        }
+                }
                 return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
             case JevDoneCheck.TARGET_OUTCOME:
                 return self._target_outcome_section(handoff)
+
+            case JevDoneCheck.MOTIVATING_CASE:
+                return self._motivating_case_section(handoff)
             case JevDoneCheck.PROBLEMS_RESOLVED:
                 return self._problems_resolved_section(handoff)
+
+    # @intent motivating-case-questions-are-user-named
+    # Implied scenarios remain visible in the handoff state, but only motivating and requested scenarios create blocking questions.
+    def _motivating_case_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        state = None if self.record is None else self.record.motivating_case
+        evidence = handoff.motivating_case
+        if state is None or evidence is None:
+            return {}, ()
+        by_id = {item.id: item for item in evidence.scenarios}
+        question = JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE)
+        entries = {
+            scenario.id: {
+                JEV_DONE_MOTIVATING_CASE_FIELD: {
+                    "role": scenario.role.value,
+                    "kind": scenario.kind.value,
+                    "source_quote": scenario.source_quote,
+                    "target": scenario.target,
+                    "condition": scenario.condition,
+                    "near_miss": scenario.near_miss,
+                    "ordinary_flow": state.ordinary_flow,
+                    "expected_behavior": scenario.expected_behavior or "",
+                    "literal_inputs": list(scenario.literal_inputs),
+                    "exercise_mode": scenario.exercise_mode.value,
+                    "testing_restriction_quote": state.testing_restriction_quote or "",
+                },
+                JEV_DONE_EVIDENCE_FIELD: by_id[scenario.id].evidence,
+            }
+            for scenario in state.scenarios
+        }
+        blocking_ids = state.ids(blocking_only=True)
+        return {JEV_DONE_MOTIVATING_CASES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in blocking_ids)
 
     # @intent target-outcome-evidence
     # A requested target result must be judged against direct evidence for that target, not inferred from a proxy milestone.
@@ -316,6 +399,11 @@ class JevRunState(BaseAgent):
             case JevDoneCheck.TARGET_OUTCOME:
                 # Each requested target outcome must be demonstrated on its actual target; a proxy alone is insufficient.
                 return self._target_outcome(handoff, decision)
+
+            case JevDoneCheck.MOTIVATING_CASE:
+                # Each user-named unusual case must independently clear the registered threshold.
+                return self._motivating_case(handoff, decision)
+
             case JevDoneCheck.PROBLEMS_RESOLVED:
                 # Every observed issue and the separate original-request item must pass independently.
                 return self._problems_resolved(handoff, decision)
@@ -415,6 +503,43 @@ class JevRunState(BaseAgent):
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
+    def _motivating_case(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        # Scores the answers only for the user-named scenarios; implied entries never block a finish attempt.
+        state = None if self.record is None else self.record.motivating_case
+        if state is None or handoff is None or handoff.motivating_case is None:
+            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None, available=False)
+        identifiers = state.ids(blocking_only=True)
+        if not identifiers:
+            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.MOTIVATING_CASE)
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None, available=False)
+        incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
+    def _needs_motivating_case_recall(self) -> bool:
+        # Runs the recall guard only when the enabled check has no directly blocking scenario to ask about.
+        state = None if self.record is None else self.record.motivating_case
+        return JevDoneCheck.MOTIVATING_CASE in self.checks and state is not None and not state.ids(blocking_only=True)
+
+    async def _motivating_case_recall_guard(self) -> float | None:
+        # Uses Jev once before the main loop to catch an empty state that missed an explicit boundary condition.
+        # @intent recall-guard-fails-open
+        # If TypeSafe is unavailable, the normal finish check remains inactive for an empty state and the user's task still runs.
+        try:
+            decision = await DecisionModelHelper(self.decision).arun(recall_guard_request(self.request))
+        except VidbyteSdkError:
+            return None
+        answer = decision.answers.get("motivating_case.recall")
+        return None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
+
+
     def _problems_resolved(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         """Score every dynamic problem item and the original-request completion item with a veto threshold."""
         # @intent every-observed-problem-and-the-original-task-are-required
@@ -437,6 +562,8 @@ class JevRunState(BaseAgent):
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.PROBLEMS_RESOLVED, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
+    # @intent request-derived-quotes-are-verified-before-recording
+    # A boundary scenario can affect whether the run continues only when its source quote and literal inputs are present in the original user request.
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.
         multi_part = None
@@ -450,6 +577,41 @@ class JevRunState(BaseAgent):
                 JevTargetOutcomeItem(item.id, item.outcome.strip(), item.target.strip(), item.scope.strip(), item.completion_criterion.strip())
                 for item in outcome_section.items
             ))
+
+        motivating_case = None
+        motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
+        if isinstance(motivating_section, JevMotivatingCasePayload):
+            restriction = motivating_section.testing_restriction_quote.strip() or None
+            if restriction is not None and not _verbatim_contains(self.request, restriction):
+                raise VidbyteSdkError("Jev motivating-case testing restriction is not quoted from the request.")
+            scenarios = tuple(
+                JevMotivatingScenario(
+                    id=item.id,
+                    role=item.role,
+                    kind=item.kind,
+                    source_quote=item.source_quote.strip(),
+                    target=item.target.strip(),
+                    condition=item.condition.strip(),
+                    near_miss=item.near_miss.strip(),
+                    expected_behavior=item.expected_behavior.strip() or None,
+                    literal_inputs=tuple(value.strip() for value in item.literal_inputs if value.strip()),
+                    exercise_mode=item.exercise_mode,
+                )
+                for item in motivating_section.scenarios
+            )
+            for item in scenarios:
+                if not _verbatim_contains(self.request, item.source_quote):
+                    raise VidbyteSdkError(f"Jev motivating-case quote for {item.id!r} is not copied from the request.")
+                if any(not _verbatim_contains(self.request, value) for value in item.literal_inputs):
+                    raise VidbyteSdkError(f"Jev motivating-case literal input for {item.id!r} is not copied from the request.")
+            motivating_case = JevMotivatingCase(
+                motivating_section.ordinary_flow.strip(),
+                restriction,
+                scenarios,
+                recall_guard_probability=self._recall_guard_probability,
+                builder_disagreement=self._state_builder_disagreement,
+            )
+
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
@@ -458,7 +620,15 @@ class JevRunState(BaseAgent):
             multi_part=multi_part,
             target_outcome=target_outcome,
             usage=self.get_usage(),
+            motivating_case=motivating_case,
         )
 
 
 __all__ = ["JevRunState"]
+
+
+def _verbatim_contains(haystack: str, quote: str) -> bool:
+    # Allows line wrapping differences while rejecting paraphrases or blank quotes.
+    normalized_quote = re.sub(r"\s+", " ", quote).strip()
+    normalized_text = re.sub(r"\s+", " ", haystack).strip()
+    return bool(normalized_quote) and normalized_quote in normalized_text

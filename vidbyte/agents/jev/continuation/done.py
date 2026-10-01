@@ -131,7 +131,9 @@ class JevDoneContinuation(JevContinuation):
                         f"  Direct target evidence: {observed.direct_evidence}",
                         f"  Still missing: {observed.missing}",
                     )))
-                return "\n".join(failed), "\n".join(focus)
+
+            case JevDoneCheck.MOTIVATING_CASE:
+                return self._explain_motivating_case(result)
             case JevDoneCheck.PROBLEMS_RESOLVED:
                 # Name only failed dynamic items, with the handoff gap and a concrete repair/revalidation focus.
                 question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
@@ -145,6 +147,24 @@ class JevDoneContinuation(JevContinuation):
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
                     focus.append(self._problem_focus(item))
                 return "\n".join(failed), "\n".join(focus)
+
+    # @intent motivating-case-focus-names-only-failed-user-scenarios
+    # The handoff gap and request-derived boundary details let the main agent exercise only the missing scenario.
+    def _explain_motivating_case(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE)
+        state = None if self.run_state.record is None else self.run_state.record.motivating_case
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.motivating_case
+        scenarios = {} if state is None else {item.id: item for item in state.scenarios}
+        missing = {} if handoff is None else {item.id: item.missing for item in handoff.scenarios}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            scenario = scenarios[identifier]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+            expected = f" Expected behavior: {scenario.expected_behavior}." if scenario.expected_behavior else ""
+            focus.append(f"- Exercise {scenario.condition} for {scenario.target}; the nearby case that does not count is {scenario.near_miss}.{expected} Allowed mode: {scenario.exercise_mode.value}.")
+        return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""
