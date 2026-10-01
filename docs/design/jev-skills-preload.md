@@ -393,6 +393,7 @@ Complete list of every file planned for this change:
 | CREATE | `vidbyte/agents/jev/preload.py` | Narrow context-preload contract |
 | CREATE | `vidbyte/agents/jev/alignment/skills.py` | Skill selection and context injection |
 | CREATE | `tests/test_jev_skill_preload.py` | Focused contract, response, and runtime tests |
+| MODIFY | `tests/test_jev_tool_alignment.py` | Verify the alignment runner receives runtime-owned decision settings |
 | CREATE | `tests/features/jev_skills_preload/FEATURE.md` | Feature test pack and regression map |
 | CREATE | `scripts/test-jev-skills-preload.py` | Focused executable gate |
 | MODIFY | `vidbyte/agents/jev/settings.py` | Skills configuration and threshold |
@@ -431,7 +432,7 @@ Complete list of every file planned for this change:
 
 ### Integration Tests
 
-- Verify a caller-provided `JevRuntimeSettings.decision` reaches the alignment decision runner without adding a field to `JevAgentSettings`.
+- Verify `test_alignment_uses_the_runtime_decision_configuration` proves a caller-provided `JevRuntimeSettings.decision` reaches the alignment runner without adding a field to `JevAgentSettings`.
 - Verify ordering after prompt/tool alignment and before run-state/main loop.
 - Verify gate stop and specialist handoff make zero skill calls.
 - Verify selected full text is appended while original caller context and prompt suffix remain intact.
