@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest fro
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem handoff items require unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-refine.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -641,6 +641,16 @@ class JevClarificationPayload(BaseModel):
         max_length=JEV_CLARIFICATION_MAX_QUESTIONS,
         description="The clarifying questions for the user, most important missing detail first.",
     )
+
+
+class JevRefinementPayload(BaseModel):
+    """The structured reply JevRefinementAgent must return: the improved prompt, what changed, and what it could not fill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(min_length=1, description="The prompt is the complete improved request that the main agent will read instead of the user's original message. It must stand on its own, because the main agent never sees the original wording beside it. It keeps everything the user asked for, every name the user used, and every piece of pasted text, code, or data exactly as it was given. It only makes clearer, better ordered, or more explicit what the request already says or unavoidably implies, and it never adds facts, requirements, or choices the user did not make. When the original request cannot be improved, return it unchanged.")
+    changes: list[str] = Field(description="The changes list says what you improved, one short item per kind of change, such as splitting the work into numbered parts or separating pasted code from the instructions. Each item names the change in plain words and, where useful, the part of the request it touched. It is shown to the user and to the developer who reads the run, so it must be honest and specific rather than general praise of the new prompt. List only changes that are actually in the prompt you returned. Return an empty list when you returned the request unchanged.")
+    unresolved: list[str] = Field(description="The unresolved list names every detail the request still leaves open that you could not fill without guessing or inventing facts. Each item is one short sentence that says what is missing, in the user's terms, such as the version of a library or the audience of a document. These details stay open in the prompt rather than being filled with your own choices, and the list tells the user what they may want to add next time. Include a detail here only when it matters for doing the work. Return an empty list when nothing important is left open.")
 
 
 class JevSectionPayload(BaseModel):
@@ -1323,13 +1333,49 @@ class JevClarification:
         return "\n".join(blocks)
 
 
+@dataclass(frozen=True, slots=True)
+class JevRefinement:
+    """The improved prompt JevRefinementAgent wrote for a clear request, and what it changed and left open.
+
+    `original` is the user's message, `prompt` is the improved prompt the main agent (or the chosen
+    specialist) reads instead, `changes` lists what was improved, `unresolved` lists what the request
+    still leaves open, and `usage` is the refinement agent's own model usage.
+    """
+
+    original: str
+    prompt: str
+    changes: tuple[str, ...] = ()
+    unresolved: tuple[str, ...] = ()
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a non-blank improved prompt and non-blank list items.
+        JevText.require(self.prompt, field_name="refined prompt")
+        for field_name in ("changes", "unresolved"):
+            values = getattr(self, field_name)
+            if values:
+                JevText.require_all(values, field_name=f"refinement {field_name}")
+
+    @classmethod
+    def from_payload(cls, payload: JevRefinementPayload, original: str, usage: UsageRollup | None = None) -> JevRefinement:
+        """Build the frozen record from the agent's validated structured reply, dropping blank list items."""
+        return cls(
+            original=original,
+            prompt=payload.prompt.strip(),
+            changes=tuple(text.strip() for text in payload.changes if text.strip()),
+            unresolved=tuple(text.strip() for text in payload.unresolved if text.strip()),
+            usage=usage,
+        )
+
+
 @dataclass(slots=True)
 class JevAgentResponse:
     """Everything JevAgent's opinionated features produced for its most recent run, read as `JevAgent.response`.
 
     JevResponse is the only writer: it resets this record at the start of each run and fills it as the
     preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
-    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
+    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user,
+    `refinement` is set only when the REFINE preset rewrote a clear request into the prompt the run read, and
     `specialist` is the title of the JevSpecialist that ran the task, or None when the main JevAgent ran it.
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
     `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
@@ -1340,6 +1386,7 @@ class JevAgentResponse:
     output: str | None = None
     results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
     clarification: JevClarification | None = None
+    refinement: JevRefinement | None = None
     usage: ProviderUsage | None = None
     specialist: str | None = None
     run_state: JevRunStateRecord | None = None
@@ -1403,6 +1450,8 @@ __all__ = [
     "JevProblemsResolvedEvidence",
     "JevProblemsResolvedEvidencePayload",
     "JevQuestion",
+    "JevRefinement",
+    "JevRefinementPayload",
     "JevRunStatePayload",
     "JevRunStateRecord",
     "JevSectionPayload",

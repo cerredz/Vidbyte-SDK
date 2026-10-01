@@ -4,8 +4,8 @@ PURPOSE: Owns the preflight flags a JevAgent user can enable and, for each flag 
 ROLE IN CODEBASE: JevPreflightRegistry.validate normalizes JevRuntimeSettings.preflight through JevPresets, and JevPreflightGate (vidbyte/agents/jev/gate/) reads each fixed preset's definition from here when it combines questions and scores answers.
 ARCHITECTURE NOTE: The flag vocabulary is JevPreflightPreset in vidbyte/lib/enums/jev.py and the definition record is JevPresetDefinition in vidbyte/lib/dataclasses/jev.py; this module holds only the mapping and the flag logic.
 COMMON MODIFICATION PATTERNS: Add a JevPreflightPreset member; if its questions are fixed, add its question keys and one JevPresetDefinition entry here and register every new question in vidbyte/lib/jev/preflight/.
-KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same flag twice is an error because it would ask Jev every question twice. TOOL_SELECTOR is a valid flag with no definition, because it asks one question per configured tool and builds them at run time.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same flag twice is an error because it would ask Jev every question twice. TOOL_SELECTOR is a valid flag with no definition, because it asks one question per configured tool and builds them at run time. REFINE is a valid flag with no definition that requires CLARITY, because it rewrites a request using the clarity answers.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-preflight-refine.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-preflight.py.
 """
 
@@ -50,6 +50,9 @@ class JevPresets:
             ),
         }
     )
+
+    # Flags that act on another flag's answers, mapped to the flag they need.
+    _requires: Mapping[JevPreflightPreset, JevPreflightPreset] = MappingProxyType({JevPreflightPreset.REFINE: JevPreflightPreset.CLARITY})
 
     @classmethod
     def definition(cls, preset: JevPreflightPreset) -> JevPresetDefinition:
@@ -97,7 +100,21 @@ class JevPresets:
             raise ConfigurationError("JevRuntimeSettings.preflight must be an iterable of Jev preflight presets.", details={"received": type(values).__name__}) from exc
         if len(set(presets)) != len(presets):
             raise ConfigurationError("JevRuntimeSettings.preflight cannot enable the same preset twice.", details={"received": [preset.value for preset in presets]})
+        cls._require_dependencies(presets)
         return presets
+
+    @classmethod
+    def _require_dependencies(cls, presets: tuple[JevPreflightPreset, ...]) -> None:
+        # Rejects a flag enabled without the flag whose answers it acts on.
+        # @intent refine-needs-the-clarity-answers
+        # REFINE asks Jev nothing of its own; it rewrites a request the clarity preset judged clear, using
+        # that preset's per-check answers, so enabling it alone would silently never run.
+        for preset, required in cls._requires.items():
+            if preset in presets and required not in presets:
+                raise ConfigurationError(
+                    f"Jev preflight preset {preset.value!r} requires {required.value!r} to be enabled too.",
+                    details={"received": [item.value for item in presets], "missing": required.value},
+                )
 
 
 __all__ = ["JevPresets"]

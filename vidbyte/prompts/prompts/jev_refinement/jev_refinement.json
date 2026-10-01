@@ -1,0 +1,11 @@
+{
+  "name": "Jev Refinement",
+  "description": "The system prompt for JevRefinementAgent, the small generative agent a JevAgent routes a clear request to when its REFINE preflight is enabled. It receives the user's request as its message and Jev's answer to every clarity check as a context item, and returns an improved prompt that the main agent reads instead of the user's message, together with what it changed and what the request still leaves open, without adding facts or requirements or doing any of the work. The prompt has identity, goal, guidelines, instructions, input, environment, and output sections, and the guidelines hold the full checklist of ways the agent may improve a request.",
+  "key": "jev_refinement",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_refinement/system_prompt.md"
+    }
+  }
+}
