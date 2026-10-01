@@ -223,13 +223,15 @@ await self.preflight.pass_(message, run_state=None if self.run_state is None els
 
 1. Reset the response as today.
 2. Call `pass_` with the current typed record if a run-state facade exists, else `None`.
-3. If the gate passes and no specialist is selected, call the run-state facade's `begin(message)` as today; the selected implementation controls retain-or-replace behavior.
-4. Continue passing the unchanged current `message`, metadata, options, and trace context through the ordinary loop.
+3. If the gate selects a specialist, call the typed run-state facade's `begin_delegated(message)` before delegation. The base method is a no-op, preserving legacy specialist behavior; the relation subclass applies its normal retain-or-replace policy.
+4. If no specialist is selected, call the run-state facade's `begin(message)` as today; the selected implementation controls retain-or-replace behavior.
+5. Continue passing the unchanged current `message`, metadata, options, and trace context through the ordinary loop or selected specialist.
 
 #### Edge Cases & Error Handling
 
 - A closed existing gate still prevents the main loop from running.
 - A related/unavailable decision does not skip or rewrite the current user message.
+- Relation-enabled accepted specialist runs report or replace run state before delegation; the base class no-op keeps legacy specialist runs unchanged.
 - No relation preset preserves current run-state and runtime behavior.
 - The runtime does not import question keys or branch on preflight presets.
 
@@ -254,6 +256,7 @@ python scripts/test-jev-run-state-relation.py
 2. Verify the relation question uses only current request and serialized record state and that usage is omitted.
 3. Exercise applicable and not-applicable gate outcomes, including missing or failed decision replies.
 4. Exercise JevRunStateRelation through JevRuntime for related retention, unrelated replacement, replacement failure, fresh responses, done-check behavior, and the disabled legacy path.
+5. Exercise the typed specialist seam: relation-enabled delegation retains or replaces state before delegation, the base run-state no-op does not generate state, and a closed gate never calls either begin method.
 
 #### Edge Cases & Error Handling
 
@@ -309,6 +312,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `vidbyte/lib/jev/preflight/__init__.py` | Export the question dataclass |
 | MODIFY | `vidbyte/agents/jev/gate/gate.py` | Pass record state into one combined Jev request and set relation outcome |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Pass current run-state record to preflight |
+| MODIFY | `vidbyte/agents/jev/done/run_state.py` | Add the legacy no-op delegated-state seam |
 | MODIFY | `vidbyte/agents/jev/agent.py` | Build relation facade when preset is enabled; gate continuation on done checks |
 | MODIFY | `vidbyte/agents/jev/done/__init__.py` | Export the internal relation subclass |
 | DELETE | N/A | No files will be deleted |
