@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at constru
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -20,6 +20,7 @@ from vidbyte.lib.constants.jev import (
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_MOTIVATING_CASE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_OUTPUT_COUNT_THRESHOLD,
     JEV_PHASE_PROGRESS_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_SCOPE_COVERAGE_THRESHOLD,
@@ -33,6 +34,7 @@ from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupported
 from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.output_count import OutputCountSatisfiedQuestion
 from vidbyte.lib.jev.done.phase_progress import PhaseProgressReachedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
@@ -44,6 +46,7 @@ class JevDoneRegistry:
 
     _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
         JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(),
+        JevDoneCheck.OUTPUT_COUNT: OutputCountSatisfiedQuestion(),
         JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(),
         JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(),
         JevDoneCheck.MOTIVATING_CASE: MotivatingCaseExercisedQuestion(),
@@ -55,6 +58,7 @@ class JevDoneRegistry:
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
+        JevDoneCheck.OUTPUT_COUNT: JEV_OUTPUT_COUNT_THRESHOLD,
         JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD,
         JevDoneCheck.TARGET_OUTCOME: JEV_TARGET_OUTCOME_THRESHOLD,
         JevDoneCheck.MOTIVATING_CASE: JEV_MOTIVATING_CASE_THRESHOLD,

@@ -59,6 +59,22 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_MOTIVATING_CASE_FIELD,
     JEV_DONE_MOTIVATING_CASES_FIELD,
     JEV_DONE_OBSERVED_PROXY_FIELD,
+    JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD,
+    JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD,
+    JEV_DONE_OUTPUT_COUNT_DISTINCT_FIELD,
+    JEV_DONE_OUTPUT_COUNT_DISTINCTNESS_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRIES_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_EVIDENCE_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_ID_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_KEY_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_VALUE_FIELD,
+    JEV_DONE_OUTPUT_COUNT_MET_FIELD,
+    JEV_DONE_OUTPUT_COUNT_OBLIGATION_FIELD,
+    JEV_DONE_OUTPUT_COUNT_OBSERVED_FIELD,
+    JEV_DONE_OUTPUT_COUNT_SCOPE_FIELD,
+    JEV_DONE_OUTPUT_COUNT_TARGET_FIELD,
+    JEV_DONE_OUTPUT_COUNT_UNIT_FIELD,
+    JEV_DONE_OUTPUT_COUNTS_FIELD,
     JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD,
     JEV_DONE_PHASE_PROGRESS_FIELD,
     JEV_DONE_PHASE_REQUEST_SCOPE_FIELD,
@@ -105,6 +121,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartPayload,
     JevOption,
+    JevOutputCount,
+    JevOutputCountEvidenceItem,
+    JevOutputCountObligation,
+    JevOutputCountPayload,
     JevPhaseProgress,
     JevPhaseProgressPayload,
     JevPhaseStage,
@@ -139,7 +159,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload})
 
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -359,6 +379,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.COMPLETION_EVIDENCE: self._completion_evidence_section,
             JevDoneCheck.PROBLEMS_RESOLVED: self._problems_resolved_section,
             JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage_section,
+            JevDoneCheck.OUTPUT_COUNT: self._output_count_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -576,6 +597,40 @@ class JevRunState(BaseAgent):
         }
         return {JEV_DONE_INPUT_SET_COVERAGE_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 
+    # @intent output-count-arithmetic-is-deterministic
+    # Code counts proposed keys while Jev recognizes their fidelity to visible output values and evidence.
+    def _output_count_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        state = None if self.record is None else self.record.output_count
+        evidence = handoff.output_count
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+        evidence_by_id = {item.id: item for item in evidence.obligations}
+        entries: dict[str, object] = {}
+        for obligation in state.obligations:
+            item = evidence_by_id[obligation.id]
+            observed = self._observed_count(item, obligation.distinct)
+            entries[obligation.id] = {
+                JEV_DONE_OUTPUT_COUNT_OBLIGATION_FIELD: {
+                    JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD: obligation.description,
+                    JEV_DONE_OUTPUT_COUNT_TARGET_FIELD: obligation.target_count,
+                    JEV_DONE_OUTPUT_COUNT_DISTINCT_FIELD: obligation.distinct,
+                    JEV_DONE_OUTPUT_COUNT_UNIT_FIELD: obligation.unit,
+                    JEV_DONE_OUTPUT_COUNT_SCOPE_FIELD: obligation.scope,
+                    JEV_DONE_OUTPUT_COUNT_DISTINCTNESS_FIELD: obligation.distinctness,
+                    JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD: obligation.completion_criteria,
+                },
+                JEV_DONE_OUTPUT_COUNT_ENTRIES_FIELD: [{
+                    JEV_DONE_OUTPUT_COUNT_ENTRY_ID_FIELD: candidate.id,
+                    JEV_DONE_OUTPUT_COUNT_ENTRY_VALUE_FIELD: candidate.value,
+                    JEV_DONE_OUTPUT_COUNT_ENTRY_KEY_FIELD: candidate.distinct_key,
+                    JEV_DONE_OUTPUT_COUNT_ENTRY_EVIDENCE_FIELD: candidate.evidence,
+                } for candidate in item.entries],
+                JEV_DONE_OUTPUT_COUNT_OBSERVED_FIELD: observed,
+                JEV_DONE_OUTPUT_COUNT_MET_FIELD: observed >= obligation.target_count,
+            }
+        return {JEV_DONE_OUTPUT_COUNTS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # @intent each-enabled-check-keeps-its-own-verdict
         # Dispatch preserves each scorer's threshold, missing-answer, and fail-open rules as gates are added.
@@ -589,6 +644,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.MOTIVATING_CASE: self._motivating_case,
             JevDoneCheck.PROBLEMS_RESOLVED: self._problems_resolved,
             JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage,
+            JevDoneCheck.OUTPUT_COUNT: self._output_count,
         }
         handler = handlers.get(check)
         if handler is None:
@@ -756,6 +812,35 @@ class JevRunState(BaseAgent):
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
+    def _output_count(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        state = None if self.record is None else self.record.output_count
+        if state is None or handoff is None or handoff.output_count is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+        identifiers = state.ids()
+        if not identifiers:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_COUNT)
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+        incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
+    @staticmethod
+    def _observed_count(item: JevOutputCountEvidenceItem, distinct: bool) -> int:
+        """Count candidate output units deterministically from handoff keys."""
+        # @intent repeated-output-units-do-not-inflate-distinct-targets
+        # Normalize spelling before counting so duplicate representations cannot manufacture extra units.
+        if not distinct:
+            return len(item.entries)
+        keys = {" ".join(entry.distinct_key.casefold().split()) for entry in item.entries}
+        return len(keys)
+
     def _target_outcome(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Missing records or evidence make the check unavailable; done checks are advisory and always fail open.
         state = None if self.record is None else self.record.target_outcome
@@ -843,6 +928,7 @@ class JevRunState(BaseAgent):
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        output_count = self._output_count_record(payload)
         scope_coverage = None
         scope_section = getattr(payload, JevDoneCheck.SCOPE_COVERAGE.value, None)
         if isinstance(scope_section, JevScopeCoveragePayload):
@@ -904,6 +990,7 @@ class JevRunState(BaseAgent):
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            output_count=output_count,
             scope_coverage=scope_coverage,
             target_outcome=target_outcome,
             usage=self.get_usage(),
@@ -919,6 +1006,26 @@ class JevRunState(BaseAgent):
             return None
         targets = tuple(JevInputTarget(item.id, item.identity.strip(), item.scope.strip(), item.action.strip(), item.engagement_signal.strip()) for item in section.targets)
         return JevInputSetCoverage(targets)
+
+    @staticmethod
+    def _output_count_record(payload: JevRunStatePayload) -> JevOutputCount | None:
+        section = getattr(payload, JevDoneCheck.OUTPUT_COUNT.value, None)
+        if not isinstance(section, JevOutputCountPayload):
+            return None
+        obligations = tuple(
+            JevOutputCountObligation(
+                item.id,
+                item.description.strip(),
+                item.target_count,
+                item.distinct,
+                item.unit.strip(),
+                item.scope.strip(),
+                item.distinctness.strip(),
+                item.completion_criteria.strip(),
+            )
+            for item in section.obligations
+        )
+        return JevOutputCount(obligations)
 
 
 __all__ = ["JevRunState"]

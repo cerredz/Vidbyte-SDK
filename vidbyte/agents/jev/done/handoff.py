@@ -50,6 +50,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevMotivatingScenarioEvidence,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
+    JevOutputCountEntry,
+    JevOutputCountEvidence,
+    JevOutputCountEvidenceItem,
+    JevOutputCountEvidencePayload,
     JevPhaseProgressEvidence,
     JevPhaseProgressEvidencePayload,
     JevPhaseStageEvidence,
@@ -81,7 +85,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -231,6 +235,7 @@ class JevHandoff(BaseAgent):
             usage=self.get_usage(),
             motivating_case=request_records.motivating_case,
             input_set_coverage=request_records.input_set_coverage,
+            output_count=request_records.output_count,
         )
 
     # @intent request-derived-evidence-covers-exactly-the-state
@@ -269,6 +274,25 @@ class JevHandoff(BaseAgent):
             expected = () if state.motivating_case is None else state.motivating_case.ids()
             if motivating_case.ids() != expected:
                 return None
+        additional_records = self._input_output_evidence_records(payload, state)
+        if additional_records is None:
+            return None
+        return JevHandoffRecord(
+            multi_part=multi_part,
+            phase_progress=phase_progress,
+            target_outcome=target_outcome,
+            motivating_case=motivating_case,
+            input_set_coverage=additional_records.input_set_coverage,
+            output_count=additional_records.output_count,
+        )
+
+    # @intent request-derived-evidence-covers-exactly-the-state
+    # New request-derived input and output obligations must remain complete when copied into the handoff.
+    def _input_output_evidence_records(
+        self,
+        payload: JevHandoffPayload,
+        state: JevRunStateRecord,
+    ) -> JevHandoffRecord | None:
         input_set_coverage = None
         input_section = getattr(payload, JevDoneCheck.INPUT_SET_COVERAGE.value, None)
         if isinstance(input_section, JevInputSetCoverageEvidencePayload):
@@ -281,12 +305,25 @@ class JevHandoff(BaseAgent):
             # A handoff omission would remove its question, so accept only the exact request-derived ids in order.
             if input_set_coverage.ids() != expected:
                 return None
+        output_count = None
+        count_section = getattr(payload, JevDoneCheck.OUTPUT_COUNT.value, None)
+        if isinstance(count_section, JevOutputCountEvidencePayload):
+            output_count = JevOutputCountEvidence(tuple(
+                JevOutputCountEvidenceItem(
+                    item.id,
+                    tuple(JevOutputCountEntry(entry.id, entry.value.strip(), entry.distinct_key.strip(), entry.evidence.strip()) for entry in item.entries),
+                    item.missing.strip(),
+                )
+                for item in count_section.obligations
+            ))
+            expected = () if state.output_count is None else state.output_count.ids()
+            # @intent every-requested-output-count-remains-in-the-check
+            # Missing or invented obligation evidence would change the count question set, so fail open on either.
+            if sorted(output_count.ids()) != sorted(expected):
+                return None
         return JevHandoffRecord(
-            multi_part=multi_part,
-            phase_progress=phase_progress,
-            target_outcome=target_outcome,
-            motivating_case=motivating_case,
             input_set_coverage=input_set_coverage,
+            output_count=output_count,
         )
 
     # @intent phase-evidence-matches-request-stages

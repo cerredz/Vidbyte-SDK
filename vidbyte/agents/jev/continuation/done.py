@@ -93,6 +93,7 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.MOTIVATING_CASE: self._explain_motivating_case,
             JevDoneCheck.PROBLEMS_RESOLVED: self._explain_problems_resolved,
             JevDoneCheck.INPUT_SET_COVERAGE: self._explain_input_set_coverage,
+            JevDoneCheck.OUTPUT_COUNT: self._explain_output_count,
         }
         return handlers[result.check](result)
 
@@ -207,6 +208,23 @@ class JevDoneContinuation(JevContinuation):
             target = targets[identifier]
             failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
             focus.append(f"- {target.action} {target.identity} within {target.scope}. Done when: {target.engagement_signal}")
+        return "\n".join(failed), "\n".join(focus)
+
+    # @intent output-count-focus-names-only-incomplete-quantities
+    # Keep the requested unit and group boundary beside only the counts Jev did not recognize.
+    def _explain_output_count(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+        state = None if self.run_state.record is None else self.run_state.record.output_count
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.output_count
+        obligations = {} if state is None else {item.id: item for item in state.obligations}
+        missing = {} if handoff is None else {item.id: item.missing for item in handoff.obligations}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            item = obligations[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+            focus.append(f"- {item.description} Target: {item.target_count} {item.unit}; scope: {item.scope}; distinctness: {item.distinctness}. Done when: {item.completion_criteria}")
         return "\n".join(failed), "\n".join(focus)
 
     # @intent scope-coverage-focus-names-every-missing-member

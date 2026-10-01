@@ -61,6 +61,10 @@ Every stage fails open. With no run state there is no check. When the handoff or
 
 At each finish attempt, the handoff reports tool-call evidence for every target and exactly echoes the run-state ids. Evidence must distinguish content actually made available or processed from a path, title, metadata listing, excerpt, or attempted call. The `missing` note is continuation feedback only and must never enter Jev state. Jev answers one recognition question per target about whether the evidence shows the requested action over its scope and depth. Code matches ids, scores each answer with a veto threshold, and returns only failed target ids for continuation focus. The complete original request remains available in the shared state; Jev judges one named obligation at a time, while deterministic code combines those answers.
 
+## Numeric output quantities: OUTPUT_COUNT
+
+`OUTPUT_COUNT` records one request-derived obligation per explicit quantity and group, including the positive target, unit, scope, distinctness rule, and completion criterion. The handoff lists each visible output candidate with its value, direct run evidence, and proposed distinctness key. Code normalizes the keys, computes `observed_count`, and sets `target_met` before Jev sees the shared request; when distinctness is required, repeated normalized keys count once. Jev checks candidate relevance, evidence, and key fidelity without recounting or doing arithmetic. A count claim in the final answer cannot substitute for visible output and source evidence.
+
 ## 2. Important files
 
 | File | What it holds | What a new check does there |
@@ -71,9 +75,9 @@ At each finish attempt, the handoff reports tool-call evidence for every target 
 | `vidbyte/lib/jev/done/<check>.py` | One `JevDoneQuestion` subclass per question | **New file**, one per check (`multi_part.py` is the model). |
 | `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions`, `_thresholds`, `validate`) | Register the question and the threshold. |
 | `vidbyte/lib/jev/done/__init__.py`, `README.md` | Exports and a folder guide | Export the question and list it in the README. |
-| `vidbyte/agents/jev/done/run_state.py` | `JevRunState`: `_SECTIONS`, `schema`, `begin`, `check`, `combine`, `_section`, `_judge`, `_record` | Request-derived checks add a run-state `_SECTIONS` entry and `_record` conversion; every check adds `_section` and `_judge` cases, and post-run items come from the handoff. |
+| `vidbyte/agents/jev/done/run_state.py` | `JevRunState`: `_SECTIONS`, `schema`, `begin`, `check`, `combine`, `_section`, `_judge`, `_record` | Request-derived checks add a run-state `_SECTIONS` entry and `_record` conversion; each check adds a typed `_section` helper and `_judge` scorer to their dispatch maps; post-run items come from the handoff. |
 | `vidbyte/agents/jev/done/handoff.py` | `JevHandoff`: `_SECTIONS`, `schema`, `window`, `compile`, `_record` | Add the handoff section and conversion; require exact run-state id matching only when the check's items were written before work. |
-| `vidbyte/agents/jev/continuation/done.py` | `JevDoneContinuation`: `should_continue`, `continue_`, `message`, `_explain` | One `case` in `_explain`. |
+| `vidbyte/agents/jev/continuation/done.py` | `JevDoneContinuation`: `should_continue`, `continue_`, `message`, `_explain` | Add a typed explanation helper and register it in `_explain`'s dispatch map. |
 | `vidbyte/agents/jev/continuation/base.py` | `JevContinuation` ABC | Nothing, unless you are writing a new continuation kind. |
 | `vidbyte/agents/jev/settings.py` | `JevContinualSettings` (`checks`, `max_continuations`, limits) | Usually nothing, because `checks` already accepts every registered member. |
 | `vidbyte/agents/jev/runtime.py`, `agent.py` | Wiring | **Nothing.** A check never touches the runtime. |
@@ -96,7 +100,7 @@ Create a **new file** only for:
 **Extend** existing modules for everything else:
 
 - Enums go in `vidbyte/lib/enums/jev.py`, records and payloads in `vidbyte/lib/dataclasses/jev.py`, and constants in `vidbyte/lib/constants/jev.py`.
-- The logic goes into `JevRunState`, `JevHandoff`, and `JevDoneContinuation` as `match` cases and map entries.
+- The logic goes into typed helpers on `JevRunState`, `JevHandoff`, and `JevDoneContinuation`. Add handler-map entries to `_section`, `_judge`, and `_explain`; keep the existing map dispatch rather than replacing it with growing `match` statements.
 
 **Never** create any of these:
 
@@ -121,10 +125,10 @@ Work through the steps in order. Each is explained in detail below.
 - [ ] 7. Write the Jev question in `vidbyte/lib/jev/done/<check>.py`, following the asking-jev-questions layout.
 - [ ] 8. Register the question and threshold in `JevDoneRegistry`, and export it.
 - [ ] 9. Add sections and conversions to the schemas and records that carry the check's items; the maps need not be identical for dynamic items.
-- [ ] 10. Add the check's `case` to `JevRunState._section`: its part of the shared state and its batched questions.
+- [ ] 10. Add a typed section helper and register it in `JevRunState._section`'s dispatch map: its part of the shared state and batched questions.
 - [ ] 11. Keep the shared state description (`DONE_STATE`) true for every combination of enabled checks.
-- [ ] 12. Add the check's `case` to `JevRunState._judge`, with a `_<check>` scorer that fails open.
-- [ ] 13. Add the check's `case` to `JevDoneContinuation._explain`: what the main agent reads when the check fails.
+- [ ] 12. Add the check's `_<check>` scorer to `JevRunState._judge`'s dispatch map, preserving its fail-open and empty-item behavior.
+- [ ] 13. Add a typed explanation helper to `JevDoneContinuation` and register it in `_explain`'s dispatch map: what the main agent reads when the check fails.
 - [ ] 14. Leave the runtime, the agent, the settings, and the system prompts alone, and confirm that you did.
 - [ ] 15. Export public records, extend the tests, and update the docs and skills.
 - [ ] 16. Run the verification commands.
@@ -399,22 +403,26 @@ Then extend each `_record`, the only place a validated pydantic reply becomes a 
 
 ### Step 10: Your part of the batched request (`JevRunState._section`)
 
-Every enabled check's questions go to Jev in **one** `JevDecisionRequest` per finish attempt (review of #470; strategies 11 and 24). `combine()` does the batching, and you only add a `case`:
+Every enabled check's questions go to Jev in **one** `JevDecisionRequest` per finish attempt (review of #470; strategies 11 and 24). `combine()` does the batching. Keep `_section` as a typed dispatch map and register a helper for the new check:
 
 ```python
 def _section(self, check, handoff):
-    match check:
-        case JevDoneCheck.MULTI_PART:
-            ...
-        case JevDoneCheck.<CHECK>:
-            # <comment: what the entries hold and why; what is deliberately left out>
-            state = None if self.record is None else self.record.<check>
-            if state is None or handoff.<check> is None:
-                return {}, ()                                        # nothing to ask → _judge handles it
-            question = JevDoneRegistry.question(JevDoneCheck.<CHECK>)
-            evidence = {item.id: item.evidence for item in handoff.<check>.items}   # evidence only, never `missing`
-            entries = {item.id: {JEV_DONE_<A>_FIELD: item.<a>, JEV_DONE_EVIDENCE_FIELD: evidence[item.id]} for item in state.items}
-            return {JEV_DONE_<ITEMS>_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+    handlers = {
+        JevDoneCheck.MULTI_PART: self._multi_part_section,
+        JevDoneCheck.<CHECK>: self._<check>_section,
+    }
+    handler = handlers.get(check)
+    return ({}, ()) if handler is None else handler(handoff)
+
+def _<check>_section(self, handoff):
+    # <comment: what the entries hold and why; what is deliberately left out>
+    state = None if self.record is None else self.record.<check>
+    if state is None or handoff.<check> is None:
+        return {}, ()                                        # nothing to ask → _judge handles it
+    question = JevDoneRegistry.question(JevDoneCheck.<CHECK>)
+    evidence = {item.id: item.evidence for item in handoff.<check>.items}   # evidence only, never `missing`
+    entries = {item.id: {JEV_DONE_<A>_FIELD: item.<a>, JEV_DONE_EVIDENCE_FIELD: evidence[item.id]} for item in state.items}
+    return {JEV_DONE_<ITEMS>_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 ```
 
 What `combine()` does with your return value:
@@ -428,7 +436,7 @@ for check in self.checks:
 return JevDecisionRequest(state=state, questions=tuple(questions))   # or None if no check asked anything
 ```
 
-Rules for your `case`:
+Rules for your helper:
 
 - **Return a mapping of top-level state keys and a tuple of `JevQuestion`s.** Never call Jev here, and never build your own `JevDecisionRequest`.
 - **Key entries by item id**, so that a question naming `{item}` finds its entry.
@@ -449,7 +457,7 @@ For PROBLEMS_RESOLVED, build the dynamic item list from the current finish attem
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `claims`, `phase_progress`, `scope_coverage`, `target_outcomes`, `motivating_cases`, `problems_resolved`, and `completion_evidence` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including request-derived stage lists and dynamic items emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `claims`, `phase_progress`, `scope_coverage`, `target_outcomes`, `motivating_cases`, `problems_resolved`, `completion_evidence`, `input_set_coverage`, and `output_counts` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including request-derived stage lists and dynamic items emitted by the handoff.
 
 Before you ship:
 
@@ -461,12 +469,18 @@ Before you ship:
 
 ```python
 def _judge(self, check, handoff, decision):
-    match check:
-        case JevDoneCheck.MULTI_PART:
-            return self._multi_part(handoff, decision)
-        case JevDoneCheck.<CHECK>:
-            # <comment: the rule this check enforces and how answers are combined>
-            return self._<check>(handoff, decision)
+    handlers = {
+        JevDoneCheck.MULTI_PART: self._multi_part,
+        JevDoneCheck.<CHECK>: self._<check>,
+    }
+    handler = handlers.get(check)
+    if handler is None:
+        return JevDoneResult(check=check, score=None, available=False)
+    return handler(handoff, decision)
+
+def _<check>(self, handoff, decision):
+    # <comment: the rule this check enforces and how answers are combined>
+    ...
 ```
 
 `_<check>` must return a `JevDoneResult` on **every** path. Copy the order of `_multi_part`, and comment each step:
@@ -509,10 +523,10 @@ This is what happens **after** `should_continue` returns True.
 | `# Failed checks` | `"\n\n".join(failed …)` over the `_explain` results | the **first** string you return |
 | `# Focus` | `"\n".join(focus …)` over the `_explain` results | the **second** string you return |
 
-Your `case` returns `(failed, focus)`, following the multi-part case:
+Register a typed `_explain_<check>` helper in `_explain`'s handler map. The helper returns `(failed, focus)`:
 
 ```python
-case JevDoneCheck.<CHECK>:
+def _explain_<check>(self, result):
     # <comment: what the main agent reads for this check and why>
     question = JevDoneRegistry.question(JevDoneCheck.<CHECK>)
     state = None if self.run_state.record is None else self.run_state.record.<check>
