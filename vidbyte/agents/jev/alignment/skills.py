@@ -45,6 +45,7 @@ _SKILL_SECTION = """
 --- Caller-selected skill guidance for this request ---
 
 """
+_SKILL_INDEX_BASE = 1
 _MAX_REQUEST_JSON_BYTES = 60_000
 _MAX_STATE_AND_QUESTION_JSON_BYTES = 30_000
 _SkillBatch = tuple[tuple[int, ...], JevDecisionRequest]
@@ -68,7 +69,7 @@ class JevSkillsPreload(JevPreload):
         oversized_set = set(oversized)
         results: dict[int, JevSkillResult] = {
             index: JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=JevSkillStatus.UNAVAILABLE)
-            for index, skill in enumerate(self.skills, start=1)
+            for index, skill in enumerate(self.skills, start=_SKILL_INDEX_BASE)
             if index in oversized_set
         }
         selected_indices: set[int] = set()
@@ -78,12 +79,12 @@ class JevSkillsPreload(JevPreload):
                 decision = await DecisionModelHelper(self.decision).arun(request)
             except VidbyteSdkError:
                 for index in indices:
-                    skill = self.skills[index - 1]
+                    skill = self.skills[index - _SKILL_INDEX_BASE]
                     results[index] = JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=JevSkillStatus.UNAVAILABLE)
                 continue
             usages.append(JevUsage.from_usage_payload(decision.usage or {}))
             for index in indices:
-                skill = self.skills[index - 1]
+                skill = self.skills[index - _SKILL_INDEX_BASE]
                 result = self._score_skill(index, skill, decision.answers)
                 results[index] = result
                 if result.status is JevSkillStatus.SELECTED:

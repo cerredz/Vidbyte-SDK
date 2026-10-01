@@ -2,6 +2,7 @@
 
 PURPOSE: Defines the narrow Jev context-preload contract used by request-time capabilities that transform an immutable BaseAgentContext before the main loop.
 ROLE IN CODEBASE: JevRuntime runs this contract after gate and alignment passes; JevSkillsPreload is its current implementation and returns a replacement context without changing the tool catalog.
+ARCHITECTURE NOTE: Each preload is a request-local context transform; JevRuntime remains responsible for gate ordering, tools, run state, and the main agent loop.
 FUNCTION INVENTORY:
     JevPreload.run(message, context) -> BaseAgentContext: asynchronously returns the effective context for one run.
 COMMON MODIFICATION PATTERNS: Keep this contract limited to context input and output. Put feature questions, scoring, response records, and fail-open policy in the named preload implementation.
