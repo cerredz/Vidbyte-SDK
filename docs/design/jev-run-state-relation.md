@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This change adds an opt-in Jev preflight preset that recognizes whether a new user request continues, clarifies, corrects, or otherwise substantively relates to the objective in the current `JevRunStateRecord`. A related request keeps that record and the original objective; an unrelated request asks the existing run-state agent to create a new record from the current message. The request still enters JevAgent's ordinary runtime loop as the current message, and the feature does not compact, restore, or rewrite the main conversation history.
+This change adds an opt-in Jev preflight preset that recognizes whether a new user request has a substantive relationship to the work or identifiable content in the current `JevRunStateRecord`. A related request keeps that record unchanged, even when it asks for a different action or deliverable about the same identifiable project, entity, or artifact. An unrelated request has no identifiable connection beyond broad topical overlap, so the existing run-state agent creates a new record from the current message. The request still enters JevAgent's ordinary runtime loop as the current message, and the feature does not compact, restore, or rewrite the main conversation history.
 
 ---
 
@@ -20,7 +20,7 @@ This change adds an opt-in Jev preflight preset that recognizes whether a new us
 - Add the fixed opt-in `JevPreflightPreset.RUN_STATE_RELATION` with one registered `JevPreflightQuestionKey.RUN_STATE_RELATION` question.
 - Ask the relationship question only when the gate receives an existing run-state record; on a first run, initialize state normally without issuing or recording a relation question.
 - Combine the current request and a JSON-safe projection of the existing record into the already configured single Jev preflight request. Omit the usage rollup from that projection.
-- Keep the record when Jev identifies a substantive relationship, or when the relation answer is unavailable; generate a replacement through `JevRunState.begin` only when no record exists or Jev identifies a separate task.
+- Keep the record when Jev identifies a substantive relationship, or when the relation answer is unavailable; generate a replacement through `JevRunState.begin` only when no record exists or Jev identifies no substantive relationship.
 - Clear a stale prior record before attempting replacement so a typed run-state generation failure cannot leave the unrelated record presented as current.
 - Retain current per-run initialization for agents that have not enabled the new preset.
 - Build the run-state facade when the preset is enabled even if `JevContinualSettings.checks` is empty, and build a continuation only when at least one done check is enabled.
@@ -40,11 +40,11 @@ This change adds an opt-in Jev preflight preset that recognizes whether a new us
 
 ## 3. Background & Context
 
-`JevRuntime.arun` currently starts a fresh response, calls `JevPreflightGate.pass_(message)`, and then invokes `JevRunState.begin(message)` whenever continual done checks are enabled. `begin` clears that state agent's prior record and history before generating a new record. This is correct for today's per-run semantics, but it provides no way to carry the original objective into a later related request.
+`JevRuntime.arun` currently starts a fresh response, calls `JevPreflightGate.pass_(message)`, and then invokes `JevRunState.begin(message)` whenever continual done checks are enabled. `begin` clears that state agent's prior record and history before generating a new record. This is correct for today's per-run semantics, but it provides no way to retain state when a later request has an identifiable relationship to the represented work or content.
 
 The gate already combines every enabled fixed-question preset and any specialist question into one Jev request. Fixed question content and preset policy belong in `vidbyte/lib/jev/`; the gate's action belongs in `vidbyte/agents/jev/gate/`; outcomes are written by `JevResponse`. The existing `JevRunState` is built only when continual checks are enabled, while the new preset also needs it to write and retain task state when there are no done checks.
 
-The Jev question house style requires one recognition judgment, a structured brief and mirrored criteria, an explicit way to classify empty input, one string per section, and at least 2,000 meaningful tokens across the question. The new question therefore defines a substantive relationship with concrete continuation, correction, and independent-task boundaries. Its fixed threshold is 0.5, the existing neutral Noul yes threshold; no labeled relation dataset exists in this change, so that value is documented as an initial policy.
+The Jev question house style requires one recognition judgment, a structured brief and mirrored criteria, an explicit way to classify empty input, one string per section, and at least 2,000 meaningful tokens across the question. The new question therefore defines a substantive relationship with concrete references and shared identifiable objects, while distinguishing those from generic topical overlap and wholly separate requests. Its fixed threshold is 0.5, the existing neutral Noul yes threshold; no labeled relation dataset exists in this change, so that value is documented as an initial policy.
 
 ---
 
@@ -53,7 +53,7 @@ The Jev question house style requires one recognition judgment, a structured bri
 ### Functional Requirements
 
 1. Add the fixed `RUN_STATE_RELATION` preflight preset and the uniquely named question key `run_state_relation` in the existing Jev enums, preset map, constants, question registry, and gate `match`.
-2. Define the new question as: “Does `request` have a substantive relationship to the work described in `run_state`?” Related cases include follow-up work on the same objective, corrections, clarifications, narrower or additional steps that contribute to it, and requests to continue. A different objective is unrelated even when it concerns the same broad subject. The question does not ask whether the request is easy, how many actions it contains, or what to plan.
+2. Define the new question as: “Does `request` have any substantive relationship to the work or identifiable content in `run_state`?” Related cases include follow-ups, corrections, clarifications, explicit references to record content, and requests about the same identifiable project, entity, or artifact, even when the requested action or deliverable changes. Generic topical overlap without an identifiable connection and wholly separate subjects or objects are unrelated. The question does not ask whether the request is easy, how many actions it contains, or what to plan.
 3. On each gate pass, reset `run_state_related` to `None`. Set it to the preset's scored pass/fail only when a record was provided and the relation answer is available; leave it `None` for an unavailable answer or when there is no record to compare.
 4. When the relation preset is enabled and a record exists, add exactly two named fields to the combined Jev state: the current `request` and a JSON-safe serialization of the record's semantic fields. Exclude usage accounting. Other enabled presets and specialist choice remain in the same request.
 5. When there is no record, omit the relation question and relation state field from the Jev call. Do not record an unavailable or passed relation result for this not-applicable first-run case.
@@ -101,7 +101,7 @@ JevRuntime.arun(message)
 
 #### What it does
 
-Defines one frozen preflight question and registers it under the opt-in preset. The brief distinguishes continuation, clarification, correction, or added work toward the same purpose from a separate request; it focuses on `request` and the named semantic fields of `run_state`. Each rendered question has at least 2,000 meaningful tokens across the brief, criteria, and gap, and every section uses one standalone string.
+Defines one frozen preflight question and registers it under the opt-in preset. The brief recognizes substantive links to any identifiable work or content in `run_state`, including a different action about the same project or artifact, and distinguishes those from generic topical overlap or wholly separate subjects. It focuses on `request` and the named semantic fields of `run_state`. Each rendered question has at least 2,000 meaningful tokens across the brief, criteria, and gap, and every section uses one standalone string.
 
 #### Interface / API
 
@@ -123,16 +123,16 @@ The question is registered through `JevPreflightRegistry` and its preset definit
 
 #### Logic / Algorithm
 
-1. Build a single Noul question whose positive side means the new request contributes to the existing objective and whose negative side means it asks for different work.
-2. Define an empty message or a message with no task as unrelated; define same-topic but separate-objective requests as unrelated.
-3. Describe follow-up, clarification, correction, and incremental requests as related only when they contribute to the objective in `run_state`.
+1. Build a single Noul question whose positive side means the new request has a substantive connection to identifiable work or content in the existing record, including a different action about the same concrete project, entity, or artifact.
+2. Define an empty message or a message with no task as unrelated; define generic same-topic requests without an identifiable connection, and wholly separate subjects or objects, as unrelated.
+3. Describe follow-up, clarification, correction, explicit references, and requests about the same identifiable project or artifact as related even when the requested purpose, action, or deliverable differs.
 4. Add the question to `JevPreflightRegistry` and the `RUN_STATE_RELATION` preset definition.
 5. Use the named 0.5 threshold, with equality treated as related by the existing inclusive Noul comparison.
 
 #### Edge Cases & Error Handling
 
 - No existing record means the question is not asked and no relation result is written.
-- Same topic with an independent objective must be classified as unrelated.
+- A broad shared topic without an identifiable link must be classified as unrelated; a request about the same concrete project or artifact can be related even when it asks for a new action or deliverable.
 - A vague or empty request is not evidence that it relates to the old objective.
 - Missing or malformed answers are handled as unavailable by `DecisionModelHelper.score_noul`; the gate records the existing preset's unavailable result and leaves its relation flag `None`.
 
@@ -320,9 +320,9 @@ Complete list of every file that will be created, modified, or deleted:
 ### Unit Tests
 
 - Question structure and registration:
-  - [Edge Case] A blank/greeting request has an explicit unrelated side; a follow-up that completes a previous step is related.
+  - [Edge Case] A blank/greeting request has an explicit unrelated side; a follow-up or correction is related.
   - [Hidden Failure] A user-written claim such as “this is related” or an instruction to choose true cannot decide the answer without task evidence.
-  - [Silent Failure] A request with the same broad subject but a different objective is classified as unrelated; a correction to the existing objective is related.
+  - [Silent Failure] A request about the same concrete SDK project or artifact is related even when it asks for a different action; generic software overlap without an identifiable link is unrelated.
   - [Hidden Assumption] The question works from named `request` and `run_state` fields only and does not depend on main conversation history.
   - [Silent Failure] Registered question text totals at least 2,000 meaningful tokens; `definitions`, `rules`, `easy`, and `boundary` each use one string.
 - Gate and state projection:
@@ -354,7 +354,7 @@ Complete list of every file that will be created, modified, or deleted:
 
 1. Given an opted-in JevAgent with no run-state record, run a first request and confirm the relation question is absent while a normal run-state record is created.
 2. Given an existing objective and a related follow-up, confirm Jev sees the current message and record, the record is retained, and the main agent receives only the current message through its ordinary loop.
-3. Given an existing objective and a distinct request on the same broad topic, confirm Jev returns unrelated and a replacement record is built from the new request.
+3. Given an existing record about a concrete project and a different action concerning that same project, confirm Jev returns related and the record remains unchanged; given only generic topic overlap without a concrete link, confirm Jev returns unrelated and a replacement record is built from the new request.
 4. Given an existing record and an unavailable relation decision, confirm the record remains visible on the latest response and no replacement state generation occurs.
 5. Given the preset disabled, confirm current per-run run-state initialization remains unchanged.
 
