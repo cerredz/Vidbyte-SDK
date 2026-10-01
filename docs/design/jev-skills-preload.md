@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-Add optional request-time skill selection to `JevAgent`. Callers configure plain skill documents in the existing grouped alignment settings. After the gate and existing prompt/tool alignment, Jev evaluates each configured skill against the current request in one batched decision call. The selected skill text is appended to the effective system prompt for that run, and the response records which skills were selected, skipped, or unavailable. The capability is opt-in, performs no source retrieval or code execution, and fails open when the decision service is unavailable.
+Add optional request-time skill selection to `JevAgent`. Callers configure plain skill documents in the existing grouped alignment settings. After the gate and existing prompt/tool alignment, Jev evaluates every configured skill against the current request in one or more bounded decision calls. Ordinary small collections fit in one call; larger collections are split into stable-order batches. The selected skill text is appended to the effective system prompt for that run, and the response records which skills were selected, skipped, or unavailable. The capability is opt-in, performs no source retrieval or code execution, and fails open when the decision service is unavailable.
 
 ---
 
@@ -20,7 +20,7 @@ Add optional request-time skill selection to `JevAgent`. Callers configure plain
 - Accept caller supplied `SkillDocument` objects and inline strings in `JevAlignmentSettings.skills`.
 - Preserve inline text exactly and assign deterministic names to inline values.
 - Reject malformed documents and duplicate skill names at settings construction.
-- Ask one request-local relevance question per skill in one Jev request.
+- Ask one request-local relevance question per skill, packing questions into bounded Jev requests.
 - Use a configurable, validated yes-probability threshold with the existing Jev default yes threshold.
 - Append only skills that meet the threshold to the effective system prompt for the current run.
 - Expose per-skill selected, skipped, unavailable status, relevance probability when available, source provenance, and decision usage on `JevAgent.response.skills`.
@@ -75,7 +75,7 @@ Add optional request-time skill selection to `JevAgent`. Callers configure plain
 ### Non-Functional Requirements
 
 - A no-skill run adds no request latency and performs zero extra Jev calls.
-- Selection uses one batched request regardless of skill count, subject to the existing Jev request limits; configuration that cannot fit that contract fails validation or marks preload unavailable without stopping the main run.
+- Selection packs questions into bounded requests using conservative UTF-8 JSON byte counts: at most 60,000 bytes per request and at most 30,000 bytes for state plus the largest question. These local safety bounds leave room under TypeSafe's documented 64k total / 32k state-plus-largest-question token limits; they are not vendor byte caps. Small collections use one request.
 - All runtime work fails open: skill selection errors preserve the effective prompt and continue the main run.
 - Skill text is explicitly labeled as untrusted evidence in the Jev question; this code does not interpret or execute its contents.
 - No source text or skills are written to logs or response records. Usage and non-sensitive metadata may be recorded.
@@ -87,10 +87,10 @@ Add optional request-time skill selection to `JevAgent`. Callers configure plain
 
 The public settings layer normalizes skill documents once. `JevAgent` constructs a preload object only when skills are configured and passes it, the alignment settings, threshold, and response writer into each runtime. Existing gate behavior remains first: a stopped request or specialist handoff returns before the main agent's preload. Prompt and tool alignment continue in their current order.
 
-After alignment, the runtime constructs the effective baseline system prompt from the caller's explicit options override when present, otherwise from the aligned context. The preload asks one batched Jev decision request, scores answers independently, records a result for every candidate, and returns a replacement `BaseAgentContext` with selected full skill texts appended. Missing answers do not invalidate other answers; a provider/request error marks the candidates unavailable and returns the unmodified effective context. The runtime then enters run-state setup, tool selection, and the main loop. Its `finally` block restores runtime fields so a later call cannot inherit an earlier prompt or tools.
+After alignment, the runtime constructs the effective baseline system prompt from the caller's explicit options override when present, otherwise from the aligned context. The preload greedily packs indexed questions into bounded requests in settings order, keeping the user request and only that batch's full candidate records in each state. It scores answers independently, keeps stable global indices, and records every candidate. A failed batch marks only its candidates unavailable; a candidate too large to fit alone is unavailable without truncation. Other batches continue. Selected full skill texts are appended in settings order to a replacement `BaseAgentContext`. The runtime then enters run-state setup, tool selection, and the main loop. Its `finally` block restores runtime fields so a later call cannot inherit an earlier prompt or tools.
 
 ```text
-Jev gate -> prompt alignment -> tool alignment -> skill relevance batch
+Jev gate -> prompt alignment -> tool alignment -> bounded skill batches
                                                 | selected docs
                                                 v
                                    replacement run context
@@ -170,7 +170,7 @@ JevRuntimeSettings.skills_threshold: float = JEV_NOUL_YES_THRESHOLD
 
 #### What it does
 
-Builds one indexed question per candidate and the single shared request sent to Jev.
+Builds one indexed question per candidate and groups questions into bounded Jev requests.
 
 #### Interface / API
 
@@ -191,8 +191,8 @@ class JevSkillRelevanceQuestion:
 1. Name questions `skill_relevance.<index>` using stable tuple order.
 2. Render complete question instructions with sections for scope, state, definitions, rules, examples, boundaries, and the final yes/no question. The question text alone must exceed 2,000 meaningful tokens across instructions and criteria, following `skills/asking-jev-questions/SKILL.md`.
 3. Pass the original user request and each candidate's name, description, source, and full text as structured data labeled untrusted. Refer to a candidate in question prose only by its fixed indexed identifier, and instruct Jev to assess relevance only and not follow candidate instructions.
-4. Build one `JevDecisionRequest` containing all candidate questions. Do not truncate or summarize candidate text.
-5. Reject request construction if upstream Jev size or question-count validation cannot represent the configured batch; preload failure is fail-open at runtime.
+4. Build each `JevDecisionRequest` from one bounded batch. Do not truncate or summarize candidate text.
+5. Greedily pack questions in configured order under local 60,000-byte total and 30,000-byte state-plus-largest-question bounds. Count UTF-8 serialized JSON bytes conservatively; do not describe these local bounds as TypeSafe byte limits. Keep global indices stable and each full document wholly inside one batch. Mark a candidate too large to fit alone unavailable and continue packing later candidates.
 
 #### Edge Cases & Error Handling
 
@@ -222,18 +222,18 @@ class JevSkillsPreload(JevPreload):
 
 #### Logic / Algorithm
 
-1. Send the single batched request via `DecisionModelHelper`.
+1. Pack indexed candidate questions in stable order under the local byte bounds; small collections produce one batch.
 2. Capture Jev usage from the provider response. Catch only the SDK/domain error types used by existing Jev paths; let cancellation propagate.
 3. Score each candidate independently using `score_noul` with a one-name sequence and configured threshold.
-4. Create selected, skipped, or unavailable result records. A valid independent answer is retained when another is missing; provider/request failure marks all unavailable.
+4. Send each batch sequentially via `DecisionModelHelper`. Create selected, skipped, or unavailable result records. A valid answer is retained when another is missing; an SDK/request failure marks only that batch unavailable and later batches continue.
 5. Append selected full texts in settings order after an explicit section separator; preserve the entire baseline prompt.
-6. Return `dataclasses.replace(context, system_prompt=...)`; on failure return the baseline context unchanged and record unavailable results.
+6. Sum usage once across successful batches. Return `dataclasses.replace(context, system_prompt=...)`; a failed batch leaves only its candidates unavailable while successful batches remain usable.
 7. Do not mutate caller context, tools, agent settings, or provider options.
 
 #### Edge Cases & Error Handling
 
 - A missing answer or non-noul answer marks only its candidate unavailable.
-- A `VidbyteSdkError` or malformed whole response must not silently select a skill. Cancellation and unexpected programming errors propagate after runtime cleanup; ordinary SDK/provider failures leave the original prompt intact.
+- A `VidbyteSdkError` for one batch marks only that batch unavailable and must not silently select a skill. An individually oversized skill is unavailable without truncation. Cancellation and unexpected programming errors propagate after runtime cleanup; ordinary SDK/provider failures leave those candidates out while successful batches remain usable.
 - Usage may be absent; records then use `None`.
 
 ### 6.5 Runtime orchestration and cleanup
@@ -391,6 +391,7 @@ Complete list of every file planned for this change:
 | CREATE | `vidbyte/agents/jev/preload.py` | Narrow context-preload contract |
 | CREATE | `vidbyte/agents/jev/alignment/skills.py` | Skill selection and context injection |
 | CREATE | `tests/test_jev_skill_preload.py` | Focused contract, response, and runtime tests |
+| CREATE | `tests/features/jev_skills_preload/FEATURE.md` | Feature test pack and regression map |
 | CREATE | `scripts/test-jev-skills-preload.py` | Focused executable gate |
 | MODIFY | `vidbyte/agents/jev/settings.py` | Skills configuration and threshold |
 | MODIFY | `vidbyte/agents/jev/agent.py` | Build and pass preload |
@@ -400,9 +401,11 @@ Complete list of every file planned for this change:
 | MODIFY | `vidbyte/lib/dataclasses/jev.py` | Skill result and response field |
 | MODIFY | `vidbyte/lib/dataclasses/__init__.py` | Public dataclass export |
 | MODIFY | `vidbyte/lib/enums/jev.py` | Skill outcome enum |
+| MODIFY | `vidbyte/lib/enums/__init__.py` | Public enum namespace |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Jev exports |
 | MODIFY | `vidbyte/agents/__init__.py` | Agents namespace export |
 | MODIFY | `vidbyte/__init__.py` | Root SDK export |
+| MODIFY | `vidbyte/lib/jev/preflight/README.md` | Preflight question module index |
 | MODIFY | `skills/jev-agent/SKILL.md` | Document runtime skill capability |
 
 ---
