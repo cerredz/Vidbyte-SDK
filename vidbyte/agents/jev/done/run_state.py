@@ -54,6 +54,15 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_COMPLETION_STATUS_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_ACTION_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_CANDIDATES_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_CRITERIA_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_EVIDENCE_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_IDENTITY_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD,
+    JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD,
+    JEV_DONE_DISCOVERED_ITEMS_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_EXECUTION_FIELD,
     JEV_DONE_FINAL_ACCOUNT_FIELD,
@@ -263,6 +272,9 @@ class JevRunState(BaseAgent):
 
     async def begin(self, request: str, prior_user_turns: Sequence[str] = ()) -> None:
         """Write this run's state from the user's request and record it; a failure leaves no state, so no check runs."""
+        # @intent caller-supplied-user-turns-remain-source-context
+        # Preserve earlier user messages verbatim and in order beside the current request, including the one bounded
+        # recall rebuild; do not infer history from agent messages or drop it when a focused rewrite is requested.
         self.request = request
         self.prior_user_turns = tuple(turn for turn in prior_user_turns if turn.strip())
         self.user_turns = (*self.prior_user_turns, request)
@@ -399,6 +411,9 @@ class JevRunState(BaseAgent):
 
     async def check(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> tuple[JevDoneResult, ...]:
         """Run every enabled done check on this finish attempt, record every result, and return the checks that failed."""
+        # @intent finish-attempt-evidence-is-rebuilt-and-batched
+        # Compile from this attempt's raw responses and calls, then ask the complete enabled question set once so
+        # neither stale evidence nor sequential gate rewrites can change a sibling check's input.
         self.handoff = None
         if self.record is None:
             return ()
@@ -478,9 +493,44 @@ class JevRunState(BaseAgent):
             JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions_section,
             JevDoneCheck.REQUIRED_ACTIONS: self._required_actions_section,
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations_section,
+            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
+
+    def _discovered_item_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Project every recorded source inventory and discovered item into one shared decision batch."""
+        evidence = handoff.discovered_item_coverage
+        if evidence is None:
+            return {}, ()
+        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        inventories: dict[str, object] = {
+            batch.source_id: {
+                JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD: batch.source_output,
+                JEV_DONE_DISCOVERED_ITEM_CANDIDATES_FIELD: [
+                    {JEV_DONE_DISCOVERED_ITEM_IDENTITY_FIELD: item.identity}
+                    for item in batch.candidates
+                ],
+            }
+            for batch in evidence.batches
+        }
+        items: dict[str, object] = {
+            item.id: {
+                JEV_DONE_DISCOVERED_ITEM_FIELD: item.identity,
+                JEV_DONE_DISCOVERED_ITEM_ACTION_FIELD: item.requested_processing,
+                JEV_DONE_DISCOVERED_ITEM_CRITERIA_FIELD: item.completion_criteria,
+                JEV_DONE_DISCOVERED_ITEM_EVIDENCE_FIELD: item.processing_evidence,
+            }
+            for item in evidence.items()
+        }
+        questions = tuple(
+            inventory_question.to_question(batch.source_id) for batch in evidence.batches
+        ) + tuple(item_question.to_question(identifier) for identifier in evidence.item_ids())
+        return {
+            JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD: inventories,
+            JEV_DONE_DISCOVERED_ITEMS_FIELD: items,
+        }, questions
 
     def _cumulative_obligations_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         """Ask about every active request obligation and every supplied user turn's evidence inventory."""
@@ -977,11 +1027,59 @@ class JevRunState(BaseAgent):
             JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions,
             JevDoneCheck.REQUIRED_ACTIONS: self._required_actions,
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations,
+            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_coverage,
         }
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
         return handler(handoff, decision)
+
+    def _discovered_item_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Require every recorded source inventory and discovered item to meet its own coverage threshold."""
+        evidence = None if handoff is None else handoff.discovered_item_coverage
+        if evidence is None:
+            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
+        identifiers = tuple(f"inventory:{batch.source_id}" for batch in evidence.batches)
+        identifiers += tuple(f"item:{identifier}" for identifier in evidence.item_ids())
+        if not identifiers:
+            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
+        item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        question_names = {
+            **{
+                f"inventory:{batch.source_id}": inventory_question.name(batch.source_id)
+                for batch in evidence.batches
+            },
+            **{
+                f"item:{item_id}": item_question.name(item_id)
+                for item_id in evidence.item_ids()
+            },
+        }
+        answers = {
+            identifier: decision.answers[name]
+            for identifier, name in question_names.items()
+            if name in decision.answers
+        }
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
+        incomplete = tuple(
+            identifier
+            for identifier in identifiers
+            if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False
+        )
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE,
+            score=verdict.score,
+            passed=verdict.passed,
+            answers=verdict.answers,
+            incomplete=incomplete,
+            usage=usage,
+        )
 
     def _cumulative_obligations(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         """Require each surviving obligation and each supplied user turn's evidence inventory to pass."""

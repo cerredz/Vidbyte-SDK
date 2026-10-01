@@ -50,6 +50,9 @@ from vidbyte import (
     JevContinualSettings,
     JevDoneCheck,
     JevDeliverableEvidence,
+    JevDiscoveredItem,
+    JevDiscoveredItemBatch,
+    JevDiscoveredItemEvidence,
     JevInputSetCoverage,
     JevInputTarget,
     JevOutputCount,
@@ -90,10 +93,14 @@ from vidbyte.lib.dataclasses.jev import (
     JevCumulativeObligationEvidencePayload,
     JevCumulativeUserTurnEvidence,
     JevCumulativeUserTurnEvidenceEntryPayload,
+    JevDiscoveredItemBatchEntryPayload,
+    JevDiscoveredItemBatchPayload,
+    JevDiscoveredItemPayload,
 )
 from vidbyte.lib.constants.jev import (
     JEV_CLAIMS_THRESHOLD,
     JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
+    JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
     JEV_DONE_CLAIM_FIELD,
     JEV_DONE_CLAIMS_FIELD,
     JEV_DONE_COMPLETION_EVIDENCE_FIELD,
@@ -568,7 +575,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevNegativeCoverageTarget, JevNegativeCoverage, JevNegativeCoverageEvidenceItem, JevNegativeCoverageEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRequiredAction, JevRequiredActionEvidence, JevRequiredActions, JevRequiredActionsEvidence, JevCumulativeObligation, JevCumulativeObligationEvidence, JevCumulativeObligations, JevCumulativeObligationsEvidence, JevCumulativeUserTurnEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevNegativeCoverageTarget, JevNegativeCoverage, JevNegativeCoverageEvidenceItem, JevNegativeCoverageEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRequiredAction, JevRequiredActionEvidence, JevRequiredActions, JevRequiredActionsEvidence, JevCumulativeObligation, JevCumulativeObligationEvidence, JevCumulativeObligations, JevCumulativeObligationsEvidence, JevCumulativeUserTurnEvidence, JevDiscoveredItem, JevDiscoveredItemBatch, JevDiscoveredItemEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -576,7 +583,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevNegativeCoveragePayload, JevNegativeCoverageTargetPayload, JevNegativeCoverageEvidencePayload, JevNegativeCoverageEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationPayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidenceEntryPayload, JevCumulativeUserTurnEvidenceEntryPayload, JevCumulativeObligationEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevNegativeCoveragePayload, JevNegativeCoverageTargetPayload, JevNegativeCoverageEvidencePayload, JevNegativeCoverageEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationPayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidenceEntryPayload, JevCumulativeUserTurnEvidenceEntryPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemPayload, JevDiscoveredItemBatchEntryPayload, JevDiscoveredItemBatchPayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -585,7 +592,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevNegativeCoveragePayload, JevNegativeCoverageEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevNegativeCoveragePayload, JevNegativeCoverageEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemBatchPayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -844,6 +851,7 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(required_schema.model_fields[JEV_DONE_REQUIRED_ACTIONS_FIELD].description, JevRequiredActionsPayload.SECTION)
         cumulative_schema = JevRunState.schema((JevDoneCheck.CUMULATIVE_OBLIGATIONS,))
         self.assertEqual(cumulative_schema.model_fields["cumulative_obligations"].description, JevCumulativeObligationsPayload.SECTION)
+        self.assertNotIn("discovered_item_coverage", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
         self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "what_not_to_do"})
         self.assertNotIn(JEV_DONE_REQUIRED_ACTIONS_FIELD, JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields)
@@ -884,6 +892,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertNotIn(JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD, JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         required_schema = JevHandoff.schema((JevDoneCheck.REQUIRED_ACTIONS,))
         self.assertEqual(required_schema.model_fields[JEV_DONE_REQUIRED_ACTIONS_FIELD].description, JevRequiredActionsEvidencePayload.SECTION)
+        discovered_schema = JevHandoff.schema((JevDoneCheck.DISCOVERED_ITEM_COVERAGE,))
+        self.assertEqual(discovered_schema.model_fields["discovered_item_coverage"].description, JevDiscoveredItemBatchPayload.SECTION)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
@@ -956,6 +966,16 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertIs(JevDoneRegistry.question_for_key(inventory.key), inventory)
         self.assertNotEqual(obligation.key, inventory.key)
         self.assertIn("turn_evidence", inventory.instructions.state)
+
+    def test_discovered_item_registry_keeps_source_inventory_separate(self) -> None:
+        check = JevDoneCheck.DISCOVERED_ITEM_COVERAGE
+        processing = JevDoneRegistry.question(check)
+        inventory = JevDoneRegistry.inventory_question(check)
+        self.assertEqual(JevDoneRegistry.threshold(check), JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD)
+        self.assertIs(JevDoneRegistry.question_for_key(inventory.key), inventory)
+        self.assertNotEqual(processing.key, inventory.key)
+        self.assertIn("source_output", inventory.instructions.state)
+        self.assertIn("discovered_items", processing.instructions.state)
 
     def test_brief_follows_the_skill_layout_with_one_string_per_section(self) -> None:
         brief = self.question.instructions
@@ -1392,6 +1412,89 @@ class JevCumulativeObligationsIntegrationTests(unittest.IsolatedAsyncioTestCase)
             usage={},
         )
         result = run_state._judge(check, handoff, decision)
+        self.assertTrue(result.available and result.passed)
+
+
+class JevDiscoveredItemCoverageIntegrationTests(unittest.TestCase):
+    """Pin source-inventory vetoes and empty-inventory questions in the combined gate path."""
+
+    @staticmethod
+    def _run_state_and_handoff(
+        batches: tuple[JevDiscoveredItemBatch, ...],
+    ) -> tuple[JevRunState, JevHandoffRecord]:
+        agent = _jev(done=(JevDoneCheck.DISCOVERED_ITEM_COVERAGE,))
+        assert agent.run_state is not None
+        evidence = JevDiscoveredItemEvidence(batches=batches)
+        return agent.run_state, JevHandoffRecord(discovered_item_coverage=evidence)
+
+    @staticmethod
+    def _decision(answers: Mapping[str, float]) -> DecisionModelResponse:
+        return DecisionModelResponse(
+            provider=ModelProvider.TYPESAFE,
+            model="jev-1.13.0",
+            answers={name: _answer(name, score) for name, score in answers.items()},
+            raw={},
+            usage={},
+        )
+
+    def test_low_source_inventory_vetoes_high_item_processing_answer(self) -> None:
+        check = JevDoneCheck.DISCOVERED_ITEM_COVERAGE
+        candidate = JevDiscoveredItem(
+            "doc_1", "Document 1", "summarize it", "a summary is visible",
+            "The agent summarized Document 1.", "Nothing is missing.",
+        )
+        run_state, handoff = self._run_state_and_handoff((
+            JevDiscoveredItemBatch("tool_call_0", "doc_id=1", (candidate,)),
+        ))
+        _, questions = run_state._section(check, handoff)
+        self.assertEqual(len(questions), 2)
+        self.assertEqual(JevDoneRegistry.threshold(check), JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD)
+        inventory = JevDoneRegistry.inventory_question(check)
+        item = JevDoneRegistry.question(check)
+        result = run_state._judge(check, handoff, self._decision({
+            inventory.name("tool_call_0"): 0.79,
+            item.name("doc_1"): 0.99,
+        }))
+        self.assertTrue(result.available)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("inventory:tool_call_0",))
+
+    def test_handoff_requires_exact_bounded_raw_source_outputs(self) -> None:
+        raw_output = "  doc_id=1\nstatus=open  "
+        payload = JevDiscoveredItemBatchPayload(batches=[
+            JevDiscoveredItemBatchEntryPayload(source_id="tool_call_0", candidates=[
+                JevDiscoveredItemPayload(
+                    id="doc_1",
+                    identity="Document 1",
+                    requested_processing="summarize it",
+                    completion_criteria="a summary is visible",
+                    processing_evidence="The run contains a summary of Document 1.",
+                    missing="Nothing is missing.",
+                )
+            ])
+        ])
+        evidence = JevHandoff._discovered_items(payload, {"tool_call_0": raw_output})
+        self.assertIsNotNone(evidence)
+        assert evidence is not None
+        self.assertEqual(evidence.batches[0].source_output, raw_output)
+        self.assertEqual(evidence.batches[0].candidates[0].identity, "Document 1")
+        self.assertIsNone(JevHandoff._discovered_items(payload, {"other_call": raw_output}))
+        self.assertIsNone(JevHandoff._discovered_items(payload, {"tool_call_0": "x" * 12_001}))
+
+    def test_empty_candidate_lists_still_ask_each_source_at_inclusive_threshold(self) -> None:
+        check = JevDoneCheck.DISCOVERED_ITEM_COVERAGE
+        run_state, handoff = self._run_state_and_handoff((
+            JevDiscoveredItemBatch("tool_call_0", "No collection here.", ()),
+            JevDiscoveredItemBatch("tool_call_1", "No collection here either.", ()),
+        ))
+        projected, questions = run_state._section(check, handoff)
+        self.assertEqual(projected["discovered_items"], {})
+        self.assertEqual(len(questions), 2)
+        inventory = JevDoneRegistry.inventory_question(check)
+        result = run_state._judge(check, handoff, self._decision({
+            inventory.name("tool_call_0"): 0.8,
+            inventory.name("tool_call_1"): 0.8,
+        }))
         self.assertTrue(result.available and result.passed)
 
 

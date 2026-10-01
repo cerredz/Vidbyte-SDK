@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names. Cumulative obligations preserve requirements across the supplied chronological user turns.
+PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names. Cumulative obligations preserve requirements across the supplied chronological user turns. Discovered-item coverage inventories bounded recorded outputs and checks requested per-item processing.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-agent-scaffold.py, and tests/test_jev_done.py.
 """
 
@@ -49,7 +49,11 @@ JEV_STATUS_RATE_LIMITED: int = 429
 JEV_STATUS_OVERLOADED: int = 529
 JEV_STATUS_SERVER_ERROR_FLOOR: int = 500
 JEV_STATUS_SERVER_ERROR_CEILING: int = 600
-JEV_RETRY_STATUS_CODES: tuple[int, ...] = (JEV_STATUS_REQUEST_TIMEOUT, JEV_STATUS_RATE_LIMITED, *range(JEV_STATUS_SERVER_ERROR_FLOOR, JEV_STATUS_SERVER_ERROR_CEILING))
+JEV_RETRY_STATUS_CODES: tuple[int, ...] = (
+    JEV_STATUS_REQUEST_TIMEOUT,
+    JEV_STATUS_RATE_LIMITED,
+    *range(JEV_STATUS_SERVER_ERROR_FLOOR, JEV_STATUS_SERVER_ERROR_CEILING),
+)
 
 # Noul wire literals: the optional criteria keys and the two outcomes a noul answer expands to.
 JEV_NOUL_TRUE: str = "true"
@@ -126,6 +130,11 @@ JEV_PHASE_PROGRESS_THRESHOLD: float = 0.8
 JEV_REQUIRED_ACTIONS_THRESHOLD: float = 0.85
 # Every active user obligation independently reaches this P(yes); a single clear no is a veto.
 JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD: float = 0.85
+# Each discovered source inventory and processed item must independently meet this threshold.
+JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD: float = 0.8
+# Preserve bounded raw tool outputs for source-inventory questions.
+JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS: int = 12_000
+JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS: int = 48_000
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -226,6 +235,18 @@ JEV_DONE_OBLIGATION_ACTIVE_FIELD: str = "active"
 JEV_DONE_OBLIGATION_STATUS_REASON_FIELD: str = "status_reason"
 JEV_MIN_OBLIGATION_STATUS_REASON_CHARS: int = 1
 JEV_MIN_OBLIGATION_TURN_INDEX: int = 0
+# Discovered-item handoff and state field names.
+JEV_DONE_DISCOVERED_ITEMS_FIELD: str = "discovered_items"
+JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD: str = "inventory"
+JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD: str = "source_output"
+JEV_DONE_DISCOVERED_ITEM_CANDIDATES_FIELD: str = "candidates"
+JEV_DONE_DISCOVERED_ITEM_FIELD: str = "item"
+JEV_DONE_DISCOVERED_ITEM_ACTION_FIELD: str = "requested_processing"
+JEV_DONE_DISCOVERED_ITEM_CRITERIA_FIELD: str = "completion_criteria"
+JEV_DONE_DISCOVERED_ITEM_EVIDENCE_FIELD: str = "processing_evidence"
+JEV_DONE_DISCOVERED_ITEM_GAP_FIELD: str = "missing"
+JEV_DONE_DISCOVERED_ITEM_SOURCE_ID_FIELD: str = "source_id"
+JEV_DONE_DISCOVERED_ITEM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_FIELD: str = "claim"
 JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
@@ -359,6 +380,17 @@ __all__ = [
     "JEV_DONE_COMPLETION_STATUS_FIELD",
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
+    "JEV_DONE_DISCOVERED_ITEMS_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_ACTION_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_CANDIDATES_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_CRITERIA_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_EVIDENCE_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_GAP_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_IDENTITY_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD",
+    "JEV_DONE_DISCOVERED_ITEM_SOURCE_ID_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_INSPECTION_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
@@ -432,6 +464,9 @@ __all__ = [
     "JEV_OUTPUT_COUNT_THRESHOLD",
     "JEV_REQUIRED_ACTIONS_THRESHOLD",
     "JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD",
+    "JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD",
+    "JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS",
+    "JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS",
     "JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",

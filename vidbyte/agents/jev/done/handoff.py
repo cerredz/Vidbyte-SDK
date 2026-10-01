@@ -27,7 +27,11 @@ from vidbyte.context.primitives import (
     TextContextItem,
     ToolCallContextItem,
 )
-from vidbyte.lib.constants.jev import JEV_DONE_COMPLETION_ITEM_INDEX
+from vidbyte.lib.constants.jev import (
+    JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS,
+    JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS,
+    JEV_DONE_COMPLETION_ITEM_INDEX,
+)
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
     JevClaimAssertion,
@@ -44,6 +48,11 @@ from vidbyte.lib.dataclasses.jev import (
     JevCompletionEvidence,
     JevCompletionEvidenceSectionPayload,
     JevDeliverableEvidence,
+    JevDiscoveredItem,
+    JevDiscoveredItemBatch,
+    JevDiscoveredItemBatchEntryPayload,
+    JevDiscoveredItemBatchPayload,
+    JevDiscoveredItemEvidence,
     JevGuaranteedNextAction,
     JevGuaranteedNextActions,
     JevGuaranteedNextActionsEvidencePayload,
@@ -116,6 +125,7 @@ class JevHandoff(BaseAgent):
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.GUARANTEED_NEXT_ACTIONS: JevGuaranteedNextActionsEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JevDiscoveredItemBatchPayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -165,7 +175,7 @@ class JevHandoff(BaseAgent):
                 name=f"trace[{index}] {call.name} state={getattr(call.state, 'value', call.state)}",
                 arguments=dict(call.arguments),
                 output=call.output,
-                metadata={"state": str(getattr(call.state, "value", call.state)), "trace_index": index},
+                metadata={"state": str(getattr(call.state, "value", call.state)), "trace_index": index, "source_id": f"tool_call_{index}"},
             )
             for index, call in enumerate(calls)
         )
@@ -217,23 +227,10 @@ class JevHandoff(BaseAgent):
         required_actions = self._required_actions_record(payload, state, calls, responses, final_answer)
         if JevDoneCheck.REQUIRED_ACTIONS in self.checks and required_actions is None:
             return None
-        report_action_alignment = None
-        alignment_section = getattr(payload, JevDoneCheck.REPORT_ACTION_ALIGNMENT.value, None)
-        if isinstance(alignment_section, JevReportActionAlignmentEvidenceSectionPayload):
-            # @intent report-action-candidates-are-post-run
-            # These candidates are created from post-run plans, execution, and the final account, so no request-state id list exists.
-            report_action_alignment = JevReportActionAlignment(tuple(
-                JevReportActionAlignmentItem(
-                    item.id,
-                    item.plan.strip(),
-                    item.execution.strip(),
-                    item.final_account.strip(),
-                    item.request_relevance.strip(),
-                    item.evidence.strip(),
-                    item.missing.strip(),
-                )
-                for item in alignment_section.items
-            ))
+        discovered_item_coverage = self._discovered_item_coverage_record(payload, calls)
+        if JevDoneCheck.DISCOVERED_ITEM_COVERAGE in self.checks and discovered_item_coverage is None:
+            return None
+        report_action_alignment = self._report_action_alignment_record(payload)
         assumptions_reconciled = None
         assumptions_section = getattr(payload, JevDoneCheck.ASSUMPTIONS_RECONCILED.value, None)
         if JevDoneCheck.ASSUMPTIONS_RECONCILED in self.checks:
@@ -312,6 +309,44 @@ class JevHandoff(BaseAgent):
             negative_coverage=request_records.negative_coverage,
             guaranteed_next_actions=guaranteed_next_actions,
             required_actions=required_actions,
+            discovered_item_coverage=discovered_item_coverage,
+        )
+
+    @staticmethod
+    def _report_action_alignment_record(payload: JevHandoffPayload) -> JevReportActionAlignment | None:
+        """Convert only the dynamically observed plan, execution, and final-account comparisons."""
+        alignment_section = getattr(payload, JevDoneCheck.REPORT_ACTION_ALIGNMENT.value, None)
+        if not isinstance(alignment_section, JevReportActionAlignmentEvidenceSectionPayload):
+            return None
+        # @intent report-action-candidates-are-post-run
+        # These candidates are created from post-run plans, execution, and the final account, so no request-state id list exists.
+        return JevReportActionAlignment(tuple(
+            JevReportActionAlignmentItem(
+                item.id,
+                item.plan.strip(),
+                item.execution.strip(),
+                item.final_account.strip(),
+                item.request_relevance.strip(),
+                item.evidence.strip(),
+                item.missing.strip(),
+            )
+            for item in alignment_section.items
+        ))
+
+    def _discovered_item_coverage_record(
+        self, payload: JevHandoffPayload, calls: Sequence[ToolCallContext]
+    ) -> JevDiscoveredItemEvidence | None:
+        """Match the handoff inventory against every string output from the current tool-call sequence."""
+        if JevDoneCheck.DISCOVERED_ITEM_COVERAGE not in self.checks:
+            return None
+        source_outputs = {
+            f"tool_call_{index}": call.output
+            for index, call in enumerate(calls)
+            if isinstance(call.output, str)
+        }
+        return self._discovered_items(
+            getattr(payload, JevDoneCheck.DISCOVERED_ITEM_COVERAGE.value, None),
+            source_outputs,
         )
 
     @staticmethod
@@ -622,6 +657,42 @@ class JevHandoff(BaseAgent):
         if sorted(evidence.ids()) != sorted(expected):
             return None
         return evidence
+
+    @staticmethod
+    def _discovered_items(
+        section: object, source_outputs: Mapping[str, str]
+    ) -> JevDiscoveredItemEvidence | None:
+        """Build item evidence only when each bounded raw tool output has one exact handoff batch."""
+        if not isinstance(section, JevDiscoveredItemBatchPayload):
+            return None
+        if any(not isinstance(output, str) for output in source_outputs.values()):
+            return None
+        if sum(len(output) for output in source_outputs.values()) > JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS:
+            return None
+        if any(len(output) > JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS for output in source_outputs.values()):
+            return None
+        entries = {entry.source_id: entry for entry in section.batches}
+        if len(entries) != len(section.batches) or set(entries) != set(source_outputs):
+            return None
+        batches = []
+        for source_id, source_output in source_outputs.items():
+            entry: JevDiscoveredItemBatchEntryPayload = entries[source_id]
+            candidates = tuple(
+                JevDiscoveredItem(
+                    item.id,
+                    item.identity.strip(),
+                    item.requested_processing.strip(),
+                    item.completion_criteria.strip(),
+                    item.processing_evidence.strip(),
+                    item.missing.strip(),
+                )
+                for item in entry.candidates
+            )
+            batches.append(JevDiscoveredItemBatch(source_id, source_output, candidates))
+        try:
+            return JevDiscoveredItemEvidence(tuple(batches))
+        except VidbyteSdkError:
+            return None
 
 
 

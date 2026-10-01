@@ -3,9 +3,9 @@
 PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question or question pair and threshold, plus validation of the done checks a user enables.
 ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
-COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; checks that audit a generated list against source inputs also register a per-source question in _inventory_questions. Keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here. REQUIRED_ACTIONS contributes one question for each explicitly requested action.
+COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; checks that audit a generated list against source inputs also register a per-source question in _inventory_questions. Keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here. REQUIRED_ACTIONS contributes one question for each explicitly requested action; DISCOVERED_ITEM_COVERAGE asks one source-inventory question and one item-processing question.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-discovered-item-coverage.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -19,6 +19,7 @@ from vidbyte.lib.constants.jev import (
     JEV_CLAIMS_THRESHOLD,
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
     JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
+    JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
     JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
     JEV_INPUT_EXHAUSTION_THRESHOLD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
@@ -46,6 +47,10 @@ from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupported
 from vidbyte.lib.jev.done.cumulative_obligations import (
     CumulativeObligationFulfilledQuestion,
     CumulativeUserTurnReconciledQuestion,
+)
+from vidbyte.lib.jev.done.discovered_item_coverage import (
+    DiscoveredItemInventoryCompleteQuestion,
+    DiscoveredItemProcessedQuestion,
 )
 from vidbyte.lib.jev.done.guaranteed_next_actions import (
     GuaranteedActionNecessaryQuestion,
@@ -88,9 +93,11 @@ class JevDoneRegistry:
         JevDoneCheck.OUTPUT_EXTENT: (OutputExtentSatisfiedQuestion(),),
         JevDoneCheck.REQUIRED_ACTIONS: (RequiredActionCompletedQuestion(),),
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: (CumulativeObligationFulfilledQuestion(),),
+        JevDoneCheck.DISCOVERED_ITEM_COVERAGE: (DiscoveredItemProcessedQuestion(),),
     })
     _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeUserTurnReconciledQuestion(),
+        JevDoneCheck.DISCOVERED_ITEM_COVERAGE: DiscoveredItemInventoryCompleteQuestion(),
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
@@ -111,6 +118,7 @@ class JevDoneRegistry:
         JevDoneCheck.OUTPUT_EXTENT: JEV_OUTPUT_EXTENT_THRESHOLD,
         JevDoneCheck.REQUIRED_ACTIONS: JEV_REQUIRED_ACTIONS_THRESHOLD,
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
+        JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
     })
 
     @classmethod
@@ -149,7 +157,13 @@ class JevDoneRegistry:
         """Return the P(yes) every one of the check's answers must reach for the run to finish."""
         found = cls._thresholds.get(check)
         if found is None:
-            raise ConfigurationError(f"Jev done check {check!r} has no registered threshold.", details={"check": str(check), "registered": [item.value for item in cls._thresholds]})
+            raise ConfigurationError(
+                f"Jev done check {check!r} has no registered threshold.",
+                details={
+                    "check": str(check),
+                    "registered": [item.value for item in cls._thresholds],
+                },
+            )
         return found
 
     @classmethod
@@ -171,7 +185,10 @@ class JevDoneRegistry:
         except ValueError as exc:
             raise ConfigurationError(
                 f"Unsupported Jev done check: {value!r}.",
-                details={"received": repr(value), "available": [item.value for item in JevDoneCheck]},
+                details={
+                    "received": repr(value),
+                    "available": [item.value for item in JevDoneCheck],
+                },
             ) from exc
 
     @classmethod
@@ -181,16 +198,27 @@ class JevDoneRegistry:
         # Settings construction calls this, so a typo, a bare string, or a repeated check fails when the
         # agent is built instead of silently asking Jev the wrong (or duplicated) questions at every finish.
         if isinstance(values, (str, bytes)):
-            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks, not a string.", details={"received": repr(values)})
+            raise ConfigurationError(
+                "JevContinualSettings.checks must be an iterable of Jev done checks, not a string.",
+                details={"received": repr(values)},
+            )
         try:
             checks = tuple(cls.resolve(value) for value in values)
         except TypeError as exc:
-            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks.", details={"received": type(values).__name__}) from exc
+            raise ConfigurationError(
+                "JevContinualSettings.checks must be an iterable of Jev done checks.",
+                details={"received": type(values).__name__},
+            ) from exc
         if len(set(checks)) != len(checks):
-            raise ConfigurationError("JevContinualSettings.checks cannot enable the same check twice.", details={"received": [check.value for check in checks]})
+            raise ConfigurationError(
+                "JevContinualSettings.checks cannot enable the same check twice.",
+                details={"received": [check.value for check in checks]},
+            )
         for check in checks:
             cls.questions(check)
             cls.threshold(check)
+            if check in cls._inventory_questions:
+                cls.inventory_question(check)
         return checks
 
 

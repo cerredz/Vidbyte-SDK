@@ -664,3 +664,7 @@ A new kind of done check never needs a new continuation class, because `JevDoneC
 ### Cumulative obligations
 
 `CUMULATIVE_OBLIGATIONS` receives only caller-supplied user messages in history, followed by the current request. Keep exact wording and order; do not treat agent replies or absent history as user intent. Keep the current request as the run-state prompt and preserve earlier-turn context when rebuilding after a motivating-case recall review. At finish, ask one question for each obligation and a separate inventory question for every supplied user turn in the same Jev batch. Inventory failures stay distinct from obligation failures and must continue the run even when no obligations were generated. Focus only on failed turns or obligations and avoid inventing specific missing work from an inventory failure alone.
+
+### Discovered item coverage
+
+`DISCOVERED_ITEM_COVERAGE` is post-run-derived. Retain every recorded tool output within the configured per-source and total character bounds, require exact source-id coverage from the handoff, and ask one source-inventory question even when that output yields no candidate. Ask each discovered candidate's processing question separately in the same combined request. A low inventory answer is a hard veto even when every candidate answer passes; continuation must include the bounded original output for an inventory gap and the specific requested processing for an item gap.

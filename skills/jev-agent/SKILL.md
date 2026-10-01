@@ -148,3 +148,7 @@ python scripts/run_ci.py
 ### Cumulative obligations
 
 `CUMULATIVE_OBLIGATIONS` uses only caller-supplied `AgentMessage` history entries whose sender is `user`, in their supplied order, plus the current request as the final turn. Preserve exact turn text; do not infer missing history or treat agent replies as user requirements. Attach earlier turns as context while keeping the current request as the run-state prompt, including during the single motivating-case recall rebuild. At handoff, ask once for each obligation and once for each turn's complete inventory in the same batched Jev request. Each turn inventory remains a separate required answer even when the generated obligation list is empty; a missing or low answer must continue the run.
+
+### Discovered item coverage
+
+`DISCOVERED_ITEM_COVERAGE` derives candidate items from recorded tool-call outputs at each finish attempt. Preserve every raw output within the per-source and total size bounds, require one handoff batch for every source id, and keep source-inventory questions separate from per-item processing questions. Both kinds of answers join the same Jev decision request; one low inventory or item answer vetoes completion. Even an empty candidate list must still ask about every recorded source inventory.

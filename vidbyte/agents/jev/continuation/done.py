@@ -104,8 +104,35 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._explain_guaranteed_next_actions,
             JevDoneCheck.REQUIRED_ACTIONS: self._explain_required_actions,
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._explain_cumulative_obligations,
+            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._explain_discovered_items,
         }
         return handlers[result.check](result)
+
+    # @intent discovered-inventory-and-item-gaps-stay-separate
+    # Source inventory failures need the original bounded output, while item failures need the specific requested action still missing.
+    def _explain_discovered_items(self, result: JevDoneResult) -> tuple[str, str]:
+        """Describe each failed source inventory or discovered item with its own evidence and recovery focus."""
+        handoff = self.run_state.handoff
+        evidence = None if handoff is None else handoff.discovered_item_coverage
+        batches = {} if evidence is None else {batch.source_id: batch for batch in evidence.batches}
+        items = {} if evidence is None else {item.id: item for item in evidence.items()}
+        item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        failed = [item_question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            kind, item_id = identifier.split(":", 1)
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            if kind == "inventory":
+                batch = batches[item_id]
+                failed.append(f"- {inventory_question.instructions.question.format(item=item_id)} Jev's answer: no (P(yes) = {yes:.2f}). Source output:\n{batch.source_output}")
+                listed = ", ".join(candidate.identity for candidate in batch.candidates) or "No candidates were listed."
+                focus.append(f"- Review the complete source output for every in-scope discovered item, add any omitted item, and process each one. Current candidate inventory: {listed}")
+                continue
+            item = items[item_id]
+            failed.append(f"- {item_question.instructions.question.format(item=item_id)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+            focus.append(f"- {item.identity}. Requested: {item.requested_processing} Done when: {item.completion_criteria}")
+        return "\n".join(failed), "\n".join(focus)
 
     def _explain_cumulative_obligations(self, result: JevDoneResult) -> tuple[str, str]:
         """Name only failed obligations or user-turn inventories and reconnect them to the user's words."""
