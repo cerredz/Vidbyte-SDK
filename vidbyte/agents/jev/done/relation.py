@@ -29,6 +29,8 @@ class JevRunStateRelation(JevRunState):
 
     async def begin(self, request: str) -> None:
         # Clears only the previous handoff and keeps an existing record unless the current gate explicitly rejects it.
+        # @intent related-request-preserves-existing-record
+        # Done checks must read the request-derived baseline unchanged; merging a related request would silently rewrite that baseline.
         """Retain and report a related record, or use JevRunState's existing replacement generation path."""
         self.handoff = None
         if self.record is None or self.preflight.run_state_related is False:
