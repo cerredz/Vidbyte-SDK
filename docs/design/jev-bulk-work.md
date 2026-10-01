@@ -197,7 +197,7 @@ The public opt-in is `JevRuntimeSettings(preflight=(JevPreflightPreset.BULK_WORK
 
 #### What it does
 
-Defines the structured planner output schema, validates public per-item results, and adds the sole response-writer method that publishes a completed bulk-work outcome. Results preserve task order, status, text/error, and each child agent's owned usage rollup.
+Defines the structured planner output schema, validates public per-item results, and adds the sole response-writer method that publishes each attempted bulk-work outcome. Valid and rejected plans both retain the planner's owned usage rollup; valid results preserve task order, status, text/error, and each child agent's rollup.
 
 #### Interface / API
 
@@ -217,8 +217,10 @@ class JevBulkItemResult:
 
 @dataclass(frozen=True, slots=True)
 class JevBulkWorkResult:
+    plan_valid: bool
     items: tuple[JevBulkItemResult, ...]
     planner_usage: UsageRollup | None
+    planning_error: str | None
 ```
 
 `JevAgentResponse.bulk_work` is `JevBulkWorkResult | None`, and `JevResponse.bulk_work(result)` is its only writer.
@@ -228,14 +230,14 @@ class JevBulkWorkResult:
 1. Require nonblank identifier, title, and prompt in every plan item.
 2. Require two or more plan items and reject the entire plan if the count exceeds `max_items`.
 3. Require identifiers to be unique so results map deterministically to requested work.
-4. Store item results as an immutable tuple in original plan order.
-5. Preserve success or ordinary exception as an explicit item outcome; preserve each raw `UsageRollup` without flattening or re-recording it.
+4. Store valid-plan item results as an immutable tuple in original plan order; a rejected plan has no item records.
+5. Preserve planning rejection reason and planner rollup; preserve each worker's success or ordinary exception and raw rollup without flattening or re-recording it.
 
 #### Edge Cases & Error Handling
 
 - No partial acceptance or truncation of malformed plans.
 - Empty output is still a completed output string; a task error is represented separately.
-- If planning fails before a valid plan exists, leave `bulk_work` unset and use the ordinary path.
+- If planning fails before a valid plan exists, report a rejected empty outcome with planner usage and use the ordinary path; disabled capability leaves `bulk_work` unset.
 
 ### 6.4 Planner and Bounded Worker Coordinator
 
@@ -244,31 +246,31 @@ class JevBulkWorkResult:
 
 #### What it does
 
-Implements `JevBulkWork`, a bounded generative planner/coordinator built from `JevBulkSettings` and the owner's ordinary agent settings. It never constructs another JevAgent. Its planner has no tools; each work item gets a fresh BaseAgent worker with separate history.
+Implements `JevBulkWork`, a bounded planner/coordinator that subclasses BaseAgent and is built from `JevBulkSettings` and the owner's ordinary agent settings. This object is itself the tool-free, structured-output planning agent, then creates a fresh BaseAgent worker with separate history for each planned work item. It never constructs another JevAgent.
 
 #### Interface / API
 
 ```python
-class JevBulkWork:
+class JevBulkWork(BaseAgent):
     def __init__(self, settings: JevAgentSettings) -> None: ...
-    async def plan_and_run(self, message: str, context: BaseAgentContext) -> JevBulkWorkResult | None: ...
+    async def plan_and_run(self, message: str, context: BaseAgentContext, tools: tuple[object, ...]) -> JevBulkWorkResult: ...
 ```
 
-Returning `None` means no valid plan was produced; the runtime continues through the ordinary serial loop.
+`plan_valid=False` means the planner did not provide a usable plan; the runtime continues through the ordinary serial loop after recording planner usage and the safe failure category.
 
 #### Logic / Algorithm
 
-1. Construct a structured-output planner BaseAgent with owner provider/model/API configuration, a system prompt for independent work decomposition, no tools, and configured iteration/token bounds.
+1. Construct `JevBulkWork` as a structured-output BaseAgent with owner provider/model/API configuration, a system prompt for independent work decomposition, no tools (including implicit internal tools), and configured iteration/token bounds.
 2. Pass the complete original request as explicit request data; validate plan schema, lower/upper count, unique IDs, and nonblank content atomically.
 3. Make a bounded `asyncio.Queue` for planned item indexes and start exactly `min(max_parallel_agents, task_count)` worker coroutines.
 4. For each item, create a new BaseAgent using the owner's name/prompt policy, model, API configuration, timeout, loop policy, and permission policy. Clone every selected SDK tool by calling its `clone_for_fork()` hook before BaseAgent construction; preserve tools without this hook by identity.
-5. Run the task under its own work-specific prompt and isolated context/history. Capture normal exceptions as task failures and continue consuming the queue.
+5. Run the task under its own work-specific prompt and isolated history, while preserving the caller's immutable contextual inputs. Capture normal exceptions as task failures and continue consuming the queue.
 6. On cancellation, cancel and gather the pool so sibling work is not left running; do not convert cancellation into an item failure.
 7. Return ordered results plus planner and per-worker `get_usage()` rollups.
 
 #### Edge Cases & Error Handling
 
-- A missing or malformed structured output, one item, zero items, or more than `max_items` yields `None` before any worker is created.
+- A missing or malformed structured output, one item, zero items, or more than `max_items` creates a rejected outcome before any worker is created.
 - An item exception is retained and does not cancel siblings; a cancellation propagates and cleans the pool.
 - Selected tool names must match exactly. AgentTool clones must bind to each worker and leave the owner's original AgentTool bound to the owner.
 - Custom mutable tools without a clone hook follow the existing fork identity contract; parallel safety remains that tool's existing responsibility.
@@ -349,8 +351,10 @@ class JevBulkItemResult:
 
 @dataclass(frozen=True, slots=True)
 class JevBulkWorkResult:
+    plan_valid: bool
     items: tuple[JevBulkItemResult, ...]
     planner_usage: UsageRollup | None
+    planning_error: str | None
 
 @dataclass
 class JevAgentResponse:
@@ -396,7 +400,7 @@ agent.response.bulk_work.items  # ordered tuple[JevBulkItemResult, ...]
 | Invalid settings limit | Construction raises `ConfigurationError`. |
 | Bulk preset omitted | No bulk question, planner, or worker call; ordinary path. |
 | One or more preflight answers unavailable or vetoed | Gate continues fail-open with bulk disabled. |
-| Planner output absent, malformed, under-sized, or over limit | No workers; ordinary path handles the original request. |
+| Planner output absent, malformed, under-sized, or over limit | No workers; response records a rejected plan and its usage; ordinary path handles the original request. |
 | Worker raises ordinary exception | That item has an error result; sibling items continue. |
 | Run is cancelled | Cancellation propagates after sibling worker cleanup. |
 
