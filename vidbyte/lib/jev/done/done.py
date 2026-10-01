@@ -21,6 +21,7 @@ from vidbyte.lib.constants.jev import (
     JEV_MOTIVATING_CASE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
     JEV_OUTPUT_COUNT_THRESHOLD,
+    JEV_OUTPUT_EXTENT_THRESHOLD,
     JEV_PHASE_PROGRESS_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_SCOPE_COVERAGE_THRESHOLD,
@@ -35,6 +36,7 @@ from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
 from vidbyte.lib.jev.done.output_count import OutputCountSatisfiedQuestion
+from vidbyte.lib.jev.done.output_extent import OutputExtentSatisfiedQuestion
 from vidbyte.lib.jev.done.phase_progress import PhaseProgressReachedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
@@ -55,6 +57,7 @@ class JevDoneRegistry:
         JevDoneCheck.INPUT_SET_COVERAGE: InputSetCoverageQuestion(),
         JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion(),
         JevDoneCheck.PHASE_PROGRESS: PhaseProgressReachedQuestion(),
+        JevDoneCheck.OUTPUT_EXTENT: OutputExtentSatisfiedQuestion(),
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
@@ -67,6 +70,7 @@ class JevDoneRegistry:
         JevDoneCheck.INPUT_SET_COVERAGE: JEV_INPUT_SET_COVERAGE_THRESHOLD,
         JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD,
         JevDoneCheck.PHASE_PROGRESS: JEV_PHASE_PROGRESS_THRESHOLD,
+        JevDoneCheck.OUTPUT_EXTENT: JEV_OUTPUT_EXTENT_THRESHOLD,
     })
 
     @classmethod

@@ -16,6 +16,7 @@ from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
 from vidbyte.lib.jev.done.output_count import OutputCountSatisfiedQuestion
+from vidbyte.lib.jev.done.output_extent import OutputExtentSatisfiedQuestion
 from vidbyte.lib.jev.done.phase_progress import PhaseProgressReachedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
@@ -30,6 +31,7 @@ __all__ = [
     "MotivatingCaseExercisedQuestion",
     "MultiPartDeliveredQuestion",
     "OutputCountSatisfiedQuestion",
+    "OutputExtentSatisfiedQuestion",
     "PhaseProgressReachedQuestion",
     "ProblemsResolvedQuestion",
     "ScopeCoverageAppliedQuestion",

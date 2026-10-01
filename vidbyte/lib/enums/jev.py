@@ -47,6 +47,8 @@ class JevDoneCheck(str, Enum):
     SCOPE_COVERAGE = "scope_coverage"
     COMPLETION_EVIDENCE = "completion_evidence"
     INPUT_SET_COVERAGE = "input_set_coverage"
+
+    OUTPUT_EXTENT = "output_extent"
     PROBLEMS_RESOLVED = "problems_resolved"
     PHASE_PROGRESS = "phase_progress"
 
@@ -65,6 +67,8 @@ class JevDoneQuestionKey(str, Enum):
     MOTIVATING_CASE_EXERCISED = "motivating_case.exercised"
     COMPLETION_EVIDENCE_SUPPORTED = "completion_evidence.supported"
     INPUT_SET_COVERAGE_ENGAGED = "input_set_coverage.engaged"
+
+    OUTPUT_EXTENT_SATISFIED = "output_extent.satisfied"
     PROBLEMS_RESOLVED_FIXED = "problems_resolved.fixed"
     PHASE_PROGRESS_REACHED = "phase_progress.reached"
     SCOPE_COVERAGE_BREADTH = "scope_coverage.breadth"
@@ -139,6 +143,24 @@ class JevCompletionStatus(str, Enum):
     UNCLEAR = "unclear"
 
 
+class JevOutputExtentUnit(str, Enum):
+    """Text units supported by the OUTPUT_EXTENT request schema."""
+
+    WORDS = "words"
+    CHARACTERS = "characters"
+    LINES = "lines"
+    SECTIONS = "sections"
+    PAGES = "pages"
+
+
+class JevOutputExtentComparator(str, Enum):
+    """Directions of explicit numeric bounds for an output extent."""
+
+    MINIMUM = "minimum"
+    EXACT = "exact"
+    MAXIMUM = "maximum"
+
+
 class JevProblemCheckItemType(str, Enum):
     """The two dynamic item kinds judged by the problem-resolution check."""
 
@@ -179,4 +201,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

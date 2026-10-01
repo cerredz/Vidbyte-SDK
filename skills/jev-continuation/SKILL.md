@@ -215,6 +215,14 @@ Each field below has a five-sentence instruction because the handoff model reads
 
 ### Step 2: The enum member and question key (`vidbyte/lib/enums/jev.py`)
 
+### Request-derived items: OUTPUT_EXTENT
+
+`OUTPUT_EXTENT` checks the requested magnitude of text in an output. It is separate from counting distinct examples, files, records, or other entries, which are output-count obligations. The pre-run state writer creates one item for each clear, explicit text extent and records its target, positive amount, unit (`words`, `characters`, `lines`, `sections`, or `pages`), and comparator (`minimum`, `exact`, or `maximum`). Do not create an amount from adjectives such as “detailed” or “comprehensive,” and do not change exact into minimum or maximum.
+
+At each finish attempt, the handoff provides evidence for each pre-run extent item and an actionable `missing` note. `missing` is continuation feedback only; never put it in Jev's state. For targets explicitly scoped to the final answer, code counts the raw final answer deterministically for supported units and applies the original comparator. Pages are measurable only with explicit page markers; sections use Markdown headings when the request makes that basis clear. Other artifact targets need direct artifact evidence, not only a final-answer claim. Jev's single-item question recognizes target evidence and can judge an explicit amount when code cannot count it; it must not be tasked to enumerate or count.
+
+The failure is checked against the original request-derived amount even when the final answer never repeats the quota. When code has an observed count, a numerically failing minimum, exact amount, or maximum fails regardless of Jev's answer. Missing measurements remain visible as unavailable in the state rather than being treated as zero. On failure, `_explain` sends the exact target, unit, comparator, requested amount, observed amount when available, and the handoff's missing note in the Focus feedback.
+
 ```python
 class JevDoneCheck(str, Enum):
     MULTI_PART = "multi_part"

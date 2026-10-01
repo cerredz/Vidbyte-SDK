@@ -104,6 +104,9 @@ JEV_SCOPE_COVERAGE_THRESHOLD: float = 0.8
 JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD: float = 0.5
 # Whether the final answer's whole-task completion status is supported; starting point, not tuned on a labeled set.
 JEV_COMPLETION_EVIDENCE_THRESHOLD: float = 0.85
+
+# Explicit requested output extents must meet this threshold and the per-item numeric comparator.
+JEV_OUTPUT_EXTENT_THRESHOLD: float = 0.8
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # A requested outcome stage must show progress or an evidenced blocker; this is a starting point, not a tuned value.
@@ -157,6 +160,15 @@ JEV_DONE_COMPLETION_STATUS_FIELD: str = "completion_status"
 JEV_DONE_REQUESTED_OUTCOMES_FIELD: str = "requested_outcomes"
 JEV_DONE_COMPLETED_WORK_FIELD: str = "completed_work"
 JEV_DONE_UNFINISHED_OR_BLOCKED_FIELD: str = "unfinished_or_blocked"
+
+JEV_DONE_OUTPUT_EXTENTS_FIELD: str = "output_extents"
+JEV_DONE_OUTPUT_EXTENT_FIELD: str = "output_extent"
+JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD: str = "target"
+JEV_DONE_OUTPUT_EXTENT_AMOUNT_FIELD: str = "amount"
+JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD: str = "unit"
+JEV_DONE_OUTPUT_EXTENT_COMPARATOR_FIELD: str = "comparator"
+JEV_DONE_OUTPUT_EXTENT_EVIDENCE_FIELD: str = "evidence"
+JEV_DONE_OUTPUT_EXTENT_OBSERVED_FIELD: str = "observed"
 JEV_DONE_PROBLEMS_RESOLVED_FIELD: str = "problems_resolved"
 JEV_DONE_PROBLEM_ITEMS_FIELD: str = "items"
 JEV_DONE_PROBLEM_ID_FIELD: str = "id"
@@ -211,6 +223,8 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
     "JEV_INPUT_SET_COVERAGE_THRESHOLD",
+
+    "JEV_OUTPUT_EXTENT_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -254,6 +268,15 @@ __all__ = [
     "JEV_DONE_INPUT_SET_COVERAGE_FIELD",
     "JEV_DONE_INPUT_TARGETS_FIELD",
     "JEV_DONE_INPUT_TARGET_FIELD",
+
+    "JEV_DONE_OUTPUT_EXTENTS_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_AMOUNT_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_COMPARATOR_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_EVIDENCE_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_OBSERVED_FIELD",
     "JEV_DONE_CLAIM_DESCRIPTION_FIELD",
     "JEV_DONE_CLAIM_FIELD",
     "JEV_DONE_CLAIM_IDENTITY_FIELD",

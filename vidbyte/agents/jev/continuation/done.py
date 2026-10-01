@@ -94,6 +94,7 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.PROBLEMS_RESOLVED: self._explain_problems_resolved,
             JevDoneCheck.INPUT_SET_COVERAGE: self._explain_input_set_coverage,
             JevDoneCheck.OUTPUT_COUNT: self._explain_output_count,
+            JevDoneCheck.OUTPUT_EXTENT: self._explain_output_extent,
         }
         return handlers[result.check](result)
 
@@ -225,6 +226,36 @@ class JevDoneContinuation(JevContinuation):
             yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
             failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
             focus.append(f"- {item.description} Target: {item.target_count} {item.unit}; scope: {item.scope}; distinctness: {item.distinctness}. Done when: {item.completion_criteria}")
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_output_extent(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT)
+        state = None if self.run_state.record is None else self.run_state.record.output_extent
+        evidence = None if self.run_state.handoff is None else self.run_state.handoff.output_extent
+        items = {} if state is None else {item.id: item for item in state.items}
+        missing = {} if evidence is None else {item.id: item.missing for item in evidence.items}
+        failed = [question.gap]
+        focus = []
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_EXTENT)
+        for identifier in result.incomplete:
+            item = items[identifier]
+            observed = self.run_state._observed_extent.get(identifier)
+            amount = "unmeasured" if observed is None else str(observed)
+            probability = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            verdict = "yes" if DecisionModelHelper.noul_passes(result.answers, identifier, threshold) else "no"
+            if observed is None or self.run_state._satisfies(observed, item.amount, item.comparator):
+                gap = missing[identifier]
+            else:
+                gap = f"The final answer has {observed} {item.unit.value}; the request requires {item.comparator.value} {item.amount} {item.unit.value}."
+            failed.append(
+                f"- {question.instructions.question.format(item=identifier)} Jev's answer: {verdict} "
+                f"(P(yes) = {probability:.2f}). Observed amount: {amount} {item.unit.value}; requested "
+                f"{item.comparator.value} {item.amount} {item.unit.value}. Still missing: {gap}"
+            )
+            focus.append(
+                f"- Output target: {item.target}\n  Requested extent: {item.comparator.value} "
+                f"{item.amount} {item.unit.value}\n  Observed extent: {amount} {item.unit.value}"
+            )
         return "\n".join(failed), "\n".join(focus)
 
     # @intent scope-coverage-focus-names-every-missing-member

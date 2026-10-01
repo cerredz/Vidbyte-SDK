@@ -49,6 +49,8 @@ from vidbyte.lib.enums.jev import (
     JevDoneCheck,
     JevDoneQuestionKey,
     JevExerciseMode,
+    JevOutputExtentComparator,
+    JevOutputExtentUnit,
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevProblemCheckItemType,
@@ -950,6 +952,48 @@ class JevInputSetCoverageEvidencePayload(JevSectionPayload):
     targets: list[JevInputTargetEvidencePayload] = Field(description="The targets contain exactly one evidence entry for every target in the run-state section. Preserve the target order and copy each id exactly so deterministic code can validate the correspondence. Gather only observations that relate directly to that target, and repeat an observation only when the recorded operation truly covers multiple targets. Include successful and failed call results and state any uncovered extent in `missing`. The handoff is unavailable when any target is omitted, added, renamed, or reordered from the run-state list.")
 
 
+class JevOutputExtentItemPayload(BaseModel):
+    """One explicit text-size obligation extracted from the request before work starts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this extent obligation a stable lowercase id beginning with a letter and containing only letters, digits, and underscores. Derive the id from the output target rather than its position in the request. Use a distinct id for every separately stated target or extent requirement. Copy the same id into the handoff so the checker can match request and evidence. Keep it no longer than sixty-four characters.")
+    target: str = Field(min_length=1, description="Name the specific answer or artifact whose text extent the user explicitly constrained. Preserve any file, section, audience, or scope named by the request. Do not replace the target with a count of distinct examples, files, or records, because those are separate output-count obligations. Do not create an extent item from vague words such as detailed, comprehensive, or thorough without an explicit measurable amount. Keep this target recognizable in continuation feedback.")
+    amount: int = Field(gt=0, description="Record the positive numeric amount the user explicitly requested for this target. Copy the number faithfully and do not round, convert, strengthen, or weaken it. The amount is interpreted together with the comparator and unit fields. Do not infer an amount from an adjective, an example, or an agent's proposed plan. One item represents one explicit amount requirement.")
+    unit: JevOutputExtentUnit = Field(description="Use the text unit explicitly named or unambiguously implied by the request: words, characters, lines, sections, or pages. Preserve distinctions between these units because their counting rules differ. Do not choose a unit merely because it is convenient to measure. For a requested page count, require visible page boundaries such as form-feed markers before code treats the count as deterministic. If the unit or its basis is unclear, do not create an item.")
+    comparator: JevOutputExtentComparator = Field(description="Use minimum when the request asks for at least or no fewer than the amount, exact when it asks for exactly the amount, and maximum when it asks for at most or no more than the amount. Preserve the direction of the bound; an exact amount is not a minimum. Do not reinterpret an unqualified number unless the user's wording makes its comparator clear. The comparator determines which observed amounts satisfy this obligation. Keep the original bound available to continuation feedback.")
+
+
+class JevOutputExtentPayload(JevSectionPayload):
+    """The output-extent section of run state, containing only explicit measurable text-size requests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The output-extent section records explicit measurable text-size obligations from the user's request before the main agent starts work. Each item names one output target, one numeric amount, one unit, and whether the user requested a minimum, exact, or maximum amount. This check concerns the magnitude of text in an output, while separate requested examples, files, records, and other distinct entries are checked as output-count obligations. Do not create quotas from vague adjectives or infer an amount that the user did not give. Return an empty list when the request contains no clear measurable text extent."
+
+    items: list[JevOutputExtentItemPayload] = Field(description="Return one item for each explicit measurable text-size obligation in the request, preserving its target, amount, unit, and comparator. Include word, character, line, section, or page extents only when the requested basis is clear enough to identify. Keep an exact bound distinct from a minimum or maximum bound. Do not include counts of distinct entries, files, examples, or records, and do not invent quotas from words such as detailed or comprehensive. Return an empty list if no explicit measurable text extent was requested.")
+
+
+class JevOutputExtentEvidenceItemPayload(BaseModel):
+    """Observed run evidence and its actionable gap for one requested output extent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Copy the id of one output-extent item from run state character for character. Return exactly one evidence entry for every run-state item, including when the run shows no target output. Do not invent, rename, merge, or omit ids. Preserve the request-state order so item-to-evidence matching is stable. The id links evidence and continuation feedback to one explicit extent obligation.")
+    evidence: str = Field(min_length=1, description="Quote or closely reproduce the run's observed text for this target, naming whether it comes from the final answer or a particular artifact/tool result. Preserve enough of the output for the checker to identify which target is present and what text is available. When code measures the raw final answer directly, report that code-side observation instead of asking the handoff model to count or reproduce a large answer. Report observations and failed or superseding attempts without declaring that the requested amount passed. Do not count words, characters, lines, sections, or pages; deterministic code performs supported counting from the raw final answer.")
+    missing: str = Field(min_length=1, description="Explain what the run does not show about this target in relation to its requested amount and unit. Name the target and any absent, short, excessive, or otherwise unverified text extent in actionable terms. Preserve whether the request says minimum, exact, or maximum. If the evidence covers the requested extent, say that nothing is missing. This field is continuation feedback only and is never sent to Jev as evidence.")
+
+
+class JevOutputExtentEvidencePayload(JevSectionPayload):
+    """The handoff's output-extent evidence section, with one entry per pre-run obligation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The output-extent evidence section records what the latest finish attempt shows for every extent obligation written from the request before work began. A checker reads each output target and its observed run evidence separately, while deterministic code measures raw final-answer text when the target and unit permit an unambiguous count. The evidence must identify the target and reproduce relevant observed text without relying on the main agent's claim that it met the amount. The separate missing field helps the main agent continue but is a handoff judgment, not evidence for Jev. Preserve output exactly enough that later code and a recognition check can distinguish the target from unrelated text."
+
+    items: list[JevOutputExtentEvidenceItemPayload] = Field(description="Return one entry for each output-extent item in run state, in the same order and with the same id. Identify the latest evidence that bears on that target, including its source, or state that the run shows no relevant output. Do not summarize the text in a way that changes its amount or claim that the amount passed. Put an actionable account of what remains absent or unverified in missing, which is not sent as Jev evidence. Never omit an item merely because the run did not address it.")
+
+
 class JevClaimIdentityPayload(BaseModel):
     """The title, meaning, and stated purpose of a final-answer claim."""
 
@@ -1320,6 +1364,54 @@ class JevScopeDimension:
 
 
 @dataclass(frozen=True, slots=True)
+class JevOutputExtentAmount:
+    """Validate one positive whole-number output bound at a typed Jev boundary."""
+
+    value: int
+    field_name: str = "output extent amount"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, int) or isinstance(self.value, bool) or self.value < 1:
+            raise JevValidation.error(self.field_name, "a positive integer", self.value)
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputExtentItem:
+    """One explicit target and bound on the magnitude of its requested text output."""
+
+    id: str
+    target: str
+    amount: int
+    unit: JevOutputExtentUnit
+    comparator: JevOutputExtentComparator
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="output extent id")
+        JevText.require(self.target, field_name=f"output extent target {self.id!r}")
+        JevOutputExtentAmount(self.amount, field_name=f"output extent amount {self.id!r}")
+        if not isinstance(self.unit, JevOutputExtentUnit):
+            raise JevValidation.error(f"output extent unit {self.id!r}", "a JevOutputExtentUnit member", self.unit)
+        if not isinstance(self.comparator, JevOutputExtentComparator):
+            raise JevValidation.error(f"output extent comparator {self.id!r}", "a JevOutputExtentComparator member", self.comparator)
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputExtent:
+    """The explicit text extents requested before work starts, in request order."""
+
+    items: tuple[JevOutputExtentItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or not all(isinstance(item, JevOutputExtentItem) for item in self.items):
+            raise JevValidation.error("output extent items", "a tuple of JevOutputExtentItem values", self.items)
+        JevDeliverableId.require_unique(self.ids(), field_name="output extent items")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return each explicit extent obligation id in request order."""
+        return tuple(item.id for item in self.items)
+
+
+@dataclass(frozen=True, slots=True)
 class JevScopeCoverage:
     """The request-derived scope dimensions for one run."""
 
@@ -1603,6 +1695,7 @@ class JevRunStateRecord:
     phase_progress: JevPhaseProgress | None = None
     input_set_coverage: JevInputSetCoverage | None = None
     output_count: JevOutputCount | None = None
+    output_extent: JevOutputExtent | None = None
 
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
@@ -1620,6 +1713,7 @@ class JevRunStateRecord:
             ("run state phase_progress", self.phase_progress, JevPhaseProgress),
             ("run state input_set_coverage", self.input_set_coverage, JevInputSetCoverage),
             ("run state output_count", self.output_count, JevOutputCount),
+            ("run state output_extent", self.output_extent, JevOutputExtent),
         ))
 
 
@@ -1713,6 +1807,36 @@ class JevTargetOutcomeEvidence:
 
     def ids(self) -> tuple[str, ...]:
         """Return the ids of the target outcomes represented by this evidence."""
+        return tuple(item.id for item in self.items)
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputExtentEvidenceItem:
+    """The handoff's observed evidence and continuation gap for one text extent."""
+
+    id: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="output extent evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of output extent {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of output extent {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputExtentEvidence:
+    """Observed evidence for each requested output extent, in request order."""
+
+    items: tuple[JevOutputExtentEvidenceItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or not all(isinstance(item, JevOutputExtentEvidenceItem) for item in self.items):
+            raise JevValidation.error("output extent evidence", "a tuple of JevOutputExtentEvidenceItem values", self.items)
+        JevDeliverableId.require_unique(self.ids(), field_name="output extent evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return the extent ids represented in the evidence section."""
         return tuple(item.id for item in self.items)
 
 
@@ -2084,7 +2208,7 @@ class JevHandoffRecord:
     Each optional typed section is present only for its check. Existing sections include `multi_part`,
     `claims`, `target_outcome`, `motivating_case`, `scope_coverage`, `problems_resolved`,
     `completion_evidence`, `phase_progress`, and `input_set_coverage`; `output_count` carries candidate
-    output units and direct evidence for the request-derived numeric obligations. Completion evidence is
+    output units and direct evidence for numeric obligations, and `output_extent` carries text-size evidence. Completion evidence is
     handoff-only; input-set and output-count evidence are matched to their run-state ids. `usage` is this
     agent's model usage.
     """
@@ -2100,6 +2224,7 @@ class JevHandoffRecord:
     phase_progress: JevPhaseProgressEvidence | None = None
     input_set_coverage: JevInputSetCoverageEvidence | None = None
     output_count: JevOutputCountEvidence | None = None
+    output_extent: JevOutputExtentEvidence | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -2114,6 +2239,7 @@ class JevHandoffRecord:
             ("handoff problems_resolved", self.problems_resolved, JevProblemsResolvedEvidence),
             ("handoff motivating_case", self.motivating_case, JevMotivatingCaseEvidence),
             ("handoff output_count", self.output_count, JevOutputCountEvidence),
+            ("handoff output_extent", self.output_extent, JevOutputExtentEvidence),
         ))
 
 
@@ -2329,18 +2455,27 @@ __all__ = [
     "JevMultiPartEvidence",
     "JevMultiPartEvidencePayload",
     "JevMultiPartPayload",
+    "JevNoulScore",
+    "JevOption",
     "JevOutputCount",
+    "JevOutputCountEntry",
+    "JevOutputCountEntryPayload",
     "JevOutputCountEvidence",
     "JevOutputCountEvidenceItem",
-    "JevOutputCountEntry",
+    "JevOutputCountEvidencePayload",
+    "JevOutputCountEvidencePayloadItem",
     "JevOutputCountObligation",
     "JevOutputCountObligationPayload",
     "JevOutputCountPayload",
-    "JevOutputCountEntryPayload",
-    "JevOutputCountEvidencePayload",
-    "JevOutputCountEvidencePayloadItem",
-    "JevNoulScore",
-    "JevOption",
+    "JevOutputExtent",
+    "JevOutputExtentAmount",
+    "JevOutputExtentEvidence",
+    "JevOutputExtentEvidenceItem",
+    "JevOutputExtentEvidenceItemPayload",
+    "JevOutputExtentEvidencePayload",
+    "JevOutputExtentItem",
+    "JevOutputExtentItemPayload",
+    "JevOutputExtentPayload",
     "JevPhaseProgress",
     "JevPhaseProgressEvidence",
     "JevPhaseProgressEvidencePayload",
