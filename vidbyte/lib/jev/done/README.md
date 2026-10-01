@@ -13,6 +13,9 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 - `negative_coverage.py` holds the NEGATIVE_COVERAGE check's question, asked once per user-requested inspection target; it flags a negative or explicitly incomplete report only when the run shows no inspection evidence for that target.
 - Each question describes the common `request` plus the section it reads; section fields exist only when their corresponding checks are enabled, so all enabled questions can share one batched state.
 - The `negative_coverage` section is present only when NEGATIVE_COVERAGE is enabled and keeps requested inspection scope, run evidence, final-answer conclusions, and the handoff gap in distinct fields.
+- `target_outcome.py` holds the TARGET_OUTCOME check's question, asked once per request-derived outcome; it distinguishes direct evidence on the actual target from a proxy milestone.
+- `problems_resolved.py` holds the dynamic problem-repair question, asked once per observed run problem and once for the required completion of the original request after repairs.
+- Every question uses the shared state description in `multi_part.py`; `deliverables`, `claims`, `target_outcomes`, and `problems_resolved` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.
 - The logic that writes the run state and the handoff, asks Jev, and sends the main agent back to work is `JevRunState` and `JevHandoff` in `vidbyte/agents/jev/done/`.
