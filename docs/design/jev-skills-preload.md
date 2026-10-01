@@ -3,7 +3,7 @@
 **Status:** Approved
 **Author:** Codex
 **Created:** 2026-09-30
-**Last Updated:** 2026-09-30
+**Last Updated:** 2026-10-01
 
 ---
 
@@ -41,6 +41,7 @@ Add optional request-time skill selection to `JevAgent`. Callers configure plain
 ## 3. Background & Context
 
 - PR #449 provides the grouped `JevAlignmentSettings` API on which this feature is based; this work stacks on that API while preserving current main's target-outcome and done-check changes.
+- In merged main, `DecisionModelConfig` belongs to `JevRuntimeSettings`, not `JevAgentSettings`; `JevAgentAlignment` receives that dependency explicitly from the facade rather than reading it from agent settings.
 - Existing prompt alignment, tool alignment, and tool selection execute in `JevRuntime.arun`. The gate runs first; a closed gate and specialist delegation return before those request-time passes.
 - Existing `JevPreflight` changes a `Tools` catalog and cannot provide modified `BaseAgentContext`. Skills therefore use a narrow `JevPreload` context-transform contract.
 - `JevResponse.start()` replaces the public response record on each run. A new `skills` field follows this latest-run lifetime.
@@ -238,7 +239,7 @@ class JevSkillsPreload(JevPreload):
 
 ### 6.5 Runtime orchestration and cleanup
 
-**File(s):** `vidbyte/agents/jev/agent.py`, `vidbyte/agents/jev/runtime.py`
+**File(s):** `vidbyte/agents/jev/agent.py`, `vidbyte/agents/jev/alignment/agent.py`, `vidbyte/agents/jev/runtime.py`
 **Type:** Modified
 
 #### What it does
@@ -247,17 +248,18 @@ Constructs the preload only for nonempty configuration, orders it after alignmen
 
 #### Interface / API
 
-The public method remains `JevAgent.arun(...)`. Internal `JevRuntime` receives the optional `JevPreload` and `skills_threshold` through its constructor extension arguments.
+The public method remains `JevAgent.arun(...)`. Internal `JevRuntime` receives the optional `JevPreload` and `skills_threshold` through its constructor extension arguments. `JevAgentAlignment` receives the owner `DecisionModelConfig` explicitly from `JevRuntimeSettings`.
 
 #### Logic / Algorithm
 
-1. Preserve current gate and specialist early returns.
-2. Snapshot `self.system_prompt`, `self.user_tools`, and `self.tools` before request-time mutation.
-3. Run existing prompt alignment and tool alignment.
-4. Resolve the effective system prompt: explicit `options["system"]` if supplied, else the aligned `context.system_prompt`.
-5. Apply the skill preload to a replacement context using that effective prompt as baseline; pass the resulting context prompt to the provider even when options previously carried an override.
-6. Continue with run-state initialization, selector, and main loop.
-7. Restore snapshots in `finally`; preserve tool-alignment resource cleanup.
+1. Build `JevAgentAlignment` with the validated agent settings and `runtime_settings.decision`; alignment never reads a decision model from `JevAgentSettings`.
+2. Preserve current gate and specialist early returns.
+3. Snapshot `self.system_prompt`, `self.user_tools`, and `self.tools` before request-time mutation.
+4. Run existing prompt alignment and tool alignment.
+5. Resolve the effective system prompt: explicit `options["system"]` if supplied, else the aligned `context.system_prompt`.
+6. Apply the skill preload to a replacement context using that effective prompt as baseline; pass the resulting context prompt to the provider even when options previously carried an override.
+7. Continue with run-state initialization, selector, and main loop.
+8. Restore snapshots in `finally`; preserve tool-alignment resource cleanup.
 
 #### Edge Cases & Error Handling
 
@@ -395,6 +397,7 @@ Complete list of every file planned for this change:
 | CREATE | `scripts/test-jev-skills-preload.py` | Focused executable gate |
 | MODIFY | `vidbyte/agents/jev/settings.py` | Skills configuration and threshold |
 | MODIFY | `vidbyte/agents/jev/agent.py` | Build and pass preload |
+| MODIFY | `vidbyte/agents/jev/alignment/agent.py` | Receive the decision config from runtime settings |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Run ordering, prompt baseline, cleanup |
 | MODIFY | `vidbyte/agents/jev/response.py` | Write per-run skill outcomes |
 | MODIFY | `vidbyte/lib/dataclasses/jev.py` | Skill result and response field |
@@ -428,6 +431,7 @@ Complete list of every file planned for this change:
 
 ### Integration Tests
 
+- Verify a caller-provided `JevRuntimeSettings.decision` reaches the alignment decision runner without adding a field to `JevAgentSettings`.
 - Verify ordering after prompt/tool alignment and before run-state/main loop.
 - Verify gate stop and specialist handoff make zero skill calls.
 - Verify selected full text is appended while original caller context and prompt suffix remain intact.
