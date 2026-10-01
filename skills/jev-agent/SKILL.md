@@ -73,6 +73,8 @@ Load `skills/jev-continuation/SKILL.md` first; it explains each step below in de
 
 **Changed-assumption reconciliation:** ASSUMPTIONS_RECONCILED checks whether downstream work was brought into line after an explicitly used premise changed. Keep candidates whose work was revised, left unchanged, or made irrelevant; Jev judges each from run evidence. Acknowledgment alone does not pass, but do not require a generic repair or validation ritual when the evidence already shows the work was reconciled or no longer applies.
 
+**Required actions:** `JevDoneCheck.REQUIRED_ACTIONS` records only procedures or actions the request explicitly requires, with a stable id, observable completion condition, and predecessors only for stated order. `JevHandoff` gathers tool-call traces and can cite an exact excerpt of substantive response or final-answer output; code verifies that excerpt occurs in its named source. A successful call or verified substantive excerpt supplies direct evidence, while a completion claim alone does not. Jev judges whether the evidence meets the condition, and deterministic code requires successful tool-call indices to verify explicit ordering. Missing evidence or order fails the relevant action and focuses the same-loop continuation.
+
 ## Change workflow
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.

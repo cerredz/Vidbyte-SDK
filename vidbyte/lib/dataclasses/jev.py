@@ -3,9 +3,9 @@
 PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state and handoff records, output extent and count obligations, report/action alignment evidence, and negative-coverage inspection evidence.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
-COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report.
+COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes requested members, workspace inventory, and unsupported mentions. Completion evidence is one handoff-only whole-task item. PHASE_PROGRESS is omitted when no substantive outcome stage exists; INPUT_SET_COVERAGE is omitted when no explicitly bounded input target exists. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because concrete subclasses redeclare defaulted fields. Pydantic payload descriptions are the instructions generative agents receive; records built from those replies hold validated values, and conversion remains with the agent that requested the reply. Report/action candidates compare an explicit earlier plan with recorded execution, the final account, and request relevance; they do not turn an agent plan into a user requirement. Include a consequential assumption even when later work recovers or makes dependent work irrelevant; Jev judges whether the work was revised or became irrelevant.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and tests/test_jev_done.py.
 """
 
@@ -904,6 +904,27 @@ class JevOutputCountEvidencePayload(JevSectionPayload):
     obligations: list[JevOutputCountEvidencePayloadItem] = Field(description="Provide one evidence record for every output-count obligation in run-state order. Keep candidates inside the exact obligation scope and include every visible qualifying unit, including repeats that code can exclude by shared distinct key. Preserve candidate content and source evidence so Jev can recognize relevance and distinctness. Do not let entries from other groups satisfy this obligation. An empty entries list means no candidate output unit is shown for that obligation.")
 
 
+class JevRequiredActionPayload(BaseModel):
+    """One explicitly requested procedure or action the required-actions check will verify."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this required action a short stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive the id from the requested action or its target rather than from its position in the list. Keep every id unique in this request and copy it unchanged into the handoff and Jev question name. Do not change an id between finish attempts because the run-state list is written once. The id connects the explicit request, its evidence, its answer, and any continuation focus.")
+    action: str = Field(min_length=1, description="Describe one action or procedure the user explicitly requires, using the user's words and naming its target. Keep it distinct from the output the action may help produce, because producing an output is checked separately. Include a tool, operation, review, phase, retry, or delegation only when the request states that requirement. Do not add conventional or merely helpful steps that the user did not request. Each entry describes exactly one required action so it can receive one Jev judgment.")
+    completion_signal: str = Field(min_length=1, description="State the observable condition in the run that would show this exact action was successfully completed. Include the successful result that the user asked for, such as a completed review, a tool result, a classification, a returned delegation result, or a resolved failure. A call attempt, plan, intention, failed result, unanswered delegation, or final-answer claim by itself is not successful completion. Keep this condition within the action's stated target and scope. Do not require extra work or stronger proof than the request states.")
+    predecessors: list[str] = Field(description="List the ids of actions that the user explicitly requires to happen before this action. Preserve a stated sequence or dependency, but do not infer an order from a generally sensible workflow or from the order in which actions appear in the request. Use an empty list when the user states no prerequisite for this action. Every listed id must identify a different action in this same section and must precede this item in the section. This field makes explicit dependencies available to deterministic code without asking Jev to reason across several actions.")
+
+
+class JevRequiredActionsPayload(JevSectionPayload):
+    """The run-state section of required actions explicitly named in the request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The required-actions section records procedures and actions the user explicitly requires the agent to perform, so a plausible final answer cannot conceal skipped work. It describes one action at a time, with its target, successful observable completion condition, and only the dependencies the user explicitly ordered. This section is not a plan and does not expand the request into every step that might be useful. Read the request before deciding whether an action is truly required, and omit ordinary helpful work the user did not specifically require. Fill the section from the request alone before the main agent begins its work."
+
+    actions: list[JevRequiredActionPayload] = Field(description="List each distinct action or procedural obligation the user explicitly states, preserving request order except where a stated dependency requires putting its predecessor first. Include required reviews, named operations or tools, prescribed phases, requested delegation and result return, and a required retry or resolution only when the request says so. Do not infer procedures from best practice, from the requested output, or from what an agent would usually do. Record a predecessor only when the user explicitly says one action follows or depends on another, and leave predecessors empty otherwise. Return an empty list when the request names no action or procedure beyond producing an answer or output.")
+
+
 class JevHandoffPayload(BaseModel):
     """The evidence handoff JevHandoff writes after the main agent tries to finish.
 
@@ -1084,6 +1105,30 @@ class JevOutputExtentEvidencePayload(JevSectionPayload):
     SECTION: ClassVar[str] = "The output-extent evidence section records what the latest finish attempt shows for every extent obligation written from the request before work began. A checker reads each output target and its observed run evidence separately, while deterministic code measures raw final-answer text when the target and unit permit an unambiguous count. The evidence must identify the target and reproduce relevant observed text without relying on the main agent's claim that it met the amount. The separate missing field helps the main agent continue but is a handoff judgment, not evidence for Jev. Preserve output exactly enough that later code and a recognition check can distinguish the target from unrelated text."
 
     items: list[JevOutputExtentEvidenceItemPayload] = Field(description="Return one entry for each output-extent item in run state, in the same order and with the same id. Identify the latest evidence that bears on that target, including its source, or state that the run shows no relevant output. Do not summarize the text in a way that changes its amount or claim that the amount passed. Put an actionable account of what remains absent or unverified in missing, which is not sent as Jev evidence. Never omit an item merely because the run did not address it.")
+
+
+class JevRequiredActionEvidencePayload(BaseModel):
+    """Trace evidence for one explicitly required action, including indices of cited tool calls."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Copy the exact id of one action from the run-state required-actions section. Return one evidence entry for every action, even when the run contains no related event. Do not add an id that the run state does not contain, and do not rename or merge action ids. Keep the entries in the same order as the run-state actions so each one maps back without inference. The id is used to find the evidence, Jev answer, and continuation focus for this action.")
+    evidence: str = Field(min_length=1, description="Quote or closely reproduce direct observations from the run that bear on successful completion of this action. Include relevant tool names and arguments, call execution states and outputs, command or test results, and observable delegation or returned-result evidence, with the source and trace-call index named. Preserve successful and failed attempts in their run order, and state when the run contains no relevant evidence. A call attempt, a plan, a final-answer assertion, or a summary is not itself proof that the requested action succeeded. Report observations only and do not give a completion verdict.")
+    trace_indices: list[int] = Field(description="List the zero-based indices of tool calls in the supplied trace that directly support this action's evidence. The trace labels each tool call with its index, and the indices must be copied exactly rather than estimated or renumbered. Include failed attempts when they are relevant, and include a later successful call separately when one exists. Return an empty list when no tool call directly supports the action, even if the final answer discusses it. Code uses these exact indices only to enforce an order the user explicitly requested, not to decide whether a call succeeded.")
+    completion_trace_index: int | None = Field(description="Give the zero-based trace index of the successful tool call that directly shows this action's completion, when such a call exists. The index must also appear in `trace_indices` and must refer to a call whose recorded state is succeeded. Use null when the recorded run has no successful tool call that directly shows completion, including when it shows only an attempt, a failure, or words in the final answer. Do not choose an earlier failed call when a later call is the one that completed the action. Deterministic code uses this field only for explicit user-stated ordering, while Jev judges whether the cited evidence meets the action's completion condition.")
+    output_source: str | None = Field(default=None, description="Name the actual main-agent response or final-answer section that contains a substantive output proving this action, when one exists. Use `response[n]` with the zero-based response index, or `final_answer` for the final answer; do not cite a sentence that merely claims or summarizes completion. The cited source must contain the exact excerpt copied into `output_excerpt`, so code can check that the output is really present. Use null when no direct output excerpt supports the action. An empty source or an unsupported source name is not direct evidence.")
+    output_excerpt: str | None = Field(default=None, description="Copy a concise, exact excerpt of substantive output from the source named in `output_source`, such as the actual classification table, analysis, or requested written result. Do not copy a sentence that only says the action was done, is complete, or will be done. The excerpt must appear verbatim in the recorded response or final answer, which code validates before it can count as evidence. Use null when the run contains no substantive output excerpt for this action. This field supplements tool evidence and cannot substitute for a successful trace index when the user explicitly required an observable order.")
+    missing: str = Field(min_length=1, description="Tell the main agent what successful part of this requested action the run does not show, in words it can act on. Name a missing review, operation result, classification, returned delegation result, or resolution when that is the stated completion condition. A failed attempt remains missing until the run shows the requested successful result. Do not repeat the evidence or request additional actions the user did not ask for. When the evidence shows the action completed, say that nothing is missing.")
+
+
+class JevRequiredActionsEvidencePayload(JevSectionPayload):
+    """The handoff section with trace evidence for every explicitly required action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The required-actions evidence section gathers what the run directly records for each action listed before work began. A separate checker reads one action and its successful completion condition beside only the evidence gathered for that action. The handoff has access to the main agent's ordered tool calls, including their arguments, state, and outputs, along with responses and the final answer. It must identify the exact tool-call indices when citing calls so code can enforce an explicitly requested order. This section reports observations and actionable gaps, never a verdict, and is compiled anew at each finish attempt."
+
+    actions: list[JevRequiredActionEvidencePayload] = Field(description="Return exactly one evidence entry for each action in the run state's required-actions section, keeping the same ids and order. Quote direct trace observations, including successful command or test output and returned delegation results when they bear on an action. List the exact trace-call indices supporting each action, or an empty list when no call supports it. Preserve failures and unsuccessful attempts so a call that did not complete the requested action cannot look successful. Do not omit an action because the run has no evidence for it, and do not create requirements or evidence beyond the run state and trace.")
 
 
 class JevClaimIdentityPayload(BaseModel):
@@ -1869,10 +1914,52 @@ class JevNegativeCoverage:
 
 
 @dataclass(frozen=True, slots=True)
+class JevRequiredAction:
+    """One explicitly requested action, its observable completion condition, and explicit predecessors."""
+
+    id: str
+    action: str
+    completion_signal: str
+    predecessors: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="required action id")
+        JevText.require(self.action, field_name=f"required action {self.id!r}")
+        JevText.require(self.completion_signal, field_name=f"completion signal of required action {self.id!r}")
+        if not isinstance(self.predecessors, tuple):
+            raise JevValidation.error("required action predecessors", "a tuple of action ids", self.predecessors)
+        JevDeliverableId.require_unique(self.predecessors, field_name=f"predecessors of required action {self.id!r}")
+        for predecessor in self.predecessors:
+            JevDeliverableId.require(predecessor, field_name=f"predecessor of required action {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevRequiredActions:
+    """Request-derived required actions in the order the user explicitly stated them."""
+
+    actions: tuple[JevRequiredAction, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.actions, tuple) or not all(isinstance(item, JevRequiredAction) for item in self.actions):
+            raise JevValidation.error("required actions", "a tuple of JevRequiredAction values", self.actions)
+        identifiers = self.ids()
+        JevDeliverableId.require_unique(identifiers, field_name="required actions")
+        position = {identifier: index for index, identifier in enumerate(identifiers)}
+        for action in self.actions:
+            for predecessor in action.predecessors:
+                if predecessor not in position or position[predecessor] >= position[action.id]:
+                    raise JevValidation.error("required action predecessor", "an existing action earlier in the request-state order", predecessor)
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every required action id in request order."""
+        return tuple(item.id for item in self.actions)
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: central fields and enabled check sections.
 
-    `negative_coverage` records each requested inspection target, while request-derived fields are otherwise present only when their check has items. `multi_part`, `target_outcome`,
+    `negative_coverage` records each requested inspection target, and `required_actions` lists explicitly requested procedures; request-derived fields are otherwise present only when their check has items. `multi_part`, `target_outcome`,
     `motivating_case`, `scope_coverage`, `phase_progress`, and `input_set_coverage` retain their per-check
     rules; `output_count` holds each explicit numeric output obligation. `usage` is JevRunState's own model usage.
     """
@@ -1894,6 +1981,8 @@ class JevRunStateRecord:
 
     negative_coverage: JevNegativeCoverage | None = None
 
+    required_actions: JevRequiredActions | None = None
+
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
         for field_name in ("goal", "objective", "mission"):
@@ -1913,6 +2002,7 @@ class JevRunStateRecord:
             ("run state output_extent", self.output_extent, JevOutputExtent),
             ("run state input_exhaustion", self.input_exhaustion, JevInputExhaustion),
             ("run state negative_coverage", self.negative_coverage, JevNegativeCoverage),
+            ("run state required_actions", self.required_actions, JevRequiredActions),
         ))
 
 
@@ -2301,6 +2391,56 @@ class JevOutputCountEvidence:
         """Return obligation ids in handoff order."""
         return tuple(item.id for item in self.obligations)
 
+@dataclass(frozen=True, slots=True)
+class JevRequiredActionEvidence:
+    """What the run shows for one required action, the successful trace call when available, and its gap."""
+
+    id: str
+    evidence: str
+    trace_indices: tuple[int, ...]
+    completion_trace_index: int | None
+    missing: str
+    output_source: str | None = None
+    output_excerpt: str | None = None
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="required-action evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of required action {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of required action {self.id!r}")
+        if not isinstance(self.trace_indices, tuple):
+            raise JevValidation.error("required-action trace indices", "a tuple of non-negative integers", self.trace_indices)
+        if any(isinstance(index, bool) or not isinstance(index, int) or index < 0 for index in self.trace_indices):
+            raise JevValidation.error("required-action trace indices", "a tuple of non-negative integers", self.trace_indices)
+        if tuple(sorted(set(self.trace_indices))) != self.trace_indices:
+            raise JevValidation.error("required-action trace indices", "unique indices in ascending trace order", self.trace_indices)
+        if self.completion_trace_index is not None:
+            if isinstance(self.completion_trace_index, bool) or not isinstance(self.completion_trace_index, int) or self.completion_trace_index < 0:
+                raise JevValidation.error("required-action completion trace index", "a non-negative integer or None", self.completion_trace_index)
+            if self.completion_trace_index not in self.trace_indices:
+                raise JevValidation.error("required-action completion trace index", "an index also listed in trace_indices", self.completion_trace_index)
+        if (self.output_source is None) != (self.output_excerpt is None):
+            raise JevValidation.error("required-action output evidence", "both output_source and output_excerpt or neither", (self.output_source, self.output_excerpt))
+        if self.output_source is not None:
+            if not re.fullmatch(r"response\[\d+\]|final_answer", self.output_source):
+                raise JevValidation.error("required-action output source", "response[n] or final_answer", self.output_source)
+            JevText.require(self.output_excerpt, field_name=f"output excerpt for required action {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevRequiredActionsEvidence:
+    """The handoff evidence for every request-derived required action, in run-state order."""
+
+    actions: tuple[JevRequiredActionEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.actions, tuple) or not all(isinstance(item, JevRequiredActionEvidence) for item in self.actions):
+            raise JevValidation.error("required-actions evidence", "a tuple of JevRequiredActionEvidence values", self.actions)
+        JevDeliverableId.require_unique(self.ids(), field_name="required-actions evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every evidence id in request order."""
+        return tuple(item.id for item in self.actions)
+
 
 @dataclass(frozen=True, slots=True)
 class JevClaimIdentity:
@@ -2608,7 +2748,7 @@ class JevProblemsResolvedEvidence:
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for enabled done checks.
 
-    Each optional typed section is present only for its check. `negative_coverage` carries one inspection account per requested target and separates inspection evidence from the final answer's negative or incomplete report. `guaranteed_next_actions` holds post-run candidate actions and is handoff-only. Existing sections include `multi_part`,
+    Each optional typed section is present only for its check. `negative_coverage` carries one inspection account per requested target and separates inspection evidence from the final answer's negative or incomplete report. `guaranteed_next_actions` holds post-run candidate actions and is handoff-only; `required_actions` pairs request-derived action definitions with trace-backed completion evidence. Existing sections include `multi_part`,
     `claims`, `target_outcome`, `motivating_case`, `scope_coverage`, `problems_resolved`,
     `completion_evidence`, `phase_progress`, and `input_set_coverage` and request-derived `input_exhaustion`; `output_count` carries candidate
     output units and direct evidence for numeric obligations, and `output_extent` carries text-size evidence; `report_action_alignment` and `assumptions_reconciled` carry post-run comparisons; `negative_coverage` carries per-target inspection evidence and answer reports. Completion evidence and changed assumptions are
@@ -2635,6 +2775,8 @@ class JevHandoffRecord:
     negative_coverage: JevNegativeCoverageEvidence | None = None
     guaranteed_next_actions: JevGuaranteedNextActions | None = None
 
+    required_actions: JevRequiredActionsEvidence | None = None
+
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
         _require_optional_jev_sections((
@@ -2654,6 +2796,7 @@ class JevHandoffRecord:
             ("handoff input_exhaustion", self.input_exhaustion, JevInputExhaustionEvidenceSet),
             ("handoff negative_coverage", self.negative_coverage, JevNegativeCoverageEvidence),
             ("handoff guaranteed_next_actions", self.guaranteed_next_actions, JevGuaranteedNextActions),
+            ("handoff required_actions", self.required_actions, JevRequiredActionsEvidence),
         ))
 
 
@@ -2971,6 +3114,14 @@ __all__ = [
     "JevReportActionAlignmentEvidencePayload",
     "JevReportActionAlignmentEvidenceSectionPayload",
     "JevReportActionAlignmentItem",
+    "JevRequiredAction",
+    "JevRequiredActionEvidence",
+    "JevRequiredActionEvidencePayload",
+    "JevRequiredActionPayload",
+    "JevRequiredActions",
+    "JevRequiredActionsEvidence",
+    "JevRequiredActionsEvidencePayload",
+    "JevRequiredActionsPayload",
     "JevRunStatePayload",
     "JevRunStateRecord",
     "JevScopeCoverage",

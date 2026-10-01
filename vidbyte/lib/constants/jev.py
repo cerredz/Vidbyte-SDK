@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate.
+PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-agent-scaffold.py, and tests/test_jev_done.py.
 """
 
 from __future__ import annotations
@@ -122,6 +122,8 @@ JEV_ASSUMPTIONS_RECONCILED_THRESHOLD: float = 0.8
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # A requested outcome stage must show progress or an evidenced blocker; this is a starting point, not a tuned value.
 JEV_PHASE_PROGRESS_THRESHOLD: float = 0.8
+# Each explicitly required action must independently reach this P(yes); starting point, not tuned.
+JEV_REQUIRED_ACTIONS_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -208,6 +210,7 @@ JEV_DONE_PHASE_STAGE_FIELD: str = "stage"
 JEV_DONE_PHASE_REQUIRED_RESULT_FIELD: str = "required_result"
 JEV_DONE_PHASE_REQUEST_SCOPE_FIELD: str = "request_scope"
 JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD: str = "output_criterion"
+JEV_DONE_REQUIRED_ACTIONS_FIELD: str = "required_actions"
 JEV_DONE_CLAIM_FIELD: str = "claim"
 JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
@@ -269,6 +272,8 @@ __all__ = [
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
+    "JEV_DONE_ACTION_FIELD",
+    "JEV_DONE_REQUIRED_ACTIONS_FIELD",
     "JEV_DELIVERABLE_ID_PATTERN",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
     "JEV_DONE_OUTPUT_COUNTS_FIELD",
@@ -398,6 +403,7 @@ __all__ = [
     "JEV_MULTI_PART_THRESHOLD",
     "JEV_NEGATIVE_COVERAGE_THRESHOLD",
     "JEV_OUTPUT_COUNT_THRESHOLD",
+    "JEV_REQUIRED_ACTIONS_THRESHOLD",
     "JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",

@@ -153,6 +153,10 @@ For every per-item continuation gate, design the item's Jev-facing state as **fo
 
 A check that judges the run as a whole still fits this model: it has one item with a fixed id. `str.format(item=...)` ignores a placeholder the question does not use. Prefer real items when they exist.
 
+### Explicit procedural items: REQUIRED_ACTIONS
+
+`REQUIRED_ACTIONS` writes one pre-run item for each action or procedure the user explicitly requires. Keep the target and observable completion condition in the user's terms; do not add customary steps. Record predecessor ids only when the user specifies order. At each finish attempt, the handoff collects direct trace evidence and may cite an exact substantive excerpt from a recorded response or final answer. Code verifies that an excerpt occurs in its cited source; Jev still judges whether its content meets the completion condition. A bare statement that work happened is not an excerpt. A positive Jev answer cannot pass without a successful completion call or validated output excerpt. Explicit order is checked from successful tool-call indices; missing indices cannot establish chronology and leave the dependent action incomplete. The continuation reports the precise action and evidence gap, with the usual cap and fail-open behavior.
+
 ### Dynamic items: CLAIMS
 
 The `CLAIMS` check is the exception to the usual pre-run item list. Its items are the concrete, checkable factual assertions in the main agent's final answer, so they cannot be truthfully written from the user's request before work begins. Do not add a claims list to `JevRunStateRecord` or ask the run-state writer to predict what the main agent will say. Instead, `JevHandoff` extracts rich parent claims at each finish attempt, separates independently checkable assertions, and pairs each parent with relevant `ToolCallContextItem` evidence or an explicit statement that no supporting call exists. The handoff creates one question per assertion, and code later combines those answers under their parent claim.
@@ -617,11 +621,11 @@ Your change must not raise any lint baseline count.
 ## 4. Important things to remember
 
 - **A check is data plus `match` cases, not a class.** It adds sections to the agents that can know its items, records, one question module, and one `case` each in `_section`, `_judge`, and `_explain`. CLAIMS items come from the post-run handoff, not the pre-run state.
-- **Generative agents write, and Jev recognizes.** Listing items, writing "done when" conditions, and compiling evidence are generation, done by `JevRunState` and `JevHandoff`. Jev only answers yes or no per item. Counting, "all of them", and thresholds belong in code.
+- **Generative agents write, and Jev recognizes.** Listing items, writing "done when" conditions, and compiling evidence are generation, done by `JevRunState` and `JevHandoff`. Jev only answers yes or no per item. Counting, "all of them", thresholds, and explicit-order checks belong in code.
 - **One Jev request per finish attempt.** Every enabled check's questions share one state and one request. Question names `"<key>.<item_id>"` keep the answers apart. Never add a second `DecisionModelRunner` call.
 - **One item per question, and the focus rule names the id.** This keeps each answer tied to one item, so Focus names the exact missing part. The brief must say to judge only the named entry.
 - **The shared state must describe itself truthfully** for every combination of enabled checks (step 11).
-- **`evidence` goes to Jev, and `missing` goes to the main agent.** Never the reverse.
+- **`evidence` goes to Jev, and `missing` goes to the main agent.** Never the reverse. For REQUIRED_ACTIONS, a cited output excerpt must exactly occur in its source; a completion assertion alone is not evidence.
 - **The run state is written once, from the request only, before any work.** It is the fixed reference for checks with request-derived items; never predict final-answer claims there.
 - **The handoff is recompiled at every finish attempt**, with history cleared. Request-derived item ids must match the run state; dynamic parent claim ids and within-parent assertion ids must be valid and unique within that handoff.
 - **INPUT_EXHAUSTION is request-derived.** Preserve an explicit requested count and its unit in run state. The handoff reports distinct trace-backed visited-unit ids, source-reported totals, continuation positions, terminal evidence, and failures. Code compares observed distinct ids with the request total first, or a comparable source total if the request gave none; a total for pages must never be compared with record ids. Jev receives one prepared evidence judgment per collection in the same batched request and does not count or infer unseen members.

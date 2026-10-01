@@ -78,6 +78,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevReportActionAlignment,
     JevReportActionAlignmentEvidenceSectionPayload,
     JevReportActionAlignmentItem,
+    JevRequiredActionEvidence,
+    JevRequiredActionEvidencePayload,
+    JevRequiredActionsEvidence,
+    JevRequiredActionsEvidencePayload,
     JevRunStateRecord,
     JevScopeCoverageEvidence,
     JevScopeCoverageEvidencePayload,
@@ -106,6 +110,7 @@ class JevHandoff(BaseAgent):
     _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoverageEvidencePayload})
 
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.GUARANTEED_NEXT_ACTIONS: JevGuaranteedNextActionsEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -142,12 +147,32 @@ class JevHandoff(BaseAgent):
         # The owner asked for the main agent's context window to reach the handoff through vidbyte.context, so the
         # run is passed as the SDK's own response and tool-call primitives instead of a hand-built transcript.
         items: list[ContextItem] = [TextContextItem(title=RUN_STATE_TITLE, content=run_state, source=HANDOFF_SOURCE)]
-        items.extend(ResponseContextItem(content=text, sender=sender) for text in responses if text.strip())
-        items.extend(ToolCallContextItem(name=call.name, arguments=dict(call.arguments), output=call.output, metadata={"state": str(getattr(call.state, "value", call.state))}) for call in calls)
+        for index, text in enumerate(responses):
+            if not text.strip():
+                continue
+            items.append(TextContextItem(title=f"Response source response[{index}]", content="The immediately following response retains this exact source index."))
+            items.append(ResponseContextItem(content=text, sender=sender, metadata={"response_index": index}))
+        items.extend(
+            ToolCallContextItem(
+                name=f"trace[{index}] {call.name} state={getattr(call.state, 'value', call.state)}",
+                arguments=dict(call.arguments),
+                output=call.output,
+                metadata={"state": str(getattr(call.state, "value", call.state)), "trace_index": index},
+            )
+            for index, call in enumerate(calls)
+        )
         items.append(TextContextItem(title=FINAL_ANSWER_TITLE, content=final_answer if final_answer.strip() else NO_FINAL_ANSWER, source=HANDOFF_SOURCE))
         return ContextManager(items)
 
-    async def compile(self, request: str, state: JevRunStateRecord, window: ContextManager) -> JevHandoffRecord | None:
+    async def compile(
+        self,
+        request: str,
+        state: JevRunStateRecord,
+        window: ContextManager,
+        calls: Sequence[ToolCallContext] = (),
+        responses: Sequence[str] = (),
+        final_answer: str = "",
+    ) -> JevHandoffRecord | None:
         """Return evidence for every enabled check, or None when a request-derived section does not match run state."""
         self.history.clear()
         self.rendered = ""
@@ -155,7 +180,7 @@ class JevHandoff(BaseAgent):
             reply = await self.arun(AgentInput(prompt=request, context_manager=window))
             if not isinstance(reply.structured, self.payload):
                 return None
-            record = self._record(reply.structured, state)
+            record = self._record(reply.structured, state, calls, responses, final_answer)
             # The continuation hands this text back to the main agent when a check fails.
             self.rendered = "" if record is None else reply.structured.model_dump_json()
             return record
@@ -164,7 +189,14 @@ class JevHandoff(BaseAgent):
             # validation fails the done check open, exactly as a Jev outage does.
             return None
 
-    def _record(self, payload: JevHandoffPayload, state: JevRunStateRecord) -> JevHandoffRecord | None:
+    def _record(
+        self,
+        payload: JevHandoffPayload,
+        state: JevRunStateRecord,
+        calls: Sequence[ToolCallContext] = (),
+        responses: Sequence[str] = (),
+        final_answer: str = "",
+    ) -> JevHandoffRecord | None:
         # Converts the validated reply into the frozen record, requiring one evidence entry per run-state deliverable.
         # @intent evidence-covers-exactly-the-run-state
         # Jev judges each deliverable by id, so evidence for a deliverable the state never listed, or
@@ -172,42 +204,11 @@ class JevHandoff(BaseAgent):
         request_records = self._request_evidence_records(payload, state)
         if request_records is None:
             return None
-        claims = None
-        claims_section = getattr(payload, JevDoneCheck.CLAIMS.value, None)
-        if isinstance(claims_section, JevClaimsEvidencePayload):
-            # The claim ids are created from this final answer, so validate uniqueness here instead of matching
-            # them to a pre-run list that cannot contain statements the main agent has not made yet.
-            # @intent claims-are-derived-after-the-work
-            claims = JevClaimsEvidence(tuple(
-                JevClaimEvidence(
-                    item.id,
-                    JevClaimContext(
-                        identity=JevClaimIdentity(
-                            title=item.claim.identity.title.strip(),
-                            description=item.claim.identity.description.strip(),
-                            intent=None if item.claim.identity.intent is None else item.claim.identity.intent.strip(),
-                        ),
-                        scope=JevClaimScope(
-                            scope=item.claim.scope.scope.strip(),
-                            qualifications=tuple(value.strip() for value in item.claim.scope.qualifications),
-                        ),
-                        kind=item.claim.kind,
-                        output=None if item.claim.output is None else item.claim.output.strip(),
-                        assertions=tuple(
-                            JevClaimAssertion(
-                                assertion.id,
-                                assertion.statement.strip(),
-                                assertion.completion_criteria.strip(),
-                            )
-                            for assertion in item.claim.assertions
-                        ),
-                    ),
-                    item.evidence.strip(),
-                    item.missing.strip(),
-                )
-                for item in claims_section.claims
-            ))
+        claims = self._claims_record(payload)
         guaranteed_next_actions = self._guaranteed_next_actions_record(payload)
+        required_actions = self._required_actions_record(payload, state, calls, responses, final_answer)
+        if JevDoneCheck.REQUIRED_ACTIONS in self.checks and required_actions is None:
+            return None
         report_action_alignment = None
         alignment_section = getattr(payload, JevDoneCheck.REPORT_ACTION_ALIGNMENT.value, None)
         if isinstance(alignment_section, JevReportActionAlignmentEvidenceSectionPayload):
@@ -301,7 +302,117 @@ class JevHandoff(BaseAgent):
             input_exhaustion=request_records.input_exhaustion,
             negative_coverage=request_records.negative_coverage,
             guaranteed_next_actions=guaranteed_next_actions,
+            required_actions=required_actions,
         )
+
+    @staticmethod
+    def _claims_record(payload: JevHandoffPayload) -> JevClaimsEvidence | None:
+        """Convert post-run claims while keeping their nested assertions and source context intact."""
+        section = getattr(payload, JevDoneCheck.CLAIMS.value, None)
+        if not isinstance(section, JevClaimsEvidencePayload):
+            return None
+        # Claim ids come from the final answer, so validate uniqueness without matching them to a pre-run list.
+        # @intent claims-are-derived-after-the-work
+        return JevClaimsEvidence(tuple(
+            JevClaimEvidence(
+                item.id,
+                JevClaimContext(
+                    identity=JevClaimIdentity(
+                        title=item.claim.identity.title.strip(),
+                        description=item.claim.identity.description.strip(),
+                        intent=None if item.claim.identity.intent is None else item.claim.identity.intent.strip(),
+                    ),
+                    scope=JevClaimScope(
+                        scope=item.claim.scope.scope.strip(),
+                        qualifications=tuple(value.strip() for value in item.claim.scope.qualifications),
+                    ),
+                    kind=item.claim.kind,
+                    output=None if item.claim.output is None else item.claim.output.strip(),
+                    assertions=tuple(
+                        JevClaimAssertion(assertion.id, assertion.statement.strip(), assertion.completion_criteria.strip())
+                        for assertion in item.claim.assertions
+                    ),
+                ),
+                item.evidence.strip(),
+                item.missing.strip(),
+            )
+            for item in section.claims
+        ))
+
+    def _required_actions_record(
+        self,
+        payload: JevHandoffPayload,
+        state: JevRunStateRecord,
+        calls: Sequence[ToolCallContext],
+        responses: Sequence[str],
+        final_answer: str,
+    ) -> JevRequiredActionsEvidence | None:
+        """Convert evidence only when its ids, trace indices, and quoted output match the run."""
+        section = getattr(payload, JevDoneCheck.REQUIRED_ACTIONS.value, None)
+        if not isinstance(section, JevRequiredActionsEvidencePayload):
+            return None
+        items = tuple(
+            self._required_action_evidence(item, responses, final_answer)
+            for item in section.actions
+        )
+        evidence = JevRequiredActionsEvidence(items)
+        expected = () if state.required_actions is None else state.required_actions.ids()
+        if evidence.ids() != expected:
+            return None
+        if any(not self._valid_required_action_trace(item, calls) for item in evidence.actions):
+            return None
+        return evidence
+
+    @classmethod
+    def _required_action_evidence(
+        cls,
+        item: JevRequiredActionEvidencePayload,
+        responses: Sequence[str],
+        final_answer: str,
+    ) -> JevRequiredActionEvidence:
+        """Keep only output excerpts that occur in the exact raw source named by the handoff."""
+        output_is_cited = cls._valid_output_excerpt(item.output_source, item.output_excerpt, responses, final_answer)
+        return JevRequiredActionEvidence(
+            item.id,
+            item.evidence.strip(),
+            tuple(item.trace_indices),
+            item.completion_trace_index,
+            item.missing.strip(),
+            item.output_source if output_is_cited else None,
+            item.output_excerpt.strip() if output_is_cited and item.output_excerpt is not None else None,
+        )
+
+    @staticmethod
+    def _valid_required_action_trace(item: JevRequiredActionEvidence, calls: Sequence[ToolCallContext]) -> bool:
+        """Reject nonexistent trace indices and completion citations that point to unsuccessful calls."""
+        if any(index >= len(calls) for index in item.trace_indices):
+            return False
+        if item.completion_trace_index is None:
+            return True
+        call = calls[item.completion_trace_index]
+        return str(getattr(call.state, "value", call.state)) == "succeeded"
+
+    @staticmethod
+    def _valid_output_excerpt(
+        source: str | None,
+        excerpt: str | None,
+        responses: Sequence[str],
+        final_answer: str,
+    ) -> bool:
+        """Check an excerpt against the unmodified response or final-answer text it cites."""
+        if source is None or excerpt is None or not excerpt.strip():
+            return False
+        if source == "final_answer":
+            text = final_answer
+        elif source.startswith("response[") and source.endswith("]"):
+            try:
+                index = int(source[9:-1])
+                text = responses[index]
+            except (ValueError, IndexError):
+                return False
+        else:
+            return False
+        return excerpt.strip() in text
 
     def _guaranteed_next_actions_record(self, payload: JevHandoffPayload) -> JevGuaranteedNextActions | None:
         """Convert dynamic candidates without copying their private necessity rationale into Jev evidence."""

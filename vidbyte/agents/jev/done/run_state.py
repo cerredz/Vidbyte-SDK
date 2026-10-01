@@ -94,6 +94,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD,
     JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD,
     JEV_DONE_OUTPUT_EXTENTS_FIELD,
+    JEV_DONE_REQUIRED_ACTIONS_FIELD,
     JEV_DONE_ORIGINAL_ASSUMPTION_FIELD,
     JEV_DONE_ORIGINAL_BASIS_FIELD,
     JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD,
@@ -165,6 +166,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevPhaseProgressPayload,
     JevPhaseStage,
     JevQuestion,
+    JevRequiredAction,
+    JevRequiredActionEvidence,
+    JevRequiredActions,
+    JevRequiredActionsPayload,
     JevRunStatePayload,
     JevRunStateRecord,
     JevScopeCoverage,
@@ -198,6 +203,7 @@ class JevRunState(BaseAgent):
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
     _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsPayload})
 
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -367,7 +373,14 @@ class JevRunState(BaseAgent):
             item.id: self._measure(final_answer, item) for item in self.record.output_extent.items
         }
         window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender)
-        self.handoff = await self.handoff_writer.compile(self.request, self.record, window)
+        self.handoff = await self.handoff_writer.compile(
+            self.request,
+            self.record,
+            window,
+            calls=calls,
+            responses=responses,
+            final_answer=final_answer,
+        )
         self.response.handoff(self.handoff)
         decision = await self._ask(self.handoff)
         failed: list[JevDoneResult] = []
@@ -429,6 +442,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion_section,
             JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage_section,
             JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions_section,
+            JevDoneCheck.REQUIRED_ACTIONS: self._required_actions_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -483,6 +497,31 @@ class JevRunState(BaseAgent):
         }
         asked = tuple(question.to_question(identifier) for question in questions for identifier in candidates.ids())
         return {JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD: entries}, asked
+
+    def _required_actions_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Pair each explicitly requested action with its direct evidence and completion signal."""
+        state = None if self.record is None else self.record.required_actions
+        evidence = handoff.required_actions
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
+        evidence_by_id = {item.id: item for item in evidence.actions}
+        entries = {
+            action.id: {
+                JEV_DONE_ACTION_FIELD: action.action,
+                JEV_DONE_COMPLETION_SIGNAL_FIELD: action.completion_signal,
+                JEV_DONE_EVIDENCE_FIELD: self._required_action_evidence_text(evidence_by_id[action.id]),
+            }
+            for action in state.actions
+        }
+        return {JEV_DONE_REQUIRED_ACTIONS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
+    @staticmethod
+    def _required_action_evidence_text(item: JevRequiredActionEvidence) -> str:
+        """Include only a handoff-validated output excerpt alongside the cited run evidence."""
+        if item.output_source is None or item.output_excerpt is None:
+            return item.evidence
+        return f"{item.evidence}\nOutput excerpt from {item.output_source}: {item.output_excerpt}"
 
     def _input_exhaustion_entry(self, item: JevInputExhaustionObligation, observation: JevInputExhaustionEvidence) -> Mapping[str, object]:
         """Build Jev's evidence-only view for one dynamic collection traversal."""
@@ -867,6 +906,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion,
             JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage,
             JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions,
+            JevDoneCheck.REQUIRED_ACTIONS: self._required_actions,
         }
         handler = handlers.get(check)
         if handler is None:
@@ -909,6 +949,59 @@ class JevRunState(BaseAgent):
             incomplete=incomplete,
             usage=usage,
         )
+
+    def _required_actions(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Judge each requested action and apply deterministic trace/order requirements."""
+        state = None if self.record is None else self.record.required_actions
+        if state is None or handoff is None or handoff.required_actions is None:
+            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None, available=False)
+        if not state.actions:
+            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.REQUIRED_ACTIONS)
+        identifiers = state.ids()
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None, available=False)
+        evidence = {item.id: item for item in handoff.required_actions.actions}
+        incomplete = {
+            identifier
+            for identifier in identifiers
+            if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False
+            or (evidence[identifier].completion_trace_index is None and evidence[identifier].output_excerpt is None)
+        }
+        incomplete.update(self._ordered_action_failures(state, evidence, incomplete))
+        ordered_incomplete = tuple(identifier for identifier in identifiers if identifier in incomplete)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.REQUIRED_ACTIONS,
+            score=verdict.score,
+            passed=verdict.passed and not incomplete,
+            answers=verdict.answers,
+            incomplete=ordered_incomplete,
+            usage=usage,
+        )
+
+    @staticmethod
+    def _ordered_action_failures(
+        state: JevRequiredActions,
+        evidence: Mapping[str, JevRequiredActionEvidence],
+        incomplete: set[str],
+    ) -> set[str]:
+        """Require successful trace indices to show every explicitly requested predecessor first."""
+        failures: set[str] = set()
+        for action in state.actions:
+            if not action.predecessors or action.id in incomplete:
+                continue
+            completion = evidence[action.id].completion_trace_index
+            predecessor_indices = [evidence[identifier].completion_trace_index for identifier in action.predecessors]
+            predecessor_failed = any(identifier in incomplete or identifier in failures for identifier in action.predecessors)
+            if predecessor_failed or completion is None or any(index is None or index >= completion for index in predecessor_indices):
+                failures.add(action.id)
+        return failures
 
     # @intent absence-conclusions-require-inspection-evidence
     # A clean outcome is valid when the requested target was examined; this check only rejects an unsupported all-clear or explicitly incomplete inspection.
@@ -1337,6 +1430,7 @@ class JevRunState(BaseAgent):
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        required_actions = self._required_actions_record(payload)
         output_count = self._output_count_record(payload)
         scope_coverage = None
         scope_section = getattr(payload, JevDoneCheck.SCOPE_COVERAGE.value, None)
@@ -1401,6 +1495,7 @@ class JevRunState(BaseAgent):
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            required_actions=required_actions,
             output_count=output_count,
             scope_coverage=scope_coverage,
             target_outcome=target_outcome,
@@ -1412,6 +1507,18 @@ class JevRunState(BaseAgent):
             negative_coverage=negative_coverage,
             output_extent=self._output_extent_record(payload),
         )
+
+    @staticmethod
+    def _required_actions_record(payload: JevRunStatePayload) -> JevRequiredActions | None:
+        """Convert explicit action obligations while preserving their requested order and predecessors."""
+        section = getattr(payload, JevDoneCheck.REQUIRED_ACTIONS.value, None)
+        if not isinstance(section, JevRequiredActionsPayload):
+            return None
+        actions = tuple(
+            JevRequiredAction(item.id, item.action.strip(), item.completion_signal.strip(), tuple(item.predecessors))
+            for item in section.actions
+        )
+        return JevRequiredActions(actions)
 
     @staticmethod
     def _input_set_coverage_record(payload: JevRunStatePayload) -> JevInputSetCoverage | None:

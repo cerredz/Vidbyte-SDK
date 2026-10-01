@@ -5,8 +5,8 @@ ROLE IN CODEBASE: This is the public package boundary imported by vidbyte.agents
 ARCHITECTURE NOTE: The agent types plus the preflight flag and done-check enums and result records are public; they are re-exported from vidbyte.lib, while preflight and done questions, JevPreflightGate, JevRunState, JevHandoff, decision records, and provider transport stay in their lower-level packages.
 COMMON MODIFICATION PATTERNS: Export a named capability settings type only when it becomes part of the supported JevAgent API.
 KNOWN EDGE CASES: Importing this package must not resolve credentials or construct a TypeSafe decision runner.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md, docs/design/jev-required-actions-done-criteria.md.
+TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py, tests/test_jev_done.py.
 """
 
 from vidbyte.agents.jev.agent import JevAgent
@@ -69,6 +69,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevProblemsResolvedEvidence,
     JevReportActionAlignment,
     JevReportActionAlignmentItem,
+    JevRequiredAction,
+    JevRequiredActionEvidence,
+    JevRequiredActions,
+    JevRequiredActionsEvidence,
     JevRunStateRecord,
     JevScopeCoverage,
     JevScopeCoverageEvidence,
@@ -162,6 +166,10 @@ __all__ = [
     "JevProblemCheckItemType",
     "JevProblemResolutionItem",
     "JevProblemsResolvedEvidence",
+    "JevRequiredAction",
+    "JevRequiredActionEvidence",
+    "JevRequiredActions",
+    "JevRequiredActionsEvidence",
     "JevRunStateRecord",
     "JevRuntime",
     "JevRuntimeSettings",

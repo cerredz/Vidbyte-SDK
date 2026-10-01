@@ -30,6 +30,8 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneQuestion,
     JevDoneResult,
     JevProblemResolutionItem,
+    JevRequiredAction,
+    JevRequiredActionEvidence,
 )
 from vidbyte.lib.enums.jev import JevDoneCheck, JevProblemCheckItemType
 from vidbyte.lib.enums.prompts import Prompt
@@ -100,6 +102,7 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.INPUT_EXHAUSTION: self._explain_input_exhaustion,
             JevDoneCheck.NEGATIVE_COVERAGE: self._explain_negative_coverage,
             JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._explain_guaranteed_next_actions,
+            JevDoneCheck.REQUIRED_ACTIONS: self._explain_required_actions,
         }
         return handlers[result.check](result)
 
@@ -122,6 +125,29 @@ class JevDoneContinuation(JevContinuation):
                 missing=item.missing,
             ))
             focus.append(f"- Requested outcome: {item.outcome}\n  Observed trigger: {item.trigger}\n  Necessary action: {item.action}\n  Evidence gap: {item.missing}")
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_required_actions(self, result: JevDoneResult) -> tuple[str, str]:
+        """Focus feedback on explicitly requested actions that remain incomplete or out of order."""
+        question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
+        state = None if self.run_state.record is None else self.run_state.record.required_actions
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.required_actions
+        actions = {} if state is None else {item.id: item for item in state.actions}
+        evidence = {} if handoff is None else {item.id: item for item in handoff.actions}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            action = actions[identifier]
+            observed = evidence[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            missing = observed.missing
+            order_gap = self._required_action_order_gap(action, evidence, result.incomplete)
+            if order_gap:
+                missing = f"{missing} {order_gap}" if missing else order_gap
+            failed.append(
+                f"- {question.instructions.question.format(item=identifier)} Gate result: incomplete (P(yes) = {yes:.2f}). Still missing: {missing}"
+            )
+            focus.append(f"- Required action: {action.action} Completion condition: {action.completion_signal}")
         return "\n".join(failed), "\n".join(focus)
 
     def _explain_negative_coverage(self, result: JevDoneResult) -> tuple[str, str]:
@@ -405,6 +431,23 @@ class JevDoneContinuation(JevContinuation):
             expected = f" Expected behavior: {scenario.expected_behavior}." if scenario.expected_behavior else ""
             focus.append(f"- Exercise {scenario.condition} for {scenario.target}; the nearby case that does not count is {scenario.near_miss}.{expected} Allowed mode: {scenario.exercise_mode.value}.")
         return "\n".join(failed), "\n".join(focus)
+
+    @staticmethod
+    def _required_action_order_gap(
+        action: JevRequiredAction,
+        evidence: Mapping[str, JevRequiredActionEvidence],
+        incomplete: tuple[str, ...],
+    ) -> str:
+        """Describe an explicit predecessor order that the successful trace indices do not establish."""
+        if not action.predecessors:
+            return ""
+        own_index = evidence[action.id].completion_trace_index
+        predecessor_indices = [evidence[identifier].completion_trace_index for identifier in action.predecessors]
+        if any(identifier in incomplete for identifier in action.predecessors) or own_index is None or any(
+            index is None or index >= own_index for index in predecessor_indices
+        ):
+            return f"The run does not show successful completion of {', '.join(action.predecessors)} before {action.id} in the requested order."
+        return ""
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""

@@ -3,9 +3,9 @@
 PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question or question pair and threshold, plus validation of the done checks a user enables.
 ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
-COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
+COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here. REQUIRED_ACTIONS contributes one question for each explicitly requested action.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -29,6 +29,7 @@ from vidbyte.lib.constants.jev import (
     JEV_PHASE_PROGRESS_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
+    JEV_REQUIRED_ACTIONS_THRESHOLD,
     JEV_SCOPE_COVERAGE_THRESHOLD,
     JEV_TARGET_OUTCOME_THRESHOLD,
 )
@@ -55,6 +56,7 @@ from vidbyte.lib.jev.done.output_extent import OutputExtentSatisfiedQuestion
 from vidbyte.lib.jev.done.phase_progress import PhaseProgressReachedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.report_action_alignment import ReportActionAlignmentQuestion
+from vidbyte.lib.jev.done.required_actions import RequiredActionCompletedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
 from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
@@ -79,6 +81,7 @@ class JevDoneRegistry:
         JevDoneCheck.PROBLEMS_RESOLVED: (ProblemsResolvedQuestion(),),
         JevDoneCheck.PHASE_PROGRESS: (PhaseProgressReachedQuestion(),),
         JevDoneCheck.OUTPUT_EXTENT: (OutputExtentSatisfiedQuestion(),),
+        JevDoneCheck.REQUIRED_ACTIONS: (RequiredActionCompletedQuestion(),),
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
@@ -97,6 +100,7 @@ class JevDoneRegistry:
         JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD,
         JevDoneCheck.PHASE_PROGRESS: JEV_PHASE_PROGRESS_THRESHOLD,
         JevDoneCheck.OUTPUT_EXTENT: JEV_OUTPUT_EXTENT_THRESHOLD,
+        JevDoneCheck.REQUIRED_ACTIONS: JEV_REQUIRED_ACTIONS_THRESHOLD,
     })
 
     @classmethod
