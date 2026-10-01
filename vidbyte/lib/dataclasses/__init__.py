@@ -189,6 +189,7 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorReportPayload,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.dataclasses.sandbox import (
     SandboxRequest,
     SandboxResult,
@@ -425,6 +426,7 @@ __all__ = [
     "SearchHit",
     "SearchPayload",
     "Selection",
+    "SkillDocument",
     "SessionMeta",
     "SessionStatus",
     "SourceResult",

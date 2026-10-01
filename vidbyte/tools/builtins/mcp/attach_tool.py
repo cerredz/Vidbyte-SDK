@@ -69,10 +69,7 @@ class AttachMcpServerTool(BaseTool):
                     name="url",
                     type="string",
                     description=(
-                        "The https Streamable HTTP endpoint of a remote MCP server, such as the 'url' field returned by search_mcp_servers. "
-                        "No local process is started when you attach by url. "
-                        "Servers that require a login or an API key refuse the connection and return an error. "
-                        "Leave this empty when you attach by command."
+                        "The https Streamable HTTP endpoint of a remote MCP server, such as the 'url' field returned by search_mcp_servers. No local process is started when you attach by url. Servers that require a login or an API key refuse the connection and return an error. Leave this empty when you attach by command."
                     ),
                     required=False,
                     default=None,

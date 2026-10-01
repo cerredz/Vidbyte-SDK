@@ -23,6 +23,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevPromptAlignmentOutcome,
     JevRunStateRecord,
     JevSpecialist,
+    JevSkillsOutcome,
     JevToolAlignmentOutcome,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -79,6 +80,12 @@ class JevResponse:
     def tool_alignment(self, outcome: JevToolAlignmentOutcome) -> None:
         """Record the tool-settings alignment outcome for this run."""
         self.state.tool_alignment = outcome
+
+    def skills(self, outcome: JevSkillsOutcome) -> None:
+        # @intent response-never-retains-skill-content
+        # The public record exposes per-document status and decision usage, while selected text stays in the run context only.
+        """Record per-skill relevance outcomes and usage without retaining candidate text."""
+        self.state.skills = outcome
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

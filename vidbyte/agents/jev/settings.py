@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines JevAgent's public configuration objects: JevAgentSettings for the agent and its alignment switches, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations.
+PURPOSE: Defines JevAgent's public configuration objects: JevAgentSettings for the agent and its grouped prompt, tool, and skill alignment settings, and JevRuntimeSettings for Jev's decision policy, including skill relevance and continual done checks.
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
-ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent, specialist candidates, and one JevAlignmentSettings object with prompt and tool alignment switches; JevRuntimeSettings holds the decision model, preflight flags, continuation settings, and tool-selector threshold.
+ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent, specialist candidates, and one JevAlignmentSettings object with prompt, tool, and skill settings; JevRuntimeSettings holds the decision model, preflight flags, continuation settings, and validated selection thresholds.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
@@ -21,6 +21,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_HANDOFF_MAX_ITERATIONS,
     JEV_HANDOFF_MAX_TOKENS,
+    JEV_NOUL_YES_THRESHOLD,
     JEV_RUN_STATE_MAX_ITERATIONS,
     JEV_RUN_STATE_MAX_TOKENS,
     JEV_SPECIALIST_MAX_COUNT,
@@ -30,6 +31,7 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
+from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.dataclasses.tool_catalogs import ToolCatalogCredentials
 from vidbyte.lib.enums import JevDoneCheck, JevPreflightPreset, ModelProvider
 from vidbyte.lib.enums.tool_catalogs import ToolCatalogName, ToolInstallKind
@@ -150,11 +152,12 @@ class JevToolAlignmentSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevAlignmentSettings:
-    """Select which request-time alignment passes JevAgent runs and their tool catalog policy."""
+    """Select request-time prompt, tool, and plain-skill alignment for JevAgent."""
 
     system_prompt: bool = False
     tool_settings: bool = False
     tool_options: JevToolAlignmentSettings = field(default_factory=JevToolAlignmentSettings)
+    skills: tuple[SkillDocument | str, ...] = ()
 
     def __post_init__(self) -> None:
         # Keeps both visible alignment switches explicit while allowing catalog policy to be tuned separately.
@@ -163,6 +166,40 @@ class JevAlignmentSettings:
                 raise ConfigurationError(f"JevAlignmentSettings.{name} must be True or False.")
         if not isinstance(self.tool_options, JevToolAlignmentSettings):
             raise ConfigurationError("JevAlignmentSettings.tool_options must be a JevToolAlignmentSettings instance.")
+        object.__setattr__(self, "skills", self._normalized_skills())
+
+    def _normalized_skills(self) -> tuple[SkillDocument, ...]:
+        # @intent names-uniquely-identify-response-results
+        # JevAgent.response exposes each decision by the configured name. Duplicate names would make two
+        # different candidate bodies indistinguishable to callers and future source adapters.
+        """Normalize caller strings and require unique stable names for every skill."""
+        if isinstance(self.skills, (str, bytes)):
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings, not a string.")
+        try:
+            candidates = tuple(self.skills)
+        except TypeError as exc:
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings.") from exc
+        skills: list[SkillDocument] = []
+        for index, candidate in enumerate(candidates, start=1):
+            if isinstance(candidate, str):
+                candidate = SkillDocument(
+                    name=f"inline_skill_{index}",
+                    description="Caller-supplied inline skill text.",
+                    text=candidate,
+                    source="inline",
+                )
+            if not isinstance(candidate, SkillDocument):
+                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillDocument or string values.")
+            skills.append(candidate)
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for skill in skills:
+            if skill.name in seen:
+                duplicates.add(skill.name)
+            seen.add(skill.name)
+        if duplicates:
+            raise ConfigurationError("JevAlignmentSettings.skills must have unique document names.", details={"names": sorted(duplicates)})
+        return tuple(skills)
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +331,7 @@ class JevRuntimeSettings:
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     continual: JevContinualSettings = field(default_factory=JevContinualSettings)
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+    skills_threshold: float = JEV_NOUL_YES_THRESHOLD
 
     def __post_init__(self) -> None:
         # Rejects invalid decision policy before JevAgent builds its preflight gate and run state.
@@ -303,6 +341,7 @@ class JevRuntimeSettings:
         if not isinstance(self.continual, JevContinualSettings):
             raise ConfigurationError("JevRuntimeSettings.continual must be a JevContinualSettings instance.")
         self._validate_tool_selector_threshold()
+        self._validate_skills_threshold()
 
     def _validate_tool_selector_threshold(self) -> None:
         # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
@@ -315,6 +354,16 @@ class JevRuntimeSettings:
         ):
             raise ConfigurationError("JevRuntimeSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
         object.__setattr__(self, "tool_selector_threshold", float(value))
+
+    def _validate_skills_threshold(self) -> None:
+        # @intent boundary-probabilities-are-inclusive
+        # Thresholds represent the minimum calibrated P(yes), so 0 and 1 are meaningful policies; booleans
+        # are rejected even though Python treats them as integers.
+        """Require a finite yes-probability cutoff for each skill selection."""
+        value = self.skills_threshold
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ConfigurationError("JevRuntimeSettings.skills_threshold must be a finite probability between 0 and 1 inclusive.")
+        object.__setattr__(self, "skills_threshold", float(value))
 
 
 __all__ = ["JevAgentSettings", "JevAlignmentSettings", "JevContinualSettings", "JevRuntimeSettings", "JevToolAlignmentSettings"]

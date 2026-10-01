@@ -24,6 +24,7 @@ from vidbyte.agents.jev.settings import (
     JevRuntimeSettings,
     JevToolAlignmentSettings,
 )
+from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.dataclasses.jev import (
     JevAlignmentOutcome,
     JevAgentResponse,
@@ -45,6 +46,8 @@ from vidbyte.lib.dataclasses.jev import (
     JevProblemsResolvedEvidence,
     JevRunStateRecord,
     JevSpecialist,
+    JevSkillResult,
+    JevSkillsOutcome,
     JevToolAlignmentOutcome,
     JevTargetOutcome,
     JevTargetOutcomeEvidence,
@@ -56,6 +59,7 @@ from vidbyte.lib.enums.jev import (
     JevDoneCheck,
     JevPreflightPreset,
     JevProblemCheckItemType,
+    JevSkillStatus,
 )
 
 __all__ = [
@@ -73,13 +77,9 @@ __all__ = [
     "JevClaimsEvidence",
     "JevClaimAssertion",
     "JevClaimContext",
-    "JevClaimEvidence",
     "JevClaimIdentity",
     "JevClaimKind",
     "JevClaimScope",
-    "JevClaimsEvidence",
-    "JevClarification",
-    "JevClarifyingQuestion",
     "JevContinualSettings",
     "JevDeliverable",
     "JevDeliverableEvidence",
@@ -95,6 +95,10 @@ __all__ = [
     "JevRuntime",
     "JevRuntimeSettings",
     "JevSpecialist",
+    "JevSkillResult",
+    "JevSkillsOutcome",
+    "JevSkillStatus",
+    "SkillDocument",
     "JevToolAlignmentResult",
     "JevToolAlignmentSettings",
     "JevToolAlignmentOutcome",

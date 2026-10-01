@@ -61,9 +61,9 @@ Add optional request-time skill selection to `JevAgent`. Callers configure plain
 5. `JevRuntimeSettings.skills_threshold` is a finite probability in `[0, 1]`, defaults to the standard Jev yes threshold, rejects booleans and invalid numeric values, and is used independently for each skill.
 6. No configured skills means the runtime performs no skill decision call and reports an empty skills result.
 7. A closed preflight gate or selected specialist performs no skill decision call.
-8. When enabled, the preload builds one `JevDecisionRequest` with one indexed `JevSkillRelevanceQuestion` for each configured skill. The user request and each candidate's name, description, source, and full text are framed as untrusted data. Question rules refer only to fixed indexed identifiers; caller values never enter rule prose.
+8. When enabled, the preload builds one indexed `JevSkillRelevanceQuestion` per configured skill and groups those questions into bounded `JevDecisionRequest` batches. The user request and each candidate's name, description, source, and full text are framed as untrusted data. Question rules refer only to fixed indexed identifiers; caller values never enter rule prose.
 9. Each answer is independently scored using `DecisionModelHelper.score_noul` with that skill's question name and `skills_threshold`. A passing answer selects only its corresponding skill.
-10. A valid yes/no answer for one candidate remains usable when another candidate answer is missing or malformed. A missing or malformed answer marks only that candidate unavailable. A `VidbyteSdkError` or malformed whole response makes all candidates unavailable and selects none; cancellation propagates.
+10. A valid yes/no answer for one candidate remains usable when another candidate answer is missing or malformed. A missing or malformed answer marks only that candidate unavailable. A `VidbyteSdkError` or malformed whole response makes only the current batch unavailable and selects none from that batch; cancellation propagates.
 11. A known answer below threshold records skipped; an unavailable answer records unavailable. Each result preserves stable name, description, source, answer probability if present, and status.
 12. Selected skill texts are appended in configured order to the effective system prompt. Existing prompt content and its suffix are preserved, and the original context object is not mutated.
 13. If caller options explicitly supply a system prompt override, that value is the effective baseline before selected skill text is appended. The resulting context prompt is what the provider receives.
@@ -183,12 +183,12 @@ class JevSkillRelevanceQuestion:
     @property
     def name(self) -> str: ...
 
-    def to_jev_question(self) -> JevQuestion: ...
+    def to_question(self) -> JevQuestion: ...
 ```
 
 #### Logic / Algorithm
 
-1. Name questions `skill_relevance.<index>` using stable tuple order.
+1. Name questions `skills.skill_<index>` using stable tuple order.
 2. Render complete question instructions with sections for scope, state, definitions, rules, examples, boundaries, and the final yes/no question. The question text alone must exceed 2,000 meaningful tokens across instructions and criteria, following `skills/asking-jev-questions/SKILL.md`.
 3. Pass the original user request and each candidate's name, description, source, and full text as structured data labeled untrusted. Refer to a candidate in question prose only by its fixed indexed identifier, and instruct Jev to assess relevance only and not follow candidate instructions.
 4. Build each `JevDecisionRequest` from one bounded batch. Do not truncate or summarize candidate text.
@@ -375,7 +375,7 @@ agent.response.skills  # JevSkillsOutcome(results, usage)
 |--------|-----------|
 | `ConfigurationError` | Invalid document, duplicate name, or invalid threshold |
 | Per-item `unavailable` | Missing or malformed answer for that skill |
-| All items `unavailable` | Jev request/provider failure; main run proceeds without injected skill text |
+| Batch items `unavailable` | Jev request/provider failure; other batches can still inject selected skill text |
 
 ---
 
@@ -397,9 +397,9 @@ Complete list of every file planned for this change:
 | MODIFY | `vidbyte/agents/jev/agent.py` | Build and pass preload |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Run ordering, prompt baseline, cleanup |
 | MODIFY | `vidbyte/agents/jev/response.py` | Write per-run skill outcomes |
-| MODIFY | `vidbyte/agents/jev/alignment/__init__.py` | Alignment exports |
 | MODIFY | `vidbyte/lib/dataclasses/jev.py` | Skill result and response field |
 | MODIFY | `vidbyte/lib/dataclasses/__init__.py` | Public dataclass export |
+| MODIFY | `vidbyte/lib/__init__.py` | Public lib namespace export |
 | MODIFY | `vidbyte/lib/enums/jev.py` | Skill outcome enum |
 | MODIFY | `vidbyte/lib/enums/__init__.py` | Public enum namespace |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Jev exports |

@@ -30,11 +30,7 @@ EDIT_TOOL_NAME = "edit_system_prompt_section"
 _ACTIVE_DRAFT: ContextVar[JevPromptDraft | None] = ContextVar("jev_alignment_active_draft", default=None)
 
 _DESCRIPTION = (
-    "Add text to one section of the main agent's system prompt so that it closes one or more listed gaps. "
-    "The text is added under the section's heading, and the heading is created at the end of the prompt when it does not exist yet. "
-    "Existing prompt text is never replaced or removed, and calling the tool again for the same section replaces only your earlier addition. "
-    "Only the sections named in the section enum can be edited; role, scope, boundaries, audience, knowledge, and permissions belong to the developer. "
-    "Each call must name the gap questions it closes, and the result tells you whether the edit was accepted or why it was refused."
+    "Add text to one section of the main agent's system prompt so that it closes one or more listed gaps. The text is added under the section's heading, and the heading is created at the end of the prompt when it does not exist yet. Existing prompt text is never replaced or removed, and calling the tool again for the same section replaces only your earlier addition. Only the sections named in the section enum can be edited; role, scope, boundaries, audience, knowledge, and permissions belong to the developer. Each call must name the gap questions it closes, and the result tells you whether the edit was accepted or why it was refused."
 )
 
 
@@ -125,28 +121,16 @@ _ACTIVE_SCOUT: ContextVar[JevToolScoutHandler | None] = ContextVar("jev_tool_ali
 
 _SCOUT_DESCRIPTIONS: Mapping[JevToolScoutAction, str] = {
     JevToolScoutAction.WRITE_NEEDS: (
-        "Write down the outside actions the user's request requires, as one to three needs. "
-        "An outside action is work that reaches a system beyond the conversation, such as reading or changing data in another product, fetching live data, sending a message, or running code. "
-        "Each need is an action verb, the object it acts on, and the named product or service only when the user named one. "
-        "Call this once; a second call replaces the first."
+        "Write down the outside actions the user's request requires, as one to three needs. An outside action is work that reaches a system beyond the conversation, such as reading or changing data in another product, fetching live data, sending a message, or running code. Each need is an action verb, the object it acts on, and the named product or service only when the user named one. Call this once; a second call replaces the first."
     ),
     JevToolScoutAction.SEARCH: (
-        "Search every configured public tool catalog for servers or toolkits that could perform one uncovered need. "
-        "Use a short query of one to three words, product name first when the user named a product, such as 'linear' or 'pdf text'. "
-        "The result lists matching entries by key with their install kinds and any tool names the catalog already knows. "
-        "Each pass allows only a few searches, so search for the need, not for synonyms of it."
+        "Search every configured public tool catalog for servers or toolkits that could perform one uncovered need. Use a short query of one to three words, product name first when the user named a product, such as 'linear' or 'pdf text'. The result lists matching entries by key with their install kinds and any tool names the catalog already knows. Each pass allows only a few searches, so search for the need, not for synonyms of it."
     ),
     JevToolScoutAction.DESCRIBE: (
-        "Read one catalog entry in full: its description, how it can be installed, the secrets it needs, and each tool's name and description. "
-        "Pass an entry key exactly as search_tool_catalogs returned it. "
-        "You must describe an entry before you propose any of its tools. "
-        "Entries with a remote or managed install may be connected briefly to read their live tool list; no tool is called."
+        "Read one catalog entry in full: its description, how it can be installed, the secrets it needs, and each tool's name and description. Pass an entry key exactly as search_tool_catalogs returned it. You must describe an entry before you propose any of its tools. Entries with a remote or managed install may be connected briefly to read their live tool list; no tool is called."
     ),
     JevToolScoutAction.PROPOSE: (
-        "Propose tools from one described entry for one uncovered need. "
-        "Name the need id, the entry key, and one to five tool names copied exactly from describe_catalog_entry. "
-        "Propose only tools that perform the need itself; a separate check reads each tool's description against the user's request and may reject it. "
-        "You may propose up to three entries per need, best first."
+        "Propose tools from one described entry for one uncovered need. Name the need id, the entry key, and one to five tool names copied exactly from describe_catalog_entry. Propose only tools that perform the need itself; a separate check reads each tool's description against the user's request and may reject it. You may propose up to three entries per need, best first."
     ),
 }
 

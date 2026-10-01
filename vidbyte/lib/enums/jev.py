@@ -64,6 +64,14 @@ class JevProblemCheckItemType(str, Enum):
     REQUEST_COMPLETION = "request_completion"
 
 
+class JevSkillStatus(str, Enum):
+    """Outcome of evaluating one configured skill for the current request."""
+
+    SELECTED = "selected"
+    SKIPPED = "skipped"
+    UNAVAILABLE = "unavailable"
+
+
 class JevClaimKind(str, Enum):
     """The closed categories of factual assertions the CLAIMS handoff can describe."""
 
@@ -97,4 +105,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType"]
+__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevSkillStatus"]
