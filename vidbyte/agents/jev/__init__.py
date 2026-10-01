@@ -26,6 +26,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimsEvidence,
     JevClarification,
     JevClarifyingQuestion,
+    JevCompletionEvidence,
     JevDeliverable,
     JevDeliverableEvidence,
     JevDoneResult,
@@ -51,6 +52,7 @@ from vidbyte.lib.dataclasses.jev import (
 )
 from vidbyte.lib.enums.jev import (
     JevClaimKind,
+    JevCompletionStatus,
     JevDoneCheck,
     JevBoundaryKind,
     JevExerciseMode,
@@ -77,6 +79,8 @@ __all__ = [
     "JevClarification",
     "JevClarifyingQuestion",
     "JevContinualSettings",
+    "JevCompletionEvidence",
+    "JevCompletionStatus",
     "JevDeliverable",
     "JevDeliverableEvidence",
     "JevDoneCheck",

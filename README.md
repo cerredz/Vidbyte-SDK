@@ -29,6 +29,23 @@ access remain outside this package.
 - Typed state-machine workflows with validation gates, conditional branches, cycles, retries, and declared jumps.
 - Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
 
+## JevAgent continuation checks
+
+`JevAgent` can run named done checks whenever its main agent attempts to finish. Enable whole-task completion evidence alongside other checks through `JevContinualSettings.checks`:
+
+```python
+from vidbyte import JevContinualSettings, JevDoneCheck, JevRuntimeSettings
+
+runtime_settings = JevRuntimeSettings(
+    continual=JevContinualSettings(
+        checks=(JevDoneCheck.COMPLETION_EVIDENCE,),
+        max_continuations=2,
+    ),
+)
+```
+
+`COMPLETION_EVIDENCE` checks whether the final answer's overall complete, incomplete, or blocked status matches the requested outcomes and observations in the run. An unqualified final answer implies completion, even when it does not say “done.” Honest incomplete or blocked reports can pass when the run evidence supports them. The final answer's own claim that external work happened does not count as evidence for that work. The result is available as `agent.response.done[JevDoneCheck.COMPLETION_EVIDENCE]`; if Jev cannot evaluate it, the check fails open.
+
 ## Layer Guide
 
 | Layer | Role |

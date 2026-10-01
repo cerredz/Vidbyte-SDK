@@ -44,6 +44,7 @@ class JevDoneCheck(str, Enum):
     TARGET_OUTCOME = "target_outcome"
     MOTIVATING_CASE = "motivating_case"
     SCOPE_COVERAGE = "scope_coverage"
+    COMPLETION_EVIDENCE = "completion_evidence"
     PROBLEMS_RESOLVED = "problems_resolved"
 
 
@@ -58,6 +59,7 @@ class JevDoneQuestionKey(str, Enum):
     TARGET_OUTCOME_DEMONSTRATED = "target_outcome.demonstrated"
     MOTIVATING_CASE_RECALL = "motivating_case.recall"
     MOTIVATING_CASE_EXERCISED = "motivating_case.exercised"
+    COMPLETION_EVIDENCE_SUPPORTED = "completion_evidence.supported"
     PROBLEMS_RESOLVED_FIXED = "problems_resolved.fixed"
     SCOPE_COVERAGE_BREADTH = "scope_coverage.breadth"
     SCOPE_COVERAGE_APPLIED = "scope_coverage.applied"
@@ -122,6 +124,15 @@ class JevScopeUnitSource(str, Enum):
     MENTIONED_BY_AGENT = "mentioned_by_agent"
 
 
+class JevCompletionStatus(str, Enum):
+    """The whole-task completion status communicated by a JevAgent final answer."""
+
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+    BLOCKED = "blocked"
+    UNCLEAR = "unclear"
+
+
 class JevProblemCheckItemType(str, Enum):
     """The two dynamic item kinds judged by the problem-resolution check."""
 
@@ -162,4 +173,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -98,6 +98,8 @@ JEV_MOTIVATING_CASE_MAX_SCENARIOS: int = 12
 JEV_SCOPE_COVERAGE_THRESHOLD: float = 0.8
 # A one-time request-only review can widen a state builder's narrow label when Jev recognizes broader wording.
 JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD: float = 0.5
+# Whether the final answer's whole-task completion status is supported; starting point, not tuned on a labeled set.
+JEV_COMPLETION_EVIDENCE_THRESHOLD: float = 0.85
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
@@ -119,7 +121,13 @@ JEV_DONE_COMPLETION_CRITERION_FIELD: str = "completion_criterion"
 JEV_DONE_OBSERVED_PROXY_FIELD: str = "observed_proxy"
 JEV_DONE_MOTIVATING_CASES_FIELD: str = "motivating_cases"
 JEV_DONE_MOTIVATING_CASE_FIELD: str = "motivating_case"
-
+JEV_DONE_COMPLETION_EVIDENCE_FIELD: str = "completion_evidence"
+JEV_DONE_COMPLETION_ITEM_ID: str = "task_completion"
+JEV_DONE_COMPLETION_ITEM_INDEX: int = 0
+JEV_DONE_COMPLETION_STATUS_FIELD: str = "completion_status"
+JEV_DONE_REQUESTED_OUTCOMES_FIELD: str = "requested_outcomes"
+JEV_DONE_COMPLETED_WORK_FIELD: str = "completed_work"
+JEV_DONE_UNFINISHED_OR_BLOCKED_FIELD: str = "unfinished_or_blocked"
 JEV_DONE_PROBLEMS_RESOLVED_FIELD: str = "problems_resolved"
 JEV_DONE_PROBLEM_ITEMS_FIELD: str = "items"
 JEV_DONE_PROBLEM_ID_FIELD: str = "id"
@@ -168,6 +176,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_COMPLETION_EVIDENCE_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -185,6 +194,13 @@ __all__ = [
     "JEV_DONE_CLAIM_ASSERTION_SEPARATOR",
     "JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD",
     "JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD",
+    "JEV_DONE_COMPLETION_EVIDENCE_FIELD",
+    "JEV_DONE_COMPLETION_ITEM_ID",
+    "JEV_DONE_COMPLETION_ITEM_INDEX",
+    "JEV_DONE_COMPLETION_STATUS_FIELD",
+    "JEV_DONE_REQUESTED_OUTCOMES_FIELD",
+    "JEV_DONE_COMPLETED_WORK_FIELD",
+    "JEV_DONE_UNFINISHED_OR_BLOCKED_FIELD",
     "JEV_DONE_CLAIM_DESCRIPTION_FIELD",
     "JEV_DONE_CLAIM_FIELD",
     "JEV_DONE_CLAIM_IDENTITY_FIELD",
@@ -204,6 +220,16 @@ __all__ = [
     "JEV_DONE_MOTIVATING_CASE_FIELD",
     "JEV_DONE_OBSERVED_PROXY_FIELD",
     "JEV_DONE_PROBLEMS_RESOLVED_FIELD",
+    "JEV_DONE_PROBLEM_ASSERTION_FIELD",
+    "JEV_DONE_PROBLEM_DESCRIPTION_FIELD",
+    "JEV_DONE_PROBLEM_ID_FIELD",
+    "JEV_DONE_PROBLEM_ITEMS_FIELD",
+    "JEV_DONE_PROBLEM_KIND_FIELD",
+    "JEV_DONE_PROBLEM_QUALIFICATIONS_FIELD",
+    "JEV_DONE_PROBLEM_REPAIR_FIELD",
+    "JEV_DONE_PROBLEM_SCOPE_FIELD",
+    "JEV_DONE_PROBLEM_TITLE_FIELD",
+    "JEV_DONE_PROBLEM_VERIFICATION_FIELD",
     "JEV_DONE_PROBLEM_ASSERTION_FIELD",
     "JEV_DONE_PROBLEM_DESCRIPTION_FIELD",
     "JEV_DONE_PROBLEM_ID_FIELD",

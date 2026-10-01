@@ -10,6 +10,7 @@ TESTS: tests/test_jev_done.py.
 """
 
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
+from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
@@ -17,4 +18,4 @@ from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
 from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
-__all__ = ["DONE_STATE", "ClaimsSupportedQuestion", "JevDoneRegistry", "MotivatingCaseExercisedQuestion", "MultiPartDeliveredQuestion", "ProblemsResolvedQuestion", "ScopeCoverageAppliedQuestion", "TargetOutcomeDemonstratedQuestion"]
+__all__ = ["ClaimsSupportedQuestion", "CompletionEvidenceSupportedQuestion", "DONE_STATE", "JevDoneRegistry", "MotivatingCaseExercisedQuestion", "MultiPartDeliveredQuestion", "ProblemsResolvedQuestion", "ScopeCoverageAppliedQuestion", "TargetOutcomeDemonstratedQuestion"]

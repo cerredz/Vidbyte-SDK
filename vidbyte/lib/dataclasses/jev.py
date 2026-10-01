@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines validated TypeSafe decision and response records, preflight questions, and request/run evidence for the multi-part, claim, target-outcome, motivating-case, scope-coverage, and problem-resolution done checks.
+PURPOSE: Defines validated TypeSafe decision and response records, preflight questions, and request/run evidence for the multi-part, claim, target-outcome, motivating-case, scope-coverage, completion-evidence, and problem-resolution done checks.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem handoff items require unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
-COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
-KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes members named in the request, members enumerated in the workspace, and unsupported mentions so a mention cannot establish coverage. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; request-derived definitions belong in JevRunStateRecord, while evidence derived from the finished run belongs in JevHandoffRecord.
+KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes members named in the request, members enumerated in the workspace, and unsupported mentions so a mention cannot establish coverage. Completion evidence is a single handoff-only whole-task item and has no run-state section. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -27,6 +27,7 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
     JEV_DELIVERABLE_ID_PATTERN,
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
+    JEV_DONE_COMPLETION_ITEM_ID,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
     JEV_MAX_QUESTIONS,
@@ -44,6 +45,7 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
+    JevCompletionStatus,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevExerciseMode,
@@ -943,6 +945,30 @@ class JevScopeCoverageEvidencePayload(JevSectionPayload):
     dimensions: list[JevScopeDimensionEvidencePayload] = Field(description="Return exactly one entry for each checked scope dimension in the run state, using the same ids and order. Do not leave out a named member even when there is no work to report for it.")
 
 
+class JevCompletionEvidencePayload(BaseModel):
+    """One whole-task completion status and the observations that support or contradict it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Use the fixed id `task_completion` for this single whole-task item. The same id is required at every finish attempt so its Jev answer and continuation feedback remain stable. Do not create a separate item for each requested deliverable or factual assertion. This item is required even when the final answer is empty or says nothing about completion. The id identifies the scope of the judgment and is not itself evidence.")
+    completion_status: JevCompletionStatus = Field(description="Choose the status communicated by the final answer for the original request as a whole. Use complete when the answer explicitly says the task is finished or ends with a result and no caveat, so it implies completion. Use incomplete when the answer says requested work remains, blocked when it names an obstacle preventing progress, and unclear only when its status cannot reasonably be read either way. This field records the answer's message and never proves that any external action occurred.")
+    requested_outcomes: list[str] = Field(description="List the distinct outcomes the original user request requires before the task can be considered complete. Preserve the user's scope, quantities, targets, and constraints, and do not add expected best practices or work from the agent's plan. Include informational answers and artifacts requested in the response as outcomes alongside external changes. Keep this list complete enough to reveal when only part of the request is shown, and return an empty list when the request asks for no result. These requested outcomes define what the evidence must cover but do not establish that any outcome happened.")
+    completed_work: list[str] = Field(description="List only requested outcomes for which the run contains a visible result or artifact. Name the specific tool output, command result, file content, or delivered answer passage that shows each outcome. Do not use an assistant's statement that it completed, checked, searched, or changed something as evidence of that action. Preserve partial scope and failed or later-reversed results rather than describing them as finished. Return an empty list when the run shows no requested outcome completed.")
+    unfinished_or_blocked: list[str] = Field(description="List requested outcomes that the run does not show completed, or that have a recorded failure or blocker. Name the specific missing part, failed result, or obstacle and keep it within the user's request. Do not infer a blocker from silence alone when the run provides no observation about it. A complete run may return an empty list. This field provides context for judging an incomplete or blocked status and is not a substitute for evidence.")
+    evidence: str = Field(min_length=1, description="Compile the relevant observations from actual run artifacts and tool-call inputs and outputs, naming their source and order. Include the delivered final-answer passage when it is itself a requested text outcome, but do not treat the answer's own completion claim as proof of external work. Report attempted commands, tool failures, successful outputs, and later changes that may reverse earlier results. Distinguish a visible artifact from an agent's description of an artifact that the run does not show. If no useful observation exists, say that the run contains no observable evidence for the requested outcomes.")
+    missing: str = Field(min_length=1, description="Write the actionable gap between the completion status communicated by the answer and the work the run actually shows. Name requested outcomes that remain unsupported, or say that the answer should report its incomplete or blocked status when it implies full completion without evidence. Do not repeat the evidence or add tasks the user did not request. If the status is supported, say that no completion-status gap remains. This field is for continuation feedback only and must not be included in Jev's evidence state.")
+
+
+class JevCompletionEvidenceSectionPayload(JevSectionPayload):
+    """The completion-evidence section of the handoff, with one item per finish attempt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "This section records whether the final answer communicates that the user's whole request is complete, incomplete, blocked, or unclear. It exists to catch a finished-sounding answer whose requested outcomes are not shown in the run. It always contains one stable task_completion item, including when the final answer omits a status or is empty. Its context fields describe the answer and requested outcomes, while evidence contains only observations from the run and never the handoff's own verdict. The handoff compiles this section at every finish attempt from the original request, the final answer, the responses, and the actual tool-call record."
+
+    items: list[JevCompletionEvidencePayload] = Field(min_length=1, max_length=1, description="Return exactly one item with id task_completion for the entire request, not one item per deliverable or factual assertion. Set its completion_status from what the final answer states or implies, treating an unqualified terminal answer as complete and an empty answer as incomplete. Include every requested outcome and identify which outcomes actual run observations show. Keep the status description and missing note separate from the evidence string so a checker can distinguish an agent's words from external observations. Always return the item, including when no tool calls or no explicit completion claim exist.")
+
+
 class JevProblemEvidencePayload(BaseModel):
     """One run-observed problem or the required original-request completion item."""
 
@@ -1613,6 +1639,35 @@ class JevClaimsEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevCompletionEvidence:
+    """The whole-task completion status, requested outcomes, observed work, and separate continuation gap."""
+
+    id: str
+    completion_status: JevCompletionStatus
+    requested_outcomes: tuple[str, ...]
+    completed_work: tuple[str, ...]
+    unfinished_or_blocked: tuple[str, ...]
+
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires the stable task item id, typed status, and immutable non-blank outcome lists.
+        if self.id != JEV_DONE_COMPLETION_ITEM_ID:
+            raise JevValidation.error("completion evidence id", f"the fixed id {JEV_DONE_COMPLETION_ITEM_ID!r}", self.id)
+        if not isinstance(self.completion_status, JevCompletionStatus):
+            raise JevValidation.error("completion status", "a JevCompletionStatus member", self.completion_status)
+        for field_name in ("requested_outcomes", "completed_work", "unfinished_or_blocked"):
+            value = getattr(self, field_name)
+            if not isinstance(value, tuple):
+                raise JevValidation.error(f"completion evidence {field_name}", "a tuple of strings", value)
+            for index, text in enumerate(value):
+                JevText.require(text, field_name=f"completion evidence {field_name}[{index}]")
+        JevText.require(self.evidence, field_name="completion evidence observations")
+        JevText.require(self.missing, field_name="completion evidence gap")
+
+
+@dataclass(frozen=True, slots=True)
 class JevProblemResolutionItem:
     """One dynamic issue or original-request completion entry and its evidence."""
 
@@ -1668,6 +1723,7 @@ class JevHandoffRecord:
 
     Each evidence section is set only when its corresponding done check is enabled, and `usage` is JevHandoff's own model usage.
     All sections are optional and typed, including `multi_part`, `claims`, `target_outcome`, `motivating_case`, `scope_coverage`, and `problems_resolved`.
+    `completion_evidence` is also optional and typed, and is handoff-only rather than a request-derived run-state section.
     """
 
     multi_part: JevMultiPartEvidence | None = None
@@ -1677,6 +1733,7 @@ class JevHandoffRecord:
     usage: UsageRollup | None = None
     motivating_case: JevMotivatingCaseEvidence | None = None
     scope_coverage: JevScopeCoverageEvidence | None = None
+    completion_evidence: JevCompletionEvidence | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -1688,6 +1745,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff target_outcome", "a JevTargetOutcomeEvidence or None", self.target_outcome)
         if self.scope_coverage is not None and not isinstance(self.scope_coverage, JevScopeCoverageEvidence):
             raise JevValidation.error("handoff scope_coverage", "a JevScopeCoverageEvidence or None", self.scope_coverage)
+        if self.completion_evidence is not None and not isinstance(self.completion_evidence, JevCompletionEvidence):
+            raise JevValidation.error("handoff completion_evidence", "a JevCompletionEvidence or None", self.completion_evidence)
         if self.problems_resolved is not None and not isinstance(self.problems_resolved, JevProblemsResolvedEvidence):
             raise JevValidation.error("handoff problems_resolved", "a JevProblemsResolvedEvidence or None", self.problems_resolved)
         if self.motivating_case is not None and not isinstance(self.motivating_case, JevMotivatingCaseEvidence):
@@ -1744,7 +1803,9 @@ class JevDoneResult:
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
     the items whose P(yes) fell below the check's threshold or whose work evidence is missing. Those items are
     deliverables for MULTI_PART, parent claims for CLAIMS, and scope members or a missing workspace inventory
-    for SCOPE_COVERAGE; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+    for SCOPE_COVERAGE, and the fixed `task_completion` item for COMPLETION_EVIDENCE; CLAIMS answers use
+    `parent_id.assertion_id` keys so each assertion stays atomic. Completion evidence is handoff-only and is not
+    a request-derived run-state section.
     With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
@@ -1855,6 +1916,9 @@ __all__ = [
     "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
+    "JevCompletionEvidence",
+    "JevCompletionEvidencePayload",
+    "JevCompletionEvidenceSectionPayload",
     "JevClarification",
     "JevClarificationPayload",
     "JevClarifyingQuestion",

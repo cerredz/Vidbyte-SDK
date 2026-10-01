@@ -2,10 +2,10 @@
 
 PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run enabled checks, and on failure it sends the original request, run state, handoff, failed Jev questions, and focused missing work back to the main agent.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). Problem repair feedback requires relevant successful revalidation and then directs the agent back to the original request. The cap on continuations is JevContinualSettings.max_continuations.
+ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). Whole-task completion feedback compares final status with requested outcomes and run evidence, while problem repair feedback requires relevant successful revalidation. The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -18,10 +18,11 @@ from vidbyte.agents.jev.continuation.base import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevContinualSettings
-from vidbyte.lib.constants.jev import JEV_DONE_CLAIM_ASSERTION_SEPARATOR, JEV_NOUL_TRUE
+from vidbyte.lib.constants.jev import JEV_DONE_CLAIM_ASSERTION_SEPARATOR, JEV_DONE_COMPLETION_ITEM_ID, JEV_NOUL_TRUE
 from vidbyte.lib.dataclasses.jev import (
     JevClaimAssertion,
     JevClaimEvidence,
+    JevCompletionEvidence,
     JevDoneQuestion,
     JevDoneResult,
     JevProblemResolutionItem,
@@ -108,6 +109,15 @@ class JevDoneContinuation(JevContinuation):
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
                 return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.COMPLETION_EVIDENCE:
+                # The final answer's overall completion status is a claim; show the run-evidence gap to correct it.
+                item = None if self.run_state.handoff is None else self.run_state.handoff.completion_evidence
+                failed = [JevDoneRegistry.question(JevDoneCheck.COMPLETION_EVIDENCE).gap]
+                if item is None:
+                    return "\n".join(failed), "Review the original request and make the final answer accurately reflect the work shown in the run."
+                yes = result.answers[JEV_DONE_COMPLETION_ITEM_ID].probabilities[JEV_NOUL_TRUE]
+                failed.append(f"- The final answer communicates {item.completion_status.value} status. Jev's answer: unsupported (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+                return "\n".join(failed), self._completion_focus(item)
             case JevDoneCheck.TARGET_OUTCOME:
                 # Return only target outcomes Jev could not recognize in direct evidence, with the proxy and gap visible.
                 question = JevDoneRegistry.question(JevDoneCheck.TARGET_OUTCOME)
@@ -228,6 +238,19 @@ class JevDoneContinuation(JevContinuation):
             f"  Completion criteria: {assertion.completion_criteria}",
             f"  Tool-call evidence: {claim.evidence}",
             f"  Still missing: {claim.missing}",
+        ))
+
+    @staticmethod
+    def _completion_focus(item: JevCompletionEvidence) -> str:
+        """Render the requested outcomes the final answer must finish or accurately describe."""
+        requested = "; ".join(item.requested_outcomes) or "No outcome was requested."
+        completed = "; ".join(item.completed_work) or "None shown."
+        unfinished = "; ".join(item.unfinished_or_blocked) or "No unfinished outcome was identified."
+        return "\n".join((
+            f"- Requested outcomes: {requested}",
+            f"  Work shown: {completed}",
+            f"  Unfinished or blocked: {unfinished}",
+            f"  Evidence gap: {item.missing}",
         ))
 
     @staticmethod

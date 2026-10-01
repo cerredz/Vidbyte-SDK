@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-completion-evidence.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
 """
 
@@ -60,6 +60,8 @@ from vidbyte.lib.constants.jev import (
     JEV_CLAIMS_THRESHOLD,
     JEV_DONE_CLAIM_FIELD,
     JEV_DONE_CLAIMS_FIELD,
+    JEV_DONE_COMPLETION_EVIDENCE_FIELD,
+    JEV_DONE_COMPLETION_ITEM_ID,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
@@ -80,6 +82,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimIdentityPayload,
     JevClaimScopePayload,
     JevClaimsEvidencePayload,
+    JevCompletionEvidenceSectionPayload,
     JevCriterion,
     JevDecisionRequest,
     JevDeliverable,
@@ -200,6 +203,19 @@ _REQUEST_ITEM = {
     "missing": "Nothing is missing.",
 }
 _PROBLEMS_HANDOFF = {"problems_resolved": {"items": [_PROBLEM_ITEM, _REQUEST_ITEM]}}
+_COMPLETION_EVIDENCE_HANDOFF = {
+    "completion_evidence": {
+        "items": [{
+            "id": "task_completion",
+            "completion_status": "complete",
+            "requested_outcomes": ["Add the dry-run flag", "Document the flag in the README"],
+            "completed_work": ["The CLI accepts --dry-run."],
+            "unfinished_or_blocked": ["The README update is not shown."],
+            "evidence": "Tool output shows the CLI edit; no README edit appears in the run.",
+            "missing": "The requested README explanation is unsupported by run evidence.",
+        }]
+    }
+}
 
 
 class ScriptedGenerativeRunner:
@@ -477,6 +493,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(motivating_schema.model_fields["motivating_case"].description, JevMotivatingCasePayload.SECTION)
         scope_schema = JevRunState.schema((JevDoneCheck.SCOPE_COVERAGE,))
         self.assertEqual(scope_schema.model_fields["scope_coverage"].description, JevScopeCoveragePayload.SECTION)
+        completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
+        self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "what_not_to_do"})
         self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME})
         request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage"}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
@@ -494,6 +512,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(problem_schema.model_fields[JEV_DONE_PROBLEMS_RESOLVED_FIELD].description, JevProblemsResolvedEvidencePayload.SECTION)
         scope_schema = JevHandoff.schema((JevDoneCheck.SCOPE_COVERAGE,))
         self.assertEqual(scope_schema.model_fields["scope_coverage"].description, JevScopeCoverageEvidencePayload.SECTION)
+        completion_schema = JevHandoff.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
+        self.assertEqual(completion_schema.model_fields[JEV_DONE_COMPLETION_EVIDENCE_FIELD].description, JevCompletionEvidenceSectionPayload.SECTION)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
@@ -784,6 +804,49 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("missing", str(request_state))
         self.assertEqual(len(decision.requests[0].questions), 2)
         self.assertEqual(len(decision.requests[1].questions), 2)
+
+    async def test_completion_evidence_is_handoff_only_and_judges_the_stable_task_item(self) -> None:
+        decision = ScriptedDecisionRunner({JEV_DONE_COMPLETION_ITEM_ID: [0.9]})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.COMPLETION_EVIDENCE,),
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(_COMPLETION_EVIDENCE_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        question = JevDoneRegistry.question(JevDoneCheck.COMPLETION_EVIDENCE)
+        self.assertEqual(tuple(item.name for item in request.questions), (question.name(JEV_DONE_COMPLETION_ITEM_ID),))
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_COMPLETION_EVIDENCE_FIELD})
+        entry = request.state[JEV_DONE_COMPLETION_EVIDENCE_FIELD][JEV_DONE_COMPLETION_ITEM_ID]
+        self.assertEqual(
+            set(entry),
+            {"completion_status", "requested_outcomes", "completed_work", "unfinished_or_blocked", "evidence"},
+        )
+        self.assertNotIn("missing", entry)
+        result = agent.response.done[JevDoneCheck.COMPLETION_EVIDENCE]
+        self.assertTrue(result.available and result.passed)
+        self.assertEqual(result.incomplete, ())
+
+    async def test_completion_evidence_continuation_names_the_status_and_run_gap(self) -> None:
+        decision = ScriptedDecisionRunner({JEV_DONE_COMPLETION_ITEM_ID: [0.2, 0.98]})
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.COMPLETION_EVIDENCE,),
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(_COMPLETION_EVIDENCE_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (2, 2))
+        feedback = main.messages[1][0]["content"]
+        self.assertIn("Requested outcomes: Add the dry-run flag; Document the flag in the README", feedback)
+        self.assertIn("Work shown: The CLI accepts --dry-run.", feedback)
+        self.assertIn("Unfinished or blocked: The README update is not shown.", feedback)
+        self.assertIn("Evidence gap: The requested README explanation is unsupported by run evidence.", feedback)
+        self.assertTrue(agent.response.done[JevDoneCheck.COMPLETION_EVIDENCE].passed)
 
     async def test_problem_check_batches_with_other_enabled_checks(self) -> None:
         decision = ScriptedDecisionRunner({
