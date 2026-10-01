@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevAlignmentSettings, JevToolAlignmentSettings, JevToolAlignmentStatus
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevAlignmentSettings, JevRuntimeSettings, JevToolAlignmentSettings, JevToolAlignmentStatus
 from vidbyte.agents.jev.alignment.draft import JevToolScoutPass, JevToolScoutPhase
 from vidbyte.agents.jev.alignment.questions import TOOL_QUESTIONS, JevToolQuestion
 from vidbyte.agents.jev.alignment.result import JevToolEffect, JevToolNeed, JevToolRejection
@@ -35,6 +35,7 @@ from vidbyte.lib.dataclasses.tool_catalogs import (
     ToolSecretRequirement,
 )
 from vidbyte.lib.enums import JevQuestionType, ModelProvider
+from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.enums.tool_catalogs import ToolCatalogName, ToolInstallKind, ToolSecretLocation
 from vidbyte.lib.errors import ConfigurationError, McpConnectionError, ProviderRequestError
 from vidbyte.lib.runners import TextModelResponse
@@ -154,8 +155,10 @@ class ScriptedJev:
         self.table = dict(table or {})
         self.fail = fail
         self.requests: list[JevDecisionRequest] = []
+        self.configs: list[object] = []
 
     def __call__(self, config: object = None) -> ScriptedJev:
+        self.configs.append(config)
         return self
 
     async def arun(self, request: JevDecisionRequest) -> DecisionModelResponse:
@@ -240,8 +243,8 @@ def _settings(**tool_overrides: Any) -> JevAgentSettings:
     return JevAgentSettings(name="assistant", system_prompt=PROMPT, provider="openai", model_name="gpt-4.1-mini", alignment=alignment, permission_policy=PermissionPolicy.allow_all())
 
 
-def _agent(main: ScriptedRunner, scout: ScriptedRunner, catalog: ToolCatalogProvider | None = None, **tool_overrides: Any) -> JevAgent:
-    agent = bind_test_runner(JevAgent(_settings(**tool_overrides)), main)
+def _agent(main: ScriptedRunner, scout: ScriptedRunner, catalog: ToolCatalogProvider | None = None, *, runtime_settings: JevRuntimeSettings | None = None, **tool_overrides: Any) -> JevAgent:
+    agent = bind_test_runner(JevAgent(_settings(**tool_overrides), runtime_settings), main)
     assert agent.alignment is not None and agent.alignment.tool_scout is not None
     bind_test_runner(agent.alignment.tool_scout, scout)
     fake = catalog or FakeCatalog(_linear_entry())
@@ -319,6 +322,20 @@ class ToolAlignmentSettingsTests(unittest.TestCase):
 
 class ToolAlignmentRunTests(unittest.IsolatedAsyncioTestCase):
     """Pins the full pass through a real JevAgent run."""
+
+    async def test_alignment_uses_the_runtime_decision_configuration(self) -> None:
+        # @intent alignment-decision-config-comes-from-runtime-settings
+        # The runner factory receives the same validated decision object supplied to JevAgent.
+        decision = DecisionModelConfig(model="alignment-specific-model", api_key="fixture-key")
+        jev = ScriptedJev({"alignment.tools.detect.outside_action": 0.1})
+        agent = _agent(
+            ScriptedRunner(_text("OAuth is ...")),
+            ScriptedRunner(),
+            runtime_settings=JevRuntimeSettings(decision=decision),
+        )
+        with patch(RUNNER_PATH, jev):
+            await agent.arun("Explain how OAuth works.")
+        self.assertEqual(jev.configs, [decision])
 
     async def test_tool_settings_off_makes_no_jev_call(self) -> None:
         # [Edge Case] without alignment.tool_settings the agent behaves exactly like the scaffold.

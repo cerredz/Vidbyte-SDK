@@ -75,6 +75,7 @@ from vidbyte.agents.jev.settings import JevAgentSettings, JevToolAlignmentSettin
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import JEV_NOUL_YES_THRESHOLD
+from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.tool_catalogs import (
     TOOL_CATALOG_MERGED_LIMIT,
     TOOL_CATALOG_SEARCH_LIMIT,
@@ -163,14 +164,18 @@ _EFFECT_RANK: Mapping[JevToolEffect, int] = {JevToolEffect.READS: 0, JevToolEffe
 class JevAgentAlignment(BaseAgent):
     """Editor agent that aligns a JevAgent's system prompt with one request before the run."""
 
-    def __init__(self, settings: JevAgentSettings) -> None:
-        # Reuses the main agent's generative model and decision config; its own prompt and tool are fixed.
-        # @intent editor-shares-model-not-prompt
+    def __init__(self, settings: JevAgentSettings, decision: DecisionModelConfig) -> None:
+        # @intent alignment-uses-runtime-owned-decision-config
+        # JevRuntimeSettings owns the decision model; this editor receives that validated config without adding it to JevAgentSettings.
+        # Its own prompt and tool stay fixed while its generative model comes from the agent settings.
         # The editor must call the same provider and key the owner configured, but its system prompt and single
         # tool are fixed here so no caller can turn it into a general agent that edits anything else.
         if not isinstance(settings, JevAgentSettings):
             raise ConfigurationError("JevAgentAlignment requires the JevAgentSettings of the agent it aligns.")
+        if not isinstance(decision, DecisionModelConfig):
+            raise ConfigurationError("JevAgentAlignment requires the JevRuntimeSettings decision configuration.")
         self.agent_settings = settings
+        self.decision = decision
         self._static_cache: OrderedDict[str, Mapping[str, float]] = OrderedDict()
         super().__init__(
             name=f"{settings.name}-alignment",
@@ -265,7 +270,7 @@ class JevAgentAlignment(BaseAgent):
         cache_key = _state_key(static_state)
         cached = self._static_cache.get(cache_key)
         dynamic = _asked((*FIT_QUESTIONS, *COVERAGE_QUESTIONS), has_tools)
-        runner = DecisionModelRunner(self.agent_settings.decision)
+        runner = DecisionModelRunner(self.decision)
         calls = [runner.arun(_request({**static_state, "request": request}, dynamic))]
         static = () if cached is not None else _asked(SECTION_QUESTIONS, has_tools)
         if static:
@@ -299,7 +304,7 @@ class JevAgentAlignment(BaseAgent):
         cited = dict.fromkeys(name for edit in draft.edits for name in edit.fixes)
         questions = tuple(_QUESTIONS_BY_NAME[name] for name in cited if name != CONSISTENCY_QUESTION.name) + (CONSISTENCY_QUESTION,)
         state = {"system_prompt": draft.render(), "request": request, "tools": list(tools)}
-        response = await DecisionModelRunner(self.agent_settings.decision).arun(_request(state, questions))
+        response = await DecisionModelRunner(self.decision).arun(_request(state, questions))
         after = _probabilities(response, questions)
         usage = JevUsage.from_usage_payload(response.usage or {})
         consistent_before = before.get(CONSISTENCY_QUESTION.name, 1.0) >= JEV_NOUL_YES_THRESHOLD
@@ -749,7 +754,7 @@ class JevAgentAlignment(BaseAgent):
 
     async def _ask_jev(self, scout_pass: JevToolScoutPass, state: Mapping[str, object], questions: Sequence[JevQuestion], *, record: bool = True) -> Mapping[str, JevAnswer]:
         # Sends one Jev request, adds its usage to the pass, and records noul probabilities unless they are per-candidate.
-        response = await DecisionModelRunner(self.agent_settings.decision).arun(JevDecisionRequest(state=dict(state), questions=tuple(questions)))
+        response = await DecisionModelRunner(self.decision).arun(JevDecisionRequest(state=dict(state), questions=tuple(questions)))
         usage = JevUsage.from_usage_payload(response.usage or {})
         if usage is not None:
             scout_pass.usages.append(usage)

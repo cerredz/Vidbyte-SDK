@@ -44,7 +44,9 @@ class JevAgent(BaseAgent):
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
         self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
         self.continuation = None if self.run_state is None else JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
-        self.alignment = JevAgentAlignment(settings) if settings.alignment.system_prompt or settings.alignment.tool_settings else None
+        # @intent alignment-gets-decision-from-runtime-settings
+        # Grouped agent settings carry model identity while JevRuntimeSettings owns the separate decision-model configuration.
+        self.alignment = JevAgentAlignment(settings, runtime_settings.decision) if settings.alignment.system_prompt or settings.alignment.tool_settings else None
         self.skill_preload = (
             JevSkillsPreload(
                 skills=settings.alignment.skills,
