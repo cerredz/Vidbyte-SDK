@@ -60,6 +60,8 @@ from vidbyte.lib.enums.failure import (
     RuleErrorMode,
 )
 from vidbyte.lib.enums.jev import (
+    JevBulkItemError,
+    JevBulkPlanningError,
     JevClaimKind,
     JevDoneCheck,
     JevDoneQuestionKey,
@@ -104,6 +106,8 @@ from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "JevBulkItemError",
+    "JevBulkPlanningError",
     "JevClaimKind",
     "JevDoneCheck",
     "JevDoneQuestionKey",

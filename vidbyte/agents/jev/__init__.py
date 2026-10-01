@@ -13,11 +13,14 @@ from vidbyte.agents.jev.agent import JevAgent
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
+    JevBulkSettings,
     JevContinualSettings,
     JevRuntimeSettings,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevBulkItemResult,
+    JevBulkWorkResult,
     JevClaimAssertion,
     JevClaimContext,
     JevClaimEvidence,
@@ -41,6 +44,8 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeItem,
 )
 from vidbyte.lib.enums.jev import (
+    JevBulkItemError,
+    JevBulkPlanningError,
     JevClaimKind,
     JevDoneCheck,
     JevPreflightPreset,
@@ -51,6 +56,11 @@ __all__ = [
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
+    "JevBulkItemResult",
+    "JevBulkItemError",
+    "JevBulkPlanningError",
+    "JevBulkSettings",
+    "JevBulkWorkResult",
     "JevClaimAssertion",
     "JevClaimContext",
     "JevClaimEvidence",

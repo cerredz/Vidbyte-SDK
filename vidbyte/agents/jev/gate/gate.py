@@ -48,9 +48,13 @@ class JevPreflightGate:
         self.clarification = JevClarificationAgent(settings) if JevPreflightPreset.CLARITY in self.presets else None
         self.specialists = settings.agents
         self.specialist: JevSpecialist | None = None
+        self.bulk_work_requested = False
 
     def combine(self, message: str) -> JevDecisionRequest | None:
         """Return one Jev request holding every enabled preset's questions, or None when no preset has a question to ask."""
+        # @intent one-batched-preflight-owns-each-preset-answer
+        # One request keeps bulk recognition questions alongside the existing configured gate questions;
+        # separate independent answers still let the gate veto only the unsafe fan-out decision.
         questions: list[JevQuestion] = []
         for preset in self.presets:
             questions.extend(JevPreflightRegistry.questions(preset))
@@ -62,6 +66,8 @@ class JevPreflightGate:
     async def pass_(self, message: str) -> bool:
         """Act on every enabled preset's answers, choose the specialist, and return True when a generative agent should run."""
         self.specialist = None
+        self.bulk_work_requested = False
+        bulk_work_passed = False
         answers = await self._ask(message)
         for outcome in (self._score(preset, answers) for preset in self.presets):
             self.response.preset(outcome)
@@ -75,9 +81,13 @@ class JevPreflightGate:
                     # run stops so the user answers them before any generative-agent tokens are spent.
                     if await self._clarify(message, outcome):
                         return False
+                case JevPresetResult(preset=JevPreflightPreset.BULK_WORK, available=True, passed=True):
+                    # Fan-out is allowed only when every separate recognition question passes its veto and mean threshold.
+                    bulk_work_passed = True
                 case _:
                     # A preset that passed needs no action.
                     continue
+        self.bulk_work_requested = bulk_work_passed
         self.specialist = self._choose(answers)
         return True
 
