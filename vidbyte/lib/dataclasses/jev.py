@@ -4,8 +4,8 @@ PURPOSE: Defines validated TypeSafe decision and response records, preflight que
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem handoff items require unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; request-derived definitions belong in JevRunStateRecord, while evidence derived from the finished run belongs in JevHandoffRecord.
-KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes members named in the request, members enumerated in the workspace, and unsupported mentions so a mention cannot establish coverage. Completion evidence is a single handoff-only whole-task item and has no run-state section. PHASE_PROGRESS records only request-required outcome stages; when none exist, its state section and question are omitted. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes members named in the request, members enumerated in the workspace, and unsupported mentions so a mention cannot establish coverage. Completion evidence is a single handoff-only whole-task item and has no run-state section. PHASE_PROGRESS records only request-required outcome stages; when none exist, its state section and question are omitted. INPUT_SET_COVERAGE records only explicitly bounded request inputs; when none exist, its state section and question are omitted. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -807,6 +807,26 @@ class JevPhaseProgressEvidencePayload(JevSectionPayload):
 
     SECTION: ClassVar[str] = "The phase-progress evidence section gathers what the actual run shows about every outcome stage from the run state. It lets a separate checker distinguish preparatory activity from the work the user requested without inferring a universal workflow. The checker sees only each stage's request-derived identity and criteria plus the evidence written here. Each entry reports observations and a separate missing note for the main agent, never a Jev verdict. Compile it after every finish attempt from the current run window, including its latest answer and any failures or blockers."
     stages: list[JevPhaseStageEvidencePayload] = Field(description="Return one evidence entry for each phase-progress stage in the run state, with exactly matching ids and request order. Report the activity that occurred and whether it remained preparatory or reached the requested stage's observable criterion. Include evidence of a concrete constraint when it prevented further progress, and separate that from the agent's own statement that it cannot continue. Keep the missing note useful to the main agent but do not copy it into Jev's state projection. Return an entry even when the run contains no work related to that stage.")
+class JevInputTargetPayload(BaseModel):
+    """One explicitly bounded input target and the requested action to perform on it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a unique lowercase identifier for this one input target. Derive it from the target identity using letters, digits, and underscores. Keep it stable when the handoff repeats the target. Do not merge independently requested targets under one id. This id is how code joins one question and one evidence record to the obligation.")
+    identity: str = Field(min_length=1, description="The identity names the exact input or finite group the user asked the agent to engage. Copy the names, keys, category labels, source names, or membership rule that define it. It comes from the user's request, not from what the agent later happened to inspect. Do not add members based on convention or guesswork. This identity lets evidence be matched to the intended input rather than a similarly named one.")
+    scope: str = Field(min_length=1, description="The scope states the complete explicit boundary that applies to this target. Preserve requested extent, category, date bounds, exclusions, and completeness words such as all, each, or whole. It comes from the user request and must not be narrowed to fit the available evidence. When no additional boundary is stated, describe the target itself as the full scope. This field determines how much evidence Jev must see before recognizing engagement.")
+    action: str = Field(min_length=1, description="The action states what the user asked the agent to do with this input. Use the request's meaning, such as read, inspect, review, compare, or process. Do not substitute an output the user requested for the action on the source. Do not add a stronger action than the request states. The action determines what kind of recorded operation and output can count as engagement.")
+    engagement_signal: str = Field(min_length=1, description="The engagement signal describes observations that would show the requested action over the complete scope. It is derived from the user's wording and the input type, not from later claims of completion. Distinguish content access from locating a path or listing a title. Match the depth requested, so a preview does not stand for a full review. Jev uses this signal with the request, target, scope, and evidence to recognize whether engagement occurred.")
+
+
+class JevInputSetCoveragePayload(JevSectionPayload):
+    """The request-derived, explicitly bounded input targets this check requires the run to engage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The input-set coverage section lists each distinct input target the user explicitly bounded and asked the agent to read, inspect, review, compare, or process. Include finite named targets and finite user-defined scopes, including all members when the request explicitly requires every member of a known bounded set. Do not turn an open-ended or dynamically paginated collection into guessed targets; those are outside this check. Extract these obligations from the user's request before work starts, preserve stable ids, and state the requested action, target identity, scope, and observable engagement signal for each. This section concerns inputs the agent must engage, not outputs it must create. Return an empty list when the request contains no explicitly bounded input-engagement obligation."
+
+    targets: list[JevInputTargetPayload] = Field(description="The targets are separate input-engagement obligations the request explicitly bounds. Preserve their order from the request and split independently named inputs so each receives a separate evidence judgment. A single finite category or range may remain one target when its membership rule is fully stated. Do not add inputs only implied by good practice or guess members of an unknown collection. An empty list means no explicit bounded input-engagement obligation was requested, and no Jev question is asked for this check.")
 
 
 class JevHandoffPayload(BaseModel):
@@ -858,6 +878,24 @@ class JevTargetOutcomeEvidencePayload(JevSectionPayload):
     SECTION: ClassVar[str] = "This section records what the main agent's run observed for each outcome in the request-derived target-outcome section. It separates intermediate proxy milestones from direct evidence about the actual target so that a nearby step cannot stand in for the user's requested result. The checker receives the target, scope, and completion criterion from run state together with the proxy and direct evidence from this section. The section reports observations and a separate actionable gap, never a completion verdict. Fill it after each finish attempt from the current run window, including relevant failed attempts and later state changes."
 
     items: list[JevTargetOutcomeEvidenceItemPayload] = Field(description="Return one evidence item for every run-state target outcome, preserving each id and the request's ordering. Separate any observed proxy milestone from observations made directly on the actual target. Include the source of each observation, relevant failures, and the latest state shown by the run. Write `missing` separately for the main agent; do not use it as evidence or tell the checker what verdict to choose. If there are no run-state outcomes, return an empty list.")
+class JevInputTargetEvidencePayload(BaseModel):
+    """Successful and unsuccessful observations about one requested input-engagement obligation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is copied character for character from one run-state input target. Every run-state target must have exactly one evidence record with the same id. Do not add, omit, merge, or rename targets. This stable key joins each evidence record to the matching Jev question. The handoff is unavailable if its ids do not match the request-derived list.")
+    evidence: str = Field(min_length=1, description="The evidence reports recorded tool calls and outputs that bear on this target, in run order. Quote or closely reproduce the output that shows what content was actually available or what operation completed. Include failed attempts when they explain why the requested extent is absent. Distinguish full content from a listing, metadata, or excerpt. When there is no relevant call, state that the run contains no evidence for this target.")
+    missing: str = Field(min_length=1, description="The missing field names what the evidence does not show for this target. Identify the requested action, scope, or depth still uncovered in plain language the main agent can act on. This is a handoff writer's feedback field, not evidence about the run. Jev must never receive this value in its state, because it is already a generated judgment. If the evidence shows the entire requested engagement, say that nothing is missing.")
+
+
+class JevInputSetCoverageEvidencePayload(JevSectionPayload):
+    """The handoff evidence for each request-derived bounded input target."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The input-set coverage evidence section records what the main agent's tool calls and outputs show for each target listed in the run state's input-set coverage section. It must preserve exact target ids and include all targets, including those with no work or only failed attempts. Report observations at the depth the request asks for: locating a path is not reading its content, a listing is not reviewing each member, and an excerpt is not full-document review unless the request asks only for an excerpt. The section is evidence for a later recognition question and does not decide whether coverage is adequate. The separate missing field is used only to focus continuation feedback and is excluded from Jev's evidence state."
+
+    targets: list[JevInputTargetEvidencePayload] = Field(description="The targets contain exactly one evidence entry for every target in the run-state section. Preserve the target order and copy each id exactly so deterministic code can validate the correspondence. Gather only observations that relate directly to that target, and repeat an observation only when the recorded operation truly covers multiple targets. Include successful and failed call results and state any uncovered extent in `missing`. The handoff is unavailable when any target is omitted, added, renamed, or reordered from the run-state list.")
 
 
 class JevClaimIdentityPayload(BaseModel):
@@ -1460,12 +1498,43 @@ class JevPhaseProgress:
         """Return every request-required stage id in order."""
         return tuple(item.id for item in self.stages)
 
+@dataclass(frozen=True, slots=True)
+class JevInputTarget:
+    """One stable input target, its boundary, and the action the user requested on it."""
+
+    id: str
+    identity: str
+    scope: str
+    action: str
+    engagement_signal: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="input target id")
+        for field_name in ("identity", "scope", "action", "engagement_signal"):
+            JevText.require(getattr(self, field_name), field_name=f"input target {self.id!r} {field_name}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevInputSetCoverage:
+    """The explicitly bounded input-engagement obligations in request order."""
+
+    targets: tuple[JevInputTarget, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.targets, tuple) or not all(isinstance(item, JevInputTarget) for item in self.targets):
+            raise JevValidation.error("input-set targets", "a tuple of JevInputTarget values", self.targets)
+        JevDeliverableId.require_unique(self.ids(), field_name="input-set targets")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every input target id in request order."""
+        return tuple(item.id for item in self.targets)
+
 
 @dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part`, `target_outcome`, `motivating_case`, and `scope_coverage` are set only when their respective request-derived done checks are enabled; `phase_progress` is set only when the request has a stage to check, and `usage` is JevRunState's own model usage.
+    `multi_part`, `target_outcome`, `motivating_case`, and `scope_coverage` are set only when their respective request-derived done checks are enabled; `phase_progress` is set only when the request has a stage to check, `input_set_coverage` is set only when INPUT_SET_COVERAGE is enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -1478,6 +1547,7 @@ class JevRunStateRecord:
     motivating_case: JevMotivatingCase | None = None
     scope_coverage: JevScopeCoverage | None = None
     phase_progress: JevPhaseProgress | None = None
+    input_set_coverage: JevInputSetCoverage | None = None
 
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
@@ -1497,6 +1567,8 @@ class JevRunStateRecord:
             raise JevValidation.error("run state scope_coverage", "a JevScopeCoverage or None", self.scope_coverage)
         if self.phase_progress is not None and not isinstance(self.phase_progress, JevPhaseProgress):
             raise JevValidation.error("run state phase_progress", "a JevPhaseProgress or None", self.phase_progress)
+        if self.input_set_coverage is not None and not isinstance(self.input_set_coverage, JevInputSetCoverage):
+            raise JevValidation.error("run state input_set_coverage", "a JevInputSetCoverage or None", self.input_set_coverage)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1653,6 +1725,34 @@ class JevPhaseProgressEvidence:
         """Return every evidence entry's phase stage id in order."""
         return tuple(item.id for item in self.stages)
 
+@dataclass(frozen=True, slots=True)
+class JevInputTargetEvidence:
+    """Evidence from the main run for one requested input target and an actionable missing note."""
+
+    id: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="input evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of input target {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of input target {self.id!r}")
+
+@dataclass(frozen=True, slots=True)
+class JevInputSetCoverageEvidence:
+    """Evidence entries for each request-derived input target, in the run-state order."""
+
+    targets: tuple[JevInputTargetEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.targets, tuple) or not all(isinstance(item, JevInputTargetEvidence) for item in self.targets):
+            raise JevValidation.error("input-set evidence", "a tuple of JevInputTargetEvidence values", self.targets)
+        JevDeliverableId.require_unique(self.ids(), field_name="input-set evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every input evidence id in order."""
+        return tuple(item.id for item in self.targets)
+
 
 @dataclass(frozen=True, slots=True)
 class JevClaimIdentity:
@@ -1806,6 +1906,7 @@ class JevProblemResolutionItem:
     missing: str
 
     def __post_init__(self) -> None:
+        # @intent dynamic-problem-records-preserve-typed-evidence
         # Requires typed item kind, stable identity, and all context/evidence text.
         JevDeliverableId.require(self.id, field_name="problem evidence id")
         if not isinstance(self.kind, JevProblemCheckItemType):
@@ -1821,6 +1922,7 @@ class JevProblemsResolvedEvidence:
     items: tuple[JevProblemResolutionItem, ...]
 
     def __post_init__(self) -> None:
+        # @intent a-done-verdict-needs-one-original-request-item
         # Keeps each question id unique and requires the reserved completion item exactly once.
         if not isinstance(self.items, tuple) or not all(isinstance(item, JevProblemResolutionItem) for item in self.items):
             raise JevValidation.error("problem evidence items", "a tuple of JevProblemResolutionItem values", self.items)
@@ -1845,8 +1947,8 @@ class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
     Each evidence section is set only when its corresponding done check is enabled, and `usage` is JevHandoff's own model usage.
-    All sections are optional and typed, including `multi_part`, `claims`, `target_outcome`, `motivating_case`, `scope_coverage`, and `problems_resolved`.
-    `completion_evidence` is also optional and typed, and is handoff-only rather than a request-derived run-state section.
+    All sections are optional and typed, including `multi_part`, `claims`, `target_outcome`, `motivating_case`, `scope_coverage`, `problems_resolved`, `completion_evidence`, `phase_progress`, and `input_set_coverage`.
+    `completion_evidence` is handoff-only rather than a request-derived run-state section; `input_set_coverage` is populated from the trace for every request-derived input target.
     """
 
     multi_part: JevMultiPartEvidence | None = None
@@ -1858,6 +1960,7 @@ class JevHandoffRecord:
     scope_coverage: JevScopeCoverageEvidence | None = None
     completion_evidence: JevCompletionEvidence | None = None
     phase_progress: JevPhaseProgressEvidence | None = None
+    input_set_coverage: JevInputSetCoverageEvidence | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -1873,6 +1976,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff scope_coverage", "a JevScopeCoverageEvidence or None", self.scope_coverage)
         if self.completion_evidence is not None and not isinstance(self.completion_evidence, JevCompletionEvidence):
             raise JevValidation.error("handoff completion_evidence", "a JevCompletionEvidence or None", self.completion_evidence)
+        if self.input_set_coverage is not None and not isinstance(self.input_set_coverage, JevInputSetCoverageEvidence):
+            raise JevValidation.error("handoff input_set_coverage", "a JevInputSetCoverageEvidence or None", self.input_set_coverage)
         if self.problems_resolved is not None and not isinstance(self.problems_resolved, JevProblemsResolvedEvidence):
             raise JevValidation.error("handoff problems_resolved", "a JevProblemsResolvedEvidence or None", self.problems_resolved)
         if self.motivating_case is not None and not isinstance(self.motivating_case, JevMotivatingCaseEvidence):
@@ -2062,6 +2167,14 @@ __all__ = [
     "JevDoneResult",
     "JevHandoffPayload",
     "JevHandoffRecord",
+    "JevInputSetCoverage",
+    "JevInputSetCoverageEvidence",
+    "JevInputSetCoverageEvidencePayload",
+    "JevInputSetCoveragePayload",
+    "JevInputTarget",
+    "JevInputTargetEvidence",
+    "JevInputTargetEvidencePayload",
+    "JevInputTargetPayload",
     "JevJson",
     "JevModelCard",
     "JevMotivatingCase",

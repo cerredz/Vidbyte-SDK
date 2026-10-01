@@ -43,6 +43,8 @@ from vidbyte import (
     JevClaimsEvidence,
     JevContinualSettings,
     JevDoneCheck,
+    JevInputSetCoverage,
+    JevInputTarget,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
     JevRuntimeSettings,
@@ -66,11 +68,17 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_INPUT_ACTION_FIELD,
+    JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
+    JEV_DONE_INPUT_IDENTITY_FIELD,
+    JEV_DONE_INPUT_SCOPE_FIELD,
+    JEV_DONE_INPUT_SET_COVERAGE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
-    JEV_DONE_PROBLEMS_RESOLVED_FIELD,
     JEV_DONE_PHASE_PROGRESS_FIELD,
+    JEV_DONE_PROBLEMS_RESOLVED_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
+    JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
 )
@@ -92,6 +100,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneQuestion,
     JevDoneResult,
     JevHandoffPayload,
+    JevInputSetCoverageEvidencePayload,
+    JevInputSetCoveragePayload,
+    JevInputTargetEvidencePayload,
+    JevInputTargetPayload,
     JevMotivatingCasePayload,
     JevMultiPart,
     JevMultiPartEvidencePayload,
@@ -117,6 +129,7 @@ from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev.done import (
     DONE_STATE,
     ClaimsSupportedQuestion,
+    InputSetCoverageQuestion,
     MultiPartDeliveredQuestion,
     ProblemsResolvedQuestion,
 )
@@ -151,6 +164,27 @@ _HANDOFF = {
             {"id": "dry_run_flag", "evidence": "Tool call edit_file(path='cli/deploy.py') output: updated; it adds --dry-run.", "missing": "Nothing is missing."},
             {"id": "readme_docs", "evidence": "No part of the run concerns the README.", "missing": "The README section for --dry-run."},
         ]
+    }
+}
+_INPUT_STATE = {
+    **_BASE_STATE,
+    "input_set_coverage": {
+        "targets": [{
+            "id": "incident_pages",
+            "identity": "incident report pages 1 through 3",
+            "scope": "all three pages in the named incident report",
+            "action": "review",
+            "engagement_signal": "content from each of pages 1, 2, and 3 was returned and examined",
+        }]
+    },
+}
+_INPUT_HANDOFF = {
+    "input_set_coverage": {
+        "targets": [{
+            "id": "incident_pages",
+            "evidence": "Tool call fetch_pages(start=1, end=3) succeeded; output contains the full text of pages 1, 2, and 3 from the incident report.",
+            "missing": "Nothing is missing.",
+        }]
     }
 }
 _CLAIMS = {
@@ -324,7 +358,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -332,7 +366,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -341,7 +375,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -517,10 +551,12 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(scope_schema.model_fields["scope_coverage"].description, JevScopeCoveragePayload.SECTION)
         phase_schema = JevRunState.schema((JevDoneCheck.PHASE_PROGRESS,))
         self.assertEqual(phase_schema.model_fields[JEV_DONE_PHASE_PROGRESS_FIELD].description, JevPhaseProgressPayload.SECTION)
+        input_schema = JevRunState.schema((JevDoneCheck.INPUT_SET_COVERAGE,))
+        self.assertEqual(input_schema.model_fields[JEV_DONE_INPUT_SET_COVERAGE_FIELD].description, JevInputSetCoveragePayload.SECTION)
         completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
         self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS})
-        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD}
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE})
+        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
@@ -540,6 +576,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(completion_schema.model_fields[JEV_DONE_COMPLETION_EVIDENCE_FIELD].description, JevCompletionEvidenceSectionPayload.SECTION)
         phase_schema = JevHandoff.schema((JevDoneCheck.PHASE_PROGRESS,))
         self.assertEqual(phase_schema.model_fields[JEV_DONE_PHASE_PROGRESS_FIELD].description, JevPhaseProgressEvidencePayload.SECTION)
+        input_schema = JevHandoff.schema((JevDoneCheck.INPUT_SET_COVERAGE,))
+        self.assertEqual(input_schema.model_fields[JEV_DONE_INPUT_SET_COVERAGE_FIELD].description, JevInputSetCoverageEvidencePayload.SECTION)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
@@ -641,6 +679,24 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertIn("problems_resolved", question.instructions.state)
         self.assertIn("after repairs", question.gap)
         self.assertGreater(len(question.instructions.render()), 1_000)
+
+    def test_input_set_question_is_registered_and_names_each_target(self) -> None:
+        question = InputSetCoverageQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.INPUT_SET_COVERAGE), JEV_INPUT_SET_COVERAGE_THRESHOLD)
+        rendered = question.to_question("incident_pages")
+        self.assertEqual(rendered.name, f"input_set_coverage.engaged.incident_pages")
+        self.assertIn("with id `incident_pages`", str(rendered.instructions))
+        self.assertIn("`input_set_coverage`", DONE_STATE)
+        self.assertIn("`missing`", question.instructions.rules[0])
+        self.assertTrue(question.instructions.question.startswith("Does `evidence` show"))
+        self.assertIn("full `scope`", question.instructions.question)
+
+    def test_input_set_question_text_is_one_literal_per_section(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/input_set_coverage.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
     def test_problems_resolved_question_carries_at_least_two_thousand_tokens(self) -> None:
@@ -970,6 +1026,92 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         result = agent.response.done[JevDoneCheck.PROBLEMS_RESOLVED]
         self.assertFalse(result.available)
         self.assertTrue(result.passed)
+
+    async def test_input_set_coverage_checks_tool_evidence_per_bounded_target(self) -> None:
+        decision = ScriptedDecisionRunner({"incident_pages": [0.95]})
+        agent, main, state_runner, handoff_runner = self._agent(
+            done=(JevDoneCheck.INPUT_SET_COVERAGE,),
+            state=json.dumps(_INPUT_STATE),
+            handoff=json.dumps(_INPUT_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Review pages 1 through 3 of the incident report.")
+
+        self.assertEqual((len(main.calls), len(state_runner.calls), len(handoff_runner.calls)), (1, 1, 1))
+        self.assertEqual(agent.response.done[JevDoneCheck.INPUT_SET_COVERAGE].incomplete, ())
+        request = decision.requests[0]
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD})
+        entry = request.state[JEV_DONE_INPUT_SET_COVERAGE_FIELD]["incident_pages"]
+        self.assertEqual(set(entry), {JEV_DONE_INPUT_IDENTITY_FIELD, JEV_DONE_INPUT_SCOPE_FIELD, JEV_DONE_INPUT_ACTION_FIELD, JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD})
+        self.assertEqual(entry[JEV_DONE_EVIDENCE_FIELD], _INPUT_HANDOFF["input_set_coverage"]["targets"][0]["evidence"])
+        self.assertNotIn("missing", entry)
+        self.assertEqual([question.name for question in request.questions], ["input_set_coverage.engaged.incident_pages"])
+
+    async def test_input_set_threshold_is_inclusive(self) -> None:
+        decision = ScriptedDecisionRunner({"incident_pages": [JEV_INPUT_SET_COVERAGE_THRESHOLD]})
+        agent, main, *_ = self._agent(done=(JevDoneCheck.INPUT_SET_COVERAGE,), state=json.dumps(_INPUT_STATE), handoff=json.dumps(_INPUT_HANDOFF))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Review pages 1 through 3 of the incident report.")
+
+        self.assertEqual(len(main.calls), 1)
+        self.assertTrue(agent.response.done[JevDoneCheck.INPUT_SET_COVERAGE].passed)
+
+    async def test_incomplete_input_target_continues_with_only_that_target_in_focus(self) -> None:
+        incomplete_handoff = json.loads(json.dumps(_INPUT_HANDOFF))
+        incomplete_handoff["input_set_coverage"]["targets"][0].update(
+            evidence="Tool call list_pages() succeeded and returned page names 1, 2, and 3; no page content was returned.",
+            missing="The full content of pages 1, 2, and 3 was not read or reviewed.",
+        )
+        decision = ScriptedDecisionRunner({"incident_pages": [0.1]})
+        agent, main, *_ = self._agent(done=(JevDoneCheck.INPUT_SET_COVERAGE,), state=json.dumps(_INPUT_STATE), handoff=json.dumps(incomplete_handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Review pages 1 through 3 of the incident report.")
+
+        feedback = main.messages[1][0]["content"]
+        self.assertIn(InputSetCoverageQuestion().gap, feedback)
+        self.assertIn("The full content of pages 1, 2, and 3 was not read or reviewed.", feedback)
+        self.assertIn("review incident report pages 1 through 3", feedback.split("# Focus", 1)[1])
+        self.assertEqual(agent.response.done[JevDoneCheck.INPUT_SET_COVERAGE].incomplete, ("incident_pages",))
+        self.assertEqual(agent.response.continuations, JEV_DONE_MAX_CONTINUATIONS)
+
+    async def test_input_set_coverage_batches_with_other_enabled_checks(self) -> None:
+        state = {**_STATE, "input_set_coverage": _INPUT_STATE["input_set_coverage"]}
+        handoff = {**_HANDOFF, **_INPUT_HANDOFF}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.95], "readme_docs": [0.95], "incident_pages": [0.95]})
+        agent, *_ = self._agent(done=(JevDoneCheck.MULTI_PART, JevDoneCheck.INPUT_SET_COVERAGE), state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD})
+        self.assertEqual(len(request.questions), 3)
+        self.assertEqual(set(agent.response.done), {JevDoneCheck.MULTI_PART, JevDoneCheck.INPUT_SET_COVERAGE})
+        self.assertTrue(all(result.passed for result in agent.response.done.values()))
+
+    async def test_empty_input_set_passes_without_a_jev_question(self) -> None:
+        empty_state = {**_BASE_STATE, "input_set_coverage": {"targets": []}}
+        empty_handoff = {"input_set_coverage": {"targets": []}}
+        decision = ScriptedDecisionRunner({})
+        agent, main, *_ = self._agent(done=(JevDoneCheck.INPUT_SET_COVERAGE,), state=json.dumps(empty_state), handoff=json.dumps(empty_handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("What is an incident report?")
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        self.assertTrue(agent.response.done[JevDoneCheck.INPUT_SET_COVERAGE].passed)
+
+    async def test_input_handoff_with_missing_or_extra_ids_is_unavailable(self) -> None:
+        wrong_handoff = {"input_set_coverage": {"targets": [{**_INPUT_HANDOFF["input_set_coverage"]["targets"][0], "id": "another_target"}]}}
+        decision = ScriptedDecisionRunner({"incident_pages": [0.1]})
+        agent, main, *_ = self._agent(done=(JevDoneCheck.INPUT_SET_COVERAGE,), state=json.dumps(_INPUT_STATE), handoff=json.dumps(wrong_handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Review pages 1 through 3 of the incident report.")
+
+        result = agent.response.done[JevDoneCheck.INPUT_SET_COVERAGE]
+        self.assertEqual(len(main.calls), 1)
+        self.assertFalse(result.available)
+        self.assertTrue(result.passed)
+        self.assertEqual(decision.requests, [])
 
     async def test_one_jev_request_holds_every_enabled_checks_questions(self) -> None:
         # [Review 4117808663] the enabled checks' questions are combined and sent to Jev at once with the handoff.

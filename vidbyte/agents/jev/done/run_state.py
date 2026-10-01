@@ -51,6 +51,11 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_INPUT_ACTION_FIELD,
+    JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
+    JEV_DONE_INPUT_IDENTITY_FIELD,
+    JEV_DONE_INPUT_SCOPE_FIELD,
+    JEV_DONE_INPUT_SET_COVERAGE_FIELD,
     JEV_DONE_MOTIVATING_CASE_FIELD,
     JEV_DONE_MOTIVATING_CASES_FIELD,
     JEV_DONE_OBSERVED_PROXY_FIELD,
@@ -91,6 +96,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverable,
     JevDoneResult,
     JevHandoffRecord,
+    JevInputSetCoverage,
+    JevInputSetCoveragePayload,
+    JevInputTarget,
     JevMotivatingCase,
     JevMotivatingCasePayload,
     JevMotivatingScenario,
@@ -131,7 +139,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload})
 
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -350,6 +358,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.SCOPE_COVERAGE: self._scope_coverage_section,
             JevDoneCheck.COMPLETION_EVIDENCE: self._completion_evidence_section,
             JevDoneCheck.PROBLEMS_RESOLVED: self._problems_resolved_section,
+            JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -546,6 +555,27 @@ class JevRunState(BaseAgent):
         }
         return {JEV_DONE_COMPLETION_EVIDENCE_FIELD: {item.id: entry}}, (question.to_question(JEV_DONE_COMPLETION_ITEM_ID),)
 
+    # @intent each-request-bounded-input-target-is-judged-individually
+    # Keep the run-state criteria beside observed evidence, while leaving missing-work prose to the continuation.
+    def _input_set_coverage_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        state = None if self.record is None else self.record.input_set_coverage
+        evidence = handoff.input_set_coverage
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
+        evidence_by_id = {item.id: item.evidence for item in evidence.targets}
+        entries = {
+            target.id: {
+                JEV_DONE_INPUT_IDENTITY_FIELD: target.identity,
+                JEV_DONE_INPUT_SCOPE_FIELD: target.scope,
+                JEV_DONE_INPUT_ACTION_FIELD: target.action,
+                JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD: target.engagement_signal,
+                JEV_DONE_EVIDENCE_FIELD: evidence_by_id[target.id],
+            }
+            for target in state.targets
+        }
+        return {JEV_DONE_INPUT_SET_COVERAGE_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # @intent each-enabled-check-keeps-its-own-verdict
         # Dispatch preserves each scorer's threshold, missing-answer, and fail-open rules as gates are added.
@@ -558,6 +588,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.TARGET_OUTCOME: self._target_outcome,
             JevDoneCheck.MOTIVATING_CASE: self._motivating_case,
             JevDoneCheck.PROBLEMS_RESOLVED: self._problems_resolved,
+            JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage,
         }
         handler = handlers.get(check)
         if handler is None:
@@ -704,6 +735,27 @@ class JevRunState(BaseAgent):
         passed = not incomplete and (verdict is None or verdict.passed)
         return JevDoneResult(check=JevDoneCheck.SCOPE_COVERAGE, score=score, passed=passed, answers={} if verdict is None else verdict.answers, incomplete=incomplete, usage=usage)
 
+    # @intent every-bounded-input-target-needs-its-own-answer
+    # Use an item-level veto so evidence for one source cannot hide a skipped required target.
+    def _input_set_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        state = None if self.record is None else self.record.input_set_coverage
+        if state is None or handoff is None or handoff.input_set_coverage is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+        identifiers = state.ids()
+        if not identifiers:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.INPUT_SET_COVERAGE)
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+        incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
     def _target_outcome(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Missing records or evidence make the check unavailable; done checks are advisory and always fail open.
         state = None if self.record is None else self.record.target_outcome
@@ -810,6 +862,8 @@ class JevRunState(BaseAgent):
                 for item in phase_section.stages
             ))
 
+        input_set_coverage = self._input_set_coverage_record(payload)
+
         motivating_case = None
         motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
         if isinstance(motivating_section, JevMotivatingCasePayload):
@@ -855,7 +909,16 @@ class JevRunState(BaseAgent):
             usage=self.get_usage(),
             motivating_case=motivating_case,
             phase_progress=phase_progress,
+            input_set_coverage=input_set_coverage,
         )
+
+    @staticmethod
+    def _input_set_coverage_record(payload: JevRunStatePayload) -> JevInputSetCoverage | None:
+        section = getattr(payload, JevDoneCheck.INPUT_SET_COVERAGE.value, None)
+        if not isinstance(section, JevInputSetCoveragePayload):
+            return None
+        targets = tuple(JevInputTarget(item.id, item.identity.strip(), item.scope.strip(), item.action.strip(), item.engagement_signal.strip()) for item in section.targets)
+        return JevInputSetCoverage(targets)
 
 
 __all__ = ["JevRunState"]

@@ -42,6 +42,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverableEvidence,
     JevHandoffPayload,
     JevHandoffRecord,
+    JevInputSetCoverageEvidence,
+    JevInputSetCoverageEvidencePayload,
+    JevInputTargetEvidence,
     JevMotivatingCaseEvidence,
     JevMotivatingCaseEvidencePayload,
     JevMotivatingScenarioEvidence,
@@ -78,7 +81,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -227,6 +230,7 @@ class JevHandoff(BaseAgent):
             scope_coverage=scope_coverage,
             usage=self.get_usage(),
             motivating_case=request_records.motivating_case,
+            input_set_coverage=request_records.input_set_coverage,
         )
 
     # @intent request-derived-evidence-covers-exactly-the-state
@@ -265,11 +269,24 @@ class JevHandoff(BaseAgent):
             expected = () if state.motivating_case is None else state.motivating_case.ids()
             if motivating_case.ids() != expected:
                 return None
+        input_set_coverage = None
+        input_section = getattr(payload, JevDoneCheck.INPUT_SET_COVERAGE.value, None)
+        if isinstance(input_section, JevInputSetCoverageEvidencePayload):
+            input_set_coverage = JevInputSetCoverageEvidence(tuple(
+                JevInputTargetEvidence(item.id, item.evidence.strip(), item.missing.strip())
+                for item in input_section.targets
+            ))
+            expected = () if state.input_set_coverage is None else state.input_set_coverage.ids()
+            # @intent no-requested-input-can-disappear-from-the-check
+            # A handoff omission would remove its question, so accept only the exact request-derived ids in order.
+            if input_set_coverage.ids() != expected:
+                return None
         return JevHandoffRecord(
             multi_part=multi_part,
             phase_progress=phase_progress,
             target_outcome=target_outcome,
             motivating_case=motivating_case,
+            input_set_coverage=input_set_coverage,
         )
 
     # @intent phase-evidence-matches-request-stages

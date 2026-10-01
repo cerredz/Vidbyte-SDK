@@ -92,6 +92,7 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.SCOPE_COVERAGE: self._explain_scope_coverage,
             JevDoneCheck.MOTIVATING_CASE: self._explain_motivating_case,
             JevDoneCheck.PROBLEMS_RESOLVED: self._explain_problems_resolved,
+            JevDoneCheck.INPUT_SET_COVERAGE: self._explain_input_set_coverage,
         }
         return handlers[result.check](result)
 
@@ -189,6 +190,23 @@ class JevDoneContinuation(JevContinuation):
             yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
             failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
             focus.append(self._problem_focus(item))
+        return "\n".join(failed), "\n".join(focus)
+
+    # @intent input-target-feedback-is-limited-to-incomplete-targets
+    # Keep the original boundary and each missing-work note beside only the target Jev did not recognize.
+    def _explain_input_set_coverage(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
+        state = None if self.run_state.record is None else self.run_state.record.input_set_coverage
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.input_set_coverage
+        targets = {} if state is None else {item.id: item for item in state.targets}
+        missing = {} if handoff is None else {item.id: item.missing for item in handoff.targets}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            target = targets[identifier]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+            focus.append(f"- {target.action} {target.identity} within {target.scope}. Done when: {target.engagement_signal}")
         return "\n".join(failed), "\n".join(focus)
 
     # @intent scope-coverage-focus-names-every-missing-member
