@@ -57,6 +57,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_FINAL_ACCOUNT_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
+    JEV_DONE_INPUT_EXHAUSTION_FIELD,
     JEV_DONE_INPUT_IDENTITY_FIELD,
     JEV_DONE_INPUT_SCOPE_FIELD,
     JEV_DONE_INPUT_SET_COVERAGE_FIELD,
@@ -131,6 +132,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverable,
     JevDoneResult,
     JevHandoffRecord,
+    JevInputExhaustion,
+    JevInputExhaustionEvidence,
+    JevInputExhaustionObligation,
+    JevInputExhaustionPayload,
     JevInputSetCoverage,
     JevInputSetCoveragePayload,
     JevInputTarget,
@@ -183,7 +188,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload})
 
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -412,9 +417,68 @@ class JevRunState(BaseAgent):
             JevDoneCheck.OUTPUT_EXTENT: self._output_extent_section,
             JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment_section,
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled_section,
+            JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
+
+    def _input_exhaustion_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Pair each requested traversal with its trace observations and deterministic boundary assessment."""
+        state = None if self.record is None else self.record.input_exhaustion
+        evidence = handoff.input_exhaustion
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+        evidence_by_id = {item.id: item for item in evidence.collections}
+        entries = {item.id: self._input_exhaustion_entry(item, evidence_by_id[item.id]) for item in state.collections}
+        return {JEV_DONE_INPUT_EXHAUSTION_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
+    def _input_exhaustion_entry(self, item: JevInputExhaustionObligation, observation: JevInputExhaustionEvidence) -> Mapping[str, object]:
+        """Build Jev's evidence-only view for one dynamic collection traversal."""
+        assessment, _ = self._input_exhaustion_assessment(item, observation)
+        return {"collection": item.collection, "scope": item.scope, "unit": item.unit, "expected_total": item.expected_total, "exhaustion_condition": item.exhaustion_condition, JEV_DONE_EVIDENCE_FIELD: observation.evidence, "visited_unit_ids": list(observation.visited_unit_ids), "source_reported_total": observation.source_reported_total, "unit_type": observation.unit_type, "last_position": observation.last_position, "outstanding_continuation": observation.outstanding_continuation, "terminal_evidence": observation.terminal_evidence, "failed_retrievals": list(observation.failed_retrievals), "deterministic_assessment": assessment}
+
+    # @intent input-exhaustion-counts-require-trace-backed-boundaries
+    # An explicit count is meaningful only for distinct trace-backed units of the same type; an open cursor or failed fetch remains incomplete even when counts match.
+    def _input_exhaustion_assessment(self, obligation: JevInputExhaustionObligation, evidence: JevInputExhaustionEvidence) -> tuple[str, bool]:
+        distinct_count = len(set(evidence.visited_unit_ids))
+        if evidence.outstanding_continuation is not None or evidence.failed_retrievals:
+            return "Traversal is incomplete: an outstanding continuation or failed retrieval remains in the trace.", True
+        if evidence.unit_type != obligation.unit:
+            if obligation.expected_total is not None:
+                return f"The user explicitly requested {obligation.expected_total} {obligation.unit} units, but the handoff's identifiers are typed as {evidence.unit_type or 'unknown'}; code cannot compare these units, and terminal evidence does not establish the requested count.", True
+            if evidence.terminal_evidence is None:
+                return "The handoff does not establish that visited identifiers use the requested unit type, and no affirmative terminal signal establishes exhaustion.", True
+            return "Code did not compare visited identifiers with a total because their unit type does not match the obligation; Jev must judge the supplied affirmative terminal signal against the requested scope.", False
+        if obligation.expected_total is not None:
+            return self._requested_total_assessment(obligation, evidence, distinct_count)
+        if evidence.source_reported_total is not None:
+            return self._source_total_assessment(obligation, evidence, distinct_count)
+        if evidence.terminal_evidence is not None:
+            return "The trace includes an affirmative terminal signal for Jev to recognize against the stated exhaustion condition.", False
+        return "The handoff has no comparable source total or affirmative terminal signal, so the requested exhaustion condition is not established.", True
+
+    @staticmethod
+    def _requested_total_assessment(obligation: JevInputExhaustionObligation, evidence: JevInputExhaustionEvidence, distinct_count: int) -> tuple[str, bool]:
+        expected = obligation.expected_total
+        if distinct_count != expected:
+            return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the user's requested total of {expected}; the counts do not match.", True
+        if expected == 0 and evidence.terminal_evidence is None and not (evidence.unit_type == obligation.unit and evidence.source_reported_total == 0):
+            return "The user requested an empty collection, but the trace has no affirmative source evidence of zero results or terminal exhaustion.", True
+        if evidence.source_reported_total is not None and evidence.unit_type == obligation.unit and evidence.source_reported_total != expected:
+            return f"Code matched the user's requested total of {expected} {obligation.unit} identifiers, while the source reports {evidence.source_reported_total}; Jev must assess this conflict against the stated scope.", False
+        return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the user's requested total of {expected}; the counts match.", False
+
+    @staticmethod
+    def _source_total_assessment(obligation: JevInputExhaustionObligation, evidence: JevInputExhaustionEvidence, distinct_count: int) -> tuple[str, bool]:
+        if evidence.unit_type != obligation.unit:
+            if evidence.terminal_evidence is None:
+                return "The reported total uses a different unit type, and no affirmative terminal signal establishes the requested boundary.", True
+            return "The reported total uses a different unit type; Jev must judge the supplied affirmative terminal signal against the requested condition.", False
+        total = evidence.source_reported_total
+        if distinct_count != total:
+            return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the source-reported total of {total}; the counts do not match.", True
+        return f"Code compared {distinct_count} distinct visited {obligation.unit} identifiers with the source-reported total of {total}; the counts match.", False
 
     def _multi_part_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         # One entry per deliverable keeps its own run evidence and completion signal beside the question id.
@@ -749,11 +813,35 @@ class JevRunState(BaseAgent):
             JevDoneCheck.OUTPUT_EXTENT: self._output_extent,
             JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment,
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled,
+            JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion,
         }
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
         return handler(handoff, decision)
+
+    def _input_exhaustion(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Score each traversal while keeping deterministic gaps incomplete and Jev failures fail open."""
+        state = None if self.record is None else self.record.input_exhaustion
+        evidence = None if handoff is None else handoff.input_exhaustion
+        if state is None or evidence is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+        if not state.collections:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None)
+        observations = {item.id: item for item in evidence.collections}
+        assessments = {item.id: self._input_exhaustion_assessment(item, observations[item.id]) for item in state.collections}
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.INPUT_EXHAUSTION)
+        identifiers = state.ids()
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+        incomplete = tuple(identifier for identifier in identifiers if assessments[identifier][1] or DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=verdict.score, passed=not incomplete, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -1158,6 +1246,7 @@ class JevRunState(BaseAgent):
             ))
 
         input_set_coverage = self._input_set_coverage_record(payload)
+        input_exhaustion = self._input_exhaustion_record(payload)
 
         motivating_case = None
         motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
@@ -1206,6 +1295,7 @@ class JevRunState(BaseAgent):
             motivating_case=motivating_case,
             phase_progress=phase_progress,
             input_set_coverage=input_set_coverage,
+            input_exhaustion=input_exhaustion,
             output_extent=self._output_extent_record(payload),
         )
 
@@ -1216,6 +1306,14 @@ class JevRunState(BaseAgent):
             return None
         targets = tuple(JevInputTarget(item.id, item.identity.strip(), item.scope.strip(), item.action.strip(), item.engagement_signal.strip()) for item in section.targets)
         return JevInputSetCoverage(targets)
+
+    @staticmethod
+    def _input_exhaustion_record(payload: JevRunStatePayload) -> JevInputExhaustion | None:
+        section = getattr(payload, JevDoneCheck.INPUT_EXHAUSTION.value, None)
+        if not isinstance(section, JevInputExhaustionPayload):
+            return None
+        obligations = tuple(JevInputExhaustionObligation(item.id, item.collection.strip(), item.scope.strip(), item.unit.strip(), item.expected_total, item.exhaustion_condition.strip()) for item in section.collections)
+        return JevInputExhaustion(obligations)
 
     @staticmethod
     def _output_count_record(payload: JevRunStatePayload) -> JevOutputCount | None:

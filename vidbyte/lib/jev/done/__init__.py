@@ -13,6 +13,7 @@ from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQue
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
+from vidbyte.lib.jev.done.input_exhaustion import InputExhaustionTraversedQuestion
 from vidbyte.lib.jev.done.input_set_coverage import InputSetCoverageQuestion
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
@@ -29,6 +30,7 @@ __all__ = [
     "AssumptionsReconciledQuestion",
     "ClaimsSupportedQuestion",
     "CompletionEvidenceSupportedQuestion",
+    "InputExhaustionTraversedQuestion",
     "InputSetCoverageQuestion",
     "JevDoneRegistry",
     "MotivatingCaseExercisedQuestion",

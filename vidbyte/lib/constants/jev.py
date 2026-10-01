@@ -90,6 +90,8 @@ JEV_OUTPUT_COUNT_THRESHOLD: float = 0.8
 JEV_CLAIMS_THRESHOLD: float = 0.85
 # Every explicitly bounded input target must have evidence of the requested level of engagement.
 JEV_INPUT_SET_COVERAGE_THRESHOLD: float = 0.8
+# A dynamic collection must be supported by trace evidence of its stopping condition, not merely a plausible answer.
+JEV_INPUT_EXHAUSTION_THRESHOLD: float = 0.85
 # Evidence for the requested outcome must reach this P(yes), alone and in the mean; this is a starting point, not tuned.
 JEV_TARGET_OUTCOME_THRESHOLD: float = 0.8
 # Every motivating scenario must independently reach this P(yes) to pass the gate.
@@ -150,6 +152,7 @@ JEV_DONE_INPUT_SCOPE_FIELD: str = "scope"
 JEV_DONE_INPUT_SET_COVERAGE_FIELD: str = "input_set_coverage"
 JEV_DONE_INPUT_TARGETS_FIELD: str = "targets"
 JEV_DONE_INPUT_TARGET_FIELD: str = "target"
+JEV_DONE_INPUT_EXHAUSTION_FIELD: str = "input_exhaustion"
 JEV_DONE_TARGET_OUTCOMES_FIELD: str = "target_outcomes"
 JEV_DONE_TARGET_OUTCOME_FIELD: str = "target_outcome"
 JEV_DONE_TARGET_FIELD: str = "target"
@@ -239,6 +242,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_INPUT_EXHAUSTION_THRESHOLD",
     "JEV_INPUT_SET_COVERAGE_THRESHOLD",
     "JEV_ASSUMPTIONS_RECONCILED_THRESHOLD",
 
@@ -290,6 +294,7 @@ __all__ = [
     "JEV_DONE_INPUT_IDENTITY_FIELD",
     "JEV_DONE_INPUT_SCOPE_FIELD",
     "JEV_DONE_INPUT_SET_COVERAGE_FIELD",
+    "JEV_DONE_INPUT_EXHAUSTION_FIELD",
     "JEV_DONE_INPUT_TARGETS_FIELD",
     "JEV_DONE_INPUT_TARGET_FIELD",
 

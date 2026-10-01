@@ -45,6 +45,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevAssumptionsReconciledPayload,
     JevHandoffPayload,
     JevHandoffRecord,
+    JevInputExhaustionEvidence,
+    JevInputExhaustionEvidenceSection,
+    JevInputExhaustionEvidenceSet,
     JevInputSetCoverageEvidence,
     JevInputSetCoverageEvidencePayload,
     JevInputTargetEvidence,
@@ -94,7 +97,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -286,6 +289,7 @@ class JevHandoff(BaseAgent):
             output_extent=request_records.output_extent,
             report_action_alignment=report_action_alignment,
             assumptions_reconciled=assumptions_reconciled,
+            input_exhaustion=request_records.input_exhaustion,
         )
 
     # @intent request-derived-evidence-covers-exactly-the-state
@@ -332,6 +336,7 @@ class JevHandoff(BaseAgent):
             phase_progress=phase_progress,
             target_outcome=target_outcome,
             motivating_case=motivating_case,
+            input_exhaustion=additional_records.input_exhaustion,
             input_set_coverage=additional_records.input_set_coverage,
             output_count=additional_records.output_count,
             output_extent=additional_records.output_extent,
@@ -344,6 +349,28 @@ class JevHandoff(BaseAgent):
         payload: JevHandoffPayload,
         state: JevRunStateRecord,
     ) -> JevHandoffRecord | None:
+        input_exhaustion = None
+        exhaustion_section = getattr(payload, JevDoneCheck.INPUT_EXHAUSTION.value, None)
+        if isinstance(exhaustion_section, JevInputExhaustionEvidenceSection):
+            input_exhaustion = JevInputExhaustionEvidenceSet(tuple(
+                JevInputExhaustionEvidence(
+                    item.id,
+                    item.evidence.strip(),
+                    None if item.unit_type is None else item.unit_type.strip(),
+                    tuple(value.strip() for value in item.visited_unit_ids),
+                    item.source_reported_total,
+                    None if item.last_position is None else item.last_position.strip(),
+                    None if item.outstanding_continuation is None else item.outstanding_continuation.strip(),
+                    None if item.terminal_evidence is None else item.terminal_evidence.strip(),
+                    tuple(value.strip() for value in item.failed_retrievals),
+                    item.missing.strip(),
+                    item.next_step.strip(),
+                )
+                for item in exhaustion_section.collections
+            ))
+            expected = () if state.input_exhaustion is None else state.input_exhaustion.ids()
+            if sorted(input_exhaustion.ids()) != sorted(expected):
+                return None
         input_set_coverage = None
         input_section = getattr(payload, JevDoneCheck.INPUT_SET_COVERAGE.value, None)
         if isinstance(input_section, JevInputSetCoverageEvidencePayload):
@@ -383,6 +410,7 @@ class JevHandoff(BaseAgent):
             if output_extent.ids() != expected:
                 return None
         return JevHandoffRecord(
+            input_exhaustion=input_exhaustion,
             input_set_coverage=input_set_coverage,
             output_count=output_count,
             output_extent=output_extent,

@@ -97,8 +97,26 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.OUTPUT_EXTENT: self._explain_output_extent,
             JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._explain_report_action_alignment,
             JevDoneCheck.ASSUMPTIONS_RECONCILED: self._explain_assumptions_reconciled,
+            JevDoneCheck.INPUT_EXHAUSTION: self._explain_input_exhaustion,
         }
         return handlers[result.check](result)
+
+    def _explain_input_exhaustion(self, result: JevDoneResult) -> tuple[str, str]:
+        """Give each incomplete traversal's boundary, last position, and next action."""
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+        state = None if self.run_state.record is None else self.run_state.record.input_exhaustion
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.input_exhaustion
+        obligations = {} if state is None else {item.id: item for item in state.collections}
+        observations = {} if handoff is None else {item.id: item for item in handoff.collections}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            item, observation = obligations[identifier], observations[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev P(yes) = {yes:.2f}; this obligation remains incomplete. Still missing: {observation.missing}")
+            position = "No successful traversal position is recorded." if observation.last_position is None else f"Last known position: {observation.last_position}."
+            focus.append(f"- Collection: {item.collection}. Scope: {item.scope}. {position} Next step: {observation.next_step} Exhaustion condition: {item.exhaustion_condition}")
+        return "\n".join(failed), "\n".join(focus)
 
     def _explain_multi_part(self, result: JevDoneResult) -> tuple[str, str]:
         # Keep each incomplete deliverable's answer, handoff gap, and request wording together.

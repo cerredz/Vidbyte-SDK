@@ -81,6 +81,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
+    JEV_DONE_INPUT_EXHAUSTION_FIELD,
     JEV_DONE_INPUT_IDENTITY_FIELD,
     JEV_DONE_INPUT_SCOPE_FIELD,
     JEV_DONE_INPUT_SET_COVERAGE_FIELD,
@@ -231,6 +232,39 @@ _INPUT_HANDOFF = {
         }]
     }
 }
+_INPUT_EXHAUSTION_STATE = {
+    **_BASE_STATE,
+    "input_exhaustion": {"collections": [{
+        "id": "all_pages",
+        "collection": "the report pages",
+        "scope": "all 41 pages of the report",
+        "unit": "page",
+        "expected_total": 41,
+        "exhaustion_condition": "The report has no pages after page 41.",
+    }]},
+}
+
+
+def _input_exhaustion_handoff(
+    visited: tuple[str, ...] = tuple(f"page-{number}" for number in range(1, 11)),
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Build one trace-backed traversal observation with replaceable boundary facts."""
+    collection: dict[str, Any] = {
+        "id": "all_pages",
+        "evidence": "Tool calls opened and read the listed report pages in order.",
+        "unit_type": "page",
+        "visited_unit_ids": list(visited),
+        "source_reported_total": None,
+        "last_position": "page 10",
+        "outstanding_continuation": "cursor page-11",
+        "terminal_evidence": None,
+        "failed_retrievals": [],
+        "missing": "Pages 11 through 41 and a terminal boundary remain unobserved.",
+        "next_step": "Continue requesting report pages after page 10.",
+    }
+    collection.update(overrides)
+    return {"input_exhaustion": {"collections": [collection]}}
 _OUTPUT_REQUEST = "Give me 25 distinct examples of useful cache invalidation strategies, and write one file per strategy."
 _OUTPUT_STATE = {
     **_BASE_STATE,
@@ -701,8 +735,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(extent_schema.model_fields["output_extent"].description, JevOutputExtentPayload.SECTION)
         completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
         self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE, JevDoneCheck.OUTPUT_COUNT, JevDoneCheck.OUTPUT_EXTENT})
-        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent"}
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE, JevDoneCheck.OUTPUT_COUNT, JevDoneCheck.OUTPUT_EXTENT, JevDoneCheck.INPUT_EXHAUSTION})
+        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent", "input_exhaustion"}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
@@ -1379,6 +1413,102 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.available)
         self.assertTrue(result.passed)
         self.assertEqual(decision.requests, [])
+
+    async def test_input_exhaustion_matches_the_requested_distinct_total(self) -> None:
+        pages = tuple(f"page-{number}" for number in range(1, 42))
+        handoff = _input_exhaustion_handoff(
+            pages,
+            last_position="page 41",
+            outstanding_continuation=None,
+            missing="Nothing is missing.",
+            next_step="No next traversal step is indicated.",
+        )
+        decision = ScriptedDecisionRunner({"all_pages": [0.85]})
+        agent, *_ = self._agent(done=(JevDoneCheck.INPUT_EXHAUSTION,), state=json.dumps(_INPUT_EXHAUSTION_STATE), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.INPUT_EXHAUSTION]
+        self.assertTrue(result.available and result.passed)
+        self.assertEqual(result.incomplete, ())
+        entry = decision.requests[0].state[JEV_DONE_INPUT_EXHAUSTION_FIELD]["all_pages"]
+        self.assertEqual(entry["deterministic_assessment"], "Code compared 41 distinct visited page identifiers with the user's requested total of 41; the counts match.")
+        self.assertNotIn("missing", entry)
+
+    async def test_empty_collection_requires_affirmative_source_boundary(self) -> None:
+        state = json.loads(json.dumps(_INPUT_EXHAUSTION_STATE))
+        state["input_exhaustion"]["collections"][0].update({"unit": "record", "expected_total": 0})
+        handoff = _input_exhaustion_handoff((), unit_type="record", outstanding_continuation=None)
+        decision = ScriptedDecisionRunner({"all_pages": [0.99]})
+        agent, *_ = self._agent(done=(JevDoneCheck.INPUT_EXHAUSTION,), state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.INPUT_EXHAUSTION]
+        self.assertTrue(result.available)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("all_pages",))
+
+    async def test_duplicate_visited_ids_do_not_meet_source_total(self) -> None:
+        state = json.loads(json.dumps(_INPUT_EXHAUSTION_STATE))
+        state["input_exhaustion"]["collections"][0]["expected_total"] = None
+        handoff = _input_exhaustion_handoff(("page-1", "page-1"), source_reported_total=2, outstanding_continuation=None)
+        decision = ScriptedDecisionRunner({"all_pages": [0.99]})
+        agent, *_ = self._agent(done=(JevDoneCheck.INPUT_EXHAUSTION,), state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.INPUT_EXHAUSTION]
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("all_pages",))
+        assessment = decision.requests[0].state[JEV_DONE_INPUT_EXHAUSTION_FIELD]["all_pages"]["deterministic_assessment"]
+        self.assertIn("1 distinct visited page identifiers", assessment)
+
+    async def test_terminal_evidence_can_establish_unknown_total(self) -> None:
+        state = json.loads(json.dumps(_INPUT_EXHAUSTION_STATE))
+        state["input_exhaustion"]["collections"][0]["expected_total"] = None
+        handoff = _input_exhaustion_handoff(
+            ("page-1",),
+            outstanding_continuation=None,
+            terminal_evidence="Tool output for the last cursor: end-of-results; no further pages.",
+            missing="Nothing is missing.",
+            next_step="No next traversal step is indicated.",
+        )
+        decision = ScriptedDecisionRunner({"all_pages": [0.95]})
+        agent, *_ = self._agent(done=(JevDoneCheck.INPUT_EXHAUSTION,), state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.INPUT_EXHAUSTION]
+        self.assertTrue(result.available and result.passed)
+        self.assertEqual(result.incomplete, ())
+
+    async def test_input_exhaustion_batches_with_multi_part_questions(self) -> None:
+        pages = tuple(f"page-{number}" for number in range(1, 42))
+        state = {**_STATE, **_INPUT_EXHAUSTION_STATE}
+        handoff = {**_HANDOFF, **_input_exhaustion_handoff(pages, outstanding_continuation=None)}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.95], "readme_docs": [0.95], "all_pages": [0.95]})
+        agent, *_ = self._agent(done=(JevDoneCheck.MULTI_PART, JevDoneCheck.INPUT_EXHAUSTION), state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(len(request.questions), 3)
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_INPUT_EXHAUSTION_FIELD})
+        self.assertTrue(all(result.passed for result in agent.response.done.values()))
+
+    async def test_invalid_input_exhaustion_handoff_fails_open(self) -> None:
+        malformed = {"input_exhaustion": {"collections": []}}
+        decision = ScriptedDecisionRunner({"all_pages": [0.1]})
+        agent, main, _, handoff_runner = self._agent(done=(JevDoneCheck.INPUT_EXHAUSTION,), state=json.dumps(_INPUT_EXHAUSTION_STATE), handoff=json.dumps(malformed))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.INPUT_EXHAUSTION]
+        self.assertTrue(result.passed)
+        self.assertFalse(result.available)
+        self.assertEqual((len(main.calls), len(handoff_runner.calls), len(decision.requests)), (1, 1, 0))
 
     async def test_request_quantity_is_checked_even_when_final_answer_omits_a_count(self) -> None:
         decision = ScriptedDecisionRunner({"cache_examples": [0.2]})
