@@ -16,8 +16,8 @@ from types import MappingProxyType
 
 from vidbyte.lib.constants.jev import (
     JEV_CLAIMS_THRESHOLD,
-    JEV_MOTIVATING_CASE_THRESHOLD,
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
+    JEV_MOTIVATING_CASE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_SCOPE_COVERAGE_THRESHOLD,
@@ -27,8 +27,8 @@ from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
-from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
+from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
