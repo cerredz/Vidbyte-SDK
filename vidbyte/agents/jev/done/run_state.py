@@ -145,6 +145,11 @@ class JevRunState(BaseAgent):
             self.record = None
         self.response.run_state(self.record)
 
+    async def begin_delegated(self, message: str) -> None:
+        # Leaves specialist-owned work outside the legacy done-check state writer.
+        """Allow specialized run-state policies to handle accepted work before it is delegated."""
+        return
+
     async def check(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> tuple[JevDoneResult, ...]:
         """Run every enabled done check on this finish attempt, record every result, and return the checks that failed."""
         self.handoff = None
