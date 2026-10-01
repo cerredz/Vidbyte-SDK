@@ -1,11 +1,15 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles evidence for request-derived checks, and extracts checkable final-answer claims for CLAIMS.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles request-derived evidence, and extracts final-answer claims and run-observed problem episodes for dynamic checks.
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
 ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims are generated from the final answer here because their item list does not exist before the main agent works.
 COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims. INPUT_EXHAUSTION preserves current cursors, terminal observations, failures, and trace-backed unit identifiers for deterministic assessment and Jev recognition.
 KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims have no pre-run id list; their ids must be valid and unique within the generated claim section. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-input-exhaustion-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims and observed problem episodes are generated after work because those items cannot be known in the pre-run state.
+COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
+KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims and problem items have no pre-run id list; generated ids must be valid and unique, and problem evidence must include exactly one original-request completion item. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -44,8 +48,14 @@ from vidbyte.lib.dataclasses.jev import (
     JevInputExhaustionEvidenceSet,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
+    JevProblemResolutionItem,
+    JevProblemsResolvedEvidence,
+    JevProblemsResolvedEvidencePayload,
     JevRunStateRecord,
     JevSectionPayload,
+    JevTargetOutcomeEvidence,
+    JevTargetOutcomeEvidenceItem,
+    JevTargetOutcomeEvidencePayload,
 )
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.enums.prompts import Prompt
@@ -64,7 +74,13 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({
+        JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload,
+        JevDoneCheck.CLAIMS: JevClaimsEvidencePayload,
+        JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection,
+        JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload,
+        JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload,
+    })
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -105,6 +121,9 @@ class JevHandoff(BaseAgent):
         items.append(TextContextItem(title=FINAL_ANSWER_TITLE, content=final_answer if final_answer.strip() else NO_FINAL_ANSWER, source=HANDOFF_SOURCE))
         return ContextManager(items)
 
+    # @intent handoff-evidence-is-current-finish-attempt-only
+    # Recompiling from the current window prevents a prior attempt's success, cursor, or errors from masquerading as
+    # current evidence after continuation. Compilation failures remain advisory, so the main agent's answer stands.
     async def compile(self, request: str, state: JevRunStateRecord, window: ContextManager) -> JevHandoffRecord | None:
         """Return evidence for every enabled check, or None when a request-derived section does not match run state."""
         self.history.clear()
@@ -123,75 +142,109 @@ class JevHandoff(BaseAgent):
             return None
 
     def _record(self, payload: JevHandoffPayload, state: JevRunStateRecord) -> JevHandoffRecord | None:
-        # Converts the validated reply into the frozen record, requiring one evidence entry per run-state deliverable.
-        # @intent evidence-covers-exactly-the-run-state
-        # Jev judges each deliverable by id, so evidence for a deliverable the state never listed, or
-        # no evidence for one it did, would silently skip a check; either one makes the handoff unavailable.
-        multi_part = None
+        """Convert the reply into typed evidence, requiring every request-derived item exactly once."""
+        multi_part = self._multi_part(payload)
+        if state.multi_part is not None and (multi_part is None or sorted(multi_part.ids()) != sorted(state.multi_part.ids())):
+            return None
+        target_outcome = self._target_outcome(payload)
+        if state.target_outcome is not None and (target_outcome is None or sorted(target_outcome.ids()) != sorted(state.target_outcome.ids())):
+            return None
+        input_exhaustion = self._input_exhaustion(payload)
+        if state.input_exhaustion is not None and (input_exhaustion is None or sorted(input_exhaustion.ids()) != sorted(state.input_exhaustion.ids())):
+            return None
+        return JevHandoffRecord(
+            multi_part=multi_part,
+            claims=self._claims(payload),
+            target_outcome=target_outcome,
+            input_exhaustion=input_exhaustion,
+            problems_resolved=self._problems_resolved(payload),
+            usage=self.get_usage(),
+        )
+
+    @staticmethod
+    def _multi_part(payload: JevHandoffPayload) -> JevMultiPartEvidence | None:
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
-        if isinstance(section, JevMultiPartEvidencePayload):
-            multi_part = JevMultiPartEvidence(tuple(JevDeliverableEvidence(item.id, item.evidence.strip(), item.missing.strip()) for item in section.deliverables))
-            expected = () if state.multi_part is None else state.multi_part.ids()
-            if sorted(multi_part.ids()) != sorted(expected):
-                return None
-        claims = None
-        claims_section = getattr(payload, JevDoneCheck.CLAIMS.value, None)
-        if isinstance(claims_section, JevClaimsEvidencePayload):
-            # The claim ids are created from this final answer, so validate uniqueness here instead of matching
-            # them to a pre-run list that cannot contain statements the main agent has not made yet.
-            # @intent claims-are-derived-after-the-work
-            claims = JevClaimsEvidence(tuple(
-                JevClaimEvidence(
-                    item.id,
-                    JevClaimContext(
-                        identity=JevClaimIdentity(
-                            title=item.claim.identity.title.strip(),
-                            description=item.claim.identity.description.strip(),
-                            intent=None if item.claim.identity.intent is None else item.claim.identity.intent.strip(),
-                        ),
-                        scope=JevClaimScope(
-                            scope=item.claim.scope.scope.strip(),
-                            qualifications=tuple(value.strip() for value in item.claim.scope.qualifications),
-                        ),
-                        kind=item.claim.kind,
-                        output=None if item.claim.output is None else item.claim.output.strip(),
-                        assertions=tuple(
-                            JevClaimAssertion(
-                                assertion.id,
-                                assertion.statement.strip(),
-                                assertion.completion_criteria.strip(),
-                            )
-                            for assertion in item.claim.assertions
-                        ),
+        if not isinstance(section, JevMultiPartEvidencePayload):
+            return None
+        return JevMultiPartEvidence(tuple(
+            JevDeliverableEvidence(item.id, item.evidence.strip(), item.missing.strip())
+            for item in section.deliverables
+        ))
+
+    @staticmethod
+    def _claims(payload: JevHandoffPayload) -> JevClaimsEvidence | None:
+        section = getattr(payload, JevDoneCheck.CLAIMS.value, None)
+        if not isinstance(section, JevClaimsEvidencePayload):
+            return None
+        return JevClaimsEvidence(tuple(
+            JevClaimEvidence(
+                item.id,
+                JevClaimContext(
+                    identity=JevClaimIdentity(
+                        title=item.claim.identity.title.strip(),
+                        description=item.claim.identity.description.strip(),
+                        intent=None if item.claim.identity.intent is None else item.claim.identity.intent.strip(),
                     ),
-                    item.evidence.strip(),
-                    item.missing.strip(),
-                )
-                for item in claims_section.claims
-            ))
-        input_exhaustion = None
-        exhaustion_section = getattr(payload, JevDoneCheck.INPUT_EXHAUSTION.value, None)
-        if isinstance(exhaustion_section, JevInputExhaustionEvidenceSection):
-            input_exhaustion = JevInputExhaustionEvidenceSet(tuple(
-                JevInputExhaustionEvidence(
-                    item.id,
-                    item.evidence.strip(),
-                    None if item.unit_type is None else item.unit_type.strip(),
-                    tuple(value.strip() for value in item.visited_unit_ids),
-                    item.source_reported_total,
-                    None if item.last_position is None else item.last_position.strip(),
-                    None if item.outstanding_continuation is None else item.outstanding_continuation.strip(),
-                    None if item.terminal_evidence is None else item.terminal_evidence.strip(),
-                    tuple(value.strip() for value in item.failed_retrievals),
-                    item.missing.strip(),
-                    item.next_step.strip(),
-                )
-                for item in exhaustion_section.collections
-            ))
-            expected = () if state.input_exhaustion is None else state.input_exhaustion.ids()
-            if sorted(input_exhaustion.ids()) != sorted(expected):
-                return None
-        return JevHandoffRecord(multi_part=multi_part, claims=claims, input_exhaustion=input_exhaustion, usage=self.get_usage())
+                    scope=JevClaimScope(
+                        scope=item.claim.scope.scope.strip(),
+                        qualifications=tuple(value.strip() for value in item.claim.scope.qualifications),
+                    ),
+                    kind=item.claim.kind,
+                    output=None if item.claim.output is None else item.claim.output.strip(),
+                    assertions=tuple(
+                        JevClaimAssertion(assertion.id, assertion.statement.strip(), assertion.completion_criteria.strip())
+                        for assertion in item.claim.assertions
+                    ),
+                ),
+                item.evidence.strip(),
+                item.missing.strip(),
+            )
+            for item in section.claims
+        ))
+
+    @staticmethod
+    def _target_outcome(payload: JevHandoffPayload) -> JevTargetOutcomeEvidence | None:
+        section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
+        if not isinstance(section, JevTargetOutcomeEvidencePayload):
+            return None
+        return JevTargetOutcomeEvidence(tuple(
+            JevTargetOutcomeEvidenceItem(item.id, item.observed_proxy.strip(), item.direct_evidence.strip(), item.missing.strip())
+            for item in section.items
+        ))
+
+    @staticmethod
+    def _problems_resolved(payload: JevHandoffPayload) -> JevProblemsResolvedEvidence | None:
+        section = getattr(payload, JevDoneCheck.PROBLEMS_RESOLVED.value, None)
+        if not isinstance(section, JevProblemsResolvedEvidencePayload):
+            return None
+        return JevProblemsResolvedEvidence(tuple(
+            JevProblemResolutionItem(
+                item.id, item.kind, item.title.strip(), item.description.strip(), item.scope.strip(),
+                item.qualifications.strip(), item.repair.strip(), item.verification.strip(),
+                item.evidence.strip(), item.missing.strip(),
+            )
+            for item in section.items
+        ))
+
+    @staticmethod
+    def _input_exhaustion(payload: JevHandoffPayload) -> JevInputExhaustionEvidenceSet | None:
+        section = getattr(payload, JevDoneCheck.INPUT_EXHAUSTION.value, None)
+        if not isinstance(section, JevInputExhaustionEvidenceSection):
+            return None
+        return JevInputExhaustionEvidenceSet(tuple(
+            JevInputExhaustionEvidence(
+                item.id, item.evidence.strip(),
+                None if item.unit_type is None else item.unit_type.strip(),
+                tuple(value.strip() for value in item.visited_unit_ids),
+                item.source_reported_total,
+                None if item.last_position is None else item.last_position.strip(),
+                None if item.outstanding_continuation is None else item.outstanding_continuation.strip(),
+                None if item.terminal_evidence is None else item.terminal_evidence.strip(),
+                tuple(value.strip() for value in item.failed_retrievals),
+                item.missing.strip(), item.next_step.strip(),
+            )
+            for item in section.collections
+        ))
 
 
 __all__ = ["JevHandoff"]

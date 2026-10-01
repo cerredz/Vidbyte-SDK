@@ -13,6 +13,9 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 - `input_exhaustion.py` holds the INPUT_EXHAUSTION question, asked once per request-derived dynamic collection traversal; its state carries trace evidence and deterministic count assessment without the handoff's `missing` note.
 - Every question uses the shared state description in `multi_part.py`; `deliverables` and `claims` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `input_exhaustion` is present only when INPUT_EXHAUSTION is enabled and maps each obligation id to the request boundary, source evidence, visited unit ids, source total, current continuation, terminal evidence, failed retrievals, and deterministic assessment.
+- `target_outcome.py` holds the TARGET_OUTCOME check's question, asked once per request-derived outcome; it distinguishes direct evidence on the actual target from a proxy milestone.
+- `problems_resolved.py` holds the dynamic problem-repair question, asked once per observed run problem and once for the required completion of the original request after repairs.
+- Every question uses the shared state description in `multi_part.py`; `deliverables`, `claims`, `target_outcomes`, and `problems_resolved` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.
 - The logic that writes the run state and the handoff, asks Jev, and sends the main agent back to work is `JevRunState` and `JevHandoff` in `vidbyte/agents/jev/done/`.
