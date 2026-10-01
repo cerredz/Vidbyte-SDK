@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight and done-check policy values.
+PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
@@ -94,7 +94,10 @@ JEV_MOTIVATING_CASE_THRESHOLD: float = 0.8
 JEV_MOTIVATING_CASE_RECALL_THRESHOLD: float = 0.6
 # Bound scenarios returned from one request so a broad prompt cannot create an unbounded question batch.
 JEV_MOTIVATING_CASE_MAX_SCENARIOS: int = 12
-
+# Each covered member must independently reach this P(yes); missing run evidence is an automatic gap.
+JEV_SCOPE_COVERAGE_THRESHOLD: float = 0.8
+# A one-time request-only review can widen a state builder's narrow label when Jev recognizes broader wording.
+JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD: float = 0.5
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
@@ -142,6 +145,13 @@ JEV_DONE_CLAIM_ASSERTION_ID_FIELD: str = "id"
 JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: str = "statement"
 JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: str = "completion_criteria"
 JEV_DONE_CLAIM_ASSERTION_SEPARATOR: str = "."
+JEV_DONE_SCOPE_COVERAGE_FIELD: str = "scope_coverage"
+JEV_DONE_SCOPE_DIMENSIONS_FIELD: str = "dimensions"
+JEV_DONE_SCOPE_REQUEST_QUOTE_FIELD: str = "request_quote"
+JEV_DONE_SCOPE_REQUESTED_CHANGE_FIELD: str = "requested_change"
+JEV_DONE_SCOPE_UNIT_NOUN_FIELD: str = "unit_noun"
+JEV_DONE_SCOPE_UNIT_FIELD: str = "unit"
+JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD: str = "membership_rule"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -205,6 +215,13 @@ __all__ = [
     "JEV_DONE_PROBLEM_TITLE_FIELD",
     "JEV_DONE_PROBLEM_VERIFICATION_FIELD",
     "JEV_DONE_REQUEST_FIELD",
+    "JEV_DONE_SCOPE_COVERAGE_FIELD",
+    "JEV_DONE_SCOPE_DIMENSIONS_FIELD",
+    "JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD",
+    "JEV_DONE_SCOPE_REQUESTED_CHANGE_FIELD",
+    "JEV_DONE_SCOPE_REQUEST_QUOTE_FIELD",
+    "JEV_DONE_SCOPE_UNIT_FIELD",
+    "JEV_DONE_SCOPE_UNIT_NOUN_FIELD",
     "JEV_DONE_TARGET_FIELD",
     "JEV_DONE_TARGET_OUTCOMES_FIELD",
     "JEV_DONE_TARGET_OUTCOME_FIELD",
@@ -238,6 +255,8 @@ __all__ = [
     "JEV_RETRY_STATUS_CODES",
     "JEV_RUN_STATE_MAX_ITERATIONS",
     "JEV_RUN_STATE_MAX_TOKENS",
+    "JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD",
+    "JEV_SCOPE_COVERAGE_THRESHOLD",
     "JEV_SPECIALIST_MAX_COUNT",
     "JEV_SPECIALIST_NONE",
     "JEV_SPECIALIST_QUESTION_NAME",

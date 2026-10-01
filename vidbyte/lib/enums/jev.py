@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, opt-in done checks, fixed question keys, and dynamic problem-item kinds.
+PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, opt-in done checks and fixed question keys, motivating-case and scope-coverage classifications, and dynamic problem-item kinds.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on the presets when it acts on Jev's answers, and `vidbyte/agents/jev/done/` builds enabled done-check schemas and their questions.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, the record layer, and the tool layer all read it, and the lower two may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a question type only when TypeSafe documents one, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change. Add a preflight question key together with its question dataclass in `vidbyte/lib/jev/preflight/` and its preset's key list in `vidbyte/lib/jev/presets.py`. Add a done check with the run-state and handoff sections its items require, and its question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff rather than the pre-run state.
@@ -43,7 +43,7 @@ class JevDoneCheck(str, Enum):
     CLAIMS = "claims"
     TARGET_OUTCOME = "target_outcome"
     MOTIVATING_CASE = "motivating_case"
-
+    SCOPE_COVERAGE = "scope_coverage"
     PROBLEMS_RESOLVED = "problems_resolved"
 
 
@@ -58,8 +58,9 @@ class JevDoneQuestionKey(str, Enum):
     TARGET_OUTCOME_DEMONSTRATED = "target_outcome.demonstrated"
     MOTIVATING_CASE_RECALL = "motivating_case.recall"
     MOTIVATING_CASE_EXERCISED = "motivating_case.exercised"
-
     PROBLEMS_RESOLVED_FIXED = "problems_resolved.fixed"
+    SCOPE_COVERAGE_BREADTH = "scope_coverage.breadth"
+    SCOPE_COVERAGE_APPLIED = "scope_coverage.applied"
 
 
 class JevBoundaryKind(str, Enum):
@@ -90,6 +91,35 @@ class JevExerciseMode(str, Enum):
     RUN = "run"
     RUN_OR_INSPECT = "run_or_inspect"
     INSPECT_ONLY = "inspect_only"
+
+
+class JevScopeBreadth(str, Enum):
+    """How much of a group the request asks the change to reach."""
+
+    EVERY_MEMBER = "every_member"
+    NAMED_LIST = "named_list"
+    ONE_EXAMPLE = "one_example"
+    SINGLE_TARGET = "single_target"
+
+    def is_checked(self) -> bool:
+        """Return whether the requested breadth covers multiple members."""
+        return self in (JevScopeBreadth.EVERY_MEMBER, JevScopeBreadth.NAMED_LIST)
+
+
+class JevScopeUniverse(str, Enum):
+    """Where the members of a scope group are identified."""
+
+    NAMED_IN_REQUEST = "named_in_request"
+    FOUND_IN_WORKSPACE = "found_in_workspace"
+    OPEN_ENDED = "open_ended"
+
+
+class JevScopeUnitSource(str, Enum):
+    """How one unit was identified in the run handoff."""
+
+    NAMED_IN_REQUEST = "named_in_request"
+    FOUND_BY_RUN = "found_by_run"
+    MENTIONED_BY_AGENT = "mentioned_by_agent"
 
 
 class JevProblemCheckItemType(str, Enum):
@@ -132,4 +162,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/jev/done/__init__.py
 
-PURPOSE: Exposes JevDoneRegistry and every fixed done question dataclass from the canonical done question folder.
+PURPOSE: Exposes JevDoneRegistry and every fixed done question dataclass, including the member-level scope-coverage question, from the canonical done question folder.
 ROLE IN CODEBASE: JevRuntimeSettings and JevRunState (vidbyte/agents/jev/done/) import JevDoneRegistry from here; tests import the question dataclasses to pin their contract.
 ARCHITECTURE NOTE: This folder is the one home for fixed done questions and their registry; the check vocabulary lives in vidbyte/lib/enums/jev.py, records and structured-reply payloads in vidbyte/lib/dataclasses/jev.py, and the logic that asks and acts on the questions in vidbyte/agents/jev/done/.
 COMMON MODIFICATION PATTERNS: Load skills/asking-jev-questions/SKILL.md before writing or changing any question (see README.md in this folder), then export each new check's question module here beside multi_part.
@@ -14,6 +14,7 @@ from vidbyte.lib.jev.done.done import JevDoneRegistry
 from vidbyte.lib.jev.done.motivating_case import MotivatingCaseExercisedQuestion
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
+from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
 from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
-__all__ = ["DONE_STATE", "ClaimsSupportedQuestion", "JevDoneRegistry", "MotivatingCaseExercisedQuestion", "MultiPartDeliveredQuestion", "ProblemsResolvedQuestion", "TargetOutcomeDemonstratedQuestion"]
+__all__ = ["DONE_STATE", "ClaimsSupportedQuestion", "JevDoneRegistry", "MotivatingCaseExercisedQuestion", "MultiPartDeliveredQuestion", "ProblemsResolvedQuestion", "ScopeCoverageAppliedQuestion", "TargetOutcomeDemonstratedQuestion"]

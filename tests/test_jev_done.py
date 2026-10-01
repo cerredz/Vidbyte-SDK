@@ -1,6 +1,6 @@
 """FILE: tests/test_jev_done.py
 
-PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas, request-derived and post-run claim records, both fixed questions, the shared state description, the handoff context, batched Jev requests, and continuation and fail-open behavior.
+PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: request-derived and post-run records, fixed questions, shared state and handoff schemas, one-time request reviews, batched Jev requests, and continuation and fail-open behavior.
 ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, the handoff reads the main agent's window through ContextManager, and every enabled check's questions share one Jev request.
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
@@ -19,8 +19,9 @@ import re
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from pydantic import BaseModel
 
@@ -66,6 +67,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_DONE_PROBLEMS_RESOLVED_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_MULTI_PART_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
 )
@@ -94,10 +96,12 @@ from vidbyte.lib.dataclasses.jev import (
     JevProblemsResolvedEvidencePayload,
     JevRunStatePayload,
     JevRunStateRecord,
+    JevScopeCoverageEvidencePayload,
+    JevScopeCoveragePayload,
     JevSectionPayload,
 )
 from vidbyte.lib.enums import JevDoneQuestionKey, JevQuestionType, ModelProvider
-from vidbyte.lib.enums.jev import JevProblemCheckItemType
+from vidbyte.lib.enums.jev import JevProblemCheckItemType, JevScopeBreadth
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevDoneRegistry
@@ -360,6 +364,105 @@ class JevDoneRecordTests(unittest.TestCase):
             JevProblemsResolvedEvidence((JevProblemResolutionItem(**{**_PROBLEM_ITEM, "id": "original_request_completion", "kind": JevProblemCheckItemType.PROBLEM}), completion))
 
 
+class JevScopeCoverageMergeTests(unittest.IsolatedAsyncioTestCase):
+    """Pin that scope breadth review receives the latest run state after motivating-case recall."""
+
+    async def test_scope_breadth_review_uses_the_accepted_recall_payload(self) -> None:
+        request = "Update all North, South, and West adapters."
+        agent = _jev(done=(JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE))
+        assert agent.run_state is not None
+        run_state = agent.run_state
+
+        def payload(request_quote: str, requested_change: str) -> BaseModel:
+            return run_state.payload(
+                goal="Update every adapter.",
+                objective="All requested adapters show the change.",
+                mission="Change only the requested adapters.",
+                what_not_to_do=[],
+                motivating_case={"ordinary_flow": "all adapters work", "testing_restriction_quote": "", "scenarios": []},
+                scope_coverage={"dimensions": [{
+                    "id": "adapter_set",
+                    "request_quote": request_quote,
+                    "requested_change": requested_change,
+                    "unit_noun": "adapter",
+                    "membership_rule": "one named adapter",
+                    "breadth": "one_example",
+                    "universe": "named_in_request",
+                    "named_units": ["North", "South", "West"],
+                    "excluded_units": [],
+                }]},
+            )
+
+        initial = payload("North, South, and West", "change the North adapter")
+        revised = payload("all North, South, and West adapters", "change every named adapter")
+        generated = AsyncMock(side_effect=(SimpleNamespace(structured=initial), SimpleNamespace(structured=revised)))
+        decision_requests: list[JevDecisionRequest] = []
+        responses = [
+            SimpleNamespace(answers={"motivating_case.recall": SimpleNamespace(probabilities={"true": 0.9})}),
+            SimpleNamespace(answers={"scope_coverage.breadth.adapter_set": SimpleNamespace(probabilities={"every_member": 0.2, "named_list": 0.55})}),
+        ]
+
+        async def decide(_helper: object, decision_request: JevDecisionRequest) -> SimpleNamespace:
+            decision_requests.append(decision_request)
+            return responses.pop(0)
+
+        with (
+            patch.object(run_state, "arun", new=generated),
+            patch("vidbyte.agents.jev.done.run_state.DecisionModelHelper.arun", new=decide),
+        ):
+            await run_state.begin(request)
+
+        assert run_state.record is not None
+        assert run_state.record.scope_coverage is not None
+        assert run_state.record.motivating_case is not None
+        self.assertEqual(generated.await_count, 2)
+        self.assertEqual(len(decision_requests), 2)
+        self.assertEqual(decision_requests[1].state["dimensions"]["adapter_set"]["request_quote"], "all North, South, and West adapters")
+        self.assertEqual(run_state.record.scope_coverage.dimensions[0].requested_change, "change every named adapter")
+        self.assertIs(run_state.record.scope_coverage.dimensions[0].breadth, JevScopeBreadth.NAMED_LIST)
+        self.assertTrue(run_state.record.scope_coverage.dimensions[0].breadth_upgraded)
+        self.assertTrue(run_state.record.motivating_case.builder_disagreement)
+        rendered = json.loads(run_state.rendered)
+        self.assertEqual(rendered["scope_coverage"]["dimensions"][0]["request_quote"], "all North, South, and West adapters")
+        self.assertEqual(rendered["scope_coverage"]["dimensions"][0]["breadth"], "named_list")
+
+
+class JevScopeCoverageResultTests(unittest.TestCase):
+    """Pin per-member questions and automatic gaps for work and workspace coverage."""
+
+    def test_missing_member_work_and_inventory_are_continuation_gaps(self) -> None:
+        agent = _jev(done=(JevDoneCheck.SCOPE_COVERAGE,))
+        assert agent.run_state is not None
+        run_state = agent.run_state
+        run_state.record = SimpleNamespace(scope_coverage=object())
+        dimension = SimpleNamespace(
+            request_quote="all adapters",
+            requested_change="enable the flag",
+            unit_noun="adapter",
+            membership_rule="one named adapter",
+        )
+        units = (
+            SimpleNamespace(unit="North", work="The flag is enabled for North."),
+            SimpleNamespace(unit="South", work=""),
+        )
+        evidence = SimpleNamespace(
+            question_items=lambda _state: tuple((f"adapters.{index}", dimension, unit) for index, unit in enumerate(units)),
+            inventory_gaps=lambda _state: ("adapters",),
+        )
+        handoff = SimpleNamespace(scope_coverage=evidence)
+
+        section, questions = run_state._section(JevDoneCheck.SCOPE_COVERAGE, handoff)
+        question = JevDoneRegistry.question(JevDoneCheck.SCOPE_COVERAGE)
+        self.assertEqual(tuple(item.name for item in questions), (question.name("adapters.0"),))
+        self.assertEqual(set(section[JEV_DONE_SCOPE_COVERAGE_FIELD]), {"adapters.0", "adapters.1"})
+
+        decision = SimpleNamespace(answers={question.name("adapters.0"): _answer(question.name("adapters.0"), 0.9)}, usage={})
+        result = run_state._scope_coverage(handoff, decision)
+        self.assertTrue(result.available)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("adapters.1", "adapters.inventory"))
+
+
 class JevDoneSchemaTests(unittest.TestCase):
     """Pin that one JevRunState and one JevHandoff compose their schemas from the enabled checks."""
 
@@ -372,8 +475,10 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS, JevDoneCheck.PROBLEMS_RESOLVED)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
         motivating_schema = JevRunState.schema((JevDoneCheck.MOTIVATING_CASE,))
         self.assertEqual(motivating_schema.model_fields["motivating_case"].description, JevMotivatingCasePayload.SECTION)
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.TARGET_OUTCOME})
-        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case"}
+        scope_schema = JevRunState.schema((JevDoneCheck.SCOPE_COVERAGE,))
+        self.assertEqual(scope_schema.model_fields["scope_coverage"].description, JevScopeCoveragePayload.SECTION)
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME})
+        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage"}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
@@ -387,6 +492,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(claim_schema.model_fields["claims"].description, JevClaimsEvidencePayload.SECTION)
         problem_schema = JevHandoff.schema((JevDoneCheck.PROBLEMS_RESOLVED,))
         self.assertEqual(problem_schema.model_fields[JEV_DONE_PROBLEMS_RESOLVED_FIELD].description, JevProblemsResolvedEvidencePayload.SECTION)
+        scope_schema = JevHandoff.schema((JevDoneCheck.SCOPE_COVERAGE,))
+        self.assertEqual(scope_schema.model_fields["scope_coverage"].description, JevScopeCoverageEvidencePayload.SECTION)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
