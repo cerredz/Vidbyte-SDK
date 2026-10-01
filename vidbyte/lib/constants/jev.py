@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -100,13 +100,16 @@ JEV_MOTIVATING_CASE_RECALL_THRESHOLD: float = 0.6
 JEV_MOTIVATING_CASE_MAX_SCENARIOS: int = 12
 # Each covered member must independently reach this P(yes); missing run evidence is an automatic gap.
 JEV_SCOPE_COVERAGE_THRESHOLD: float = 0.8
-# A one-time request-only review can widen a state builder's narrow label when Jev recognizes broader wording.
+# A one-time request-only review can widen a narrow label once when Jev recognizes broader wording.
 JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD: float = 0.5
 # Whether the final answer's whole-task completion status is supported; starting point, not tuned on a labeled set.
 JEV_COMPLETION_EVIDENCE_THRESHOLD: float = 0.85
 
 # Explicit requested output extents must meet this threshold and the per-item numeric comparator.
 JEV_OUTPUT_EXTENT_THRESHOLD: float = 0.8
+# A report/action candidate must reach this P(yes) to count as aligned; this is both the mean threshold and
+# veto, and is a starting point rather than a value tuned on a labeled set.
+JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD: float = 0.85
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # A requested outcome stage must show progress or an evidenced blocker; this is a starting point, not a tuned value.
@@ -169,6 +172,11 @@ JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD: str = "unit"
 JEV_DONE_OUTPUT_EXTENT_COMPARATOR_FIELD: str = "comparator"
 JEV_DONE_OUTPUT_EXTENT_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_OUTPUT_EXTENT_OBSERVED_FIELD: str = "observed"
+JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD: str = "report_action_alignment"
+JEV_DONE_PLAN_FIELD: str = "plan"
+JEV_DONE_EXECUTION_FIELD: str = "execution"
+JEV_DONE_FINAL_ACCOUNT_FIELD: str = "final_account"
+JEV_DONE_REQUEST_RELEVANCE_FIELD: str = "request_relevance"
 JEV_DONE_PROBLEMS_RESOLVED_FIELD: str = "problems_resolved"
 JEV_DONE_PROBLEM_ITEMS_FIELD: str = "items"
 JEV_DONE_PROBLEM_ID_FIELD: str = "id"
@@ -297,6 +305,8 @@ __all__ = [
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_EXECUTION_FIELD",
+    "JEV_DONE_FINAL_ACCOUNT_FIELD",
     "JEV_DONE_MOTIVATING_CASES_FIELD",
     "JEV_DONE_MOTIVATING_CASE_FIELD",
     "JEV_DONE_OBSERVED_PROXY_FIELD",
@@ -305,6 +315,7 @@ __all__ = [
     "JEV_DONE_PHASE_REQUEST_SCOPE_FIELD",
     "JEV_DONE_PHASE_REQUIRED_RESULT_FIELD",
     "JEV_DONE_PHASE_STAGE_FIELD",
+    "JEV_DONE_PLAN_FIELD",
     "JEV_DONE_PROBLEMS_RESOLVED_FIELD",
     "JEV_DONE_PROBLEM_ASSERTION_FIELD",
     "JEV_DONE_PROBLEM_DESCRIPTION_FIELD",
@@ -318,6 +329,8 @@ __all__ = [
     "JEV_DONE_PROBLEM_VERIFICATION_FIELD",
     "JEV_DONE_REQUESTED_OUTCOMES_FIELD",
     "JEV_DONE_REQUEST_FIELD",
+    "JEV_DONE_REQUEST_RELEVANCE_FIELD",
+    "JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD",
     "JEV_DONE_SCOPE_COVERAGE_FIELD",
     "JEV_DONE_SCOPE_DIMENSIONS_FIELD",
     "JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD",
@@ -346,6 +359,7 @@ __all__ = [
     "JEV_MOTIVATING_CASE_THRESHOLD",
     "JEV_MULTI_PART_THRESHOLD",
     "JEV_OUTPUT_COUNT_THRESHOLD",
+    "JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",

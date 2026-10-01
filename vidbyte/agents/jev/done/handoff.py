@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles request-derived evidence, and extracts final-answer claims, phase evidence, run-observed problem episodes, and whole-task completion status for dynamic checks.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles request-derived evidence, and extracts final-answer claims, phase evidence, run-observed problem episodes, whole-task completion status, and explicit plan/account comparisons for dynamic checks.
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
-ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Phase progress evidence is matched to the request-derived stages; claims, observed problems, and completion status are derived after work.
+ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Phase progress evidence is matched to the request-derived stages; claims, observed problems, completion status, and report/action alignment are derived after work.
 COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items for request-derived candidates, including phase stages; dynamic post-run items follow their own validation rules.
 KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or invalid handoff evidence returns None, so checks fail open. Phase evidence must contain exactly the request-derived stage ids. Claims and problem items have no pre-run id list; generated ids must be valid and unique, and problem evidence must include exactly one original-request completion item. Completion evidence has one stable `task_completion` item. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
@@ -63,6 +63,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
     JevProblemsResolvedEvidencePayload,
+    JevReportActionAlignment,
+    JevReportActionAlignmentEvidenceSectionPayload,
+    JevReportActionAlignmentItem,
     JevRunStateRecord,
     JevScopeCoverageEvidence,
     JevScopeCoverageEvidencePayload,
@@ -88,7 +91,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -190,6 +193,23 @@ class JevHandoff(BaseAgent):
                 )
                 for item in claims_section.claims
             ))
+        report_action_alignment = None
+        alignment_section = getattr(payload, JevDoneCheck.REPORT_ACTION_ALIGNMENT.value, None)
+        if isinstance(alignment_section, JevReportActionAlignmentEvidenceSectionPayload):
+            # @intent report-action-candidates-are-post-run
+            # These candidates are created from post-run plans, execution, and the final account, so no request-state id list exists.
+            report_action_alignment = JevReportActionAlignment(tuple(
+                JevReportActionAlignmentItem(
+                    item.id,
+                    item.plan.strip(),
+                    item.execution.strip(),
+                    item.final_account.strip(),
+                    item.request_relevance.strip(),
+                    item.evidence.strip(),
+                    item.missing.strip(),
+                )
+                for item in alignment_section.items
+            ))
         completion_evidence = None
         completion_section = getattr(payload, JevDoneCheck.COMPLETION_EVIDENCE.value, None)
         if isinstance(completion_section, JevCompletionEvidenceSectionPayload):
@@ -240,6 +260,7 @@ class JevHandoff(BaseAgent):
             input_set_coverage=request_records.input_set_coverage,
             output_count=request_records.output_count,
             output_extent=request_records.output_extent,
+            report_action_alignment=report_action_alignment,
         )
 
     # @intent request-derived-evidence-covers-exactly-the-state

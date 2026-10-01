@@ -53,6 +53,8 @@ from vidbyte import (
     JevOutputExtent,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
+    JevReportActionAlignment,
+    JevReportActionAlignmentItem,
     JevRuntimeSettings,
     JevSpecialist,
 )
@@ -83,6 +85,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_OUTPUT_COUNTS_FIELD,
     JEV_DONE_PHASE_PROGRESS_FIELD,
     JEV_DONE_PROBLEMS_RESOLVED_FIELD,
+    JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
@@ -90,6 +93,7 @@ from vidbyte.lib.constants.jev import (
     JEV_OUTPUT_COUNT_THRESHOLD,
     JEV_OUTPUT_EXTENT_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
+    JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
@@ -136,6 +140,8 @@ from vidbyte.lib.dataclasses.jev import (
     JevPhaseStagePayload,
     JevProblemEvidencePayload,
     JevProblemsResolvedEvidencePayload,
+    JevReportActionAlignmentEvidencePayload,
+    JevReportActionAlignmentEvidenceSectionPayload,
     JevRunStatePayload,
     JevRunStateRecord,
     JevScopeCoverageEvidencePayload,
@@ -162,6 +168,7 @@ from vidbyte.lib.jev.done import (
     OutputCountSatisfiedQuestion,
     OutputExtentSatisfiedQuestion,
     ProblemsResolvedQuestion,
+    ReportActionAlignmentQuestion,
 )
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -324,6 +331,16 @@ _PHASE_HANDOFF = {
         }]
     }
 }
+_REPORT_ACTION_ITEM = {
+    "id": "manifest_update",
+    "plan": "I will update the manifest with the new field.",
+    "execution": "edit_file for manifest.json succeeded and the new field is present.",
+    "final_account": "I updated the manifest with the new field.",
+    "request_relevance": "The user explicitly requested the manifest update.",
+    "evidence": "Earlier response named the manifest update; edit_file succeeded; final response says it was updated.",
+    "missing": "Nothing remains to reconcile.",
+}
+_REPORT_ACTION_HANDOFF = {"report_action_alignment": {"items": [_REPORT_ACTION_ITEM]}}
 
 
 class ScriptedGenerativeRunner:
@@ -410,7 +427,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -418,7 +435,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -427,7 +444,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -482,6 +499,22 @@ class JevDoneRecordTests(unittest.TestCase):
                     JevOutputExtentUnit.WORDS if invalid[1] == "words" else invalid[1],
                     JevOutputExtentComparator.MINIMUM if invalid[2] == "minimum" else invalid[2],
                 )
+
+    def test_report_action_alignment_records_preserve_candidates_and_reject_duplicates(self) -> None:
+        item = JevReportActionAlignmentItem(
+            "manifest_update",
+            "I will update the manifest.",
+            "edit_file succeeded for manifest.json.",
+            "I updated the manifest.",
+            "The user requested the manifest update.",
+            "The earlier response, edit result, and final account are visible.",
+            "Nothing remains to reconcile.",
+        )
+        alignment = JevReportActionAlignment((item,))
+        self.assertEqual(alignment.ids(), ("manifest_update",))
+        self.assertEqual(JevHandoffRecord(report_action_alignment=alignment).report_action_alignment, alignment)
+        with self.assertRaises(ConfigurationError):
+            JevReportActionAlignment((item, item))
 
     def test_claim_evidence_requires_unique_claim_ids_and_preserves_an_empty_list(self) -> None:
         context = JevClaimContext(
@@ -668,6 +701,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(output_schema.model_fields["output_count"].description, JevOutputCountEvidencePayload.SECTION)
         extent_schema = JevHandoff.schema((JevDoneCheck.OUTPUT_EXTENT,))
         self.assertEqual(extent_schema.model_fields["output_extent"].description, JevOutputExtentEvidencePayload.SECTION)
+        alignment_schema = JevHandoff.schema((JevDoneCheck.REPORT_ACTION_ALIGNMENT,))
+        self.assertEqual(alignment_schema.model_fields[JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD].description, JevReportActionAlignmentEvidenceSectionPayload.SECTION)
+        self.assertNotIn(JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD, JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
@@ -796,6 +832,17 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertTrue(question.when_false.what.startswith("Choose false when `evidence`"))
         self.assertEqual(question.when_true.easy[0].split(", and evidence")[0], question.when_false.easy[0].split(", but evidence")[0])
 
+    def test_report_action_alignment_question_is_registered_and_handoff_derived(self) -> None:
+        question = ReportActionAlignmentQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.REPORT_ACTION_ALIGNMENT), JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD)
+        self.assertEqual(question.key, JevDoneQuestionKey.REPORT_ACTION_ALIGNMENT_MATCHED)
+        rendered = question.to_question("manifest_update")
+        self.assertEqual(rendered.name, "report_action_alignment.matched.manifest_update")
+        self.assertIn("`report_action_alignment`", question.instructions.state)
+        self.assertIn("`request_relevance`", question.instructions.question)
+        self.assertIn("explicit statement in an earlier response", question.instructions.definitions[0])
+
     def test_output_extent_counter_preserves_explicit_units_and_bound_direction(self) -> None:
         answer = "# Summary\nOne two three.\n# Details\nFour five."
         self.assertEqual(
@@ -831,9 +878,9 @@ class JevDoneQuestionTests(unittest.TestCase):
 
     def test_output_extent_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
-        rel = "vidbyte/lib/jev/done/output_extent.py"
-        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
-        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+        for rel in ("vidbyte/lib/jev/done/output_extent.py", "vidbyte/lib/jev/done/report_action_alignment.py"):
+            text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+            self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
     def test_input_set_question_text_is_one_literal_per_section(self) -> None:
         scanner = ImplicitConcatenationScanner()
@@ -1455,6 +1502,66 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
             {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, "output_extents"},
         )
         self.assertTrue(all(result.passed for result in agent.response.done.values()))
+
+    async def test_report_action_alignment_batches_with_other_checks_and_uses_handoff_only_state(self) -> None:
+        handoff = {**_HANDOFF, **_REPORT_ACTION_HANDOFF}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.99], "readme_docs": [0.99], "manifest_update": [0.85]})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.MULTI_PART, JevDoneCheck.REPORT_ACTION_ALIGNMENT),
+            state=json.dumps(_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(len(request.questions), 3)
+        self.assertEqual(
+            set(request.state),
+            {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD},
+        )
+        self.assertTrue(all(result.passed for result in agent.response.done.values()))
+
+    async def test_report_action_alignment_continues_only_for_a_low_scored_candidate(self) -> None:
+        missing = "Correct the inaccurate completion account for the still-required manifest field."
+        handoff = json.loads(json.dumps(_REPORT_ACTION_HANDOFF))
+        handoff["report_action_alignment"]["items"][0]["missing"] = missing
+        decision = ScriptedDecisionRunner({"manifest_update": [0.84, 0.84]})
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.REPORT_ACTION_ALIGNMENT,),
+            final_answer="I updated the manifest with the new field.",
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertGreaterEqual(len(decision.requests), 2)
+        self.assertEqual(decision.requests[0].questions[0].name, "report_action_alignment.matched.manifest_update")
+        self.assertEqual(agent.response.done[JevDoneCheck.REPORT_ACTION_ALIGNMENT].incomplete, ("manifest_update",))
+        self.assertGreater(agent.response.continuations, 0)
+        feedback = main.messages[1][0]["content"]
+        self.assertIn("Earlier plan or commitment", feedback)
+        self.assertIn("Recorded execution", feedback)
+        self.assertIn("Relevance to the original request", feedback)
+        self.assertIn(missing, feedback)
+
+    async def test_empty_report_action_alignment_passes_without_a_question(self) -> None:
+        handoff = {"report_action_alignment": {"items": []}}
+        decision = ScriptedDecisionRunner({})
+        agent, *_ = self._agent(
+            done=(JevDoneCheck.REPORT_ACTION_ALIGNMENT,),
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(handoff),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 0)
+        result = agent.response.done[JevDoneCheck.REPORT_ACTION_ALIGNMENT]
+        self.assertTrue(result.passed)
+        self.assertTrue(result.available)
 
     async def test_one_jev_request_holds_every_enabled_checks_questions(self) -> None:
         # [Review 4117808663] the enabled checks' questions are combined and sent to Jev at once with the handoff.

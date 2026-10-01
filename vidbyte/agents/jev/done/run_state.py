@@ -1,8 +1,8 @@
 """FILE: vidbyte/agents/jev/done/run_state.py
 
-PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, measures supported final-answer extents, has JevHandoff compile post-run evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
+PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, measures supported final-answer extents, has JevHandoff compile post-run evidence at every finish attempt, scores explicit plan/account alignment, asks every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims, observed problems, and whole-task completion status that do not exist until after work are extracted by JevHandoff and added to the shared Jev state at check time. PHASE_PROGRESS keeps its request-derived stages in the run state and adds run evidence at handoff time. OUTPUT_EXTENT applies an explicit comparator to safe deterministic measurements of the raw final answer, while Jev recognizes whether evidence belongs to the named output. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
+ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims, observed problems, whole-task completion status, and plan/account comparisons that do not exist until after work are extracted by JevHandoff and added to the shared Jev state at check time. PHASE_PROGRESS keeps its request-derived stages in the run state and adds run evidence at handoff time. OUTPUT_EXTENT applies an explicit comparator to safe deterministic measurements of the raw final answer, while Jev recognizes whether evidence belongs to the named output. REPORT_ACTION_ALIGNMENT checks explicit earlier plans against observed execution and the final account without making optional plan steps into user requirements. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their items and questions in _section() from typed records. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-phase-progress.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
@@ -51,6 +51,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_EXECUTION_FIELD,
+    JEV_DONE_FINAL_ACCOUNT_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
     JEV_DONE_INPUT_IDENTITY_FIELD,
@@ -88,6 +90,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_PHASE_REQUEST_SCOPE_FIELD,
     JEV_DONE_PHASE_REQUIRED_RESULT_FIELD,
     JEV_DONE_PHASE_STAGE_FIELD,
+    JEV_DONE_PLAN_FIELD,
     JEV_DONE_PROBLEM_ASSERTION_FIELD,
     JEV_DONE_PROBLEM_DESCRIPTION_FIELD,
     JEV_DONE_PROBLEM_ITEMS_FIELD,
@@ -97,7 +100,9 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_PROBLEM_SCOPE_FIELD,
     JEV_DONE_PROBLEM_TITLE_FIELD,
     JEV_DONE_PROBLEMS_RESOLVED_FIELD,
+    JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_REQUEST_RELEVANCE_FIELD,
     JEV_DONE_REQUESTED_OUTCOMES_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD,
@@ -140,6 +145,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevPhaseProgressPayload,
     JevPhaseStage,
     JevQuestion,
+    JevReportActionAlignment,
     JevRunStatePayload,
     JevRunStateRecord,
     JevScopeCoverage,
@@ -399,6 +405,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage_section,
             JevDoneCheck.OUTPUT_COUNT: self._output_count_section,
             JevDoneCheck.OUTPUT_EXTENT: self._output_extent_section,
+            JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -679,6 +686,25 @@ class JevRunState(BaseAgent):
             }
         return {JEV_DONE_OUTPUT_EXTENTS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 
+    # @intent report-alignment-candidates-come-from-the-finished-run
+    # Compare only explicit earlier plans the final account refers to; the handoff's missing judgment stays out of Jev's evidence.
+    def _report_action_alignment_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        alignment = handoff.report_action_alignment
+        if alignment is None or not alignment.items:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+        entries = {
+            item.id: {
+                JEV_DONE_PLAN_FIELD: item.plan,
+                JEV_DONE_EXECUTION_FIELD: item.execution,
+                JEV_DONE_FINAL_ACCOUNT_FIELD: item.final_account,
+                JEV_DONE_REQUEST_RELEVANCE_FIELD: item.request_relevance,
+                JEV_DONE_EVIDENCE_FIELD: item.evidence,
+            }
+            for item in alignment.items
+        }
+        return {JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD: entries}, tuple(question.to_question(identifier) for identifier in alignment.ids())
+
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # @intent each-enabled-check-keeps-its-own-verdict
         # Dispatch preserves each scorer's threshold, missing-answer, and fail-open rules as gates are added.
@@ -694,6 +720,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage,
             JevDoneCheck.OUTPUT_COUNT: self._output_count,
             JevDoneCheck.OUTPUT_EXTENT: self._output_extent,
+            JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment,
         }
         handler = handlers.get(check)
         if handler is None:
@@ -905,6 +932,27 @@ class JevRunState(BaseAgent):
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=verdict.score, passed=not failed, answers=verdict.answers, incomplete=failed, usage=usage)
+
+    # @intent reported-plans-are-checked-against-observed-execution
+    # Every post-run candidate must pass independently; a single clear mismatch is a veto, while no candidates pass without asking Jev.
+    def _report_action_alignment(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        if handoff is None or handoff.report_action_alignment is None:
+            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None, available=False)
+        alignment = handoff.report_action_alignment
+        identifiers = alignment.ids()
+        if not identifiers:
+            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None, available=False)
+        incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     # @intent only-a-supported-answer-target-has-a-deterministic-counter
     # Named artifacts remain unmeasured until the run exposes their current contents directly.

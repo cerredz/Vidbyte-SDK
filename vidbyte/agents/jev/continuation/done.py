@@ -2,7 +2,7 @@
 
 PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run enabled checks, and on failure it sends the original request, run state, handoff, failed Jev questions, and focused missing work back to the main agent.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence. The cap on continuations is JevContinualSettings.max_continuations.
+ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; each failed check contributes its own helper in _explain(). Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned. The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
@@ -95,6 +95,7 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.INPUT_SET_COVERAGE: self._explain_input_set_coverage,
             JevDoneCheck.OUTPUT_COUNT: self._explain_output_count,
             JevDoneCheck.OUTPUT_EXTENT: self._explain_output_extent,
+            JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._explain_report_action_alignment,
         }
         return handlers[result.check](result)
 
@@ -256,6 +257,29 @@ class JevDoneContinuation(JevContinuation):
                 f"- Output target: {item.target}\n  Requested extent: {item.comparator.value} "
                 f"{item.amount} {item.unit.value}\n  Observed extent: {amount} {item.unit.value}"
             )
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_report_action_alignment(self, result: JevDoneResult) -> tuple[str, str]:
+        # @intent a-report-mismatch-focuses-one-plan-item
+        # A planned route is not a user requirement by itself; repair only a still-required outcome or an inaccurate account.
+        # Only failed account comparisons are sent back, with the original request relevance and evidence gap.
+        alignment = None if self.run_state.handoff is None else self.run_state.handoff.report_action_alignment
+        candidates = {} if alignment is None else {item.id: item for item in alignment.items}
+        question = JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            item = candidates[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+            focus.append("\n".join((
+                f"- Earlier plan or commitment: {item.plan}",
+                f"  Recorded execution: {item.execution}",
+                f"  Final account: {item.final_account}",
+                f"  Relevance to the original request: {item.request_relevance}",
+                f"  Recorded evidence: {item.evidence}",
+                f"  Reconcile by completing any still-required result or correcting the account: {item.missing}",
+            )))
         return "\n".join(failed), "\n".join(focus)
 
     # @intent scope-coverage-focus-names-every-missing-member

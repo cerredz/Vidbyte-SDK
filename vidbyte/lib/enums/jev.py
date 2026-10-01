@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, and scope-coverage checks), motivating-case classifications, and dynamic problem-item kinds.
+PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, scope-coverage, output-extent, and report/action-alignment checks), motivating-case classifications, and dynamic problem-item kinds.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on presets, and `vidbyte/agents/jev/done/` builds enabled done-check schemas and questions.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, record layer, and tool layer all read it, and lower layers may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a TypeSafe question type only when documented, and extend validation and answer normalization with it. Add preflight keys with their fixed question dataclasses and preset registration. Add a done check together with its run-state and handoff sections and one fixed question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff.
 KNOWN EDGE CASES: `noul` is TypeSafe's spelling for a yes/no question; keep the serialized value exactly as the API expects. A question key's value is the answer name Jev returns, so it must remain unique. TOOL_SELECTOR has no question keys because it asks one question per configured tool at run time.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, skills/jev-continuation/SKILL.md, and https://docs.typesafe.ai/api.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, skills/jev-continuation/SKILL.md, and https://docs.typesafe.ai/api.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, scripts/test-jev-agent-scaffold.py, and scripts/test-jev-preflight.py.
 """
 
@@ -49,6 +49,7 @@ class JevDoneCheck(str, Enum):
     INPUT_SET_COVERAGE = "input_set_coverage"
 
     OUTPUT_EXTENT = "output_extent"
+    REPORT_ACTION_ALIGNMENT = "report_action_alignment"
     PROBLEMS_RESOLVED = "problems_resolved"
     PHASE_PROGRESS = "phase_progress"
 
@@ -69,6 +70,7 @@ class JevDoneQuestionKey(str, Enum):
     INPUT_SET_COVERAGE_ENGAGED = "input_set_coverage.engaged"
 
     OUTPUT_EXTENT_SATISFIED = "output_extent.satisfied"
+    REPORT_ACTION_ALIGNMENT_MATCHED = "report_action_alignment.matched"
     PROBLEMS_RESOLVED_FIXED = "problems_resolved.fixed"
     PHASE_PROGRESS_REACHED = "phase_progress.reached"
     SCOPE_COVERAGE_BREADTH = "scope_coverage.breadth"
