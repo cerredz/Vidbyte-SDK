@@ -51,23 +51,23 @@ Cached official Anthropic documentation says Skills use Messages container.skill
 
 ### Functional Requirements
 
-1. SkillSourceKind is a closed enum with FILE, GITHUB, SKILLS_SH, and CLAUDE. A frozen SkillSource describes one explicit source with location/reference, optional name, revision/version, explicit API key hidden from repr, and optional Claude workspace ID.
+1. SkillSourceKind is a closed enum with FILE, GITHUB, SKILLS_SH, and CLAUDE. ClaudeSkillType is a closed enum with CUSTOM and ANTHROPIC. A frozen SkillSource validates nonblank named fields and kind-compatible options before resolution; its explicit API key is hidden from repr.
 2. JevAlignmentSettings.skills accepts str | SkillDocument | SkillSource. Inline strings remain exact text and are never path-guessed. Source resolution occurs during preload/run, never during settings or agent construction.
-3. Source resolution is class-first and closed-dispatch. Each configured position yields exactly one result in the same position. Expected resolution, parsing, HTTP, ambiguity, and source-descriptor failures yield UNAVAILABLE for that index while sibling candidates continue. Cancellation propagates. Duplicate names discovered after resolution are identified after resolution; every member of a collision is unavailable, with no constructor-time guess based on optional names.
+3. Source resolution is class-first and closed-dispatch. Each configured position yields exactly one result in the same position. Well-typed sources that fail provider lookup, parsing, HTTP, or ambiguity checks yield UNAVAILABLE with a safe SDK-authored detail for that index while sibling candidates continue. Malformed typed descriptors fail settings construction before resolution. Cancellation propagates. Duplicate names discovered after resolution are handled then; every member of a collision is unavailable, with no constructor-time guess based on optional source names.
 4. FILE accepts a SKILL.md path or a directory containing it. It bounds file reads, parses YAML frontmatter with existing PyYAML, requires valid name and description, and preserves the body exactly. It does not resolve or execute sibling assets.
 5. GITHUB accepts supported GitHub repository, blob, raw, and tree URLs/references. It determines the default branch through the GitHub API, honors explicit revisions, rejects ambiguous slash refs, truncated trees, unresolved selectors, and duplicate matches. It uses bounded HTTP and sends an explicit credential only to approved GitHub hosts.
 6. SKILLS_SH accepts an explicit owner/repo/skill-slug reference and resolves it through the same GitHub repository catalog. It does not call an invented skills.sh content endpoint or invoke an installer.
 7. CLAUDE lists or retrieves Claude Skills metadata with an explicit Anthropic key and optional workspace ID. It returns a typed ClaudeSkillReference(skill_id, version, type) and metadata only. It never substitutes a description for missing body text.
 8. SkillDocument.text may be None only when a valid Claude native reference is present. Text-backed documents keep the existing exact-text validation and source provenance behavior.
-9. Jev receives metadata and body text only for text-backed candidates. The fixed relevance question states clearly that native candidates are judged from listed metadata only. Native candidates for non-Anthropic main providers are UNAVAILABLE before scoring. Jev selects candidates independently; selected text is injected as before, selected native references are collected in original order.
-10. At most 20 selected native references are attached to one call. Overflow candidates are explicitly marked UNAVAILABLE in their indexed results; no candidate silently disappears or shifts position.
-11. JevSkillsOutcome.claude_skills is a typed tuple, default empty. After preload, JevRuntime reads the just-written response outcome and adds claude_skills to the current run's copied options. It does not extend BaseAgentContext or add a generic preload-options callback.
+9. Jev receives metadata and body text only for text-backed candidates. The fixed relevance question states clearly that native candidates are judged from listed metadata only. Native candidates for non-Anthropic main providers are UNAVAILABLE before scoring with detail Native Claude skills require an Anthropic model. Jev selects candidates independently; selected text is injected as before, selected native references are collected in original order.
+10. At most 20 selected native references are attached to one call. Overflow candidates are explicitly marked UNAVAILABLE with detail Anthropic supports at most 20 skills per request in their indexed results; no candidate silently disappears or shifts position.
+11. JevSkillResult.detail is an optional safe, SDK-authored explanation for an UNAVAILABLE result and never includes exception text, source credentials, or source content. JevSkillsOutcome.claude_skills is a typed tuple, default empty. After preload, JevRuntime reads the just-written response outcome and adds claude_skills to the current run's copied options. It does not extend BaseAgentContext or add a generic preload-options callback.
 12. TextModelRunner.arun and run accept typed per-call claude_skills and claude_skill_session, copying them into a TextModelConfig for that call. Existing runner config defaults and non-native calls are unchanged.
 13. Anthropic adds selected references under container.skills, reuses a session container ID, and adds code_execution_20250825 once while retaining local tool schemas. A conflicting caller-supplied reserved container or incompatible code-execution payload fails with a typed configuration error rather than being overwritten. Native streaming fails before transport.
 14. Anthropic validates that native-skill responses include content/container fields needed for safe continuation. Empty text is permitted only for a valid native pause_turn response. Each TextModelResponse carries optional typed ClaudeSkillSession(container_id, paused).
 15. After usage recording and after_model_response middleware, but before local tool parsing, AgentRuntime handles a typed paused session. It appends exact assistant content blocks once, reuses the container, and resumes through the ordinary bounded runtime loop. It does not append the original user prompt a second time. Completed native responses preserve the container ID and continue through normal local-tool handling; server-side code execution blocks are never executed as local tools.
 16. Existing limits, timeout, and cancellation govern every raw exchange. Usage and cache usage are recorded once per raw response by the existing tracker; no provider-side loop or summed replacement record is introduced.
-17. Public exports expose the source enum, source descriptor, Claude reference/session, and updated skill outcome contracts through existing SDK namespaces. A feature-specific guide documents explicit source forms and one example.
+17. Public exports expose the source enums, source descriptor, Claude reference/session, and updated skill outcome contracts through existing SDK namespaces. A feature-specific guide documents explicit source forms and one example.
 
 ### Non-Functional Requirements
 
@@ -115,6 +115,7 @@ Defines the public explicit source kind/descriptor, native Claude reference/sess
 
 ~~~python
 class SkillSourceKind(str, Enum): ...
+class ClaudeSkillType(str, Enum): ...
 @dataclass(frozen=True, slots=True)
 class SkillSource:
     kind: SkillSourceKind
@@ -128,7 +129,7 @@ class SkillSource:
 class ClaudeSkillReference:
     skill_id: str
     version: str
-    type: str
+    type: ClaudeSkillType
 @dataclass(frozen=True, slots=True)
 class ClaudeSkillSession:
     container_id: str
@@ -141,15 +142,15 @@ JevSkillsOutcome.claude_skills: tuple[ClaudeSkillReference, ...] = ()
 #### Logic / Algorithm
 
 1. Keep string normalization and existing resolved text validation unchanged.
-2. Accept SkillSource values in settings and preserve their input positions. Do not resolve optional names or reject source duplicates at construction.
-3. Keep source-specific semantic validation in the resolver so a bad descriptor becomes one indexed UNAVAILABLE result rather than aborting sibling work.
+2. Validate source kind, nonblank required/optional fields, and supported options for that kind during construction. Accept valid SkillSource values in settings and preserve their positions without resolving them.
+3. Keep provider lookup, reference ambiguity, parsing, and transport failures in the resolver so one unavailable source does not abort sibling work; write only safe SDK-authored detail.
 4. Require exactly one content mode: nonblank text without a native reference, or text=None with a valid Claude reference.
 5. Keep API keys out of reprs and all Jev response fields. Export public types from vidbyte.lib.enums, vidbyte.lib.dataclasses, and root vidbyte.
 
 #### Edge Cases & Error Handling
 
 - Empty/whitespace inline text remains a configuration error as before.
-- Invalid location, missing optional skill_name, or unsupported semantic descriptor is isolated by resolution at its source index.
+- Malformed field types, blank location, or kind-incompatible options fail with ConfigurationError before a run; unresolved provider references become unavailable per index with safe detail.
 - A text document with a native ref, or a bodyless document without a ref, is rejected as an invalid contract.
 - Exact duplicate text names retain existing settings validation. Duplicates found only after source resolution make every source in that collision unavailable.
 
@@ -325,11 +326,15 @@ class SkillSourceKind(str, Enum):
     GITHUB = "github"
     SKILLS_SH = "skills_sh"
     CLAUDE = "claude"
+
+class ClaudeSkillType(str, Enum):
+    CUSTOM = "custom"
+    ANTHROPIC = "anthropic"
 ~~~
 
 ### 7.2 SkillSource, ClaudeSkillReference, ClaudeSkillSession
 
-**Change type:** New frozen value contracts in vidbyte.lib.dataclasses.skills.
+**Change type:** New frozen value contracts in vidbyte.lib.dataclasses.skills; ClaudeSkillType is in vidbyte.lib.enums.skills.
 
 ~~~python
 @dataclass(frozen=True, slots=True)
@@ -341,6 +346,7 @@ class SkillSource:
     version: str | None = None
     api_key: str | None = field(default=None, repr=False)
     workspace_id: str | None = None
+    # __post_init__ validates nonblank fields and kind-compatible options.
 ~~~
 
 No migration. API keys are excluded from repr and outcomes.
@@ -349,7 +355,7 @@ No migration. API keys are excluded from repr and outcomes.
 
 **Change type:** Modified.
 
-SkillDocument.text becomes nullable only with a typed native Claude reference. JevSkillsOutcome adds claude_skills: tuple[ClaudeSkillReference, ...] = (). TextModelConfig and TextModelResponse add typed native request/session fields needed for one HTTP exchange at a time.
+SkillDocument.text becomes nullable only with a typed native Claude reference. JevSkillResult adds safe optional detail for UNAVAILABLE outcomes. JevSkillsOutcome adds claude_skills: tuple[ClaudeSkillReference, ...] = (). TextModelConfig and TextModelResponse add typed native request/session fields needed for one HTTP exchange at a time.
 
 ---
 
@@ -400,7 +406,7 @@ Complete list of every file expected to be created, modified, or deleted. Totals
 | MODIFY | vidbyte/lib/enums/skills.py | Define closed source-kind enum. |
 | MODIFY | vidbyte/lib/enums/__init__.py | Export source-kind enum. |
 | MODIFY | vidbyte/lib/dataclasses/skills.py | Add source/native typed contracts and nullable native body rule. |
-| MODIFY | vidbyte/lib/dataclasses/jev.py | Carry ordered native selections in the run outcome. |
+| MODIFY | vidbyte/lib/dataclasses/jev.py | Carry ordered native selections and safe per-candidate details in the run outcome. |
 | MODIFY | vidbyte/lib/dataclasses/__init__.py | Export source and native contracts. |
 | MODIFY | vidbyte/__init__.py | Export public SDK source and native contracts. |
 | MODIFY | vidbyte/agents/jev/settings.py | Accept explicit source descriptors without constructor fetching. |
@@ -426,11 +432,12 @@ All cases run without live provider credentials. Adapter HTTP uses stub transpor
 ### Unit Tests
 
 - [Edge Case] Source contract accepts each closed kind, keeps secret repr-safe, and rejects invalid content-mode combinations.
-- [Hidden Failure] A semantically invalid configured source becomes exactly one indexed unavailable result; another source still resolves.
+- [Hidden Failure] A provider-level invalid source reference becomes exactly one indexed unavailable result with safe detail; another source still resolves.
+- [Edge Case] Blank location, invalid enum value, wrong optional-field type, or kind-incompatible options fail during typed source construction.
 - [Silent Failure] Configured strings preserve exact leading/trailing text and are not interpreted as file paths.
 - [Hidden Assumption] Optional skill_name is absent and the adapter must select only a unique metadata/path match.
 - [Edge Case] FILE resolves both a SKILL.md path and a directory, including minimal frontmatter/body.
-- [Hidden Failure] FILE reports over-limit, unreadable, and malformed YAML inputs as unavailable without reading sibling assets.
+- [Hidden Failure] FILE reports over-limit, unreadable, and malformed YAML inputs as unavailable with a safe detail, without reading sibling assets.
 - [Silent Failure] FILE preserves body whitespace and code fences after removing only the frontmatter envelope.
 - [Hidden Assumption] Missing, non-string, or blank YAML metadata is not silently replaced with defaults.
 - [Edge Case] GitHub URL forms cover repository root, explicit tree path, blob path, and raw path.
