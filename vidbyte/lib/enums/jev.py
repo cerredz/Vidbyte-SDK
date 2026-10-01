@@ -31,6 +31,7 @@ class JevPreflightPreset(str, Enum):
     """The preflight flags a JevAgent user can enable; each one turns on a fixed policy that JevPreflightGate (fixed-question presets) or the tool selector acts on."""
 
     CLARITY = "clarity"
+    RUN_STATE_RELATION = "run_state_relation"
     TOOL_SELECTOR = "tool_selector"
 
 
@@ -103,6 +104,7 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_CONSISTENCY = "clarity.consistency"
     CLARITY_TIME_CONTEXT = "clarity.time_context"
     CLARITY_SINGLE_READING = "clarity.single_reading"
+    RUN_STATE_RELATION = "run_state_relation"
 
 
 __all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevSkillStatus"]

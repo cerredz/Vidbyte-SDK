@@ -17,12 +17,12 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.alignment import JevAgentAlignment
 from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
 from vidbyte.agents.jev.continuation import JevDoneContinuation
-from vidbyte.agents.jev.done import JevRunState
+from vidbyte.agents.jev.done import JevRunState, JevRunStateRelation
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.lib.dataclasses.jev import JevAgentResponse
-from vidbyte.lib.enums import AgentRuntimeType
+from vidbyte.lib.enums import AgentRuntimeType, JevPreflightPreset
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -42,8 +42,14 @@ class JevAgent(BaseAgent):
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
-        self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
-        self.continuation = None if self.run_state is None else JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+        relation_enabled = JevPreflightPreset.RUN_STATE_RELATION in self.preflight.presets
+        if relation_enabled:
+            self.run_state = JevRunStateRelation(settings, runtime_settings, self._response, self.preflight)
+        elif runtime_settings.continual.checks:
+            self.run_state = JevRunState(settings, runtime_settings, self._response)
+        else:
+            self.run_state = None
+        self.continuation = JevDoneContinuation(self.run_state, runtime_settings.continual, self._response) if runtime_settings.continual.checks else None
         # @intent alignment-gets-decision-from-runtime-settings
         # Grouped agent settings carry model identity while JevRuntimeSettings owns the separate decision-model configuration.
         self.alignment = JevAgentAlignment(settings, runtime_settings.decision) if settings.alignment.system_prompt or settings.alignment.tool_settings else None

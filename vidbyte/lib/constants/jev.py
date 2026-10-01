@@ -57,11 +57,15 @@ JEV_NOUL_FALSE: str = "false"
 JEV_NOUL_OPTIONS: tuple[str, ...] = (JEV_NOUL_TRUE, JEV_NOUL_FALSE)
 JEV_NOUL_YES_THRESHOLD: float = 0.5
 
-# Preflight policy. The request is the only state field preflight questions read, and a fixed-question
-# preset's score is the mean P(yes) of its questions; below the threshold the preset fails.
+# Preflight policy. The request is the standard state field; RUN_STATE_RELATION also receives a
+# semantic projection under its own key. A fixed-question preset's score is the mean P(yes) of its
+# questions; below the threshold the preset fails.
 # 0.75 is a starting point, not a value tuned on a labeled set.
 JEV_PREFLIGHT_REQUEST_FIELD: str = "request"
+JEV_PREFLIGHT_RUN_STATE_FIELD: str = "run_state"
 JEV_CLARITY_THRESHOLD: float = 0.75
+# The initial relation policy uses the neutral yes threshold; no labeled relation set is available yet.
+JEV_RUN_STATE_RELATION_THRESHOLD: float = JEV_NOUL_YES_THRESHOLD
 # One clarity question with P(yes) below this fails the preset on its own, so a mean pulled up by many
 # easy yes answers cannot hide one clear no. Also a starting point, not a tuned value.
 JEV_CLARITY_VETO_THRESHOLD: float = 0.2
@@ -215,6 +219,7 @@ __all__ = [
     "JEV_NOUL_YES_THRESHOLD",
     "JEV_NO_RETRIES",
     "JEV_PREFLIGHT_REQUEST_FIELD",
+    "JEV_PREFLIGHT_RUN_STATE_FIELD",
     "JEV_PREFLIGHT_STRATEGY_NAME",
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
@@ -223,6 +228,7 @@ __all__ = [
     "JEV_RETRY_STATUS_CODES",
     "JEV_RUN_STATE_MAX_ITERATIONS",
     "JEV_RUN_STATE_MAX_TOKENS",
+    "JEV_RUN_STATE_RELATION_THRESHOLD",
     "JEV_SPECIALIST_MAX_COUNT",
     "JEV_SPECIALIST_NONE",
     "JEV_SPECIALIST_QUESTION_NAME",

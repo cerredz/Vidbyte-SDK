@@ -84,15 +84,18 @@ class JevRuntime(AgentRuntime):
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         # @intent each-run-owns-alignment-and-skill-context
-        # Temporary prompts, tools, and options are scoped to this call and are restored even when execution fails.
+        # Temporary prompts and tools are scoped to this call; preflight reads the persistent run-state record, not the reset response.
         """Run the preflight gate, then apply enabled run-local preflights before entering the inherited agent loop."""
         # @intent closed-gate-never-reaches-the-model
         # A closed gate returns without invoking the generative runner, so an unclear request is answered
         # with questions before any generative tokens are spent.
         self.response.start(message)
-        if not await self.preflight.pass_(message):
+        run_state_record = None if self.run_state is None else self.run_state.record
+        if not await self.preflight.pass_(message, run_state_record):
             return self.response.stopped()
         if self.preflight.specialist is not None:
+            if self.run_state is not None:
+                await self.run_state.begin_delegated(message)
             return self.response.delegated(await self.preflight.specialist.agent.arun(message))
 
         alignment = self.alignment
