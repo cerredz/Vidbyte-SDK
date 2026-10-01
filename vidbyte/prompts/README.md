@@ -65,6 +65,7 @@ prompt text.
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
+| Jev Bulk Work | `jev_bulk_work` | system_prompt, worker_system_prompt, synthesis_prompt | [jev_bulk_work/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work) |
 | Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
 | Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
 | Jev Run State | `jev_run_state` | system_prompt | [jev_run_state/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md) |
@@ -228,6 +229,16 @@ questions, each with two to four recommended answers, for the user to answer
 before the main agent starts.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md>
+
+#### Jev Bulk Work — `jev_bulk_work`
+
+The tool-free planner prompt turns an approved repeated independent operation
+into a complete structured list, preserving every requested target. The worker
+prompt scopes each isolated agent to one assigned item, and the synthesis prompt
+tells the main agent to preserve worker failures in its final response. Unsafe
+or invalid fan-out returns to the ordinary serial loop.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work>
 
 #### Jev Continuation — `jev_continuation`
 

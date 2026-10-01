@@ -212,7 +212,7 @@ class JevBulkItemResult:
     identifier: str
     title: str
     output: str | None
-    error: str | None
+    error: JevBulkItemError | None
     usage: UsageRollup | None
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +220,7 @@ class JevBulkWorkResult:
     plan_valid: bool
     items: tuple[JevBulkItemResult, ...]
     planner_usage: UsageRollup | None
-    planning_error: str | None
+    planning_error: JevBulkPlanningError | None
 ```
 
 `JevAgentResponse.bulk_work` is `JevBulkWorkResult | None`, and `JevResponse.bulk_work(result)` is its only writer.
@@ -419,11 +419,14 @@ Complete list of expected source, documentation, and test changes. Any implement
 | CREATE | `vidbyte/lib/jev/preflight/bulk_work.py` | Three fixed recognition question dataclasses. |
 | CREATE | `vidbyte/prompts/prompts/jev_bulk_work/jev_bulk_work.json` | Register planner prompt family. |
 | CREATE | `vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md` | Constrained bulk planner prompt. |
+| CREATE | `vidbyte/prompts/prompts/jev_bulk_work/worker_system_prompt.md` | Trusted worker scope applied to each isolated item. |
+| CREATE | `vidbyte/prompts/prompts/jev_bulk_work/synthesis_prompt.md` | Trusted final-synthesis instructions for preserving item failures honestly. |
 | CREATE | `tests/features/jev_bulk_work/FEATURE.md` | Defines the durable behavior contract and failure inventory. |
 | CREATE | `tests/features/jev_bulk_work/README.md` | Routes future agents to the feature pack and records its test scope. |
 | CREATE | `tests/features/jev_bulk_work/test_jev_bulk_work.py` | Settings, gate, planning, workers, response, and runtime coverage. |
 | CREATE | `scripts/test-jev-bulk-work.py` | Executable Section 10 feature verification. |
 | MODIFY | `vidbyte/agents/jev/settings.py` | Add validated JevBulkSettings and nested setting. |
+| MODIFY | `tests/test_jev_preflight.py` | Include the new opt-in BULK_WORK preset in the public preset-availability expectation. |
 | MODIFY | `vidbyte/agents/jev/agent.py` | Build and pass JevBulkWork through the runtime extension seam. |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Gate and dispatch bulk execution after selector and restore catalogs. |
 | MODIFY | `vidbyte/agents/jev/gate/gate.py` | Reset and own bulk eligibility outcome. |

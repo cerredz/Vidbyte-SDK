@@ -65,6 +65,19 @@ JEV_CLARITY_THRESHOLD: float = 0.75
 # One clarity question with P(yes) below this fails the preset on its own, so a mean pulled up by many
 # easy yes answers cannot hide one clear no. Also a starting point, not a tuned value.
 JEV_CLARITY_VETO_THRESHOLD: float = 0.2
+# Each bulk-work recognition question must independently reach this probability; the
+# same value as the mean threshold prevents a clear dependency answer being averaged away.
+JEV_BULK_WORK_THRESHOLD: float = 0.75
+JEV_BULK_WORK_VETO_THRESHOLD: float = 0.75
+JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS: int = 4
+JEV_BULK_MIN_PARALLEL_AGENTS: int = 1
+JEV_BULK_DEFAULT_MAX_ITEMS: int = 32
+JEV_BULK_MIN_ITEMS: int = 2
+JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS: int = 5
+JEV_BULK_MIN_PLANNER_MAX_ITERATIONS: int = 1
+JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS: int = 16_000
+JEV_BULK_MIN_PLANNER_MAX_TOKENS: int = 1
+JEV_BULK_ITEM_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # A run the preflight gate stops reports this strategy name.
 JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
 # JevClarificationAgent limits: its loop and token budget, and the size of the structured reply it must
@@ -155,6 +168,17 @@ __all__ = [
     "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
     "JEV_CLARITY_THRESHOLD",
     "JEV_CLARITY_VETO_THRESHOLD",
+    "JEV_BULK_DEFAULT_MAX_ITEMS",
+    "JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS",
+    "JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS",
+    "JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS",
+    "JEV_BULK_ITEM_ID_PATTERN",
+    "JEV_BULK_MIN_ITEMS",
+    "JEV_BULK_MIN_PLANNER_MAX_ITERATIONS",
+    "JEV_BULK_MIN_PLANNER_MAX_TOKENS",
+    "JEV_BULK_MIN_PARALLEL_AGENTS",
+    "JEV_BULK_WORK_THRESHOLD",
+    "JEV_BULK_WORK_VETO_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",

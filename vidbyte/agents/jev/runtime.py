@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from vidbyte.agents.jev.bulk_work import JevBulkWork
 from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
@@ -23,6 +24,7 @@ from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
 from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.jev import JevBulkWorkResult
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums.jev import JevPreflightPreset
@@ -42,19 +44,21 @@ class JevRuntime(AgentRuntime):
         run_state: JevRunState | None = None,
         continuation: JevContinuation | None = None,
         response: JevResponse | None = None,
+        bulk_work: JevBulkWork | None = None,
         **kwargs: Any,
     ) -> None:
         # Retains the validated runtime settings, the gate, the done checks, the continuation, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
         # @intent jev-runtime-needs-jev-agent
         # AgentRuntimeType.JEV is selectable by string, so a generic BaseAgent can reach this class
         # without them; refusing here names JevAgent instead of failing later on a None field.
-        if not isinstance(runtime_settings, JevRuntimeSettings) or not isinstance(preflight, JevPreflightGate) or not isinstance(response, JevResponse):
+        if not isinstance(runtime_settings, JevRuntimeSettings) or not isinstance(preflight, JevPreflightGate) or not isinstance(response, JevResponse) or not isinstance(bulk_work, JevBulkWork):
             raise ConfigurationError(
                 "The 'jev' runtime is only available through JevAgent; construct JevAgent(JevAgentSettings(...)) instead of BaseAgent(runtime='jev').",
                 details={
                     "received_runtime_settings": type(runtime_settings).__name__,
                     "received_preflight": type(preflight).__name__,
                     "received_response": type(response).__name__,
+                    "received_bulk_work": type(bulk_work).__name__,
                 },
             )
         self.runtime_settings = runtime_settings
@@ -62,18 +66,11 @@ class JevRuntime(AgentRuntime):
         self.run_state = run_state
         self.continuation = continuation
         self.response = response
+        self.bulk_work = bulk_work
         super().__init__(**kwargs)
 
-    async def arun(
-        self,
-        message: str,
-        *,
-        handle: RunnerHandle,
-        context: BaseAgentContext,
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> AgentResult:
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
+        # Runs the gate, applies selection before bulk workers, then returns to the inherited main loop.
         """Run the preflight gate, then apply enabled run-local preflights before entering the inherited agent loop."""
         # @intent closed-gate-never-reaches-the-model
         # A closed gate returns without invoking the generative runner, so an unclear request is answered
@@ -85,51 +82,67 @@ class JevRuntime(AgentRuntime):
             return self.response.delegated(await self.preflight.specialist.agent.arun(message))
         if self.run_state is not None:
             await self.run_state.begin(message)
-        if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
-            return self.response.finished(await super().arun(
-                message,
-                handle=handle,
-                context=context,
-                metadata=metadata,
-                options=options,
-                trace_context=trace_context,
-            ))
+        original_user_tools = self.user_tools
+        original_tools = self.tools
+        selector: JevPreflightTools | None = None
+        try:
+            if options is not None and "system" in options:
+                context = replace(context, system_prompt=str(options["system"] or ""))
+            context, selector, candidate_tool_count = await self._select_run_tools(message, context)
+            context, bulk_outcome = await self._run_bulk_work(message, context)
+            context, run_options = self._prepare_main_run(context, options, selector, bulk_outcome)
+            result = await super().arun(message, handle=handle, context=context, metadata=metadata, options=run_options, trace_context=trace_context)
+            if selector is not None:
+                result = self._with_selector_metadata(result, selector, candidate_tool_count)
+            return self.response.finished(result)
+        finally:
+            self.user_tools = original_user_tools
+            self.tools = original_tools
 
+    async def _select_run_tools(self, message: str, context: BaseAgentContext) -> tuple[BaseAgentContext, JevPreflightTools | None, int]:
+        # Applies the optional selector before bulk workers and updates only this run's tool context.
+        if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
+            return context, None, 0
         candidate_tool_count = len(self.user_tools)
-        selector = JevPreflightTools(
-            self.runtime_settings.decision,
-            self.runtime_settings.tool_selector_threshold,
-        )
+        selector = JevPreflightTools(self.runtime_settings.decision, self.runtime_settings.tool_selector_threshold)
         self.user_tools = await selector.run(message, self.user_tools)
         self.tools = with_internal_agent_tools(self.user_tools)
-        context = replace(context, tools=self.tools.specs())
+        return replace(context, tools=self.tools.specs()), selector, candidate_tool_count
+
+    async def _run_bulk_work(self, message: str, context: BaseAgentContext) -> tuple[BaseAgentContext, JevBulkWorkResult | None]:
+        # Runs bulk work only after gate approval and adds valid results as immutable context data.
+        if not self.preflight.bulk_work_requested:
+            return context, None
+        outcome = await self.bulk_work.plan_and_run(message, context, self.user_tools.all())
+        self.response.bulk_work(outcome)
+        if outcome.plan_valid:
+            artifact = self.bulk_work.result_artifact(outcome)
+            context = replace(context, tools=self.tools.specs(), artifacts=(*context.artifacts, artifact))
+        return context, outcome
+
+    def _prepare_main_run(self, context: BaseAgentContext, options: Mapping[str, Any] | None, selector: JevPreflightTools | None, bulk_outcome: JevBulkWorkResult | None) -> tuple[BaseAgentContext, dict[str, Any]]:
+        # Preserves caller options and appends trusted synthesis instructions only for a valid bulk result.
         run_options = dict(options or {})
-        run_options.pop("tools", None)
-        result = await super().arun(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=run_options,
-            trace_context=trace_context,
-        )
+        if selector is not None:
+            run_options.pop("tools", None)
+        if bulk_outcome is not None and bulk_outcome.plan_valid:
+            if "system" in run_options:
+                run_options["system"] = f"{run_options['system'] or ''}\n\n{self.bulk_work.synthesis_prompt}"
+            else:
+                effective_system = context.system_prompt or self.system_prompt
+                context = replace(context, system_prompt=f"{effective_system}\n\n{self.bulk_work.synthesis_prompt}")
+        return context, run_options
+
+    def _with_selector_metadata(self, result: AgentResult, selector: JevPreflightTools, candidate_tool_count: int) -> AgentResult:
+        # Adds the existing selector report after every preflight and restores the selected catalog in arun's finally block.
         selector_metadata: dict[str, Any] = {
             "available": selector.available,
             "candidate_tool_count": candidate_tool_count,
             "selected_tool_count": len(self.user_tools),
         }
         if selector.usage is not None:
-            selector_metadata["usage"] = {
-                "input_tokens": selector.usage.input_tokens,
-                "output_tokens": selector.usage.output_tokens,
-            }
-        return self.response.finished(replace(
-            result,
-            metadata={
-                **dict(result.metadata),
-                "jev_tool_selector": selector_metadata,
-            },
-        ))
+            selector_metadata["usage"] = {"input_tokens": selector.usage.input_tokens, "output_tokens": selector.usage.output_tokens}
+        return replace(result, metadata={**dict(result.metadata), "jev_tool_selector": selector_metadata})
 
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
         """Ask the continuation whether this finish attempt continues the loop, and let it shape what the main agent reads next."""
