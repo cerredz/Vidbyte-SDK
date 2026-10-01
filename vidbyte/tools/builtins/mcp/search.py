@@ -117,10 +117,7 @@ class SearchMcpServersTool(BaseTool):
                     name="query",
                     type="string",
                     description=(
-                        "Keywords to search for in the Smithery registry, such as 'filesystem', 'github', or 'database'. "
-                        "Short product or capability names match best. "
-                        "The search is semantic, so a phrase describing the job also works. "
-                        "An empty query is refused before any request is sent."
+                        "Keywords to search for in the Smithery registry, such as 'filesystem', 'github', or 'database'. Short product or capability names match best. The search is semantic, so a phrase describing the job also works. An empty query is refused before any request is sent."
                     ),
                     required=True,
                 ),
@@ -128,10 +125,7 @@ class SearchMcpServersTool(BaseTool):
                     name="limit",
                     type="integer",
                     description=(
-                        "Maximum number of results to return. "
-                        "Defaults to 10 and is clamped to at most 25. "
-                        "Each result costs one extra detail request to find its url. "
-                        "Ask for fewer results when you only need the best match."
+                        'Maximum number of results to return. Defaults to 10 and is clamped to at most 25. Each result costs one extra detail request to find its url. Ask for fewer results when you only need the best match.'
                     ),
                     required=False,
                     default=_DEFAULT_LIMIT,
