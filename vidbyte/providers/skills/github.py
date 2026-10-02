@@ -3,6 +3,10 @@
 PURPOSE: Resolves explicit GitHub skill repository, tree, blob, and raw sources.
 ROLE IN CODEBASE: Supplies bounded GitHub catalog lookup for Jev's GITHUB and SKILLS_SH source adapters.
 ARCHITECTURE NOTE: GitHub API credentials are sent only to api.github.com; raw downloads are always anonymous.
+COMMON MODIFICATION PATTERNS: Keep URL normalization, bounded ref probes, catalog selection, and GitHub response validation together.
+KNOWN EDGE CASES: Ambiguous slash-containing refs require explicit revisions; only genuine 404 probe results are ignored.
+RELATED DOCS: docs/design/jev-skill-providers.md and docs/jev-skill-providers.md.
+TESTS: tests/test_jev_skill_remote_sources.py and scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ import base64
 import binascii
 import re
 from dataclasses import replace
-from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit
+from urllib.parse import SplitResult, parse_qsl, quote, unquote, urlencode, urlsplit
 
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
 from vidbyte.lib.enums.skills import SkillSourceKind
@@ -140,22 +144,41 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         return documents
 
     async def _resolve_url_candidates(self, source: SkillSource, owner: str, repo: str, mode: str, candidates: list[tuple[str, str]]) -> SkillDocument:
-        # Tests every possible literal-slash ref boundary and refuses multiple matching interpretations.
+        # Dispatches bounded slash-ref probes to a focused file or tree resolver.
+        if mode in ("blob", "raw"):
+            return await self._resolve_file_url_candidates(source, owner, repo, candidates)
+        return await self._resolve_tree_url_candidates(source, owner, repo, candidates)
+
+    async def _resolve_file_url_candidates(self, source: SkillSource, owner: str, repo: str, candidates: list[tuple[str, str]]) -> SkillDocument:
+        # Resolves file interpretations while preserving exact 404-only probe semantics.
         file_candidates: list[tuple[dict[str, object], str, str]] = []
+        for revision, path in candidates:
+            payload = await self._try_get_json(
+                self._contents_url(owner, repo, revision, path),
+                source,
+                maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES,
+                purpose="skill file",
+            )
+            if payload is not None:
+                file_candidates.append((payload, revision, path))
+        if len(file_candidates) > 1:
+            raise SkillSourceError("GitHub URL has an ambiguous revision and path; set SkillSource.revision explicitly.")
+        if not file_candidates:
+            raise SkillSourceError("GitHub URL did not identify a matching SKILL.md.")
+        payload, revision, path = file_candidates[0]
+        content, returned_path = self._decode_api_file(payload)
+        if returned_path != path:
+            raise SkillSourceError("GitHub API returned a different skill file than requested.")
+        document = self.document_parser.parse(content, source=replace(source, skill_name=None), provenance=self._provenance(owner, repo, revision, path))
+        if source.skill_name is not None and document.name != source.skill_name:
+            raise SkillSourceError("SKILL.md name does not match the requested skill name.")
+        return document
+
+    async def _resolve_tree_url_candidates(self, source: SkillSource, owner: str, repo: str, candidates: list[tuple[str, str]]) -> SkillDocument:
+        # Resolves tree interpretations and refuses multiple matching revision boundaries.
         tree_matches: list[SkillDocument] = []
         tree_interpretations = 0
         for revision, path in candidates:
-            if mode in ("blob", "raw"):
-                payload = await self._try_get_json(
-                    self._contents_url(owner, repo, revision, path),
-                    source,
-                    maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES,
-                    purpose="skill file",
-                )
-                if payload is None:
-                    continue
-                file_candidates.append((payload, revision, path))
-                continue
             payload = await self._try_get_json(
                 self._tree_url(owner, repo, revision),
                 source,
@@ -170,19 +193,6 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             document = self._matching_document(source, documents)
             if document is not None:
                 tree_matches.append(document)
-        if mode in ("blob", "raw"):
-            if len(file_candidates) > 1:
-                raise SkillSourceError("GitHub URL has an ambiguous revision and path; set SkillSource.revision explicitly.")
-            if not file_candidates:
-                raise SkillSourceError("GitHub URL did not identify a matching SKILL.md.")
-            payload, revision, path = file_candidates[0]
-            content, returned_path = self._decode_api_file(payload)
-            if returned_path != path:
-                raise SkillSourceError("GitHub API returned a different skill file than requested.")
-            document = self.document_parser.parse(content, source=replace(source, skill_name=None), provenance=self._provenance(owner, repo, revision, path))
-            if source.skill_name is not None and document.name != source.skill_name:
-                raise SkillSourceError("SKILL.md name does not match the requested skill name.")
-            return document
         if tree_interpretations > 1:
             raise SkillSourceError("GitHub URL has an ambiguous revision and path; set SkillSource.revision explicitly.")
         if not tree_matches:
@@ -260,16 +270,24 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             raise SkillSourceError("GitHub request could not be completed.") from None
 
     def _parse_location(self, source: SkillSource) -> tuple[str, str, str, str, str | None]:
-        # Accepts only owner/repo and approved HTTPS GitHub URL forms without embedded credentials.
-        location = source.location
-        if "://" not in location:
-            owner, separator, repo = location.partition("/")
-            if not separator or "/" in repo:
-                raise SkillSourceError("GitHub source must identify an owner and repository.")
-            self._validate_repo_parts(owner, repo)
-            return "repo", owner, repo.removesuffix(".git"), source.revision or "", None
+        # Keeps shorthand parsing separate from URL parsing and host validation.
+        """Normalizes a GitHub source into mode, owner, repository, revision, and path."""
+        if "://" not in source.location:
+            return self._parse_shorthand_location(source)
+        return self._parse_url_location(source)
+
+    def _parse_shorthand_location(self, source: SkillSource) -> tuple[str, str, str, str, str | None]:
+        # Parses only the explicit owner/repository shorthand form.
+        owner, separator, repo = source.location.partition("/")
+        if not separator or "/" in repo:
+            raise SkillSourceError("GitHub source must identify an owner and repository.")
+        self._validate_repo_parts(owner, repo)
+        return "repo", owner, repo.removesuffix(".git"), source.revision or "", None
+
+    def _parse_url_location(self, source: SkillSource) -> tuple[str, str, str, str, str | None]:
+        # Validates URL credentials, query data, protocol, port, and approved hosts before routing.
         try:
-            parsed = urlsplit(location)
+            parsed = urlsplit(source.location)
             hostname = parsed.hostname
             port = parsed.port
         except ValueError:
@@ -279,18 +297,28 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         if parsed.fragment:
             raise SkillSourceError("GitHub skill source URL fragments are not supported.")
         self._validate_query(parsed.query)
+        if hostname == _GITHUB_RAW_HOST:
+            return self._parse_raw_url_location(source, parsed)
+        if hostname == _GITHUB_WEB_HOST:
+            return self._parse_web_url_location(source, parsed)
+        raise SkillSourceError("GitHub skill sources must use an approved HTTPS host.")
+
+    def _parse_raw_url_location(self, source: SkillSource, parsed: SplitResult) -> tuple[str, str, str, str, str | None]:
+        # Routes raw.githubusercontent.com URLs after shared HTTPS and credential validation.
         raw_parts = [segment for segment in parsed.path.split("/") if segment]
         parts = [unquote(segment) for segment in raw_parts]
-        if hostname == _GITHUB_RAW_HOST:
-            if len(parts) < 4:
-                raise SkillSourceError("GitHub raw URL must include owner, repository, revision, and file path.")
-            owner, repo = parts[:2]
-            self._validate_repo_parts(owner, repo)
-            revision, path = self._split_revision(raw_parts[2:], source.revision)
-            self._validate_skill_path(path)
-            return "raw", owner, repo.removesuffix(".git"), revision, path
-        if hostname != _GITHUB_WEB_HOST:
-            raise SkillSourceError("GitHub skill sources must use an approved HTTPS host.")
+        if len(parts) < 4:
+            raise SkillSourceError("GitHub raw URL must include owner, repository, revision, and file path.")
+        owner, repo = parts[:2]
+        self._validate_repo_parts(owner, repo)
+        revision, path = self._split_revision(raw_parts[2:], source.revision)
+        self._validate_skill_path(path)
+        return "raw", owner, repo.removesuffix(".git"), revision, path
+
+    def _parse_web_url_location(self, source: SkillSource, parsed: SplitResult) -> tuple[str, str, str, str, str | None]:
+        # Parses GitHub web repository, tree, blob, and raw URL routes after shared validation.
+        raw_parts = [segment for segment in parsed.path.split("/") if segment]
+        parts = [unquote(segment) for segment in raw_parts]
         if len(parts) < 2:
             raise SkillSourceError("GitHub source must identify an owner and repository.")
         owner, repo = parts[:2]
@@ -403,10 +431,17 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             if not isinstance(sha, str) or not sha:
                 raise SkillSourceError("GitHub repository tree contained an invalid skill blob.")
             size = item.get("size")
-            if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
-                raise SkillSourceError("GitHub repository tree contained an invalid skill size.")
+            size = self._validate_optional_size(size, "GitHub repository tree contained an invalid skill size.")
             candidates.append((path, sha, size))
         return candidates
+
+    def _validate_optional_size(self, size: object, error_detail: str) -> int | None:
+        # Owns the bool-safe nonnegative integer contract shared by GitHub size fields.
+        if size is None:
+            return None
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise SkillSourceError(error_detail)
+        return size
 
     def _path_is_selected(self, path: str, selected_path: str | None) -> bool:
         # Matches a direct SKILL.md path or a directory subtree without using ambiguous basename matches.
@@ -424,14 +459,12 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             raise SkillSourceError("GitHub API did not return a base64 skill file.")
         encoded = payload.get("content")
         path = payload.get("path")
-        size = payload.get("size")
+        size = self._validate_optional_size(payload.get("size"), "GitHub API returned an invalid skill file size.")
         if not isinstance(encoded, str) or (require_path and not isinstance(path, str)):
             raise SkillSourceError("GitHub API returned a malformed skill file.")
         if expected_sha is not None and payload.get("sha") != expected_sha:
             raise SkillSourceError("GitHub API returned a different skill blob than requested.")
-        if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
-            raise SkillSourceError("GitHub API returned an invalid skill file size.")
-        if isinstance(size, int) and size > _GITHUB_DOCUMENT_MAX_BYTES:
+        if size is not None and size > _GITHUB_DOCUMENT_MAX_BYTES:
             raise SkillSourceError("GitHub skill document exceeds the SDK size limit.")
         try:
             content = base64.b64decode("".join(encoded.split()), validate=True)
@@ -439,7 +472,7 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             raise SkillSourceError("GitHub API returned malformed skill file bytes.") from None
         if len(content) > _GITHUB_DOCUMENT_MAX_BYTES:
             raise SkillSourceError("GitHub skill document exceeds the SDK size limit.")
-        if isinstance(size, int) and len(content) != size:
+        if size is not None and len(content) != size:
             raise SkillSourceError("GitHub API returned an incomplete skill file.")
         return content, path if isinstance(path, str) else ""
 
