@@ -367,7 +367,7 @@ class SkillPreloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
         candidate = decision_request.state["skills"]["skills.skill_1"]
         self.assertEqual(candidate["kind"], "claude_native_metadata")
         self.assertNotIn("text", candidate)
-        self.assertIn("full skill body is unavailable", decision_request.questions[0].instructions)
+        self.assertIn("full body is unavailable", decision_request.questions[0].instructions)
 
     async def test_non_anthropic_agent_does_not_resolve_or_score_claude_candidates(self) -> None:
         # [Hidden Failure] an OpenAI key is never forwarded to Anthropic, and unsupported native candidates skip Jev scoring.
