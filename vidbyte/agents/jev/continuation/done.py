@@ -21,6 +21,7 @@ from vidbyte.agents.jev.settings import JevContinualSettings
 from vidbyte.lib.constants.jev import (
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_DONE_COMPLETION_ITEM_ID,
+    JEV_DONE_HARD_PART_FIELD,
     JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.jev import (
@@ -48,8 +49,19 @@ class JevDoneContinuation(JevContinuation):
         # Fixes the done checks' run state, the continuation cap, and the response writer when JevAgent is built.
         self.run_state = run_state
         self.max_continuations = continual.max_continuations
+        self.continual = continual
         self.response = response
         self.failed: tuple[JevDoneResult, ...] = ()
+
+    def budget_extension(self) -> tuple[int, int, int]:
+        """Grant the configured bounded extension only when faithful-scope evidence failed."""
+        if not any(result.check is JevDoneCheck.FAITHFUL_SCOPE for result in self.failed):
+            return 0, 0, 0
+        return (
+            self.continual.faithful_scope_extra_iterations,
+            self.continual.faithful_scope_extra_tokens,
+            self.continual.faithful_scope_extra_tool_calls,
+        )
 
     async def should_continue(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> bool:
         """Run every enabled done check and return True when one failed and continuations remain."""
@@ -105,8 +117,28 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.REQUIRED_ACTIONS: self._explain_required_actions,
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._explain_cumulative_obligations,
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._explain_discovered_items,
+            JevDoneCheck.FAITHFUL_SCOPE: self._explain_faithful_scope,
         }
         return handlers[result.check](result)
+
+    def _explain_faithful_scope(self, result: JevDoneResult) -> tuple[str, str]:
+        """Keep continuation feedback focused on the saved hard part and its evidence gap."""
+        question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+        answer = result.answers.get(JEV_DONE_HARD_PART_FIELD)
+        probability = None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
+        answer_text = "Jev's answer was unavailable." if probability is None else f"Jev's answer: no (P(yes) = {probability:.2f})."
+        failed = f"{question.gap}\n- {question.instructions.question.format(item=JEV_DONE_HARD_PART_FIELD)} {answer_text}"
+        record = self.run_state.record
+        if record is None:
+            return failed, "- Recover the saved run state before changing scope."
+        evidence = None if self.run_state.handoff is None else self.run_state.handoff.faithful_scope
+        if evidence is not None and evidence.evidence:
+            failed += f" Evidence reported: {evidence.evidence}"
+        if evidence is not None and evidence.missing:
+            failed += f" Missing: {evidence.missing}"
+        limits = ", ".join(record.what_not_to_do) or "none were stated"
+        focus = f"- Complete the saved hard part in the user's intended scope: {record.hard_part}. Preserve these limits: {limits}."
+        return failed, focus
 
     # @intent discovered-inventory-and-item-gaps-stay-separate
     # Source inventory failures need the original bounded output, while item failures need the specific requested action still missing.

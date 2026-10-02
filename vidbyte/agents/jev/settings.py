@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
     JEV_DONE_MAX_CONTINUATIONS,
+    JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS,
+    JEV_FAITHFUL_SCOPE_EXTRA_TOKENS,
+    JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS,
     JEV_HANDOFF_MAX_ITERATIONS,
     JEV_HANDOFF_MAX_TOKENS,
     JEV_RUN_STATE_MAX_ITERATIONS,
@@ -134,6 +137,9 @@ class JevContinualSettings:
     run_state_max_tokens: int = JEV_RUN_STATE_MAX_TOKENS
     handoff_max_iterations: int = JEV_HANDOFF_MAX_ITERATIONS
     handoff_max_tokens: int = JEV_HANDOFF_MAX_TOKENS
+    faithful_scope_extra_iterations: int = JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS
+    faithful_scope_extra_tokens: int = JEV_FAITHFUL_SCOPE_EXTRA_TOKENS
+    faithful_scope_extra_tool_calls: int = JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS
 
     def __post_init__(self) -> None:
         # Rejects unknown or repeated done checks and non-integer limits before JevAgent builds its run state.
@@ -144,6 +150,8 @@ class JevContinualSettings:
         self._validate_count("max_continuations", minimum=0)
         for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens"):
             self._validate_count(field_name, minimum=1)
+        for field_name in ("faithful_scope_extra_iterations", "faithful_scope_extra_tokens", "faithful_scope_extra_tool_calls"):
+            self._validate_count(field_name, minimum=0)
 
     def _validate_count(self, field_name: str, *, minimum: int) -> None:
         # Requires a whole number at or above the minimum, excluding bool.

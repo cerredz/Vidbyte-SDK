@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state and handoff records, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, and negative-coverage inspection evidence.
+PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, handoff records, faithful-scope evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, and negative-coverage inspection evidence.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
@@ -693,8 +693,9 @@ class JevRunStatePayload(BaseModel):
     """The central structured state JevRunState writes once from the user's request, before the main agent starts.
 
     JevRunState adds one more field to this model for every enabled done check, typed as that check's
-    section payload and described by its SECTION text, so the reply always holds these four fields plus
-    exactly the sections the enabled done checks read.
+    section payload and described by its SECTION text, so the reply always holds these five fields plus
+    exactly the sections the enabled done checks read. The required `hard_part` is central because
+    FAITHFUL_SCOPE checks it directly.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -703,6 +704,7 @@ class JevRunStatePayload(BaseModel):
     objective: str = Field(min_length=1, description="The objective is the concrete, checkable outcome of this one run, narrower than the goal: what the agent must hand back or change before it may stop. Name the artifact, change, or answer, and where it goes, whenever the request says so. It must be specific enough that a reader could look at the agent's final work and say whether the objective was met. Do not restate the goal in other words, and do not list the separate parts of the work here, since those belong to the done-check sections. When the request leaves a detail open, say that it is open rather than choosing a value for the user.")
     mission: str = Field(min_length=1, description="The mission is the agent's overall responsibility while it works on this request: the role it plays and the standard its work must meet. It describes how the agent should behave on the way to the objective, such as working only inside the named project, keeping existing behavior intact, or citing sources, whenever the request sets such a standard. Take the standard from the request itself and from what its words clearly imply about quality, not from general advice about good work. Write it as two to four sentences addressed to the agent. When the request sets no particular standard, say that the agent should do exactly what the request asks and nothing more.")
     what_not_to_do: list[str] = Field(description="What not to do lists every limit the request places on the work: things the user said to avoid, leave unchanged, or keep out of scope. Write each limit as its own short item in the user's terms, and keep only limits that the request states directly or that follow unavoidably from its words. Do not invent cautions, best practices, or safety rules the request does not state, since every item here is treated as a hard constraint. Include limits on scope, such as files, systems, or topics the work must not touch, as well as limits on form, such as length or tone. Return an empty list when the request places no limits on the work.")
+    hard_part: str = Field(min_length=1, description="The hard part is the single specific requirement in the user's request that is most likely to be weakened, mocked, skipped, hard-coded, or redefined while doing the work. Choose it from the user's request alone and preserve the user's own terms. State the observable result that would satisfy it, without adding requirements or replacing it with an easier nearby task. Consider what_not_to_do when identifying it. If no unusually difficult requirement stands out, identify the request's central required action.")
 
 
 class JevDeliverablePayload(BaseModel):
@@ -802,6 +804,16 @@ class JevDiscoveredItemBatchEntryPayload(BaseModel):
     candidates: list[JevDiscoveredItemPayload] = Field(
         description="Candidates contains one item for each concrete collection member visibly present in source_output that falls under the user's request to process all items. Include source-provided ids or locations in identity, and do not merge several records into one candidate. Do not include links or records merely mentioned as prose unless the request and output make them collection members to process. Use an empty list when this output contains no such collection members, and never use an empty list to conceal a partial or uncertain inventory. The separate inventory question checks whether this list accounts for the full recorded output."
     )
+
+class JevFaithfulScopeEvidencePayload(JevSectionPayload):
+    """The evidence section for the one hard part named in the run state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The faithful-scope section reports what the agent's run shows about the one hard part named in the run state. It gathers relevant final-answer passages, earlier responses, tool calls and their outputs, and test or command results in the order they happened. It also states which requested parts of the hard part the run does not show. The section reports observations from the run, not a verdict about whether the hard part was satisfied. It must make any narrowing, mock, skipped work, hard-coded substitute, or redefinition visible to the checker."
+
+    evidence: str = Field(min_length=1, description="Evidence reproduces or closely reports every part of the run that bears on hard_part, including the final result and relevant earlier responses, tool calls with their arguments and outputs, and test or command results. Name the source of each observation and report failed attempts as well as successes in the order they happened. Describe what the run actually shows, including a mock, a hard-coded substitute, skipped work, a narrowed implementation, or a changed interpretation when present. Never infer success from a claim, plan, summary, or statement that the work is complete. If no part of the run concerns hard_part, say so.")
+    missing: str = Field(min_length=1, description="Missing states which parts of hard_part the run does not show, or says that none are missing. Name the specific requested behavior, evidence, or output that is absent, narrowed, mocked, skipped, hard-coded, or redefined. Describe only the gap visible in the run, not what the agent intended or claims to have done. Do not decide whether the whole request is complete or suggest work beyond hard_part.")
 
 class JevInputExhaustionObligationPayload(BaseModel):
     """One request-derived obligation to exhaust a dynamically discovered input collection."""
@@ -2117,6 +2129,8 @@ class JevRequiredActions:
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: central fields and enabled check sections.
 
+    `hard_part` captures the request's specific requirement most at risk of being weakened, skipped, mocked, or redefined. It is required and recorded before the main agent starts.
+
     `negative_coverage` records each requested inspection target, and `required_actions` lists explicitly requested procedures; request-derived fields are otherwise present only when their check has items. `multi_part`, `target_outcome`,
     `motivating_case`, `scope_coverage`, `phase_progress`, and `input_set_coverage` retain their per-check
     rules; `output_count` holds each explicit numeric output obligation, and `cumulative_obligations` preserves explicit requirements across the supplied user turns with source and status links. `usage` is JevRunState's own model usage.
@@ -2141,10 +2155,11 @@ class JevRunStateRecord:
 
     required_actions: JevRequiredActions | None = None
     cumulative_obligations: JevCumulativeObligations | None = None
+    hard_part: str = field(kw_only=True)
 
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
-        for field_name in ("goal", "objective", "mission"):
+        for field_name in ("goal", "objective", "mission", "hard_part"):
             JevText.require(getattr(self, field_name), field_name=f"run state {field_name}")
         if not isinstance(self.what_not_to_do, tuple):
             raise JevValidation.error("run state what_not_to_do", "a tuple of strings", self.what_not_to_do)
@@ -2370,6 +2385,18 @@ class JevDiscoveredItemEvidence:
     def items(self) -> tuple[JevDiscoveredItem, ...]:
         """Return all candidates in the order their tool outputs recorded them."""
         return tuple(item for batch in self.batches for item in batch.candidates)
+
+@dataclass(frozen=True, slots=True)
+class JevFaithfulScopeEvidence:
+    """The reported evidence and missing work for the request's one identified hard part."""
+
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires both observations and the explicit missing-work report.
+        JevText.require(self.evidence, field_name="faithful-scope evidence")
+        JevText.require(self.missing, field_name="faithful-scope missing")
 
 @dataclass(frozen=True, slots=True)
 class JevInputExhaustionEvidence:
@@ -3055,7 +3082,7 @@ class JevHandoffRecord:
     `claims`, `target_outcome`, `motivating_case`, `scope_coverage`, `problems_resolved`,
     `completion_evidence`, `phase_progress`, and `input_set_coverage` and request-derived `input_exhaustion`; `output_count` carries candidate
     output units and direct evidence for numeric obligations, and `output_extent` carries text-size evidence; `report_action_alignment` and `assumptions_reconciled` carry post-run comparisons; `negative_coverage` carries per-target inspection evidence and answer reports. Completion evidence and changed assumptions are
-    handoff-only; input-exhaustion, input-set, and output-count evidence are matched to their run-state ids. `cumulative_obligations` reports observations for each obligation and supplied user turn without deciding completion. `discovered_item_coverage` retains bounded source outputs and their candidate inventories for separate source and item judgments. `usage` is this
+    handoff-only; input-exhaustion, input-set, and output-count evidence are matched to their run-state ids. `cumulative_obligations` reports observations for each obligation and supplied user turn without deciding completion. `discovered_item_coverage` retains bounded source outputs and their candidate inventories for separate source and item judgments. `faithful_scope` reports post-run evidence about the one central hard part. `usage` is this
     agent's model usage.
     """
 
@@ -3081,6 +3108,7 @@ class JevHandoffRecord:
     required_actions: JevRequiredActionsEvidence | None = None
     cumulative_obligations: JevCumulativeObligationsEvidence | None = None
     discovered_item_coverage: JevDiscoveredItemEvidence | None = None
+    faithful_scope: JevFaithfulScopeEvidence | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -3104,6 +3132,7 @@ class JevHandoffRecord:
             ("handoff required_actions", self.required_actions, JevRequiredActionsEvidence),
             ("handoff cumulative_obligations", self.cumulative_obligations, JevCumulativeObligationsEvidence),
             ("handoff discovered_item_coverage", self.discovered_item_coverage, JevDiscoveredItemEvidence),
+            ("handoff faithful_scope", self.faithful_scope, JevFaithfulScopeEvidence),
         ))
 
 
@@ -3236,6 +3265,7 @@ class JevAgentResponse:
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
     `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
+    `continuation_budget` records cumulative additional loop limits granted to faithful-scope continuations.
     """
 
     input: str = ""
@@ -3248,6 +3278,7 @@ class JevAgentResponse:
     handoff: JevHandoffRecord | None = None
     done: dict[JevDoneCheck, JevDoneResult] = field(default_factory=dict)
     continuations: int = 0
+    continuation_budget: dict[str, int] = field(default_factory=dict)
 
     @property
     def needs_clarification(self) -> bool:
@@ -3356,6 +3387,8 @@ __all__ = [
     "JevDiscoveredItemPayload",
     "JevDoneQuestion",
     "JevDoneResult",
+    "JevFaithfulScopeEvidence",
+    "JevFaithfulScopeEvidencePayload",
     "JevGuaranteedNextAction",
     "JevGuaranteedNextActionPayload",
     "JevGuaranteedNextActions",

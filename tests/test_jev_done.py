@@ -43,28 +43,28 @@ from vidbyte import (
     JevClaimKind,
     JevClaimScope,
     JevClaimsEvidence,
+    JevContinualSettings,
     JevCumulativeObligation,
     JevCumulativeObligationEvidence,
     JevCumulativeObligations,
     JevCumulativeObligationsEvidence,
-    JevContinualSettings,
-    JevDoneCheck,
     JevDeliverableEvidence,
     JevDiscoveredItem,
     JevDiscoveredItemBatch,
     JevDiscoveredItemEvidence,
+    JevDoneCheck,
     JevInputSetCoverage,
     JevInputTarget,
+    JevNegativeCoverage,
+    JevNegativeCoverageEvidence,
+    JevNegativeCoverageEvidenceItem,
+    JevNegativeCoverageTarget,
     JevOutputCount,
     JevOutputCountEntry,
     JevOutputCountEvidence,
     JevOutputCountEvidenceItem,
     JevOutputCountObligation,
     JevOutputExtent,
-    JevNegativeCoverage,
-    JevNegativeCoverageEvidence,
-    JevNegativeCoverageEvidenceItem,
-    JevNegativeCoverageTarget,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
     JevReportActionAlignment,
@@ -79,46 +79,37 @@ from vidbyte import (
 from vidbyte.agents.jev.continuation import JevContinuation, JevDoneContinuation
 from vidbyte.agents.jev.done import JevHandoff, JevRunState
 from vidbyte.agents.jev.runtime import JevRuntime
+from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context.primitives import (
     ResponseContextItem,
     TextContextItem,
     ToolCallContextItem,
 )
 from vidbyte.lib.config import DecisionModelConfig
-from vidbyte.lib.dataclasses.agents import AgentMessage
-from vidbyte.lib.dataclasses.jev import (
-    JevCumulativeObligationEvidenceEntryPayload,
-    JevCumulativeObligationPayload,
-    JevCumulativeObligationsPayload,
-    JevCumulativeObligationEvidencePayload,
-    JevCumulativeUserTurnEvidence,
-    JevCumulativeUserTurnEvidenceEntryPayload,
-    JevDiscoveredItemBatchEntryPayload,
-    JevDiscoveredItemBatchPayload,
-    JevDiscoveredItemPayload,
-)
 from vidbyte.lib.constants.jev import (
+    JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
     JEV_CLAIMS_THRESHOLD,
     JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
     JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
+    JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD,
     JEV_DONE_CLAIM_FIELD,
     JEV_DONE_CLAIMS_FIELD,
     JEV_DONE_COMPLETION_EVIDENCE_FIELD,
     JEV_DONE_COMPLETION_ITEM_ID,
-    JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD,
+    JEV_DONE_HARD_PART_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
     JEV_DONE_INPUT_EXHAUSTION_FIELD,
     JEV_DONE_INPUT_IDENTITY_FIELD,
     JEV_DONE_INPUT_SCOPE_FIELD,
     JEV_DONE_INPUT_SET_COVERAGE_FIELD,
-    JEV_DONE_NEGATIVE_COVERAGE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
+    JEV_DONE_NEGATIVE_COVERAGE_FIELD,
     JEV_DONE_OUTPUT_COUNTS_FIELD,
     JEV_DONE_PHASE_PROGRESS_FIELD,
     JEV_DONE_PROBLEMS_RESOLVED_FIELD,
@@ -126,8 +117,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_REQUEST_FIELD,
     JEV_DONE_REQUIRED_ACTIONS_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
-    JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
+    JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
     JEV_NEGATIVE_COVERAGE_THRESHOLD,
     JEV_OUTPUT_COUNT_THRESHOLD,
@@ -135,8 +126,8 @@ from vidbyte.lib.constants.jev import (
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
     JEV_REQUIRED_ACTIONS_THRESHOLD,
-    JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
 )
+from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevAssumptionEvidencePayload,
@@ -150,12 +141,23 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimsEvidencePayload,
     JevCompletionEvidenceSectionPayload,
     JevCriterion,
+    JevCumulativeObligationEvidenceEntryPayload,
+    JevCumulativeObligationEvidencePayload,
+    JevCumulativeObligationPayload,
+    JevCumulativeObligationsPayload,
+    JevCumulativeUserTurnEvidence,
+    JevCumulativeUserTurnEvidenceEntryPayload,
     JevDecisionRequest,
     JevDeliverable,
     JevDeliverableEvidencePayload,
     JevDeliverablePayload,
+    JevDiscoveredItemBatchEntryPayload,
+    JevDiscoveredItemBatchPayload,
+    JevDiscoveredItemPayload,
     JevDoneQuestion,
     JevDoneResult,
+    JevFaithfulScopeEvidence,
+    JevFaithfulScopeEvidencePayload,
     JevHandoffPayload,
     JevHandoffRecord,
     JevInputSetCoverageEvidencePayload,
@@ -215,7 +217,9 @@ from vidbyte.lib.jev import JevDoneRegistry
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev.done import (
     DONE_STATE,
+    AssumptionsReconciledQuestion,
     ClaimsSupportedQuestion,
+    FaithfulScopeQuestion,
     InputSetCoverageQuestion,
     MultiPartDeliveredQuestion,
     NegativeCoverageSupportedQuestion,
@@ -223,7 +227,6 @@ from vidbyte.lib.jev.done import (
     OutputExtentSatisfiedQuestion,
     ProblemsResolvedQuestion,
     ReportActionAlignmentQuestion,
-    AssumptionsReconciledQuestion,
 )
 from vidbyte.lib.jev.done.guaranteed_next_actions import (
     GuaranteedActionNecessaryQuestion,
@@ -244,7 +247,14 @@ _BASE_STATE = {
     "goal": "The deploy CLI can preview a deploy without changing anything, and users can read how.",
     "objective": "A working --dry-run flag in the deploy CLI and a README section that documents it.",
     "mission": "Change only the deploy CLI and its README, and keep every existing flag working.",
+    "hard_part": "A working --dry-run flag that prints planned changes without applying them.",
     "what_not_to_do": ["Do not change other commands."],
+}
+_FAITHFUL_HANDOFF = {
+    "faithful_scope": {
+        "evidence": "The final answer says --dry-run is implemented, but the run contains no test showing it prints planned changes without applying them.",
+        "missing": "No direct evidence shows the deploy command's behavior when --dry-run is used.",
+    }
 }
 _STATE = {
     **_BASE_STATE,
@@ -575,7 +585,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevNegativeCoverageTarget, JevNegativeCoverage, JevNegativeCoverageEvidenceItem, JevNegativeCoverageEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRequiredAction, JevRequiredActionEvidence, JevRequiredActions, JevRequiredActionsEvidence, JevCumulativeObligation, JevCumulativeObligationEvidence, JevCumulativeObligations, JevCumulativeObligationsEvidence, JevCumulativeUserTurnEvidence, JevDiscoveredItem, JevDiscoveredItemBatch, JevDiscoveredItemEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevNegativeCoverageTarget, JevNegativeCoverage, JevNegativeCoverageEvidenceItem, JevNegativeCoverageEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRequiredAction, JevRequiredActionEvidence, JevRequiredActions, JevRequiredActionsEvidence, JevCumulativeObligation, JevCumulativeObligationEvidence, JevCumulativeObligations, JevCumulativeObligationsEvidence, JevCumulativeUserTurnEvidence, JevDiscoveredItem, JevDiscoveredItemBatch, JevDiscoveredItemEvidence, JevFaithfulScopeEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -583,7 +593,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevNegativeCoveragePayload, JevNegativeCoverageTargetPayload, JevNegativeCoverageEvidencePayload, JevNegativeCoverageEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationPayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidenceEntryPayload, JevCumulativeUserTurnEvidenceEntryPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemPayload, JevDiscoveredItemBatchEntryPayload, JevDiscoveredItemBatchPayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevNegativeCoveragePayload, JevNegativeCoverageTargetPayload, JevNegativeCoverageEvidencePayload, JevNegativeCoverageEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationPayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidenceEntryPayload, JevCumulativeUserTurnEvidenceEntryPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemPayload, JevDiscoveredItemBatchEntryPayload, JevDiscoveredItemBatchPayload, JevFaithfulScopeEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -592,7 +602,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevNegativeCoveragePayload, JevNegativeCoverageEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemBatchPayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevNegativeCoveragePayload, JevNegativeCoverageEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemBatchPayload, JevFaithfulScopeEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -600,8 +610,14 @@ class JevDoneRecordTests(unittest.TestCase):
         # [Review 4116727218] the multi-part section is a separate dataclass, not a nested dict inside the state.
         self.assertTrue(issubclass(JevMultiPartPayload, JevSectionPayload))
         self.assertNotIn("multi_part", JevRunStatePayload.model_fields)
-        record = JevRunStateRecord("goal", "objective", "mission", multi_part=JevMultiPart((JevDeliverable("a", "b", "c"),)))
+        record = JevRunStateRecord("goal", "objective", "mission", hard_part="hard", multi_part=JevMultiPart((JevDeliverable("a", "b", "c"),)))
         self.assertIsInstance(record.multi_part, JevMultiPart)
+
+    def test_hard_part_is_required_without_shifting_prior_positional_fields(self) -> None:
+        with self.assertRaises(TypeError):
+            JevRunStateRecord("goal", "objective", "mission")
+        record = JevRunStateRecord("goal", "objective", "mission", hard_part="the hard part")
+        self.assertEqual((record.goal, record.objective, record.mission, record.hard_part, record.what_not_to_do), ("goal", "objective", "mission", "the hard part", ()))
 
     def test_records_hold_no_parsing_or_schema_code(self) -> None:
         # [Review 4116752796] from_payload and output_schema do not belong on the record dataclasses.
@@ -616,7 +632,7 @@ class JevDoneRecordTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             JevMultiPart((JevDeliverable("a", "b", "c"), JevDeliverable("a", "d", "e")))
         with self.assertRaises(ConfigurationError):
-            JevRunStateRecord("goal", " ", "mission")
+            JevRunStateRecord("goal", " ", "mission", hard_part="hard")
 
     def test_output_count_records_reject_invalid_targets_and_duplicate_ids(self) -> None:
         obligation = JevOutputCountObligation("examples", "Requested examples", 25, True, "examples", "cache strategies", "distinct strategies", "Show 25 distinct strategies.")
@@ -635,7 +651,7 @@ class JevDoneRecordTests(unittest.TestCase):
         item = JevOutputExtentItem("answer_length", "the final answer", 25, JevOutputExtentUnit.WORDS, JevOutputExtentComparator.MINIMUM)
         state = JevOutputExtent((item,))
         self.assertEqual(state.ids(), ("answer_length",))
-        self.assertEqual(JevRunStateRecord("goal", "objective", "mission", output_extent=state).output_extent, state)
+        self.assertEqual(JevRunStateRecord("goal", "objective", "mission", hard_part="hard", output_extent=state).output_extent, state)
         evidence = JevOutputExtentEvidence((JevOutputExtentEvidenceItem("answer_length", "final answer text", "no gap"),))
         self.assertEqual(JevHandoffRecord(output_extent=evidence).output_extent, evidence)
         for invalid in ((0, "words", "minimum"), (3, "tokens", "minimum"), (3, "words", "at_least")):
@@ -654,7 +670,7 @@ class JevDoneRecordTests(unittest.TestCase):
         state = JevRequiredActions((collect, classify))
         self.assertEqual(state.ids(), ("collect", "classify"))
         self.assertEqual(state.actions[1].predecessors, ("collect",))
-        self.assertEqual(JevRunStateRecord("goal", "objective", "mission", required_actions=state).required_actions, state)
+        self.assertEqual(JevRunStateRecord("goal", "objective", "mission", hard_part="hard", required_actions=state).required_actions, state)
         evidence = JevRequiredActionEvidence("collect", "The inputs were returned.", (0,), 0, "Nothing is missing.")
         self.assertEqual(JevHandoffRecord(required_actions=JevRequiredActionsEvidence((evidence,))).required_actions.ids(), ("collect",))
         with self.assertRaises(ConfigurationError):
@@ -738,6 +754,7 @@ class JevScopeCoverageMergeTests(unittest.IsolatedAsyncioTestCase):
                 goal="Update every adapter.",
                 objective="All requested adapters show the change.",
                 mission="Change only the requested adapters.",
+                hard_part="Update every requested adapter.",
                 what_not_to_do=[],
                 motivating_case={"ordinary_flow": "all adapters work", "testing_restriction_quote": "", "scenarios": []},
                 scope_coverage={"dimensions": [{
@@ -828,11 +845,11 @@ class JevDoneSchemaTests(unittest.TestCase):
 
     def test_run_state_schema_contains_only_checks_with_request_derived_items(self) -> None:
         # CLAIMS are statements written after work, so the run-state model must not predict them from the request.
-        self.assertEqual(set(JevRunState.schema(()).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
+        self.assertEqual(set(JevRunState.schema(()).model_fields), {"goal", "objective", "mission", "hard_part", "what_not_to_do"})
         schema = JevRunState.schema((JevDoneCheck.MULTI_PART,))
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
-        self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS, JevDoneCheck.PROBLEMS_RESOLVED)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
+        self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS, JevDoneCheck.PROBLEMS_RESOLVED)).model_fields), {"goal", "objective", "mission", "hard_part", "what_not_to_do"})
         motivating_schema = JevRunState.schema((JevDoneCheck.MOTIVATING_CASE,))
         self.assertEqual(motivating_schema.model_fields["motivating_case"].description, JevMotivatingCasePayload.SECTION)
         scope_schema = JevRunState.schema((JevDoneCheck.SCOPE_COVERAGE,))
@@ -853,11 +870,20 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(cumulative_schema.model_fields["cumulative_obligations"].description, JevCumulativeObligationsPayload.SECTION)
         self.assertNotIn("discovered_item_coverage", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
-        self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "what_not_to_do"})
+        self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "hard_part", "what_not_to_do"})
         self.assertNotIn(JEV_DONE_REQUIRED_ACTIONS_FIELD, JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields)
         self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE, JevDoneCheck.OUTPUT_COUNT, JevDoneCheck.OUTPUT_EXTENT, JevDoneCheck.INPUT_EXHAUSTION, JevDoneCheck.NEGATIVE_COVERAGE, JevDoneCheck.REQUIRED_ACTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS})
-        request_derived_fields = {"goal", "objective", "mission", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent", "input_exhaustion", JEV_DONE_NEGATIVE_COVERAGE_FIELD, JEV_DONE_REQUIRED_ACTIONS_FIELD, "cumulative_obligations"}
+        request_derived_fields = {"goal", "objective", "mission", "hard_part", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent", "input_exhaustion", JEV_DONE_NEGATIVE_COVERAGE_FIELD, JEV_DONE_REQUIRED_ACTIONS_FIELD, "cumulative_obligations"}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
+
+    def test_faithful_scope_uses_the_central_hard_part_and_handoff_only_evidence(self) -> None:
+        schema = JevRunState.schema((JevDoneCheck.FAITHFUL_SCOPE,))
+        self.assertIn(JEV_DONE_HARD_PART_FIELD, schema.model_fields)
+        self.assertTrue(schema.model_fields[JEV_DONE_HARD_PART_FIELD].is_required())
+        self.assertNotIn(JevDoneCheck.FAITHFUL_SCOPE.value, schema.model_fields)
+        handoff = JevHandoff.schema((JevDoneCheck.FAITHFUL_SCOPE,))
+        self.assertEqual(handoff.model_fields[JevDoneCheck.FAITHFUL_SCOPE.value].annotation, JevFaithfulScopeEvidencePayload)
+        self.assertNotIn(JevDoneCheck.FAITHFUL_SCOPE, JevRunState._SECTIONS)
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
         # Request-derived deliverables and post-run-derived claims both need evidence sections in the handoff.
@@ -948,6 +974,13 @@ class JevDoneQuestionTests(unittest.TestCase):
     """Pin the multi-part question to the asking-jev-questions layout (review 4116786437)."""
 
     question = MultiPartDeliveredQuestion()
+
+    def test_faithful_scope_question_is_registered_for_the_saved_hard_part(self) -> None:
+        question = FaithfulScopeQuestion()
+        self.assertIsInstance(question, JevDoneQuestion)
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE), question)
+        self.assertEqual(question.to_question(JEV_DONE_HARD_PART_FIELD).name, "faithful_scope.hard_part")
+        self.assertIn("what_not_to_do", question.instructions.state)
 
     def test_question_is_an_argument_free_registered_dataclass(self) -> None:
         self.assertIsInstance(self.question, JevDoneQuestion)
@@ -1089,6 +1122,20 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual(question.to_question("classify").name, "required_actions.completed.classify")
         self.assertIn("`required_actions` entry with id `classify`", str(question.to_question("classify").instructions))
         self.assertIn("completion_signal", question.instructions.state)
+
+    def test_faithful_scope_question_is_registered_for_one_named_hard_part(self) -> None:
+        question = FaithfulScopeQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.FAITHFUL_SCOPE), 0.8)
+        self.assertEqual(question.to_question(JEV_DONE_HARD_PART_FIELD).name, "faithful_scope.hard_part")
+        self.assertIn("what_not_to_do", question.instructions.state)
+
+    def test_faithful_scope_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/faithful_scope.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=tree)), [])
 
     def test_changed_assumption_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
@@ -1334,7 +1381,7 @@ class JevCumulativeObligationsIntegrationTests(unittest.IsolatedAsyncioTestCase)
             obligations=(JevCumulativeObligationEvidence("build_cli", "The command is available.", "No gap."),) if obligation else (),
             turns=tuple(JevCumulativeUserTurnEvidence(f"turn_{index}", f"Evidence for supplied turn {index}.") for index in range(len(turns))),
         )
-        agent.run_state.record = JevRunStateRecord("goal", "objective", "mission", cumulative_obligations=state)
+        agent.run_state.record = JevRunStateRecord("goal", "objective", "mission", hard_part="hard", cumulative_obligations=state)
         return agent.run_state, JevHandoffRecord(cumulative_obligations=evidence)
 
     async def test_only_user_messages_are_forwarded_and_recall_input_keeps_earlier_context(self) -> None:
@@ -1352,6 +1399,7 @@ class JevCumulativeObligationsIntegrationTests(unittest.IsolatedAsyncioTestCase)
             goal="goal",
             objective="objective",
             mission="mission",
+            hard_part="hard",
             what_not_to_do=[],
             cumulative_obligations={"obligations": []},
         )
@@ -1513,7 +1561,7 @@ class JevRequiredActionsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             JevRequiredAction("collect", "Collect the requested inputs.", "Every named input is recorded."),
             JevRequiredAction("classify", "Classify each input.", "Each input has a classification.", ("collect",)),
         ))
-        records = JevRunStateRecord("goal", "objective", "mission", required_actions=actions)
+        records = JevRunStateRecord("goal", "objective", "mission", hard_part="hard", required_actions=actions)
         evidence = JevRequiredActionsEvidence((
             JevRequiredActionEvidence("collect", "The named inputs were collected.", collect_traces if collect_traces is not None else (() if collect_completion is None else (collect_completion,)), collect_completion, "Nothing is missing."),
             JevRequiredActionEvidence("classify", "Each input received a classification.", classify_traces if classify_traces is not None else (() if classify_completion is None else (classify_completion,)), classify_completion, "Nothing is missing."),
@@ -1535,6 +1583,7 @@ class JevRequiredActionsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "goal",
             "objective",
             "mission",
+            hard_part="hard",
             multi_part=JevMultiPart((JevDeliverable("report", "Write the report.", "The report is present."),)),
             required_actions=action_state,
         )
@@ -1656,7 +1705,7 @@ class JevRequiredActionsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         assert agent.run_state is not None
         run_state = agent.run_state
         action = JevRequiredAction("collect", "Collect the requested inputs.", "All named inputs are recorded.")
-        run_state.record = JevRunStateRecord("goal", "objective", "mission", required_actions=JevRequiredActions((action,)))
+        run_state.record = JevRunStateRecord("goal", "objective", "mission", hard_part="hard", required_actions=JevRequiredActions((action,)))
         run_state.request = "Collect the named inputs."
         calls = (ToolCallContext(tool_name="fetch", arguments={}, state=ToolCallState.SUCCEEDED, result=ToolResult.success("fetch", "inputs returned")),)
         responses = ("The raw response body.",)
@@ -1725,6 +1774,48 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.continuations, 0)
         self.assertEqual((result.usage.input_tokens, result.usage.output_tokens), (100, 10))
         self.assertNotIn("done", reply.metadata)
+
+    async def test_faithful_scope_uses_one_batched_answer_and_extends_configured_loop_after_failure(self) -> None:
+        decision = ScriptedDecisionRunner({JEV_DONE_HARD_PART_FIELD: [0.79, 0.8], "dry_run_flag": [0.95], "readme_docs": [0.95]})
+        loop = AgentLoopSettings(max_iterations=3, max_tokens=5_000)
+        agent, main, state_runner, handoff_runner = self._agent(
+            done=(JevDoneCheck.MULTI_PART, JevDoneCheck.FAITHFUL_SCOPE),
+            state=json.dumps(_STATE),
+            handoff=json.dumps({**_HANDOFF, **_FAITHFUL_HANDOFF}),
+            loop=loop,
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), len(state_runner.calls), len(handoff_runner.calls)), (2, 1, 2))
+        self.assertEqual(len(decision.requests), 2)
+        first_request = decision.requests[0]
+        assert isinstance(first_request.state, Mapping)
+        self.assertEqual(first_request.state[JEV_DONE_HARD_PART_FIELD], _BASE_STATE[JEV_DONE_HARD_PART_FIELD])
+        self.assertEqual(tuple(question.name for question in first_request.questions), ("multi_part.delivered.dry_run_flag", "multi_part.delivered.readme_docs", "faithful_scope.hard_part"))
+        result = agent.response.done[JevDoneCheck.FAITHFUL_SCOPE]
+        self.assertTrue(result.available and result.passed)
+        self.assertEqual(agent.response.continuations, 1)
+        self.assertEqual(agent.response.continuation_budget, {"max_iterations": 2, "max_tokens": 16_000})
+        feedback = main.messages[1][0]["content"]
+        self.assertIn(_BASE_STATE[JEV_DONE_HARD_PART_FIELD], feedback)
+        self.assertIn(_FAITHFUL_HANDOFF["faithful_scope"]["missing"], feedback)
+
+    async def test_faithful_scope_failure_at_continuation_cap_does_not_grant_budget(self) -> None:
+        agent, main, *_ = self._agent(
+            done=(JevDoneCheck.FAITHFUL_SCOPE,),
+            max_continuations=0,
+            state=json.dumps(_BASE_STATE),
+            handoff=json.dumps(_FAITHFUL_HANDOFF),
+            loop=AgentLoopSettings(max_iterations=3, max_tokens=5_000, max_tool_calls=2),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({JEV_DONE_HARD_PART_FIELD: [0.79]}))):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(main.calls), 1)
+        self.assertEqual(agent.response.continuations, 0)
+        self.assertEqual(agent.response.continuation_budget, {})
+        self.assertFalse(agent.response.done[JevDoneCheck.FAITHFUL_SCOPE].passed)
 
     async def test_problem_repair_check_rechecks_after_handoff_and_returns_to_original_request(self) -> None:
         # The first finish fails an observed problem; the same loop receives focused repair guidance and checks again.
@@ -2773,6 +2864,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         result = agent.response.done[JevDoneCheck.MULTI_PART]
         self.assertFalse(result.passed)
         self.assertEqual(result.incomplete, ("readme_docs",))
+        self.assertEqual(agent.response.continuation_budget, {})
 
     async def test_threshold_is_inclusive_and_one_clear_no_fails_a_passing_mean(self) -> None:
         agent, main, *_ = self._agent()

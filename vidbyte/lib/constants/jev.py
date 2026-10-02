@@ -135,9 +135,15 @@ JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD: float = 0.8
 # Preserve bounded raw tool outputs for source-inventory questions.
 JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS: int = 12_000
 JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS: int = 48_000
+JEV_FAITHFUL_SCOPE_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
+JEV_CONTINUATION_BUDGET_INITIAL: int = 0
+# Extra main-agent capacity granted for each continuation caused by FAITHFUL_SCOPE.
+JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS: int = 2
+JEV_FAITHFUL_SCOPE_EXTRA_TOKENS: int = 16_000
+JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS: int = 4
 # The state fields the done questions read: the user's request, and one entry per deliverable id holding
 # the deliverable, the visible condition that shows it is done, and the evidence JevHandoff compiled for it.
 JEV_DONE_REQUEST_FIELD: str = "request"
@@ -275,6 +281,9 @@ JEV_DONE_ORIGINAL_BASIS_FIELD: str = "original_basis"
 JEV_DONE_LATER_OBSERVATION_FIELD: str = "later_observation"
 JEV_DONE_AFFECTED_WORK_FIELD: str = "affected_work"
 JEV_DONE_REVISION_FIELD: str = "revision"
+JEV_DONE_HARD_PART_FIELD: str = "hard_part"
+JEV_DONE_MISSING_FIELD: str = "missing"
+JEV_DONE_WHAT_NOT_TO_DO_FIELD: str = "what_not_to_do"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -305,6 +314,11 @@ __all__ = [
     "JEV_CLARITY_THRESHOLD",
     "JEV_CLARITY_VETO_THRESHOLD",
     "JEV_COMPLETION_EVIDENCE_THRESHOLD",
+    "JEV_CONTINUATION_BUDGET_INITIAL",
+    "JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS",
+    "JEV_FAITHFUL_SCOPE_EXTRA_TOKENS",
+    "JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS",
+    "JEV_FAITHFUL_SCOPE_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
@@ -392,6 +406,9 @@ __all__ = [
     "JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD",
     "JEV_DONE_DISCOVERED_ITEM_SOURCE_ID_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_HARD_PART_FIELD",
+    "JEV_DONE_MISSING_FIELD",
+    "JEV_DONE_WHAT_NOT_TO_DO_FIELD",
     "JEV_DONE_INSPECTION_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
     "JEV_DONE_EXECUTION_FIELD",

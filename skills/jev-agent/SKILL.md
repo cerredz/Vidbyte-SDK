@@ -152,3 +152,7 @@ python scripts/run_ci.py
 ### Discovered item coverage
 
 `DISCOVERED_ITEM_COVERAGE` derives candidate items from recorded tool-call outputs at each finish attempt. Preserve every raw output within the per-source and total size bounds, require one handoff batch for every source id, and keep source-inventory questions separate from per-item processing questions. Both kinds of answers join the same Jev decision request; one low inventory or item answer vetoes completion. Even an empty candidate list must still ask about every recorded source inventory.
+
+### Faithful scope
+
+`FAITHFUL_SCOPE` saves one request-selected `hard_part` in the central request state before work starts. Keep the user's completion condition and stated limits verbatim in meaning; the handoff reports evidence and missing work, and adds no second state section. A failed judgment focuses the same-loop continuation on the saved hard part in the user's original scope, with the configured bounded iteration, token, and tool-call extension applied only to configured main-loop ceilings.

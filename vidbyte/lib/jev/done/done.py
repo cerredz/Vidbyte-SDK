@@ -20,6 +20,7 @@ from vidbyte.lib.constants.jev import (
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
     JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
     JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
+    JEV_FAITHFUL_SCOPE_THRESHOLD,
     JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
     JEV_INPUT_EXHAUSTION_THRESHOLD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
@@ -52,6 +53,7 @@ from vidbyte.lib.jev.done.discovered_item_coverage import (
     DiscoveredItemInventoryCompleteQuestion,
     DiscoveredItemProcessedQuestion,
 )
+from vidbyte.lib.jev.done.faithful_scope import FaithfulScopeQuestion
 from vidbyte.lib.jev.done.guaranteed_next_actions import (
     GuaranteedActionNecessaryQuestion,
     GuaranteedActionUnfinishedQuestion,
@@ -94,6 +96,7 @@ class JevDoneRegistry:
         JevDoneCheck.REQUIRED_ACTIONS: (RequiredActionCompletedQuestion(),),
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: (CumulativeObligationFulfilledQuestion(),),
         JevDoneCheck.DISCOVERED_ITEM_COVERAGE: (DiscoveredItemProcessedQuestion(),),
+        JevDoneCheck.FAITHFUL_SCOPE: (FaithfulScopeQuestion(),),
     })
     _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeUserTurnReconciledQuestion(),
@@ -119,6 +122,7 @@ class JevDoneRegistry:
         JevDoneCheck.REQUIRED_ACTIONS: JEV_REQUIRED_ACTIONS_THRESHOLD,
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
         JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
+        JevDoneCheck.FAITHFUL_SCOPE: JEV_FAITHFUL_SCOPE_THRESHOLD,
     })
 
     @classmethod

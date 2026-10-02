@@ -34,6 +34,9 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
+    JevAssumptionEvidence,
+    JevAssumptionsReconciledEvidence,
+    JevAssumptionsReconciledPayload,
     JevClaimAssertion,
     JevClaimContext,
     JevClaimEvidence,
@@ -41,24 +44,23 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimScope,
     JevClaimsEvidence,
     JevClaimsEvidencePayload,
+    JevCompletionEvidence,
+    JevCompletionEvidenceSectionPayload,
     JevCumulativeObligationEvidence,
     JevCumulativeObligationEvidencePayload,
     JevCumulativeObligationsEvidence,
     JevCumulativeUserTurnEvidence,
-    JevCompletionEvidence,
-    JevCompletionEvidenceSectionPayload,
     JevDeliverableEvidence,
     JevDiscoveredItem,
     JevDiscoveredItemBatch,
     JevDiscoveredItemBatchEntryPayload,
     JevDiscoveredItemBatchPayload,
     JevDiscoveredItemEvidence,
+    JevFaithfulScopeEvidence,
+    JevFaithfulScopeEvidencePayload,
     JevGuaranteedNextAction,
     JevGuaranteedNextActions,
     JevGuaranteedNextActionsEvidencePayload,
-    JevAssumptionEvidence,
-    JevAssumptionsReconciledEvidence,
-    JevAssumptionsReconciledPayload,
     JevHandoffPayload,
     JevHandoffRecord,
     JevInputExhaustionEvidence,
@@ -120,7 +122,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoverageEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoverageEvidencePayload, JevDoneCheck.FAITHFUL_SCOPE: JevFaithfulScopeEvidencePayload})
 
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.GUARANTEED_NEXT_ACTIONS: JevGuaranteedNextActionsEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
@@ -289,6 +291,7 @@ class JevHandoff(BaseAgent):
             if state.scope_coverage is None:
                 return None
             scope_coverage = JevScopeCoverageEvidence.from_payload(scope_section, state.scope_coverage)
+        faithful_scope = self._faithful_scope_record(payload)
         return JevHandoffRecord(
             multi_part=request_records.multi_part,
             cumulative_obligations=request_records.cumulative_obligations,
@@ -310,7 +313,16 @@ class JevHandoff(BaseAgent):
             guaranteed_next_actions=guaranteed_next_actions,
             required_actions=required_actions,
             discovered_item_coverage=discovered_item_coverage,
+            faithful_scope=faithful_scope,
         )
+
+    @staticmethod
+    def _faithful_scope_record(payload: JevHandoffPayload) -> JevFaithfulScopeEvidence | None:
+        """Convert the one post-run evidence section without adding a duplicate run-state section."""
+        section = getattr(payload, JevDoneCheck.FAITHFUL_SCOPE.value, None)
+        if not isinstance(section, JevFaithfulScopeEvidencePayload):
+            return None
+        return JevFaithfulScopeEvidence(section.evidence.strip(), section.missing.strip())
 
     @staticmethod
     def _report_action_alignment_record(payload: JevHandoffPayload) -> JevReportActionAlignment | None:

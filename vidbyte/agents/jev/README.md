@@ -27,6 +27,8 @@ Enable done checks with `JevRuntimeSettings(continual=JevContinualSettings(check
 
 With `JevDoneCheck.NEGATIVE_COVERAGE`, the run state lists targets the user explicitly asked to inspect. The handoff pairs each target with visible run evidence of inspection and any final-answer no-findings, all-clear, or explicitly incomplete report. The check sends a target back only when the answer reports it clear or incomplete without inspection evidence; a supported clean result passes and no finding is required.
 
+With `JevDoneCheck.FAITHFUL_SCOPE`, `JevRunState` records one `hard_part` from the request before work begins. At each finish attempt, `JevHandoff` reports run evidence about that requirement and Jev checks whether the work met it without narrowing, mocking, skipping, hard-coding a substitute, or redefining it. A failed check sends the main agent back with the hard part in focus. Each such continuation receives the configured additional `faithful_scope_extra_iterations`, `faithful_scope_extra_tokens`, and `faithful_scope_extra_tool_calls` (defaults: 2, 16,000, and 4), added only to finite limits on the same loop. `agent.response.continuation_budget` records the cumulative extra limits granted. Missing run state, handoff evidence, or Jev answers fail open.
+
 Do not add a generic `decisions` collection or runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions inside this package.
 
 See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, `docs/design/jev-specialist-routing.md`, `docs/design/jev-multipart-done-criteria.md`, `docs/design/jev-negative-coverage.md`, and `skills/jev-agent/SKILL.md`.

@@ -21,6 +21,7 @@ from vidbyte.lib.jev.done.discovered_item_coverage import (
     DiscoveredItemProcessedQuestion,
 )
 from vidbyte.lib.jev.done.done import JevDoneRegistry
+from vidbyte.lib.jev.done.faithful_scope import FaithfulScopeQuestion
 from vidbyte.lib.jev.done.guaranteed_next_actions import (
     GuaranteedActionNecessaryQuestion,
     GuaranteedActionUnfinishedQuestion,
@@ -41,6 +42,7 @@ from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestio
 
 __all__ = [
     "DONE_STATE",
+    "FaithfulScopeQuestion",
     "AssumptionsReconciledQuestion",
     "ClaimsSupportedQuestion",
     "CompletionEvidenceSupportedQuestion",

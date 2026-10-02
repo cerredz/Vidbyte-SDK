@@ -67,18 +67,19 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_EXECUTION_FIELD,
     JEV_DONE_FINAL_ACCOUNT_FIELD,
     JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD,
+    JEV_DONE_HARD_PART_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
-    JEV_DONE_INSPECTION_FIELD,
     JEV_DONE_INPUT_EXHAUSTION_FIELD,
     JEV_DONE_INPUT_IDENTITY_FIELD,
     JEV_DONE_INPUT_SCOPE_FIELD,
     JEV_DONE_INPUT_SET_COVERAGE_FIELD,
-    JEV_DONE_NEGATIVE_COVERAGE_FIELD,
+    JEV_DONE_INSPECTION_FIELD,
     JEV_DONE_LATER_OBSERVATION_FIELD,
+    JEV_DONE_MISSING_FIELD,
     JEV_DONE_MOTIVATING_CASE_FIELD,
     JEV_DONE_MOTIVATING_CASES_FIELD,
-    JEV_DONE_OBSERVED_PROXY_FIELD,
+    JEV_DONE_NEGATIVE_COVERAGE_FIELD,
     JEV_DONE_OBLIGATION_ACTIVE_FIELD,
     JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_OBLIGATION_FIELD,
@@ -87,6 +88,9 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_OBLIGATION_STATUS_REASON_FIELD,
     JEV_DONE_OBLIGATION_STATUS_TURN_FIELD,
     JEV_DONE_OBLIGATIONS_FIELD,
+    JEV_DONE_OBSERVED_PROXY_FIELD,
+    JEV_DONE_ORIGINAL_ASSUMPTION_FIELD,
+    JEV_DONE_ORIGINAL_BASIS_FIELD,
     JEV_DONE_OUTCOME_FIELD,
     JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD,
     JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD,
@@ -112,9 +116,6 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD,
     JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD,
     JEV_DONE_OUTPUT_EXTENTS_FIELD,
-    JEV_DONE_REQUIRED_ACTIONS_FIELD,
-    JEV_DONE_ORIGINAL_ASSUMPTION_FIELD,
-    JEV_DONE_ORIGINAL_BASIS_FIELD,
     JEV_DONE_PHASE_OUTPUT_CRITERION_FIELD,
     JEV_DONE_PHASE_PROGRESS_FIELD,
     JEV_DONE_PHASE_REQUEST_SCOPE_FIELD,
@@ -131,10 +132,11 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_PROBLEM_TITLE_FIELD,
     JEV_DONE_PROBLEMS_RESOLVED_FIELD,
     JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD,
-    JEV_DONE_REVISION_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_DONE_REQUEST_RELEVANCE_FIELD,
     JEV_DONE_REQUESTED_OUTCOMES_FIELD,
+    JEV_DONE_REQUIRED_ACTIONS_FIELD,
+    JEV_DONE_REVISION_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD,
     JEV_DONE_SCOPE_REQUEST_QUOTE_FIELD,
@@ -144,11 +146,12 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_TARGET_FIELD,
     JEV_DONE_TARGET_OUTCOME_FIELD,
     JEV_DONE_TARGET_OUTCOMES_FIELD,
-    JEV_DONE_TRIGGER_FIELD,
     JEV_DONE_TARGET_SCOPE_FIELD,
+    JEV_DONE_TRIGGER_FIELD,
     JEV_DONE_UNFINISHED_OR_BLOCKED_FIELD,
-    JEV_DONE_USER_TURNS_FIELD,
     JEV_DONE_USER_TURN_EVIDENCE_FIELD,
+    JEV_DONE_USER_TURNS_FIELD,
+    JEV_DONE_WHAT_NOT_TO_DO_FIELD,
     JEV_MOTIVATING_CASE_RECALL_THRESHOLD,
     JEV_NOUL_TRUE,
     JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD,
@@ -169,14 +172,14 @@ from vidbyte.lib.dataclasses.jev import (
     JevInputSetCoverage,
     JevInputSetCoveragePayload,
     JevInputTarget,
-    JevNegativeCoverage,
-    JevNegativeCoveragePayload,
-    JevNegativeCoverageTarget,
     JevMotivatingCase,
     JevMotivatingCasePayload,
     JevMotivatingScenario,
     JevMultiPart,
     JevMultiPartPayload,
+    JevNegativeCoverage,
+    JevNegativeCoveragePayload,
+    JevNegativeCoverageTarget,
     JevOption,
     JevOutputCount,
     JevOutputCountEvidenceItem,
@@ -494,6 +497,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.REQUIRED_ACTIONS: self._required_actions_section,
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations_section,
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_section,
+            JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -531,6 +535,19 @@ class JevRunState(BaseAgent):
             JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD: inventories,
             JEV_DONE_DISCOVERED_ITEMS_FIELD: items,
         }, questions
+
+    def _faithful_scope_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Project the preselected hard part and its handoff evidence without adding another section."""
+        if self.record is None or handoff.faithful_scope is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+        state = {
+            JEV_DONE_HARD_PART_FIELD: self.record.hard_part,
+            JEV_DONE_WHAT_NOT_TO_DO_FIELD: list(self.record.what_not_to_do),
+            JEV_DONE_EVIDENCE_FIELD: handoff.faithful_scope.evidence,
+            JEV_DONE_MISSING_FIELD: handoff.faithful_scope.missing,
+        }
+        return state, (question.to_question(JEV_DONE_HARD_PART_FIELD),)
 
     def _cumulative_obligations_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         """Ask about every active request obligation and every supplied user turn's evidence inventory."""
@@ -1028,11 +1045,34 @@ class JevRunState(BaseAgent):
             JevDoneCheck.REQUIRED_ACTIONS: self._required_actions,
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations,
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_coverage,
+            JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope,
         }
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
         return handler(handoff, decision)
+
+    def _faithful_scope(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Judge the one request-selected hard part from the handoff evidence and one bounded answer."""
+        if self.record is None or handoff is None or handoff.faithful_scope is None or decision is None:
+            return JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+        answer_name = question.name(JEV_DONE_HARD_PART_FIELD)
+        answers = {JEV_DONE_HARD_PART_FIELD: decision.answers[answer_name]} if answer_name in decision.answers else {}
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.FAITHFUL_SCOPE)
+        verdict = DecisionModelHelper.score_noul(answers, (JEV_DONE_HARD_PART_FIELD,), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=None, available=False)
+        incomplete = () if verdict.passed else (JEV_DONE_HARD_PART_FIELD,)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.FAITHFUL_SCOPE,
+            score=verdict.score,
+            passed=verdict.passed,
+            answers=verdict.answers,
+            incomplete=incomplete,
+            usage=usage,
+        )
 
     def _discovered_item_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         """Require every recorded source inventory and discovered item to meet its own coverage threshold."""
@@ -1696,6 +1736,7 @@ class JevRunState(BaseAgent):
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
+            hard_part=payload.hard_part.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
             required_actions=required_actions,

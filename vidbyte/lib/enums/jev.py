@@ -59,6 +59,7 @@ class JevDoneCheck(str, Enum):
     REQUIRED_ACTIONS = "required_actions"
     CUMULATIVE_OBLIGATIONS = "cumulative_obligations"
     DISCOVERED_ITEM_COVERAGE = "discovered_item_coverage"
+    FAITHFUL_SCOPE = "faithful_scope"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -92,6 +93,7 @@ class JevDoneQuestionKey(str, Enum):
     CUMULATIVE_USER_TURN_RECONCILED = "cumulative_obligations.user_turn_reconciled"
     DISCOVERED_ITEM_PROCESSED = "discovered_item_coverage.processed"
     DISCOVERED_ITEM_INVENTORY_COMPLETE = "discovered_item_coverage.inventory_complete"
+    FAITHFUL_SCOPE = "faithful_scope"
 
 
 class JevBoundaryKind(str, Enum):
