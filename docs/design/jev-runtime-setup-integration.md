@@ -3,13 +3,13 @@
 **Status:** Draft
 **Author:** Codex
 **Created:** 2026-10-01
-**Last Updated:** 2026-10-01
+**Last Updated:** 2026-10-02
 
 ---
 
 ## 1. Overview
 
-Integrate Jev's request-time skill preload and tool alignment, run-state relationship, and bulk-work capabilities into one ordered runtime. The combined agent must preserve existing main-branch behavior and each capability's independent public contract while making preflight a single batched gate, selecting skills and tools before bounded workers start, and keeping caller context and runtime state isolated across runs.
+Integrate Jev's request-time skill preload and tool alignment, run-state relationship, bulk work, explicit skill sources, and Claude-native skill sessions into one ordered runtime. The combined agent must preserve existing behavior and each capability's public contract while making preflight a single batched gate, selecting skills and tools before bounded workers start, isolating worker histories and provider containers, and keeping caller context and runtime state isolated across runs.
 
 ---
 
@@ -17,22 +17,24 @@ Integrate Jev's request-time skill preload and tool alignment, run-state relatio
 
 ### Goals
 
-- Integrate the three reviewed feature heads on top of the current Jev skill-preload core without losing core fields, checks, exports, or behavior.
+- Integrate the relation, bulk-work, and provider-skill heads on top of the current Jev skill-preload core without losing core fields, checks, exports, or behavior.
 - Run one combined preflight gate, passing the persistent `self.run_state.record` into it so `JevResponse.start()` cannot erase the record used for relation judgment.
 - Reset relation and bulk gate flags on every pass and preserve closed-gate and specialist early returns.
 - Keep alignment prompt and tool attachment before skill preload; run `run_state.begin`, tool selection, and bulk work after preload in that order.
 - Create `JevRunStateRelation` when its preset is enabled even with no done checks, while creating `JevDoneContinuation` only when checks exist.
 - Build the skill loader only when skills are configured; build the named bulk coordinator from validated `JevBulkSettings`.
+- Resolve explicitly configured skill sources at run time; keep selected native Claude references separate from selected text and attach them only to Anthropic requests.
+- Continue valid Anthropic `pause_turn` responses through the inherited bounded runtime and record each response's raw usage once.
 - Preserve the caller's original main-loop message and immutable context; provide ordered per-item results as context data for final synthesis.
+- Pass selected native skill references to each fresh bulk worker without forwarding the owner session/container; each worker owns its own provider session.
 - Keep run-local prompt, tool, option, and MCP attachment cleanup in `finally`.
 - Add cross-capability tests and retain the individual relation, bulk-work, skills-preload, and tool-alignment test packs.
 
 ### Non-Goals
 
 - Do not add a generic runtime hook, strategy registry, callback API, or preset-specific branches to the main runtime beyond the narrow named capability seams.
-- Do not change the main agent's conversation-history semantics, preflight question semantics, task planner schema, or public settings except where the three reviewed features already define them.
+- Do not change the main agent's conversation-history semantics, preflight question semantics, task planner schema, or public settings except where the reviewed feature contracts already define them.
 - Do not give the planner tools or native skills, or share the owner's native skill session/container with a worker.
-- Do not implement bulk worker native-skill forwarding until the provider contract has its final review checkpoint. The approved narrow shape is recorded in §6.7 for later implementation.
 - Do not push, merge component PRs into main, or publish the aggregate PR before the combined source review and required gates.
 
 ---
@@ -42,9 +44,11 @@ Integrate Jev's request-time skill preload and tool alignment, run-state relatio
 - The skills-preload core (`a357a4fa`) adds prompt/tool alignment, selected-skill context preload, and tool selection to `JevRuntime`. Its runtime currently runs the gate, alignment, preload, run-state, selector, then the inherited loop, with temporary prompt and tool state restored in `finally`.
 - The run-state relationship feature (`4d19553b`) makes the preflight gate compare the current request with an existing typed run-state record. It adds an opt-in preset and `JevRunStateRelation`, including state initialization when done checks are absent.
 - The bulk-work feature (`51be73f1`) adds three fixed recognition questions, validated `JevBulkSettings`, a tool-free planner, and bounded fresh-agent workers after tool selection. It records ordered results and feeds them to the main loop as context.
-- All three features extend overlapping files: `JevAgent`, `JevRuntime`, gate, preflight registry, presets, enums, constants, response, exports, and preflight tests. A read-only three-way merge audit found expected conflicts at these seams; the integration must union their changes and preserve the current core behavior.
+- The provider-skill feature (`40f20e32`) adds explicit source resolution, metadata-only Claude skill references, typed per-call native options, and bounded pause continuation through `AgentRuntime`.
+- Relation, bulk, and provider-skill heads extend overlapping files: `JevAgent`, `JevRuntime`, preload, runtime, dataclasses, enums, exports, and provider contracts. Preserve their additions together with current core behavior.
 - `JevResponse.start()` resets the response record. Therefore the persistent record is read from `self.run_state.record` for the gate, not from a prior response's state result.
-- Native provider skills are currently selected during the core preload. Each bulk worker will need the selected references and its own provider session/container; the provider feature is still in progress, so worker forwarding is deliberately a later integration step.
+- The provider preload outcome carries the selected native references. Bulk forwarding must use only that selected tuple, while each fresh worker starts with `claude_skill_session=None` and owns its container independently of the main agent.
+- `ClaudeSkillSession.resume_messages` captures the provider-visible request plus the complete assistant response content, so continuation can preserve server-tool blocks and avoid re-appending the user's original message.
 
 ---
 
@@ -60,9 +64,10 @@ Integrate Jev's request-time skill preload and tool alignment, run-state relatio
 6. Give each worker the selected tool set using the established `clone_for_fork()` contract, preserving selected tool names while isolating `AgentTool` contexts. Restore owner prompt, user tools, full tools, and attached MCP resources in `finally`.
 7. Keep task results ordered and typed, retain failures without leaking raw exception text, and ensure the final-synthesis context identifies failures as failures. Do not mutate the caller's context or replace the original request sent to the main loop.
 8. Create the relation facade whenever its preset is enabled; create continuation only when done checks are configured. With the relation preset disabled, preserve the existing per-run run-state behavior.
-9. Build the skill loader only when skills are nonempty. Preserve the explicit provider `system` override as the baseline before selected skill text is appended.
-10. After provider native-skill contracts receive final review, add the narrow typed `claude_skills` argument to bulk planning and pass selected references to each fresh worker. The planner receives none, and workers get independent provider sessions/containers. This requirement is pending that checkpoint and is not part of the relation/bulk merge stage.
-11. Preserve all current done-check behavior and response data, and ensure repeated runs do not reuse stale relation/bulk flags or prior temporary runtime state.
+9. Resolve configured skill sources only during preload; keep selection indices and outcomes stable, append selected text to the effective prompt, and retain selected Claude references in the typed skill outcome.
+10. Extend bulk planning with `claude_skills: tuple[ClaudeSkillReference, ...] = ()`. Pass only the selected outcome references to each worker; give the planner no tools or native refs and each worker a fresh session (`None`) so it creates an independent container.
+11. Let the inherited runtime resume valid Anthropic pause turns from the exact raw assistant content and existing container ID, after usage accounting and response middleware but before local tool parsing.
+12. Preserve all current done-check behavior and response data, ensure repeated runs do not reuse stale relation/bulk flags or provider sessions, and keep the main owner's Claude session separate from all worker sessions.
 
 ### Non-Functional Requirements
 
@@ -70,6 +75,7 @@ Integrate Jev's request-time skill preload and tool alignment, run-state relatio
 - Worker count remains bounded by `min(max_parallel_agents, item_count)` and uses a bounded queue rather than one task per planned item.
 - Errors from individual workers are retained as safe typed failures; cancellation propagates and cleans up sibling workers.
 - Selected tools and provider skill references are not broadened beyond those selected for the owner.
+- Each bulk worker receives the same selected native reference tuple but no owner session/container; each child pause/resume remains within that worker's own bounded runtime.
 - Preserve immutable `BaseAgentContext` values and existing usage rollup ownership.
 - Pass the repository's custom lint, source tests, full CI, and all four focused feature packs on the combined, tracked source tree.
 
@@ -81,7 +87,7 @@ The integration keeps the gate as the first decision seam. The runtime resets `J
 
 For an ordinary run, the runtime attaches any aligned tools before core skill preload, then initializes relation-aware run state, applies the existing tool selector, and only then invokes the named bulk coordinator. If the gate did not enable bulk or its planner cannot produce a valid bounded plan, the ordinary inherited loop continues. Otherwise the coordinator adds an immutable result artifact to a replacement context, and the inherited loop still receives the exact original user message for final synthesis.
 
-The integration merges feature-owned types and registrations as a union. It changes only the small shared runtime seams and adds tests for behavior that can fail specifically at their intersection. Native skill forwarding remains pending provider contract review; when approved, only selected references are passed to fresh worker runs, with no session sharing and no native skills on the planner.
+The integration merges feature-owned types and registrations as a union. It changes only the shared runtime seams and adds tests for behavior that can fail specifically at their intersection. Skill preload places the selected native-reference tuple in the request-local main options. The bulk coordinator separately receives that tuple, sends it only to fresh workers with no session, and keeps the planner tool-free and native-skill-free. Main and worker pause continuations use separate container IDs and preserve their own full raw response content.
 
 ```text
 response reset -> one gate(message, persistent record)
@@ -90,7 +96,8 @@ response reset -> one gate(message, persistent record)
                      v
 prompt alignment -> tool attachment -> skill preload
   -> run_state.begin -> tool selector -> bounded bulk coordinator
-  -> inherited loop(original message) -> response outcome
+  -> bulk workers(selected native refs, fresh sessions)
+  -> inherited loop(original message, selected refs) -> pause/resume as needed -> outcome
   -> finally restore runtime fields and release attachments
 ```
 
@@ -148,7 +155,7 @@ class JevBulkWork(BaseAgent):
     async def plan_and_run(self, message: str, context: BaseAgentContext, tools: tuple[object, ...], *, claude_skills: tuple[ClaudeSkillReference, ...] = ()) -> JevBulkWorkResult: ...
 ```
 
-`claude_skills` is the approved future narrow extension and is deferred until provider contracts are final. The relation facade's `begin_delegated` follows the relation policy before specialist handoff.
+`claude_skills` is the selected native tuple from the completed preload outcome. The relation facade's `begin_delegated` follows the relation policy before specialist handoff.
 
 #### Logic / Algorithm
 
@@ -170,7 +177,7 @@ class JevBulkWork(BaseAgent):
 
 #### What it does
 
-Combines the three capabilities in the approved order and retains run-local cleanup around all normal-run phases.
+Combines the Jev setup capabilities in the approved order and retains run-local cleanup around all normal-run phases.
 
 #### Interface / API
 
@@ -184,15 +191,17 @@ async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentCo
 2. Stop on a closed gate. If a specialist is selected, call `begin_delegated` and hand off before alignment/preload/bulk.
 3. Save owner system prompt, user tool catalog, and full tool catalog; keep run options as immutable per-call values.
 4. Apply prompt alignment, then tool alignment/attachment and update context/tool specs.
-5. Normalize an explicit `options['system']` override into the effective context even when no skill loader exists; when configured, run core `_preload_skills` against that baseline and append selected skill text.
+5. Normalize an explicit `options['system']` override into the effective context even when no skill loader exists; when configured, resolve and score skills, append selected text, and add the selected native refs to the copied main-agent options.
 6. Call `run_state.begin(message)`, then existing core `_select_tools` so workers see only selected tools.
-7. If the bulk gate flag is true, call the named coordinator and add its typed result as immutable context data. Keep the message passed to `super().arun` unchanged.
+7. If the bulk gate flag is true, call the named coordinator with the selected refs from the skill outcome and add its typed result as immutable context data. Keep the message passed to `super().arun` unchanged.
 8. Handle attachment announcement, selector metadata, and normal response outcome.
-9. In `finally`, restore prompt and user/full tool catalogs, then release any attached MCP resources.
+9. Let the inherited runtime record each raw call's usage once and continue valid native pause turns with the owning main agent's session.
+10. In `finally`, restore prompt and user/full tool catalogs, then release any attached MCP resources.
 
 #### Edge Cases & Error Handling
 
 - A tool selector that filters a tool must not have that tool reintroduced for workers.
+- Main-agent native references remain in the run-local options; the owner session is never sent to a worker.
 - Bulk workers receive the effective explicit system override even when no skills are configured; the main agent keeps the original run options and synthesis uses the same override.
 - Gate, specialist, and invalid-plan paths must avoid an extra bulk planner/worker call as specified by each feature.
 - Exceptions and cancellation still execute cleanup; cancellation is not converted into an item failure.
@@ -215,45 +224,49 @@ async def plan_and_run(self, message: str, context: BaseAgentContext, tools: tup
 def bulk_work(self, result: JevBulkWorkResult) -> None: ...
 ```
 
-The native-skill parameter is deferred pending the provider contract checkpoint. No generic worker callback or options factory is introduced.
+The `claude_skills` parameter accepts only references selected by the owner’s completed Jev preload. No generic worker callback or options factory is introduced.
 
 #### Logic / Algorithm
 
 1. Generate and validate the whole plan; require at least two tasks and no more than configured `max_items`. Invalid plans are rejected whole, never truncated.
 2. Do not expose tools or native skills to the planner. Use a bounded queue with at most `min(max_parallel_agents, item_count)` worker coroutines.
 3. Give every worker isolated history and a trusted item-only instruction. Clone bound tools via `clone_for_fork()` to isolate agent tool context while preserving names.
-4. Collect outputs/failures by original task index. Catch ordinary per-item exceptions into safe typed failures; let cancellation escape and clean siblings up.
-5. Record planner and worker usage only through their existing owned rollups. Add a result artifact to a replacement context for the inherited loop; synthesis instructions must not treat failures as successes.
+4. Pass the selected native references and explicit `claude_skill_session=None` to each new worker. Never pass the owner's session/container; each worker starts and resumes its own container inside its own BaseAgent loop.
+5. Collect outputs/failures by original task index. Catch ordinary per-item exceptions into safe typed failures; let cancellation escape and clean siblings up.
+6. Record planner and worker usage only through their existing owned rollups. Add a result artifact to a replacement context for the inherited loop; synthesis instructions must not treat failures as successes.
 
 #### Edge Cases & Error Handling
 
 - Never leak raw `str(exc)` or `repr(exc)` into public output; use a safe error code/type or stable generic message.
 - Tool wrappers without the approved clone hook must be surfaced as a concrete integration issue; do not redesign the global forker.
 - Arbitrary custom mutable stateless tools retain the existing fork contract and may be shared by identity.
+- Native provider usage from a child remains owned by that child; the owner does not flatten or re-record its child rollup.
 - No shared mutable context, worker history, or result ordering depends on task completion order.
 
 ### 6.5 Public Types, Presets, Response, and Exports
 
-**File(s):** `vidbyte/agents/jev/settings.py`, `vidbyte/agents/jev/response.py`, `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py`, `vidbyte/lib/constants/jev.py`, `vidbyte/lib/dataclasses/jev.py`, `vidbyte/lib/enums/__init__.py`, `vidbyte/lib/enums/jev.py`, `vidbyte/lib/enums/prompts.py`, `vidbyte/lib/jev/preflight/__init__.py`, `vidbyte/lib/jev/presets.py`
+**File(s):** `vidbyte/agents/jev/settings.py`, `vidbyte/agents/jev/response.py`, `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py`, `vidbyte/lib/constants/jev.py`, `vidbyte/lib/dataclasses/jev.py`, `vidbyte/lib/dataclasses/model_configs.py`, `vidbyte/lib/dataclasses/skills.py`, `vidbyte/lib/enums/__init__.py`, `vidbyte/lib/enums/jev.py`, `vidbyte/lib/enums/prompts.py`, `vidbyte/lib/enums/skills.py`, `vidbyte/lib/jev/preflight/__init__.py`, `vidbyte/lib/jev/presets.py`
 **Type:** Modified files
 
 #### What it does
 
-Preserves the union of existing core types and feature types, including validated bulk settings/results, the relation preset and outcome flag, all response fields, skill and alignment settings, and tool-selector configuration. Every public closed status/rejection vocabulary remains a central enum; dataclasses remain in `vidbyte/lib/dataclasses`.
+Preserves the union of existing core types and feature types, including validated bulk settings/results, run-state relationship types, explicit skill sources, selected native references, typed per-call provider sessions, the relation and bulk presets, response fields, alignment settings, and tool-selector configuration. Every public closed status/rejection vocabulary remains a central enum; dataclasses remain in `vidbyte/lib/dataclasses`.
 
 #### Interface / API
 
 ```python
 JevAgentSettings.bulk_work: JevBulkSettings
+JevAlignmentSettings.skills: tuple[str | SkillDocument | SkillSource, ...]
 JevAgentResponse.bulk_work: JevBulkWorkResult | None
+JevSkillsOutcome.claude_skills: tuple[ClaudeSkillReference, ...]
 JevPreflightPreset.RUN_STATE_RELATION: str
 JevPreflightPreset.BULK_WORK: str
 ```
 
 #### Logic / Algorithm
 
-1. Merge exports and central registries as a union, preserving all skills-core exports, settings, response fields, tool-alignment presets, and done-check types.
-2. Register both new presets alongside the current core presets without duplicate enum or mapping keys.
+1. Merge exports and central registries as a union, preserving all skills-core exports, settings, response fields, tool-alignment presets, provider skill types, and done-check types.
+2. Register both new preflight presets alongside the current core presets without duplicate enum or mapping keys.
 3. Keep feature result status fields typed through central enums and preserve the sole response writer contract.
 
 #### Edge Cases & Error Handling
@@ -264,7 +277,7 @@ JevPreflightPreset.BULK_WORK: str
 
 ### 6.6 Prompt Assets and Focused Feature Packs
 
-**File(s):** `vidbyte/lib/jev/preflight/README.md`, `vidbyte/prompts/README.md`, `vidbyte/prompts/prompts/jev_bulk_work/jev_bulk_work.json`, `vidbyte/prompts/prompts/jev_bulk_work/synthesis_prompt.md`, `vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md`, `vidbyte/prompts/prompts/jev_bulk_work/worker_system_prompt.md`, `tests/test_jev_preflight.py`, `tests/test_jev_run_state_relation.py`, `tests/features/jev_bulk_work/FEATURE.md`, `tests/features/jev_bulk_work/README.md`, `tests/features/jev_bulk_work/test_jev_bulk_work.py`, `scripts/test-jev-bulk-work.py`, `scripts/test-jev-run-state-relation.py`
+**File(s):** `vidbyte/lib/jev/preflight/README.md`, `vidbyte/prompts/README.md`, `vidbyte/prompts/prompts/jev_bulk_work/jev_bulk_work.json`, `vidbyte/prompts/prompts/jev_bulk_work/synthesis_prompt.md`, `vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md`, `vidbyte/prompts/prompts/jev_bulk_work/worker_system_prompt.md`, `tests/test_jev_preflight.py`, `tests/test_jev_run_state_relation.py`, `tests/features/jev_bulk_work/FEATURE.md`, `tests/features/jev_bulk_work/README.md`, `tests/features/jev_bulk_work/test_jev_bulk_work.py`, `scripts/test-jev-bulk-work.py`, `scripts/test-jev-run-state-relation.py`, `tests/test_jev_skill_providers.py`, `tests/test_jev_skill_remote_sources.py`, `scripts/test-jev-skill-providers.py`, `docs/jev-skill-providers.md`
 **Type:** New and modified files
 
 #### What it does
@@ -282,9 +295,9 @@ async def test_repeated_run_restores_prompt_tools_and_mcp_attachment() -> None: 
 
 #### Logic / Algorithm
 
-1. Keep the existing relation, bulk, skill-preload, and tool-alignment feature tests intact.
+1. Keep the existing relation, bulk, skill-preload, tool-alignment, and source-provider test packs intact.
 2. Add integration coverage for one combined gate and persistent old record; relation retain/replace behavior; selector-before-bulk ordering; skill text/options; ordered partial failures; unchanged main message; repeated-run reset; and cleanup.
-3. After provider contracts are finalized, cover independent native sessions, exact selected skill reference/text forwarding to workers, and no native skills on the planner.
+3. Cover independent worker sessions, exact selected reference forwarding, planner exclusion, raw pause/resume history, usage retention, and no-skills explicit system override behavior.
 
 #### Edge Cases & Error Handling
 
@@ -292,33 +305,59 @@ async def test_repeated_run_restores_prompt_tools_and_mcp_attachment() -> None: 
 - Test context creation through actual `BaseAgent` context-building behavior where prompt precedence is relevant.
 - Focused feature scripts run independently, then normal custom lint/source/full CI gates cover the merged branch.
 
-### 6.7 Deferred Provider-Native Skill Forwarding
+### 6.7 Selected Native Skills on Isolated Bulk Workers
 
-**File(s):** `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/bulk_work.py`, `vidbyte/agents/jev/alignment/skills.py`, `tests/test_jev_runtime_setup_integration.py`
-**Type:** Deferred modification after provider contract checkpoint
+**File(s):** `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/bulk_work.py`, `vidbyte/agents/jev/alignment/skills.py`, `vidbyte/lib/dataclasses/jev.py`, `vidbyte/lib/runners/text.py`, `tests/test_jev_runtime_setup_integration.py`
+**Type:** Modified files
 
 #### What it does
 
-Records the approved narrow integration between selected provider-native skill references and bulk workers. This section does not authorize implementation before the provider contract is final.
+Carries only Jev-selected Claude references to new bulk workers. Each worker receives references but no existing session, starts its own container, and continues its own paused native execution through its own BaseAgent runtime.
 
 #### Interface / API
 
 ```python
-await bulk.plan_and_run(message, context, claude_skills=selected_claude_skill_references)
+async def plan_and_run(self, message: str, context: BaseAgentContext, tools: tuple[object, ...], *, claude_skills: tuple[ClaudeSkillReference, ...] = ()) -> JevBulkWorkResult: ...
 ```
 
 #### Logic / Algorithm
 
-1. Pass only selected native references from the completed core preload outcome to each new worker through its named run option.
-2. Let each worker create its own native session/container; never pass the owner's `ClaudeSkillSession` or container identifier.
-3. Keep the planner tool-free and native-skill-free.
-4. Preserve selected skill text, tool catalog, owner options, and trusted synthesis instructions; append the synthesis instruction once while respecting explicit `options['system']` overrides.
+1. After `_preload_skills`, the owner reads the exact selected references from `JevSkillsOutcome.claude_skills` and passes them to the bulk coordinator.
+2. The coordinator's planner receives neither tools nor native references. It plans from the complete unchanged original user request.
+3. Each fresh worker gets the selected text context, selector-approved tools, effective system prompt/options, the selected native refs, and `claude_skill_session=None`.
+4. A worker's first native request creates a new provider container; the same worker's later pause turns reuse only its own returned session. The owner's container ID/session is never forwarded.
+5. The main agent retains its selected refs and independently owns its own main-run container and pause history.
+6. Preserve the trusted synthesis instruction once, honor explicit `options['system']` as the baseline, and keep the main-loop message unchanged.
 
 #### Edge Cases & Error Handling
 
-- Exact provider option serialization and worker lifecycle depend on the provider feature's final typed contract.
-- Do not add generic callbacks, factories, or runtime strategy surfaces to accommodate provider variation.
-- The combined feature cannot be signed off until provider-specific forwarding tests pass against the final contracts.
+- Missing skill outcome or an empty selected-ref tuple yields no native skill option for workers.
+- Provider rejection or malformed session state remains visible as the worker's safe typed failure; cancellation propagates and cleans up siblings.
+- No worker receives an unselected source, the owner's session/container, or the planner's generated history.
+- Keep this named typed argument; do not add generic callbacks, factories, or runtime strategy surfaces.
+
+### 6.8 Anthropic Pause Continuation in the Inherited Loop
+
+**File(s):** `vidbyte/agents/runtime.py`, `vidbyte/providers/anthropic.py`, `vidbyte/lib/runners/types.py`, `tests/test_jev_skill_providers.py`, `tests/test_jev_runtime_setup_integration.py`
+**Type:** Modified files
+
+#### What it does
+
+Lets the existing bounded AgentRuntime continue a Claude-native `pause_turn` without adding a provider-owned loop or bypassing normal middleware and usage accounting.
+
+#### Logic / Algorithm
+
+1. Anthropic returns the untouched full response and usage map, plus a typed session carrying container ID, pause state, and exact resume messages.
+2. AgentRuntime records usage and calls response middleware once for every raw exchange before interpreting the native session.
+3. For a paused response, append the complete raw assistant message once and continue. The next provider request reuses the same container and exact message list, without appending the original user request again.
+4. For a completed response, retain its container for any later local tool turn and continue through the normal local tool parser; server-side code execution blocks are never dispatched as SDK-local tools.
+5. Existing iteration, token, timeout, middleware-stop, cancellation, and usage-tracker policies bound the repeated calls.
+
+#### Edge Cases & Error Handling
+
+- A malformed native response without content or a container ID raises a typed provider response error.
+- Native streaming fails before transport. Ordinary nonnative calls retain their existing payload and path.
+- Child and owner loops preserve separate session/container state; each raw response remains recorded once by its own agent.
 
 ---
 
@@ -326,7 +365,7 @@ await bulk.plan_and_run(message, context, claude_skills=selected_claude_skill_re
 
 No database or persisted storage schema changes.
 
-The public in-memory model is the union of existing core records and the reviewed relation/bulk types. `JevAgentSettings` gains the existing named `JevBulkSettings` field; `JevAgentResponse` gains `bulk_work: JevBulkWorkResult | None`; relation outcomes remain in the existing preflight result map. Per-item statuses/errors use the central Jev enums and dataclasses. No native provider session object is placed in public response records.
+The public in-memory model is the union of existing core records and the relation, bulk, and provider-skill types. `JevAgentSettings` gains the named `JevBulkSettings` field; `JevAgentResponse` gains `bulk_work: JevBulkWorkResult | None`; relation outcomes remain in the existing preflight result map. `JevSkillsOutcome` carries the selected `ClaudeSkillReference` tuple. `TextModelResponse` carries one exchange's raw usage and optional `ClaudeSkillSession`, which stays run-local and is never placed in public Jev response records.
 
 ---
 
@@ -341,6 +380,7 @@ The public in-memory model is the union of existing core records and the reviewe
 ```python
 JevAgentSettings(
     bulk_work=JevBulkSettings(max_parallel_agents=4, max_items=32),
+    alignment=JevAlignmentSettings(skills=(SkillSource(kind=SkillSourceKind.CLAUDE, location="skill-id"),)),
 )
 JevRuntimeSettings(
     preflight=(JevPreflightPreset.RUN_STATE_RELATION, JevPreflightPreset.BULK_WORK),
@@ -354,11 +394,13 @@ JevAgentResponse(
     results=...,        # includes relation and existing preflight outcomes
     run_state=...,      # retained or replaced record
     alignment=...,      # existing prompt alignment outcome
-    skills=...,         # existing skill preload outcome
+    skills=...,         # ordered candidate results and selected native refs
     tool_alignment=..., # existing core tool attachment outcome
     bulk_work=...,      # ordered typed planner/worker outcome or None
 )
 ```
+
+Each worker gets the selected `ClaudeSkillReference` values through `plan_and_run(..., claude_skills=...)` and an explicit empty initial session. The owner retains its own provider options and session lifecycle.
 
 **Error cases:**
 
@@ -393,7 +435,7 @@ One boolean gate outcome, with gate-owned specialist, relation, and bulk decisio
 
 ## 9. File Change Manifest
 
-The current core head already contains skill preload and tool alignment. The relation and bulk rows below are the union to be integrated; `tests/test_jev_runtime_setup_integration.py` is added for cross-feature contracts. Native worker forwarding rows are deferred until provider contract review.
+The current core head already contains text skill preload and tool alignment. This manifest is the reconciled union of the relation and bulk heads, provider skill-source head, and cross-feature integration work. Shared paths appear once with all applicable responsibilities in the reason column.
 
 | Action | File Path | Reason |
 |--------|-----------|--------|
@@ -416,17 +458,17 @@ The current core head already contains skill preload and tool alignment. The rel
 | CREATE | `vidbyte/prompts/prompts/jev_bulk_work/synthesis_prompt.md` | Supply trusted final synthesis instructions. |
 | CREATE | `vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md` | Supply tool-free planner system instructions. |
 | CREATE | `vidbyte/prompts/prompts/jev_bulk_work/worker_system_prompt.md` | Scope workers to their assigned item. |
-| MODIFY | `vidbyte/agents/jev/agent.py` | Union facade construction and named capability wiring. |
+| MODIFY | `vidbyte/agents/jev/agent.py` | Union facade construction, named capability wiring, and provider-aware skill source configuration. |
 | MODIFY | `vidbyte/agents/jev/done/__init__.py` | Export relation facade. |
 | MODIFY | `vidbyte/agents/jev/done/run_state.py` | Preserve the existing generator behavior and relation-aware state lifecycle seam. |
 | MODIFY | `vidbyte/agents/jev/gate/gate.py` | Accept persistent record and reset/score both feature flags. |
-| MODIFY | `vidbyte/agents/jev/runtime.py` | Apply ordered phases and combined cleanup. |
+| MODIFY | `vidbyte/agents/jev/runtime.py` | Apply ordered phases, selected native refs, main session options, and combined cleanup. |
 | MODIFY | `vidbyte/agents/jev/response.py` | Preserve core response fields and add bulk result writer. |
 | MODIFY | `vidbyte/agents/jev/README.md` | Document the opt-in bulk-work capability. |
-| MODIFY | `vidbyte/agents/jev/settings.py` | Add named bulk settings while preserving core settings. |
+| MODIFY | `vidbyte/agents/jev/settings.py` | Add named bulk settings and explicit skill source values while preserving core settings. |
 | MODIFY | `vidbyte/lib/constants/jev.py` | Add relation threshold/constants without removing core values. |
-| MODIFY | `vidbyte/lib/dataclasses/jev.py` | Add centrally placed bulk result and plan records. |
-| MODIFY | `vidbyte/lib/enums/__init__.py` | Export new Jev enums. |
+| MODIFY | `vidbyte/lib/dataclasses/jev.py` | Add central bulk result/plan records and selected native refs in the skill outcome. |
+| MODIFY | `vidbyte/lib/enums/__init__.py` | Export Jev, skill-source, and Claude skill enums. |
 | MODIFY | `vidbyte/lib/enums/jev.py` | Union relation/bulk preset, question, and result enums. |
 | MODIFY | `vidbyte/lib/enums/prompts.py` | Add named bulk prompt keys. |
 | MODIFY | `vidbyte/lib/jev/preflight/README.md` | Document registered relation and bulk questions. |
@@ -438,8 +480,30 @@ The current core head already contains skill preload and tool alignment. The rel
 | MODIFY | `vidbyte/__init__.py` | Preserve core exports and expose bulk settings. |
 | MODIFY | `vidbyte/agents/__init__.py` | Preserve core exports and expose bulk settings. |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Expose named bulk settings. |
+| CREATE | `docs/design/jev-skill-providers.md` | Preserve provider-source and Claude-native skill contracts. |
+| CREATE | `docs/jev-skill-providers.md` | Document explicit skill source configuration and provider behavior. |
+| CREATE | `scripts/test-jev-skill-providers.py` | Provide the focused source-provider verification entrypoint. |
+| CREATE | `tests/test_jev_skill_providers.py` | Test native Anthropic payload, sessions, usage, and skill selection. |
+| CREATE | `tests/test_jev_skill_remote_sources.py` | Test bounded file, GitHub, skills.sh, and Claude source resolution. |
+| MODIFY | `vidbyte/agents/jev/alignment/skills.py` | Resolve sources, score native metadata, and preserve selected Claude references. |
+| MODIFY | `vidbyte/agents/runtime.py` | Resume native pause turns within the inherited bounded loop. |
+| MODIFY | `vidbyte/lib/dataclasses/__init__.py` | Export provider skill-source and native-session records. |
+| MODIFY | `vidbyte/lib/dataclasses/model_configs.py` | Add validated typed native skill/session call configuration. |
+| MODIFY | `vidbyte/lib/dataclasses/skills.py` | Add source, native-reference, and provider-session records. |
+| MODIFY | `vidbyte/lib/enums/skills.py` | Define closed skill source and Claude skill type enums. |
+| MODIFY | `vidbyte/lib/jev/preflight/skills.py` | Ask relevance from honest text or native metadata without exposing fake bodies. |
+| MODIFY | `vidbyte/lib/runners/streaming_text.py` | Reject native Claude requests before streaming transport. |
+| MODIFY | `vidbyte/lib/runners/text.py` | Carry request-local native references and session sentinel through runner calls. |
+| MODIFY | `vidbyte/lib/runners/types.py` | Return optional typed native provider session state on text responses. |
+| MODIFY | `vidbyte/providers/anthropic.py` | Mount native references, preserve exact resume history, and return raw exchange usage/session. |
+| CREATE | `vidbyte/providers/skills/__init__.py` | Provide closed skill-source resolver dispatch. |
+| CREATE | `vidbyte/providers/skills/base.py` | Define source adapter and safe SKILL.md parser contracts. |
+| CREATE | `vidbyte/providers/skills/claude.py` | Resolve Claude skill metadata to pinned opaque references. |
+| CREATE | `vidbyte/providers/skills/file.py` | Resolve bounded local SKILL.md files. |
+| CREATE | `vidbyte/providers/skills/github.py` | Resolve bounded GitHub-backed skill sources. |
+| CREATE | `vidbyte/providers/skills/skills_sh.py` | Resolve explicit skills.sh references through GitHub. |
 
-No files are deleted. Provider-specific edits are intentionally absent until their contract checkpoint.
+No files are deleted. Shared runtime, export, and settings paths are unioned; the provider feature's separate public PR remains untouched.
 
 ---
 
@@ -451,14 +515,17 @@ No files are deleted. Provider-specific edits are intentionally absent until the
 - `tests/test_jev_run_state_relation.py` -> retain related/unavailable records, replace unrelated records, initialize with no record, initialize without done checks, and handle delegated specialist state.
 - `tests/features/jev_bulk_work/test_jev_bulk_work.py` -> validate planner bounds without truncation, bounded concurrency, stable result order, safe partial failures, cancellation cleanup, original request preservation, and result artifact visibility.
 - Core skill preload tests -> selected skill text and explicit system overrides survive the merged runtime and reach a real context-building provider stub.
+- Provider skill tests -> each configured source keeps its index, native metadata does not masquerade as text, selected Claude refs are capped and typed, and provider failures preserve cancellation and safe error details.
 - Core tool alignment and selector tests -> attached tools are available to selection and workers receive exactly the selector's effective set.
 - New integration test file -> assert `response.start` precedes gate but gate uses `self.run_state.record`; runtime phase order; specialist bypass; selected-skill/tool context precedes bulk; inherited loop receives unchanged message; repeated-run cleanup restores prompt/tools and releases MCP attachment.
 - Bulk-only integration test -> verify an explicit `system` option reaches the actual worker context builder when the skill preloader is absent, while main synthesis retains the override.
-- After provider checkpoint, integration tests -> exact selected `ClaudeSkillReference` forwarding, independent worker sessions/containers, planner receives none, and system synthesis instruction is appended once while honoring explicit overrides.
+- Native integration test -> exact selected `ClaudeSkillReference` forwarding to fresh workers, independent worker container IDs, planner receives none, and main owner session remains separate while selected text/tools/system and one synthesis instruction remain present.
+- Pause integration test -> exact assistant content resumes once without duplicating the original request; raw cached usage remains visible and recorded once per exchange.
 
 ### Integration Tests
 
 - Run all four focused packs: skill preload, tool alignment, run-state relation, and bulk work.
+- Run the focused provider source/native payload test packs.
 - Run the new combined runtime setup pack with deterministic stubs for decision, generation, provider context construction, and MCP attachment release.
 - Run repository source tests and full CI after all merged/new files are staged and tracked so custom lint sees the complete tree.
 
@@ -477,7 +544,8 @@ No files are deleted. Provider-specific edits are intentionally absent until the
 |------------|--------------------|---------|------|
 | Existing Jev `DecisionModelHelper` / TypeSafe client | Current SDK configuration | Combined fixed-question decision request | Provider failure follows existing fail-open gate policy. |
 | Existing `BaseAgent` / `AgentTool.clone_for_fork()` | Current SDK runtime contract | Fresh bounded workers with selected tools | Custom mutable tools without clone hooks follow existing fork sharing semantics. |
-| Skills-preload provider adapter | Final contract pending | Select and attach native skill references | Worker forwarding is gated until typed contract review. |
+| Skills source adapters | Existing `HttpTransport`, PyYAML, GitHub, and Anthropic endpoints | Resolve explicit source descriptors to text or native refs | Bounded requests; source failures remain indexed and cannot execute skill assets. |
+| Anthropic Messages API | Existing configured Anthropic model | Mount selected skill refs and resume valid pause turns | One provider request per runtime iteration; raw usage recorded by the existing tracker. |
 | Existing MCP alignment attachment | Current SDK runtime contract | Attach selected tools for the run | Must be released in `finally`, including errors and cancellation. |
 
 No new external service or package is introduced.
@@ -489,7 +557,7 @@ No new external service or package is introduced.
 - Both new preflight presets and configured skills are opt-in; defaults retain current behavior and do not add capability model calls.
 - This is an additive SDK API change; no persistent migration is required.
 - Merge only into the isolated integration branch. Do not merge component PRs into main as part of this task.
-- Required order: commit this design document, merge reviewed relation and bulk feature heads into the core-based integration branch, resolve union conflicts, wait for provider contract checkpoint before native forwarding, then run focused tests, custom lint, source tests, and full CI.
+- Required order: commit this design amendment, merge the reviewed provider head into the relation/bulk integration branch, resolve shared-file unions, implement selected-reference bulk forwarding and cross-feature tests, receive parent diff review, then run focused tests, custom lint, source tests, and full CI.
 - Prepare a separate aggregate draft PR only after parent reviews the combined diff and required gates pass. Keep component PRs and main untouched.
 - Rollback consists of discarding the isolated integration branch; no data or external service changes are made.
 
@@ -497,7 +565,7 @@ No new external service or package is introduced.
 
 ## 13. Open Questions
 
-- [ ] Provider feature owner to confirm the final typed selected-skill reference and fresh worker session/container lifecycle contract before native skill forwarding is implemented.
+- [ ] Provider's native-metadata relevance question must meet the repo's >=2,000 meaningful-token and 2–3 sentence intro requirements before final gates; provider owner owns that follow-up.
 - [ ] Parent review must approve the combined source diff and gate results before an aggregate draft PR is created.
 
 ---
