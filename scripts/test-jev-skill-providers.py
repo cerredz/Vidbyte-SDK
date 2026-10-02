@@ -1,4 +1,4 @@
-"""Run Jev skill provider tests individually with an explicit result per case."""
+"""Run Jev skill provider and remote-source tests with a result per case."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tests import test_jev_skill_providers
+from tests import test_jev_skill_providers, test_jev_skill_remote_sources
 
 
 def _flatten(suite: unittest.TestSuite) -> tuple[unittest.TestCase, ...]:
@@ -23,7 +23,13 @@ def _flatten(suite: unittest.TestSuite) -> tuple[unittest.TestCase, ...]:
 
 def main() -> int:
     # Runs each discovered case in isolation and returns failure status for CI.
-    cases = _flatten(unittest.defaultTestLoader.loadTestsFromModule(test_jev_skill_providers))
+    suite = unittest.TestSuite(
+        (
+            unittest.defaultTestLoader.loadTestsFromModule(test_jev_skill_providers),
+            unittest.defaultTestLoader.loadTestsFromModule(test_jev_skill_remote_sources),
+        )
+    )
+    cases = _flatten(suite)
     failures = 0
     for case in cases:
         result = unittest.TestResult()

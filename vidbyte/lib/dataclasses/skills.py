@@ -18,10 +18,21 @@ TESTS: `tests/test_jev_skill_preload.py`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 from vidbyte.lib.enums.skills import ClaudeSkillType, SkillSourceKind
 from vidbyte.lib.errors import ConfigurationError
+
+
+class _ClaudeSessionDefault(Enum):
+    CONFIG = "config"
+
+
+_USE_CONFIGURED_CLAUDE_SESSION = _ClaudeSessionDefault.CONFIG
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +40,7 @@ class SkillSource:
     """One explicit source descriptor; provider-specific validity is checked during run-time resolution."""
 
     kind: SkillSourceKind
-    location: str
+    location: str = field(repr=False)
     skill_name: str | None = None
     revision: str | None = None
     version: str | None = None
@@ -80,17 +91,27 @@ class ClaudeSkillReference:
 
 @dataclass(frozen=True, slots=True)
 class ClaudeSkillSession:
-    """Container identity and pause state returned by one Anthropic exchange."""
+    """Container identity and exact paused exchange history returned by Anthropic."""
 
     container_id: str
     paused: bool
+    resume_messages: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
-        # Keep only usable container state in the runtime handoff.
+        # Preserve an isolated, exact replay snapshot only while Anthropic is paused.
         if not isinstance(self.container_id, str) or not self.container_id.strip():
             raise ConfigurationError("ClaudeSkillSession.container_id must be non-blank text.")
         if not isinstance(self.paused, bool):
             raise ConfigurationError("ClaudeSkillSession.paused must be True or False.")
+        if not isinstance(self.resume_messages, tuple) or not all(isinstance(message, Mapping) for message in self.resume_messages):
+            raise ConfigurationError("ClaudeSkillSession.resume_messages must be a tuple of message mappings.")
+        snapshot = tuple(deepcopy(dict(message)) for message in self.resume_messages)
+        if self.paused:
+            if not snapshot or snapshot[-1].get("role") != "assistant" or "content" not in snapshot[-1]:
+                raise ConfigurationError("A paused ClaudeSkillSession requires full assistant content in resume_messages.")
+        elif snapshot:
+            raise ConfigurationError("A completed ClaudeSkillSession cannot retain resume_messages.")
+        object.__setattr__(self, "resume_messages", snapshot)
 
 
 @dataclass(frozen=True, slots=True)

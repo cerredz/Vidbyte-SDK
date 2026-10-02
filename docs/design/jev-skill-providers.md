@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** Codex
 **Created:** 2026-10-01
-**Last Updated:** 2026-10-01
+**Last Updated:** 2026-10-02
 
 ---
 
@@ -62,7 +62,7 @@ Cached official Anthropic documentation says Skills use Messages container.skill
 9. Jev receives metadata and body text only for text-backed candidates. The fixed relevance question states clearly that native candidates are judged from listed metadata only. Native candidates for non-Anthropic main providers are UNAVAILABLE before scoring with detail Native Claude skills require an Anthropic model. Jev selects candidates independently; selected text is injected as before, selected native references are collected in original order.
 10. At most 20 selected native references are attached to one call. Overflow candidates are explicitly marked UNAVAILABLE with detail Anthropic supports at most 20 skills per request in their indexed results; no candidate silently disappears or shifts position.
 11. JevSkillResult.detail is an optional safe, SDK-authored explanation for an UNAVAILABLE result and never includes exception text, source credentials, or source content. JevSkillsOutcome.claude_skills is a typed tuple, default empty. After preload, JevRuntime reads the just-written response outcome and adds claude_skills to the current run's copied options. It does not extend BaseAgentContext or add a generic preload-options callback.
-12. TextModelRunner.arun and run accept typed per-call claude_skills and claude_skill_session, copying them into a TextModelConfig for that call. Existing runner config defaults and non-native calls are unchanged.
+12. TextModelRunner.arun and run accept typed per-call claude_skills and claude_skill_session, copying them into a TextModelConfig for that call. Omitted claude_skills or session use the saved config defaults; explicit empty refs or session=None clear those defaults. A private typed sentinel distinguishes omitted session from explicit None. Existing config and non-native calls are unchanged.
 13. Anthropic adds selected references under container.skills, reuses a session container ID, and adds code_execution_20250825 once while retaining local tool schemas. A conflicting caller-supplied reserved container or incompatible code-execution payload fails with a typed configuration error rather than being overwritten. Native streaming fails before transport.
 14. Anthropic validates that native-skill responses include content/container fields needed for safe continuation. Empty text is permitted only for a valid native pause_turn response. Each TextModelResponse carries optional typed ClaudeSkillSession(container_id, paused, resume_messages); paused sessions retain the exact provider request messages plus the full raw assistant content as the next provider history, while completed sessions have no resume history.
 15. After usage recording and after_model_response middleware, but before local tool parsing, AgentRuntime handles a typed native session. It updates the run-local session option; a paused session adds the exact assistant content to runtime history and resumes through the ordinary bounded loop. Anthropic uses the provider-captured resume_messages directly, preserving initial history and conversation placements without rebuilding them or appending the user prompt again. Completed native responses preserve the container ID and continue through normal local-tool handling; server-side code execution blocks are never executed as local tools.
@@ -181,7 +181,7 @@ class SkillSourceResolver:
 3. For GITHUB, normalize approved GitHub URLs/shorthands; query repository metadata to get the true default branch; use an explicit revision when provided; use bounded tree lookup and raw/blob retrieval; for ambiguous implicit slash splits, probe only bounded ref/path interpretations, ignore only 404, and reject multiple matches or any non-404 probe failure.
 4. For SKILLS_SH, parse only owner/repo/slug forms and choose the matching SKILL.md from the same GitHub catalog resolver. No CLI, installation, or invented endpoint.
 5. For CLAUDE, call official list/retrieve/version metadata endpoints using a typed API request, follow pagination within explicit bounds, and return a ClaudeSkillReference plus display metadata with text=None.
-6. Use HttpTransport timeouts and maximum response sizes. Send API keys only to the fixed GitHub or Anthropic host set appropriate to the selected adapter. Do not include secrets in errors.
+6. Use HttpTransport timeouts and maximum response sizes. Send API keys only to the fixed GitHub or Anthropic host set appropriate to the selected adapter. Claude credentials resolve in order from SkillSource.api_key, the owning Anthropic JevAgentSettings.api_key, then ANTHROPIC_API_KEY; never forward a non-Anthropic model key. Do not include secrets in errors.
 7. Convert expected per-source transport, parse, not-found, ambiguity, unsupported-kind, and descriptor failures into one indexed unavailable value. Propagate asyncio.CancelledError.
 8. After resolution, group by resolved name and mark all colliding indices unavailable. Do not silently take the first result or shift later candidates.
 
@@ -236,16 +236,16 @@ Carry selected native refs and returned container session through one typed mode
 #### Interface / API
 
 ~~~python
-async def arun(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] | None = None, claude_skill_session: ClaudeSkillSession | None = None) -> TextModelResponse: ...
-def run(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] | None = None, claude_skill_session: ClaudeSkillSession | None = None) -> TextModelResponse: ...
+async def arun(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] | None = None, claude_skill_session: ClaudeSkillSession | None | _ConfiguredSession = <private sentinel>) -> TextModelResponse: ...
+def run(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None, claude_skills: Iterable[ClaudeSkillReference] | None = None, claude_skill_session: ClaudeSkillSession | None | _ConfiguredSession = <private sentinel>) -> TextModelResponse: ...
 ~~~
 
 #### Logic / Algorithm
 
-1. Store request-local values in a dataclasses.replace copy for the current run. None for claude_skills means use the saved config default; an explicit empty tuple disables saved refs for this call. An omitted session uses the saved session default. Do not mutate runner config.
+1. Store request-local values in a dataclasses.replace copy for the current run. None for claude_skills means use the saved config default; an explicit empty tuple disables saved refs for this call. The private session sentinel means use the saved session default; explicit None disables it. Do not mutate runner config.
 2. On Anthropic calls with native refs, attach container.skills entries with exact type, skill_id, and version, plus the typed session ID when available.
 3. Add the required code_execution_20250825 tool once. Preserve normal caller tools in their existing order. Reject incompatible reserved caller payloads rather than overwriting container or tools data from extra_body.
-4. For a paused-session resume, send the already appended assistant content and do not append the previous prompt again. For an ordinary call, preserve normal prompt append semantics.
+4. For a paused-session resume, send the already appended assistant content and do not append the previous prompt again. For every fresh exchange, preserve the existing provider behavior by appending the dispatched prompt, even when an identical prompt appears in earlier history.
 5. Build the request payload once, then parse and validate container.id, content, and stop_reason; return raw response and raw usage unmodified plus a ClaudeSkillSession whose paused value matches pause_turn. For pause_turn only, capture the exact payload.messages followed by an assistant message containing the complete raw response.content; completed sessions carry no resume_messages.
 6. Permit empty extracted text only for a well-formed native paused response. Raise typed provider response/configuration errors for malformed responses or conflicting payloads.
 7. If native skills are configured for streaming, raise before transport.
@@ -277,7 +277,7 @@ def _continue_claude_skill_execution(self, raw_result: object, message: str, mes
 1. After the Jev preload response writer records JevSkillsOutcome, read response.state.skills.claude_skills and set that exact tuple on the run's copied options, including an empty tuple to prevent config defaults from leaking into a run with no selected native refs.
 2. Generic runtime records raw usage and invokes after-model middleware exactly as today.
 3. Before ToolsFormatter.parse_tool_calls, inspect the typed response session and the prior run-local session.
-4. If the prior session was not paused, append the dispatched user message because Anthropic included it in payload.messages. If the new session is paused, append the exact assistant content from captured resume_messages, set the next request's session/container, and continue through the main bounded loop.
+4. If the prior session is absent or completed, append the dispatched user message because Anthropic included it in payload.messages. Do not deduplicate it based on matching older message content. If the new session is paused, append the exact assistant content from captured resume_messages, set the next request's session/container, and continue through the main bounded loop.
 5. If the prior session was paused, do not append the user message again. Anthropic uses the newly returned session.resume_messages as the next exact provider conversation. If the new session is not paused, retain its container ID for later local-tool turns and allow normal local-tool handling. Server tool blocks remain provider-side content.
 6. Respect max iterations, token limits, timeout, middleware stop, and cancellation for each exchange. UsageTracker records each raw response exactly once; no rollup is synthesized.
 
@@ -285,7 +285,7 @@ def _continue_claude_skill_execution(self, raw_result: object, message: str, mes
 
 - A response without a typed Claude session follows the current path without native-specific behavior.
 - Middleware stop after a paused response exits before another request.
-- Paused content is appended once; resume does not duplicate the user prompt or flatten non-text blocks. The captured provider history also preserves pre-existing messages and conversation-window placements exactly.
+- Each fresh exchange appends its dispatched prompt as before, even when the same text already appears in history. Paused content is appended once; each pause resume adds no new prompt and does not flatten non-text blocks. The captured provider history also preserves pre-existing messages and conversation-window placements exactly.
 - The runtime does not dispatch server_tool_use/code execution blocks to local tools, while preserving ordinary local tool schemas and calls.
 
 ### 6.6 Public Usage Guide
@@ -390,7 +390,7 @@ JevAlignmentSettings(skills=("inline text", SkillDocument(...), SkillSource(kind
 
 ## 9. File Change Manifest
 
-Complete list of every file expected to be created, modified, or deleted. Totals: 10 create, 18 modify, 0 delete.
+Complete list of every file expected to be created, modified, or deleted. Totals: 11 create, 19 modify, 0 delete.
 
 | Action | File Path | Reason |
 |--------|-----------|--------|
@@ -403,6 +403,7 @@ Complete list of every file expected to be created, modified, or deleted. Totals
 | CREATE | vidbyte/providers/skills/skills_sh.py | Explicit skills.sh slug-to-GitHub adapter. |
 | CREATE | vidbyte/providers/skills/claude.py | Claude Skills metadata API adapter. |
 | CREATE | tests/test_jev_skill_providers.py | Adapter, pipeline, provider, runtime, and failure coverage. |
+| CREATE | tests/test_jev_skill_remote_sources.py | GitHub/skills.sh probes, safety, ordering, and source resolution tests. |
 | CREATE | scripts/test-jev-skill-providers.py | Executable design-plan test harness. |
 | MODIFY | vidbyte/lib/enums/skills.py | Define closed source-kind enum. |
 | MODIFY | vidbyte/lib/enums/__init__.py | Export source-kind enum. |
@@ -411,6 +412,7 @@ Complete list of every file expected to be created, modified, or deleted. Totals
 | MODIFY | vidbyte/lib/dataclasses/__init__.py | Export source and native contracts. |
 | MODIFY | vidbyte/__init__.py | Export public SDK source and native contracts. |
 | MODIFY | vidbyte/agents/jev/settings.py | Accept explicit source descriptors without constructor fetching. |
+| MODIFY | vidbyte/agents/jev/agent.py | Pass only the Anthropic owner key to Claude source resolution. |
 | MODIFY | vidbyte/agents/jev/__init__.py | Export new contracts from the Jev namespace. |
 | MODIFY | vidbyte/agents/__init__.py | Export new contracts from the agents namespace. |
 | MODIFY | vidbyte/lib/jev/preflight/skills.py | State honest metadata-only criteria for native candidates. |
@@ -418,10 +420,10 @@ Complete list of every file expected to be created, modified, or deleted. Totals
 | MODIFY | vidbyte/lib/dataclasses/model_configs.py | Add per-call Claude refs/session fields to copied provider config. |
 | MODIFY | vidbyte/lib/runners/types.py | Carry typed native session in text response. |
 | MODIFY | vidbyte/lib/runners/text.py | Forward typed per-call options through config copy. |
-| MODIFY | vidbyte/lib/runners/__init__.py | Export typed response/session contracts as needed. |
+| MODIFY | vidbyte/lib/runners/streaming_text.py | Reject effective native options before streaming transport. |
 | MODIFY | vidbyte/providers/anthropic.py | Mount refs, preserve tools, parse session, reject unsupported stream. |
 | MODIFY | vidbyte/agents/jev/runtime.py | Add selected refs to named per-run options after preload. |
-| MODIFY | vidbyte/agents/runtime.py | Meter and resume native pauses inside the bounded loop. |
+| MODIFY | vidbyte/agents/runtime.py | Meter fresh exchanges and replay exact native pauses inside the bounded loop. |
 | DELETE | N/A | No deletion is required. |
 
 ---
@@ -471,11 +473,12 @@ All cases run without live provider credentials. Adapter HTTP uses stub transpor
 - [Hidden Failure] Missing container ID/content is a typed provider response failure.
 - [Silent Failure] Full assistant content blocks and raw usage survive response/session handling exactly.
 - [Hidden Assumption] Conversation-window TOP/END placements and caller history survive pause/resume exactly because the provider reuses the typed captured request history.
-- [Silent Failure] Repeated pause_turn responses retain one original user prompt and append each assistant response block exactly once.
+- [Hidden Assumption] If an identical prompt already appears in caller history, a fresh exchange still appends the current dispatched prompt; it is not deduplicated by content.
+- [Silent Failure] Repeated pause_turn responses replay the exact captured request and append each assistant response block once without adding another prompt during paused resumes.
 - [Hidden Assumption] Non-native calls preserve their current payload and response behavior.
 - [Edge Case] Pause on the last allowed iteration and middleware stop after pause are bounded.
 - [Hidden Failure] Cancellation/timeout during resume propagates.
-- [Silent Failure] Pause content is appended once and original user prompt is not duplicated.
+- [Silent Failure] Each completed/fresh exchange mirrors the provider's ordinary prompt append; the pause chain replays exact snapshots without an extra prompt.
 - [Hidden Assumption] Server-side code execution blocks are never dispatched as local tools while local tool calls still work.
 - [Edge Case] Two exchanges preserve per-call usage, including cached input fields when present.
 - [Hidden Failure] Continuation failure does not bypass usage recording for an already received response.

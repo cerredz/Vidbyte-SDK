@@ -139,17 +139,21 @@ class JevRuntime(AgentRuntime):
     async def _preload_skills(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
         # @intent explicit-system-option-is-the-effective-skill-baseline
         # An explicit provider override remains the caller's baseline, with selected skill text appended in the run context and provider option.
-        if self.skill_preload is None:
-            return context, options
         run_options = dict(options or {})
         explicit_system = run_options.get("system")
         has_system_override = isinstance(explicit_system, str)
         if has_system_override:
             context = replace(context, system_prompt=explicit_system)
+        if self.skill_preload is None:
+            return context, run_options if has_system_override else options
         context = await self.skill_preload.run(message, context)
-        if not has_system_override:
-            return context, options
-        run_options["system"] = context.system_prompt
+        if has_system_override:
+            run_options["system"] = context.system_prompt
+        outcome = self.response.state.skills
+        if outcome is None:
+            raise ConfigurationError("The Jev skill preload did not record its outcome.")
+        run_options["claude_skills"] = outcome.claude_skills
+        run_options["claude_skill_session"] = None
         return context, run_options
 
     async def _select_tools(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None, dict[str, Any] | None]:

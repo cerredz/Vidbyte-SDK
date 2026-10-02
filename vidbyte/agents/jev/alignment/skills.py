@@ -40,8 +40,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevSkillResult,
     JevSkillsOutcome,
 )
-from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
+from vidbyte.lib.dataclasses.skills import ClaudeSkillReference, SkillDocument, SkillSource
 from vidbyte.lib.enums.jev import JevQuestionType, JevSkillStatus
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.enums.skills import SkillSourceKind
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.jev.decision import DecisionModelHelper
@@ -62,21 +63,23 @@ _SkillBatch = tuple[tuple[int, ...], JevDecisionRequest]
 _SOURCE_FAILURE_DETAIL = "Skill source could not be resolved."
 _DUPLICATE_SOURCE_DETAIL = "Resolved skill name is ambiguous."
 _DECISION_FAILURE_DETAIL = "Skill relevance could not be evaluated."
-_UNSUPPORTED_NATIVE_DETAIL = "Claude-native skill resolution is not available."
+_UNSUPPORTED_NATIVE_DETAIL = "Native Claude skills require an Anthropic model."
 _OVERSIZED_DETAIL = "Skill candidate exceeds Jev's request size limit."
+_NATIVE_CAP_DETAIL = "Anthropic supports at most 20 skills per request."
 
 
 class JevSkillsPreload(JevPreload):
     """Selects relevant documents once for one run and appends their exact bodies."""
 
-    def __init__(self, *, skills: tuple[SkillDocument | SkillSource, ...], decision: DecisionModelConfig, threshold: float, response: JevResponse, source_resolver: SkillSourceResolver | None = None) -> None:
+    def __init__(self, *, skills: tuple[SkillDocument | SkillSource, ...], decision: DecisionModelConfig, threshold: float, response: JevResponse, provider: ModelProvider = ModelProvider.ANTHROPIC, claude_api_key: str | None = None, source_resolver: SkillSourceResolver | None = None) -> None:
         # @intent validated-settings-cross-the-preload-boundary
         # JevAgent passes normalized candidates, a validated decision policy, the response writer, and a closed resolver with no construction-time I/O.
         self.skills = skills
         self.decision = decision
         self.threshold = threshold
         self.response = response
-        self.source_resolver = source_resolver or SkillSourceResolver()
+        self.provider = provider
+        self.source_resolver = source_resolver or SkillSourceResolver(claude_api_key=claude_api_key)
 
     async def run(self, message: str, context: BaseAgentContext) -> BaseAgentContext:
         # @intent each-candidate-has-an-independent-result
@@ -105,15 +108,29 @@ class JevSkillsPreload(JevPreload):
                 if result.status is JevSkillStatus.SELECTED:
                     selected_indices.add(index)
         ordered_results = tuple(results[index] for index in range(1, len(self.skills) + 1))
-        selected = tuple(available[index] for index in sorted(selected_indices))
-        self.response.skills(JevSkillsOutcome(results=ordered_results, usage=self._sum_usage(usages)))
-        return self._append_selected(context, selected)
+        selected_text: list[SkillDocument] = []
+        native_refs: list[ClaudeSkillReference] = []
+        for index in sorted(selected_indices):
+            skill = available[index]
+            if skill.claude_reference is None:
+                selected_text.append(skill)
+                continue
+            if len(native_refs) >= 20:
+                results[index] = self._unavailable_result(index, self.skills[index - _SKILL_INDEX_BASE], _NATIVE_CAP_DETAIL, resolved=skill)
+                continue
+            native_refs.append(skill.claude_reference)
+        ordered_results = tuple(results[index] for index in range(1, len(self.skills) + 1))
+        self.response.skills(JevSkillsOutcome(results=ordered_results, usage=self._sum_usage(usages), claude_skills=tuple(native_refs)))
+        return self._append_selected(context, tuple(selected_text))
 
     async def _resolve_candidates(self) -> tuple[dict[int, SkillDocument], dict[int, JevSkillResult]]:
         # Resolves sources at run time and converts only expected per-source failures into indexed outcomes.
         available: dict[int, SkillDocument] = {}
         results: dict[int, JevSkillResult] = {}
         for index, candidate in enumerate(self.skills, start=_SKILL_INDEX_BASE):
+            if isinstance(candidate, SkillSource) and candidate.kind is SkillSourceKind.CLAUDE and self.provider is not ModelProvider.ANTHROPIC:
+                results[index] = self._unavailable_result(index, candidate, _UNSUPPORTED_NATIVE_DETAIL)
+                continue
             if isinstance(candidate, SkillSource):
                 try:
                     document = await self.source_resolver.resolve(candidate)
@@ -122,7 +139,7 @@ class JevSkillsPreload(JevPreload):
                     continue
             else:
                 document = candidate
-            if document.text is None:
+            if document.claude_reference is not None and self.provider is not ModelProvider.ANTHROPIC:
                 results[index] = self._unavailable_result(index, candidate, _UNSUPPORTED_NATIVE_DETAIL, resolved=document)
                 continue
             available[index] = document
@@ -154,7 +171,7 @@ class JevSkillsPreload(JevPreload):
         indexed = tuple(indexed_skills) if indexed_skills is not None else tuple(
             (index, skill)
             for index, skill in enumerate(self.skills, start=_SKILL_INDEX_BASE)
-            if isinstance(skill, SkillDocument) and skill.text is not None
+            if isinstance(skill, SkillDocument) and (skill.text is not None or skill.claude_reference is not None)
         )
         batches: list[_SkillBatch] = []
         oversized: list[int] = []
@@ -182,18 +199,21 @@ class JevSkillsPreload(JevPreload):
     def _build_batch(self, message: str, indexed: Sequence[tuple[int, SkillDocument]]) -> tuple[_SkillBatch | None, bool]:
         # @intent byte-bounds-match-the-provider-json-shape
         # Counting the UTF-8 bytes of a standard JSON encoding keeps the estimate conservative without claiming provider byte limits.
-        questions = tuple(JevSkillRelevanceQuestion(index).to_question() for index, _ in indexed)
+        questions = tuple(JevSkillRelevanceQuestion(index, metadata_only=skill.claude_reference is not None).to_question() for index, skill in indexed)
+        skills_state = {}
+        for index, skill in indexed:
+            candidate_state = {
+                "kind": "claude_native_metadata" if skill.claude_reference is not None else "text",
+                "name": skill.name,
+                "description": skill.description,
+                "source": skill.source,
+            }
+            if skill.text is not None:
+                candidate_state["text"] = skill.text
+            skills_state[JevSkillRelevanceQuestion(index).name] = candidate_state
         state = {
             "request": message,
-            "skills": {
-                JevSkillRelevanceQuestion(index).name: {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "source": skill.source,
-                    "text": skill.text,
-                }
-                for index, skill in indexed
-            },
+            "skills": skills_state,
         }
         question_payloads = {
             question.name: {

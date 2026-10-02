@@ -77,6 +77,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -115,6 +116,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHookInvocation,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.skills import ClaudeSkillSession
 from vidbyte.lib.constants.speed import (
     AGENT_SPEED_FIRST_INDEX,
     AGENT_SPEED_FIRST_RETRY_INDEX,
@@ -130,11 +132,13 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality
 from vidbyte.lib.errors import (
     AllModelsFailedError,
+    ConfigurationError,
     PermissionDeniedError,
     ToolExecutionError,
     ToolRegistryError,
 )
 from vidbyte.lib.token_usage import token_usage_from_response
+from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
@@ -460,6 +464,9 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+
+            if self._continue_claude_skill_execution(raw_result, message, messages, run_options):
+                continue
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, state.provider)
             self._record_parser_span(
@@ -1363,6 +1370,24 @@ class AgentRuntime:
         if self.output_schema is not None:
             call_options.setdefault("response_format", self._wire_schema())
         return call_options
+
+    def _continue_claude_skill_execution(self, raw_result: object, message: str, messages: list[dict[str, Any]], run_options: dict[str, Any]) -> bool:
+        # Mirrors fresh prompt appends and replays exact typed Claude pause snapshots after metering.
+        if not isinstance(raw_result, TextModelResponse) or raw_result.claude_skill_session is None:
+            return False
+        prior_session = run_options.get("claude_skill_session")
+        if prior_session is None:
+            messages.append({"role": "user", "content": message})
+        elif not isinstance(prior_session, ClaudeSkillSession):
+            raise ConfigurationError("claude_skill_session must be a ClaudeSkillSession or None.")
+        elif not prior_session.paused:
+            messages.append({"role": "user", "content": message})
+        session = raw_result.claude_skill_session
+        run_options["claude_skill_session"] = session
+        if not session.paused:
+            return False
+        messages.append(deepcopy(dict(session.resume_messages[-1])))
+        return True
 
     def _wire_schema(self) -> dict[str, Any]:
         # Resolves the declared schema once per runtime and folds unenforceable constraints into
