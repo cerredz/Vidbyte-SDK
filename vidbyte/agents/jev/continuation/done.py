@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/continuation/done.py
 
-PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run the enabled checks, and when one fails it sends the main agent back to work with the original request, the run state, the handoff, and the Jev questions that failed, with more focus on what is missing.
+PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run enabled checks, and on failure it sends the original request, run state, handoff, failed Jev questions, and focused missing work back to the main agent.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
+ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). Problem repair feedback requires relevant successful revalidation and then directs the agent back to the original request. The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md, docs/design/jev-required-actions-done-criteria.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -24,10 +24,11 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimEvidence,
     JevDoneQuestion,
     JevDoneResult,
+    JevProblemResolutionItem,
     JevRequiredAction,
     JevRequiredActionEvidence,
 )
-from vidbyte.lib.enums.jev import JevDoneCheck
+from vidbyte.lib.enums.jev import JevDoneCheck, JevProblemCheckItemType
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.jev import JevDoneRegistry
 from vidbyte.lib.jev.decision import DecisionModelHelper
@@ -77,58 +78,97 @@ class JevDoneContinuation(JevContinuation):
         )
 
     def _explain(self, result: JevDoneResult) -> tuple[str, str]:
-        # Returns one failed check's part of the message: its failed Jev questions, and the focus lines; one commented case per check.
         match result.check:
             case JevDoneCheck.MULTI_PART:
-                # Each incomplete deliverable's question, Jev's answer, and the handoff's own words for what is missing,
-                # then the deliverables themselves, in the user's terms, as the parts to focus on.
-                question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
-                state = None if self.run_state.record is None else self.run_state.record.multi_part
-                handoff = None if self.run_state.handoff_record is None else self.run_state.handoff_record.multi_part
-                deliverables = {} if state is None else {item.id: item for item in state.deliverables}
-                missing = {} if handoff is None else {item.id: item.missing for item in handoff.deliverables}
-                failed = [question.gap]
-                focus = []
-                for identifier in result.incomplete:
-                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
-                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
-                    focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
-                return "\n".join(failed), "\n".join(focus)
+                return self._explain_multi_part(result)
             case JevDoneCheck.CLAIMS:
-                # Give the main agent only the factual assertions Jev found unsupported, paired with their
-                # exact tool-call evidence and gap so it can finish requested work or correct its final answer.
-                question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
-                handoff = None if self.run_state.handoff_record is None else self.run_state.handoff_record.claims
-                claims = {} if handoff is None else {item.id: item for item in handoff.claims}
-                failed = [question.gap]
-                focus = []
-                threshold = JevDoneRegistry.threshold(JevDoneCheck.CLAIMS)
-                for claim_id in result.incomplete:
-                    item = claims[claim_id]
-                    assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
-                    failed.extend(assertion_failures)
-                    focus.extend(assertion_focus)
-                return "\n".join(failed), "\n".join(focus)
+                return self._explain_claims(result)
             case JevDoneCheck.REQUIRED_ACTIONS:
-                # Name only actions Jev or deterministic dependency checks found incomplete, and give the
-                # main agent the original requested condition plus the handoff's actionable evidence gap.
-                question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
-                state = None if self.run_state.record is None else self.run_state.record.required_actions
-                handoff = None if self.run_state.handoff_record is None else self.run_state.handoff_record.required_actions
-                actions = {} if state is None else {item.id: item for item in state.actions}
-                evidence = {} if handoff is None else {item.id: item for item in handoff.actions}
-                failed = [question.gap]
-                focus = []
-                for identifier in result.incomplete:
-                    action = actions[identifier]
-                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
-                    missing = evidence[identifier].missing
-                    order_gap = self._required_action_order_gap(action, evidence, result.incomplete)
-                    if order_gap:
-                        missing = f"{missing} {order_gap}" if missing else order_gap
-                    failed.append(f"- {question.instructions.question.format(item=identifier)} Gate result: incomplete (P(yes) = {yes:.2f}). Still missing: {missing}")
-                    focus.append(f"- Required action: {action.action} Completion condition: {action.completion_signal}")
-                return "\n".join(failed), "\n".join(focus)
+                return self._explain_required_actions(result)
+            case JevDoneCheck.TARGET_OUTCOME:
+                return self._explain_target_outcomes(result)
+            case JevDoneCheck.PROBLEMS_RESOLVED:
+                return self._explain_problems_resolved(result)
+        raise ValueError(f"Unsupported Jev done check: {result.check!r}")
+
+    def _explain_multi_part(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
+        state = None if self.run_state.record is None else self.run_state.record.multi_part
+        handoff = None if self.run_state.handoff_record is None else self.run_state.handoff_record.multi_part
+        deliverables = {} if state is None else {item.id: item for item in state.deliverables}
+        missing = {} if handoff is None else {item.id: item.missing for item in handoff.deliverables}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+            focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_claims(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
+        handoff = None if self.run_state.handoff_record is None else self.run_state.handoff_record.claims
+        claims = {} if handoff is None else {item.id: item for item in handoff.claims}
+        failed = [question.gap]
+        focus = []
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.CLAIMS)
+        for claim_id in result.incomplete:
+            assertion_failures, assertion_focus = self._claim_assertion_feedback(claims[claim_id], result, question, threshold)
+            failed.extend(assertion_failures)
+            focus.extend(assertion_focus)
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_required_actions(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
+        state = None if self.run_state.record is None else self.run_state.record.required_actions
+        handoff = None if self.run_state.handoff_record is None else self.run_state.handoff_record.required_actions
+        actions = {} if state is None else {item.id: item for item in state.actions}
+        evidence = {} if handoff is None else {item.id: item for item in handoff.actions}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            action = actions[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            missing = evidence[identifier].missing
+            order_gap = self._required_action_order_gap(action, evidence, result.incomplete)
+            if order_gap:
+                missing = f"{missing} {order_gap}" if missing else order_gap
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Gate result: incomplete (P(yes) = {yes:.2f}). Still missing: {missing}")
+            focus.append(f"- Required action: {action.action} Completion condition: {action.completion_signal}")
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_target_outcomes(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.TARGET_OUTCOME)
+        state = None if self.run_state.record is None else self.run_state.record.target_outcome
+        handoff = None if self.run_state.handoff_record is None else self.run_state.handoff_record.target_outcome
+        items = {} if state is None else {item.id: item for item in state.items}
+        evidence = {} if handoff is None else {item.id: item for item in handoff.items}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            item = items[identifier]
+            observed = evidence[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {observed.missing}")
+            focus.append("\n".join((
+                f"- Outcome: {item.outcome}", f"  Actual target: {item.target}", f"  Scope: {item.scope}",
+                f"  Completion criterion: {item.completion_criterion}", f"  Observed proxy milestone: {observed.observed_proxy}",
+                f"  Direct target evidence: {observed.direct_evidence}", f"  Still missing: {observed.missing}",
+            )))
+        return "\n".join(failed), "\n".join(focus)
+
+    def _explain_problems_resolved(self, result: JevDoneResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
+        evidence = None if self.run_state.handoff_record is None else self.run_state.handoff_record.problems_resolved
+        items = {} if evidence is None else {item.id: item for item in evidence.items}
+        failed = [question.gap]
+        focus = []
+        for identifier in result.incomplete:
+            item = items[identifier]
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+            focus.append(self._problem_focus(item))
+        return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""
@@ -172,6 +212,21 @@ class JevDoneContinuation(JevContinuation):
             f"  Completion criteria: {assertion.completion_criteria}",
             f"  Tool-call evidence: {claim.evidence}",
             f"  Still missing: {claim.missing}",
+        ))
+
+    @staticmethod
+    def _problem_focus(item: JevProblemResolutionItem) -> str:
+        """Render the failed issue or original-request item with its repair and evidence gap."""
+        directive = "Fully repair this problem and successfully revalidate the affected behavior, then return to the original request and complete all remaining requested work." if item.kind is JevProblemCheckItemType.PROBLEM else "Return to the original request and complete every remaining requested part after any repairs."
+        return "\n".join((
+            f"- Item: {item.title} ({item.kind.value})",
+            f"  Description: {item.description}",
+            f"  Scope: {item.scope}",
+            f"  Repair reported: {item.repair}",
+            f"  Verification: {item.verification}",
+            f"  Run evidence: {item.evidence}",
+            f"  Still missing: {item.missing}",
+            f"  {directive}",
         ))
 
 
