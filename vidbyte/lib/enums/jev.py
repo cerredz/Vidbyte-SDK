@@ -60,6 +60,7 @@ class JevDoneCheck(str, Enum):
     CUMULATIVE_OBLIGATIONS = "cumulative_obligations"
     DISCOVERED_ITEM_COVERAGE = "discovered_item_coverage"
     FAITHFUL_SCOPE = "faithful_scope"
+    EXPERT_DEPTH = "expert_depth"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -94,6 +95,7 @@ class JevDoneQuestionKey(str, Enum):
     DISCOVERED_ITEM_PROCESSED = "discovered_item_coverage.processed"
     DISCOVERED_ITEM_INVENTORY_COMPLETE = "discovered_item_coverage.inventory_complete"
     FAITHFUL_SCOPE = "faithful_scope"
+    EXPERT_DEPTH_HANDLED = "expert_depth.handled"
 
 
 class JevBoundaryKind(str, Enum):

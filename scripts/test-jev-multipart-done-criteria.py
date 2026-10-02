@@ -1,11 +1,11 @@
 """FILE: scripts/test-jev-multipart-done-criteria.py
 
-PURPOSE: Runs the focused, network-free JevAgent done-check test suite, including multi-part, claims, and required-actions checks.
+PURPOSE: Runs the focused, network-free JevAgent done-check test suite, including multi-part, expert-depth, claims, and required-actions checks.
 ROLE IN CODEBASE: Provides a discoverable feature verification entrypoint alongside the repository's broader CI runner.
 ARCHITECTURE NOTE: The script loads the unittest module directly and returns a non-zero process code for any failure.
 COMMON MODIFICATION PATTERNS: Keep module loading exhaustive when new done-check test classes are added.
 KNOWN EDGE CASES: The repository root is inserted for direct script execution from any current working directory.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-required-actions-done-criteria.md, and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-expert-depth-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-required-actions-done-criteria.md, and skills/jev-continuation/SKILL.md.
 TESTS: This script executes tests/test_jev_done.py.
 """
 

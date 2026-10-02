@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at constru
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; checks that audit a generated list against source inputs also register a per-source question in _inventory_questions. Keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here. REQUIRED_ACTIONS contributes one question for each explicitly requested action; DISCOVERED_ITEM_COVERAGE asks one source-inventory question and one item-processing question.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-discovered-item-coverage.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-discovered-item-coverage.md, docs/design/jev-expert-depth-done-criteria.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -20,6 +20,7 @@ from vidbyte.lib.constants.jev import (
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
     JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
     JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
+    JEV_EXPERT_DEPTH_THRESHOLD,
     JEV_FAITHFUL_SCOPE_THRESHOLD,
     JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
     JEV_INPUT_EXHAUSTION_THRESHOLD,
@@ -53,6 +54,7 @@ from vidbyte.lib.jev.done.discovered_item_coverage import (
     DiscoveredItemInventoryCompleteQuestion,
     DiscoveredItemProcessedQuestion,
 )
+from vidbyte.lib.jev.done.expert_depth import ExpertDepthHandledQuestion
 from vidbyte.lib.jev.done.faithful_scope import FaithfulScopeQuestion
 from vidbyte.lib.jev.done.guaranteed_next_actions import (
     GuaranteedActionNecessaryQuestion,
@@ -97,6 +99,7 @@ class JevDoneRegistry:
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: (CumulativeObligationFulfilledQuestion(),),
         JevDoneCheck.DISCOVERED_ITEM_COVERAGE: (DiscoveredItemProcessedQuestion(),),
         JevDoneCheck.FAITHFUL_SCOPE: (FaithfulScopeQuestion(),),
+        JevDoneCheck.EXPERT_DEPTH: (ExpertDepthHandledQuestion(),),
     })
     _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeUserTurnReconciledQuestion(),
@@ -123,6 +126,7 @@ class JevDoneRegistry:
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
         JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
         JevDoneCheck.FAITHFUL_SCOPE: JEV_FAITHFUL_SCOPE_THRESHOLD,
+        JevDoneCheck.EXPERT_DEPTH: JEV_EXPERT_DEPTH_THRESHOLD,
     })
 
     @classmethod

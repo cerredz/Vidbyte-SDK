@@ -54,6 +54,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_COMPLETION_STATUS_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
+    JEV_DONE_DETAIL_FIELD,
     JEV_DONE_DISCOVERED_ITEM_ACTION_FIELD,
     JEV_DONE_DISCOVERED_ITEM_CANDIDATES_FIELD,
     JEV_DONE_DISCOVERED_ITEM_CRITERIA_FIELD,
@@ -63,8 +64,10 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DISCOVERED_ITEM_INVENTORY_FIELD,
     JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD,
     JEV_DONE_DISCOVERED_ITEMS_FIELD,
+    JEV_DONE_DONE_WHEN_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_EXECUTION_FIELD,
+    JEV_DONE_EXPERT_DETAILS_FIELD,
     JEV_DONE_FINAL_ACCOUNT_FIELD,
     JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD,
     JEV_DONE_HARD_PART_FIELD,
@@ -143,6 +146,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_SCOPE_REQUESTED_CHANGE_FIELD,
     JEV_DONE_SCOPE_UNIT_FIELD,
     JEV_DONE_SCOPE_UNIT_NOUN_FIELD,
+    JEV_DONE_SHALLOW_VERSION_FIELD,
     JEV_DONE_TARGET_FIELD,
     JEV_DONE_TARGET_OUTCOME_FIELD,
     JEV_DONE_TARGET_OUTCOMES_FIELD,
@@ -152,6 +156,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_USER_TURN_EVIDENCE_FIELD,
     JEV_DONE_USER_TURNS_FIELD,
     JEV_DONE_WHAT_NOT_TO_DO_FIELD,
+    JEV_EXPERT_DEPTH_THRESHOLD,
     JEV_MOTIVATING_CASE_RECALL_THRESHOLD,
     JEV_NOUL_TRUE,
     JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD,
@@ -164,6 +169,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevDecisionRequest,
     JevDeliverable,
     JevDoneResult,
+    JevExpertDepth,
+    JevExpertDepthDeliverable,
+    JevExpertDepthPayload,
+    JevExpertDetail,
     JevHandoffRecord,
     JevInputExhaustion,
     JevInputExhaustionEvidence,
@@ -231,6 +240,7 @@ class JevRunState(BaseAgent):
     _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsPayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationsPayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthPayload})
 
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -498,6 +508,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations_section,
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_section,
             JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope_section,
+            JevDoneCheck.EXPERT_DEPTH: self._expert_depth_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -548,6 +559,28 @@ class JevRunState(BaseAgent):
             JEV_DONE_MISSING_FIELD: handoff.faithful_scope.missing,
         }
         return state, (question.to_question(JEV_DONE_HARD_PART_FIELD),)
+
+    def _expert_depth_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Project each request-derived weak point beside only its own run evidence."""
+        state = None if self.record is None else self.record.expert_depth
+        evidence = handoff.expert_depth
+        if state is None or evidence is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        evidence_by_id = {item.id: item.evidence for item in evidence.details}
+        entries = {
+            detail.id: {
+                JEV_DONE_DELIVERABLE_FIELD: deliverable.description,
+                JEV_DONE_DETAIL_FIELD: detail.detail,
+                JEV_DONE_SHALLOW_VERSION_FIELD: detail.shallow_version,
+                JEV_DONE_DONE_WHEN_FIELD: detail.done_when,
+                JEV_DONE_EVIDENCE_FIELD: evidence_by_id[detail.id],
+            }
+            for deliverable, detail in state.entries()
+        }
+        return {JEV_DONE_EXPERT_DETAILS_FIELD: entries}, tuple(
+            question.to_question(identifier) for identifier in state.ids()
+        )
 
     def _cumulative_obligations_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         """Ask about every active request obligation and every supplied user turn's evidence inventory."""
@@ -1046,11 +1079,48 @@ class JevRunState(BaseAgent):
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations,
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_coverage,
             JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope,
+            JevDoneCheck.EXPERT_DEPTH: self._expert_depth,
         }
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
         return handler(handoff, decision)
+
+    def _expert_depth(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Score every named weak point with a per-item veto and preserve weakest-first failures."""
+        state = None if self.record is None else self.record.expert_depth
+        if state is None or handoff is None or handoff.expert_depth is None:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+        if not state.deliverables:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        identifiers = state.ids()
+        answers = {
+            identifier: decision.answers[question.name(identifier)]
+            for identifier in identifiers
+            if question.name(identifier) in decision.answers
+        }
+        verdict = DecisionModelHelper.score_noul(answers, identifiers, JEV_EXPERT_DEPTH_THRESHOLD, JEV_EXPERT_DEPTH_THRESHOLD)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+        yes = {identifier: verdict.answers[identifier].probabilities[JEV_NOUL_TRUE] for identifier in identifiers}
+        incomplete = tuple(
+            sorted(
+                (identifier for identifier in identifiers if yes[identifier] < JEV_EXPERT_DEPTH_THRESHOLD),
+                key=yes.__getitem__,
+            )
+        )
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.EXPERT_DEPTH,
+            score=verdict.score,
+            passed=verdict.passed,
+            answers=verdict.answers,
+            incomplete=incomplete,
+            usage=usage,
+        )
 
     def _faithful_scope(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         """Judge the one request-selected hard part from the handoff evidence and one bounded answer."""
@@ -1671,6 +1741,7 @@ class JevRunState(BaseAgent):
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        expert_depth = self._expert_depth_record(payload)
         required_actions = self._required_actions_record(payload)
         output_count = self._output_count_record(payload)
         scope_coverage = None
@@ -1751,7 +1822,33 @@ class JevRunState(BaseAgent):
             negative_coverage=negative_coverage,
             output_extent=self._output_extent_record(payload),
             cumulative_obligations=cumulative_obligations,
+            expert_depth=expert_depth,
         )
+
+    @staticmethod
+    def _expert_depth_record(payload: JevRunStatePayload) -> JevExpertDepth | None:
+        """Convert weak points in request order, retaining each detail's own shallow and deep criteria."""
+        section = getattr(payload, JevDoneCheck.EXPERT_DEPTH.value, None)
+        if not isinstance(section, JevExpertDepthPayload):
+            return None
+        deliverables = tuple(
+            JevExpertDepthDeliverable(
+                item.id,
+                item.description.strip(),
+                tuple(
+                    JevExpertDetail(
+                        detail.id,
+                        detail.detail.strip(),
+                        detail.shallow_version.strip(),
+                        detail.done_when.strip(),
+                        detail.risk.strip(),
+                    )
+                    for detail in item.details
+                ),
+            )
+            for item in section.deliverables
+        )
+        return JevExpertDepth(deliverables)
 
     def _cumulative_obligations_record(self, payload: JevRunStatePayload) -> JevCumulativeObligations | None:
         """Convert supplied-turn obligation statuses while retaining their exact history indices."""

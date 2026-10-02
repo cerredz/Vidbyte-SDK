@@ -56,6 +56,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevDiscoveredItemBatchEntryPayload,
     JevDiscoveredItemBatchPayload,
     JevDiscoveredItemEvidence,
+    JevExpertDepthEvidence,
+    JevExpertDepthEvidencePayload,
+    JevExpertDetailEvidence,
     JevFaithfulScopeEvidence,
     JevFaithfulScopeEvidencePayload,
     JevGuaranteedNextAction,
@@ -128,6 +131,7 @@ class JevHandoff(BaseAgent):
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JevDiscoveredItemBatchPayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -314,6 +318,7 @@ class JevHandoff(BaseAgent):
             required_actions=required_actions,
             discovered_item_coverage=discovered_item_coverage,
             faithful_scope=faithful_scope,
+            expert_depth=request_records.expert_depth,
         )
 
     @staticmethod
@@ -492,13 +497,9 @@ class JevHandoff(BaseAgent):
     # @intent request-derived-evidence-covers-exactly-the-state
     # Each pre-run item gets exactly one handoff entry; an omission or invented id makes all evidence unavailable.
     def _request_evidence_records(self, payload: JevHandoffPayload, state: JevRunStateRecord) -> JevHandoffRecord | None:
-        multi_part = None
-        section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
-        if isinstance(section, JevMultiPartEvidencePayload):
-            multi_part = JevMultiPartEvidence(tuple(JevDeliverableEvidence(item.id, item.evidence.strip(), item.missing.strip()) for item in section.deliverables))
-            expected = () if state.multi_part is None else state.multi_part.ids()
-            if sorted(multi_part.ids()) != sorted(expected):
-                return None
+        multi_part_valid, multi_part = self._multi_part_evidence_record(payload, state)
+        if not multi_part_valid:
+            return None
         phase_progress = None
         phase_section = getattr(payload, JevDoneCheck.PHASE_PROGRESS.value, None)
         if isinstance(phase_section, JevPhaseProgressEvidencePayload):
@@ -525,6 +526,9 @@ class JevHandoff(BaseAgent):
             expected = () if state.motivating_case is None else state.motivating_case.ids()
             if motivating_case.ids() != expected:
                 return None
+        expert_depth_valid, expert_depth = self._expert_depth_evidence_record(payload, state)
+        if not expert_depth_valid:
+            return None
         cumulative_obligations = self._cumulative_obligations_evidence(payload, state)
         additional_records = self._request_derived_evidence_records(payload, state)
         if additional_records is None:
@@ -540,7 +544,41 @@ class JevHandoff(BaseAgent):
             output_count=additional_records.output_count,
             output_extent=additional_records.output_extent,
             negative_coverage=additional_records.negative_coverage,
+            expert_depth=expert_depth,
         )
+
+    @staticmethod
+    def _multi_part_evidence_record(
+        payload: JevHandoffPayload, state: JevRunStateRecord
+    ) -> tuple[bool, JevMultiPartEvidence | None]:
+        """Match multi-part evidence to every request-derived deliverable id."""
+        section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
+        if not isinstance(section, JevMultiPartEvidencePayload):
+            return True, None
+        evidence = JevMultiPartEvidence(tuple(
+            JevDeliverableEvidence(item.id, item.evidence.strip(), item.missing.strip())
+            for item in section.deliverables
+        ))
+        expected = () if state.multi_part is None else state.multi_part.ids()
+        valid = sorted(evidence.ids()) == sorted(expected)
+        return valid, evidence if valid else None
+
+    @staticmethod
+    def _expert_depth_evidence_record(
+        payload: JevHandoffPayload, state: JevRunStateRecord
+    ) -> tuple[bool, JevExpertDepthEvidence | None]:
+        """Match the per-detail evidence to exactly the request-derived detail ids."""
+        section = getattr(payload, JevDoneCheck.EXPERT_DEPTH.value, None)
+        if not isinstance(section, JevExpertDepthEvidencePayload):
+            return True, None
+        evidence = JevExpertDepthEvidence(tuple(
+            JevExpertDetailEvidence(item.id, item.evidence.strip(), item.missing.strip())
+            for item in section.details
+        ))
+        expected = () if state.expert_depth is None else state.expert_depth.ids()
+        if sorted(evidence.ids()) != sorted(expected):
+            return False, None
+        return True, evidence
 
     @staticmethod
     def _cumulative_obligations_evidence(payload: JevHandoffPayload, state: JevRunStateRecord) -> JevCumulativeObligationsEvidence | None:

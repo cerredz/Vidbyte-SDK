@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_done.py
 
-PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: request-derived and post-run records, fixed questions, shared state and handoff schemas, one-time request reviews, batched Jev requests, trace-backed required actions, and continuation and fail-open behavior.
+PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: request-derived and post-run records, fixed questions, shared state and handoff schemas, one-time request reviews, batched Jev requests, expert-depth ranking, trace-backed required actions, and continuation and fail-open behavior.
 ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, the handoff reads the main agent's window through ContextManager, and every enabled check's questions share one Jev request.
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-completion-evidence.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-required-actions-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-expert-depth-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-completion-evidence.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-required-actions-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
 """
 
@@ -117,6 +117,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_REQUEST_FIELD,
     JEV_DONE_REQUIRED_ACTIONS_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
+    JEV_EXPERT_DEPTH_FOCUS_LIMIT,
+    JEV_EXPERT_DEPTH_THRESHOLD,
     JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD,
     JEV_INPUT_SET_COVERAGE_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
@@ -156,6 +158,16 @@ from vidbyte.lib.dataclasses.jev import (
     JevDiscoveredItemPayload,
     JevDoneQuestion,
     JevDoneResult,
+    JevExpertDepth,
+    JevExpertDepthDeliverable,
+    JevExpertDepthDeliverablePayload,
+    JevExpertDepthEvidence,
+    JevExpertDepthEvidencePayload,
+    JevExpertDepthPayload,
+    JevExpertDetail,
+    JevExpertDetailEvidence,
+    JevExpertDetailEvidencePayload,
+    JevExpertDetailPayload,
     JevFaithfulScopeEvidence,
     JevFaithfulScopeEvidencePayload,
     JevHandoffPayload,
@@ -216,7 +228,6 @@ from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevDoneRegistry
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev.done import (
-    DONE_STATE,
     AssumptionsReconciledQuestion,
     ClaimsSupportedQuestion,
     FaithfulScopeQuestion,
@@ -228,11 +239,14 @@ from vidbyte.lib.jev.done import (
     ProblemsResolvedQuestion,
     ReportActionAlignmentQuestion,
 )
+from vidbyte.lib.jev.done.expert_depth import ExpertDepthHandledQuestion
 from vidbyte.lib.jev.done.guaranteed_next_actions import (
     GuaranteedActionNecessaryQuestion,
     GuaranteedActionUnfinishedQuestion,
 )
+from vidbyte.lib.jev.done.multi_part import DONE_STATE as MULTI_PART_DONE_STATE
 from vidbyte.lib.jev.done.required_actions import RequiredActionCompletedQuestion
+from vidbyte.lib.jev.done.state import DONE_STATE
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.prompts.catalog import Prompts
@@ -585,7 +599,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevNegativeCoverageTarget, JevNegativeCoverage, JevNegativeCoverageEvidenceItem, JevNegativeCoverageEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRequiredAction, JevRequiredActionEvidence, JevRequiredActions, JevRequiredActionsEvidence, JevCumulativeObligation, JevCumulativeObligationEvidence, JevCumulativeObligations, JevCumulativeObligationsEvidence, JevCumulativeUserTurnEvidence, JevDiscoveredItem, JevDiscoveredItemBatch, JevDiscoveredItemEvidence, JevFaithfulScopeEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevExpertDetail, JevExpertDepthDeliverable, JevExpertDepth, JevExpertDetailEvidence, JevExpertDepthEvidence, JevInputTarget, JevInputSetCoverage, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevOutputExtentItem, JevOutputExtent, JevOutputExtentEvidenceItem, JevOutputExtentEvidence, JevNegativeCoverageTarget, JevNegativeCoverage, JevNegativeCoverageEvidenceItem, JevNegativeCoverageEvidence, JevReportActionAlignmentItem, JevReportActionAlignment, JevRequiredAction, JevRequiredActionEvidence, JevRequiredActions, JevRequiredActionsEvidence, JevCumulativeObligation, JevCumulativeObligationEvidence, JevCumulativeObligations, JevCumulativeObligationsEvidence, JevCumulativeUserTurnEvidence, JevDiscoveredItem, JevDiscoveredItemBatch, JevDiscoveredItemEvidence, JevFaithfulScopeEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload, JevExpertDepthPayload, JevExpertDepthEvidencePayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -593,7 +607,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevNegativeCoveragePayload, JevNegativeCoverageTargetPayload, JevNegativeCoverageEvidencePayload, JevNegativeCoverageEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationPayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidenceEntryPayload, JevCumulativeUserTurnEvidenceEntryPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemPayload, JevDiscoveredItemBatchEntryPayload, JevDiscoveredItemBatchPayload, JevFaithfulScopeEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevExpertDepthPayload, JevExpertDepthDeliverablePayload, JevExpertDetailPayload, JevExpertDepthEvidencePayload, JevExpertDetailEvidencePayload, JevInputSetCoveragePayload, JevInputTargetPayload, JevInputSetCoverageEvidencePayload, JevInputTargetEvidencePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevNegativeCoveragePayload, JevNegativeCoverageTargetPayload, JevNegativeCoverageEvidencePayload, JevNegativeCoverageEvidenceItemPayload, JevReportActionAlignmentEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionEvidencePayload, JevAssumptionsReconciledPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload, JevProblemEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseStagePayload, JevPhaseProgressPayload, JevPhaseStageEvidencePayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationPayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidenceEntryPayload, JevCumulativeUserTurnEvidenceEntryPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemPayload, JevDiscoveredItemBatchEntryPayload, JevDiscoveredItemBatchPayload, JevFaithfulScopeEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -602,7 +616,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevNegativeCoveragePayload, JevNegativeCoverageEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemBatchPayload, JevFaithfulScopeEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevExpertDepthPayload, JevExpertDepthEvidencePayload, JevInputSetCoveragePayload, JevInputSetCoverageEvidencePayload, JevOutputCountPayload, JevOutputCountEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevNegativeCoveragePayload, JevNegativeCoverageEvidencePayload, JevReportActionAlignmentEvidenceSectionPayload, JevAssumptionsReconciledPayload, JevClaimsEvidencePayload, JevProblemsResolvedEvidencePayload, JevPhaseProgressPayload, JevPhaseProgressEvidencePayload, JevCumulativeObligationsPayload, JevCumulativeObligationEvidencePayload, JevDiscoveredItemBatchPayload, JevFaithfulScopeEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -868,12 +882,14 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(required_schema.model_fields[JEV_DONE_REQUIRED_ACTIONS_FIELD].description, JevRequiredActionsPayload.SECTION)
         cumulative_schema = JevRunState.schema((JevDoneCheck.CUMULATIVE_OBLIGATIONS,))
         self.assertEqual(cumulative_schema.model_fields["cumulative_obligations"].description, JevCumulativeObligationsPayload.SECTION)
+        expert_schema = JevRunState.schema((JevDoneCheck.EXPERT_DEPTH,))
+        self.assertEqual(expert_schema.model_fields["expert_depth"].description, JevExpertDepthPayload.SECTION)
         self.assertNotIn("discovered_item_coverage", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         completion_schema = JevRunState.schema((JevDoneCheck.COMPLETION_EVIDENCE,))
         self.assertEqual(set(completion_schema.model_fields), {"goal", "objective", "mission", "hard_part", "what_not_to_do"})
         self.assertNotIn(JEV_DONE_REQUIRED_ACTIONS_FIELD, JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields)
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE, JevDoneCheck.OUTPUT_COUNT, JevDoneCheck.OUTPUT_EXTENT, JevDoneCheck.INPUT_EXHAUSTION, JevDoneCheck.NEGATIVE_COVERAGE, JevDoneCheck.REQUIRED_ACTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS})
-        request_derived_fields = {"goal", "objective", "mission", "hard_part", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent", "input_exhaustion", JEV_DONE_NEGATIVE_COVERAGE_FIELD, JEV_DONE_REQUIRED_ACTIONS_FIELD, "cumulative_obligations"}
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.MOTIVATING_CASE, JevDoneCheck.SCOPE_COVERAGE, JevDoneCheck.TARGET_OUTCOME, JevDoneCheck.PHASE_PROGRESS, JevDoneCheck.INPUT_SET_COVERAGE, JevDoneCheck.OUTPUT_COUNT, JevDoneCheck.OUTPUT_EXTENT, JevDoneCheck.INPUT_EXHAUSTION, JevDoneCheck.NEGATIVE_COVERAGE, JevDoneCheck.REQUIRED_ACTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS, JevDoneCheck.EXPERT_DEPTH})
+        request_derived_fields = {"goal", "objective", "mission", "hard_part", "what_not_to_do", "multi_part", "target_outcome", "motivating_case", "scope_coverage", JEV_DONE_PHASE_PROGRESS_FIELD, JEV_DONE_INPUT_SET_COVERAGE_FIELD, "output_count", "output_extent", "input_exhaustion", JEV_DONE_NEGATIVE_COVERAGE_FIELD, JEV_DONE_REQUIRED_ACTIONS_FIELD, "cumulative_obligations", "expert_depth"}
         self.assertEqual(set(JevRunState.schema(tuple(JevDoneCheck)).model_fields), request_derived_fields)
 
     def test_faithful_scope_uses_the_central_hard_part_and_handoff_only_evidence(self) -> None:
@@ -920,6 +936,8 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(required_schema.model_fields[JEV_DONE_REQUIRED_ACTIONS_FIELD].description, JevRequiredActionsEvidencePayload.SECTION)
         discovered_schema = JevHandoff.schema((JevDoneCheck.DISCOVERED_ITEM_COVERAGE,))
         self.assertEqual(discovered_schema.model_fields["discovered_item_coverage"].description, JevDiscoveredItemBatchPayload.SECTION)
+        expert_schema = JevHandoff.schema((JevDoneCheck.EXPERT_DEPTH,))
+        self.assertEqual(expert_schema.model_fields["expert_depth"].description, JevExpertDepthEvidencePayload.SECTION)
         self.assertEqual(set(JevProblemEvidencePayload.model_fields), {"id", "kind", "title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"})
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
@@ -981,6 +999,20 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual(JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE), question)
         self.assertEqual(question.to_question(JEV_DONE_HARD_PART_FIELD).name, "faithful_scope.hard_part")
         self.assertIn("what_not_to_do", question.instructions.state)
+
+    def test_expert_depth_question_is_registered_for_each_detail(self) -> None:
+        question = ExpertDepthHandledQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.EXPERT_DEPTH), JEV_EXPERT_DEPTH_THRESHOLD)
+        rendered = question.to_question("retry_backoff")
+        self.assertEqual(rendered.name, "expert_depth.handled.retry_backoff")
+        self.assertIn("expert_details", question.instructions.state)
+
+    def test_expert_depth_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/expert_depth.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
     def test_question_is_an_argument_free_registered_dataclass(self) -> None:
         self.assertIsInstance(self.question, JevDoneQuestion)
@@ -1223,9 +1255,10 @@ class JevDoneQuestionTests(unittest.TestCase):
 
     def test_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
-        rel = "vidbyte/lib/jev/done/multi_part.py"
+        rel = "vidbyte/lib/jev/done/state.py"
         text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+        self.assertIs(MULTI_PART_DONE_STATE, DONE_STATE)
 
     def test_claims_question_is_registered_and_asks_once_for_each_answer_claim(self) -> None:
         question = ClaimsSupportedQuestion()
@@ -1725,6 +1758,100 @@ class JevRequiredActionsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(args.kwargs["calls"], calls)
         self.assertIs(args.kwargs["responses"], responses)
         self.assertIs(args.kwargs["final_answer"], final_answer)
+
+
+class JevExpertDepthScoringTests(unittest.TestCase):
+    """Pin per-detail veto scoring, exact evidence ids, empty work, and weakest-first feedback."""
+
+    @staticmethod
+    def _records() -> tuple[JevRunState, JevHandoffRecord, tuple[str, ...]]:
+        agent = _jev(done=(JevDoneCheck.EXPERT_DEPTH,))
+        assert agent.run_state is not None
+        identifiers = ("retry_backoff", "retry_cap", "retry_errors", "retry_safe_methods", "retry_jitter")
+        details = tuple(
+            JevExpertDetail(
+                identifier,
+                f"Handle {identifier.replace('_', ' ')}.",
+                f"The quick version omits {identifier.replace('_', ' ')}.",
+                f"The output demonstrates {identifier.replace('_', ' ')}.",
+                f"Missing {identifier.replace('_', ' ')} can harm users.",
+            )
+            for identifier in identifiers
+        )
+        depth = JevExpertDepth((JevExpertDepthDeliverable("http_retries", "HTTP retry handling.", details),))
+        agent.run_state.record = JevRunStateRecord("goal", "objective", "mission", hard_part="hard part", expert_depth=depth)
+        evidence = JevExpertDepthEvidence(tuple(
+            JevExpertDetailEvidence(identifier, f"Run evidence for {identifier}.", f"Still missing {identifier}.")
+            for identifier in identifiers
+        ))
+        handoff = JevHandoffRecord(expert_depth=evidence)
+        agent.run_state.handoff = handoff
+        return agent.run_state, handoff, identifiers
+
+    def test_each_detail_is_asked_once_and_failed_points_rank_weakest_first(self) -> None:
+        run_state, handoff, identifiers = self._records()
+        section, questions = run_state._section(JevDoneCheck.EXPERT_DEPTH, handoff)
+        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        self.assertEqual(tuple(item.name for item in questions), tuple(question.name(identifier) for identifier in identifiers))
+        self.assertEqual(set(section["expert_details"]), set(identifiers))
+        answers_by_id = dict(zip(identifiers, (0.69, 0.2, 0.65, 0.3, 0.95), strict=True))
+        decision = DecisionModelResponse(
+            provider=ModelProvider.TYPESAFE,
+            model="jev-test",
+            answers={question.name(identifier): _answer(question.name(identifier), probability) for identifier, probability in answers_by_id.items()},
+            raw={},
+            usage={},
+        )
+
+        result = run_state._judge(JevDoneCheck.EXPERT_DEPTH, handoff, decision)
+        self.assertTrue(result.available)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("retry_cap", "retry_safe_methods", "retry_errors", "retry_backoff"))
+        continuation = JevDoneContinuation(run_state, JevContinualSettings(checks=(JevDoneCheck.EXPERT_DEPTH,)), _jev(done=(JevDoneCheck.EXPERT_DEPTH,)).response)
+        failed, focus = continuation._explain_expert_depth(result)
+        self.assertIn("Still needed for depth: Still missing retry_backoff.", failed)
+        focus_lines = focus.splitlines()
+        self.assertEqual(len(focus_lines), JEV_EXPERT_DEPTH_FOCUS_LIMIT)
+        self.assertIn("Handle retry cap", focus_lines[0])
+        self.assertIn("Handle retry safe methods", focus_lines[1])
+        self.assertIn("Handle retry errors", focus_lines[2])
+
+    def test_threshold_boundary_and_empty_depth_pass_while_missing_handoff_fails_open(self) -> None:
+        run_state, handoff, identifiers = self._records()
+        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        at_threshold = DecisionModelResponse(
+            provider=ModelProvider.TYPESAFE,
+            model="jev-test",
+            answers={question.name(identifier): _answer(question.name(identifier), JEV_EXPERT_DEPTH_THRESHOLD) for identifier in identifiers},
+            raw={},
+            usage={},
+        )
+        passed = run_state._judge(JevDoneCheck.EXPERT_DEPTH, handoff, at_threshold)
+        self.assertTrue(passed.available and passed.passed)
+        self.assertEqual(run_state._judge(JevDoneCheck.EXPERT_DEPTH, None, at_threshold).available, False)
+
+        run_state.record = JevRunStateRecord("goal", "objective", "mission", hard_part="hard part", expert_depth=JevExpertDepth())
+        empty_handoff = JevHandoffRecord(expert_depth=JevExpertDepthEvidence())
+        projected, questions = run_state._section(JevDoneCheck.EXPERT_DEPTH, empty_handoff)
+        self.assertEqual(projected, {"expert_details": {}})
+        self.assertEqual(questions, ())
+        empty_result = run_state._judge(JevDoneCheck.EXPERT_DEPTH, empty_handoff, None)
+        self.assertTrue(empty_result.available and empty_result.passed)
+
+    def test_handoff_rejects_missing_or_invented_detail_evidence_ids(self) -> None:
+        run_state, _, identifiers = self._records()
+        assert run_state.record is not None
+        schema = JevHandoff.schema((JevDoneCheck.EXPERT_DEPTH,))
+        handoff_agent = run_state.handoff_writer
+        good_items = [{"id": identifier, "evidence": "The output shows the detail.", "missing": "Nothing is missing."} for identifier in identifiers]
+        good = schema(expert_depth={"details": good_items})
+        valid, evidence = handoff_agent._expert_depth_evidence_record(good, run_state.record)
+        self.assertTrue(valid)
+        self.assertEqual(evidence.ids(), identifiers)
+        bad = schema(expert_depth={"details": [{**item, "id": "invented_detail"} if index == 0 else item for index, item in enumerate(good_items)]})
+        valid, evidence = handoff_agent._expert_depth_evidence_record(bad, run_state.record)
+        self.assertFalse(valid)
+        self.assertIsNone(evidence)
 
 
 class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):

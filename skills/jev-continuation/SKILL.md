@@ -668,3 +668,7 @@ A new kind of done check never needs a new continuation class, because `JevDoneC
 ### Discovered item coverage
 
 `DISCOVERED_ITEM_COVERAGE` is post-run-derived. Retain every recorded tool output within the configured per-source and total character bounds, require exact source-id coverage from the handoff, and ask one source-inventory question even when that output yields no candidate. Ask each discovered candidate's processing question separately in the same combined request. A low inventory answer is a hard veto even when every candidate answer passes; continuation must include the bounded original output for an inventory gap and the specific requested processing for an item gap.
+
+### Expert depth
+
+`EXPERT_DEPTH` is request-derived. For each deliverable whose quick version could miss meaningful depth, preserve three to five distinct weak points in request order and rank them from most vulnerable to least. Keep each point's `risk` for the main agent; Jev receives only its deliverable, detail, shallow version, done-when condition, and matching handoff evidence. Require exact detail-id coverage from the handoff. Score every point at the registered 0.7 threshold with a per-item veto, then sort failed ids by ascending P(yes), preserving request order on ties. Failed checks list every shallow point, while Focus names only the three weakest; an empty list passes and unavailable state, handoff, or answers fail open.

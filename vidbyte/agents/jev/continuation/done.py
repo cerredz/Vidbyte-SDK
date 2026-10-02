@@ -22,6 +22,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_DONE_COMPLETION_ITEM_ID,
     JEV_DONE_HARD_PART_FIELD,
+    JEV_EXPERT_DEPTH_FOCUS_LIMIT,
     JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.jev import (
@@ -118,6 +119,7 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._explain_cumulative_obligations,
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._explain_discovered_items,
             JevDoneCheck.FAITHFUL_SCOPE: self._explain_faithful_scope,
+            JevDoneCheck.EXPERT_DEPTH: self._explain_expert_depth,
         }
         return handlers[result.check](result)
 
@@ -139,6 +141,31 @@ class JevDoneContinuation(JevContinuation):
         limits = ", ".join(record.what_not_to_do) or "none were stated"
         focus = f"- Complete the saved hard part in the user's intended scope: {record.hard_part}. Preserve these limits: {limits}."
         return failed, focus
+
+    # @intent go-deep-on-the-weakest-few
+    # List every shallow point weakest first, but focus the next round on only the weakest few; it will re-rank after more work.
+    def _explain_expert_depth(self, result: JevDoneResult) -> tuple[str, str]:
+        """Keep the failed-point list complete while concentrating recovery on its weakest details."""
+        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        record = self.run_state.record
+        state = None if record is None else record.expert_depth
+        handoff_record = self.run_state.handoff
+        evidence = None if handoff_record is None else handoff_record.expert_depth
+        details = {} if state is None else {detail.id: (deliverable, detail) for deliverable, detail in state.entries()}
+        missing = {} if evidence is None else {item.id: item.missing for item in evidence.details}
+        failed = [question.gap]
+        focus = []
+        for rank, identifier in enumerate(result.incomplete):
+            answer = result.answers[identifier]
+            yes = answer.probabilities[JEV_NOUL_TRUE]
+            missing_work = missing[identifier]
+            failed_line = f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still needed for depth: {missing_work}"
+            failed.append(failed_line)
+            if rank < JEV_EXPERT_DEPTH_FOCUS_LIMIT:
+                deliverable, detail = details[identifier]
+                focus_line = f"- Go deeper on: {detail.detail} Deliverable: {deliverable.description} Quick version to move past: {detail.shallow_version} Why it matters: {detail.risk} Done when: {detail.done_when}"
+                focus.append(focus_line)
+        return "\n".join(failed), "\n".join(focus)
 
     # @intent discovered-inventory-and-item-gaps-stay-separate
     # Source inventory failures need the original bounded output, while item failures need the specific requested action still missing.
