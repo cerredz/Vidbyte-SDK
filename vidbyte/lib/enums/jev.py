@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, scope-coverage, output-extent, report/action-alignment, assumption-reconciliation, required-actions, and cumulative-obligations and discovered-item-coverage checks), motivating-case classifications, and dynamic problem-item kinds. Negative coverage is an opt-in done check with a fixed question key. Guaranteed-next-action judgments have separate fixed question keys.
+PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, scope-coverage, output-extent, report/action-alignment, assumption-reconciliation, required-actions, cumulative-obligations, discovered-item-coverage, expert-depth, and self-review checks), motivating-case classifications, and dynamic problem-item kinds. Negative coverage is an opt-in done check with a fixed question key. Guaranteed-next-action judgments have separate fixed question keys.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on presets, and `vidbyte/agents/jev/done/` builds enabled done-check schemas and questions.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, record layer, and tool layer all read it, and lower layers may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a TypeSafe question type only when documented, and extend validation and answer normalization with it. Add preflight keys with their fixed question dataclasses and preset registration. Add a done check together with its run-state and handoff sections and one fixed question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff.
@@ -61,6 +61,7 @@ class JevDoneCheck(str, Enum):
     DISCOVERED_ITEM_COVERAGE = "discovered_item_coverage"
     FAITHFUL_SCOPE = "faithful_scope"
     EXPERT_DEPTH = "expert_depth"
+    SELF_REVIEW = "self_review"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -96,6 +97,8 @@ class JevDoneQuestionKey(str, Enum):
     DISCOVERED_ITEM_INVENTORY_COMPLETE = "discovered_item_coverage.inventory_complete"
     FAITHFUL_SCOPE = "faithful_scope"
     EXPERT_DEPTH_HANDLED = "expert_depth.handled"
+    SELF_REVIEW_RESOLVED = "self_review.resolved"
+    SELF_REVIEW_IN_SCOPE = "self_review.in_scope"
 
 
 class JevBoundaryKind(str, Enum):

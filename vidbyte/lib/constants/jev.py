@@ -146,6 +146,8 @@ JEV_EXPERT_DEPTH_MAX_DETAILS: int = 5
 # How many of the weakest incomplete details the continuation names under Focus, so the main agent goes
 # deep on a few points at a time instead of shallow on all of them; the next finish attempt re-ranks.
 JEV_EXPERT_DEPTH_FOCUS_LIMIT: int = 3
+# Both self-review judgments use one threshold; an objection clears when resolved or out of scope.
+JEV_SELF_REVIEW_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -300,6 +302,10 @@ JEV_DONE_EXPERT_DETAILS_FIELD: str = "expert_details"
 JEV_DONE_DETAIL_FIELD: str = "detail"
 JEV_DONE_SHALLOW_VERSION_FIELD: str = "shallow_version"
 JEV_DONE_DONE_WHEN_FIELD: str = "done_when"
+# Post-run reviewer objections and their request-derived resolution conditions.
+JEV_DONE_OBJECTIONS_FIELD: str = "objections"
+JEV_DONE_OBJECTION_FIELD: str = "objection"
+JEV_DONE_RESOLVED_WHEN_FIELD: str = "resolved_when"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -308,6 +314,11 @@ JEV_RUN_STATE_MAX_ITERATIONS: int = 25
 JEV_RUN_STATE_MAX_TOKENS: int = 100_000
 JEV_HANDOFF_MAX_ITERATIONS: int = 25
 JEV_HANDOFF_MAX_TOKENS: int = 400_000
+# Defaults of the JevReviewer limits: like the handoff it reads the main agent's whole run and writes one reply.
+JEV_REVIEW_MAX_ITERATIONS: int = 25
+JEV_REVIEW_MAX_TOKENS: int = 400_000
+# Keep the reviewer question batch bounded and focused on the most serious objections.
+JEV_REVIEW_MAX_OBJECTIONS: int = 5
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -435,6 +446,9 @@ __all__ = [
     "JEV_DONE_MOTIVATING_CASES_FIELD",
     "JEV_DONE_MOTIVATING_CASE_FIELD",
     "JEV_DONE_NEGATIVE_COVERAGE_FIELD",
+    "JEV_DONE_OBJECTIONS_FIELD",
+    "JEV_DONE_OBJECTION_FIELD",
+    "JEV_DONE_RESOLVED_WHEN_FIELD",
     "JEV_DONE_OBLIGATIONS_FIELD",
     "JEV_DONE_USER_TURNS_FIELD",
     "JEV_DONE_USER_TURN_EVIDENCE_FIELD",
@@ -522,10 +536,14 @@ __all__ = [
     "JEV_PROBLEMS_RESOLVED_THRESHOLD",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_REVIEW_MAX_ITERATIONS",
+    "JEV_REVIEW_MAX_OBJECTIONS",
+    "JEV_REVIEW_MAX_TOKENS",
     "JEV_RUN_STATE_MAX_ITERATIONS",
     "JEV_RUN_STATE_MAX_TOKENS",
     "JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD",
     "JEV_SCOPE_COVERAGE_THRESHOLD",
+    "JEV_SELF_REVIEW_THRESHOLD",
     "JEV_SPECIALIST_MAX_COUNT",
     "JEV_SPECIALIST_NONE",
     "JEV_SPECIALIST_QUESTION_NAME",

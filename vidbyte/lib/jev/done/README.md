@@ -47,6 +47,10 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.
 - The logic that writes the run state and the handoff, asks Jev, and sends the main agent back to work is `JevRunState` and `JevHandoff` in `vidbyte/agents/jev/done/`.
 
+## Self-review questions
+
+self_review.py asks two questions for every valid reviewer objection: whether run evidence meets the reviewer's resolved_when condition, and whether the request includes that work. JevDoneRegistry.questions(SELF_REVIEW) returns the pair in that order; question(SELF_REVIEW) remains a compatibility accessor for the first question. With the shared .8 threshold, code clears an objection when max(P(resolved), 1 - P(in_scope)) reaches .8, so clearly out-of-scope work passes even if unresolved. A valid empty reviewer result passes with no objection entries or questions. Missing or unavailable review fails open, and reviewer failure is never treated as a valid empty result. The handoff-only objections entries contain the objection, its request-derived resolution condition, and run evidence; SELF_REVIEW adds no request-derived run-state field.
+
 ## Enable assumption reconciliation
 
 The check is opt-in through the existing `JevContinualSettings.checks` API. It extracts only explicit, consequential assumptions that later concrete run evidence changes, and judges downstream reconciliation separately from whether tool errors were repaired.

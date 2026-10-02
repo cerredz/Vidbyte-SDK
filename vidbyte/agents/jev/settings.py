@@ -22,6 +22,8 @@ from vidbyte.lib.constants.jev import (
     JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS,
     JEV_HANDOFF_MAX_ITERATIONS,
     JEV_HANDOFF_MAX_TOKENS,
+    JEV_REVIEW_MAX_ITERATIONS,
+    JEV_REVIEW_MAX_TOKENS,
     JEV_RUN_STATE_MAX_ITERATIONS,
     JEV_RUN_STATE_MAX_TOKENS,
     JEV_SPECIALIST_MAX_COUNT,
@@ -129,7 +131,7 @@ class JevAgentSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevContinualSettings:
-    """Validated continuation settings: the done checks run at every finish attempt, how often a failed one may send the main agent back to work, and the limits of the run-state and handoff agents."""
+    """Validated continuation settings: enabled checks, the continuation cap, and the run-state, reviewer, and handoff agent limits."""
 
     checks: tuple[JevDoneCheck | str, ...] = ()
     max_continuations: int = JEV_DONE_MAX_CONTINUATIONS
@@ -140,6 +142,8 @@ class JevContinualSettings:
     faithful_scope_extra_iterations: int = JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS
     faithful_scope_extra_tokens: int = JEV_FAITHFUL_SCOPE_EXTRA_TOKENS
     faithful_scope_extra_tool_calls: int = JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS
+    review_max_iterations: int = JEV_REVIEW_MAX_ITERATIONS
+    review_max_tokens: int = JEV_REVIEW_MAX_TOKENS
 
     def __post_init__(self) -> None:
         # Rejects unknown or repeated done checks and non-integer limits before JevAgent builds its run state.
@@ -148,7 +152,7 @@ class JevContinualSettings:
         # check never sends the main agent back to work.
         object.__setattr__(self, "checks", JevDoneRegistry.validate(self.checks))
         self._validate_count("max_continuations", minimum=0)
-        for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens"):
+        for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens", "review_max_iterations", "review_max_tokens"):
             self._validate_count(field_name, minimum=1)
         for field_name in ("faithful_scope_extra_iterations", "faithful_scope_extra_tokens", "faithful_scope_extra_tool_calls"):
             self._validate_count(field_name, minimum=0)

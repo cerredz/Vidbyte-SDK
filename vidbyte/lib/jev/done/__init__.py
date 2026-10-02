@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/jev/done/__init__.py
 
-PURPOSE: Exposes JevDoneRegistry and every fixed done question dataclass, including member-level scope-coverage, request-required phase-progress, bounded-input coverage, required-actions, cumulative-obligation, and discovered-item coverage questions, from the canonical done question folder.
+PURPOSE: Exposes JevDoneRegistry and every fixed done question dataclass, including member-level scope-coverage, request-required phase-progress, bounded-input coverage, required-actions, cumulative-obligation, discovered-item coverage, and self-review questions, from the canonical done question folder.
 ROLE IN CODEBASE: JevRuntimeSettings and JevRunState (vidbyte/agents/jev/done/) import JevDoneRegistry from here; tests import the question dataclasses to pin their contract.
 ARCHITECTURE NOTE: This folder is the one home for fixed done questions and their registry; the check vocabulary lives in vidbyte/lib/enums/jev.py, records and structured-reply payloads in vidbyte/lib/dataclasses/jev.py, and the logic that asks and acts on the questions in vidbyte/agents/jev/done/.
 COMMON MODIFICATION PATTERNS: Load skills/asking-jev-questions/SKILL.md before writing or changing any question (see README.md in this folder), then export each new check's question module here beside multi_part and expert_depth.
@@ -39,6 +39,10 @@ from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.report_action_alignment import ReportActionAlignmentQuestion
 from vidbyte.lib.jev.done.required_actions import RequiredActionCompletedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
+from vidbyte.lib.jev.done.self_review import (
+    SelfReviewInScopeQuestion,
+    SelfReviewResolvedQuestion,
+)
 from vidbyte.lib.jev.done.state import DONE_STATE
 from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
@@ -68,5 +72,7 @@ __all__ = [
     "ReportActionAlignmentQuestion",
     "RequiredActionCompletedQuestion",
     "ScopeCoverageAppliedQuestion",
+    "SelfReviewInScopeQuestion",
+    "SelfReviewResolvedQuestion",
     "TargetOutcomeDemonstratedQuestion",
 ]

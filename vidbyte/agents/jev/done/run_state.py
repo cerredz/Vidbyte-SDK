@@ -11,6 +11,7 @@ TESTS: tests/test_jev_done.py.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -21,6 +22,7 @@ from pydantic import Field, create_model
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.done.handoff import JevHandoff
+from vidbyte.agents.jev.done.reviewer import JevReviewer
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
@@ -83,6 +85,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_MOTIVATING_CASE_FIELD,
     JEV_DONE_MOTIVATING_CASES_FIELD,
     JEV_DONE_NEGATIVE_COVERAGE_FIELD,
+    JEV_DONE_OBJECTION_FIELD,
+    JEV_DONE_OBJECTIONS_FIELD,
     JEV_DONE_OBLIGATION_ACTIVE_FIELD,
     JEV_DONE_OBLIGATION_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_OBLIGATION_FIELD,
@@ -139,6 +143,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_REQUEST_RELEVANCE_FIELD,
     JEV_DONE_REQUESTED_OUTCOMES_FIELD,
     JEV_DONE_REQUIRED_ACTIONS_FIELD,
+    JEV_DONE_RESOLVED_WHEN_FIELD,
     JEV_DONE_REVISION_FIELD,
     JEV_DONE_SCOPE_COVERAGE_FIELD,
     JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD,
@@ -205,6 +210,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevRequiredActionEvidence,
     JevRequiredActions,
     JevRequiredActionsPayload,
+    JevReviewRecord,
     JevRunStatePayload,
     JevRunStateRecord,
     JevScopeCoverage,
@@ -267,6 +273,8 @@ class JevRunState(BaseAgent):
         self.payload = payload
         self.sender = settings.name
         self.handoff_writer = JevHandoff(settings, continual)
+        self.reviewer = JevReviewer(settings, continual) if JevDoneCheck.SELF_REVIEW in self.checks else None
+        self.review: JevReviewRecord | None = None
         self.request = ""
         self.user_turns: tuple[str, ...] = ()
         self.prior_user_turns: tuple[str, ...] = ()
@@ -428,13 +436,22 @@ class JevRunState(BaseAgent):
         # Compile from this attempt's raw responses and calls, then ask the complete enabled question set once so
         # neither stale evidence nor sequential gate rewrites can change a sibling check's input.
         self.handoff = None
+        self.review = None
         if self.record is None:
             return ()
         self._observed_extent = {} if self.record.output_extent is None else {
             item.id: self._measure(final_answer, item) for item in self.record.output_extent.items
         }
         turns = self.user_turns if JevDoneCheck.CUMULATIVE_OBLIGATIONS in self.checks else ()
-        window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender, user_turns=turns)
+        if self.reviewer is not None:
+            # @intent the-strict-review-runs-before-the-checks
+            # The reviewer sees the main agent's run before the handoff compiles evidence, so each objection
+            # becomes a stable post-run item for Jev to judge; an unavailable review leaves other checks intact.
+            review_window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender)
+            self.review = await self.reviewer.review(self.request, review_window)
+            self.response.review(self.review)
+        review_text = "" if self.reviewer is None else self.reviewer.rendered
+        window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender, user_turns=turns, review=review_text)
         self.handoff = await self.handoff_writer.compile(
             self.request,
             self.record,
@@ -442,6 +459,7 @@ class JevRunState(BaseAgent):
             calls=calls,
             responses=responses,
             final_answer=final_answer,
+            review=self.review,
         )
         self.response.handoff(self.handoff)
         decision = await self._ask(self.handoff)
@@ -509,9 +527,33 @@ class JevRunState(BaseAgent):
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_section,
             JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope_section,
             JevDoneCheck.EXPERT_DEPTH: self._expert_depth_section,
+            JevDoneCheck.SELF_REVIEW: self._self_review_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
+
+    def _self_review_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Ask both clearance questions for each strict-review objection, preserving reviewer order."""
+        review = self.review
+        evidence = handoff.self_review
+        if review is None or evidence is None or not review.objections:
+            return {}, ()
+        resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+        evidence_by_id = {item.id: item.evidence for item in evidence.objections}
+        entries = {
+            item.id: {
+                JEV_DONE_OBJECTION_FIELD: item.objection,
+                JEV_DONE_RESOLVED_WHEN_FIELD: item.resolved_when,
+                JEV_DONE_EVIDENCE_FIELD: evidence_by_id[item.id],
+            }
+            for item in review.objections
+        }
+        asked = tuple(
+            question.to_question(identifier)
+            for identifier in review.ids()
+            for question in (resolved, in_scope)
+        )
+        return {JEV_DONE_OBJECTIONS_FIELD: entries}, asked
 
     def _discovered_item_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         """Project every recorded source inventory and discovered item into one shared decision batch."""
@@ -1080,11 +1122,52 @@ class JevRunState(BaseAgent):
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_coverage,
             JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope,
             JevDoneCheck.EXPERT_DEPTH: self._expert_depth,
+            JevDoneCheck.SELF_REVIEW: self._self_review,
         }
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
         return handler(handoff, decision)
+
+    def _self_review(
+        self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None
+    ) -> JevDoneResult:
+        """Clear a reviewer objection only when it is resolved or clearly outside the request."""
+        review = self.review
+        evidence = None if handoff is None else handoff.self_review
+        if review is None or evidence is None:
+            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None, available=False)
+        if not review.objections:
+            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None, available=False)
+        resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+        names = tuple(
+            question.name(identifier)
+            for identifier in review.ids()
+            for question in (resolved, in_scope)
+        )
+        answers = {name: decision.answers[name] for name in names if name in decision.answers}
+        if len(answers) != len(names) or any(answer.question_type is not JevQuestionType.NOUL for answer in answers.values()):
+            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None, available=False)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.SELF_REVIEW)
+        clearance = {
+            identifier: max(
+                answers[resolved.name(identifier)].probabilities[JEV_NOUL_TRUE],
+                1.0 - answers[in_scope.name(identifier)].probabilities[JEV_NOUL_TRUE],
+            )
+            for identifier in review.ids()
+        }
+        standing = tuple(identifier for identifier in review.ids() if clearance[identifier] < threshold)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.SELF_REVIEW,
+            score=math.fsum(clearance.values()) / len(clearance),
+            passed=not standing,
+            answers=answers,
+            incomplete=standing,
+            usage=usage,
+        )
 
     def _expert_depth(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         """Score every named weak point with a per-item veto and preserve weakest-first failures."""

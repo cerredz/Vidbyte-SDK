@@ -80,6 +80,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevNegativeCoverageEvidence,
     JevNegativeCoverageEvidenceItem,
     JevNegativeCoverageEvidencePayload,
+    JevObjectionEvidence,
     JevOutputCountEntry,
     JevOutputCountEvidence,
     JevOutputCountEvidenceItem,
@@ -100,10 +101,13 @@ from vidbyte.lib.dataclasses.jev import (
     JevRequiredActionEvidencePayload,
     JevRequiredActionsEvidence,
     JevRequiredActionsEvidencePayload,
+    JevReviewRecord,
     JevRunStateRecord,
     JevScopeCoverageEvidence,
     JevScopeCoverageEvidencePayload,
     JevSectionPayload,
+    JevSelfReviewEvidence,
+    JevSelfReviewEvidencePayload,
     JevTargetOutcomeEvidence,
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeEvidencePayload,
@@ -116,6 +120,7 @@ from vidbyte.tools.types import ToolCallContext
 
 # The titles and source of the context items that frame the main agent's window, named in the system prompt.
 RUN_STATE_TITLE = "Run state"
+REVIEW_TITLE = "Strict review"
 FINAL_ANSWER_TITLE = "Final answer"
 NO_FINAL_ANSWER = "The main agent gave no final answer."
 HANDOFF_SOURCE = "jev_done"
@@ -132,6 +137,7 @@ class JevHandoff(BaseAgent):
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JevDiscoveredItemBatchPayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.SELF_REVIEW: JevSelfReviewEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -162,12 +168,14 @@ class JevHandoff(BaseAgent):
         return create_model("JevHandoffPayload", __base__=JevHandoffPayload, **sections)
 
     @staticmethod
-    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str, user_turns: Sequence[str] = ()) -> ContextManager:
-        """Build the handoff's context: the run state, then the main agent's responses and tool calls, then its final answer."""
+    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str, user_turns: Sequence[str] = (), review: str = "") -> ContextManager:
+        """Build the handoff's context: run state, any strict review, the main agent's work, and its final answer."""
         # @intent the-handoff-reads-the-main-agents-window
         # The owner asked for the main agent's context window to reach the handoff through vidbyte.context, so the
         # run is passed as the SDK's own response and tool-call primitives instead of a hand-built transcript.
         items: list[ContextItem] = [TextContextItem(title=RUN_STATE_TITLE, content=run_state, source=HANDOFF_SOURCE)]
+        if review.strip():
+            items.append(TextContextItem(title=REVIEW_TITLE, content=review, source=HANDOFF_SOURCE))
         if user_turns:
             turns = "\n\n".join(f"User turn {index}:\n{text}" for index, text in enumerate(user_turns))
             items.append(TextContextItem(title="Exact user turns for cumulative obligations", content=turns, source=HANDOFF_SOURCE))
@@ -196,6 +204,7 @@ class JevHandoff(BaseAgent):
         calls: Sequence[ToolCallContext] = (),
         responses: Sequence[str] = (),
         final_answer: str = "",
+        review: JevReviewRecord | None = None,
     ) -> JevHandoffRecord | None:
         """Return evidence for every enabled check, or None when a request-derived section does not match run state."""
         self.history.clear()
@@ -204,7 +213,7 @@ class JevHandoff(BaseAgent):
             reply = await self.arun(AgentInput(prompt=request, context_manager=window))
             if not isinstance(reply.structured, self.payload):
                 return None
-            record = self._record(reply.structured, state, calls, responses, final_answer)
+            record = self._record(reply.structured, state, calls, responses, final_answer, review)
             # The continuation hands this text back to the main agent when a check fails.
             self.rendered = "" if record is None else reply.structured.model_dump_json()
             return record
@@ -220,13 +229,15 @@ class JevHandoff(BaseAgent):
         calls: Sequence[ToolCallContext] = (),
         responses: Sequence[str] = (),
         final_answer: str = "",
+        review: JevReviewRecord | None = None,
     ) -> JevHandoffRecord | None:
         # Converts the validated reply into the frozen record, requiring one evidence entry per run-state deliverable.
         # @intent evidence-covers-exactly-the-run-state
         # Jev judges each deliverable by id, so evidence for a deliverable the state never listed, or
         # no evidence for one it did, would silently skip a check; either one makes the handoff unavailable.
         request_records = self._request_evidence_records(payload, state)
-        if request_records is None:
+        self_review_valid, self_review = self._self_review_evidence(payload, review)
+        if request_records is None or not self_review_valid:
             return None
         claims = self._claims_record(payload)
         guaranteed_next_actions = self._guaranteed_next_actions_record(payload)
@@ -319,6 +330,7 @@ class JevHandoff(BaseAgent):
             discovered_item_coverage=discovered_item_coverage,
             faithful_scope=faithful_scope,
             expert_depth=request_records.expert_depth,
+            self_review=self_review,
         )
 
     @staticmethod
@@ -546,6 +558,22 @@ class JevHandoff(BaseAgent):
             negative_coverage=additional_records.negative_coverage,
             expert_depth=expert_depth,
         )
+
+    @staticmethod
+    def _self_review_evidence(
+        payload: JevHandoffPayload, review: JevReviewRecord | None
+    ) -> tuple[bool, JevSelfReviewEvidence | None]:
+        """Match handoff evidence to the reviewer's exact objection ids, or drop the section when no review exists."""
+        section = getattr(payload, JevDoneCheck.SELF_REVIEW.value, None)
+        if review is None:
+            return True, None
+        if not isinstance(section, JevSelfReviewEvidencePayload):
+            return False, None
+        evidence = JevSelfReviewEvidence(tuple(
+            JevObjectionEvidence(item.id, item.evidence.strip(), item.missing.strip())
+            for item in section.objections
+        ))
+        return sorted(evidence.ids()) == sorted(review.ids()), evidence
 
     @staticmethod
     def _multi_part_evidence_record(

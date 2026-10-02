@@ -35,6 +35,7 @@ from vidbyte.lib.constants.jev import (
     JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
     JEV_REQUIRED_ACTIONS_THRESHOLD,
     JEV_SCOPE_COVERAGE_THRESHOLD,
+    JEV_SELF_REVIEW_THRESHOLD,
     JEV_TARGET_OUTCOME_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
@@ -72,11 +73,15 @@ from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.report_action_alignment import ReportActionAlignmentQuestion
 from vidbyte.lib.jev.done.required_actions import RequiredActionCompletedQuestion
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
+from vidbyte.lib.jev.done.self_review import (
+    SelfReviewInScopeQuestion,
+    SelfReviewResolvedQuestion,
+)
 from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
 
 class JevDoneRegistry:
-    """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
+    """Registry over every done check's fixed questions and the threshold its scorer applies to their answers."""
 
     _questions: Mapping[JevDoneCheck, tuple[JevDoneQuestion, ...]] = MappingProxyType({
         JevDoneCheck.MULTI_PART: (MultiPartDeliveredQuestion(),),
@@ -100,6 +105,7 @@ class JevDoneRegistry:
         JevDoneCheck.DISCOVERED_ITEM_COVERAGE: (DiscoveredItemProcessedQuestion(),),
         JevDoneCheck.FAITHFUL_SCOPE: (FaithfulScopeQuestion(),),
         JevDoneCheck.EXPERT_DEPTH: (ExpertDepthHandledQuestion(),),
+        JevDoneCheck.SELF_REVIEW: (SelfReviewResolvedQuestion(), SelfReviewInScopeQuestion()),
     })
     _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeUserTurnReconciledQuestion(),
@@ -127,6 +133,7 @@ class JevDoneRegistry:
         JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JEV_DISCOVERED_ITEM_COVERAGE_THRESHOLD,
         JevDoneCheck.FAITHFUL_SCOPE: JEV_FAITHFUL_SCOPE_THRESHOLD,
         JevDoneCheck.EXPERT_DEPTH: JEV_EXPERT_DEPTH_THRESHOLD,
+        JevDoneCheck.SELF_REVIEW: JEV_SELF_REVIEW_THRESHOLD,
     })
 
     @classmethod
@@ -162,7 +169,7 @@ class JevDoneRegistry:
 
     @classmethod
     def threshold(cls, check: JevDoneCheck) -> float:
-        """Return the P(yes) every one of the check's answers must reach for the run to finish."""
+        """Return the threshold the check's scorer applies to its answers before the run may finish."""
         found = cls._thresholds.get(check)
         if found is None:
             raise ConfigurationError(

@@ -641,6 +641,10 @@ Your change must not raise any lint baseline count.
 
 ---
 
+### Strict self-review
+
+`SELF_REVIEW` has no request-derived run-state section. Before the handoff at each finish attempt, `JevReviewer` reads the main agent's run without tools and returns up to three objections, most serious first, each with a stable id and acceptance condition. The handoff must report exactly one evidence item per objection id; missing or extra ids make that handoff unavailable. Jev receives the objection, acceptance condition, and evidence, then answers both whether it is resolved and whether it is in scope. Clearance is `max(P(resolved), 1 - P(in_scope))`; compare each objection independently with the registered threshold, and continue only for standing in-scope objections. A reviewer failure (`None`) is distinct from a valid empty review: failure makes only this check unavailable, while an empty review passes without a Jev request. Preserve reviewer order in the failed ids and Focus. Do not treat a reviewer objection as proof or use it to add work outside the user's request.
+
 ## 5. When to write a new JevContinuation instead
 
 `JevContinuation` (`vidbyte/agents/jev/continuation/base.py`) is the contract the runtime calls:

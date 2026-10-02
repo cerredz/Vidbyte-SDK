@@ -120,8 +120,33 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._explain_discovered_items,
             JevDoneCheck.FAITHFUL_SCOPE: self._explain_faithful_scope,
             JevDoneCheck.EXPERT_DEPTH: self._explain_expert_depth,
+            JevDoneCheck.SELF_REVIEW: self._explain_self_review,
         }
         return handlers[result.check](result)
+
+    def _explain_self_review(self, result: JevDoneResult) -> tuple[str, str]:
+        """Return unresolved reviewer objections in their original severity order."""
+        resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+        review = self.run_state.review
+        handoff_record = self.run_state.handoff
+        handoff = None if handoff_record is None else handoff_record.self_review
+        objections = {} if review is None else {item.id: item for item in review.objections}
+        missing = {} if handoff is None else {item.id: item.missing for item in handoff.objections}
+        failed = [resolved.gap, in_scope.gap]
+        focus = []
+        for identifier in result.incomplete:
+            resolved_answer = result.answers[resolved.name(identifier)]
+            scope_answer = result.answers[in_scope.name(identifier)]
+            cleared = resolved_answer.probabilities[JEV_NOUL_TRUE]
+            in_scope_probability = scope_answer.probabilities[JEV_NOUL_TRUE]
+            objection = objections[identifier]
+            failed.append(
+                f"- Objection `{identifier}`: {objection.objection} Jev's answers: the work does not yet show it "
+                f"resolved (P(resolved) = {cleared:.2f}), and fixing it is within the request "
+                f"(P(in scope) = {in_scope_probability:.2f}). Still missing: {missing[identifier]}"
+            )
+            focus.append(f"- A strict reviewer would reject this: {objection.objection} Accept when: {objection.resolved_when}")
+        return "\n".join(failed), "\n".join(focus)
 
     def _explain_faithful_scope(self, result: JevDoneResult) -> tuple[str, str]:
         """Keep continuation feedback focused on the saved hard part and its evidence gap."""
