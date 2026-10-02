@@ -424,7 +424,7 @@ class SkillPreloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
         requested = [question.name for call in _SelectiveDecisionHelper.requests for question in call.questions]
         self.assertEqual(requested, [f"skills.skill_{index}" for index in range(1, 22)])
         first_native_question = _SelectiveDecisionHelper.requests[0].questions[0]
-        self.assertIn("full skill body is unavailable", first_native_question.instructions)
+        self.assertIn("full body is unavailable", first_native_question.instructions)
         self.assertEqual(len(response.state.skills.claude_skills), 1)
         self.assertEqual(response.state.skills.claude_skills[0].skill_id, "skill_21")
         self.assertEqual(response.state.skills.results[0].status, JevSkillStatus.SKIPPED)
