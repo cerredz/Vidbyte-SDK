@@ -3,7 +3,7 @@
 PURPOSE: Implements JevBulkWork, the bounded, tool-free structured planner and per-item BaseAgent coordinator. It validates a complete plan before any work starts, preserves ordered success/failure records, and never constructs or recursively invokes JevAgent.
 ROLE IN CODEBASE: JevAgent builds one coordinator from JevAgentSettings; JevRuntime calls it only after bulk preflight approval and normal tool selection. The coordinator calls BaseAgent for planning and fresh workers, clones selected tools through `AgentForker._clone_tool`'s `clone_for_fork()` contract, and returns records from `vidbyte/lib/dataclasses/jev.py` for JevResponse and final context synthesis.
 ARCHITECTURE NOTE: The coordinator subclasses BaseAgent so its planner owns its own raw usage tracker, but disables implicit internal tools and is never given user tools. Bounded `asyncio.Queue` workers each own one fresh BaseAgent history; the fixed worker count bounds concurrency, while result slots preserve request order.
-FUNCTION INVENTORY: `JevBulkWork.__init__(settings)` builds the structured planner and resource caps; `plan_and_run(message, context, tools)` validates a generated plan and returns a typed attempt record; `result_artifact(result)` creates untrusted synthesis context for a valid plan. Private helpers validate plans, build isolated workers and prompts, consume the bounded queue, and render outcomes. Feature contracts live in `tests/features/jev_bulk_work/test_jev_bulk_work.py`; the executable verification is `scripts/test-jev-bulk-work.py`.
+FUNCTION INVENTORY: `JevBulkWork.__init__(settings)` builds the structured planner and resource caps; `plan_and_run(message, context, tools, *, claude_skills=())` validates a generated plan and returns a typed attempt record; `result_artifact(result)` creates untrusted synthesis context for a valid plan. Private helpers validate plans, build isolated workers and prompts, consume the bounded queue, and render outcomes. Feature contracts live in `tests/features/jev_bulk_work/test_jev_bulk_work.py`; the executable verification is `scripts/test-jev-bulk-work.py`.
 COMMON MODIFICATION PATTERNS: Keep planner schema and public outcomes in `vidbyte/lib/dataclasses/jev.py`, settings in `vidbyte/agents/jev/settings.py`, gate decisions in `vidbyte/agents/jev/gate/gate.py`, and runtime ordering in `vidbyte/agents/jev/runtime.py`. Preserve whole-plan rejection, worker ordering, selected tool names, owner permission policy, raw child usage, and cancellation cleanup together.
 WHAT NOT TO DO IN THIS FILE: 1. Do not call Jev or perform fixed question scoring; `JevPreflightGate` owns that boundary. 2. Do not choose which user tools are allowed; consume only the runtime's already selected catalog. 3. Do not truncate a plan or start workers before validating the whole plan. 4. Do not flatten or re-record worker usage in the planner or owner's tracker. 5. Do not expose exception messages, secrets, or raw repr values in public failure records.
 KNOWN EDGE CASES: A rejected plan still reports planner usage and a safe failure code but creates no workers. A successful plan can contain failed items; those failures remain explicit and the final agent must not describe them as completed. Mutable custom tools without `clone_for_fork()` retain the existing fork contract's identity behavior.
@@ -25,6 +25,7 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.context import BaseAgentContext, ContextArtifact
+from vidbyte.lib.dataclasses.skills import ClaudeSkillReference
 from vidbyte.lib.dataclasses.jev import (
     JevBulkItemResult,
     JevBulkPlan,
@@ -69,7 +70,7 @@ class JevBulkWork(BaseAgent):
             output_schema=JevBulkPlan,
         )
 
-    async def plan_and_run(self, message: str, context: BaseAgentContext, tools: tuple[object, ...]) -> JevBulkWorkResult:
+    async def plan_and_run(self, message: str, context: BaseAgentContext, tools: tuple[object, ...], *, claude_skills: tuple[ClaudeSkillReference, ...] = ()) -> JevBulkWorkResult:
         # Plans from the exact request, rejects the entire invalid plan, then runs a bounded worker pool.
         # @intent only-independent-work-is-fanned-out
         # Bulk execution is safe only when Jev recognized separate independent work and the generated
@@ -78,10 +79,12 @@ class JevBulkWork(BaseAgent):
         # Each worker gets a fresh history and the exact effective selected tools, with the owner's
         # permission policy. A task failure remains visible to final synthesis instead of being hidden
         # by sibling successes, and cancellation is never converted into a completed item.
+        if not isinstance(claude_skills, tuple) or not all(isinstance(skill, ClaudeSkillReference) for skill in claude_skills):
+            raise ConfigurationError("claude_skills must be a tuple of ClaudeSkillReference values.")
         attempt = await self._request_plan(message, context)
         if attempt.plan is None:
             return self._rejected_result(attempt)
-        items = await self._run_plan(message, context, tools, attempt.plan)
+        items = await self._run_plan(message, context, tools, attempt.plan, claude_skills)
         return JevBulkWorkResult(plan_valid=True, items=items, planner_usage=self.get_usage(), planning_error=None)
 
     def result_artifact(self, result: JevBulkWorkResult) -> ContextArtifact:
@@ -152,12 +155,12 @@ class JevBulkWork(BaseAgent):
             planning_error=attempt.failure or JevBulkPlanningError.MALFORMED_OUTPUT,
         )
 
-    async def _run_plan(self, message: str, context: BaseAgentContext, tools: tuple[object, ...], plan: JevBulkPlan) -> tuple[JevBulkItemResult, ...]:
+    async def _run_plan(self, message: str, context: BaseAgentContext, tools: tuple[object, ...], plan: JevBulkPlan, claude_skills: tuple[ClaudeSkillReference, ...]) -> tuple[JevBulkItemResult, ...]:
         # Runs plan indexes through a fixed worker count and returns records in plan order.
         worker_count = min(self._bulk_settings.max_parallel_agents, len(plan.items))
         queue: asyncio.Queue[int | None] = asyncio.Queue(maxsize=worker_count)
         results: list[JevBulkItemResult | None] = [None] * len(plan.items)
-        workers = [asyncio.create_task(self._consume_items(queue, results, message, context, tools, plan)) for _ in range(worker_count)]
+        workers = [asyncio.create_task(self._consume_items(queue, results, message, context, tools, plan, claude_skills)) for _ in range(worker_count)]
         try:
             for index in range(len(plan.items)):
                 await queue.put(index)
@@ -169,7 +172,7 @@ class JevBulkWork(BaseAgent):
             raise
         return tuple(self._completed_result(index, item, results[index]) for index, item in enumerate(plan.items))
 
-    async def _consume_items(self, queue: asyncio.Queue[int | None], results: list[JevBulkItemResult | None], message: str, context: BaseAgentContext, tools: tuple[object, ...], plan: JevBulkPlan) -> None:
+    async def _consume_items(self, queue: asyncio.Queue[int | None], results: list[JevBulkItemResult | None], message: str, context: BaseAgentContext, tools: tuple[object, ...], plan: JevBulkPlan, claude_skills: tuple[ClaudeSkillReference, ...]) -> None:
         # Takes queue indexes until the sentinel and stores each item result at its original position.
         while True:
             index = await queue.get()
@@ -177,11 +180,11 @@ class JevBulkWork(BaseAgent):
                 if index is None:
                     return
                 item = plan.items[index]
-                results[index] = await self._run_item(message, context, tools, item)
+                results[index] = await self._run_item(message, context, tools, item, claude_skills)
             finally:
                 queue.task_done()
 
-    async def _run_item(self, message: str, context: BaseAgentContext, tools: tuple[object, ...], item: JevBulkPlanItem) -> JevBulkItemResult:
+    async def _run_item(self, message: str, context: BaseAgentContext, tools: tuple[object, ...], item: JevBulkPlanItem, claude_skills: tuple[ClaudeSkillReference, ...]) -> JevBulkItemResult:
         # Runs one item with a fresh agent and captures ordinary failures as safe typed records.
         worker: BaseAgent | None = None
         try:
@@ -196,7 +199,12 @@ class JevBulkWork(BaseAgent):
                 tool_calls=(),
                 responses=(),
             )
-            reply = await worker.arun(self._task_message(message, item), context=worker_context)
+            reply = await worker.arun(
+                self._task_message(message, item),
+                context=worker_context,
+                claude_skills=claude_skills,
+                claude_skill_session=None,
+            )
             return JevBulkItemResult(identifier=item.identifier, title=item.title, output=reply.content, error=None, usage=worker.get_usage())
         except asyncio.CancelledError:
             raise

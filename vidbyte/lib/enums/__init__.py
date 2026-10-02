@@ -100,7 +100,12 @@ from vidbyte.lib.enums.reasoning_strategies import (
     TestimonyTrust,
     TransitivityConsistency,
 )
-from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
+from vidbyte.lib.enums.skills import (
+    ClaudeSkillType,
+    ContextMinimalFanoutSkill,
+    Skill,
+    SkillSourceKind,
+)
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
@@ -116,6 +121,7 @@ __all__ = [
     "JevPreflightQuestionKey",
     "JevQuestionType",
     "JevSkillStatus",
+    "ClaudeSkillType",
     "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
@@ -172,6 +178,7 @@ __all__ = [
     "Reversibility",
     "RuleErrorMode",
     "Skill",
+    "SkillSourceKind",
     "SkillEnums",
     "StrawmanCriticism",
     "StructuredOutputSupport",

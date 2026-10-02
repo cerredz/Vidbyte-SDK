@@ -24,7 +24,14 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from vidbyte.lib.constants.jev import JEV_DEFAULT_MODEL, JEV_DEFAULT_RETRY_COUNT, JEV_DEFAULT_TIMEOUT_SECONDS, JEV_NO_RETRIES, JEV_TIMEOUT_FLOOR_SECONDS
+from vidbyte.lib.constants.jev import (
+    JEV_DEFAULT_MODEL,
+    JEV_DEFAULT_RETRY_COUNT,
+    JEV_DEFAULT_TIMEOUT_SECONDS,
+    JEV_NO_RETRIES,
+    JEV_TIMEOUT_FLOOR_SECONDS,
+)
+from vidbyte.lib.dataclasses.skills import ClaudeSkillReference, ClaudeSkillSession
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.registries.models import ProviderModelRegistry
@@ -52,6 +59,8 @@ class TextModelConfig:
     extra_body: Mapping[str, Any] | None = None
     endpoint: str | None = None
     timeout_seconds: float = 60.0
+    claude_skills: tuple[ClaudeSkillReference, ...] = ()
+    claude_skill_session: ClaudeSkillSession | None = None
 
     def normalized_provider(self) -> ModelProvider:
         # Convert strings to the canonical provider enum at the SDK boundary.
@@ -67,7 +76,19 @@ class TextModelConfig:
         self._validate_top_p()
         self._validate_positive_int(self.max_output_tokens, field_name="max_output_tokens")
         self._validate_positive_float(self.timeout_seconds, field_name="timeout_seconds")
+        self._validate_claude_skill_options()
         self.resolved_api_key()
+
+    def _validate_claude_skill_options(self) -> None:
+        # Reject malformed or non-Anthropic native options before provider dispatch.
+        if not isinstance(self.claude_skills, tuple) or not all(isinstance(skill, ClaudeSkillReference) for skill in self.claude_skills):
+            raise ConfigurationError("claude_skills must be a tuple of ClaudeSkillReference values.")
+        if len(self.claude_skills) > 20:
+            raise ConfigurationError("Anthropic supports at most 20 skills per request.")
+        if self.claude_skill_session is not None and not isinstance(self.claude_skill_session, ClaudeSkillSession):
+            raise ConfigurationError("claude_skill_session must be a ClaudeSkillSession or None.")
+        if (self.claude_skills or self.claude_skill_session is not None) and self.normalized_provider() is not ModelProvider.ANTHROPIC:
+            raise UnsupportedProviderError("Claude-native skills require an Anthropic model.", details={"provider": self.normalized_provider().value})
 
     def resolved_api_key(self) -> str:
         # Resolve explicit keys before provider-specific environment variables.

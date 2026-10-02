@@ -39,7 +39,7 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.dataclasses.skills import SkillDocument
+from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
 from vidbyte.lib.dataclasses.tool_catalogs import ToolCatalogCredentials
 from vidbyte.lib.enums import JevDoneCheck, JevPreflightPreset, ModelProvider
 from vidbyte.lib.enums.tool_catalogs import ToolCatalogName, ToolInstallKind
@@ -165,7 +165,7 @@ class JevAlignmentSettings:
     system_prompt: bool = False
     tool_settings: bool = False
     tool_options: JevToolAlignmentSettings = field(default_factory=JevToolAlignmentSettings)
-    skills: tuple[SkillDocument | str, ...] = ()
+    skills: tuple[SkillDocument | SkillSource | str, ...] = ()
 
     def __post_init__(self) -> None:
         # Keeps both visible alignment switches explicit while allowing catalog policy to be tuned separately.
@@ -176,7 +176,7 @@ class JevAlignmentSettings:
             raise ConfigurationError("JevAlignmentSettings.tool_options must be a JevToolAlignmentSettings instance.")
         object.__setattr__(self, "skills", self._normalized_skills())
 
-    def _normalized_skills(self) -> tuple[SkillDocument, ...]:
+    def _normalized_skills(self) -> tuple[SkillDocument | SkillSource, ...]:
         # @intent names-uniquely-identify-response-results
         # JevAgent.response exposes each decision by the configured name. Duplicate names would make two
         # different candidate bodies indistinguishable to callers and future source adapters.
@@ -187,7 +187,7 @@ class JevAlignmentSettings:
             candidates = tuple(self.skills)
         except TypeError as exc:
             raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings.") from exc
-        skills: list[SkillDocument] = []
+        skills: list[SkillDocument | SkillSource] = []
         for index, candidate in enumerate(candidates, start=1):
             if isinstance(candidate, str):
                 candidate = SkillDocument(
@@ -196,12 +196,14 @@ class JevAlignmentSettings:
                     text=candidate,
                     source="inline",
                 )
-            if not isinstance(candidate, SkillDocument):
-                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillDocument or string values.")
+            if not isinstance(candidate, (SkillDocument, SkillSource)):
+                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillDocument, SkillSource, or string values.")
             skills.append(candidate)
         seen: set[str] = set()
         duplicates: set[str] = set()
         for skill in skills:
+            if isinstance(skill, SkillSource):
+                continue
             if skill.name in seen:
                 duplicates.add(skill.name)
             seen.add(skill.name)

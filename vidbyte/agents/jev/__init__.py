@@ -25,13 +25,11 @@ from vidbyte.agents.jev.settings import (
     JevRuntimeSettings,
     JevToolAlignmentSettings,
 )
-from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.dataclasses.jev import (
-    JevAlignmentOutcome,
     JevAgentResponse,
-    JevPromptAlignmentOutcome,
     JevBulkItemResult,
     JevBulkWorkResult,
+    JevAlignmentOutcome,
     JevClaimAssertion,
     JevClaimContext,
     JevClaimEvidence,
@@ -47,15 +45,22 @@ from vidbyte.lib.dataclasses.jev import (
     JevPresetResult,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
+    JevPromptAlignmentOutcome,
     JevRunStateRecord,
-    JevSpecialist,
     JevSkillResult,
     JevSkillsOutcome,
-    JevToolAlignmentOutcome,
+    JevSpecialist,
     JevTargetOutcome,
     JevTargetOutcomeEvidence,
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeItem,
+    JevToolAlignmentOutcome,
+)
+from vidbyte.lib.dataclasses.skills import (
+    ClaudeSkillReference,
+    ClaudeSkillSession,
+    SkillDocument,
+    SkillSource,
 )
 from vidbyte.lib.enums.jev import (
     JevBulkItemError,
@@ -66,6 +71,7 @@ from vidbyte.lib.enums.jev import (
     JevProblemCheckItemType,
     JevSkillStatus,
 )
+from vidbyte.lib.enums.skills import ClaudeSkillType, SkillSourceKind
 
 __all__ = [
     "JevAgent",
@@ -108,7 +114,12 @@ __all__ = [
     "JevSkillResult",
     "JevSkillsOutcome",
     "JevSkillStatus",
+    "ClaudeSkillType",
+    "SkillSourceKind",
+    "ClaudeSkillReference",
+    "ClaudeSkillSession",
     "SkillDocument",
+    "SkillSource",
     "JevToolAlignmentResult",
     "JevToolAlignmentSettings",
     "JevToolAlignmentOutcome",

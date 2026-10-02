@@ -148,18 +148,23 @@ class JevRuntime(AgentRuntime):
 
     async def _preload_skills(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
         # @intent explicit-system-option-is-the-effective-skill-baseline
-        # An explicit provider override reaches workers even without skills and remains the baseline for selected skill text and synthesis.
-        explicit_system = (options or {}).get("system")
+        # An explicit provider override remains the caller's baseline, with selected skill text appended in the run context and provider option.
+        run_options = dict(options or {})
+        explicit_system = run_options.get("system")
+        # The context copy also carries this baseline to workers when no skill loader exists.
         has_system_override = isinstance(explicit_system, str)
         if has_system_override:
             context = replace(context, system_prompt=explicit_system)
         if self.skill_preload is None:
-            return context, options
-        run_options = dict(options or {})
+            return context, run_options if has_system_override else options
         context = await self.skill_preload.run(message, context)
-        if not has_system_override:
-            return context, options
-        run_options["system"] = context.system_prompt
+        if has_system_override:
+            run_options["system"] = context.system_prompt
+        outcome = self.response.state.skills
+        if outcome is None:
+            raise ConfigurationError("The Jev skill preload did not record its outcome.")
+        run_options["claude_skills"] = outcome.claude_skills
+        run_options["claude_skill_session"] = None
         return context, run_options
 
     async def _select_tools(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None, dict[str, Any] | None]:
@@ -187,7 +192,9 @@ class JevRuntime(AgentRuntime):
         # Runs bounded work only after selection and adds ordered results as immutable context data.
         if not self.preflight.bulk_work_requested:
             return context, None
-        outcome = await self.bulk_work.plan_and_run(message, context, self.user_tools.all())
+        skill_outcome = self.response.state.skills
+        claude_skills = () if skill_outcome is None else skill_outcome.claude_skills
+        outcome = await self.bulk_work.plan_and_run(message, context, self.user_tools.all(), claude_skills=claude_skills)
         self.response.bulk_work(outcome)
         if outcome.plan_valid:
             artifact = self.bulk_work.result_artifact(outcome)

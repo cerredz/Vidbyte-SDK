@@ -23,7 +23,7 @@ from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.lib.dataclasses.jev import JevAgentResponse
-from vidbyte.lib.enums import AgentRuntimeType, JevPreflightPreset
+from vidbyte.lib.enums import AgentRuntimeType, JevPreflightPreset, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -61,6 +61,8 @@ class JevAgent(BaseAgent):
                 decision=runtime_settings.decision,
                 threshold=runtime_settings.skills_threshold,
                 response=self._response,
+                provider=settings.provider,
+                claude_api_key=settings.api_key if settings.provider is ModelProvider.ANTHROPIC else None,
             )
             if settings.alignment.skills
             else None

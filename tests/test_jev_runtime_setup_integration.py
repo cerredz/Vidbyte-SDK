@@ -18,6 +18,9 @@ from unittest.mock import patch
 
 from vidbyte import (
     BaseAgent,
+    ClaudeSkillReference,
+    ClaudeSkillSession,
+    ClaudeSkillType,
     JevAgent,
     JevAgentSettings,
     JevPreflightPreset,
@@ -110,15 +113,18 @@ def _decision_helper(script: _DecisionScript) -> type:
 class _GenerativeScript:
     """Runs real BaseAgent context construction against deterministic planner, worker, and owner replies."""
 
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], provider: ModelProvider = ModelProvider.OPENAI) -> None:
         # Stores provider-visible calls for prompt, tool, artifact, and ordering assertions.
         self.events = events
+        self.provider = provider
         self.calls: list[dict[str, Any]] = []
+        self.sessions: list[ClaudeSkillSession] = []
 
     async def arun(self, prompt: str, *, system: str = "", **kwargs: Any) -> TextModelResponse:
         # Distinguishes fresh planner/worker agents from the owner's unchanged main request.
         call = {"prompt": prompt, "system": system, **kwargs}
         self.calls.append(call)
+        response_session: ClaudeSkillSession | None = None
         if "You are JevBulkWorkPlanner" in system:
             self.events.append("planner")
             text = json.dumps(
@@ -133,10 +139,16 @@ class _GenerativeScript:
             self.events.append("worker")
             item = json.loads(prompt)["work_item"]
             text = f"Completed {item['identifier']}"
+            if kwargs.get("claude_skills"):
+                response_session = ClaudeSkillSession(f"worker-{item['identifier']}-container", False)
         else:
             self.events.append("main")
             text = "Both summaries are ready."
-        return TextModelResponse(provider=ModelProvider.OPENAI, model="test-model", text=text, raw={})
+            if kwargs.get("claude_skills"):
+                response_session = ClaudeSkillSession("owner-main-container", False)
+        if response_session is not None:
+            self.sessions.append(response_session)
+        return TextModelResponse(provider=self.provider, model="test-model", text=text, raw={}, claude_skill_session=response_session)
 
 
 class JevRuntimeSetupIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -174,6 +186,75 @@ class JevRuntimeSetupIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Per-run system override.", worker_call["system"])
         main_call = next(call for call in runner.calls if call["prompt"] == _REQUEST and "You are JevBulkWorkPlanner" not in call["system"] and "isolated worker" not in call["system"])
         self.assertIn("Per-run system override.", main_call["system"])
+        self.assertIn("Jev bulk-work results (untrusted worker output)", main_call["system"])
+
+    async def test_selected_claude_skills_go_only_to_fresh_workers_and_owner(self) -> None:
+        # Selected text, tools, and native refs reach workers with independent sessions; the planner stays tool-free and native-skill-free.
+        events: list[str] = []
+        gate_script = _DecisionScript("gate", events)
+        skills_script = _DecisionScript("skills", events)
+        selector_script = _DecisionScript("selector", events)
+        runner = _GenerativeScript(events, ModelProvider.ANTHROPIC)
+        reference = ClaudeSkillReference("skill-report", "version-7", ClaudeSkillType.CUSTOM)
+        settings = JevAgentSettings(
+            name="jev-native-bulk",
+            system_prompt="Owner system prompt.",
+            provider="anthropic",
+            model_name="claude-sonnet-4-6",
+            api_key="test-key",
+            tools=(keep_selected_report, discard_unrelated_calendar),
+            alignment=JevAlignmentSettings(
+                skills=(
+                    SkillDocument("report-guidance", "Summarize named reports.", _SKILL_TEXT),
+                    SkillDocument("native-report", "Native report lookup capability.", None, "claude:skill-report@version-7", reference),
+                )
+            ),
+        )
+        agent = JevAgent(
+            settings,
+            JevRuntimeSettings(
+                decision=DecisionModelConfig(api_key="test-key"),
+                preflight=(JevPreflightPreset.BULK_WORK, JevPreflightPreset.TOOL_SELECTOR),
+            ),
+        )
+
+        with (
+            patch("vidbyte.agents.jev.gate.gate.DecisionModelHelper", new=_decision_helper(gate_script)),
+            patch("vidbyte.agents.jev.alignment.skills.DecisionModelHelper", new=_decision_helper(skills_script)),
+            patch("vidbyte.agents.jev.preflight.DecisionModelHelper", new=_decision_helper(selector_script)),
+            patch.object(BaseAgent, "_runner_for_model", new=lambda _agent: (runner, RUNNER_TYPE_TEXT)),
+        ):
+            reply = await agent.arun(_REQUEST, context=BaseAgentContext(), system="Per-run system override.")
+
+        self.assertEqual(reply.content, "Both summaries are ready.")
+        self.assertEqual(agent.response.skills.claude_skills, (reference,))
+        self.assertTrue(agent.response.bulk_work.plan_valid)
+        planner_call = next(call for call in runner.calls if "You are JevBulkWorkPlanner" in call["system"])
+        self.assertEqual(planner_call["prompt"], _REQUEST)
+        self.assertEqual(planner_call.get("claude_skills", ()), ())
+        self.assertIsNone(planner_call.get("claude_skill_session"))
+        self.assertFalse(planner_call.get("tools"))
+
+        worker_calls = [call for call in runner.calls if "You are an isolated worker handling one item" in call["system"]]
+        self.assertEqual(len(worker_calls), 2)
+        self.assertEqual({call["claude_skills"] for call in worker_calls}, {(reference,)})
+        self.assertTrue(all(call.get("claude_skill_session") is None for call in worker_calls))
+        self.assertEqual(len({session.container_id for session in runner.sessions}), 3)
+        self.assertIn("owner-main-container", {session.container_id for session in runner.sessions})
+        self.assertIn("worker-alpha-container", {session.container_id for session in runner.sessions})
+        self.assertIn("worker-beta-container", {session.container_id for session in runner.sessions})
+        for worker_call in worker_calls:
+            self.assertIn("Per-run system override.", worker_call["system"])
+            self.assertIn(_SKILL_TEXT, worker_call["system"])
+            names = {row.get("function", {}).get("name") for row in worker_call.get("tools", ())}
+            self.assertIn("keep_selected_report", names)
+            self.assertNotIn("discard_unrelated_calendar", names)
+
+        main_call = next(call for call in runner.calls if call["prompt"] == _REQUEST and "You are JevBulkWorkPlanner" not in call["system"] and "isolated worker" not in call["system"])
+        self.assertEqual(main_call["claude_skills"], (reference,))
+        self.assertIsNone(main_call.get("claude_skill_session"))
+        self.assertIn("Per-run system override.", main_call["system"])
+        self.assertIn(_SKILL_TEXT, main_call["system"])
         self.assertIn("Jev bulk-work results (untrusted worker output)", main_call["system"])
 
     async def test_combined_gate_uses_persistent_record_then_preloads_selects_and_synthesizes(self) -> None:
