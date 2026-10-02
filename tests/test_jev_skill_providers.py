@@ -8,6 +8,8 @@ ARCHITECTURE NOTE: Tests use temporary files and replace only the TypeSafe/gener
 from __future__ import annotations
 
 import asyncio
+import ast
+import importlib.util
 import json
 import os
 import tempfile
@@ -48,6 +50,8 @@ from vidbyte.lib.errors import (
 )
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.jev.decision import DecisionModelHelper
+import vidbyte.lib.jev.preflight.skills as skill_question_module
+from vidbyte.lib.jev.preflight.skills import JevSkillRelevanceQuestion
 from vidbyte.lib.runners.streaming_text import StreamingTextModelRunner
 from vidbyte.lib.runners.text import TextModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse, TextModelResponse
@@ -127,6 +131,44 @@ class _CapturingGenerativeRunner:
         # Returns a standard response after recording the exact per-run system option.
         self.systems.append(kwargs.get("system"))
         return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-4.1-mini", text="done", raw={})
+
+
+class SkillQuestionContractTests(unittest.TestCase):
+    """Checks question length, metadata boundaries, and standalone rubric literals."""
+
+    def test_text_and_native_questions_exceed_two_thousand_tokens(self) -> None:
+        # [Silent Failure] both body-aware and metadata-only questions carry complete recognition rubrics.
+        if importlib.util.find_spec("tiktoken") is None:
+            self.skipTest("tiktoken is not installed")
+        import tiktoken
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        for metadata_only in (False, True):
+            with self.subTest(metadata_only=metadata_only):
+                question = JevSkillRelevanceQuestion(7, metadata_only=metadata_only).to_question()
+                parts = [question.instructions]
+                parts.extend(json.dumps(JevJson.thaw(option.description), ensure_ascii=False) for option in question.options)
+                self.assertGreaterEqual(len(encoding.encode("\n".join(parts))), 2_000)
+                self.assertIn("skills.skill_7", question.instructions)
+                self.assertNotIn("CALLER_PRIVATE", question.instructions)
+
+    def test_metadata_definitions_and_rules_are_standalone_literals(self) -> None:
+        # [Hidden Assumption] every rubric entry remains one literal rather than split adjacent strings.
+        self.assertEqual(len(skill_question_module._NATIVE_DEFINITIONS), 11)
+        self.assertEqual(len(skill_question_module._NATIVE_RULES), 10)
+        module_path = Path(skill_question_module.__file__)
+        syntax = ast.parse(module_path.read_text(encoding="utf-8"))
+        assignments = {
+            target.id: node.value
+            for node in ast.walk(syntax)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name) and target.id in {"_NATIVE_DEFINITIONS", "_NATIVE_RULES"}
+        }
+        for name in ("_NATIVE_DEFINITIONS", "_NATIVE_RULES"):
+            value = assignments[name]
+            self.assertIsInstance(value, ast.Tuple)
+            self.assertTrue(all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in value.elts))
 
 
 class SkillSourceContractTests(unittest.TestCase):
