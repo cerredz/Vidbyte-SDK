@@ -6,6 +6,7 @@ ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabular
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-report-action-alignment.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -19,6 +20,7 @@ from vidbyte.lib.constants.jev import (
     JEV_MULTI_PART_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
+    JEV_TARGET_OUTCOME_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
@@ -27,13 +29,26 @@ from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.report_action_alignment import ReportActionAlignmentQuestion
+from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
 
 class JevDoneRegistry:
     """Registry over every done check's fixed question and the P(yes) every answer to it must reach."""
 
-    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(), JevDoneCheck.REPORT_ACTION_ALIGNMENT: ReportActionAlignmentQuestion(), JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion()})
-    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD, JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD})
+    _questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
+        JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(),
+        JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(),
+        JevDoneCheck.REPORT_ACTION_ALIGNMENT: ReportActionAlignmentQuestion(),
+        JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(),
+        JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion(),
+    })
+    _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
+        JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
+        JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD,
+        JevDoneCheck.REPORT_ACTION_ALIGNMENT: JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
+        JevDoneCheck.TARGET_OUTCOME: JEV_TARGET_OUTCOME_THRESHOLD,
+        JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD,
+    })
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:

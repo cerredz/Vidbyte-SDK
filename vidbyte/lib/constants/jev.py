@@ -6,6 +6,7 @@ ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and 
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-report-action-alignment.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -89,6 +90,8 @@ JEV_CLAIMS_THRESHOLD: float = 0.85
 # A report/action candidate must reach this P(yes) to count as aligned; this is both the mean threshold and
 # veto, and is a starting point rather than a value tuned on a labeled set.
 JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD: float = 0.85
+# Evidence for the requested outcome must reach this P(yes), alone and in the mean; this is a starting point, not tuned.
+JEV_TARGET_OUTCOME_THRESHOLD: float = 0.8
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
@@ -107,6 +110,12 @@ JEV_DONE_PLAN_FIELD: str = "plan"
 JEV_DONE_EXECUTION_FIELD: str = "execution"
 JEV_DONE_FINAL_ACCOUNT_FIELD: str = "final_account"
 JEV_DONE_REQUEST_RELEVANCE_FIELD: str = "request_relevance"
+JEV_DONE_TARGET_OUTCOMES_FIELD: str = "target_outcomes"
+JEV_DONE_TARGET_OUTCOME_FIELD: str = "target_outcome"
+JEV_DONE_TARGET_FIELD: str = "target"
+JEV_DONE_TARGET_SCOPE_FIELD: str = "scope"
+JEV_DONE_COMPLETION_CRITERION_FIELD: str = "completion_criterion"
+JEV_DONE_OBSERVED_PROXY_FIELD: str = "observed_proxy"
 JEV_DONE_PROBLEMS_RESOLVED_FIELD: str = "problems_resolved"
 JEV_DONE_PROBLEM_ITEMS_FIELD: str = "items"
 JEV_DONE_PROBLEM_ID_FIELD: str = "id"
@@ -174,13 +183,15 @@ __all__ = [
     "JEV_DONE_CLAIM_QUALIFICATIONS_FIELD",
     "JEV_DONE_CLAIM_SCOPE_FIELD",
     "JEV_DONE_CLAIM_TITLE_FIELD",
+    "JEV_DONE_COMPLETION_CRITERION_FIELD",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
-    "JEV_DONE_MAX_CONTINUATIONS",
     "JEV_DONE_EXECUTION_FIELD",
     "JEV_DONE_FINAL_ACCOUNT_FIELD",
+    "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_OBSERVED_PROXY_FIELD",
     "JEV_DONE_PLAN_FIELD",
     "JEV_DONE_PROBLEMS_RESOLVED_FIELD",
     "JEV_DONE_PROBLEM_ASSERTION_FIELD",
@@ -193,9 +204,13 @@ __all__ = [
     "JEV_DONE_PROBLEM_SCOPE_FIELD",
     "JEV_DONE_PROBLEM_TITLE_FIELD",
     "JEV_DONE_PROBLEM_VERIFICATION_FIELD",
+    "JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD",
     "JEV_DONE_REQUEST_FIELD",
     "JEV_DONE_REQUEST_RELEVANCE_FIELD",
-    "JEV_DONE_REPORT_ACTION_ALIGNMENT_FIELD",
+    "JEV_DONE_TARGET_FIELD",
+    "JEV_DONE_TARGET_OUTCOMES_FIELD",
+    "JEV_DONE_TARGET_OUTCOME_FIELD",
+    "JEV_DONE_TARGET_SCOPE_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",
@@ -208,7 +223,6 @@ __all__ = [
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
     "JEV_MULTI_PART_THRESHOLD",
-    "JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",
@@ -219,6 +233,7 @@ __all__ = [
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_PROBLEMS_RESOLVED_THRESHOLD",
+    "JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
     "JEV_RUN_STATE_MAX_ITERATIONS",
@@ -234,6 +249,7 @@ __all__ = [
     "JEV_STATUS_UNAUTHORIZED",
     "JEV_STATUS_UNPROCESSABLE",
     "JEV_SYSTEMONE_PATH",
+    "JEV_TARGET_OUTCOME_THRESHOLD",
     "JEV_TIMEOUT_FLOOR_SECONDS",
     "JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD",
     "JEV_TOOL_SELECTOR_MAX_THRESHOLD",

@@ -107,6 +107,10 @@ from vidbyte.agents.jev import (
     JevRuntime,
     JevRuntimeSettings,
     JevSpecialist,
+    JevTargetOutcome,
+    JevTargetOutcomeEvidence,
+    JevTargetOutcomeEvidenceItem,
+    JevTargetOutcomeItem,
 )
 from vidbyte.agents.multi import (
     AgentBinding,
@@ -304,6 +308,10 @@ __all__ = [
     "JevRuntimeSettings",
     "JevRunStateRecord",
     "JevSpecialist",
+    "JevTargetOutcome",
+    "JevTargetOutcomeEvidence",
+    "JevTargetOutcomeEvidenceItem",
+    "JevTargetOutcomeItem",
     "MagenticOneOrchestrator",
     "MultiAgent",
     "MultiAgentOrchestrator",
