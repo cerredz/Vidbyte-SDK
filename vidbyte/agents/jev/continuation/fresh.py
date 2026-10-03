@@ -24,6 +24,7 @@ from vidbyte.lib.dataclasses.jev import JevContinuationEvidence
 from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import VidbyteSdkError
+from vidbyte.lib.jev import JevDoneRegistry
 from vidbyte.prompts.catalog import Prompts
 
 
@@ -100,7 +101,29 @@ class JevFreshContinuation(JevDoneContinuation):
             request=self.run_state.request,
             run_state=self.run_state.rendered,
             handoff=handoff,
+            gate_assessment=self._render_gate_assessment(),
         )
+
+    def _render_gate_assessment(self) -> str:
+        # Rebuilds the complete gate section from this attempt's latest check results.
+        """Render every enabled gate's stable guidance and its latest failed question text."""
+        results = {result.check: result for result in self.run_state.latest_results}
+        sections = []
+        for check in self.run_state.checks:
+            result = results.get(check)
+            if result is None or not result.available:
+                status = "Status: not evaluated."
+            elif result.passed:
+                status = "Status: passed; no questions failed."
+            elif result.failed_questions:
+                questions = "\n".join(f"- {item.question}" for item in result.failed_questions)
+                status = f"Questions that failed:\n{questions}"
+            else:
+                status = "Status: gate failed on deterministic evidence; no Jev question failed."
+            title = check.value.replace("_", " ").title()
+            sections.append(f"## {title}\n\n{JevDoneRegistry.description(check)}\n\n{status}")
+        content = "\n\n".join(sections)
+        return f"<completion_gate_assessment>\n{content}\n</completion_gate_assessment>"
 
 
 __all__ = ["JevFreshContinuation"]
