@@ -68,6 +68,7 @@ Cached official Anthropic documentation says Skills use Messages container.skill
 15. After usage recording and after_model_response middleware, but before local tool parsing, AgentRuntime handles a typed native session. It updates the run-local session option; a paused session adds the exact assistant content to runtime history and resumes through the ordinary bounded loop. Anthropic uses the provider-captured resume_messages directly, preserving initial history and conversation placements without rebuilding them or appending the user prompt again. Completed native responses preserve the container ID and continue through normal local-tool handling; server-side code execution blocks are never executed as local tools.
 16. Existing limits, timeout, and cancellation govern every raw exchange. Usage and cache usage are recorded once per raw response by the existing tracker; no provider-side loop or summed replacement record is introduced.
 17. Public exports expose the source enums, source descriptor, Claude reference/session, and updated skill outcome contracts through existing SDK namespaces. A feature-specific guide documents explicit source forms and one example.
+18. SkillSourceResolver constructs all four named adapters with its injected transport and response parser, without constructor-time requests. Its explicit GITHUB and SKILLS_SH arms must invoke their implemented adapters; tests exercise the public resolver rather than calling those adapters directly.
 
 ### Non-Functional Requirements
 
@@ -446,10 +447,12 @@ All cases run without live provider credentials. Adapter HTTP uses stub transpor
 - [Silent Failure] FILE round-trips complete UTF-8 contents, including frontmatter, CRLF line endings, body whitespace, and code fences, while parsing metadata separately.
 - [Hidden Assumption] Missing, non-string, or blank YAML metadata is not silently replaced with defaults.
 - [Edge Case] GitHub URL forms cover repository root, explicit tree path, blob path, and raw path.
+- [Hidden Failure] SkillSourceResolver routes GITHUB through GitHubSkillSourceAdapter using the injected fake transport; construction sends no request and resolution returns the exact selected document through bounded catalog URLs.
 - [Hidden Failure] GitHub transport failure, default-branch lookup failure, and truncated tree remain local to one candidate.
 - [Silent Failure] An ambiguous slash-containing branch/path without explicit revision is checked with bounded GitHub API probes; only 404 alternatives are ignored, multiple successful splits require explicit revision, and normal default-branch URLs remain usable.
 - [Hidden Assumption] Default branch is read from repository metadata rather than assumed to be main.
 - [Edge Case] skills.sh accepts owner/repo/slug and resolves a unique match.
+- [Hidden Failure] SkillSourceResolver routes SKILLS_SH through SkillsShSkillSourceAdapter using the injected fake transport; construction sends no request and resolution returns the exact selected document through the shared GitHub catalog.
 - [Hidden Failure] A catalog failure never triggers a guessed skills.sh API or installer.
 - [Silent Failure] Slug/frontmatter mismatch or duplicate match cannot silently select another skill.
 - [Hidden Assumption] URL-looking inline strings remain literal text unless wrapped in SkillSource.
@@ -491,6 +494,7 @@ All cases run without live provider credentials. Adapter HTTP uses stub transpor
 ### Integration Tests
 
 - FILE source through JevAgent resolves, receives an indexed decision, and injects only selected exact body text into the current run.
+- A typed remote SkillSource travels through JevSkillsPreload and the default SkillSourceResolver with only fake HTTP, receives a positive Jev decision, and appends the exact resolved SKILL.md text to the run context.
 - Claude metadata selection produces typed refs for Anthropic and none for non-Anthropic.
 - Anthropic stub captures container refs, code execution plus local schemas, and container ID on pause/resume; assistant blocks survive exactly.
 - Runtime stub confirms two raw responses create two usage records and pause resumes through existing iteration bounds.

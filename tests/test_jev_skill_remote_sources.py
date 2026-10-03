@@ -21,6 +21,7 @@ from vidbyte.lib.dataclasses.skills import SkillSource
 from vidbyte.lib.enums.skills import SkillSourceKind
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.http.transport import HttpResponse
+from vidbyte.providers.skills import SkillSourceResolver
 from vidbyte.providers.skills.base import SkillSourceError
 from vidbyte.providers.skills.github import GitHubSkillSourceAdapter
 from vidbyte.providers.skills.skills_sh import SkillsShSkillSourceAdapter
@@ -83,6 +84,54 @@ def _contents_response(content: bytes, path: str) -> HttpResponse:
 def _not_found() -> HttpResponse:
     # Represents the only response ignored while testing alternate URL interpretations.
     return _response({"message": "Not Found"}, status=404)
+
+
+class SkillSourceResolverTests(unittest.IsolatedAsyncioTestCase):
+    """Checks closed public dispatch reaches the real remote adapters through fake HTTP."""
+
+    async def test_resolver_dispatches_github_with_injected_bounded_transport(self) -> None:
+        # [Hidden Failure] the public resolver must not replace an implemented GITHUB adapter with a placeholder error.
+        content = _skill("release-review", "Review release changes")
+        responses = _repository_and_tree(
+            revision="stable",
+            tree=[{"path": "guides/SKILL.md", "type": "blob", "sha": "github-resolver", "size": len(content)}],
+        )
+        responses["https://api.github.com/repos/acme/skills/git/blobs/github-resolver"] = _blob_response(content, "github-resolver")
+        transport = _FakeTransport(responses)
+        resolver = SkillSourceResolver(transport=transport)
+
+        self.assertEqual(transport.calls, [])
+        document = await resolver.resolve(
+            SkillSource(kind=SkillSourceKind.GITHUB, location="acme/skills", skill_name="release-review")
+        )
+
+        self.assertEqual(document.text, content.decode("utf-8"))
+        self.assertEqual(document.name, "release-review")
+        self.assertEqual([call["url"] for call in transport.calls], list(responses))
+        self.assertTrue(all(call["max_response_bytes"] > 0 for call in transport.calls))
+        self.assertTrue(all(call["follow_redirects"] is False for call in transport.calls))
+
+    async def test_resolver_dispatches_skills_sh_through_github_catalog(self) -> None:
+        # [Hidden Failure] the public resolver must route skills.sh references through the shared bounded GitHub catalog.
+        content = _skill("ux-guidelines", "Review interface changes")
+        responses = _repository_and_tree(
+            revision="development",
+            tree=[{"path": "skills/ux-guidelines/SKILL.md", "type": "blob", "sha": "skills-sh-resolver", "size": len(content)}],
+        )
+        responses["https://api.github.com/repos/acme/skills/git/blobs/skills-sh-resolver"] = _blob_response(content, "skills-sh-resolver")
+        transport = _FakeTransport(responses)
+        resolver = SkillSourceResolver(transport=transport)
+
+        self.assertEqual(transport.calls, [])
+        document = await resolver.resolve(
+            SkillSource(kind=SkillSourceKind.SKILLS_SH, location="https://skills.sh/acme/skills/ux-guidelines")
+        )
+
+        self.assertEqual(document.text, content.decode("utf-8"))
+        self.assertEqual(document.name, "ux-guidelines")
+        self.assertEqual([call["url"] for call in transport.calls], list(responses))
+        self.assertTrue(all(call["max_response_bytes"] > 0 for call in transport.calls))
+        self.assertTrue(all(call["follow_redirects"] is False for call in transport.calls))
 
 
 class GitHubSkillSourceTests(unittest.IsolatedAsyncioTestCase):
