@@ -1098,13 +1098,14 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.readme_docs", JevQuestionType.NOUL))
         self.assertIn("with id `readme_docs`?", str(rendered.instructions))
 
-    def test_every_done_check_has_two_paragraph_fresh_agent_guidance(self) -> None:
-        # Pins complete, consistently structured guidance for every registered gate.
+    def test_every_done_check_has_five_sentence_two_paragraph_fresh_agent_guidance(self) -> None:
+        # Pins complete guidance on each gate's purpose, failure follow-up, and common failure modes.
         self.assertEqual(set(JevDoneRegistry._descriptions), set(JevDoneCheck))
         for check in JevDoneCheck:
             with self.subTest(check=check):
                 description = JevDoneRegistry.description(check)
                 self.assertEqual(len(description.split("\n\n")), 2)
+                self.assertEqual(description.count("."), 5)
                 self.assertTrue(description.startswith("This gate checks "))
                 self.assertIn("Use ", description)
         incomplete = dict(JevDoneRegistry._descriptions)
