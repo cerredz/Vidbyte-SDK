@@ -60,12 +60,15 @@ from vidbyte.lib.enums.failure import (
     RuleErrorMode,
 )
 from vidbyte.lib.enums.jev import (
+    JevBulkItemError,
+    JevBulkPlanningError,
     JevClaimKind,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevQuestionType,
+    JevSkillStatus,
 )
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
@@ -97,19 +100,28 @@ from vidbyte.lib.enums.reasoning_strategies import (
     TestimonyTrust,
     TransitivityConsistency,
 )
-from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
+from vidbyte.lib.enums.skills import (
+    ClaudeSkillType,
+    ContextMinimalFanoutSkill,
+    Skill,
+    SkillSourceKind,
+)
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "JevBulkItemError",
+    "JevBulkPlanningError",
     "JevClaimKind",
     "JevDoneCheck",
     "JevDoneQuestionKey",
     "JevPreflightPreset",
     "JevPreflightQuestionKey",
     "JevQuestionType",
+    "JevSkillStatus",
+    "ClaudeSkillType",
     "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
@@ -166,6 +178,7 @@ __all__ = [
     "Reversibility",
     "RuleErrorMode",
     "Skill",
+    "SkillSourceKind",
     "SkillEnums",
     "StrawmanCriticism",
     "StructuredOutputSupport",

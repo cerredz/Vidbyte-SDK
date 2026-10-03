@@ -16,12 +16,16 @@ from vidbyte.lib.constants.jev import JEV_PREFLIGHT_STRATEGY_NAME
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevBulkWorkResult,
     JevClarification,
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevPromptAlignmentOutcome,
     JevRunStateRecord,
     JevSpecialist,
+    JevSkillsOutcome,
+    JevToolAlignmentOutcome,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
@@ -44,6 +48,10 @@ class JevResponse:
     def preflight_usage(self, usage: JevUsage | None) -> None:
         """Record the usage of the one preflight Jev call, or None when TypeSafe reported none."""
         self.state.usage = usage
+
+    def bulk_work(self, result: JevBulkWorkResult) -> None:
+        # Records the single bulk attempt, including a rejected plan used for serial fallback.
+        self.state.bulk_work = result
 
     def needs_clarification(self, clarification: JevClarification) -> None:
         """Record the questions the user must answer; their rendered text becomes the run's output."""
@@ -69,6 +77,20 @@ class JevResponse:
     def continued(self) -> None:
         """Record that a failed done check sent the main agent back to work."""
         self.state.continuations += 1
+
+    def alignment(self, outcome: JevPromptAlignmentOutcome) -> None:
+        """Record the system-prompt alignment outcome for this run."""
+        self.state.alignment = outcome
+
+    def tool_alignment(self, outcome: JevToolAlignmentOutcome) -> None:
+        """Record the tool-settings alignment outcome for this run."""
+        self.state.tool_alignment = outcome
+
+    def skills(self, outcome: JevSkillsOutcome) -> None:
+        # @intent response-never-retains-skill-content
+        # The public record exposes per-document status and decision usage, while selected text stays in the run context only.
+        """Record per-skill relevance outcomes and usage without retaining candidate text."""
+        self.state.skills = outcome
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

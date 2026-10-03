@@ -19,6 +19,7 @@ from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.constants.jev import (
     JEV_PREFLIGHT_REQUEST_FIELD,
+    JEV_PREFLIGHT_RUN_STATE_FIELD,
     JEV_SPECIALIST_QUESTION_NAME,
 )
 from vidbyte.lib.dataclasses.jev import (
@@ -26,6 +27,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevDecisionRequest,
     JevPresetResult,
     JevQuestion,
+    JevRunStateRecord,
     JevSpecialist,
 )
 from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
@@ -48,36 +50,61 @@ class JevPreflightGate:
         self.clarification = JevClarificationAgent(settings) if JevPreflightPreset.CLARITY in self.presets else None
         self.specialists = settings.agents
         self.specialist: JevSpecialist | None = None
+        self.run_state_related: bool | None = None
+        self.bulk_work_requested = False
 
-    def combine(self, message: str) -> JevDecisionRequest | None:
+    def combine(self, message: str, run_state: JevRunStateRecord | None = None) -> JevDecisionRequest | None:
+        # Builds one request, omitting the relation question until there is a typed record to compare.
         """Return one Jev request holding every enabled preset's questions, or None when no preset has a question to ask."""
+        # @intent one-batched-preflight-owns-each-preset-answer
+        # One request keeps bulk recognition questions alongside the existing configured gate questions;
+        # separate independent answers still let the gate veto only the unsafe fan-out decision.
         questions: list[JevQuestion] = []
         for preset in self.presets:
+            if preset is JevPreflightPreset.RUN_STATE_RELATION and run_state is None:
+                continue
             questions.extend(JevPreflightRegistry.questions(preset))
         questions.extend(JevPreflightRegistry.specialists(self.specialists))
         if not questions:
             return None
-        return JevDecisionRequest(state={JEV_PREFLIGHT_REQUEST_FIELD: message}, questions=tuple(questions))
+        state: dict[str, object] = {JEV_PREFLIGHT_REQUEST_FIELD: message}
+        if run_state is not None and JevPreflightPreset.RUN_STATE_RELATION in self.presets:
+            state[JEV_PREFLIGHT_RUN_STATE_FIELD] = self._run_state_state(run_state)
+        return JevDecisionRequest(state=state, questions=tuple(questions))
 
-    async def pass_(self, message: str) -> bool:
+    async def pass_(self, message: str, run_state: JevRunStateRecord | None = None) -> bool:
+        # Resets run-local specialist and relation outcomes before scoring the combined preflight response.
         """Act on every enabled preset's answers, choose the specialist, and return True when a generative agent should run."""
         self.specialist = None
-        answers = await self._ask(message)
-        for outcome in (self._score(preset, answers) for preset in self.presets):
+        self.run_state_related = None
+        self.bulk_work_requested = False
+        bulk_work_passed = False
+        answers = await self._ask(message, run_state)
+        for preset in self.presets:
+            if preset is JevPreflightPreset.RUN_STATE_RELATION and run_state is None:
+                continue
+            outcome = self._score(preset, answers)
             self.response.preset(outcome)
             match outcome:
                 case JevPresetResult(available=False):
                     # Jev could not answer this preset (no credential, a provider failure, or a missing
                     # answer): fail open and leave the run exactly as the owner configured it.
                     continue
+                case JevPresetResult(preset=JevPreflightPreset.RUN_STATE_RELATION):
+                    # A scored relation result controls only whether the existing run-state record is retained.
+                    self.run_state_related = outcome.passed
                 case JevPresetResult(preset=JevPreflightPreset.CLARITY, passed=False):
                     # The request is unclear: JevClarificationAgent writes simple questions for the user, and the
                     # run stops so the user answers them before any generative-agent tokens are spent.
                     if await self._clarify(message, outcome):
                         return False
+                case JevPresetResult(preset=JevPreflightPreset.BULK_WORK, available=True, passed=True):
+                    # Fan-out is allowed only when every separate recognition question passes its veto and mean threshold.
+                    bulk_work_passed = True
                 case _:
                     # A preset that passed needs no action.
                     continue
+        self.bulk_work_requested = bulk_work_passed
         self.specialist = self._choose(answers)
         return True
 
@@ -94,13 +121,14 @@ class JevPreflightGate:
         self.response.specialist(chosen)
         return chosen
 
-    async def _ask(self, message: str) -> Mapping[str, JevAnswer] | None:
+    async def _ask(self, message: str, run_state: JevRunStateRecord | None = None) -> Mapping[str, JevAnswer] | None:
+        # Uses the same fail-open decision boundary for the relation question and other preflight questions.
         # Sends the one combined request and returns Jev's answers, {} when there was nothing to ask, or None on failure.
         # @intent preflight-fails-open
         # Preflight is advisory: a missing TypeSafe key, a provider failure, or a request Jev cannot accept
         # returns None, which marks every preset unavailable instead of blocking the agent.
         try:
-            request = self.combine(message)
+            request = self.combine(message, run_state)
             if request is None:
                 return {}
             decision = await DecisionModelHelper(self.decision).arun(request)
@@ -108,6 +136,33 @@ class JevPreflightGate:
             return None
         self.response.preflight_usage(JevUsage.from_usage_payload(decision.usage or {}))
         return decision.answers
+
+    @staticmethod
+    def _run_state_state(record: JevRunStateRecord) -> Mapping[str, object]:
+        # Keeps only fields that identify prior work; usage accounting and conversation history stay out of Jev's state.
+        """Project only the typed run-state fields Jev can use to recognize a relationship."""
+        return {
+            "goal": record.goal,
+            "objective": record.objective,
+            "mission": record.mission,
+            "what_not_to_do": record.what_not_to_do,
+            "multi_part": None if record.multi_part is None else {
+                "deliverables": tuple({
+                    "id": item.id,
+                    "description": item.description,
+                    "completion_signal": item.completion_signal,
+                } for item in record.multi_part.deliverables),
+            },
+            "target_outcome": None if record.target_outcome is None else {
+                "items": tuple({
+                    "id": item.id,
+                    "outcome": item.outcome,
+                    "target": item.target,
+                    "scope": item.scope,
+                    "completion_criterion": item.completion_criterion,
+                } for item in record.target_outcome.items),
+            },
+        }
 
     @staticmethod
     def _score(preset: JevPreflightPreset, answers: Mapping[str, JevAnswer] | None) -> JevPresetResult:

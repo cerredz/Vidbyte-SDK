@@ -5,8 +5,14 @@ from dataclasses import replace
 from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
-from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
+from vidbyte.lib.dataclasses.skills import (
+    _ClaudeSessionDefault,
+    _USE_CONFIGURED_CLAUDE_SESSION,
+    ClaudeSkillReference,
+    ClaudeSkillSession,
+)
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.http import HttpTransport
 from vidbyte.providers import ModelProviders
 
@@ -28,13 +34,19 @@ class StreamingTextModelRunner:
         self._transport = transport or HttpTransport()
         self._provider = ModelProviders.streaming_text(config)
 
-    def stream(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = ()) -> Iterator[str]:
+    def stream(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), claude_skills: Iterable[ClaudeSkillReference] | None = None, claude_skill_session: ClaudeSkillSession | None | _ClaudeSessionDefault = _USE_CONFIGURED_CLAUDE_SESSION) -> Iterator[str]:
         # Yield text chunk strings as they arrive from the provider SSE stream.
+        native_skills = self._config.claude_skills if claude_skills is None else tuple(claude_skills)
+        native_session = self._config.claude_skill_session if claude_skill_session is _USE_CONFIGURED_CLAUDE_SESSION else claude_skill_session
+        if native_skills or native_session is not None:
+            raise UnsupportedProviderError("Streaming Claude-native skill requests are not supported.", details={"provider": self._config.normalized_provider().value})
         call_config = replace(
             self._config,
             tools=tuple(dict(tool) for tool in tools),
             tool_choice=tool_choice,
             messages=tuple(dict(message) for message in messages),
+            claude_skills=native_skills,
+            claude_skill_session=native_session,
         )
         yield from self._provider.stream_text(
             prompt=prompt,

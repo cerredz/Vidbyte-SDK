@@ -1,0 +1,19 @@
+{
+  "name": "Jev Bulk Work",
+  "description": "Prompts for JevBulkWork's tool-free planner and isolated item workers after fixed preflight questions approve fan-out. The planner receives the unchanged user request and returns a structured, complete list of independent repeated-operation items. The worker prompt limits each worker to one assigned item while keeping the original request as background data. Neither prompt authorizes additional tools or scope.",
+  "key": "jev_bulk_work",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work/system_prompt.md"
+    },
+    "worker_system_prompt": {
+      "path": "worker_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work/worker_system_prompt.md"
+    },
+    "synthesis_prompt": {
+      "path": "synthesis_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work/synthesis_prompt.md"
+    }
+  }
+}

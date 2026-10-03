@@ -31,7 +31,26 @@ class JevPreflightPreset(str, Enum):
     """The preflight flags a JevAgent user can enable; each one turns on a fixed policy that JevPreflightGate (fixed-question presets) or the tool selector acts on."""
 
     CLARITY = "clarity"
+    RUN_STATE_RELATION = "run_state_relation"
     TOOL_SELECTOR = "tool_selector"
+    BULK_WORK = "bulk_work"
+
+
+class JevBulkPlanningError(str, Enum):
+    """Stable reasons a Jev bulk plan was rejected before item execution."""
+
+    PLANNER_FAILURE = "planner_failure"
+    MALFORMED_OUTPUT = "malformed_output"
+    TOO_FEW_ITEMS = "too_few_items"
+    TOO_MANY_ITEMS = "too_many_items"
+    DUPLICATE_IDENTIFIERS = "duplicate_identifiers"
+
+
+class JevBulkItemError(str, Enum):
+    """Stable public category for an item whose worker did not return a result."""
+
+    WORKER_FAILURE = "worker_failure"
+    MISSING_RESULT = "missing_result"
 
 
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
@@ -62,6 +81,14 @@ class JevProblemCheckItemType(str, Enum):
 
     PROBLEM = "problem"
     REQUEST_COMPLETION = "request_completion"
+
+
+class JevSkillStatus(str, Enum):
+    """Outcome of evaluating one configured skill for the current request."""
+
+    SELECTED = "selected"
+    SKIPPED = "skipped"
+    UNAVAILABLE = "unavailable"
 
 
 class JevClaimKind(str, Enum):
@@ -95,6 +122,10 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_CONSISTENCY = "clarity.consistency"
     CLARITY_TIME_CONTEXT = "clarity.time_context"
     CLARITY_SINGLE_READING = "clarity.single_reading"
+    RUN_STATE_RELATION = "run_state_relation"
+    BULK_WORK_MULTIPLE_ITEMS = "bulk_work.multiple_items"
+    BULK_WORK_SAME_OPERATION = "bulk_work.same_operation"
+    BULK_WORK_INDEPENDENT_ITEMS = "bulk_work.independent_items"
 
 
-__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType"]
+__all__ = ["JevBulkItemError", "JevBulkPlanningError", "JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevSkillStatus"]
