@@ -46,11 +46,6 @@ from vidbyte.lib.dataclasses.agents import (
     AgentStopReason,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.config import (
-    AgentSettings,
-    MiddlewareDefinition,
-    ToolDefinition,
-)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -66,8 +61,13 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
-    CodexTurnSettings,
     CodexTurnError,
+    CodexTurnSettings,
+)
+from vidbyte.lib.dataclasses.config import (
+    AgentSettings,
+    MiddlewareDefinition,
+    ToolDefinition,
 )
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -189,7 +189,6 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorReportPayload,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.dataclasses.sandbox import (
     SandboxRequest,
     SandboxResult,
@@ -206,6 +205,12 @@ from vidbyte.lib.dataclasses.sessions import (
     SessionStatus,
     TraceCapture,
     UsageRollup,
+)
+from vidbyte.lib.dataclasses.skills import (
+    ClaudeSkillReference,
+    ClaudeSkillSession,
+    SkillDocument,
+    SkillSource,
 )
 from vidbyte.lib.dataclasses.sources import (
     ArtifactRef,
@@ -426,7 +431,10 @@ __all__ = [
     "SearchHit",
     "SearchPayload",
     "Selection",
+    "ClaudeSkillReference",
+    "ClaudeSkillSession",
     "SkillDocument",
+    "SkillSource",
     "SessionMeta",
     "SessionStatus",
     "SourceResult",
