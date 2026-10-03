@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the structured clarification output), for JevAgent done checks (run-state and handoff payloads, deliverables, cumulative user obligations, per-turn evidence, claim evidence, done records, and results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions, JevAgent preflight, JevAgent done checks, and JevAgentResponse, including request, claim, and dynamic problem-repair evidence shapes.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
-ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
-COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and structured payloads belong beside the other Jev records; request-derived obligations belong on JevRunStateRecord and only active obligation evidence belongs on JevHandoffRecord.
+ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem handoff items require unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
+COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add fields together with validation, wire records, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Keep all done-check records and payloads beside the other Jev records. Request-derived obligations belong on JevRunStateRecord; dynamic claims and problem episodes belong on JevHandoffRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -48,6 +48,7 @@ from vidbyte.lib.enums.jev import (
     JevDoneQuestionKey,
     JevPreflightPreset,
     JevPreflightQuestionKey,
+    JevProblemCheckItemType,
     JevQuestionType,
 )
 from vidbyte.lib.errors import ConfigurationError
@@ -716,6 +717,27 @@ class JevCumulativeObligationsPayload(JevSectionPayload):
 
     obligations: list[JevCumulativeObligationPayload] = Field(description="The obligations list contains one entry for each independently checkable user requirement found across the supplied user turns. Preserve the order in which each obligation first appeared and use source_turn to identify that turn. Merge later wording into the same entry when it only clarifies an existing requirement, and list those clarification indices in related_turns; keep additions as separate entries when they can be completed independently. Retain cancelled and replaced entries with active false, status_turn set to the actual change turn, and a user-grounded status_reason. The independent per-turn inventory questions compare the actual turn text with this complete list, so do not omit a direct requirement because it seems minor or was not repeated. Do not turn the agent's plan, assumptions, or implementation choices into user obligations.")
 
+class JevTargetOutcomeItemPayload(BaseModel):
+    """One distinct target outcome the request asks the agent to establish."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this requested outcome a short stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive it from the outcome's subject rather than assigning a position number. Keep ids unique within this section and copy each id unchanged into the handoff. The id connects one request-derived outcome to its evidence and Jev answer. Do not use the id to add meaning that the named fields do not contain.")
+    outcome: str = Field(min_length=1, description="State the result the user asks to exist or be true after this task, using the user's own words where possible. Name a result rather than an action the agent may take, such as installing, building, or testing. Keep this one outcome distinct from other independently requested results. Do not infer a broader goal or add a quality target the user did not state. If no separate real target outcome can be identified without guessing, omit the item rather than inventing one.")
+    target: str = Field(min_length=1, description="Name the actual object, system, environment, audience, or source whose state the requested outcome concerns. Copy the target from the request or use only a target that follows unambiguously from it. Keep the target distinct from an intermediate tool, test, build, plan, or other method used to reach it. Do not substitute a convenient proxy for the target. Omit this item when the request provides no separate target that can be named faithfully.")
+    scope: str = Field(min_length=1, description="Describe the extent of the requested outcome on its target, preserving named files, components, users, environments, versions, quantities, and limits. Keep qualifiers such as all, only, latest, and exact when they affect what the evidence must cover. Do not expand a narrow request or reduce a broad request to match expected evidence. Describe the target area or population, not the agent's sequence of steps. If a meaningful scope cannot be determined from the request, omit the item instead of filling the gap with a guess.")
+    completion_criterion: str = Field(min_length=1, description="State one observable condition that would demonstrate the requested outcome on the actual target. Derive the condition from the user's words and name what could be observed, inspected, or measured at that target. Do not use a proxy milestone alone, such as a plan, installation, successful build, or smoke test, as the criterion unless the user requested that milestone itself as the outcome. Do not require extra work or standards absent from the request. Omit the item if no faithful criterion can be stated without inventing requirements.")
+
+
+class JevTargetOutcomePayload(JevSectionPayload):
+    """The target-outcome section of the run state, written from the request before work begins."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "This section lists distinct outcomes the user asks to establish on an actual target, so a later check can tell whether the evidence reaches the requested result rather than stopping at a nearby milestone. It records the user's requested outcome, its target and scope, and one observable completion criterion for each item. The section is filled from the request alone before the main agent begins work, so it must not predict which milestones or evidence the run will produce. Do not treat a build, installation, test, plan, or other step as the user's outcome unless the request itself asks for that result. Return no items when the request has no separate target outcome or when identifying one would require guessing."
+
+    items: list[JevTargetOutcomeItemPayload] = Field(description="List one item per distinct result the user asks to establish on a target whose state is separate from merely producing an answer or other requested output. Each item names the outcome, actual target, requested scope, and a faithful observable completion criterion. Do not list agent activities, tools, plans, builds, installations, or tests as outcomes unless the user requests that result itself. Do not invent a target, scope, or criterion to fill missing request details. Return an empty list when there is no applicable target outcome to judge.")
+
 
 class JevHandoffPayload(BaseModel):
     """The evidence handoff JevHandoff writes after the main agent tries to finish.
@@ -775,6 +797,26 @@ class JevCumulativeObligationEvidencePayload(JevSectionPayload):
 
     obligations: list[JevCumulativeObligationEvidenceEntryPayload] = Field(description="The obligations list contains one evidence entry for every obligation in the run state's cumulative-obligations section, with the same ids and order. For an active obligation, report only observations that bear on it and state what remains unshown. For an inactive obligation, report the user wording that supposedly cancelled or replaced it so the checker can compare that reason with user_turns. Repeat shared evidence when it independently supports more than one obligation, but do not use evidence for one to stand in for another. Include an entry even when the run did nothing toward an active obligation.")
     turns: list[JevCumulativeUserTurnEvidenceEntryPayload] = Field(description="The turns list contains one observation entry for every exact supplied user message and the current request, with ids `turn_0`, `turn_1`, and so on in the same order as `user_turns`. Gather current run material that may bear on any direct requirement in that turn, even if the obligation list has no corresponding entry. Include actual response text, final answer passages, tool arguments and outputs, and command or test results; retain failures and later changes. This field reports only what the run shows and does not decide whether a missing requirement was fulfilled. Never leave a turn out or infer that work happened because it was requested.")
+
+class JevTargetOutcomeEvidenceItemPayload(BaseModel):
+    """The observed milestones, direct target evidence, and evidence gap for one requested outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Copy exactly one id from the run state's target-outcome section, preserving its spelling and order. Include one entry for every listed outcome, even when the run shows no relevant activity. Do not add an id for a different outcome or reuse one entry for several outcomes. This id lets the checker match this evidence to its request-derived target, scope, and criterion. A changed or missing id makes the evidence unable to match the intended item.")
+    observed_proxy: str = Field(min_length=1, description="Describe any intermediate milestone the run actually observed that could be mistaken for the requested outcome, such as a plan, installation, build, or test result. Quote or closely reproduce the run and name the response or tool result where the milestone appears. If the run shows no such milestone, say that none was observed. Do not say that the milestone proves the target outcome. This field is context for the checker and is not direct evidence that the requested result occurred.")
+    direct_evidence: str = Field(min_length=1, description="Quote or closely reproduce what the run directly observed about the requested outcome on its actual target and within its scope. Name the source, such as a tool call and its output, inspected artifact, environment observation, or final-answer content when the answer itself is the requested target. Include relevant failures and later changes so the current target state is clear. If no direct target evidence appears, state that explicitly rather than substituting a proxy milestone. Report observations only and never declare the outcome complete.")
+    missing: str = Field(min_length=1, description="Describe what the run does not show about the target outcome, measured against the request-derived target, scope, and completion criterion. Identify the target or scope that remains unobserved and explain which direct observation is absent. Keep this a concise, actionable gap for the main agent rather than a verdict about whether the request was good or the work was valuable. Do not add requirements beyond the request. When the run directly shows the criterion on the actual target, say that no evidence gap remains.")
+
+
+class JevTargetOutcomeEvidencePayload(JevSectionPayload):
+    """The target-outcome section of the handoff, with observations for every listed outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "This section records what the main agent's run observed for each outcome in the request-derived target-outcome section. It separates intermediate proxy milestones from direct evidence about the actual target so that a nearby step cannot stand in for the user's requested result. The checker receives the target, scope, and completion criterion from run state together with the proxy and direct evidence from this section. The section reports observations and a separate actionable gap, never a completion verdict. Fill it after each finish attempt from the current run window, including relevant failed attempts and later state changes."
+
+    items: list[JevTargetOutcomeEvidenceItemPayload] = Field(description="Return one evidence item for every run-state target outcome, preserving each id and the request's ordering. Separate any observed proxy milestone from observations made directly on the actual target. Include the source of each observation, relevant failures, and the latest state shown by the run. Write `missing` separately for the main agent; do not use it as evidence or tell the checker what verdict to choose. If there are no run-state outcomes, return an empty list.")
 
 
 class JevClaimIdentityPayload(BaseModel):
@@ -839,6 +881,32 @@ class JevClaimsEvidencePayload(JevSectionPayload):
     claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every parent claim containing a concrete, independently checkable factual assertion from the final answer. Give each entry a rich claim context and split independent facts into separate assertions so each receives one Jev judgment. Pair the parent with relevant run evidence, or state that no supporting tool call was found. Give each parent and its assertions stable unique ids within their respective scopes. Return an empty list only when the final answer contains no checkable factual claims.")
 
 
+class JevProblemEvidencePayload(BaseModel):
+    """One run-observed problem or the required original-request completion item."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Use a unique stable lowercase id for this observed problem. Use exactly original_request_completion for the required original-request item. Start with a letter and use only lowercase letters, digits, or underscores. Keep the id unchanged because Jev answers are keyed by it.")
+    kind: JevProblemCheckItemType = Field(description="Use problem for an issue encountered during this run. Use request_completion for the single item about finishing the user's original request after repairs. The kind selects which completion rule applies. Do not use it to signal whether the item passed.")
+    title: str = Field(min_length=1, description="Write a concise name identifying this specific issue or requested outcome. Preserve the target when it distinguishes this item from another. Use plain words the main agent can recognize in feedback. Do not state that the item is complete in its title.")
+    description: str = Field(min_length=1, description="Describe the observed problem or requested outcome using the user's request and this run. Preserve the event or result that makes this item checkable. Keep one issue in each problem item. Do not invent a failure or add work beyond the original request.")
+    scope: str = Field(min_length=1, description="Name the affected task, artifact, command, validation, or requested work. Preserve the full scope and meaningful qualifiers. Evidence about only part of this scope cannot establish the whole item. Do not narrow the scope to fit the observed result.")
+    qualifications: str = Field(min_length=1, description="State explicit limits or conditions that affect what counts as resolving this item. Preserve any stated platform, version, count, or test boundary. Say none when no condition applies. Do not add general cautions or inferred restrictions.")
+    repair: str = Field(min_length=1, description="For a problem, describe the repair attempted and the outcome shown in the run. Keep attempts separate from successful changes. For request_completion, state what original work remained or was completed after repairs. A claim that the work is done is not proof of its result.")
+    verification: str = Field(min_length=1, description="Report relevant successful revalidation after the repair, or state that no successful verification is shown. The verification must exercise or inspect the affected behavior. For request_completion, report evidence of the requested result after repairs. Do not treat an unrelated successful command as verification.")
+    evidence: str = Field(min_length=1, description="Faithfully summarize relevant responses, tool calls, outputs, and final-answer passages in run order. Name the source of each observation where available. Include relevant failures and later repairs or reversals. Never treat intent or a claim as proof that an action succeeded.")
+    missing: str = Field(min_length=1, description="Give the main agent an actionable handoff gap for this item. Name the repair, validation, or requested work that the run does not establish. This writer judgment is not shown to Jev as evidence. Say nothing is missing when the evidence covers the completion condition.")
+
+
+class JevProblemsResolvedEvidencePayload(JevSectionPayload):
+    """Dynamic problem items extracted from the completed run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "Extract every concrete error, failed operation, blocker, or failed validation encountered in this run, then include exactly one request_completion item. Report observed facts and ordered evidence only. Do not omit an issue because a later repair was attempted, and do not invent hypothetical issues. A repair is complete only when relevant evidence shows the fix and successful revalidation. The required request_completion item must judge whether the original user request was completed after the repairs."
+    items: list[JevProblemEvidencePayload] = Field(description="Return one entry per observed problem episode. Also return exactly one request_completion entry, even if no problems occurred. Use unique stable ids and reserve original_request_completion for that required item. Retain failed attempts alongside later repair and verification evidence. Do not omit an item because the handoff thinks it is already fixed.")
+
+
 class JevDeliverableId:
     """Shared validation for the stable item identifiers used by done-check records and questions."""
 
@@ -889,6 +957,11 @@ class JevMultiPart:
         return tuple(item.id for item in self.deliverables)
 
 
+def _is_non_negative_int(value: object) -> bool:
+    """Return whether a turn index is an integer ordinal rather than bool or a negative value."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 @dataclass(frozen=True, slots=True)
 class JevCumulativeObligation:
     """One requested obligation, its origin, observable completion signal, and latest user-directed status."""
@@ -905,15 +978,15 @@ class JevCumulativeObligation:
     def __post_init__(self) -> None:
         # Every obligation remains addressable even after cancellation so history can distinguish omission from revocation.
         JevDeliverableId.require(self.id, field_name="cumulative obligation id")
-        if isinstance(self.source_turn, bool) or not isinstance(self.source_turn, int) or self.source_turn < 0:
+        if not _is_non_negative_int(self.source_turn):
             raise JevValidation.error("cumulative obligation source_turn", "a non-negative integer", self.source_turn)
-        if not isinstance(self.related_turns, tuple) or any(isinstance(index, bool) or not isinstance(index, int) or index <= self.source_turn for index in self.related_turns):
+        if not isinstance(self.related_turns, tuple) or any(not _is_non_negative_int(index) or index <= self.source_turn for index in self.related_turns):
             raise JevValidation.error("cumulative obligation related_turns", "a tuple of later non-negative user-turn indices", self.related_turns)
-        if self.status_turn is not None and (isinstance(self.status_turn, bool) or not isinstance(self.status_turn, int) or self.status_turn <= self.source_turn):
+        if self.status_turn is not None and (not _is_non_negative_int(self.status_turn) or self.status_turn <= self.source_turn):
             raise JevValidation.error("cumulative obligation status_turn", "None or a later non-negative user-turn index", self.status_turn)
         for field_name in ("instruction", "completion_signal", "status_reason"):
             JevText.require(getattr(self, field_name), field_name=f"cumulative obligation {self.id!r} {field_name}")
-        if not isinstance(self.active, bool):
+        if type(self.active) is not bool:
             raise JevValidation.error("cumulative obligation active", "a boolean", self.active)
         if (self.active and self.status_turn is not None) or (not self.active and self.status_turn is None):
             raise JevValidation.error("cumulative obligation status_turn", "None for an active obligation and present for an inactive obligation", self.status_turn)
@@ -946,7 +1019,7 @@ class JevCumulativeObligations:
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    Check sections are set only when their done check is enabled, and `usage` is JevRunState's own model usage.
+    Check sections are set only when their done check is enabled. Cumulative obligations include only supplied user turns, while post-run-derived claims and problem episodes are emitted by JevHandoff. `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -955,6 +1028,7 @@ class JevRunStateRecord:
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
     cumulative_obligations: JevCumulativeObligations | None = None
+    target_outcome: JevTargetOutcome | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -969,6 +1043,40 @@ class JevRunStateRecord:
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
         if self.cumulative_obligations is not None and not isinstance(self.cumulative_obligations, JevCumulativeObligations):
             raise JevValidation.error("run state cumulative_obligations", "a JevCumulativeObligations or None", self.cumulative_obligations)
+        if self.target_outcome is not None and not isinstance(self.target_outcome, JevTargetOutcome):
+            raise JevValidation.error("run state target_outcome", "a JevTargetOutcome or None", self.target_outcome)
+
+
+@dataclass(frozen=True, slots=True)
+class JevTargetOutcomeItem:
+    """One requested target result, with its target, scope, and observable completion criterion."""
+
+    id: str
+    outcome: str
+    target: str
+    scope: str
+    completion_criterion: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="target outcome id")
+        for field_name in ("outcome", "target", "scope", "completion_criterion"):
+            JevText.require(getattr(self, field_name), field_name=f"target outcome {self.id!r} {field_name}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevTargetOutcome:
+    """Request-derived target outcomes, in the order the user asked for them."""
+
+    items: tuple[JevTargetOutcomeItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or not all(isinstance(item, JevTargetOutcomeItem) for item in self.items):
+            raise JevValidation.error("target outcomes", "a tuple of JevTargetOutcomeItem values", self.items)
+        JevDeliverableId.require_unique(self.ids(), field_name="target outcomes")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return the stable ids of the requested target outcomes."""
+        return tuple(item.id for item in self.items)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1051,6 +1159,37 @@ class JevCumulativeObligationsEvidence:
     def turn_ids(self) -> tuple[str, ...]:
         """Return each source-turn evidence id in chronological order."""
         return tuple(item.id for item in self.turns)
+
+
+@dataclass(frozen=True, slots=True)
+class JevTargetOutcomeEvidenceItem:
+    """Observed proxy and direct target evidence for one requested outcome, plus the gap for the main agent."""
+
+    id: str
+    observed_proxy: str
+    direct_evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="target outcome evidence id")
+        for field_name in ("observed_proxy", "direct_evidence", "missing"):
+            JevText.require(getattr(self, field_name), field_name=f"target outcome {self.id!r} {field_name}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevTargetOutcomeEvidence:
+    """The evidence section for every request-derived target outcome."""
+
+    items: tuple[JevTargetOutcomeEvidenceItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or not all(isinstance(item, JevTargetOutcomeEvidenceItem) for item in self.items):
+            raise JevValidation.error("target outcome evidence", "a tuple of JevTargetOutcomeEvidenceItem values", self.items)
+        JevDeliverableId.require_unique(self.ids(), field_name="target outcome evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return the ids of the target outcomes represented by this evidence."""
+        return tuple(item.id for item in self.items)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1161,6 +1300,59 @@ class JevClaimsEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevProblemResolutionItem:
+    """One dynamic issue or original-request completion entry and its evidence."""
+
+    id: str
+    kind: JevProblemCheckItemType
+    title: str
+    description: str
+    scope: str
+    qualifications: str
+    repair: str
+    verification: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires typed item kind, stable identity, and all context/evidence text.
+        JevDeliverableId.require(self.id, field_name="problem evidence id")
+        if not isinstance(self.kind, JevProblemCheckItemType):
+            raise JevValidation.error("problem evidence kind", "a JevProblemCheckItemType", self.kind)
+        for field_name in ("title", "description", "scope", "qualifications", "repair", "verification", "evidence", "missing"):
+            JevText.require(getattr(self, field_name), field_name=f"problem {self.id!r} {field_name}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevProblemsResolvedEvidence:
+    """Dynamic problem evidence with exactly one original-request completion item."""
+
+    items: tuple[JevProblemResolutionItem, ...]
+
+    # @intent original-request-completion-survives-every-repair
+    # Exactly one reserved item keeps the user's original goal independently checkable after dynamic problem repairs.
+    # Without this invariant, a repaired issue could pass while the requested work itself remains unfinished.
+    def __post_init__(self) -> None:
+        # Keeps each question id unique and requires the reserved completion item exactly once.
+        if not isinstance(self.items, tuple) or not all(isinstance(item, JevProblemResolutionItem) for item in self.items):
+            raise JevValidation.error("problem evidence items", "a tuple of JevProblemResolutionItem values", self.items)
+        JevDeliverableId.require_unique(self.ids(), field_name="problem evidence")
+        completion = tuple(item for item in self.items if item.kind is JevProblemCheckItemType.REQUEST_COMPLETION)
+        if len(completion) != 1 or completion[0].id != "original_request_completion":
+            raise JevValidation.error("problem evidence completion item", "exactly one request_completion item with id original_request_completion", tuple(item.id for item in completion))
+        if any(item.kind is JevProblemCheckItemType.PROBLEM and item.id == "original_request_completion" for item in self.items):
+            raise JevValidation.error("problem evidence id", "a problem id other than original_request_completion", "original_request_completion")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return all dynamic item ids in handoff order."""
+        return tuple(item.id for item in self.items)
+
+    def problem_ids(self) -> tuple[str, ...]:
+        """Return only observed problem ids, excluding the original-request item."""
+        return tuple(item.id for item in self.items if item.kind is JevProblemCheckItemType.PROBLEM)
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
@@ -1170,6 +1362,8 @@ class JevHandoffRecord:
     multi_part: JevMultiPartEvidence | None = None
     cumulative_obligations: JevCumulativeObligationsEvidence | None = None
     claims: JevClaimsEvidence | None = None
+    target_outcome: JevTargetOutcomeEvidence | None = None
+    problems_resolved: JevProblemsResolvedEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -1180,6 +1374,10 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff cumulative_obligations", "a JevCumulativeObligationsEvidence or None", self.cumulative_obligations)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
+        if self.target_outcome is not None and not isinstance(self.target_outcome, JevTargetOutcomeEvidence):
+            raise JevValidation.error("handoff target_outcome", "a JevTargetOutcomeEvidence or None", self.target_outcome)
+        if self.problems_resolved is not None and not isinstance(self.problems_resolved, JevProblemsResolvedEvidence):
+            raise JevValidation.error("handoff problems_resolved", "a JevProblemsResolvedEvidence or None", self.problems_resolved)
 
 
 @dataclass(frozen=True)
@@ -1330,22 +1528,22 @@ __all__ = [
     "JevAgentResponse",
     "JevAnswer",
     "JevBrief",
-    "JevClarification",
-    "JevClarificationPayload",
-    "JevClarifyingQuestion",
-    "JevClarifyingQuestionPayload",
-    "JevClaimEvidence",
-    "JevClaimEvidencePayload",
     "JevClaimAssertion",
     "JevClaimAssertionPayload",
     "JevClaimContext",
     "JevClaimContextPayload",
+    "JevClaimEvidence",
+    "JevClaimEvidencePayload",
     "JevClaimIdentity",
     "JevClaimIdentityPayload",
     "JevClaimScope",
     "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
+    "JevClarification",
+    "JevClarificationPayload",
+    "JevClarifyingQuestion",
+    "JevClarifyingQuestionPayload",
     "JevContent",
     "JevCriterion",
     "JevDecisionRecord",
@@ -1371,11 +1569,23 @@ __all__ = [
     "JevPresetDefinition",
     "JevPresetResult",
     "JevProbability",
+    "JevProblemEvidencePayload",
+    "JevProblemResolutionItem",
+    "JevProblemsResolvedEvidence",
+    "JevProblemsResolvedEvidencePayload",
     "JevQuestion",
     "JevRunStatePayload",
     "JevRunStateRecord",
     "JevSectionPayload",
     "JevSpecialist",
+    "JevTargetOutcome",
+    "JevTargetOutcomeEvidence",
+    "JevTargetOutcomeEvidenceItem",
+    "JevTargetOutcomeEvidenceItemPayload",
+    "JevTargetOutcomeEvidencePayload",
+    "JevTargetOutcomeItem",
+    "JevTargetOutcomeItemPayload",
+    "JevTargetOutcomePayload",
     "JevText",
     "JevValidation",
     "TypeSafeWireQuestion",

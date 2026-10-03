@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window and exact supplied user turns at each finish attempt, compiles evidence for request-derived checks including cumulative user obligations, and extracts checkable final-answer claims for CLAIMS.
-ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
-ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state, supplied user turns, and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Cumulative obligations get one fresh observation-only evidence summary per user turn so omitted work can still be recognized as completed after a continuation; that generative summary may omit observations. Claims are generated from the final answer here because their item list does not exist before the main agent works.
-COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
-KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims have no pre-run id list; their ids must be valid and unique within the generated claim section. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context at each finish attempt, compiles evidence for all enabled done checks, and extracts post-run claims and problems.
+ROLE IN CODEBASE: JevRunState constructs JevHandoff and calls compile() at each finish attempt; the compiled record is projected into Jev's single batched decision request.
+ARCHITECTURE NOTE: The output schema has one typed section per enabled check. The handoff reads the request, run state, supplied user turns, and main-agent window as context, reuses JevAgent's model, and has no tools. It gathers cumulative per-turn observations, request-derived evidence, and post-run claim and problem items; proxy milestones remain separate from direct target evidence.
+COMMON MODIFICATION PATTERNS: Add each check to `_SECTIONS` and convert its typed payload in `_record()`. Match ids to run-state items only for request-derived checks; validate dynamic claim and problem ids in their typed records.
+KNOWN EDGE CASES: A model failure, invalid payload, or request-derived id mismatch returns None so checks fail open. Cumulative evidence requires one entry for each obligation and supplied turn; problem evidence requires exactly one original-request completion item. History is cleared before each call so a prior attempt cannot leak into the next.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -45,8 +45,14 @@ from vidbyte.lib.dataclasses.jev import (
     JevHandoffRecord,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
+    JevProblemResolutionItem,
+    JevProblemsResolvedEvidence,
+    JevProblemsResolvedEvidencePayload,
     JevRunStateRecord,
     JevSectionPayload,
+    JevTargetOutcomeEvidence,
+    JevTargetOutcomeEvidenceItem,
+    JevTargetOutcomeEvidencePayload,
 )
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.enums.prompts import Prompt
@@ -65,7 +71,13 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({
+        JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload,
+        JevDoneCheck.CLAIMS: JevClaimsEvidencePayload,
+        JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload,
+        JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload,
+        JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload,
+    })
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -186,7 +198,43 @@ class JevHandoff(BaseAgent):
                 )
                 for item in claims_section.claims
             ))
-        return JevHandoffRecord(multi_part=multi_part, cumulative_obligations=cumulative_obligations, claims=claims, usage=self.get_usage())
+        target_outcome = None
+        outcome_section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
+        if isinstance(outcome_section, JevTargetOutcomeEvidencePayload):
+            # Request-derived target items require one exact evidence match each; an incomplete handoff fails open.
+            target_outcome = JevTargetOutcomeEvidence(tuple(
+                JevTargetOutcomeEvidenceItem(item.id, item.observed_proxy.strip(), item.direct_evidence.strip(), item.missing.strip())
+                for item in outcome_section.items
+            ))
+            expected = () if state.target_outcome is None else state.target_outcome.ids()
+            if sorted(target_outcome.ids()) != sorted(expected):
+                return None
+        problems_resolved = None
+        problem_section = getattr(payload, JevDoneCheck.PROBLEMS_RESOLVED.value, None)
+        if isinstance(problem_section, JevProblemsResolvedEvidencePayload):
+            problems_resolved = JevProblemsResolvedEvidence(tuple(
+                JevProblemResolutionItem(
+                    item.id,
+                    item.kind,
+                    item.title.strip(),
+                    item.description.strip(),
+                    item.scope.strip(),
+                    item.qualifications.strip(),
+                    item.repair.strip(),
+                    item.verification.strip(),
+                    item.evidence.strip(),
+                    item.missing.strip(),
+                )
+                for item in problem_section.items
+            ))
+        return JevHandoffRecord(
+            multi_part=multi_part,
+            cumulative_obligations=cumulative_obligations,
+            claims=claims,
+            target_outcome=target_outcome,
+            problems_resolved=problems_resolved,
+            usage=self.get_usage(),
+        )
 
 
 __all__ = ["JevHandoff"]
