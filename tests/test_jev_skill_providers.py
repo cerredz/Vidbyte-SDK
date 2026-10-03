@@ -3,6 +3,10 @@
 PURPOSE: Verifies explicit skill source contracts, bounded FILE resolution, stable failures, and Jev preload integration.
 ROLE IN CODEBASE: Covers the first implementation stage of docs/design/jev-skill-providers.md without live provider calls.
 ARCHITECTURE NOTE: Tests use temporary files and replace only the TypeSafe/generative model boundaries.
+COMMON MODIFICATION PATTERNS: Add focused cases beside the contract, preload, provider, or runtime behavior they protect.
+KNOWN EDGE CASES: The tiktoken floor test skips only when its optional tokenizer is absent; tests never call live providers.
+RELATED DOCS: docs/design/jev-skill-providers.md and docs/jev-skill-providers.md.
+TESTS: Run with python scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations

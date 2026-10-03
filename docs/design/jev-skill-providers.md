@@ -178,12 +178,14 @@ class SkillSourceResolver:
 
 1. Dispatch with an explicit match on source.kind to FILE, GITHUB, SKILLS_SH, or CLAUDE; no provider plugin registry.
 2. For FILE, resolve a file path or directory's SKILL.md, read under a fixed byte ceiling, parse YAML frontmatter with installed PyYAML, verify a nonblank body, store the complete decoded file unchanged, and set provenance to the resolved local path.
-3. For GITHUB, normalize approved GitHub URLs/shorthands; query repository metadata to get the true default branch; use an explicit revision when provided; use bounded tree lookup and raw/blob retrieval; for ambiguous implicit slash splits, probe only bounded ref/path interpretations, ignore only 404, and reject multiple matches or any non-404 probe failure.
+3. For GITHUB, normalize approved GitHub URLs/shorthands; query repository metadata to get the true default branch; use an explicit revision when provided; use bounded tree lookup and raw/blob retrieval; for ambiguous implicit slash splits, probe only bounded ref/path interpretations, ignore only 404, and reject multiple matches or any non-404 probe failure. Keep URL parsing and candidate resolution as named stages: a small mode dispatcher delegates file and tree candidate lookup to separate methods, while shorthand parsing delegates to URL host/credential/query validation. Reuse the parsed tuple and resolved payload rather than reinterpreting a source or fetching a successful probe again.
 4. For SKILLS_SH, parse only owner/repo/slug forms and choose the matching SKILL.md from the same GitHub catalog resolver. No CLI, installation, or invented endpoint.
 5. For CLAUDE, call official list/retrieve/version metadata endpoints using a typed API request, follow pagination within explicit bounds, and return a ClaudeSkillReference plus display metadata with text=None.
 6. Use HttpTransport timeouts and maximum response sizes. Send API keys only to the fixed GitHub or Anthropic host set appropriate to the selected adapter. Claude credentials resolve in order from SkillSource.api_key, the owning Anthropic JevAgentSettings.api_key, then ANTHROPIC_API_KEY; never forward a non-Anthropic model key. Do not include secrets in errors.
 7. Convert expected per-source transport, parse, not-found, ambiguity, unsupported-kind, and descriptor failures into one indexed unavailable value. Propagate asyncio.CancelledError.
 8. After resolution, group by resolved name and mark all colliding indices unavailable. Do not silently take the first result or shift later candidates.
+
+The GitHub tree and decoded-file paths share one private validator for optional nonnegative integer sizes. It rejects booleans because Python treats `bool` as an `int`, and each caller retains its existing safe SDK-authored error detail. This keeps size-validation ownership singular without changing remote response interpretation.
 
 #### Edge Cases & Error Handling
 

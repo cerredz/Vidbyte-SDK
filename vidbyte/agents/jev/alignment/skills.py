@@ -124,7 +124,8 @@ class JevSkillsPreload(JevPreload):
         return self._append_selected(context, tuple(selected_text))
 
     async def _resolve_candidates(self) -> tuple[dict[int, SkillDocument], dict[int, JevSkillResult]]:
-        # Resolves sources at run time and converts only expected per-source failures into indexed outcomes.
+        # @intent preserve-candidate-indexes-through-source-failures
+        # Each configured source keeps its original slot; expected lookup failures stay local so sibling candidates remain selectable.
         available: dict[int, SkillDocument] = {}
         results: dict[int, JevSkillResult] = {}
         for index, candidate in enumerate(self.skills, start=_SKILL_INDEX_BASE):
@@ -159,10 +160,12 @@ class JevSkillsPreload(JevPreload):
         document = resolved or (candidate if isinstance(candidate, SkillDocument) else None)
         if document is not None:
             name, description, source = document.name, document.description, document.source
-        else:
+        elif isinstance(candidate, SkillSource):
             name = candidate.skill_name or f"skill_{index}"
             description = "Skill source candidate."
             source = candidate.kind.value if isinstance(candidate.kind, SkillSourceKind) else None
+        else:
+            name, description, source = candidate.name, candidate.description, candidate.source
         return JevSkillResult(name=name, description=description, source=source, status=JevSkillStatus.UNAVAILABLE, detail=detail)
 
     def _build_batches(self, message: str, indexed_skills: Sequence[tuple[int, SkillDocument]] | None = None) -> tuple[tuple[_SkillBatch, ...], tuple[int, ...]]:

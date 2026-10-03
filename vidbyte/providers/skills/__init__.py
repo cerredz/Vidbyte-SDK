@@ -3,6 +3,10 @@
 PURPOSE: Exposes the closed class-first resolver for explicit Jev skill sources.
 ROLE IN CODEBASE: JevSkillsPreload calls this facade at run time; it never fetches during agent construction.
 ARCHITECTURE NOTE: New source kinds are added as explicit match arms, not registered callbacks.
+COMMON MODIFICATION PATTERNS: Update the finite resolver dispatch when a named source kind is added.
+KNOWN EDGE CASES: Expected provider failures become indexed source failures; cancellation propagates unchanged.
+RELATED DOCS: docs/design/jev-skill-providers.md and docs/jev-skill-providers.md.
+TESTS: tests/test_jev_skill_providers.py and scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ class SkillSourceResolver:
     """Dispatches one source through the SDK's finite adapter set."""
 
     def __init__(self, *, transport: HttpTransport | None = None, response_parser: HttpResponseParser | None = None, claude_api_key: str | None = None) -> None:
-        # The resolver owns fixed adapters and performs no construction-time I/O.
+        # @intent keep-source-dispatch-closed-and-lazy
+        # One fixed adapter exists per supported source kind and construction performs no requests, avoiding arbitrary callbacks and eager network effects.
         self._file_adapter: SkillSourceAdapter = FileSkillSourceAdapter()
         self._claude_adapter: SkillSourceAdapter = ClaudeSkillSourceAdapter(transport, response_parser, default_api_key=claude_api_key)
 
