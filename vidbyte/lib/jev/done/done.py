@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at constru
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its one or more fixed questions to _questions and its threshold constant to _thresholds; checks that audit a generated list against source inputs also register a per-source question in _inventory_questions. Keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here. REQUIRED_ACTIONS contributes one question for each explicitly requested action; DISCOVERED_ITEM_COVERAGE asks one source-inventory question and one item-processing question.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-discovered-item-coverage.md, docs/design/jev-expert-depth-done-criteria.md.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-input-exhaustion-done-criteria.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-discovered-item-coverage.md, docs/design/jev-expert-depth-done-criteria.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -16,6 +16,7 @@ from types import MappingProxyType
 
 from vidbyte.lib.constants.jev import (
     JEV_ASSUMPTIONS_RECONCILED_THRESHOLD,
+    JEV_CAN_SIMPLIFY_THRESHOLD,
     JEV_CLAIMS_THRESHOLD,
     JEV_COMPLETION_EVIDENCE_THRESHOLD,
     JEV_CUMULATIVE_OBLIGATIONS_THRESHOLD,
@@ -45,6 +46,7 @@ from vidbyte.lib.enums.jev import (
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQuestion
+from vidbyte.lib.jev.done.can_simplify import CanSimplifyQuestion
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
 from vidbyte.lib.jev.done.cumulative_obligations import (
@@ -85,6 +87,7 @@ class JevDoneRegistry:
 
     _questions: Mapping[JevDoneCheck, tuple[JevDoneQuestion, ...]] = MappingProxyType({
         JevDoneCheck.MULTI_PART: (MultiPartDeliveredQuestion(),),
+        JevDoneCheck.CAN_SIMPLIFY: (CanSimplifyQuestion(),),
         JevDoneCheck.OUTPUT_COUNT: (OutputCountSatisfiedQuestion(),),
         JevDoneCheck.CLAIMS: (ClaimsSupportedQuestion(),),
         JevDoneCheck.REPORT_ACTION_ALIGNMENT: (ReportActionAlignmentQuestion(),),
@@ -113,6 +116,7 @@ class JevDoneRegistry:
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
+        JevDoneCheck.CAN_SIMPLIFY: JEV_CAN_SIMPLIFY_THRESHOLD,
         JevDoneCheck.OUTPUT_COUNT: JEV_OUTPUT_COUNT_THRESHOLD,
         JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD,
         JevDoneCheck.REPORT_ACTION_ALIGNMENT: JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,

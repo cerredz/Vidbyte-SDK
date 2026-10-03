@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; each failed check contributes its own helper in _explain(). Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned; changed-assumption feedback names only failed premises and their dependent work. The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -22,6 +22,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_DONE_COMPLETION_ITEM_ID,
     JEV_DONE_HARD_PART_FIELD,
+    JEV_DONE_IMPLEMENTATION_FIELD,
     JEV_EXPERT_DEPTH_FOCUS_LIMIT,
     JEV_NOUL_TRUE,
 )
@@ -100,6 +101,7 @@ class JevDoneContinuation(JevContinuation):
         # One typed formatter per check keeps feedback aligned with that check's evidence and gap rules.
         handlers: Mapping[JevDoneCheck, Callable[[JevDoneResult], tuple[str, str]]] = {
             JevDoneCheck.MULTI_PART: self._explain_multi_part,
+            JevDoneCheck.CAN_SIMPLIFY: self._explain_can_simplify,
             JevDoneCheck.CLAIMS: self._explain_claims,
             JevDoneCheck.COMPLETION_EVIDENCE: self._explain_completion_evidence,
             JevDoneCheck.PHASE_PROGRESS: self._explain_phase_progress,
@@ -141,9 +143,7 @@ class JevDoneContinuation(JevContinuation):
             in_scope_probability = scope_answer.probabilities[JEV_NOUL_TRUE]
             objection = objections[identifier]
             failed.append(
-                f"- Objection `{identifier}`: {objection.objection} Jev's answers: the work does not yet show it "
-                f"resolved (P(resolved) = {cleared:.2f}), and fixing it is within the request "
-                f"(P(in scope) = {in_scope_probability:.2f}). Still missing: {missing[identifier]}"
+                f"""- Objection `{identifier}`: {objection.objection} Jev's answers: the work does not yet show it resolved (P(resolved) = {cleared:.2f}), and fixing it is within the request (P(in scope) = {in_scope_probability:.2f}). Still missing: {missing[identifier]}"""
             )
             focus.append(f"- A strict reviewer would reject this: {objection.objection} Accept when: {objection.resolved_when}")
         return "\n".join(failed), "\n".join(focus)
@@ -337,6 +337,24 @@ class JevDoneContinuation(JevContinuation):
             failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
             focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
         return "\n".join(failed), "\n".join(focus)
+
+    def _explain_can_simplify(self, result: JevDoneResult) -> tuple[str, str]:
+        """Return the candidate and original preservation requirements as one failed prompt and one focus string."""
+        question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+        record = self.run_state.record
+        state = None if record is None else record.can_simplify
+        handoff_record = self.run_state.handoff
+        evidence = None if handoff_record is None else handoff_record.can_simplify
+        if state is None or evidence is None:
+            return question.gap, "Review the requested implementation and preserve every stated requirement."
+        identifier = JEV_DONE_IMPLEMENTATION_FIELD
+        yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+        failed = f"""{question.gap}
+- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Simplification to make: {evidence.missing}"""
+        focus = f"""Implementation scope: {state.scope}
+Preserve: {state.preserve}
+Apply this smaller approach: {evidence.missing}"""
+        return failed, focus
 
     def _explain_claims(self, result: JevDoneResult) -> tuple[str, str]:
         # Keep unsupported assertions paired with their exact tool-call evidence and gap.

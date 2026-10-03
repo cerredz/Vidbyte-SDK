@@ -10,6 +10,7 @@ TESTS: tests/test_jev_done.py.
 """
 
 from vidbyte.lib.jev.done.assumptions_reconciled import AssumptionsReconciledQuestion
+from vidbyte.lib.jev.done.can_simplify import CanSimplifyQuestion
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.completion_evidence import CompletionEvidenceSupportedQuestion
 from vidbyte.lib.jev.done.cumulative_obligations import (
@@ -75,4 +76,5 @@ __all__ = [
     "SelfReviewInScopeQuestion",
     "SelfReviewResolvedQuestion",
     "TargetOutcomeDemonstratedQuestion",
+    "CanSimplifyQuestion",
 ]

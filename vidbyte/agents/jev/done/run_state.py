@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntim
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims, changed assumptions, observed problems, whole-task completion status, and plan/account comparisons that do not exist until after work are extracted by JevHandoff and added to the shared Jev state at check time. PHASE_PROGRESS keeps its request-derived stages in the run state and adds run evidence at handoff time. OUTPUT_EXTENT applies an explicit comparator to safe deterministic measurements of the raw final answer, while Jev recognizes whether evidence belongs to the named output. REPORT_ACTION_ALIGNMENT checks explicit earlier plans against observed execution and the final account without making optional plan steps into user requirements. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their items and questions in _section() from typed records. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -73,6 +73,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_FINAL_ACCOUNT_FIELD,
     JEV_DONE_GUARANTEED_NEXT_ACTIONS_FIELD,
     JEV_DONE_HARD_PART_FIELD,
+    JEV_DONE_IMPLEMENTATION_FIELD,
     JEV_DONE_INPUT_ACTION_FIELD,
     JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
     JEV_DONE_INPUT_EXHAUSTION_FIELD,
@@ -129,6 +130,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_PHASE_REQUIRED_RESULT_FIELD,
     JEV_DONE_PHASE_STAGE_FIELD,
     JEV_DONE_PLAN_FIELD,
+    JEV_DONE_PRESERVATION_FIELD,
     JEV_DONE_PROBLEM_ASSERTION_FIELD,
     JEV_DONE_PROBLEM_DESCRIPTION_FIELD,
     JEV_DONE_PROBLEM_ITEMS_FIELD,
@@ -168,6 +170,8 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
+    JevCanSimplify,
+    JevCanSimplifyPayload,
     JevCumulativeObligation,
     JevCumulativeObligations,
     JevCumulativeObligationsPayload,
@@ -243,7 +247,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.CAN_SIMPLIFY: JevCanSimplifyPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsPayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationsPayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthPayload})
@@ -507,6 +511,7 @@ class JevRunState(BaseAgent):
         # Keep one small request projection per check so later gates cannot alter their siblings' payloads.
         handlers: Mapping[JevDoneCheck, Callable[[JevHandoffRecord], tuple[Mapping[str, object], tuple[JevQuestion, ...]]]] = {
             JevDoneCheck.MULTI_PART: self._multi_part_section,
+            JevDoneCheck.CAN_SIMPLIFY: self._can_simplify_section,
             JevDoneCheck.CLAIMS: self._claims_section,
             JevDoneCheck.PHASE_PROGRESS: self._phase_progress_section,
             JevDoneCheck.TARGET_OUTCOME: self._target_outcome_section,
@@ -797,6 +802,21 @@ class JevRunState(BaseAgent):
             for deliverable in state.deliverables
         }
         return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+
+    def _can_simplify_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Pair request-derived implementation constraints with the run evidence for one judgment."""
+        state = None if self.record is None else self.record.can_simplify
+        if state is None or handoff.can_simplify is None:
+            return {}, ()
+        question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+        entry = {
+            "scope": state.scope,
+            JEV_DONE_PRESERVATION_FIELD: state.preserve,
+            JEV_DONE_EVIDENCE_FIELD: handoff.can_simplify.implementation,
+        }
+        return {
+            JEV_DONE_IMPLEMENTATION_FIELD: {JEV_DONE_IMPLEMENTATION_FIELD: entry},
+        }, (question.to_question(JEV_DONE_IMPLEMENTATION_FIELD),)
 
     def _claims_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         # @intent claims-come-from-finished-answer
@@ -1102,6 +1122,7 @@ class JevRunState(BaseAgent):
         # Dispatch preserves each scorer's threshold, missing-answer, and fail-open rules as gates are added.
         handlers: Mapping[JevDoneCheck, Callable[[JevHandoffRecord | None, DecisionModelResponse | None], JevDoneResult]] = {
             JevDoneCheck.MULTI_PART: self._multi_part,
+            JevDoneCheck.CAN_SIMPLIFY: self._can_simplify,
             JevDoneCheck.CLAIMS: self._claims,
             JevDoneCheck.PHASE_PROGRESS: self._phase_progress,
             JevDoneCheck.COMPLETION_EVIDENCE: self._completion_evidence,
@@ -1472,6 +1493,30 @@ class JevRunState(BaseAgent):
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
+    def _can_simplify(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Score the one implementation answer with the registered threshold and fail-open rules."""
+        state = None if self.record is None else self.record.can_simplify
+        if state is None or handoff is None or handoff.can_simplify is None or decision is None:
+            return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+        identifier = JEV_DONE_IMPLEMENTATION_FIELD
+        name = question.name(identifier)
+        answers = {identifier: decision.answers[name]} if name in decision.answers else {}
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.CAN_SIMPLIFY)
+        verdict = DecisionModelHelper.score_noul(answers, (identifier,), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=None, available=False)
+        incomplete = () if verdict.passed else (identifier,)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=JevDoneCheck.CAN_SIMPLIFY,
+            score=verdict.score,
+            passed=verdict.passed,
+            answers=verdict.answers,
+            incomplete=incomplete,
+            usage=usage,
+        )
+
     # @intent final-answer-claims-need-independent-evidence
     # CLAIMS guards the trust boundary between an agent's self-report and the work the run actually records.
     # A polished final answer can claim edits or passing tests that were never made, and a run-wide average
@@ -1824,6 +1869,7 @@ class JevRunState(BaseAgent):
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        can_simplify = JevRunState._can_simplify_record(payload)
         expert_depth = self._expert_depth_record(payload)
         required_actions = self._required_actions_record(payload)
         output_count = self._output_count_record(payload)
@@ -1906,7 +1952,16 @@ class JevRunState(BaseAgent):
             output_extent=self._output_extent_record(payload),
             cumulative_obligations=cumulative_obligations,
             expert_depth=expert_depth,
+            can_simplify=can_simplify,
         )
+
+    @staticmethod
+    def _can_simplify_record(payload: JevRunStatePayload) -> JevCanSimplify | None:
+        """Convert request-derived implementation scope and preservation requirements."""
+        section = getattr(payload, JevDoneCheck.CAN_SIMPLIFY.value, None)
+        if not isinstance(section, JevCanSimplifyPayload):
+            return None
+        return JevCanSimplify(section.scope.strip(), section.preserve.strip())
 
     @staticmethod
     def _expert_depth_record(payload: JevRunStatePayload) -> JevExpertDepth | None:

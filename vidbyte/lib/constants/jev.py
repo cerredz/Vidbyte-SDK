@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-agent-scaffold.py, and tests/test_jev_done.py.
 """
 
@@ -88,6 +88,7 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 # threshold is used as both the mean threshold and veto, so one clear no is not averaged away.
 # Both thresholds are starting points, not values tuned on a labeled set.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
+JEV_CAN_SIMPLIFY_THRESHOLD: float = 0.8
 # Every explicit output-count obligation must independently reach the threshold; starting point, not tuned.
 JEV_OUTPUT_COUNT_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
@@ -179,6 +180,9 @@ JEV_DONE_OUTPUT_COUNT_ENTRY_VALUE_FIELD: str = "value"
 JEV_DONE_OUTPUT_COUNT_ENTRY_KEY_FIELD: str = "distinct_key"
 JEV_DONE_OUTPUT_COUNT_ENTRY_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+# The can-simplify check compares the implementation against request constraints.
+JEV_DONE_IMPLEMENTATION_FIELD: str = "implementation"
+JEV_DONE_PRESERVATION_FIELD: str = "preserve"
 JEV_DONE_CLAIMS_FIELD: str = "claims"
 JEV_DONE_INPUT_ACTION_FIELD: str = "action"
 JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD: str = "engagement_signal"
@@ -327,6 +331,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_CAN_SIMPLIFY_THRESHOLD",
     "JEV_GUARANTEED_NEXT_ACTIONS_THRESHOLD",
     "JEV_INPUT_EXHAUSTION_THRESHOLD",
     "JEV_INPUT_SET_COVERAGE_THRESHOLD",
@@ -433,6 +438,7 @@ __all__ = [
     "JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD",
     "JEV_DONE_DISCOVERED_ITEM_SOURCE_ID_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_IMPLEMENTATION_FIELD",
     "JEV_DONE_HARD_PART_FIELD",
     "JEV_DONE_MISSING_FIELD",
     "JEV_DONE_WHAT_NOT_TO_DO_FIELD",
@@ -441,6 +447,7 @@ __all__ = [
     "JEV_DONE_DONE_WHEN_FIELD",
     "JEV_DONE_EXPERT_DETAILS_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_PRESERVATION_FIELD",
     "JEV_DONE_EXECUTION_FIELD",
     "JEV_DONE_FINAL_ACCOUNT_FIELD",
     "JEV_DONE_MOTIVATING_CASES_FIELD",

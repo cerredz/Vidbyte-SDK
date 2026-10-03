@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntim
 ARCHITECTURE NOTE: This folder is where the done-check logic lives; question text, the check vocabulary, thresholds, and records stay in vidbyte/lib/jev/done/, vidbyte/lib/enums/jev.py, vidbyte/lib/constants/jev.py, and vidbyte/lib/dataclasses/jev.py.
 COMMON MODIFICATION PATTERNS: Add a done check's run-state section and evidence section to the _SECTIONS maps of JevRunState and JevHandoff, and its commented case to JevRunState._section and JevRunState._judge; what the main agent reads when it fails goes in JevDoneContinuation._explain (vidbyte/agents/jev/continuation/).
 KNOWN EDGE CASES: Importing this package performs no model or Jev call and needs no TypeSafe credential.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-can-simplify-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 

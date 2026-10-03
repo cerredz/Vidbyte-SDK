@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest fro
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes requested members, workspace inventory, and unsupported mentions. Completion evidence is one handoff-only whole-task item. PHASE_PROGRESS is omitted when no substantive outcome stage exists; INPUT_SET_COVERAGE is omitted when no explicitly bounded input target exists. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because concrete subclasses redeclare defaulted fields. Pydantic payload descriptions are the instructions generative agents receive; records built from those replies hold validated values, and conversion remains with the agent that requested the reply. Report/action candidates compare an explicit earlier plan with recorded execution, the final account, and request relevance; they do not turn an agent plan into a user requirement. Include a consequential assumption even when later work recovers or makes dependent work irrelevant; Jev judges whether the work was revised or became irrelevant.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and tests/test_jev_done.py.
 """
 
@@ -757,6 +757,18 @@ class JevMultiPartPayload(JevSectionPayload):
 
     deliverables: list[JevDeliverablePayload] = Field(description="The deliverables are the separate outputs the request asks the agent to produce, one entry per output, in the order the request asks for them. An output is separate when it could be left out while the other outputs are still produced, such as a code change, a test, a migration, a document, an example, or an explanation the user asked for in its own right. Do not split one output into smaller steps, do not merge two outputs the user asked for separately, and do not add outputs the request does not ask for, such as extra tests or documentation the user never mentioned. Steps the agent takes only to produce an output, such as reading files or running a search, are not deliverables. Return an empty list when the request asks for no output at all, such as a greeting.")
 
+
+class JevCanSimplifyPayload(JevSectionPayload):
+    """Request-derived scope and requirements for the can-simplify check."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The can-simplify section gives the later checker a fixed reference for reviewing the implementation the agent produces. It records the implementation scope and the requirements that any simpler approach must continue to meet. Write both fields from the user's request alone, before the main agent starts work, and do not infer constraints from an implementation plan. The section narrows simplification to changes that keep the requested behavior, quality, and scope intact."
+
+    scope: str = Field(min_length=1, description="The scope identifies the implementation the request asks the agent to create or change, using the user's names for the relevant behavior, files, and boundaries. It is written before the implementation exists, so it describes the requested work rather than predicting the code structure. Include only implementation work in the request and do not expand the review to unrelated existing code. When the request asks for no implementation change, say that there is no implementation to simplify.")
+    preserve: str = Field(min_length=1, description="The preservation requirements state the behavior, outputs, interfaces, constraints, and quality conditions from the user's request that any simplification must keep. Include explicit constraints and requirements that clearly follow from the request's stated outcome, but do not invent preferences about architecture or style. A simpler approach that drops a required behavior, changes an interface the request says to retain, or moves complexity into another required part does not qualify. When the request sets no special preservation constraint, say that the simplification must still fully meet the requested outcome.")
+
+
 class JevCumulativeObligationPayload(BaseModel):
     """One user obligation and its current status across the supplied user turns."""
 
@@ -1096,6 +1108,18 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     SECTION: ClassVar[str] = "The multi-part evidence section gathers, for each deliverable the run state lists, the parts of the agent's run that show whether that deliverable was produced. A separate checker reads one entry at a time, next to the user's request and that deliverable's description and completion signal, and decides whether the deliverable is done. That checker sees nothing of the run except the evidence written here, so the evidence must be complete, specific, and faithful to what the run actually shows. The section reports observations and never gives a verdict about whether the work is complete. It is filled after the agent tries to finish, from the agent's context window."
 
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
+
+
+class JevCanSimplifyEvidencePayload(JevSectionPayload):
+    """Run evidence and a concrete alternative for the can-simplify check."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The can-simplify evidence section reviews the implementation in the main agent's run against the scope and preservation requirements written before work began. It gives the checker direct evidence of what the implementation does and identifies any specific alternative that would reduce its complexity while preserving those requirements. A candidate must be concrete enough for the main agent to apply and must identify the part it replaces and the complexity it removes. Report observations and analysis, not a verdict that the implementation is finished or already simple. If no implementation was requested or no concrete safe simplification is found, state that explicitly."
+
+    implementation: str = Field(min_length=1, description="The implementation field reports the changed code or other implementation output relevant to the request, with file names, behavior, and supporting run evidence such as tool results or command output. It identifies at least one concrete simplification candidate when the run supports one, describing the current structure, the smaller alternative, and why the alternative preserves the request's requirements. A candidate must remove a real branch, duplicate path, unnecessary abstraction, repeated operation, or comparable source of complexity rather than merely shorten spelling or move the same complexity elsewhere. If the implementation has no concrete behavior-preserving simplification, say what was reviewed and why the apparent alternatives are not simpler or would violate the request. When there is no implementation in scope, say that the check has nothing to review.")
+    missing: str = Field(min_length=1, description="The missing field gives the main agent an actionable simplification to make when the evidence identifies one, naming the current file or structure, the smaller replacement, and the required behavior it must preserve. Write it as a direct instruction that can be followed in the existing run, without asking the main agent to repeat completed work. Do not suggest a change unless the evidence supports that it is simpler and remains within the request's scope. When no concrete simplification is supported, say that no change is needed for this check.")
+
 
 class JevCumulativeObligationEvidenceEntryPayload(BaseModel):
     """Run evidence and status context for one cumulative obligation."""
@@ -1676,6 +1700,19 @@ class JevMultiPart:
     def ids(self) -> tuple[str, ...]:
         """Return every deliverable id in request order."""
         return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevCanSimplify:
+    """The request-derived implementation scope and preservation requirements."""
+
+    scope: str
+    preserve: str
+
+    def __post_init__(self) -> None:
+        JevText.require(self.scope, field_name="can-simplify scope")
+        JevText.require(self.preserve, field_name="can-simplify preservation requirements")
+
 
 @dataclass(frozen=True, slots=True)
 class JevCumulativeObligation:
@@ -2261,6 +2298,8 @@ class JevRunStateRecord:
     cumulative_obligations: JevCumulativeObligations | None = None
     hard_part: str = field(kw_only=True)
     expert_depth: JevExpertDepth | None = None
+    # Appended after existing positional fields to keep legacy constructor calls stable.
+    can_simplify: JevCanSimplify | None = None
 
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
@@ -2284,6 +2323,7 @@ class JevRunStateRecord:
             ("run state required_actions", self.required_actions, JevRequiredActions),
             ("run state cumulative_obligations", self.cumulative_obligations, JevCumulativeObligations),
             ("run state expert_depth", self.expert_depth, JevExpertDepth),
+            ("run state can_simplify", self.can_simplify, JevCanSimplify),
         ))
 
 
@@ -2347,6 +2387,19 @@ class JevMultiPartEvidence:
     def ids(self) -> tuple[str, ...]:
         """Return every evidence entry's deliverable id in order."""
         return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevCanSimplifyEvidence:
+    """The implementation evidence and suggested action for the can-simplify check."""
+
+    implementation: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevText.require(self.implementation, field_name="can-simplify implementation evidence")
+        JevText.require(self.missing, field_name="can-simplify suggested action")
+
 
 @dataclass(frozen=True, slots=True)
 class JevCumulativeObligationEvidence:
@@ -3247,6 +3300,8 @@ class JevHandoffRecord:
     faithful_scope: JevFaithfulScopeEvidence | None = None
     expert_depth: JevExpertDepthEvidence | None = None
     self_review: JevSelfReviewEvidence | None = None
+    # Appended after existing fields to preserve positional mapping for callers.
+    can_simplify: JevCanSimplifyEvidence | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -3273,6 +3328,7 @@ class JevHandoffRecord:
             ("handoff faithful_scope", self.faithful_scope, JevFaithfulScopeEvidence),
             ("handoff expert_depth", self.expert_depth, JevExpertDepthEvidence),
             ("handoff self_review", self.self_review, JevSelfReviewEvidence),
+            ("handoff can_simplify", self.can_simplify, JevCanSimplifyEvidence),
         ))
 
 
@@ -3582,6 +3638,10 @@ __all__ = [
     "JevAssumptionsReconciledEvidence",
     "JevAssumptionsReconciledPayload",
     "JevBrief",
+    "JevCanSimplify",
+    "JevCanSimplifyEvidence",
+    "JevCanSimplifyEvidencePayload",
+    "JevCanSimplifyPayload",
     "JevClaimAssertion",
     "JevClaimAssertionPayload",
     "JevClaimContext",
