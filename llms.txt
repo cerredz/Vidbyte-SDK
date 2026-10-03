@@ -570,6 +570,37 @@ Guidance when building with this:
 - `ToolActivity.metadata` is static application metadata (schema version, downstream consumer). It is copied onto each captured record and is never rendered into the model-facing schema.
 - The SDK does not sample, batch, schedule, or persist activities, and does not turn them into `ActionTrace` events. Cadence and persistence are the application's decision: attach to the tools you care about, then translate `ctx.tool_call.activity` into your own domain events.
 
+**Completion activity on `isDone`.** The direct linear runtime keeps `isDone`
+as an internal loop-control tool, but a developer may configure a typed completion
+annotation on `BaseAgent`:
+
+```python
+from pydantic import BaseModel, Field
+from vidbyte import BaseAgent, ToolActivity
+
+class CompletionActivity(BaseModel):
+    next_step: str = Field(min_length=1, max_length=240)
+
+agent = BaseAgent(
+    name="researcher",
+    system_prompt="Complete the task and describe the handoff.",
+    provider="openai",
+    model_name="gpt-4.1",
+    is_done_activity=ToolActivity(
+        schema=CompletionActivity,
+        description="Describe the next step another person or agent should take.",
+    ),
+)
+```
+
+The model receives an `activity` object nested in the `isDone` call. The SDK
+validates it, strips it before the internal tool executes, and exposes the
+normalized payload through `ToolCall.activity` and `ToolCallContext.activity`.
+It remains separate from `final_answer`; the internal tool still owns loop
+termination. Use `agent.with_is_done_activity(...)` when attaching the setting
+after a YAML-built agent is created. This setting applies to the direct linear
+runtime; non-linear runtimes do not consume it.
+
 The default permission policy allows `SAFE` and `READ` tools. Mutating or executable tools require an explicit permission policy:
 
 ```python

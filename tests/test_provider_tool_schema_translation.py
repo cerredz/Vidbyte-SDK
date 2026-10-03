@@ -25,8 +25,11 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from vidbyte.tools import BaseTool, ToolActivity, ToolCall, ToolParameter, ToolResult, ToolSpec, ToolsFormatter, tool, vidbyte_tool
+from vidbyte.agents import AgentRuntime
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.tools import BaseTool, ToolActivity, ToolCall, ToolParameter, ToolResult, ToolSpec, Tools, ToolsFormatter, tool, vidbyte_tool
 from vidbyte.providers import tool_spec_to_provider_schema
+from vidbyte.tools.security import PermissionPolicy
 
 
 class LookupActivity(BaseModel):
@@ -44,6 +47,12 @@ class StructuredLookupActivity(BaseModel):
 
     kind: LookupKind
     preference_bases: list[LookupKind]
+
+
+class CompletionActivity(BaseModel):
+    """Completion annotation used to verify the internal tool provider schema."""
+
+    handoff: str = Field(min_length=1, max_length=60)
 
 
 class LookupTool(BaseTool):
@@ -144,6 +153,25 @@ class ProviderToolActivitySchemaTests(unittest.TestCase):
 
         self.assertEqual(plain["function"]["parameters"]["required"], ["topic"])
         self.assertNotIn("activity", plain["function"]["parameters"]["properties"])
+
+    def test_internal_is_done_schema_accepts_the_public_activity_setting(self) -> None:
+        """The runtime-owned isDone tool gets the same nested activity wire shape."""
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(),
+            is_done_activity=ToolActivity(schema=CompletionActivity, description="Describe the next handoff."),
+        )
+
+        for provider, path in (("openai", ("function", "parameters")), ("anthropic", ("input_schema",)), ("gemini", ("parameters",))):
+            schema = tool_spec_to_provider_schema(runtime.tools._get("isDone").spec(), provider)
+            parameters = schema
+            for part in path:
+                parameters = parameters[part]
+            self.assertIn("activity", parameters["properties"])
+            self.assertIn("activity", parameters["required"])
 
     def test_activity_definitions_are_hoisted_to_the_tool_schema_root(self) -> None:
         """Nested Pydantic refs remain resolvable to strict OpenAI-compatible providers."""
