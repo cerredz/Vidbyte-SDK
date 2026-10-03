@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls co
 ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims and observed problem episodes are generated after work because those items cannot be known in the pre-run state.
 COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
 KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims and problem items have no pre-run id list; generated ids must be valid and unique, and problem evidence must include exactly one original-request completion item. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -49,6 +49,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevProblemsResolvedEvidencePayload,
     JevRunStateRecord,
     JevSectionPayload,
+    JevTargetOutcomeEvidence,
+    JevTargetOutcomeEvidenceItem,
+    JevTargetOutcomeEvidencePayload,
 )
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.enums.prompts import Prompt
@@ -72,6 +75,7 @@ class JevHandoff(BaseAgent):
         JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload,
         JevDoneCheck.CLAIMS: JevClaimsEvidencePayload,
         JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload,
+        JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload,
         JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload,
     })
 
@@ -183,8 +187,19 @@ class JevHandoff(BaseAgent):
         extent_section = getattr(payload, JevDoneCheck.OUTPUT_EXTENT.value, None)
         if isinstance(extent_section, JevOutputExtentEvidencePayload):
             extent = JevOutputExtentEvidence(tuple(JevOutputExtentEvidenceItem(item.id, item.evidence.strip(), item.missing.strip()) for item in extent_section.items))
-            expected = () if state.output_extent is None else state.output_extent.ids()
-            if extent.ids() != expected:
+            expected_extent_ids = () if state.output_extent is None else state.output_extent.ids()
+            if extent.ids() != expected_extent_ids:
+                return None
+        target_outcome = None
+        outcome_section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
+        if isinstance(outcome_section, JevTargetOutcomeEvidencePayload):
+            # Request-derived target items require one exact evidence match each; an incomplete handoff fails open.
+            target_outcome = JevTargetOutcomeEvidence(tuple(
+                JevTargetOutcomeEvidenceItem(item.id, item.observed_proxy.strip(), item.direct_evidence.strip(), item.missing.strip())
+                for item in outcome_section.items
+            ))
+            expected_outcome_ids = () if state.target_outcome is None else state.target_outcome.ids()
+            if sorted(target_outcome.ids()) != sorted(expected_outcome_ids):
                 return None
         problems_resolved = None
         problem_section = getattr(payload, JevDoneCheck.PROBLEMS_RESOLVED.value, None)
@@ -204,7 +219,14 @@ class JevHandoff(BaseAgent):
                 )
                 for item in problem_section.items
             ))
-        return JevHandoffRecord(multi_part=multi_part, claims=claims, output_extent=extent, problems_resolved=problems_resolved, usage=self.get_usage())
+        return JevHandoffRecord(
+            multi_part=multi_part,
+            claims=claims,
+            output_extent=extent,
+            target_outcome=target_outcome,
+            problems_resolved=problems_resolved,
+            usage=self.get_usage(),
+        )
 
 
 __all__ = ["JevHandoff"]

@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at constru
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep answer scoring in DecisionModelHelper and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-target-outcome-done-check.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -19,6 +19,7 @@ from vidbyte.lib.constants.jev import (
     JEV_MULTI_PART_THRESHOLD,
     JEV_OUTPUT_EXTENT_THRESHOLD,
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
+    JEV_TARGET_OUTCOME_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneCheck
@@ -27,6 +28,7 @@ from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.multi_part import MultiPartDeliveredQuestion
 from vidbyte.lib.jev.done.output_extent import OutputExtentSatisfiedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
+from vidbyte.lib.jev.done.target_outcome import TargetOutcomeDemonstratedQuestion
 
 
 class JevDoneRegistry:
@@ -36,12 +38,14 @@ class JevDoneRegistry:
         JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(),
         JevDoneCheck.CLAIMS: ClaimsSupportedQuestion(),
         JevDoneCheck.OUTPUT_EXTENT: OutputExtentSatisfiedQuestion(),
+        JevDoneCheck.TARGET_OUTCOME: TargetOutcomeDemonstratedQuestion(),
         JevDoneCheck.PROBLEMS_RESOLVED: ProblemsResolvedQuestion(),
     })
     _thresholds: Mapping[JevDoneCheck, float] = MappingProxyType({
         JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD,
         JevDoneCheck.CLAIMS: JEV_CLAIMS_THRESHOLD,
         JevDoneCheck.OUTPUT_EXTENT: JEV_OUTPUT_EXTENT_THRESHOLD,
+        JevDoneCheck.TARGET_OUTCOME: JEV_TARGET_OUTCOME_THRESHOLD,
         JevDoneCheck.PROBLEMS_RESOLVED: JEV_PROBLEMS_RESOLVED_THRESHOLD,
     })
 

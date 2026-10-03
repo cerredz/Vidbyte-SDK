@@ -112,7 +112,6 @@ from vidbyte.lib.enums import (
     JevQuestionType,
     ModelProvider,
 )
-from vidbyte.lib.enums import JevDoneQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.enums.jev import JevProblemCheckItemType
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
@@ -400,7 +399,7 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
         extent_schema = JevRunState.schema((JevDoneCheck.OUTPUT_EXTENT,))
         self.assertEqual(extent_schema.model_fields["output_extent"].description, JevOutputExtentPayload.SECTION)
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.OUTPUT_EXTENT})
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.OUTPUT_EXTENT, JevDoneCheck.TARGET_OUTCOME})
         self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS, JevDoneCheck.PROBLEMS_RESOLVED)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
