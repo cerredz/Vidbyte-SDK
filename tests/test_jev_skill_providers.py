@@ -11,8 +11,9 @@ TESTS: Run with python scripts/test-jev-skill-providers.py.
 
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
+import base64
 import importlib.util
 import json
 import os
@@ -22,8 +23,8 @@ from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import patch
 
+import vidbyte.lib.jev.preflight.skills as skill_question_module
 from tests.agent_test_support import bind_test_runner
-from vidbyte.agents.base import BaseAgent
 from vidbyte import ClaudeSkillReference as RootClaudeSkillReference
 from vidbyte import ClaudeSkillSession as RootClaudeSkillSession
 from vidbyte import ClaudeSkillType as RootClaudeSkillType
@@ -31,10 +32,14 @@ from vidbyte import JevAgent, JevAlignmentSettings, JevRuntimeSettings
 from vidbyte import SkillDocument as RootSkillDocument
 from vidbyte import SkillSource as RootSkillSource
 from vidbyte import SkillSourceKind as RootSkillSourceKind
+from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings as InternalJevAgentSettings
 from vidbyte.agents.settings.loop import AgentLoopSettings
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives.documents import TextContextItem
+from vidbyte.context.runtime import ContextWindowPlacement
 from vidbyte.lib.config import DecisionModelConfig, TextModelConfig
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevJson
@@ -54,18 +59,14 @@ from vidbyte.lib.errors import (
 )
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.jev.decision import DecisionModelHelper
-import vidbyte.lib.jev.preflight.skills as skill_question_module
 from vidbyte.lib.jev.preflight.skills import JevSkillRelevanceQuestion
 from vidbyte.lib.runners.streaming_text import StreamingTextModelRunner
 from vidbyte.lib.runners.text import TextModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse, TextModelResponse
-from vidbyte.context.manager import ContextManager
-from vidbyte.context.primitives.documents import TextContextItem
-from vidbyte.context.runtime import ContextWindowPlacement
+from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.providers.skills import SkillSourceError, SkillSourceResolver
 from vidbyte.providers.skills.claude import ClaudeSkillSourceAdapter
 from vidbyte.providers.skills.file import _MAX_SKILL_FILE_BYTES, FileSkillSourceAdapter
-from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.tools.decorators import tool
 
 _HELPER_PATH = "vidbyte.agents.jev.alignment.skills.DecisionModelHelper"
@@ -340,6 +341,50 @@ class SkillPreloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(content, runner.systems[0])
         self.assertEqual(agent.response.skills.results[0].status, JevSkillStatus.SELECTED)
         self.assertEqual(agent.response.skills.results[0].source, str(path.resolve()))
+
+    async def test_remote_source_resolver_pipeline_selects_and_injects_exact_github_document(self) -> None:
+        # [Hidden Failure] typed remote sources must pass through the real resolver before Jev can select their complete text.
+        content = b"---\nname: remote-release\ndescription: Prepare release notes\n---\nUse these exact remote release instructions.\n"
+        blob_sha = "remote-release-blob"
+        responses = {
+            "https://api.github.com/repos/acme/skills": HttpResponse(
+                status_code=200,
+                body=json.dumps({"default_branch": "stable"}),
+                headers={"content-type": "application/json"},
+            ),
+            "https://api.github.com/repos/acme/skills/git/trees/stable?recursive=1": HttpResponse(
+                status_code=200,
+                body=json.dumps({"tree": [{"path": "release/SKILL.md", "type": "blob", "sha": blob_sha, "size": len(content)}], "truncated": False}),
+                headers={"content-type": "application/json"},
+            ),
+            f"https://api.github.com/repos/acme/skills/git/blobs/{blob_sha}": HttpResponse(
+                status_code=200,
+                body=json.dumps({"sha": blob_sha, "encoding": "base64", "size": len(content), "content": base64.b64encode(content).decode("ascii")}),
+                headers={"content-type": "application/json"},
+            ),
+        }
+        transport = _RouteHttpTransport(responses)
+        resolver = SkillSourceResolver(transport=transport)
+        source = SkillSource(kind=SkillSourceKind.GITHUB, location="acme/skills", skill_name="remote-release")
+        preload = JevSkillsPreload(
+            skills=(source,),
+            decision=DecisionModelConfig(api_key="test-key"),
+            threshold=0.5,
+            response=JevResponse(),
+            source_resolver=resolver,
+        )
+        context = BaseAgentContext(system_prompt="Base prompt.")
+
+        self.assertEqual(transport.requests, [])
+        with patch(_HELPER_PATH, new=_AlwaysYesDecisionHelper):
+            selected_context = await preload.run("Write the release notes", context)
+
+        self.assertEqual(preload.response.state.skills.results[0].status, JevSkillStatus.SELECTED)
+        self.assertEqual(preload.response.state.skills.results[0].name, "remote-release")
+        self.assertIn(content.decode("utf-8"), selected_context.system_prompt)
+        self.assertEqual([request["url"] for request in transport.requests], list(responses))
+        self.assertTrue(all(request["max_response_bytes"] > 0 for request in transport.requests))
+        self.assertTrue(all(request["follow_redirects"] is False for request in transport.requests))
 
     async def test_claude_skill_uses_agent_key_and_metadata_only_relevance_state(self) -> None:
         # [Hidden Assumption] an Anthropic agent key is the Claude source fallback and Jev never receives an invented body.
@@ -755,6 +800,23 @@ class _QueueResponseTransport:
         self.requests.append(request)
         response = self.responses.pop(0)
         return HttpResponse(status_code=self.status_code, body=json.dumps(response), headers={"content-type": "application/json"})
+
+
+class _RouteHttpTransport:
+    """Returns exact route-keyed HTTP responses for a complete resolver pipeline."""
+
+    def __init__(self, responses: dict[str, HttpResponse]) -> None:
+        # Captures transport calls while refusing every URL not defined by the test.
+        self.responses = responses
+        self.requests: list[dict[str, Any]] = []
+
+    async def request(self, **request: Any) -> HttpResponse:
+        # Makes each adapter's real bounded request inspectable without network access.
+        self.requests.append(request)
+        url = str(request["url"])
+        if url not in self.responses:
+            raise AssertionError(f"Unexpected request URL: {url}")
+        return self.responses[url]
 
 
 __all__ = ["ClaudeNativeRunnerTests", "ClaudeSkillSourceTests", "FileSkillSourceTests", "SkillPreloadIntegrationTests", "SkillSourceContractTests"]

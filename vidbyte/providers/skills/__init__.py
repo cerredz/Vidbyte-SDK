@@ -17,6 +17,8 @@ from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.providers.skills.base import SkillSourceAdapter, SkillSourceError
 from vidbyte.providers.skills.claude import ClaudeSkillSourceAdapter
 from vidbyte.providers.skills.file import FileSkillSourceAdapter
+from vidbyte.providers.skills.github import GitHubSkillSourceAdapter
+from vidbyte.providers.skills.skills_sh import SkillsShSkillSourceAdapter
 
 
 class SkillSourceResolver:
@@ -26,6 +28,8 @@ class SkillSourceResolver:
         # @intent keep-source-dispatch-closed-and-lazy
         # One fixed adapter exists per supported source kind and construction performs no requests, avoiding arbitrary callbacks and eager network effects.
         self._file_adapter: SkillSourceAdapter = FileSkillSourceAdapter()
+        self._github_adapter: SkillSourceAdapter = GitHubSkillSourceAdapter(transport=transport, response_parser=response_parser)
+        self._skills_sh_adapter: SkillSourceAdapter = SkillsShSkillSourceAdapter(transport=transport, response_parser=response_parser)
         self._claude_adapter: SkillSourceAdapter = ClaudeSkillSourceAdapter(transport, response_parser, default_api_key=claude_api_key)
 
     async def resolve(self, source: SkillSource) -> SkillDocument:
@@ -34,10 +38,12 @@ class SkillSourceResolver:
             raise SkillSourceError("Skill source must be a SkillSource descriptor.")
         if source.kind is SkillSourceKind.FILE:
             return await self._file_adapter.resolve(source)
+        if source.kind is SkillSourceKind.GITHUB:
+            return await self._github_adapter.resolve(source)
+        if source.kind is SkillSourceKind.SKILLS_SH:
+            return await self._skills_sh_adapter.resolve(source)
         if source.kind is SkillSourceKind.CLAUDE:
             return await self._claude_adapter.resolve(source)
-        if source.kind in (SkillSourceKind.GITHUB, SkillSourceKind.SKILLS_SH):
-            raise SkillSourceError("Skill source could not be resolved.")
         raise SkillSourceError("Skill source kind is not supported.")
 
 
