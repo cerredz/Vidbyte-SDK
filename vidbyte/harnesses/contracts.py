@@ -17,12 +17,23 @@ ARCHITECTURE NOTE:
 
 PUBLIC API INVENTORY:
     Re-exports HARNESS_SCHEMA_VERSION, HarnessRunStatus, HarnessSpec, HarnessRun,
-    TrajectoryRecord, and HarnessExecutionResult.
+    TrajectoryRecord, HarnessExecutionResult, and SinkFailureEvent.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not duplicate dataclass definitions.
     2. Do not add loader, execution, or storage behavior.
     3. Do not re-export the removed event/store contracts.
+
+COMMON MODIFICATION PATTERNS:
+    Add a new field to the owning dataclass in
+    vidbyte.lib.dataclasses.harnesses first, then re-export the type here only
+    if it needs to be reachable from the feature namespace.
+
+KNOWN EDGE CASES:
+    SinkFailureEvent is re-exported here even though nothing in this file
+    constructs one — Harness._report_sink_failure() in execution.py is the
+    only constructor, kept consistent with how every other contract here is a
+    re-export rather than a definition.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
@@ -40,6 +51,7 @@ from vidbyte.lib.dataclasses.harnesses import (
     HarnessRun,
     HarnessRunStatus,
     HarnessSpec,
+    SinkFailureEvent,
     TrajectoryRecord,
 )
 
@@ -49,5 +61,6 @@ __all__ = [
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSpec",
+    "SinkFailureEvent",
     "TrajectoryRecord",
 ]
