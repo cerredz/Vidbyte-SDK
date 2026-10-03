@@ -16,6 +16,9 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 - `problems_resolved.py` holds the dynamic problem-repair question, asked once per observed run problem and once for the required completion of the original request after repairs.
 - Every question uses the shared state description in `multi_part.py`; `deliverables`, `claims`, and `problems_resolved` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `assumptions_reconciled` and `problems_resolved` are present only when enabled and are derived from post-run handoff evidence; each keeps the handoff's `missing` summary out of Jev's evidence state.
+- `target_outcome.py` holds the TARGET_OUTCOME check's question, asked once per request-derived outcome; it distinguishes direct evidence on the actual target from a proxy milestone.
+- `problems_resolved.py` holds the dynamic problem-repair question, asked once per observed run problem and once for the required completion of the original request after repairs.
+- Every question uses the shared state description in `multi_part.py`; `deliverables`, `claims`, `target_outcomes`, and `problems_resolved` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.
 - The logic that writes the run state and the handoff, asks Jev, and sends the main agent back to work is `JevRunState` and `JevHandoff` in `vidbyte/agents/jev/done/`.

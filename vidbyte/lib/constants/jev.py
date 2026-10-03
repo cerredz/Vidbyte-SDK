@@ -5,9 +5,8 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
-"""
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md. Additional detail: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py."""
 
 from __future__ import annotations
 
@@ -88,6 +87,8 @@ JEV_MULTI_PART_THRESHOLD: float = 0.8
 JEV_CLAIMS_THRESHOLD: float = 0.85
 # Starting P(yes) threshold and veto for observable reconciliation of consequential assumptions; not calibrated.
 JEV_ASSUMPTIONS_RECONCILED_THRESHOLD: float = 0.8
+# Evidence for the requested outcome must reach this P(yes), alone and in the mean; this is a starting point, not tuned.
+JEV_TARGET_OUTCOME_THRESHOLD: float = 0.8
 # Every observed problem and the original request must independently reach this P(yes).
 JEV_PROBLEMS_RESOLVED_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
@@ -101,6 +102,12 @@ JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_CLAIMS_FIELD: str = "claims"
+JEV_DONE_TARGET_OUTCOMES_FIELD: str = "target_outcomes"
+JEV_DONE_TARGET_OUTCOME_FIELD: str = "target_outcome"
+JEV_DONE_TARGET_FIELD: str = "target"
+JEV_DONE_TARGET_SCOPE_FIELD: str = "scope"
+JEV_DONE_COMPLETION_CRITERION_FIELD: str = "completion_criterion"
+JEV_DONE_OBSERVED_PROXY_FIELD: str = "observed_proxy"
 JEV_DONE_PROBLEMS_RESOLVED_FIELD: str = "problems_resolved"
 JEV_DONE_PROBLEM_ITEMS_FIELD: str = "items"
 JEV_DONE_PROBLEM_ID_FIELD: str = "id"
@@ -148,8 +155,8 @@ JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
-    "JEV_CLAIMS_THRESHOLD",
     "JEV_ASSUMPTIONS_RECONCILED_THRESHOLD",
+    "JEV_CLAIMS_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -161,16 +168,12 @@ __all__ = [
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
     "JEV_DELIVERABLE_ID_PATTERN",
+    "JEV_DONE_AFFECTED_WORK_FIELD",
+    "JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD",
     "JEV_DONE_CLAIMS_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_ID_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_SEPARATOR",
-    "JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD",
-    "JEV_DONE_ORIGINAL_ASSUMPTION_FIELD",
-    "JEV_DONE_ORIGINAL_BASIS_FIELD",
-    "JEV_DONE_LATER_OBSERVATION_FIELD",
-    "JEV_DONE_AFFECTED_WORK_FIELD",
-    "JEV_DONE_REVISION_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD",
     "JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD",
     "JEV_DONE_CLAIM_DESCRIPTION_FIELD",
@@ -182,11 +185,16 @@ __all__ = [
     "JEV_DONE_CLAIM_QUALIFICATIONS_FIELD",
     "JEV_DONE_CLAIM_SCOPE_FIELD",
     "JEV_DONE_CLAIM_TITLE_FIELD",
+    "JEV_DONE_COMPLETION_CRITERION_FIELD",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_LATER_OBSERVATION_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_OBSERVED_PROXY_FIELD",
+    "JEV_DONE_ORIGINAL_ASSUMPTION_FIELD",
+    "JEV_DONE_ORIGINAL_BASIS_FIELD",
     "JEV_DONE_PROBLEMS_RESOLVED_FIELD",
     "JEV_DONE_PROBLEM_ASSERTION_FIELD",
     "JEV_DONE_PROBLEM_DESCRIPTION_FIELD",
@@ -199,6 +207,11 @@ __all__ = [
     "JEV_DONE_PROBLEM_TITLE_FIELD",
     "JEV_DONE_PROBLEM_VERIFICATION_FIELD",
     "JEV_DONE_REQUEST_FIELD",
+    "JEV_DONE_REVISION_FIELD",
+    "JEV_DONE_TARGET_FIELD",
+    "JEV_DONE_TARGET_OUTCOMES_FIELD",
+    "JEV_DONE_TARGET_OUTCOME_FIELD",
+    "JEV_DONE_TARGET_SCOPE_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",
@@ -236,6 +249,7 @@ __all__ = [
     "JEV_STATUS_UNAUTHORIZED",
     "JEV_STATUS_UNPROCESSABLE",
     "JEV_SYSTEMONE_PATH",
+    "JEV_TARGET_OUTCOME_THRESHOLD",
     "JEV_TIMEOUT_FLOOR_SECONDS",
     "JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD",
     "JEV_TOOL_SELECTOR_MAX_THRESHOLD",
