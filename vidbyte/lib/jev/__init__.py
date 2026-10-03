@@ -5,7 +5,7 @@ ROLE IN CODEBASE: vidbyte/agents/jev imports these to validate settings, ask Jev
 ARCHITECTURE NOTE: This package sits in vidbyte.lib and imports only lib modules. DecisionModelHelper composes the transport runner with canonical question scoring; question registries hold fixed questions and feature thresholds.
 COMMON MODIFICATION PATTERNS: Add shared provider-independent answer handling to DecisionModelHelper, add a flag in presets.py and its questions under preflight/, or add a done check and its questions under done/; export the classes JevAgent needs.
 KNOWN EDGE CASES: Importing this package performs no Jev call and needs no TypeSafe credential.
-RELATED DOCS: docs/design/jev-preflight-clarity.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-motivating-case.md, docs/design/jev-preflight-clarity.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 """
 

@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any
 
+from vidbyte.lib.dataclasses.jev import JevContinuationEvidence
 from vidbyte.tools.types import ToolCallContext
 
 
@@ -27,9 +28,13 @@ class JevContinuation(ABC):
     async def should_continue(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> bool:
         """Return True when the main agent must keep working instead of finishing with `final_answer`."""
 
+    def budget_extension(self) -> tuple[int, int, int]:
+        """Return extra iteration, token, and tool-call limits for this continuation, defaulting to none."""
+        return 0, 0, 0
+
     @abstractmethod
-    def continue_(self, messages: list[dict[str, Any]]) -> None:
-        """Append what the main agent reads next to the loop's messages; called only after should_continue() returned True."""
+    def continue_(self, messages: list[dict[str, Any]]) -> JevContinuationEvidence | None:
+        """Append the continuation and optionally return its evidence segment after should_continue() returned True."""
 
 
 __all__ = ["JevContinuation"]

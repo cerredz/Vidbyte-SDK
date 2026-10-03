@@ -1,0 +1,11 @@
+{
+  "name": "Jev Review",
+  "description": "The system prompt for JevReviewer, the strict reviewer a JevAgent with the self-review done check runs each time its main agent tries to finish, before any other check. It receives the user's original request as its message and, through a context manager, the run state and the main agent's context window, and has no tools. Taking the stance of the strictest reviewer who must approve the work, it returns what that reviewer would reject, most serious first, each objection with the condition under which it would accept the work; Jev later decides which objections are real, unresolved, and in scope. The prompt has identity, goal, instructions, and input sections.",
+  "key": "jev_review",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_review/system_prompt.md"
+    }
+  }
+}
