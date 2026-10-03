@@ -149,6 +149,32 @@ class JevDoneRegistry:
         JevDoneCheck.SELF_REVIEW: JEV_SELF_REVIEW_THRESHOLD,
         JevDoneCheck.REQUIRED_SEQUENCE: JEV_REQUIRED_SEQUENCE_THRESHOLD,
     })
+    _descriptions: Mapping[JevDoneCheck, str] = MappingProxyType({
+        JevDoneCheck.MULTI_PART: "This gate checks each separate output the request asks the agent to produce, including answer content and work left in files or command results. It asks whether the available run evidence shows every part of each named deliverable in its latest state.\n\nUse each failed question to locate its deliverable in the run state and handoff, then finish the missing parts and make the result visible. Failures commonly mean an output was omitted, only partly produced, replaced by a placeholder, or merely claimed in the final answer.",
+        JevDoneCheck.CAN_SIMPLIFY: "This gate checks whether the implementation can be made simpler while preserving the user's stated requirements. It considers the proposed implementation and the requirements that a simplification must keep.\n\nUse a failed question to identify the candidate simplification and compare it with the original scope and preservation constraints before changing anything. Failures commonly mean a supported simpler design remains unapplied, or that a proposed reduction would remove required behavior.",
+        JevDoneCheck.OUTPUT_COUNT: "This gate checks explicit quantities of requested outputs, using the requested unit, scope, distinctness rule, and completion criterion for each quantity. It verifies the visible candidates and evidence rather than trusting a reported total.\n\nUse each failed question to find which quantity or group is short, then produce and show enough distinct qualifying outputs. Failures commonly come from a missing item, duplicate items counted twice, candidates outside the requested scope, or a count with no visible supporting outputs.",
+        JevDoneCheck.CLAIMS: "This gate checks whether each assertion in the agent's claims is supported by evidence from the run. It judges each assertion separately against the recorded tool activity and outputs.\n\nUse a failed question to locate the specific unsupported assertion, then either perform and verify the work or correct the account of what happened. Failures commonly occur when the final answer overstates completion, a tool call was attempted but failed, or evidence for one claim is used to support another.",
+        JevDoneCheck.INPUT_EXHAUSTION: "This gate checks whether traversal of a requested or discovered input source reached its stated stopping condition. It considers the recorded positions, totals, continuation markers, and retrieval failures for each traversal.\n\nUse each failed question to resume from the last known position and continue until the recorded exhaustion condition is supported. Failures commonly mean a cursor remains open, retrieval failed, or the run stopped at a reported count without evidence that the source was fully traversed.",
+        JevDoneCheck.NEGATIVE_COVERAGE: "This gate checks whether the agent accounted for explicit exclusions, negative conditions, and cases the request says must not be included or changed. It looks for evidence that the negative boundary was applied to the relevant work.\n\nUse a failed question to identify the missing exclusion or boundary, then apply it and show the corrected result. Failures commonly occur when the positive request is completed while excluded items are still included, or when the agent states a constraint without evidence it affected the output.",
+        JevDoneCheck.GUARANTEED_NEXT_ACTIONS: "This gate checks candidate follow-up actions against both the user's request and a trigger observed during the run. An action matters only when the request and observed condition make it necessary and the evidence shows it remains unfinished.\n\nUse a failed question to inspect the named outcome, trigger, and action; complete the action only if it is still required and unfinished. Failures commonly mean a required next step was left open, or that an action was treated as necessary without a request-based reason.",
+        JevDoneCheck.TARGET_OUTCOME: "This gate checks whether the requested outcome was demonstrated by direct evidence, rather than inferred from a proxy milestone or an activity that might lead to it. Each question concerns one target outcome and its completion criterion.\n\nUse a failed question to compare the observed result with the actual target and provide direct evidence for the criterion. Failures commonly mean the agent reports progress or an intermediate signal as though it proved the final outcome.",
+        JevDoneCheck.MOTIVATING_CASE: "This gate checks whether the agent exercised the specific motivating scenario from the request, including the condition that distinguishes it from a nearby case that does not count. It evaluates the recorded scenario and its expected behavior.\n\nUse each failed question to reproduce the named condition in the permitted mode and show the expected behavior. Failures commonly mean only the ordinary path was tried, the boundary condition was missed, or a near-miss scenario was tested instead.",
+        JevDoneCheck.SCOPE_COVERAGE: "This gate checks whether the requested scope was enumerated and the requested change was applied to every required member in that scope. It keeps source inventory completeness separate from evidence for each listed member.\n\nUse each failed question to identify either the missing inventory or the specific member without applied work, then enumerate or update it and show the result. Failures commonly mean some files, components, or members were never discovered or were listed but not changed.",
+        JevDoneCheck.COMPLETION_EVIDENCE: "This gate checks whether the run evidence supports the agent's overall completion account against the outcomes in the original request. It compares requested outcomes with work shown and anything reported unfinished or blocked.\n\nUse a failed question to complete the unsupported requested outcome or accurately report its blocker and remaining state. Failures commonly mean the final response claims the whole task is done while evidence shows only partial work, an unresolved blocker, or no result for an outcome.",
+        JevDoneCheck.INPUT_SET_COVERAGE: "This gate checks whether every explicit input the user asked the agent to engage was actually processed at the requested depth and scope. It distinguishes substantive use of content from merely locating or naming an input.\n\nUse each failed question to find the named target and perform the requested engagement, then leave evidence of that work. Failures commonly mean an input was skipped, only its title or metadata was inspected, or a small excerpt was used where the request called for broader review.",
+        JevDoneCheck.OUTPUT_EXTENT: "This gate checks whether a requested output meets a measurable size or extent target, using the requested unit and comparator. The measurement is taken from the final visible output rather than an estimate or promise.\n\nUse each failed question to identify the output and extent still required, then produce enough content and make it visible. Failures commonly mean the answer is shorter than requested, the wrong unit was measured, or an estimate was reported without a complete output.",
+        JevDoneCheck.REPORT_ACTION_ALIGNMENT: "This gate checks whether the final account accurately matches earlier plans or commitments with the work actually performed and whether any mismatch still affects the request. A plan alone is not a requirement to perform unnecessary work.\n\nUse a failed question to reconcile the specific plan, execution, and account: complete still-required work or correct the report. Failures commonly mean promised work is absent, reported execution is unsupported, or the final summary does not reflect a material result.",
+        JevDoneCheck.ASSUMPTIONS_RECONCILED: "This gate checks whether assumptions that changed during the run were revisited and their dependent work was reconciled with later observations. It accounts for recovery or a scope change that may make earlier dependent work irrelevant.\n\nUse a failed question to inspect the changed premise and affected work, then verify, revise, or explicitly retire that work based on current evidence. Failures commonly mean a disproven assumption was left in place or changes to it never propagated to dependent decisions.",
+        JevDoneCheck.PROBLEMS_RESOLVED: "This gate checks whether problems discovered during the run were repaired and the affected behavior was successfully revalidated. It also checks that original requested work resumes after a repair.\n\nUse each failed question to identify the problem and its verification gap, repair it, run the relevant validation, and return to remaining request items. Failures commonly mean a fix was only claimed, validation failed or was skipped, or the repair displaced unfinished requested work.",
+        JevDoneCheck.PHASE_PROGRESS: "This gate checks whether the run entered and made substantive progress on every required phase or stage named by the request. It does not treat a plan to begin later as evidence of progress.\n\nUse each failed question to identify the required stage that has no observed work and perform the requested activity for it. Failures commonly mean the agent stopped after an initial phase, discussed later work without doing it, or skipped a stage in a multi-stage request.",
+        JevDoneCheck.REQUIRED_ACTIONS: "This gate checks whether each explicit action the user asked the agent to take is completed, with order constraints applied when the request requires them. Each action has its own completion evidence.\n\nUse each failed question to locate the requested action and its missing result, then complete and show it while respecting its dependencies. Failures commonly mean an action was omitted, only promised, or attempted before a required predecessor was complete.",
+        JevDoneCheck.CUMULATIVE_OBLIGATIONS: "This gate checks that active requirements across the supplied user turns remain accounted for, including later changes, cancellations, and incompatible replacements. It reconciles the current run against each turn rather than considering only the latest message.\n\nUse each failed question to recover the still-active instruction from its source turn and complete it unless the conversation supports its cancellation or replacement. Failures commonly mean an earlier requirement was forgotten or treated as canceled without evidence.",
+        JevDoneCheck.DISCOVERED_ITEM_COVERAGE: "This gate checks that every in-scope item discovered from a source was inventoried and processed as requested. It separately checks whether the source output was completely reviewed for candidates.\n\nUse each failed question to complete the inventory or process the named item, then show the work. Failures commonly mean an item was omitted from the candidate list, or was identified but never actually handled.",
+        JevDoneCheck.FAITHFUL_SCOPE: "This gate checks that the agent's work stays faithful to the user's requested scope, including required content, requested format, and explicit constraints. It focuses continuation effort on recognized scope gaps.\n\nUse each failed question to compare the output with the corresponding request requirement and complete the missing in-scope work. Failures commonly mean the result is narrower than requested, a requested format or constraint was ignored, or extra work displaced required work.",
+        JevDoneCheck.EXPERT_DEPTH: "This gate checks whether the agent addressed the named hard parts, risks, and non-obvious requirements at the depth the task needs. Every named weak point is considered separately so strong coverage elsewhere cannot hide a gap.\n\nUse each failed question to return to the specific unresolved hard part and add the analysis, implementation, or validation it needs. Failures commonly mean the answer covers the easy path while leaving a risky boundary, core mechanism, or stated concern unhandled.",
+        JevDoneCheck.SELF_REVIEW: "This gate checks whether objections raised during independent review are both resolved and relevant to the user's request. An objection is cleared by evidence of a repair or by a supported reason it is outside scope.\n\nUse each failed question to inspect the objection and its scope decision, then fix an in-scope issue or substantiate why it does not apply. Failures commonly mean an objection was acknowledged but not repaired, or dismissed without tying that decision to the request.",
+        JevDoneCheck.REQUIRED_SEQUENCE: "This gate checks whether required stages have visible work and whether each stage used the previous stage's output in the order the request specified. It relies on run events to establish actual completion order.\n\nUse each failed question to identify the stage with missing work or missing predecessor evidence, then complete the stages in order and expose each result to the next. Failures commonly mean stages were skipped, performed out of order, or completed without using the required earlier output.",
+    })
 
     @classmethod
     def question(cls, check: JevDoneCheck) -> JevDoneQuestion:
@@ -180,6 +206,39 @@ class JevDoneRegistry:
                 details={"question_key": key.value, "matches": len(matches), "registered": registered},
             )
         return matches[0]
+
+    @classmethod
+    def question_for_answer_name(cls, name: str) -> tuple[JevDoneQuestion, str]:
+        # Resolves the longest registered key prefix and retains the full item suffix.
+        """Resolve a Jev answer name to its fixed question and complete checked-item suffix."""
+        matches = tuple(
+            (question, name.removeprefix(f"{question.key.value}."))
+            for question_group in cls._questions.values()
+            for question in question_group
+            if name.startswith(f"{question.key.value}.")
+        ) + tuple(
+            (question, name.removeprefix(f"{question.key.value}."))
+            for question in cls._inventory_questions.values()
+            if name.startswith(f"{question.key.value}.")
+        )
+        if len(matches) != 1 or not matches[0][1]:
+            raise ConfigurationError(
+                f"Jev done answer name {name!r} has {len(matches)} registered questions.",
+                details={"answer_name": name, "matches": len(matches)},
+            )
+        return matches[0]
+
+    @classmethod
+    def description(cls, check: JevDoneCheck) -> str:
+        # Supplies stable gate-specific instructions to the fresh continuation prompt.
+        """Return the fresh-agent guidance for one enabled continuation gate."""
+        found = cls._descriptions.get(check)
+        if found is None:
+            raise ConfigurationError(
+                f"Jev done check {check!r} has no registered fresh-continuation description.",
+                details={"check": str(check), "registered": [item.value for item in cls._descriptions]},
+            )
+        return found
 
     @classmethod
     def threshold(cls, check: JevDoneCheck) -> float:
@@ -226,6 +285,22 @@ class JevDoneRegistry:
         # @intent done-checks-fail-before-any-jev-call
         # Settings construction calls this, so a typo, a bare string, or a repeated check fails when the
         # agent is built instead of silently asking Jev the wrong (or duplicated) questions at every finish.
+        missing_descriptions = set(JevDoneCheck) - set(cls._descriptions)
+        extra_descriptions = set(cls._descriptions) - set(JevDoneCheck)
+        malformed_descriptions = tuple(
+            check.value
+            for check, description in cls._descriptions.items()
+            if len(description.split("\n\n")) != 2
+        )
+        if missing_descriptions or extra_descriptions or malformed_descriptions:
+            raise ConfigurationError(
+                "Jev done gate descriptions must cover every check with exactly two paragraphs.",
+                details={
+                    "missing": [check.value for check in missing_descriptions],
+                    "extra": [check.value for check in extra_descriptions],
+                    "malformed": malformed_descriptions,
+                },
+            )
         if isinstance(values, (str, bytes)):
             raise ConfigurationError(
                 "JevContinualSettings.checks must be an iterable of Jev done checks, not a string.",

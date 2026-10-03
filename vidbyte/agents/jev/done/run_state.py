@@ -191,6 +191,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevExpertDepthDeliverable,
     JevExpertDepthPayload,
     JevExpertDetail,
+    JevFailedDoneQuestion,
     JevHandoffRecord,
     JevInputExhaustion,
     JevInputExhaustionEvidence,
@@ -298,6 +299,7 @@ class JevRunState(BaseAgent):
         self.record: JevRunStateRecord | None = None
         self.rendered = ""
         self.handoff: JevHandoffRecord | None = None
+        self.latest_results: tuple[JevDoneResult, ...] = ()
         self._recall_guard_probability: float | None = None
         self._state_builder_disagreement = False
         self._observed_extent: dict[str, int | None] = {}
@@ -497,6 +499,7 @@ class JevRunState(BaseAgent):
         # neither stale evidence nor sequential gate rewrites can change a sibling check's input.
         self.handoff = None
         self.review = None
+        self.latest_results = ()
         if self.record is None:
             return ()
         self._capture_main_evidence(responses, calls)
@@ -550,13 +553,13 @@ class JevRunState(BaseAgent):
         )
         self.response.handoff(self.handoff)
         decision = await self._ask(self.handoff)
-        failed: list[JevDoneResult] = []
+        results: list[JevDoneResult] = []
         for check in self.checks:
             result = self._judge(check, self.handoff, decision)
             self.response.done(result)
-            if not result.passed:
-                failed.append(result)
-        return tuple(failed)
+            results.append(result)
+        self.latest_results = tuple(results)
+        return tuple(result for result in self.latest_results if not result.passed)
 
     def add_continuation_evidence(self, evidence: JevContinuationEvidence) -> None:
         """Append one continuation's raw observations after its main-agent check segment."""
@@ -1302,7 +1305,32 @@ class JevRunState(BaseAgent):
         handler = handlers.get(check)
         if handler is None:
             return JevDoneResult(check=check, score=None, available=False)
-        return handler(handoff, decision)
+        result = handler(handoff, decision)
+        return replace(result, failed_questions=self._failed_questions(result))
+
+    def _failed_questions(self, result: JevDoneResult) -> tuple[JevFailedDoneQuestion, ...]:
+        # Stores exact registered question sentences for the questions blocking one result.
+        """Retain the exact question sentences that caused this gate's latest failure."""
+        threshold = JevDoneRegistry.threshold(result.check)
+        names = self._blocking_answer_names(result, threshold)
+        failed = []
+        for name in names:
+            question, item = JevDoneRegistry.question_for_answer_name(name)
+            failed.append(JevFailedDoneQuestion(name=name, question=question.instructions.question.format(item=item)))
+        return tuple(failed)
+
+    @staticmethod
+    def _blocking_answer_names(result: JevDoneResult, threshold: float) -> tuple[str, ...]:
+        # Preserves the unusual affirmative-answer rules used by composite gates.
+        """Select answers that the check's own composite rule treats as blocking."""
+        if result.check in (JevDoneCheck.GUARANTEED_NEXT_ACTIONS, JevDoneCheck.SELF_REVIEW):
+            questions = JevDoneRegistry.questions(result.check)
+            return tuple(question.name(item) for item in result.incomplete for question in questions if question.name(item) in result.answers)
+        return tuple(
+            answer.question_name
+            for name, answer in result.answers.items()
+            if DecisionModelHelper.noul_passes(result.answers, name, threshold) is False
+        )
 
     def _self_review(
         self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None

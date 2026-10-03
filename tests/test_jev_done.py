@@ -1098,6 +1098,106 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.readme_docs", JevQuestionType.NOUL))
         self.assertIn("with id `readme_docs`?", str(rendered.instructions))
 
+    def test_every_done_check_has_two_paragraph_fresh_agent_guidance(self) -> None:
+        # Pins complete, consistently structured guidance for every registered gate.
+        self.assertEqual(set(JevDoneRegistry._descriptions), set(JevDoneCheck))
+        for check in JevDoneCheck:
+            with self.subTest(check=check):
+                description = JevDoneRegistry.description(check)
+                self.assertEqual(len(description.split("\n\n")), 2)
+                self.assertTrue(description.startswith("This gate checks "))
+                self.assertIn("Use ", description)
+        incomplete = dict(JevDoneRegistry._descriptions)
+        incomplete.pop(JevDoneCheck.MULTI_PART)
+        with patch.object(JevDoneRegistry, "_descriptions", incomplete), self.assertRaises(ConfigurationError):
+            JevDoneRegistry.validate((JevDoneCheck.MULTI_PART,))
+
+    def test_answer_name_resolves_full_item_suffix_and_question(self) -> None:
+        # Preserves dotted and colon-separated characters in a checked item's identifier.
+        question, item = JevDoneRegistry.question_for_answer_name("multi_part.delivered.file.part:1")
+        self.assertEqual(item, "file.part:1")
+        self.assertEqual(
+            question.instructions.question.format(item=item),
+            "Does `evidence` show that `deliverable` was produced in full, in the entry of `deliverables` with id `file.part:1`?",
+        )
+        with self.assertRaises(ConfigurationError):
+            JevDoneRegistry.question_for_answer_name("unknown.item")
+
+    def test_gate_description_lookup_rejects_unregistered_check(self) -> None:
+        # Fails clearly if a caller asks the description registry for an unknown check.
+        with self.assertRaises(ConfigurationError):
+            JevDoneRegistry.description("unknown")  # type: ignore[arg-type]
+
+    def test_run_state_records_only_questions_that_block_the_gate(self) -> None:
+        # Uses the gate threshold to retain only the exact failed question sentence.
+        run_state = object.__new__(JevRunState)
+        deliverable_question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
+        failed_name = deliverable_question.name("docs.intro")
+        passed_name = deliverable_question.name("docs.api")
+        boundary_name = deliverable_question.name("docs.boundary")
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.MULTI_PART)
+        result = JevDoneResult(
+            check=JevDoneCheck.MULTI_PART,
+            score=0.5,
+            passed=False,
+            answers={failed_name: _answer(failed_name, 0.2), passed_name: _answer(passed_name, 0.9), boundary_name: _answer(boundary_name, threshold)},
+            incomplete=("docs.intro",),
+        )
+
+        failed = run_state._failed_questions(result)
+
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0].name, failed_name)
+        self.assertEqual(failed[0].question, deliverable_question.instructions.question.format(item="docs.intro"))
+
+        expert_question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        expert_answer_name = expert_question.name("weak_point")
+        expert_result = JevDoneResult(
+            check=JevDoneCheck.EXPERT_DEPTH,
+            score=0.1,
+            passed=False,
+            answers={"weak_point": _answer(expert_answer_name, 0.1)},
+            incomplete=("weak_point",),
+        )
+        expert_failed = run_state._failed_questions(expert_result)
+        self.assertEqual(expert_failed[0].name, expert_answer_name)
+        self.assertEqual(expert_failed[0].question, expert_question.instructions.question.format(item="weak_point"))
+
+    def test_run_state_records_compound_questions_that_trigger_follow_up(self) -> None:
+        # Keeps both affirmative questions that jointly trigger this composite gate.
+        run_state = object.__new__(JevRunState)
+        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        names = (necessary.name("publish"), unfinished.name("publish"))
+        result = JevDoneResult(
+            check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS,
+            score=0.9,
+            passed=False,
+            answers={name: _answer(name, 0.9) for name in names},
+            incomplete=("publish",),
+        )
+
+        failed = run_state._failed_questions(result)
+
+        self.assertEqual(tuple(item.name for item in failed), names)
+        self.assertEqual(tuple(item.question for item in failed), tuple(question.instructions.question.format(item="publish") for question in (necessary, unfinished)))
+
+    def test_run_state_records_both_questions_for_a_standing_review_objection(self) -> None:
+        # Includes the paired findings that jointly establish an unresolved in-scope objection.
+        run_state = object.__new__(JevRunState)
+        questions = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+        names = tuple(question.name("objection_1") for question in questions)
+        result = JevDoneResult(
+            check=JevDoneCheck.SELF_REVIEW,
+            score=0.4,
+            passed=False,
+            answers={names[0]: _answer(names[0], 0.2), names[1]: _answer(names[1], 0.8)},
+            incomplete=("objection_1",),
+        )
+
+        failed = run_state._failed_questions(result)
+
+        self.assertEqual(tuple(item.name for item in failed), names)
+
     def test_cumulative_obligation_registry_keeps_turn_inventory_separate(self) -> None:
         check = JevDoneCheck.CUMULATIVE_OBLIGATIONS
         obligation = JevDoneRegistry.question(check)

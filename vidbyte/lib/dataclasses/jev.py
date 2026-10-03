@@ -3546,6 +3546,19 @@ class JevDoneQuestion:
 
 
 @dataclass(frozen=True, slots=True)
+class JevFailedDoneQuestion:
+    """One exact Jev question sentence that contributed to a done gate remaining blocked."""
+
+    name: str
+    question: str
+
+    def __post_init__(self) -> None:
+        # Keeps enough source identity to diagnose a failure while exposing only its rendered wording to agents.
+        JevText.require(self.name, field_name="failed done question name")
+        JevText.require(self.question, field_name="failed done question text")
+
+
+@dataclass(frozen=True, slots=True)
 class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
@@ -3575,6 +3588,7 @@ class JevDoneResult:
     incomplete: tuple[str, ...] = ()
     available: bool = True
     usage: ProviderUsage | None = None
+    failed_questions: tuple[JevFailedDoneQuestion, ...] = ()
 
     def __post_init__(self) -> None:
         # Validates the check and score and freezes the answers so a recorded result cannot be edited.
@@ -3585,6 +3599,8 @@ class JevDoneResult:
         object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
         if not isinstance(self.incomplete, tuple):
             raise JevValidation.error("done result incomplete", "a tuple of deliverable ids", self.incomplete)
+        if not isinstance(self.failed_questions, tuple) or any(not isinstance(item, JevFailedDoneQuestion) for item in self.failed_questions):
+            raise JevValidation.error("done result failed questions", "a tuple of JevFailedDoneQuestion records", self.failed_questions)
 
 
 @dataclass(frozen=True, slots=True)

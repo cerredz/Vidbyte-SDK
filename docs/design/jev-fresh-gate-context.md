@@ -1,6 +1,6 @@
 # Design Doc: JEV Fresh Continuation Gate Context
 
-**Status:** Draft
+**Status:** Implemented
 **Author:** Codex
 **Created:** 2026-10-03
 **Last Updated:** 2026-10-03
@@ -38,7 +38,7 @@ When JevAgent uses its fresh-context continuation, the new agent will receive an
 
 `JevRunState.check()` asks all enabled done checks in one shared decision request, then `_judge()` creates one `JevDoneResult` per check. Each result contains the answers used by that check. `JevDoneContinuation` retains the failed results on `self.failed`. The same-context continuation formats its own question and focus feedback through per-check handlers. `JevFreshContinuation.message()` instead formats a separate prompt from the request, run state, and handoff, so its new agent currently does not see the gate descriptions or the specific Jev questions that failed.
 
-The desired context is gate-oriented: one explanation for each enabled check, followed by the actual failed question text for that check. Question text is recoverable from the registered `JevDoneQuestion` by matching each failed `JevAnswer.question_name`; gate scoring remains the authority for whether that answer failed. `JevAnswer` probability data stays internal. A failed gate can also result from deterministic evidence conditions while no Jev answer falls below threshold; that gate still receives its description and an explicit note that no Jev question failed, while the existing handoff remains available for evidence.
+The desired context is gate-oriented: one explanation for each enabled check, followed by the actual question text that the check's scoring logic found blocking. Question text is recoverable from the registered `JevDoneQuestion` by matching each blocking `JevAnswer.question_name`; gate scoring remains the authority for whether that answer caused failure. `JevAnswer` probability data stays internal. A failed gate can also result from deterministic evidence conditions without a blocking Jev answer; that gate still receives its description and an explicit note that no Jev question failed, while the existing handoff remains available for evidence.
 
 ---
 
@@ -48,7 +48,7 @@ The desired context is gate-oriented: one explanation for each enabled check, fo
 
 1. Every registered `JevDoneCheck` has a non-empty, human-authored two-to-three paragraph description covering purpose, how the agent should use the check, and common failure modes.
 2. Gate descriptions are registered with `JevDoneRegistry`, in configuration order when rendered.
-3. `JevDoneResult` retains the exact rendered question text for answers that caused the result to fail its question threshold. Question text includes the concrete checked item name.
+3. `JevDoneResult` retains the exact rendered question text that caused the result to fail under that gate's own scoring rule. Question text includes the concrete checked item name; composite checks retain each question involved in the blocking result.
 4. A passed answer is not listed as a failed question, even when a separate deterministic rule causes its gate result to fail.
 5. Fresh-continuation context renders one `<completion_gate_assessment>` section containing every enabled gate, its description, and only its latest failed questions. Results without failed Jev questions are identified as such.
 6. The section is regenerated after every call to `JevRunState.check()`; questions repaired in the previous attempt do not persist as failures.
@@ -67,7 +67,7 @@ The desired context is gate-oriented: one explanation for each enabled check, fo
 
 ## 5. High-Level Design
 
-Add a JEV record for a failed question containing the answer's question name internally and the exact question sentence for rendering. Add `failed_questions` to `JevDoneResult`. `JevRunState` already has the check-specific result and all answers, so it will identify answers below the registered threshold, resolve each question name through the registered question set, and attach the rendered question text to the result before returning it. This captures the scorer's actual failed judgments, including compound checks whose question names have a suffix distinct from the incomplete item id.
+Add a JEV record for a failed question containing the answer's question name internally and the exact question sentence for rendering. Add `failed_questions` to `JevDoneResult`. `JevRunState` already has the check-specific result and all answers, so it will apply the check's scoring rule, resolve blocking answer names through the registered question set, and attach the rendered question text to the result before returning it. This captures the scorer's actual failed judgments, including composite checks whose question names have a suffix distinct from the incomplete item id.
 
 Add a complete description registry beside `JevDoneRegistry` with one entry per done check. `JevFreshContinuation.message()` will iterate its configured checks and latest results, render each description and its failed question sentences, and pass the completed block into a new placeholder in `fresh_prompt.md`. The block will use `<completion_gate_assessment>` as its boundary signal. It will render all enabled gates, not only failed ones, so each gate's role remains understandable and a resolved gate is visibly clear on later attempts.
 
@@ -150,7 +150,7 @@ def question_for_answer_name(cls, name: str) -> tuple[JevDoneQuestion, str]: ...
 - Inventory question names resolve through the inventory registry as well as ordinary question groups.
 - Empty or ambiguous answer names fail clearly during scoring, before fresh prompt construction.
 
-### 6.3 Capture threshold-failing questions in each result
+### 6.3 Capture blocking questions in each result
 
 **File(s):** `vidbyte/agents/jev/done/run_state.py`
 **Type:** Modified
@@ -161,23 +161,23 @@ Adds the exact Jev questions whose answers fail the threshold to each `JevDoneRe
 
 #### Interface / API
 
-```python
-def _failed_questions(self, check: JevDoneCheck, answers: Mapping[str, JevAnswer]) -> tuple[JevFailedDoneQuestion, ...]: ...
-```
+The private helpers `_failed_questions(result)` and `_blocking_answer_names(result, threshold)` attach a tuple of failed-question records at the shared `_judge()` boundary.
 
 #### Logic / Algorithm
 
-1. Each successful `_judge_*` path already returns a check-scoped result with its answers.
+1. Each `_judge_*` path already returns a check-scoped result with its answers and blocking items.
 2. At the common `_judge()` boundary, normalize that result through one helper before returning it.
-3. For each result answer, use `DecisionModelHelper.noul_passes` and the check threshold; retain only answers explicitly below threshold.
-4. Resolve each failed answer's name to its registered question and concrete item suffix, then format the same question sentence that was sent to Jev.
-5. Preserve result availability and deterministic `incomplete` behavior even when no Jev answer failed.
+3. For ordinary checks, use `DecisionModelHelper.noul_passes` and the check threshold to retain answers below threshold.
+4. For composite checks whose blocker is a combination of affirmative answers, retain the answers for the blocking item that establish that combination.
+5. Resolve each selected answer name to its registered question and complete item suffix, then format the same question sentence that Jev received.
+6. Preserve result availability and deterministic `incomplete` behavior when no Jev answer is itself blocking.
 
 #### Edge Cases & Error Handling
 
 - Missing answers are unavailable, not failed questions.
 - Non-Noul answers are unavailable, not failed questions.
-- Inclusive threshold behavior matches existing `DecisionModelHelper` semantics.
+- Inclusive threshold behavior matches existing `DecisionModelHelper` semantics for ordinary checks.
+- Composite checks preserve their gate-specific logic: required next actions retain affirmative necessity and unfinished questions; self-review retains the paired questions for each standing objection.
 - Compound questions retain separate sentences and names.
 - A deterministic incomplete item with a passing Jev answer does not incorrectly appear as a failed Jev question.
 
@@ -274,8 +274,10 @@ N/A - This is an internal SDK continuation-context change. It adds a defaulted f
 |--------|-----------|--------|
 | MODIFY | `vidbyte/lib/dataclasses/jev.py` | Add failed question record and result field. |
 | MODIFY | `vidbyte/lib/jev/done/done.py` | Register gate descriptions and exact question lookup. |
-| MODIFY | `vidbyte/agents/jev/done/run_state.py` | Capture threshold-failing question text in each result. |
+| MODIFY | `vidbyte/agents/jev/done/run_state.py` | Capture the question text that blocks each result. |
 | MODIFY | `vidbyte/agents/jev/continuation/fresh.py` | Render the latest assessment per attempt. |
+| MODIFY | `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py` | Re-export the new result record with the existing public JEV result types. |
+| MODIFY | `lint/baseline.json` | Ratchet the verified improvements in A002, S009, and S051, as required by the repository lint policy. |
 | MODIFY | `vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md` | Explain and place the assessment section. |
 | MODIFY | `tests/test_jev_fresh_continuation.py` | Add focused behavioral tests. |
 | CREATE | `scripts/test-jev-fresh-gate-context.py` | Run every design-plan case with named PASS/FAIL output. |
@@ -288,30 +290,23 @@ All cases run offline with deterministic typed records and no TypeSafe request. 
 
 ### Unit Tests
 
-- [Edge Case] Every `JevDoneCheck` has exactly one non-empty description containing two or three paragraphs.
-- [Edge Case] Multiple enabled gates render in their configured order, including one gate with zero failed questions.
-- [Edge Case] Paired questions for one item render as separate exact sentences.
-- [Edge Case] An empty configured result list and an unavailable result render safely.
-- [Hidden Failure] Unknown or ambiguous answer names produce an actionable configuration error instead of silently omitting a Jev failure.
-- [Hidden Failure] Missing and non-Noul answers are treated as unavailable, preserving fail-open behavior.
-- [Hidden Failure] One deterministic incomplete item with a passing Jev answer does not fabricate a failed-question entry.
-- [Silent Failure] The displayed question sentence matches the exact registered template rendered with its item id; probabilities, scores, and internal names do not appear.
-- [Silent Failure] Answers exactly at the configured threshold are not reported as failures; answers below it are.
-- [Hidden Assumption] A new registry check without a description is rejected by registry validation.
-- [Hidden Assumption] A question item containing punctuation or separator-like text resolves to the original registered question and complete item suffix.
+- [Edge Case] Every registered gate has one two-paragraph description; registry validation rejects a missing description.
+- [Edge Case] Compound follow-up and self-review gates preserve both exact questions that jointly block the result.
+- [Hidden Failure] Unknown question names raise a configuration error instead of silently dropping a failed answer.
+- [Silent Failure] Item ids containing dots and colons are preserved in the exact rendered question sentence.
+- [Silent Failure] Only below-threshold ordinary answers are retained; a passing answer and an answer exactly at threshold are omitted.
+- [Hidden Assumption] Remapped scorer answer keys still resolve through `JevAnswer.question_name` to the registered question.
 
 ### Integration Tests
 
-- [Edge Case] Fresh input retains original request, run state, handoff, and the new assessment.
-- [Hidden Failure] Fresh-agent creation failure and unavailable Jev checks retain existing fail-open behavior.
-- [Silent Failure] Across two finish attempts, a repaired question disappears and an outstanding question remains in the rebuilt section.
-- [Hidden Assumption] Test with more than one configured gate and verify no gate is omitted from the assessment.
+- [Edge Case] Fresh input retains the request, run state, handoff, gate descriptions, and exact current failed questions.
+- [Hidden Failure] Unavailable gates are marked not evaluated, deterministic failures do not fabricate Jev questions, and fresh-agent errors preserve the current fail-open behavior.
+- [Silent Failure] Across two finish attempts, a repaired question disappears while an outstanding question remains; passed enabled gates remain listed.
+- [Hidden Assumption] Multiple configured gates render once each, in configured order, with no internal keys or probabilities exposed.
 
 ### Manual / QA Test Cases
 
-1. [Edge Case] Configure `MULTI_PART` and `CLAIMS`, fail two multi-part items and one claim, and verify one description and only those three full question sentences appear under the matching gate headings.
-2. [Silent Failure] On the next attempt, pass one multi-part question and keep the other two failed; verify the context shows only the latter two.
-3. [Hidden Assumption] Make a gate fail from deterministic evidence while Jev's answer passes; verify no false question is shown and the gate explanation plus evidence handoff remain available.
+N/A - The changed surface is a deterministic prompt assembled from typed check results; the offline integration tests assert the complete rendered input without requiring a real provider or human judgment.
 
 ---
 
