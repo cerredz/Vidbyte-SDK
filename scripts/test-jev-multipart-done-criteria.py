@@ -19,12 +19,15 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tests import test_jev_done
+from tests import test_jev_done, test_jev_required_sequence
 
 
 def main() -> int:
     """Run every focused done-check test and return a shell-friendly status."""
-    suite = unittest.defaultTestLoader.loadTestsFromModule(test_jev_done)
+    suite = unittest.TestSuite((
+        unittest.defaultTestLoader.loadTestsFromModule(test_jev_done),
+        unittest.defaultTestLoader.loadTestsFromModule(test_jev_required_sequence),
+    ))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

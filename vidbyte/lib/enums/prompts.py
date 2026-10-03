@@ -71,6 +71,7 @@ class Prompt(str, Enum):
     AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
     HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"
     INDEPENDENT_CRITIC_REVIEWER_SYSTEM_PROMPT = "independent_critic.reviewer_system_prompt"
+    JEV_RUN_STATE_REQUIRED_SEQUENCE_AGENT = "jev_run_state.required_sequence_agent"
     INDEPENDENT_CRITIC_REVIEW_PROMPT = "independent_critic.review_prompt"
     JEV_CLARIFICATION_SYSTEM_PROMPT = "jev_clarification.system_prompt"
     JEV_CONTINUATION_CONTINUE_PROMPT = "jev_continuation.continue_prompt"

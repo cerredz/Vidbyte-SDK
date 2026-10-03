@@ -39,6 +39,10 @@ from vidbyte.lib.jev.done.phase_progress import PhaseProgressReachedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.report_action_alignment import ReportActionAlignmentQuestion
 from vidbyte.lib.jev.done.required_actions import RequiredActionCompletedQuestion
+from vidbyte.lib.jev.done.required_sequence import (
+    RequiredSequencePreviousOutputQuestion,
+    RequiredSequenceWorkShownQuestion,
+)
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
 from vidbyte.lib.jev.done.self_review import (
     SelfReviewInScopeQuestion,
@@ -77,4 +81,6 @@ __all__ = [
     "SelfReviewResolvedQuestion",
     "TargetOutcomeDemonstratedQuestion",
     "CanSimplifyQuestion",
+    "RequiredSequencePreviousOutputQuestion",
+    "RequiredSequenceWorkShownQuestion",
 ]

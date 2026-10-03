@@ -36,12 +36,22 @@ from vidbyte.lib.dataclasses.jev import (
     JevRequiredAction,
     JevRequiredActionEvidence,
 )
-from vidbyte.lib.enums.jev import JevDoneCheck, JevProblemCheckItemType
+from vidbyte.lib.enums.jev import (
+    JevDoneCheck,
+    JevDoneQuestionKey,
+    JevProblemCheckItemType,
+)
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.jev import JevDoneRegistry
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.types import ToolCallContext
+
+
+def _event_position(event_id: str) -> int:
+    if not event_id.startswith("E") or not event_id[1:].isdigit():
+        return 0
+    return int(event_id[1:])
 
 
 class JevDoneContinuation(JevContinuation):
@@ -123,8 +133,53 @@ class JevDoneContinuation(JevContinuation):
             JevDoneCheck.FAITHFUL_SCOPE: self._explain_faithful_scope,
             JevDoneCheck.EXPERT_DEPTH: self._explain_expert_depth,
             JevDoneCheck.SELF_REVIEW: self._explain_self_review,
+            JevDoneCheck.REQUIRED_SEQUENCE: self._explain_required_sequence,
         }
         return handlers[result.check](result)
+
+    def _explain_required_sequence(self, result: JevDoneResult) -> tuple[str, str]:
+        """Name each stage that lacks shown work, dependency evidence, or strict event order."""
+        state = None if self.run_state.record is None else self.run_state.record.required_sequence
+        handoff = None if self.run_state.handoff is None else self.run_state.handoff.required_sequence
+        if state is None or handoff is None:
+            return "The required sequence could not be reviewed.", "Repeat the requested stages in order and leave their outputs visible."
+        stages = {item.id: item for item in state.stages}
+        evidence = {item.stage_id: item for item in handoff.stages}
+        failed = ["The request requires its stages to be completed in order."]
+        focus = []
+        work_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_WORK_SHOWN)
+        previous_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_USES_PREVIOUS_OUTPUT)
+        for stage_id in result.incomplete:
+            stage = stages[stage_id]
+            item = evidence.get(stage_id)
+            if item is None:
+                failed.append(f"- {stage.label()} has no validated event evidence.")
+                focus.append(f"- {stage.label()}: {stage.completion_criterion} Record its result in the run.")
+                continue
+            work_answer = result.answers.get(f"{stage_id}.work_shown")
+            previous_answer = result.answers.get(f"{stage_id}.uses_previous_output")
+            if not item.observed_work:
+                failed.append(f"- {stage.label()} has no recorded work.")
+            elif work_answer is not None and work_answer.probabilities.get(JEV_NOUL_TRUE, 0.0) < JevDoneRegistry.threshold(JevDoneCheck.REQUIRED_SEQUENCE):
+                failed.append(f"- {work_question.instructions.question.format(item=stage_id)} Jev's answer: no.")
+            elif previous_answer is not None and previous_answer.probabilities.get(JEV_NOUL_TRUE, 0.0) < JevDoneRegistry.threshold(JevDoneCheck.REQUIRED_SEQUENCE):
+                failed.append(f"- {previous_question.instructions.question.format(item=stage_id)} Jev's answer: no.")
+            else:
+                previous_index = stage.position - 2
+                previous_item = evidence.get(state.stages[previous_index].id) if previous_index >= 0 else None
+                began_before_previous_finished = (
+                    previous_item is not None
+                    and previous_item.observed_work
+                    and _event_position(item.first_event_id) <= _event_position(previous_item.last_work_event_id)
+                )
+                failed.append(
+                    f"- {stage.label()} began before {state.stages[previous_index].label()} finished."
+                    if began_before_previous_finished
+                    else f"- {stage.label()} is not shown complete."
+                )
+            missing = "; ".join(item.missing_or_uncertain) or "No specific missing detail was identified."
+            focus.append(f"- {stage.label()}: {stage.completion_criterion} Still missing or uncertain: {missing} Finish this stage before moving to later stages.")
+        return "\n".join(failed), "\n".join(focus)
 
     def _explain_self_review(self, result: JevDoneResult) -> tuple[str, str]:
         """Return unresolved reviewer objections in their original severity order."""

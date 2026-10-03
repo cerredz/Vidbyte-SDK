@@ -17,6 +17,8 @@ from vidbyte.lib.dataclasses.jev import JevBrief, JevCriterion, JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneQuestionKey
 from vidbyte.lib.jev.done.state import DONE_STATE
 
+# Every done question reads the same shared state, so every brief describes it with the same words and optional check fields.
+
 
 @dataclass(frozen=True)
 class MultiPartDeliveredQuestion(JevDoneQuestion):

@@ -103,6 +103,8 @@ from vidbyte.lib.dataclasses.jev import (
     JevRequiredActionEvidencePayload,
     JevRequiredActionsEvidence,
     JevRequiredActionsEvidencePayload,
+    JevRequiredSequenceEvidence,
+    JevRequiredSequenceEvidencePayload,
     JevReviewRecord,
     JevRunStateRecord,
     JevScopeCoverageEvidence,
@@ -110,6 +112,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevSectionPayload,
     JevSelfReviewEvidence,
     JevSelfReviewEvidencePayload,
+    JevSequenceStageEvidence,
+    JevSequenceStageEvidencePayload,
+    JevSequenceWork,
     JevTargetOutcomeEvidence,
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeEvidencePayload,
@@ -126,6 +131,7 @@ REVIEW_TITLE = "Strict review"
 FINAL_ANSWER_TITLE = "Final answer"
 NO_FINAL_ANSWER = "The main agent gave no final answer."
 HANDOFF_SOURCE = "jev_done"
+EVENT_LOG_TITLE = "Numbered run event log"
 
 
 class JevHandoff(BaseAgent):
@@ -139,7 +145,7 @@ class JevHandoff(BaseAgent):
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JevDiscoveredItemBatchPayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthEvidencePayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.SELF_REVIEW: JevSelfReviewEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.SELF_REVIEW: JevSelfReviewEvidencePayload, JevDoneCheck.REQUIRED_SEQUENCE: JevRequiredSequenceEvidencePayload})
 
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
@@ -170,7 +176,7 @@ class JevHandoff(BaseAgent):
         return create_model("JevHandoffPayload", __base__=JevHandoffPayload, **sections)
 
     @staticmethod
-    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str, user_turns: Sequence[str] = (), review: str = "") -> ContextManager:
+    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str, user_turns: Sequence[str] = (), review: str = "", event_log: str = "") -> ContextManager:
         """Build the handoff's context: run state, any strict review, the main agent's work, and its final answer."""
         # @intent the-handoff-reads-the-main-agents-window
         # The owner asked for the main agent's context window to reach the handoff through vidbyte.context, so the
@@ -195,6 +201,8 @@ class JevHandoff(BaseAgent):
             )
             for index, call in enumerate(calls)
         )
+        if event_log.strip():
+            items.append(TextContextItem(title=EVENT_LOG_TITLE, content=event_log, source=HANDOFF_SOURCE))
         items.append(TextContextItem(title=FINAL_ANSWER_TITLE, content=final_answer if final_answer.strip() else NO_FINAL_ANSWER, source=HANDOFF_SOURCE))
         return ContextManager(items)
 
@@ -207,6 +215,8 @@ class JevHandoff(BaseAgent):
         responses: Sequence[str] = (),
         final_answer: str = "",
         review: JevReviewRecord | None = None,
+        *,
+        event_ids: frozenset[str] = frozenset(),
     ) -> JevHandoffRecord | None:
         """Return evidence for every enabled check, or None when a request-derived section does not match run state."""
         self.history.clear()
@@ -215,7 +225,7 @@ class JevHandoff(BaseAgent):
             reply = await self.arun(AgentInput(prompt=request, context_manager=window))
             if not isinstance(reply.structured, self.payload):
                 return None
-            record = self._record(reply.structured, state, calls, responses, final_answer, review)
+            record = self._record(reply.structured, state, calls, responses, final_answer, review, event_ids=event_ids)
             # The continuation hands this text back to the main agent when a check fails.
             self.rendered = "" if record is None else reply.structured.model_dump_json()
             return record
@@ -232,6 +242,8 @@ class JevHandoff(BaseAgent):
         responses: Sequence[str] = (),
         final_answer: str = "",
         review: JevReviewRecord | None = None,
+        *,
+        event_ids: frozenset[str] = frozenset(),
     ) -> JevHandoffRecord | None:
         # Converts the validated reply into the frozen record, requiring one evidence entry per run-state deliverable.
         # @intent evidence-covers-exactly-the-run-state
@@ -239,7 +251,13 @@ class JevHandoff(BaseAgent):
         # no evidence for one it did, would silently skip a check; either one makes the handoff unavailable.
         request_records = self._request_evidence_records(payload, state)
         self_review_valid, self_review = self._self_review_evidence(payload, review)
-        if request_records is None or not self_review_valid:
+        required_sequence_valid, required_sequence = self._required_sequence_evidence_record(
+            payload,
+            state,
+            event_ids,
+            required=JevDoneCheck.REQUIRED_SEQUENCE in self.checks,
+        )
+        if not all((request_records is not None, self_review_valid, required_sequence_valid)):
             return None
         claims = self._claims_record(payload)
         guaranteed_next_actions = self._guaranteed_next_actions_record(payload)
@@ -334,6 +352,68 @@ class JevHandoff(BaseAgent):
             expert_depth=request_records.expert_depth,
             self_review=self_review,
             can_simplify=self._can_simplify_evidence_record(payload),
+            required_sequence=required_sequence,
+        )
+
+    @staticmethod
+    def _required_sequence_evidence_record(
+        payload: JevHandoffPayload,
+        state: JevRunStateRecord,
+        event_ids: frozenset[str],
+        *,
+        required: bool,
+    ) -> tuple[bool, JevRequiredSequenceEvidence | None]:
+        """Validate stage ids and every citation against this finish attempt's numbered run events."""
+        section = getattr(payload, JevDoneCheck.REQUIRED_SEQUENCE.value, None)
+        if not isinstance(section, JevRequiredSequenceEvidencePayload):
+            return not required, None
+        sequence = state.required_sequence
+        expected = () if sequence is None or not sequence.active else sequence.ids()
+        entries: dict[str, JevSequenceStageEvidence] = {}
+        for item in section.stages:
+            if item.stage_id in entries:
+                return False, None
+            evidence = JevHandoff._sequence_stage_evidence_record(item, expected, event_ids)
+            if evidence is None:
+                return False, None
+            entries[item.stage_id] = evidence
+        if set(entries) != set(expected):
+            return False, None
+        return True, JevRequiredSequenceEvidence(tuple(entries[stage_id] for stage_id in expected))
+
+    @staticmethod
+    def _sequence_stage_evidence_record(
+        item: JevSequenceStageEvidencePayload,
+        expected: tuple[str, ...],
+        event_ids: frozenset[str],
+    ) -> JevSequenceStageEvidence | None:
+        """Convert one stage only when its observed and failed work cite current-run events."""
+        if item.stage_id not in expected:
+            return None
+        observed = tuple(JevSequenceWork(work.description.strip(), tuple(work.event_ids)) for work in item.observed_work)
+        failures = tuple(JevSequenceWork(work.description.strip(), tuple(work.event_ids)) for work in item.failures)
+        if any(not work.event_ids for work in (*observed, *failures)):
+            return None
+        observed_cited = {event_id for work in observed for event_id in work.event_ids}
+        cited = observed_cited | {event_id for work in failures for event_id in work.event_ids}
+        if not cited <= event_ids:
+            return None
+        if item.observed_work:
+            if item.first_event_id not in event_ids or item.last_work_event_id not in event_ids:
+                return None
+            if not _is_event_span(item.first_event_id, item.last_work_event_id, observed_cited):
+                return None
+        elif item.first_event_id or item.last_work_event_id:
+            return None
+        return JevSequenceStageEvidence(
+            stage_id=item.stage_id,
+            observed_work=observed,
+            outputs_produced=tuple(value.strip() for value in item.outputs_produced),
+            inputs_used=tuple(value.strip() for value in item.inputs_used),
+            first_event_id=item.first_event_id,
+            last_work_event_id=item.last_work_event_id,
+            failures=failures,
+            missing_or_uncertain=tuple(value.strip() for value in item.missing_or_uncertain),
         )
 
     @staticmethod
@@ -783,6 +863,19 @@ class JevHandoff(BaseAgent):
         except VidbyteSdkError:
             return None
 
+
+
+
+def _is_event_span(first: str, last: str, cited: set[str]) -> bool:
+    """Require ordered event ids whose endpoints are cited by observed work."""
+    if first not in cited or last not in cited:
+        return False
+    try:
+        first_position = int(first.removeprefix("E"))
+        last_position = int(last.removeprefix("E"))
+    except ValueError:
+        return False
+    return first.startswith("E") and last.startswith("E") and 0 < first_position <= last_position
 
 
 __all__ = ["JevHandoff"]

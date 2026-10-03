@@ -86,6 +86,9 @@ class JevRuntime(AgentRuntime):
             return self.response.delegated(await self.preflight.specialist.agent.arun(message))
         if self.run_state is not None:
             await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
+            sequence_instructions = self.run_state.agent_instructions()
+            if sequence_instructions:
+                context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
         if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
             return self.response.finished(await super().arun(
                 message,

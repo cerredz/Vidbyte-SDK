@@ -35,6 +35,7 @@ from vidbyte.lib.constants.jev import (
     JEV_PROBLEMS_RESOLVED_THRESHOLD,
     JEV_REPORT_ACTION_ALIGNMENT_THRESHOLD,
     JEV_REQUIRED_ACTIONS_THRESHOLD,
+    JEV_REQUIRED_SEQUENCE_THRESHOLD,
     JEV_SCOPE_COVERAGE_THRESHOLD,
     JEV_SELF_REVIEW_THRESHOLD,
     JEV_TARGET_OUTCOME_THRESHOLD,
@@ -74,6 +75,10 @@ from vidbyte.lib.jev.done.phase_progress import PhaseProgressReachedQuestion
 from vidbyte.lib.jev.done.problems_resolved import ProblemsResolvedQuestion
 from vidbyte.lib.jev.done.report_action_alignment import ReportActionAlignmentQuestion
 from vidbyte.lib.jev.done.required_actions import RequiredActionCompletedQuestion
+from vidbyte.lib.jev.done.required_sequence import (
+    RequiredSequencePreviousOutputQuestion,
+    RequiredSequenceWorkShownQuestion,
+)
 from vidbyte.lib.jev.done.scope_coverage import ScopeCoverageAppliedQuestion
 from vidbyte.lib.jev.done.self_review import (
     SelfReviewInScopeQuestion,
@@ -109,6 +114,10 @@ class JevDoneRegistry:
         JevDoneCheck.FAITHFUL_SCOPE: (FaithfulScopeQuestion(),),
         JevDoneCheck.EXPERT_DEPTH: (ExpertDepthHandledQuestion(),),
         JevDoneCheck.SELF_REVIEW: (SelfReviewResolvedQuestion(), SelfReviewInScopeQuestion()),
+        JevDoneCheck.REQUIRED_SEQUENCE: (
+            RequiredSequenceWorkShownQuestion(),
+            RequiredSequencePreviousOutputQuestion(),
+        ),
     })
     _inventory_questions: Mapping[JevDoneCheck, JevDoneQuestion] = MappingProxyType({
         JevDoneCheck.CUMULATIVE_OBLIGATIONS: CumulativeUserTurnReconciledQuestion(),
@@ -138,6 +147,7 @@ class JevDoneRegistry:
         JevDoneCheck.FAITHFUL_SCOPE: JEV_FAITHFUL_SCOPE_THRESHOLD,
         JevDoneCheck.EXPERT_DEPTH: JEV_EXPERT_DEPTH_THRESHOLD,
         JevDoneCheck.SELF_REVIEW: JEV_SELF_REVIEW_THRESHOLD,
+        JevDoneCheck.REQUIRED_SEQUENCE: JEV_REQUIRED_SEQUENCE_THRESHOLD,
     })
 
     @classmethod

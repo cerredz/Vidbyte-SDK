@@ -11,6 +11,7 @@ TESTS: tests/test_jev_done.py.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -21,6 +22,7 @@ from typing import Any, ClassVar
 from pydantic import Field, create_model
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.jev.done.event_log import JevRunEventLog
 from vidbyte.agents.jev.done.handoff import JevHandoff
 from vidbyte.agents.jev.done.reviewer import JevReviewer
 from vidbyte.agents.jev.response import JevResponse
@@ -166,7 +168,10 @@ from vidbyte.lib.constants.jev import (
     JEV_EXPERT_DEPTH_THRESHOLD,
     JEV_MOTIVATING_CASE_RECALL_THRESHOLD,
     JEV_NOUL_TRUE,
+    JEV_REQUIRED_SEQUENCE_MAX_STAGES,
+    JEV_REQUIRED_SEQUENCE_MIN_STAGES,
     JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD,
+    JEV_STAGE_ID_PREFIX,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
@@ -177,6 +182,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevCumulativeObligationsPayload,
     JevDecisionRequest,
     JevDeliverable,
+    JevDoneQuestion,
     JevDoneResult,
     JevExpertDepth,
     JevExpertDepthDeliverable,
@@ -214,12 +220,16 @@ from vidbyte.lib.dataclasses.jev import (
     JevRequiredActionEvidence,
     JevRequiredActions,
     JevRequiredActionsPayload,
+    JevRequiredSequence,
+    JevRequiredSequencePayload,
     JevReviewRecord,
     JevRunStatePayload,
     JevRunStateRecord,
     JevScopeCoverage,
     JevScopeCoveragePayload,
     JevSectionPayload,
+    JevSequenceStage,
+    JevSequenceStageEvidence,
     JevTargetOutcome,
     JevTargetOutcomeItem,
     JevTargetOutcomePayload,
@@ -247,7 +257,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.CAN_SIMPLIFY: JevCanSimplifyPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.CAN_SIMPLIFY: JevCanSimplifyPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload, JevDoneCheck.REQUIRED_SEQUENCE: JevRequiredSequencePayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsPayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationsPayload})
     _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthPayload})
@@ -318,7 +328,7 @@ class JevRunState(BaseAgent):
                 if self.record is not None:
                     self.record = await self._review_scope_breadth(self.record)
                     rendered_payload = self._render_with_scope_breadth(run_state_payload, self.record)
-                    self.rendered = rendered_payload.model_dump_json()
+                    self.rendered = self._render(rendered_payload)
         except VidbyteSdkError:
             # @intent a-missing-run-state-fails-open
             # Done checks are advisory, like preflight: without a state there is nothing to check against,
@@ -434,6 +444,39 @@ class JevRunState(BaseAgent):
         updated = [item.model_copy(update={"breadth": dimensions[item.id].breadth, "universe": dimensions[item.id].universe}) for item in section.dimensions]
         return payload.model_copy(update={JevDoneCheck.SCOPE_COVERAGE.value: section.model_copy(update={"dimensions": updated})})
 
+    def agent_instructions(self) -> str:
+        """Return request-derived sequence instructions for the main agent's system prompt."""
+        state = None if self.record is None else self.record.required_sequence
+        if state is None or not state.active:
+            return ""
+        # @intent the-main-agent-needs-the-requested-stage-order
+        # The finish check reviews observed work in this order; showing the same criteria before the loop
+        # lets the main agent follow the user's sequence instead of discovering it only after a failed finish.
+        stages = "\n".join(f"{stage.label()}: {stage.completion_criterion}" for stage in state.stages)
+        return f"{Prompts().get(Prompt.JEV_RUN_STATE_REQUIRED_SEQUENCE_AGENT).rstrip()}\n\n{stages}"
+
+    def _render(self, payload: JevRunStatePayload) -> str:
+        """Render the validated request state with code-assigned sequence ids and activation status."""
+        rendered = payload.model_dump(mode="json")
+        sequence = None if self.record is None else self.record.required_sequence
+        if sequence is not None:
+            rendered[JevDoneCheck.REQUIRED_SEQUENCE.value] = {
+                "active": sequence.active,
+                "reason": sequence.reason,
+                "stages": [
+                    {
+                        "id": stage.id,
+                        "name": stage.name,
+                        "source_text": stage.source_text,
+                        "completion_criterion": stage.completion_criterion,
+                        "produces": stage.produces,
+                        "depends_on_previous": stage.depends_on_previous,
+                    }
+                    for stage in sequence.stages
+                ],
+            }
+        return json.dumps(rendered, ensure_ascii=False)
+
     async def check(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> tuple[JevDoneResult, ...]:
         """Run every enabled done check on this finish attempt, record every result, and return the checks that failed."""
         # @intent finish-attempt-evidence-is-rebuilt-and-batched
@@ -443,6 +486,7 @@ class JevRunState(BaseAgent):
         self.review = None
         if self.record is None:
             return ()
+        event_log = JevRunEventLog.from_run(self.request, responses, calls)
         self._observed_extent = {} if self.record.output_extent is None else {
             item.id: self._measure(final_answer, item) for item in self.record.output_extent.items
         }
@@ -455,7 +499,16 @@ class JevRunState(BaseAgent):
             self.review = await self.reviewer.review(self.request, review_window)
             self.response.review(self.review)
         review_text = "" if self.reviewer is None else self.reviewer.rendered
-        window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender, user_turns=turns, review=review_text)
+        window = JevHandoff.window(
+            self.rendered,
+            responses,
+            calls,
+            final_answer,
+            sender=self.sender,
+            user_turns=turns,
+            review=review_text,
+            event_log=event_log.render(),
+        )
         self.handoff = await self.handoff_writer.compile(
             self.request,
             self.record,
@@ -464,6 +517,7 @@ class JevRunState(BaseAgent):
             responses=responses,
             final_answer=final_answer,
             review=self.review,
+            event_ids=event_log.event_ids(),
         )
         self.response.handoff(self.handoff)
         decision = await self._ask(self.handoff)
@@ -533,9 +587,47 @@ class JevRunState(BaseAgent):
             JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope_section,
             JevDoneCheck.EXPERT_DEPTH: self._expert_depth_section,
             JevDoneCheck.SELF_REVIEW: self._self_review_section,
+            JevDoneCheck.REQUIRED_SEQUENCE: self._required_sequence_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
+
+    def _required_sequence_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+        """Build stage evidence state and ask only for observed, ordered stage work."""
+        state = None if self.record is None else self.record.required_sequence
+        evidence = handoff.required_sequence
+        if state is None or not state.active or evidence is None:
+            return {}, ()
+        evidence_by_id = {item.stage_id: item for item in evidence.stages}
+        entries: dict[str, object] = {}
+        questions: list[JevQuestion] = []
+        work_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_WORK_SHOWN)
+        previous_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_USES_PREVIOUS_OUTPUT)
+        for index, stage in enumerate(state.stages):
+            item = evidence_by_id[stage.id]
+            previous_stage = None if index == 0 else state.stages[index - 1]
+            previous_evidence = None if previous_stage is None else evidence_by_id[previous_stage.id]
+            entries[stage.id] = {
+                "name": stage.name,
+                "completion_criterion": stage.completion_criterion,
+                "produces": stage.produces,
+                "depends_on_previous": stage.depends_on_previous,
+                "preceding_stage": None if previous_stage is None or previous_evidence is None else {
+                    "name": previous_stage.name,
+                    "expected_output": previous_stage.produces,
+                    "outputs_produced": list(previous_evidence.outputs_produced),
+                },
+                "observed_work": [work.description for work in item.observed_work],
+                "outputs_produced": list(item.outputs_produced),
+                "inputs_used": list(item.inputs_used),
+                "failures": [work.description for work in item.failures],
+                "missing_or_uncertain": list(item.missing_or_uncertain),
+            }
+            if item.observed_work:
+                questions.append(work_question.to_question(stage.id))
+                if stage.depends_on_previous and index > 0 and previous_evidence and previous_evidence.observed_work:
+                    questions.append(previous_question.to_question(stage.id))
+        return {"stages": entries}, tuple(questions)
 
     def _self_review_section(self, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         """Ask both clearance questions for each strict-review objection, preserving reviewer order."""
@@ -1144,6 +1236,7 @@ class JevRunState(BaseAgent):
             JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope,
             JevDoneCheck.EXPERT_DEPTH: self._expert_depth,
             JevDoneCheck.SELF_REVIEW: self._self_review,
+            JevDoneCheck.REQUIRED_SEQUENCE: self._required_sequence,
         }
         handler = handlers.get(check)
         if handler is None:
@@ -1931,6 +2024,7 @@ class JevRunState(BaseAgent):
             )
 
         cumulative_obligations = self._cumulative_obligations_record(payload)
+        required_sequence = self._required_sequence_record(payload)
 
         return JevRunStateRecord(
             goal=payload.goal.strip(),
@@ -1953,7 +2047,45 @@ class JevRunState(BaseAgent):
             cumulative_obligations=cumulative_obligations,
             expert_depth=expert_depth,
             can_simplify=can_simplify,
+            required_sequence=required_sequence,
         )
+
+    def _required_sequence_record(self, payload: JevRunStatePayload) -> JevRequiredSequence | None:
+        """Normalize the proposed stages and deactivate the check when source phrases do not validate."""
+        section = getattr(payload, JevDoneCheck.REQUIRED_SEQUENCE.value, None)
+        if not isinstance(section, JevRequiredSequencePayload):
+            return None
+        raw_stages = section.stages
+        reason = None
+        if not raw_stages:
+            reason = "request_has_no_required_order"
+        elif len(raw_stages) < JEV_REQUIRED_SEQUENCE_MIN_STAGES:
+            reason = "fewer_than_min_stages"
+        elif len(raw_stages) > JEV_REQUIRED_SEQUENCE_MAX_STAGES:
+            reason = "more_than_max_stages"
+        if reason is None and any(
+            not item.name.strip() or not item.source_text.strip() or not item.completion_criterion.strip()
+            for item in raw_stages
+        ):
+            reason = "stage_field_blank"
+        stages = tuple(
+            JevSequenceStage(
+                id=f"{JEV_STAGE_ID_PREFIX}{position}",
+                position=position,
+                name=item.name.strip(),
+                source_text=item.source_text.strip(),
+                completion_criterion=item.completion_criterion.strip(),
+                produces=item.produces.strip(),
+                depends_on_previous=item.depends_on_previous and position > 1,
+            )
+            for position, item in enumerate(raw_stages, start=1)
+        ) if reason is None else ()
+        normalized_request = " ".join(self.request.casefold().split())
+        if reason is None and any(
+            " ".join(stage.source_text.casefold().split()) not in normalized_request for stage in stages
+        ):
+            reason = "stage_source_not_in_request"
+        return JevRequiredSequence(active=reason is None, reason=reason, stages=stages if reason is None else ())
 
     @staticmethod
     def _can_simplify_record(payload: JevRunStatePayload) -> JevCanSimplify | None:
@@ -2076,6 +2208,107 @@ class JevRunState(BaseAgent):
             for item in section.items
         )
         return JevOutputExtent(items)
+
+
+    def _required_sequence(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Combine event-order facts with Jev's recognition answers for every active sequence stage."""
+        # @intent code-owns-stage-presence-and-order
+        # Missing work and overlapping or reversed event spans are exact facts; Jev only recognizes work quality
+        # and input reuse, so an unavailable Jev response cannot hide a missing or out-of-order stage.
+        state = None if self.record is None else self.record.required_sequence
+        evidence = None if handoff is None else handoff.required_sequence
+        check = JevDoneCheck.REQUIRED_SEQUENCE
+        if state is None or not state.active or not state.stages:
+            return JevDoneResult(check=check, score=None)
+        if evidence is None:
+            return JevDoneResult(check=check, score=None, available=False)
+        evidence_by_id = {item.stage_id: item for item in evidence.stages}
+        work_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_WORK_SHOWN)
+        previous_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_USES_PREVIOUS_OUTPUT)
+        threshold = JevDoneRegistry.threshold(check)
+        answers: dict[str, Any] = {}
+        incomplete: list[str] = []
+        probabilities: list[float] = []
+        asks_jev = any(item.observed_work for item in evidence.stages)
+        available = decision is not None or not asks_jev
+        for index, stage in enumerate(state.stages):
+            item = evidence_by_id.get(stage.id)
+            previous = None if index == 0 else evidence_by_id.get(state.stages[index - 1].id)
+            stage_incomplete, stage_available, stage_answers, stage_probabilities = self._required_sequence_stage_result(
+                stage,
+                item,
+                previous,
+                decision,
+                work_question,
+                previous_question,
+                threshold,
+            )
+            if stage_incomplete:
+                incomplete.append(stage.id)
+            if not stage_available:
+                available = False
+            answers.update(stage_answers)
+            probabilities.extend(stage_probabilities)
+        unique_incomplete = tuple(dict.fromkeys(incomplete))
+        if not available and not unique_incomplete:
+            return JevDoneResult(check=check, score=None, available=False)
+        score = None if not probabilities else sum(probabilities) / len(probabilities)
+        usage = None if decision is None else JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(
+            check=check,
+            score=score,
+            passed=not unique_incomplete,
+            answers=answers,
+            incomplete=unique_incomplete,
+            available=available,
+            usage=usage,
+        )
+
+    @staticmethod
+    def _required_sequence_stage_result(
+        stage: JevSequenceStage,
+        item: JevSequenceStageEvidence | None,
+        previous: JevSequenceStageEvidence | None,
+        decision: DecisionModelResponse | None,
+        work_question: JevDoneQuestion,
+        previous_question: JevDoneQuestion,
+        threshold: float,
+    ) -> tuple[bool, bool, dict[str, Any], list[float]]:
+        """Score one stage, with exact missing-work and order failures decided before Jev answers."""
+        if item is None or not item.observed_work:
+            return True, True, {}, []
+        if previous is not None and previous.observed_work:
+            current_position = _event_position(item.first_event_id)
+            previous_position = _event_position(previous.last_work_event_id)
+            if current_position <= 0 or previous_position <= 0 or current_position <= previous_position:
+                return True, True, {}, []
+        if decision is None:
+            return False, True, {}, []
+        work_answer = decision.answers.get(work_question.name(stage.id))
+        if work_answer is None:
+            return False, False, {}, []
+        answers = {f"{stage.id}.work_shown": work_answer}
+        probabilities = [work_answer.probabilities.get(JEV_NOUL_TRUE, 0.0)]
+        work_passes = DecisionModelHelper.score_noul({stage.id: work_answer}, (stage.id,), threshold)
+        if work_passes is None or not work_passes.passed:
+            return True, True, answers, probabilities
+        if stage.depends_on_previous and previous is not None and previous.observed_work:
+            previous_answer = decision.answers.get(previous_question.name(stage.id))
+            if previous_answer is None:
+                return False, False, answers, probabilities
+            answers[f"{stage.id}.uses_previous_output"] = previous_answer
+            probabilities.append(previous_answer.probabilities.get(JEV_NOUL_TRUE, 0.0))
+            previous_passes = DecisionModelHelper.score_noul({stage.id: previous_answer}, (stage.id,), threshold)
+            if previous_passes is None or not previous_passes.passed:
+                return True, True, answers, probabilities
+        return False, True, answers, probabilities
+
+
+def _event_position(event_id: str) -> int:
+    """Return the numeric position in a validated numbered event id."""
+    if not event_id.startswith("E") or not event_id[1:].isdigit():
+        return 0
+    return int(event_id[1:])
 
 
 __all__ = ["JevRunState"]

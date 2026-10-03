@@ -63,6 +63,7 @@ class JevDoneCheck(str, Enum):
     FAITHFUL_SCOPE = "faithful_scope"
     EXPERT_DEPTH = "expert_depth"
     SELF_REVIEW = "self_review"
+    REQUIRED_SEQUENCE = "required_sequence"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -92,6 +93,8 @@ class JevDoneQuestionKey(str, Enum):
     PHASE_PROGRESS_REACHED = "phase_progress.reached"
     SCOPE_COVERAGE_BREADTH = "scope_coverage.breadth"
     SCOPE_COVERAGE_APPLIED = "scope_coverage.applied"
+    REQUIRED_SEQUENCE_WORK_SHOWN = "required_sequence.work_shown"
+    REQUIRED_SEQUENCE_USES_PREVIOUS_OUTPUT = "required_sequence.uses_previous_output"
     REQUIRED_ACTIONS_COMPLETED = "required_actions.completed"
     CUMULATIVE_OBLIGATION_FULFILLED = "cumulative_obligations.fulfilled"
     CUMULATIVE_USER_TURN_RECONCILED = "cumulative_obligations.user_turn_reconciled"
