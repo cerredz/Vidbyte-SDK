@@ -32,6 +32,7 @@ from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context import ContextManager
 from vidbyte.context.primitives import TextContextItem
 from vidbyte.lib.constants.jev import (
+    JEV_CONTINUATION_SEGMENT_INCREMENT,
     JEV_DONE_ACTION_FIELD,
     JEV_DONE_AFFECTED_WORK_FIELD,
     JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD,
@@ -165,6 +166,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_USER_TURN_EVIDENCE_FIELD,
     JEV_DONE_USER_TURNS_FIELD,
     JEV_DONE_WHAT_NOT_TO_DO_FIELD,
+    JEV_EVENT_LOG_INITIAL_ITERATION,
     JEV_EXPERT_DEPTH_THRESHOLD,
     JEV_MOTIVATING_CASE_RECALL_THRESHOLD,
     JEV_NOUL_TRUE,
@@ -177,6 +179,7 @@ from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
     JevCanSimplify,
     JevCanSimplifyPayload,
+    JevContinuationEvidence,
     JevCumulativeObligation,
     JevCumulativeObligations,
     JevCumulativeObligationsPayload,
@@ -298,6 +301,11 @@ class JevRunState(BaseAgent):
         self._recall_guard_probability: float | None = None
         self._state_builder_disagreement = False
         self._observed_extent: dict[str, int | None] = {}
+        self._evidence_segments: list[JevContinuationEvidence] = []
+        self._main_response_cursor = 0
+        self._main_call_cursor = 0
+        self._main_segment_number = 0
+        self._fresh_segment_number = 0
 
     @classmethod
     def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevRunStatePayload]:
@@ -318,6 +326,11 @@ class JevRunState(BaseAgent):
         self._recall_guard_probability = None
         self._state_builder_disagreement = False
         self._observed_extent = {}
+        self._evidence_segments = []
+        self._main_response_cursor = 0
+        self._main_call_cursor = 0
+        self._main_segment_number = 0
+        self._fresh_segment_number = 0
         self.history.clear()
         try:
             reply = await self.arun(self._run_state_input(request, self.prior_user_turns))
@@ -486,7 +499,15 @@ class JevRunState(BaseAgent):
         self.review = None
         if self.record is None:
             return ()
-        event_log = JevRunEventLog.from_run(self.request, responses, calls)
+        self._capture_main_evidence(responses, calls)
+        evidence_segments = tuple(self._evidence_segments)
+        if len(evidence_segments) == JEV_CONTINUATION_SEGMENT_INCREMENT and evidence_segments[0].source == f"main:{JEV_CONTINUATION_SEGMENT_INCREMENT}":
+            responses = evidence_segments[0].responses
+            calls = evidence_segments[0].tool_calls
+        else:
+            responses = tuple(response for segment in evidence_segments for response in segment.responses)
+            calls = tuple(call for segment in evidence_segments for call in segment.tool_calls)
+        event_log = JevRunEventLog.from_segments(self.request, evidence_segments)
         self._observed_extent = {} if self.record.output_extent is None else {
             item.id: self._measure(final_answer, item) for item in self.record.output_extent.items
         }
@@ -495,7 +516,14 @@ class JevRunState(BaseAgent):
             # @intent the-strict-review-runs-before-the-checks
             # The reviewer sees the main agent's run before the handoff compiles evidence, so each objection
             # becomes a stable post-run item for Jev to judge; an unavailable review leaves other checks intact.
-            review_window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender)
+            review_window = JevHandoff.window(
+                self.rendered,
+                responses,
+                calls,
+                final_answer,
+                sender=self.sender,
+                evidence_segments=evidence_segments,
+            )
             self.review = await self.reviewer.review(self.request, review_window)
             self.response.review(self.review)
         review_text = "" if self.reviewer is None else self.reviewer.rendered
@@ -508,6 +536,7 @@ class JevRunState(BaseAgent):
             user_turns=turns,
             review=review_text,
             event_log=event_log.render(),
+            evidence_segments=evidence_segments,
         )
         self.handoff = await self.handoff_writer.compile(
             self.request,
@@ -528,6 +557,38 @@ class JevRunState(BaseAgent):
             if not result.passed:
                 failed.append(result)
         return tuple(failed)
+
+    def add_continuation_evidence(self, evidence: JevContinuationEvidence) -> None:
+        """Append one continuation's raw observations after its main-agent check segment."""
+        if evidence.source == "fresh":
+            self._fresh_segment_number += JEV_CONTINUATION_SEGMENT_INCREMENT
+            evidence = replace(evidence, source=f"fresh:{self._fresh_segment_number}")
+        self._evidence_segments.append(evidence)
+
+    def _capture_main_evidence(self, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> None:
+        """Append only the newly observed main-loop slice, normalized to its local response chronology."""
+        new_responses = tuple(responses[self._main_response_cursor:])
+        raw_calls = calls[self._main_call_cursor:]
+        if self._main_response_cursor == 0:
+            new_calls = raw_calls if isinstance(raw_calls, tuple) else tuple(raw_calls)
+        else:
+            new_calls = tuple(
+                call if call.iteration_count is None else replace(
+                    call,
+                    iteration_count=max(JEV_EVENT_LOG_INITIAL_ITERATION, call.iteration_count - self._main_response_cursor),
+                )
+                for call in raw_calls
+            )
+        self._main_response_cursor = len(responses)
+        self._main_call_cursor = len(calls)
+        if not new_responses and not new_calls:
+            return
+        self._main_segment_number += JEV_CONTINUATION_SEGMENT_INCREMENT
+        self._evidence_segments.append(JevContinuationEvidence(
+            source=f"main:{self._main_segment_number}",
+            responses=new_responses,
+            tool_calls=new_calls,
+        ))
 
     def combine(self, handoff: JevHandoffRecord) -> JevDecisionRequest | None:
         """Return one Jev request holding every enabled check's questions over one shared state, or None when no check has a question to ask."""
@@ -2052,6 +2113,9 @@ class JevRunState(BaseAgent):
 
     def _required_sequence_record(self, payload: JevRunStatePayload) -> JevRequiredSequence | None:
         """Normalize the proposed stages and deactivate the check when source phrases do not validate."""
+        # @intent sequence-stages-come-from-explicit-request-order
+        # Stage numbers are later used to check whether dependent work follows the user's stated order.
+        # Reject absent or unsupported source phrases instead of creating a plausible sequence from the generated state alone.
         section = getattr(payload, JevDoneCheck.REQUIRED_SEQUENCE.value, None)
         if not isinstance(section, JevRequiredSequencePayload):
             return None

@@ -48,6 +48,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimsEvidencePayload,
     JevCompletionEvidence,
     JevCompletionEvidenceSectionPayload,
+    JevContinuationEvidence,
     JevCumulativeObligationEvidence,
     JevCumulativeObligationEvidencePayload,
     JevCumulativeObligationsEvidence,
@@ -176,7 +177,18 @@ class JevHandoff(BaseAgent):
         return create_model("JevHandoffPayload", __base__=JevHandoffPayload, **sections)
 
     @staticmethod
-    def window(run_state: str, responses: Sequence[str], calls: Sequence[ToolCallContext], final_answer: str, *, sender: str, user_turns: Sequence[str] = (), review: str = "", event_log: str = "") -> ContextManager:
+    def window(
+        run_state: str,
+        responses: Sequence[str],
+        calls: Sequence[ToolCallContext],
+        final_answer: str,
+        *,
+        sender: str,
+        user_turns: Sequence[str] = (),
+        review: str = "",
+        event_log: str = "",
+        evidence_segments: Sequence[JevContinuationEvidence] = (),
+    ) -> ContextManager:
         """Build the handoff's context: run state, any strict review, the main agent's work, and its final answer."""
         # @intent the-handoff-reads-the-main-agents-window
         # The owner asked for the main agent's context window to reach the handoff through vidbyte.context, so the
@@ -187,6 +199,23 @@ class JevHandoff(BaseAgent):
         if user_turns:
             turns = "\n\n".join(f"User turn {index}:\n{text}" for index, text in enumerate(user_turns))
             items.append(TextContextItem(title="Exact user turns for cumulative obligations", content=turns, source=HANDOFF_SOURCE))
+        if evidence_segments:
+            response_index = 0
+            call_index = 0
+            source_ranges = []
+            for segment in evidence_segments:
+                response_end = response_index + len(segment.responses)
+                call_end = call_index + len(segment.tool_calls)
+                source_ranges.append(
+                    f"{segment.source}: responses[{response_index}:{response_end}], tool_calls[{call_index}:{call_end}]"
+                )
+                response_index = response_end
+                call_index = call_end
+            items.append(TextContextItem(
+                title="Continuation evidence source ranges",
+                content="\n".join(source_ranges),
+                source=HANDOFF_SOURCE,
+            ))
         for index, text in enumerate(responses):
             if not text.strip():
                 continue

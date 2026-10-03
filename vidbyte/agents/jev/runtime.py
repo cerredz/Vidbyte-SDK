@@ -171,7 +171,9 @@ class JevRuntime(AgentRuntime):
             # The runtime is run-local; expand only configured ceilings before the same loop consumes the continuation.
             self.config = replace(self.config, **limits)
             self.response.continuation_budget(granted)
-        self.continuation.continue_(messages)
+        evidence = self.continuation.continue_(messages)
+        if evidence is not None and self.run_state is not None:
+            self.run_state.add_continuation_evidence(evidence)
         return True
 
 

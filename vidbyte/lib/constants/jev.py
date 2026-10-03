@@ -158,6 +158,7 @@ JEV_EVENT_LOG_ID_INCREMENT: int = 1
 JEV_EVENT_LOG_NEXT_ID: int = 2
 JEV_EVENT_LOG_INITIAL_ITERATION: int = 0
 JEV_EVENT_LOG_ITERATION_OFFSET: int = 1
+JEV_CONTINUATION_SEGMENT_INCREMENT: int = 1
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -366,6 +367,7 @@ __all__ = [
     "JEV_DONE_ACTION_FIELD",
     "JEV_DONE_REQUIRED_ACTIONS_FIELD",
     "JEV_EVENT_LOG_FIRST_ID",
+    "JEV_CONTINUATION_SEGMENT_INCREMENT",
     "JEV_EVENT_LOG_ID_INCREMENT",
     "JEV_EVENT_LOG_INITIAL_ITERATION",
     "JEV_EVENT_LOG_ITERATION_OFFSET",

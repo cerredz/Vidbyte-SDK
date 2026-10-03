@@ -33,7 +33,12 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import JevDoneCheck, JevPreflightPreset, ModelProvider
+from vidbyte.lib.enums import (
+    JevContinuationGate,
+    JevDoneCheck,
+    JevPreflightPreset,
+    ModelProvider,
+)
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.tools.security import PermissionPolicy
@@ -131,7 +136,7 @@ class JevAgentSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevContinualSettings:
-    """Validated continuation settings: enabled checks, the continuation cap, and the run-state, reviewer, and handoff agent limits."""
+    """Validated done checks, continuation gate and cap, and run-state, reviewer, and handoff limits."""
 
     checks: tuple[JevDoneCheck | str, ...] = ()
     max_continuations: int = JEV_DONE_MAX_CONTINUATIONS
@@ -144,6 +149,7 @@ class JevContinualSettings:
     faithful_scope_extra_tool_calls: int = JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS
     review_max_iterations: int = JEV_REVIEW_MAX_ITERATIONS
     review_max_tokens: int = JEV_REVIEW_MAX_TOKENS
+    gate: JevContinuationGate | str = JevContinuationGate.SAME_CONTEXT
 
     def __post_init__(self) -> None:
         # Rejects unknown or repeated done checks and non-integer limits before JevAgent builds its run state.
@@ -156,6 +162,13 @@ class JevContinualSettings:
             self._validate_count(field_name, minimum=1)
         for field_name in ("faithful_scope_extra_iterations", "faithful_scope_extra_tokens", "faithful_scope_extra_tool_calls"):
             self._validate_count(field_name, minimum=0)
+        try:
+            gate = self.gate if isinstance(self.gate, JevContinuationGate) else JevContinuationGate(self.gate)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Unsupported Jev continuation gate: {self.gate!r}") from exc
+        if gate is JevContinuationGate.FRESH and not self.checks:
+            raise ConfigurationError("JevContinualSettings.gate='fresh' requires at least one done check.")
+        object.__setattr__(self, "gate", gate)
 
     def _validate_count(self, field_name: str, *, minimum: int) -> None:
         # Requires a whole number at or above the minimum, excluding bool.

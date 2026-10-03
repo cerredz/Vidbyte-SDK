@@ -664,6 +664,8 @@ Write a new subclass in its own module under `continuation/` **only** when the r
 - Record its outcomes through a new `JevResponse` method.
 - Give it its own settings field. That field lives in `vidbyte/agents/jev/settings.py`, because agent settings are the one exception to the dataclass placement rule.
 
+`JevContinualSettings.gate="fresh"` is a clean-context path for the existing done-check trigger: after a check fails, it gives a new agent the original request, run state, and handoff with the fresh-continuation prompt, then appends that agent's response to the main loop. It uses the existing continuation limit and fails open if the state, handoff, or fresh response is unavailable.
+
 A new kind of done check never needs a new continuation class, because `JevDoneContinuation` already runs every enabled check.
 
 ### Guaranteed next actions

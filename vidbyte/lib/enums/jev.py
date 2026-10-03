@@ -66,6 +66,13 @@ class JevDoneCheck(str, Enum):
     REQUIRED_SEQUENCE = "required_sequence"
 
 
+class JevContinuationGate(str, Enum):
+    """How JevAgent applies a failed done check before returning to work."""
+
+    SAME_CONTEXT = "same_context"
+    FRESH = "fresh"
+
+
 class JevDoneQuestionKey(str, Enum):
     """The key of every fixed done question, prefixed by the done check that asks it.
 
@@ -232,4 +239,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
