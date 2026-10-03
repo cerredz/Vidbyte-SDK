@@ -80,7 +80,8 @@ class TextModelConfig:
         self.resolved_api_key()
 
     def _validate_claude_skill_options(self) -> None:
-        # Reject malformed or non-Anthropic native options before provider dispatch.
+        # @intent reject-invalid-native-provider-options
+        # Native references and sessions are Anthropic-only contracts; rejecting them here prevents silent omission or malformed provider payloads.
         if not isinstance(self.claude_skills, tuple) or not all(isinstance(skill, ClaudeSkillReference) for skill in self.claude_skills):
             raise ConfigurationError("claude_skills must be a tuple of ClaudeSkillReference values.")
         if len(self.claude_skills) > 20:

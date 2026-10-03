@@ -1,4 +1,13 @@
-"""Run Jev skill provider and remote-source tests with a result per case."""
+"""FILE: scripts/test-jev-skill-providers.py
+
+PURPOSE: Runs every Jev skill provider and source test with a visible result per case.
+ROLE IN CODEBASE: Provides the mandated feature-specific test gate and nonzero exit on failure.
+ARCHITECTURE NOTE: Both local/native and remote-source modules use fake provider boundaries and no live credentials.
+COMMON MODIFICATION PATTERNS: Add each new feature-specific test module to the explicit unittest suite here.
+KNOWN EDGE CASES: A failure reports the individual case and preserves the aggregate passed count.
+RELATED DOCS: docs/design/jev-skill-providers.md.
+TESTS: Execute this script directly with python scripts/test-jev-skill-providers.py.
+"""
 
 from __future__ import annotations
 

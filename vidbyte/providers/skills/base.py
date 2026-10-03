@@ -3,6 +3,10 @@
 PURPOSE: Defines the narrow adapter boundary and safe per-source resolution failure.
 ROLE IN CODEBASE: SkillSourceResolver dispatches explicit caller descriptors to a closed set of providers.
 ARCHITECTURE NOTE: Adapters return resolved SkillDocument values and never execute companion files.
+COMMON MODIFICATION PATTERNS: Keep shared frontmatter parsing and source-failure redaction at this typed adapter boundary.
+KNOWN EDGE CASES: Full input text and line endings are preserved; only SDK-authored safe details reach Jev outcomes.
+RELATED DOCS: docs/design/jev-skill-providers.md and docs/jev-skill-providers.md.
+TESTS: tests/test_jev_skill_providers.py, tests/test_jev_skill_remote_sources.py, and scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations

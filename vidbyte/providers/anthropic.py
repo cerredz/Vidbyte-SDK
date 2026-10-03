@@ -106,7 +106,8 @@ class AnthropicProvider:
             raise ConfigurationError("Caller tools conflict with the reserved Claude code-execution tool.")
 
     def _read_native_session(self, parsed: Mapping[str, Any], request_messages: list[Mapping[str, Any]]) -> ClaudeSkillSession:
-        # Captures the sent message list plus the untouched assistant blocks needed for exact pause replay.
+        # @intent replay-exact-native-pause-history
+        # The next pause request must reuse the exact sent messages and raw assistant blocks; reconstruction can lose prior history or server content.
         content = parsed.get("content")
         container = parsed.get("container")
         stop_reason = parsed.get("stop_reason")
@@ -129,7 +130,7 @@ class AnthropicProvider:
         # Include the required Anthropic version and API key headers.
         return {"x-api-key": config.resolved_api_key(), "anthropic-version": "2023-06-01", "content-type": "application/json"}
 
-    def _create_messages(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
+    def _create_messages(self, config: TextModelConfig, prompt: str) -> list[dict[str, Any]]:
         # Paused sessions replay their provider snapshot; active containers use runtime-maintained history.
         if config.claude_skill_session is not None:
             if config.claude_skill_session.paused:

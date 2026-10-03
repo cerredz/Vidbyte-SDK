@@ -3,6 +3,10 @@
 PURPOSE: Resolves explicit skills.sh owner/repository/skill-slug references through GitHub.
 ROLE IN CODEBASE: Converts a skills.sh catalog selection to the shared GitHub skill-document adapter.
 ARCHITECTURE NOTE: skills.sh is a reference format here; no skills.sh content endpoint or installer is used.
+COMMON MODIFICATION PATTERNS: Normalize only explicit owner/repo/slug inputs, then delegate content lookup to GitHubSkillSourceAdapter.
+KNOWN EDGE CASES: Missing or ambiguous slugs are unavailable; this adapter never installs or guesses a skill.
+RELATED DOCS: docs/design/jev-skill-providers.md and docs/jev-skill-providers.md.
+TESTS: tests/test_jev_skill_remote_sources.py and scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations
@@ -29,7 +33,8 @@ class SkillsShSkillSourceAdapter(SkillSourceAdapter):
     """Resolves a skills.sh source slug using the GitHub repository catalog."""
 
     def __init__(self, *, transport: HttpTransport | None = None, response_parser: HttpResponseParser | None = None, document_parser: SkillDocumentParser | None = None) -> None:
-        # Reuses the GitHub adapter with the same injectable bounded transport and document parser.
+        # @intent reuse-github-catalog-for-skills-sh
+        # Slugs resolve through the bounded GitHub catalog adapter; no installer or undocumented content endpoint is invoked.
         self.github_adapter = GitHubSkillSourceAdapter(transport=transport, response_parser=response_parser, document_parser=document_parser)
 
     async def resolve(self, source: SkillSource) -> SkillDocument:

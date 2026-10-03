@@ -40,6 +40,8 @@ _GITHUB_TREE_MAX_BYTES = 8_000_000
 _MAX_GITHUB_REF_PATH_SPLITS = 8
 _GITHUB_HTTP_OK = 200
 _GITHUB_HTTP_MULTIPLE_CHOICES = 300
+_GITHUB_HTTP_NOT_FOUND = 404
+_GITHUB_RETRY_COUNT = 0
 _CREDENTIAL_QUERY_PARTS = ("token", "auth", "key", "secret", "credential", "password")
 _OWNER_OR_REPO = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -48,7 +50,8 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
     """Reads one validated SKILL.md from an explicit public or authenticated GitHub source."""
 
     def __init__(self, *, transport: HttpTransport | None = None, response_parser: HttpResponseParser | None = None, document_parser: SkillDocumentParser | None = None) -> None:
-        # Retains injectable HTTP and document parsers for deterministic bounded source tests.
+        # @intent keep-github-transport-and-parsing-injectable
+        # Requests share one bounded approved-host transport while parser injection keeps interpretation deterministic in tests.
         self.transport = transport or HttpTransport()
         self.response_parser = response_parser or HttpResponseParser()
         self.document_parser = document_parser or SkillDocumentParser()
@@ -94,7 +97,8 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         return await self._resolve_tree(source, owner, repo, revision or source.revision or default_branch, selected_slug=path)
 
     async def _resolve_raw(self, source: SkillSource, owner: str, repo: str, revision: str, path: str) -> SkillDocument:
-        # Fetches an explicit raw.githubusercontent.com file without forwarding any caller credential.
+        # @intent never-forward-github-credentials-to-raw-host
+        # Raw content is fetched anonymously because only api.github.com is approved to receive a caller-supplied GitHub key.
         if not path or path.rsplit("/", 1)[-1] != "SKILL.md":
             raise SkillSourceError("GitHub raw sources must identify a SKILL.md file.")
         url = self._raw_url(owner, repo, revision, path)
@@ -216,7 +220,8 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         return content
 
     async def _get_json(self, url: str, source: SkillSource, *, maximum_bytes: int, purpose: str) -> dict[str, object]:
-        # Sends bounded API requests only to api.github.com and hides all upstream error text.
+        # @intent bound-and-redact-github-api-errors
+        # Host, timeout, body ceiling, and safe SDK errors are enforced before upstream details can escape.
         if urlsplit(url).hostname != _GITHUB_API_HOST:
             raise SkillSourceError("GitHub API request did not use the approved host.")
         try:
@@ -228,11 +233,12 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             raise SkillSourceError(f"GitHub {purpose} could not be resolved.") from None
 
     async def _try_get_json(self, url: str, source: SkillSource, *, maximum_bytes: int, purpose: str) -> dict[str, object] | None:
-        # Treats only a definite 404 as a nonmatching URL interpretation; other failures remain visible.
+        # @intent ignore-only-definite-github-404
+        # Only an actual 404 means a probe did not match; auth, parse, size, and transport failures invalidate the source.
         if urlsplit(url).hostname != _GITHUB_API_HOST:
             raise SkillSourceError("GitHub API request did not use the approved host.")
         response = await self._request(url, source, raw=False, maximum_bytes=maximum_bytes)
-        if response.status_code == 404:
+        if response.status_code == _GITHUB_HTTP_NOT_FOUND:
             return None
         try:
             return self.response_parser.parse_json_response(response, provider="github")
@@ -242,7 +248,8 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             raise SkillSourceError(f"GitHub {purpose} could not be resolved.") from None
 
     async def _request(self, url: str, source: SkillSource, *, raw: bool, maximum_bytes: int) -> HttpResponse:
-        # Keeps credentials and redirects scoped to the one fixed GitHub host that accepts them.
+        # @intent scope-github-credentials-to-api-host
+        # Only the fixed API host receives explicit keys, and redirects are disabled so the transport cannot forward them elsewhere.
         host = urlsplit(url).hostname
         allowed_host = _GITHUB_RAW_HOST if raw else _GITHUB_API_HOST
         if host != allowed_host:
@@ -258,7 +265,7 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
                 url=url,
                 headers=headers,
                 timeout_seconds=_GITHUB_TIMEOUT_SECONDS,
-                retry_count=0,
+                retry_count=_GITHUB_RETRY_COUNT,
                 max_response_bytes=maximum_bytes,
                 follow_redirects=False,
             )

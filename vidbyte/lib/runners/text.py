@@ -16,7 +16,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.http import HttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
-from vidbyte.providers import ModelProviders
+from vidbyte.providers import AnthropicProvider, ModelProviders
 
 
 class TextModelRunner:
@@ -52,6 +52,7 @@ class TextModelRunner:
         )
         if native_skills or native_session is not None:
             call_config.validate()
+        if isinstance(self._provider, AnthropicProvider):
             return await self._provider.run_text(
                 prompt=prompt,
                 system=system,

@@ -3,6 +3,10 @@
 PURPOSE: Verifies bounded GitHub and skills.sh skill retrieval with no live network calls.
 ROLE IN CODEBASE: Exercises the source adapters owned by the remote-provider stage of Jev skill loading.
 ARCHITECTURE NOTE: Fake transports capture exact URLs, headers, response caps, and failure boundaries.
+COMMON MODIFICATION PATTERNS: Add a fake transport case when a provider URL form, selector, or failure rule changes.
+KNOWN EDGE CASES: Ref/path interpretations are bounded, only 404 is ignored, and raw downloads receive no API key.
+RELATED DOCS: docs/design/jev-skill-providers.md.
+TESTS: Run with python scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations

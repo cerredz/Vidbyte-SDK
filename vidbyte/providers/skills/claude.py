@@ -3,6 +3,10 @@
 PURPOSE: Resolves explicit Claude Skills identifiers into safe metadata and concrete native references.
 ROLE IN CODEBASE: SkillSourceResolver uses this adapter during Jev preload; the Messages provider later mounts selected opaque references.
 ARCHITECTURE NOTE: The Skills API exposes metadata, not the original SKILL.md body, so this adapter never turns descriptions into prompt text.
+COMMON MODIFICATION PATTERNS: Keep list/retrieve request shapes and version pinning in this adapter; the resolver owns only closed dispatch.
+KNOWN EDGE CASES: Pagination is bounded, credentials follow source/Anthropic-agent/environment precedence, and a missing concrete version fails resolution.
+RELATED DOCS: docs/design/jev-skill-providers.md and docs/jev-skill-providers.md.
+TESTS: tests/test_jev_skill_providers.py and scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations
@@ -28,13 +32,15 @@ _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_SKILL_PAGES = 10
 _PAGE_SIZE = 1000
 _REQUEST_TIMEOUT_SECONDS = 20.0
+_EXPECTED_UNIQUE_SKILL_MATCHES = 1
 
 
 class ClaudeSkillSourceAdapter(SkillSourceAdapter):
     """Looks up one Claude Skill and pins the concrete version returned by its API."""
 
     def __init__(self, transport: HttpTransport | None = None, response_parser: HttpResponseParser | None = None, *, default_api_key: str | None = None) -> None:
-        # Keeps network exchange injectable and accepts only an explicitly Anthropic-owned fallback key.
+        # @intent restrict-fallback-key-to-anthropic-owned-calls
+        # The fallback key comes only from the owning Anthropic agent; explicit source keys take precedence and construction stays offline.
         self._transport = transport or HttpTransport()
         self._parser = response_parser or HttpResponseParser()
         self._default_api_key = default_api_key
@@ -84,7 +90,7 @@ class ClaudeSkillSourceAdapter(SkillSourceAdapter):
             if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
                 raise SkillSourceError("Claude Skills API returned an invalid metadata page.")
             matches.extend(item for item in data if self._matches(source, item))
-            if len(matches) > 1:
+            if len(matches) > _EXPECTED_UNIQUE_SKILL_MATCHES:
                 raise SkillSourceError("Claude skill selector is ambiguous.")
             next_page = page.get("next_page")
             if next_page is None:
@@ -95,7 +101,7 @@ class ClaudeSkillSourceAdapter(SkillSourceAdapter):
             page_token = next_page
         else:
             raise SkillSourceError("Claude Skills API exceeded its pagination limit.")
-        if len(matches) != 1:
+        if len(matches) != _EXPECTED_UNIQUE_SKILL_MATCHES:
             raise SkillSourceError("Claude skill selector did not identify one skill.")
         return matches[0]
 
@@ -106,7 +112,8 @@ class ClaudeSkillSourceAdapter(SkillSourceAdapter):
         return identifier == source.location or display_name == source.location
 
     async def _get_json(self, url: str, headers: Mapping[str, str]) -> dict[str, Any]:
-        # Uses existing response and timeout ceilings while replacing provider error text with a safe SDK message.
+        # @intent bound-and-redact-claude-metadata-requests
+        # Fixed-host bounded requests replace upstream error details so credentials and provider response bodies never escape resolution.
         try:
             response = await self._transport.request(
                 method="GET",
