@@ -23,9 +23,11 @@ from vidbyte.agents.jev import (
 )
 from vidbyte.agents.jev.continuation import JevFreshContinuation
 from vidbyte.agents.jev.response import JevResponse
+from vidbyte.lib.dataclasses.jev import JevDoneResult, JevFailedDoneQuestion
+from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums import JevContinuationGate, JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
-from vidbyte.lib.dataclasses.tools import ToolCallContext
+from vidbyte.lib.jev import JevDoneRegistry
 
 
 class FreshAgentStub:
@@ -49,17 +51,36 @@ class FreshAgentStub:
 class RunStateStub:
     """Expose the request, serialized state, and latest handoff expected by the continuation."""
 
-    def __init__(self) -> None:
+    def __init__(self, attempts: list[tuple[JevDoneResult, ...]] | None = None) -> None:
         self.request = "Original task"
         self.rendered = '{"goal":"finish task"}'
         self.handoff_writer = SimpleNamespace(rendered='{"evidence":"partial work"}')
         self.handoff = object()
+        self.attempts = attempts or [(
+            JevDoneResult(
+                check=JevDoneCheck.MULTI_PART,
+                score=0.2,
+                passed=False,
+                incomplete=("README",),
+                failed_questions=(JevFailedDoneQuestion(
+                    name="multi_part.delivered.README",
+                    question="Does the evidence show that the README was produced in full?",
+                ),),
+            ),
+        )]
+        self.checks = tuple(dict.fromkeys(result.check for attempt in self.attempts for result in attempt)) or (JevDoneCheck.MULTI_PART,)
+        self.latest_results: tuple[JevDoneResult, ...] = ()
         self.check_calls = 0
         self.failed = True
 
     async def check(self, final_answer: str, responses: Any, calls: Any) -> tuple[object, ...]:
         self.check_calls += 1
-        return (object(),) if self.failed else ()
+        if not self.failed:
+            self.latest_results = tuple(JevDoneResult(check=check, score=1.0) for check in self.checks)
+        else:
+            attempt = min(self.check_calls - 1, len(self.attempts) - 1)
+            self.latest_results = self.attempts[attempt]
+        return tuple(result for result in self.latest_results if not result.passed)
 
 
 class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
@@ -102,6 +123,11 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Original task", prompt)
         self.assertIn("finish task", prompt)
         self.assertIn("partial work", prompt)
+        self.assertIn("<completion_gate_assessment>", prompt)
+        self.assertIn(JevDoneRegistry.description(JevDoneCheck.MULTI_PART), prompt)
+        self.assertIn("Does the evidence show that the README was produced in full?", prompt)
+        self.assertNotIn("multi_part.delivered.README", prompt)
+        self.assertNotIn("P(yes)", prompt)
         messages: list[dict[str, Any]] = []
         evidence = continuation.continue_(messages)
         self.assertEqual(messages, [{"role": "user", "content": "fresh agent response"}])
@@ -130,6 +156,76 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
             assert evidence is not None
             self.assertEqual(evidence.responses, ("raw final",))
             self.assertEqual(evidence.tool_calls, ())
+
+    async def test_gate_assessment_lists_enabled_gates_and_recomputes_failed_questions(self) -> None:
+        first = (
+            JevDoneResult(
+                check=JevDoneCheck.MULTI_PART,
+                score=0.3,
+                passed=False,
+                incomplete=("README", "tests"),
+                failed_questions=(
+                    JevFailedDoneQuestion("multi_part.delivered.README", "Is the README complete?"),
+                    JevFailedDoneQuestion("multi_part.delivered.tests", "Are the tests complete?"),
+                ),
+            ),
+            JevDoneResult(
+                check=JevDoneCheck.CLAIMS,
+                score=1.0,
+                passed=True,
+            ),
+        )
+        second = (
+            JevDoneResult(
+                check=JevDoneCheck.MULTI_PART,
+                score=0.7,
+                passed=False,
+                incomplete=("tests",),
+                failed_questions=(JevFailedDoneQuestion("multi_part.delivered.tests", "Are the tests complete?"),),
+            ),
+            JevDoneResult(check=JevDoneCheck.CLAIMS, score=1.0, passed=True),
+        )
+        run_state = RunStateStub([first, second])
+        agents: list[FreshAgentStub] = []
+
+        def factory() -> FreshAgentStub:
+            agent = FreshAgentStub()
+            agents.append(agent)
+            return agent
+
+        continuation = JevFreshContinuation(run_state, JevContinualSettings(max_continuations=2), JevResponse(), factory)  # type: ignore[arg-type]
+        self.assertTrue(await continuation.should_continue("draft", (), ()))
+        first_prompt = agents[0].inputs[0].prompt
+        self.assertLess(first_prompt.index("## Multi Part"), first_prompt.index("## Claims"))
+        self.assertIn("Is the README complete?", first_prompt)
+        self.assertIn("Are the tests complete?", first_prompt)
+        continuation.continue_([])
+
+        self.assertTrue(await continuation.should_continue("draft", (), ()))
+        second_prompt = agents[1].inputs[0].prompt
+        self.assertNotIn("Is the README complete?", second_prompt)
+        self.assertIn("Are the tests complete?", second_prompt)
+        self.assertIn("Status: passed; no questions failed.", second_prompt)
+        self.assertEqual(second_prompt.count("<completion_gate_assessment>"), 1)
+
+    async def test_gate_assessment_distinguishes_unavailable_and_deterministic_failures(self) -> None:
+        # Shows gate status without inventing a Jev question for deterministic evidence gaps.
+        results = (
+            JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None, available=False),
+            JevDoneResult(check=JevDoneCheck.REQUIRED_SEQUENCE, score=None, passed=False, incomplete=("stage_2",)),
+        )
+        run_state = RunStateStub([results])
+        fresh_agent = FreshAgentStub()
+        continuation = JevFreshContinuation(run_state, JevContinualSettings(), JevResponse(), lambda: fresh_agent)  # type: ignore[arg-type]
+
+        self.assertTrue(await continuation.should_continue("draft", (), ()))
+
+        prompt = fresh_agent.inputs[0].prompt
+        self.assertIn("Status: not evaluated.", prompt)
+        self.assertIn("Status: gate failed on deterministic evidence; no Jev question failed.", prompt)
+        self.assertIn("## Multi Part", prompt)
+        self.assertIn("## Required Sequence", prompt)
+        self.assertNotIn("stage_2", prompt)
 
     async def test_fresh_factory_is_per_attempt_and_cap_and_blank_output_stop_retries(self) -> None:
         agents: list[FreshAgentStub] = []

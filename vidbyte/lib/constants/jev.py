@@ -162,6 +162,12 @@ JEV_CONTINUATION_SEGMENT_INCREMENT: int = 1
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
+# Sentence bounds for each part of a done gate's continuation description: what the gate checks, how to use
+# its failed questions, and its common failure modes.
+JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES: int = 4
+JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES: int = 5
+# A sentence ends at '.', '?', or '!' followed by whitespace and an uppercase letter or backtick, or by the end.
+JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN: str = r"[.?!](?=\s+[A-Z`]|$)"
 JEV_CONTINUATION_BUDGET_INITIAL: int = 0
 # Extra main-agent capacity granted for each continuation caused by FAITHFUL_SCOPE.
 JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS: int = 2
@@ -463,6 +469,9 @@ __all__ = [
     "JEV_DONE_DONE_WHEN_FIELD",
     "JEV_DONE_EXPERT_DETAILS_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES",
+    "JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES",
+    "JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN",
     "JEV_DONE_PRESERVATION_FIELD",
     "JEV_DONE_EXECUTION_FIELD",
     "JEV_DONE_FINAL_ACCOUNT_FIELD",
