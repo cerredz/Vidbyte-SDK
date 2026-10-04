@@ -41,10 +41,10 @@ class JevAgent(BaseAgent):
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
-        self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
+        self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continuation_gate.enabled else None
         if self.run_state is None:
             self.continuation = None
-        elif runtime_settings.continual.gate is JevContinuationGate.FRESH:
+        elif not runtime_settings.continuation_gate.same_context:
             fresh_agent_factory = partial(
                 BaseAgent,
                 name=f"{settings.name}-fresh-continuation",
@@ -58,9 +58,9 @@ class JevAgent(BaseAgent):
                 permission_policy=settings.permission_policy,
                 agent_loop_settings=settings.loop,
             )
-            self.continuation = JevFreshContinuation(self.run_state, runtime_settings.continual, self._response, fresh_agent_factory)
+            self.continuation = JevFreshContinuation(self.run_state, runtime_settings.continuation_gate, self._response, fresh_agent_factory)
         else:
-            self.continuation = JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+            self.continuation = JevDoneContinuation(self.run_state, runtime_settings.continuation_gate, self._response)
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,

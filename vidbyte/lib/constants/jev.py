@@ -159,7 +159,7 @@ JEV_EVENT_LOG_NEXT_ID: int = 2
 JEV_EVENT_LOG_INITIAL_ITERATION: int = 0
 JEV_EVENT_LOG_ITERATION_OFFSET: int = 1
 JEV_CONTINUATION_SEGMENT_INCREMENT: int = 1
-# Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
+# Default of JevContinuationGateSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
 # Sentence bounds for each part of a done gate's continuation description: what the gate checks, how to use
@@ -328,7 +328,7 @@ JEV_DONE_OBJECTION_FIELD: str = "objection"
 JEV_DONE_RESOLVED_WHEN_FIELD: str = "resolved_when"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
-# Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
+# Defaults of the JevRunState and JevHandoff limits in JevContinuationGateSettings: each writes one structured reply,
 # so their loops stay short; the handoff reads the main agent's whole run, so its token budget is larger.
 JEV_RUN_STATE_MAX_ITERATIONS: int = 25
 JEV_RUN_STATE_MAX_TOKENS: int = 100_000

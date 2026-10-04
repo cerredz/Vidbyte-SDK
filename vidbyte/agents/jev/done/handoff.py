@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 from pydantic import Field, create_model
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.jev.settings import JevAgentSettings, JevContinualSettings
+from vidbyte.agents.jev.settings import JevAgentSettings, JevContinuationGateSettings
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context import ContextManager
 from vidbyte.context.primitives import (
@@ -120,7 +120,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeEvidencePayload,
 )
-from vidbyte.lib.enums.jev import JevDoneCheck
+from vidbyte.lib.enums.jev import JevContinuationGate
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.prompts.catalog import Prompts
@@ -139,22 +139,22 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CAN_SIMPLIFY: JevCanSimplifyEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevDoneCheck.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevDoneCheck.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevDoneCheck.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoverageEvidencePayload, JevDoneCheck.FAITHFUL_SCOPE: JevFaithfulScopeEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevContinuationGate, type[JevSectionPayload]]] = MappingProxyType({JevContinuationGate.MULTI_PART: JevMultiPartEvidencePayload, JevContinuationGate.CAN_SIMPLIFY: JevCanSimplifyEvidencePayload, JevContinuationGate.CLAIMS: JevClaimsEvidencePayload, JevContinuationGate.COMPLETION_EVIDENCE: JevCompletionEvidenceSectionPayload, JevContinuationGate.PHASE_PROGRESS: JevPhaseProgressEvidencePayload, JevContinuationGate.TARGET_OUTCOME: JevTargetOutcomeEvidencePayload, JevContinuationGate.MOTIVATING_CASE: JevMotivatingCaseEvidencePayload, JevContinuationGate.SCOPE_COVERAGE: JevScopeCoverageEvidencePayload, JevContinuationGate.PROBLEMS_RESOLVED: JevProblemsResolvedEvidencePayload, JevContinuationGate.INPUT_SET_COVERAGE: JevInputSetCoverageEvidencePayload, JevContinuationGate.OUTPUT_COUNT: JevOutputCountEvidencePayload, JevContinuationGate.OUTPUT_EXTENT: JevOutputExtentEvidencePayload, JevContinuationGate.REPORT_ACTION_ALIGNMENT: JevReportActionAlignmentEvidenceSectionPayload, JevContinuationGate.ASSUMPTIONS_RECONCILED: JevAssumptionsReconciledPayload, JevContinuationGate.INPUT_EXHAUSTION: JevInputExhaustionEvidenceSection, JevContinuationGate.NEGATIVE_COVERAGE: JevNegativeCoverageEvidencePayload, JevContinuationGate.FAITHFUL_SCOPE: JevFaithfulScopeEvidencePayload})
 
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.GUARANTEED_NEXT_ACTIONS: JevGuaranteedNextActionsEvidencePayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.DISCOVERED_ITEM_COVERAGE: JevDiscoveredItemBatchPayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthEvidencePayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.SELF_REVIEW: JevSelfReviewEvidencePayload, JevDoneCheck.REQUIRED_SEQUENCE: JevRequiredSequenceEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.GUARANTEED_NEXT_ACTIONS: JevGuaranteedNextActionsEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.REQUIRED_ACTIONS: JevRequiredActionsEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.DISCOVERED_ITEM_COVERAGE: JevDiscoveredItemBatchPayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.EXPERT_DEPTH: JevExpertDepthEvidencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.SELF_REVIEW: JevSelfReviewEvidencePayload, JevContinuationGate.REQUIRED_SEQUENCE: JevRequiredSequenceEvidencePayload})
 
 
-    def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
+    def __init__(self, settings: JevAgentSettings, continual: JevContinuationGateSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
         # @intent handoff-can-only-report
         # The handoff writer compiles evidence for a checker; with no tools and a fixed prompt it can neither
         # continue the user's work nor be steered by the caller into judging it.
-        payload = self.schema(continual.checks)
+        payload = self.schema(continual.enabled)
         super().__init__(
             name=f"{settings.name}-handoff",
             system_prompt=Prompts().get(Prompt.JEV_HANDOFF_SYSTEM_PROMPT),
@@ -166,12 +166,12 @@ class JevHandoff(BaseAgent):
             timeout_seconds=settings.timeout_seconds,
             output_schema=payload,
         )
-        self.checks = continual.checks
+        self.checks = continual.enabled
         self.payload = payload
         self.rendered = ""
 
     @classmethod
-    def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevHandoffPayload]:
+    def schema(cls, checks: tuple[JevContinuationGate, ...]) -> type[JevHandoffPayload]:
         """Return the handoff's output schema: JevHandoffPayload plus one described evidence section per enabled check."""
         sections: dict[str, Any] = {check.value: (cls._SECTIONS[check], Field(description=cls._SECTIONS[check].SECTION)) for check in checks}
         return create_model("JevHandoffPayload", __base__=JevHandoffPayload, **sections)
@@ -284,22 +284,22 @@ class JevHandoff(BaseAgent):
             payload,
             state,
             event_ids,
-            required=JevDoneCheck.REQUIRED_SEQUENCE in self.checks,
+            required=JevContinuationGate.REQUIRED_SEQUENCE in self.checks,
         )
         if not all((request_records is not None, self_review_valid, required_sequence_valid)):
             return None
         claims = self._claims_record(payload)
         guaranteed_next_actions = self._guaranteed_next_actions_record(payload)
         required_actions = self._required_actions_record(payload, state, calls, responses, final_answer)
-        if JevDoneCheck.REQUIRED_ACTIONS in self.checks and required_actions is None:
+        if JevContinuationGate.REQUIRED_ACTIONS in self.checks and required_actions is None:
             return None
         discovered_item_coverage = self._discovered_item_coverage_record(payload, calls)
-        if JevDoneCheck.DISCOVERED_ITEM_COVERAGE in self.checks and discovered_item_coverage is None:
+        if JevContinuationGate.DISCOVERED_ITEM_COVERAGE in self.checks and discovered_item_coverage is None:
             return None
         report_action_alignment = self._report_action_alignment_record(payload)
         assumptions_reconciled = None
-        assumptions_section = getattr(payload, JevDoneCheck.ASSUMPTIONS_RECONCILED.value, None)
-        if JevDoneCheck.ASSUMPTIONS_RECONCILED in self.checks:
+        assumptions_section = getattr(payload, JevContinuationGate.ASSUMPTIONS_RECONCILED.value, None)
+        if JevContinuationGate.ASSUMPTIONS_RECONCILED in self.checks:
             if not isinstance(assumptions_section, JevAssumptionsReconciledPayload):
                 return None
             # @intent changed-assumptions-are-derived-after-work
@@ -319,7 +319,7 @@ class JevHandoff(BaseAgent):
                 for item in assumptions_section.items
             ))
         completion_evidence = None
-        completion_section = getattr(payload, JevDoneCheck.COMPLETION_EVIDENCE.value, None)
+        completion_section = getattr(payload, JevContinuationGate.COMPLETION_EVIDENCE.value, None)
         if isinstance(completion_section, JevCompletionEvidenceSectionPayload):
             item = completion_section.items[JEV_DONE_COMPLETION_ITEM_INDEX]
             completion_evidence = JevCompletionEvidence(
@@ -332,7 +332,7 @@ class JevHandoff(BaseAgent):
                 missing=item.missing.strip(),
             )
         problems_resolved = None
-        problem_section = getattr(payload, JevDoneCheck.PROBLEMS_RESOLVED.value, None)
+        problem_section = getattr(payload, JevContinuationGate.PROBLEMS_RESOLVED.value, None)
         if isinstance(problem_section, JevProblemsResolvedEvidencePayload):
             problems_resolved = JevProblemsResolvedEvidence(tuple(
                 JevProblemResolutionItem(
@@ -350,7 +350,7 @@ class JevHandoff(BaseAgent):
                 for item in problem_section.items
             ))
         scope_coverage = None
-        scope_section = getattr(payload, JevDoneCheck.SCOPE_COVERAGE.value, None)
+        scope_section = getattr(payload, JevContinuationGate.SCOPE_COVERAGE.value, None)
         if isinstance(scope_section, JevScopeCoverageEvidencePayload):
             if state.scope_coverage is None:
                 return None
@@ -393,7 +393,7 @@ class JevHandoff(BaseAgent):
         required: bool,
     ) -> tuple[bool, JevRequiredSequenceEvidence | None]:
         """Validate stage ids and every citation against this finish attempt's numbered run events."""
-        section = getattr(payload, JevDoneCheck.REQUIRED_SEQUENCE.value, None)
+        section = getattr(payload, JevContinuationGate.REQUIRED_SEQUENCE.value, None)
         if not isinstance(section, JevRequiredSequenceEvidencePayload):
             return not required, None
         sequence = state.required_sequence
@@ -448,7 +448,7 @@ class JevHandoff(BaseAgent):
     @staticmethod
     def _can_simplify_evidence_record(payload: JevHandoffPayload) -> JevCanSimplifyEvidence | None:
         """Convert the optional implementation evidence and its concrete continuation action."""
-        section = getattr(payload, JevDoneCheck.CAN_SIMPLIFY.value, None)
+        section = getattr(payload, JevContinuationGate.CAN_SIMPLIFY.value, None)
         if not isinstance(section, JevCanSimplifyEvidencePayload):
             return None
         return JevCanSimplifyEvidence(section.implementation.strip(), section.missing.strip())
@@ -456,7 +456,7 @@ class JevHandoff(BaseAgent):
     @staticmethod
     def _faithful_scope_record(payload: JevHandoffPayload) -> JevFaithfulScopeEvidence | None:
         """Convert the one post-run evidence section without adding a duplicate run-state section."""
-        section = getattr(payload, JevDoneCheck.FAITHFUL_SCOPE.value, None)
+        section = getattr(payload, JevContinuationGate.FAITHFUL_SCOPE.value, None)
         if not isinstance(section, JevFaithfulScopeEvidencePayload):
             return None
         return JevFaithfulScopeEvidence(section.evidence.strip(), section.missing.strip())
@@ -464,7 +464,7 @@ class JevHandoff(BaseAgent):
     @staticmethod
     def _report_action_alignment_record(payload: JevHandoffPayload) -> JevReportActionAlignment | None:
         """Convert only the dynamically observed plan, execution, and final-account comparisons."""
-        alignment_section = getattr(payload, JevDoneCheck.REPORT_ACTION_ALIGNMENT.value, None)
+        alignment_section = getattr(payload, JevContinuationGate.REPORT_ACTION_ALIGNMENT.value, None)
         if not isinstance(alignment_section, JevReportActionAlignmentEvidenceSectionPayload):
             return None
         # @intent report-action-candidates-are-post-run
@@ -486,7 +486,7 @@ class JevHandoff(BaseAgent):
         self, payload: JevHandoffPayload, calls: Sequence[ToolCallContext]
     ) -> JevDiscoveredItemEvidence | None:
         """Match the handoff inventory against every string output from the current tool-call sequence."""
-        if JevDoneCheck.DISCOVERED_ITEM_COVERAGE not in self.checks:
+        if JevContinuationGate.DISCOVERED_ITEM_COVERAGE not in self.checks:
             return None
         source_outputs = {
             f"tool_call_{index}": call.output
@@ -494,14 +494,14 @@ class JevHandoff(BaseAgent):
             if isinstance(call.output, str)
         }
         return self._discovered_items(
-            getattr(payload, JevDoneCheck.DISCOVERED_ITEM_COVERAGE.value, None),
+            getattr(payload, JevContinuationGate.DISCOVERED_ITEM_COVERAGE.value, None),
             source_outputs,
         )
 
     @staticmethod
     def _claims_record(payload: JevHandoffPayload) -> JevClaimsEvidence | None:
         """Convert post-run claims while keeping their nested assertions and source context intact."""
-        section = getattr(payload, JevDoneCheck.CLAIMS.value, None)
+        section = getattr(payload, JevContinuationGate.CLAIMS.value, None)
         if not isinstance(section, JevClaimsEvidencePayload):
             return None
         # Claim ids come from the final answer, so validate uniqueness without matching them to a pre-run list.
@@ -541,7 +541,7 @@ class JevHandoff(BaseAgent):
         final_answer: str,
     ) -> JevRequiredActionsEvidence | None:
         """Convert evidence only when its ids, trace indices, and quoted output match the run."""
-        section = getattr(payload, JevDoneCheck.REQUIRED_ACTIONS.value, None)
+        section = getattr(payload, JevContinuationGate.REQUIRED_ACTIONS.value, None)
         if not isinstance(section, JevRequiredActionsEvidencePayload):
             return None
         items = tuple(
@@ -609,7 +609,7 @@ class JevHandoff(BaseAgent):
 
     def _guaranteed_next_actions_record(self, payload: JevHandoffPayload) -> JevGuaranteedNextActions | None:
         """Convert dynamic candidates without copying their private necessity rationale into Jev evidence."""
-        actions_section = getattr(payload, JevDoneCheck.GUARANTEED_NEXT_ACTIONS.value, None)
+        actions_section = getattr(payload, JevContinuationGate.GUARANTEED_NEXT_ACTIONS.value, None)
         if not isinstance(actions_section, JevGuaranteedNextActionsEvidencePayload):
             return None
         # @intent generated-necessity-basis-is-not-run-evidence
@@ -633,13 +633,13 @@ class JevHandoff(BaseAgent):
         if not multi_part_valid:
             return None
         phase_progress = None
-        phase_section = getattr(payload, JevDoneCheck.PHASE_PROGRESS.value, None)
+        phase_section = getattr(payload, JevContinuationGate.PHASE_PROGRESS.value, None)
         if isinstance(phase_section, JevPhaseProgressEvidencePayload):
             phase_progress = self._phase_progress_record(phase_section, state)
             if phase_progress is None:
                 return None
         target_outcome = None
-        outcome_section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
+        outcome_section = getattr(payload, JevContinuationGate.TARGET_OUTCOME.value, None)
         if isinstance(outcome_section, JevTargetOutcomeEvidencePayload):
             target_outcome = JevTargetOutcomeEvidence(tuple(
                 JevTargetOutcomeEvidenceItem(item.id, item.observed_proxy.strip(), item.direct_evidence.strip(), item.missing.strip())
@@ -649,7 +649,7 @@ class JevHandoff(BaseAgent):
             if sorted(target_outcome.ids()) != sorted(expected):
                 return None
         motivating_case = None
-        motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
+        motivating_section = getattr(payload, JevContinuationGate.MOTIVATING_CASE.value, None)
         if isinstance(motivating_section, JevMotivatingCaseEvidencePayload):
             motivating_case = JevMotivatingCaseEvidence(tuple(
                 JevMotivatingScenarioEvidence(item.id, item.evidence.strip(), item.missing.strip())
@@ -684,7 +684,7 @@ class JevHandoff(BaseAgent):
         payload: JevHandoffPayload, review: JevReviewRecord | None
     ) -> tuple[bool, JevSelfReviewEvidence | None]:
         """Match handoff evidence to the reviewer's exact objection ids, or drop the section when no review exists."""
-        section = getattr(payload, JevDoneCheck.SELF_REVIEW.value, None)
+        section = getattr(payload, JevContinuationGate.SELF_REVIEW.value, None)
         if review is None:
             return True, None
         if not isinstance(section, JevSelfReviewEvidencePayload):
@@ -700,7 +700,7 @@ class JevHandoff(BaseAgent):
         payload: JevHandoffPayload, state: JevRunStateRecord
     ) -> tuple[bool, JevMultiPartEvidence | None]:
         """Match multi-part evidence to every request-derived deliverable id."""
-        section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
+        section = getattr(payload, JevContinuationGate.MULTI_PART.value, None)
         if not isinstance(section, JevMultiPartEvidencePayload):
             return True, None
         evidence = JevMultiPartEvidence(tuple(
@@ -716,7 +716,7 @@ class JevHandoff(BaseAgent):
         payload: JevHandoffPayload, state: JevRunStateRecord
     ) -> tuple[bool, JevExpertDepthEvidence | None]:
         """Match the per-detail evidence to exactly the request-derived detail ids."""
-        section = getattr(payload, JevDoneCheck.EXPERT_DEPTH.value, None)
+        section = getattr(payload, JevContinuationGate.EXPERT_DEPTH.value, None)
         if not isinstance(section, JevExpertDepthEvidencePayload):
             return True, None
         evidence = JevExpertDepthEvidence(tuple(
@@ -731,7 +731,7 @@ class JevHandoff(BaseAgent):
     @staticmethod
     def _cumulative_obligations_evidence(payload: JevHandoffPayload, state: JevRunStateRecord) -> JevCumulativeObligationsEvidence | None:
         """Keep generated obligation and turn evidence aligned to each supplied source index."""
-        section = getattr(payload, JevDoneCheck.CUMULATIVE_OBLIGATIONS.value, None)
+        section = getattr(payload, JevContinuationGate.CUMULATIVE_OBLIGATIONS.value, None)
         if not isinstance(section, JevCumulativeObligationEvidencePayload):
             return None
         evidence = JevCumulativeObligationsEvidence(
@@ -753,7 +753,7 @@ class JevHandoff(BaseAgent):
         state: JevRunStateRecord,
     ) -> JevHandoffRecord | None:
         input_exhaustion = None
-        exhaustion_section = getattr(payload, JevDoneCheck.INPUT_EXHAUSTION.value, None)
+        exhaustion_section = getattr(payload, JevContinuationGate.INPUT_EXHAUSTION.value, None)
         if isinstance(exhaustion_section, JevInputExhaustionEvidenceSection):
             input_exhaustion = JevInputExhaustionEvidenceSet(tuple(
                 JevInputExhaustionEvidence(
@@ -775,7 +775,7 @@ class JevHandoff(BaseAgent):
             if sorted(input_exhaustion.ids()) != sorted(expected):
                 return None
         input_set_coverage = None
-        input_section = getattr(payload, JevDoneCheck.INPUT_SET_COVERAGE.value, None)
+        input_section = getattr(payload, JevContinuationGate.INPUT_SET_COVERAGE.value, None)
         if isinstance(input_section, JevInputSetCoverageEvidencePayload):
             input_set_coverage = JevInputSetCoverageEvidence(tuple(
                 JevInputTargetEvidence(item.id, item.evidence.strip(), item.missing.strip())
@@ -787,7 +787,7 @@ class JevHandoff(BaseAgent):
             if input_set_coverage.ids() != expected:
                 return None
         output_count = None
-        count_section = getattr(payload, JevDoneCheck.OUTPUT_COUNT.value, None)
+        count_section = getattr(payload, JevContinuationGate.OUTPUT_COUNT.value, None)
         if isinstance(count_section, JevOutputCountEvidencePayload):
             output_count = JevOutputCountEvidence(tuple(
                 JevOutputCountEvidenceItem(
@@ -803,7 +803,7 @@ class JevHandoff(BaseAgent):
             if sorted(output_count.ids()) != sorted(expected):
                 return None
         output_extent = None
-        extent_section = getattr(payload, JevDoneCheck.OUTPUT_EXTENT.value, None)
+        extent_section = getattr(payload, JevContinuationGate.OUTPUT_EXTENT.value, None)
         if isinstance(extent_section, JevOutputExtentEvidencePayload):
             output_extent = JevOutputExtentEvidence(tuple(
                 JevOutputExtentEvidenceItem(item.id, item.evidence.strip(), item.missing.strip())
@@ -828,7 +828,7 @@ class JevHandoff(BaseAgent):
         payload: JevHandoffPayload,
         state: JevRunStateRecord,
     ) -> tuple[bool, JevNegativeCoverageEvidence | None]:
-        section = getattr(payload, JevDoneCheck.NEGATIVE_COVERAGE.value, None)
+        section = getattr(payload, JevContinuationGate.NEGATIVE_COVERAGE.value, None)
         if not isinstance(section, JevNegativeCoverageEvidencePayload):
             return state.negative_coverage is None, None
         evidence = JevNegativeCoverageEvidence(tuple(

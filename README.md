@@ -31,20 +31,20 @@ access remain outside this package.
 
 ## JevAgent continuation checks
 
-`JevAgent` can run named done checks whenever its main agent attempts to finish. Enable whole-task completion evidence alongside other checks through `JevContinualSettings.checks`:
+`JevAgent` can run named done checks whenever its main agent attempts to finish. Enable whole-task completion evidence alongside other checks through `JevContinuationGateSettings.enabled`:
 
 ```python
-from vidbyte import JevContinualSettings, JevDoneCheck, JevRuntimeSettings
+from vidbyte import JevContinuationGateSettings, JevContinuationGate, JevRuntimeSettings
 
 runtime_settings = JevRuntimeSettings(
-    continual=JevContinualSettings(
-        checks=(JevDoneCheck.COMPLETION_EVIDENCE,),
+    continuation_gate=JevContinuationGateSettings(
+        enabled=(JevContinuationGate.COMPLETION_EVIDENCE,),
         max_continuations=2,
     ),
 )
 ```
 
-`COMPLETION_EVIDENCE` checks whether the final answer's overall complete, incomplete, or blocked status matches the requested outcomes and observations in the run. An unqualified final answer implies completion, even when it does not say “done.” Honest incomplete or blocked reports can pass when the run evidence supports them. The final answer's own claim that external work happened does not count as evidence for that work. The result is available as `agent.response.done[JevDoneCheck.COMPLETION_EVIDENCE]`; if Jev cannot evaluate it, the check fails open.
+`COMPLETION_EVIDENCE` checks whether the final answer's overall complete, incomplete, or blocked status matches the requested outcomes and observations in the run. An unqualified final answer implies completion, even when it does not say “done.” Honest incomplete or blocked reports can pass when the run evidence supports them. The final answer's own claim that external work happened does not count as evidence for that work. The result is available as `agent.response.continuation_gates[JevContinuationGate.COMPLETION_EVIDENCE]`; if Jev cannot evaluate it, the check fails open.
 
 ## Layer Guide
 
@@ -219,8 +219,8 @@ JevAgent continuation checks are opt-in. `ASSUMPTIONS_RECONCILED` adds a finish 
 from vidbyte import (
     JevAgent,
     JevAgentSettings,
-    JevContinualSettings,
-    JevDoneCheck,
+    JevContinuationGateSettings,
+    JevContinuationGate,
     JevRuntimeSettings,
 )
 
@@ -232,15 +232,15 @@ agent = JevAgent(
         model_name="gpt-4.1",
     ),
     JevRuntimeSettings(
-        continual=JevContinualSettings(
-            checks=(JevDoneCheck.ASSUMPTIONS_RECONCILED,),
+        continuation_gate=JevContinuationGateSettings(
+            enabled=(JevContinuationGate.ASSUMPTIONS_RECONCILED,),
             max_continuations=2,
         ),
     ),
 )
 
 reply = agent.run("Inspect the available source and summarize the result.")
-print(agent.response.done[JevDoneCheck.ASSUMPTIONS_RECONCILED])
+print(agent.response.continuation_gates[JevContinuationGate.ASSUMPTIONS_RECONCILED])
 ```
 
 ### Codex Harness Agent
@@ -536,7 +536,7 @@ context = ContextManager([
     TaskContextItem(
         goal="Fix failing tests",
         progress="Reviewed the runtime context builder.",
-        deterministic_checks=("python -m unittest discover -s tests",),
+        deterministic_enabled=("python -m unittest discover -s tests",),
     ),
     FileContextItem.from_path("README.md", include_content=True),
 ])

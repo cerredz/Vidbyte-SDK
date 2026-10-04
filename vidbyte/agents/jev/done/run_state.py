@@ -186,7 +186,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevDecisionRequest,
     JevDeliverable,
     JevDoneQuestion,
-    JevDoneResult,
+    JevContinuationGateResult,
     JevExpertDepth,
     JevExpertDepthDeliverable,
     JevExpertDepthPayload,
@@ -239,7 +239,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomePayload,
 )
 from vidbyte.lib.enums.jev import (
-    JevDoneCheck,
+    JevContinuationGate,
     JevDoneQuestionKey,
     JevOutputExtentComparator,
     JevOutputExtentUnit,
@@ -261,10 +261,10 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; PHASE_PROGRESS stages are fixed before work, while CLAIMS, PROBLEMS_RESOLVED, and COMPLETION_EVIDENCE are extracted later by the handoff.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.CAN_SIMPLIFY: JevCanSimplifyPayload, JevDoneCheck.MOTIVATING_CASE: JevMotivatingCasePayload, JevDoneCheck.SCOPE_COVERAGE: JevScopeCoveragePayload, JevDoneCheck.TARGET_OUTCOME: JevTargetOutcomePayload, JevDoneCheck.PHASE_PROGRESS: JevPhaseProgressPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload, JevDoneCheck.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevDoneCheck.NEGATIVE_COVERAGE: JevNegativeCoveragePayload, JevDoneCheck.REQUIRED_SEQUENCE: JevRequiredSequencePayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.REQUIRED_ACTIONS: JevRequiredActionsPayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationsPayload})
-    _SECTIONS = MappingProxyType({**_SECTIONS, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthPayload})
+    _SECTIONS: ClassVar[Mapping[JevContinuationGate, type[JevSectionPayload]]] = MappingProxyType({JevContinuationGate.MULTI_PART: JevMultiPartPayload, JevContinuationGate.CAN_SIMPLIFY: JevCanSimplifyPayload, JevContinuationGate.MOTIVATING_CASE: JevMotivatingCasePayload, JevContinuationGate.SCOPE_COVERAGE: JevScopeCoveragePayload, JevContinuationGate.TARGET_OUTCOME: JevTargetOutcomePayload, JevContinuationGate.PHASE_PROGRESS: JevPhaseProgressPayload, JevContinuationGate.INPUT_SET_COVERAGE: JevInputSetCoveragePayload, JevContinuationGate.OUTPUT_COUNT: JevOutputCountPayload, JevContinuationGate.OUTPUT_EXTENT: JevOutputExtentPayload, JevContinuationGate.INPUT_EXHAUSTION: JevInputExhaustionPayload, JevContinuationGate.NEGATIVE_COVERAGE: JevNegativeCoveragePayload, JevContinuationGate.REQUIRED_SEQUENCE: JevRequiredSequencePayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.REQUIRED_ACTIONS: JevRequiredActionsPayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.CUMULATIVE_OBLIGATIONS: JevCumulativeObligationsPayload})
+    _SECTIONS = MappingProxyType({**_SECTIONS, JevContinuationGate.EXPERT_DEPTH: JevExpertDepthPayload})
 
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -272,8 +272,8 @@ class JevRunState(BaseAgent):
         # @intent done-checks-are-configured-once
         # Like the preflight gate, every done-check input is fixed when JevAgent is built, so the runtime only
         # calls begin() and check() and never reads settings to decide what to ask.
-        continual = runtime_settings.continual
-        payload = self.schema(continual.checks)
+        continual = runtime_settings.continuation_gate
+        payload = self.schema(continual.enabled)
         super().__init__(
             name=f"{settings.name}-run-state",
             system_prompt=Prompts().get(Prompt.JEV_RUN_STATE_SYSTEM_PROMPT),
@@ -285,13 +285,13 @@ class JevRunState(BaseAgent):
             timeout_seconds=settings.timeout_seconds,
             output_schema=payload,
         )
-        self.checks = continual.checks
+        self.checks = continual.enabled
         self.decision = runtime_settings.decision
         self.response = response
         self.payload = payload
         self.sender = settings.name
         self.handoff_writer = JevHandoff(settings, continual)
-        self.reviewer = JevReviewer(settings, continual) if JevDoneCheck.SELF_REVIEW in self.checks else None
+        self.reviewer = JevReviewer(settings, continual) if JevContinuationGate.SELF_REVIEW in self.checks else None
         self.review: JevReviewRecord | None = None
         self.request = ""
         self.user_turns: tuple[str, ...] = ()
@@ -299,7 +299,7 @@ class JevRunState(BaseAgent):
         self.record: JevRunStateRecord | None = None
         self.rendered = ""
         self.handoff: JevHandoffRecord | None = None
-        self.latest_results: tuple[JevDoneResult, ...] = ()
+        self.latest_results: tuple[JevContinuationGateResult, ...] = ()
         self._recall_guard_probability: float | None = None
         self._state_builder_disagreement = False
         self._observed_extent: dict[str, int | None] = {}
@@ -310,7 +310,7 @@ class JevRunState(BaseAgent):
         self._fresh_segment_number = 0
 
     @classmethod
-    def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevRunStatePayload]:
+    def schema(cls, checks: tuple[JevContinuationGate, ...]) -> type[JevRunStatePayload]:
         """Return the central request-derived state plus described sections for enabled checks with pre-run items."""
         sections: dict[str, Any] = {check.value: (cls._SECTIONS[check], Field(description=cls._SECTIONS[check].SECTION)) for check in checks if check in cls._SECTIONS}
         return create_model("JevRunStatePayload", __base__=JevRunStatePayload, **sections)
@@ -360,7 +360,7 @@ class JevRunState(BaseAgent):
     ) -> AgentInput:
         """Keep the current prompt intact while attaching earlier user turns as separate context."""
         context_manager = None
-        if JevDoneCheck.CUMULATIVE_OBLIGATIONS in self.checks and prior_user_turns:
+        if JevContinuationGate.CUMULATIVE_OBLIGATIONS in self.checks and prior_user_turns:
             earlier = "\n\n".join(f"User turn {index}:\n{turn}" for index, turn in enumerate(prior_user_turns))
             context_manager = ContextManager((TextContextItem(title="Earlier user turns supplied for cumulative obligations", content=earlier, source="jev_done"),))
         return AgentInput(prompt=request, context_manager=context_manager, context_items=context_items)
@@ -402,7 +402,7 @@ class JevRunState(BaseAgent):
     async def _review_scope_breadth(self, record: JevRunStateRecord) -> JevRunStateRecord:
         """Give narrow scope labels one request-only Jev review before the main agent starts."""
         scope = record.scope_coverage
-        if JevDoneCheck.SCOPE_COVERAGE not in self.checks or scope is None:
+        if JevContinuationGate.SCOPE_COVERAGE not in self.checks or scope is None:
             return record
         candidates = tuple(item for item in scope.dimensions if not item.breadth.is_checked() and not item.partial_allowed_quote)
         if not candidates:
@@ -451,13 +451,13 @@ class JevRunState(BaseAgent):
     @staticmethod
     def _render_with_scope_breadth(payload: JevRunStatePayload, record: JevRunStateRecord) -> JevRunStatePayload:
         """Keep the handoff's serialized state aligned with any one-time breadth upgrade."""
-        section = getattr(payload, JevDoneCheck.SCOPE_COVERAGE.value, None)
+        section = getattr(payload, JevContinuationGate.SCOPE_COVERAGE.value, None)
         scope = record.scope_coverage
         if not isinstance(section, JevScopeCoveragePayload) or scope is None:
             return payload
         dimensions = {item.id: item for item in scope.dimensions}
         updated = [item.model_copy(update={"breadth": dimensions[item.id].breadth, "universe": dimensions[item.id].universe}) for item in section.dimensions]
-        return payload.model_copy(update={JevDoneCheck.SCOPE_COVERAGE.value: section.model_copy(update={"dimensions": updated})})
+        return payload.model_copy(update={JevContinuationGate.SCOPE_COVERAGE.value: section.model_copy(update={"dimensions": updated})})
 
     def agent_instructions(self) -> str:
         """Return request-derived sequence instructions for the main agent's system prompt."""
@@ -475,7 +475,7 @@ class JevRunState(BaseAgent):
         rendered = payload.model_dump(mode="json")
         sequence = None if self.record is None else self.record.required_sequence
         if sequence is not None:
-            rendered[JevDoneCheck.REQUIRED_SEQUENCE.value] = {
+            rendered[JevContinuationGate.REQUIRED_SEQUENCE.value] = {
                 "active": sequence.active,
                 "reason": sequence.reason,
                 "stages": [
@@ -492,7 +492,7 @@ class JevRunState(BaseAgent):
             }
         return json.dumps(rendered, ensure_ascii=False)
 
-    async def check(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> tuple[JevDoneResult, ...]:
+    async def check(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> tuple[JevContinuationGateResult, ...]:
         """Run every enabled done check on this finish attempt, record every result, and return the checks that failed."""
         # @intent finish-attempt-evidence-is-rebuilt-and-batched
         # Compile from this attempt's raw responses and calls, then ask the complete enabled question set once so
@@ -514,7 +514,7 @@ class JevRunState(BaseAgent):
         self._observed_extent = {} if self.record.output_extent is None else {
             item.id: self._measure(final_answer, item) for item in self.record.output_extent.items
         }
-        turns = self.user_turns if JevDoneCheck.CUMULATIVE_OBLIGATIONS in self.checks else ()
+        turns = self.user_turns if JevContinuationGate.CUMULATIVE_OBLIGATIONS in self.checks else ()
         if self.reviewer is not None:
             # @intent the-strict-review-runs-before-the-checks
             # The reviewer sees the main agent's run before the handoff compiles evidence, so each objection
@@ -553,10 +553,10 @@ class JevRunState(BaseAgent):
         )
         self.response.handoff(self.handoff)
         decision = await self._ask(self.handoff)
-        results: list[JevDoneResult] = []
+        results: list[JevContinuationGateResult] = []
         for check in self.checks:
             result = self._judge(check, self.handoff, decision)
-            self.response.done(result)
+            self.response.continuation_gate(result)
             results.append(result)
         self.latest_results = tuple(results)
         return tuple(result for result in self.latest_results if not result.passed)
@@ -624,34 +624,34 @@ class JevRunState(BaseAgent):
         except VidbyteSdkError:
             return None
 
-    def _section(self, check: JevDoneCheck, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
+    def _section(self, check: JevContinuationGate, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
         # @intent each-enabled-check-has-one-state-projection
         # Keep one small request projection per check so later gates cannot alter their siblings' payloads.
-        handlers: Mapping[JevDoneCheck, Callable[[JevHandoffRecord], tuple[Mapping[str, object], tuple[JevQuestion, ...]]]] = {
-            JevDoneCheck.MULTI_PART: self._multi_part_section,
-            JevDoneCheck.CAN_SIMPLIFY: self._can_simplify_section,
-            JevDoneCheck.CLAIMS: self._claims_section,
-            JevDoneCheck.PHASE_PROGRESS: self._phase_progress_section,
-            JevDoneCheck.TARGET_OUTCOME: self._target_outcome_section,
-            JevDoneCheck.MOTIVATING_CASE: self._motivating_case_section,
-            JevDoneCheck.SCOPE_COVERAGE: self._scope_coverage_section,
-            JevDoneCheck.COMPLETION_EVIDENCE: self._completion_evidence_section,
-            JevDoneCheck.PROBLEMS_RESOLVED: self._problems_resolved_section,
-            JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage_section,
-            JevDoneCheck.OUTPUT_COUNT: self._output_count_section,
-            JevDoneCheck.OUTPUT_EXTENT: self._output_extent_section,
-            JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment_section,
-            JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled_section,
-            JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion_section,
-            JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage_section,
-            JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions_section,
-            JevDoneCheck.REQUIRED_ACTIONS: self._required_actions_section,
-            JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations_section,
-            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_section,
-            JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope_section,
-            JevDoneCheck.EXPERT_DEPTH: self._expert_depth_section,
-            JevDoneCheck.SELF_REVIEW: self._self_review_section,
-            JevDoneCheck.REQUIRED_SEQUENCE: self._required_sequence_section,
+        handlers: Mapping[JevContinuationGate, Callable[[JevHandoffRecord], tuple[Mapping[str, object], tuple[JevQuestion, ...]]]] = {
+            JevContinuationGate.MULTI_PART: self._multi_part_section,
+            JevContinuationGate.CAN_SIMPLIFY: self._can_simplify_section,
+            JevContinuationGate.CLAIMS: self._claims_section,
+            JevContinuationGate.PHASE_PROGRESS: self._phase_progress_section,
+            JevContinuationGate.TARGET_OUTCOME: self._target_outcome_section,
+            JevContinuationGate.MOTIVATING_CASE: self._motivating_case_section,
+            JevContinuationGate.SCOPE_COVERAGE: self._scope_coverage_section,
+            JevContinuationGate.COMPLETION_EVIDENCE: self._completion_evidence_section,
+            JevContinuationGate.PROBLEMS_RESOLVED: self._problems_resolved_section,
+            JevContinuationGate.INPUT_SET_COVERAGE: self._input_set_coverage_section,
+            JevContinuationGate.OUTPUT_COUNT: self._output_count_section,
+            JevContinuationGate.OUTPUT_EXTENT: self._output_extent_section,
+            JevContinuationGate.REPORT_ACTION_ALIGNMENT: self._report_action_alignment_section,
+            JevContinuationGate.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled_section,
+            JevContinuationGate.INPUT_EXHAUSTION: self._input_exhaustion_section,
+            JevContinuationGate.NEGATIVE_COVERAGE: self._negative_coverage_section,
+            JevContinuationGate.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions_section,
+            JevContinuationGate.REQUIRED_ACTIONS: self._required_actions_section,
+            JevContinuationGate.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations_section,
+            JevContinuationGate.DISCOVERED_ITEM_COVERAGE: self._discovered_item_section,
+            JevContinuationGate.FAITHFUL_SCOPE: self._faithful_scope_section,
+            JevContinuationGate.EXPERT_DEPTH: self._expert_depth_section,
+            JevContinuationGate.SELF_REVIEW: self._self_review_section,
+            JevContinuationGate.REQUIRED_SEQUENCE: self._required_sequence_section,
         }
         handler = handlers.get(check)
         return ({}, ()) if handler is None else handler(handoff)
@@ -699,7 +699,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.self_review
         if review is None or evidence is None or not review.objections:
             return {}, ()
-        resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+        resolved, in_scope = JevDoneRegistry.questions(JevContinuationGate.SELF_REVIEW)
         evidence_by_id = {item.id: item.evidence for item in evidence.objections}
         entries = {
             item.id: {
@@ -721,8 +721,8 @@ class JevRunState(BaseAgent):
         evidence = handoff.discovered_item_coverage
         if evidence is None:
             return {}, ()
-        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
-        item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        inventory_question = JevDoneRegistry.inventory_question(JevContinuationGate.DISCOVERED_ITEM_COVERAGE)
+        item_question = JevDoneRegistry.question(JevContinuationGate.DISCOVERED_ITEM_COVERAGE)
         inventories: dict[str, object] = {
             batch.source_id: {
                 JEV_DONE_DISCOVERED_ITEM_SOURCE_FIELD: batch.source_output,
@@ -754,7 +754,7 @@ class JevRunState(BaseAgent):
         """Project the preselected hard part and its handoff evidence without adding another section."""
         if self.record is None or handoff.faithful_scope is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+        question = JevDoneRegistry.question(JevContinuationGate.FAITHFUL_SCOPE)
         state = {
             JEV_DONE_HARD_PART_FIELD: self.record.hard_part,
             JEV_DONE_WHAT_NOT_TO_DO_FIELD: list(self.record.what_not_to_do),
@@ -769,7 +769,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.expert_depth
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        question = JevDoneRegistry.question(JevContinuationGate.EXPERT_DEPTH)
         evidence_by_id = {item.id: item.evidence for item in evidence.details}
         entries = {
             detail.id: {
@@ -793,8 +793,8 @@ class JevRunState(BaseAgent):
             return {}, ()
         if not state.obligations and not state.user_turns:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
-        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+        question = JevDoneRegistry.question(JevContinuationGate.CUMULATIVE_OBLIGATIONS)
+        inventory_question = JevDoneRegistry.inventory_question(JevContinuationGate.CUMULATIVE_OBLIGATIONS)
         evidence_by_id = {item.id: item for item in evidence.obligations}
         turn_evidence = {item.id: item.evidence for item in evidence.turns}
         entries = {
@@ -825,7 +825,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.input_exhaustion
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+        question = JevDoneRegistry.question(JevContinuationGate.INPUT_EXHAUSTION)
         evidence_by_id = {item.id: item for item in evidence.collections}
         entries = {item.id: self._input_exhaustion_entry(item, evidence_by_id[item.id]) for item in state.collections}
         return {JEV_DONE_INPUT_EXHAUSTION_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
@@ -836,7 +836,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.negative_coverage
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+        question = JevDoneRegistry.question(JevContinuationGate.NEGATIVE_COVERAGE)
         evidence_by_id = {item.id: item for item in evidence.inspections}
         entries = {
             item.id: {
@@ -857,7 +857,7 @@ class JevRunState(BaseAgent):
         candidates = handoff.guaranteed_next_actions
         if candidates is None or not candidates.actions:
             return {}, ()
-        questions = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        questions = JevDoneRegistry.questions(JevContinuationGate.GUARANTEED_NEXT_ACTIONS)
         entries = {
             item.id: {
                 JEV_DONE_OUTCOME_FIELD: item.outcome,
@@ -876,7 +876,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.required_actions
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
+        question = JevDoneRegistry.question(JevContinuationGate.REQUIRED_ACTIONS)
         evidence_by_id = {item.id: item for item in evidence.actions}
         entries = {
             action.id: {
@@ -947,7 +947,7 @@ class JevRunState(BaseAgent):
         state = None if self.record is None else self.record.multi_part
         if state is None or handoff.multi_part is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
+        question = JevDoneRegistry.question(JevContinuationGate.MULTI_PART)
         evidence = {item.id: item.evidence for item in handoff.multi_part.deliverables}
         entries = {
             deliverable.id: {
@@ -964,7 +964,7 @@ class JevRunState(BaseAgent):
         state = None if self.record is None else self.record.can_simplify
         if state is None or handoff.can_simplify is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+        question = JevDoneRegistry.question(JevContinuationGate.CAN_SIMPLIFY)
         entry = {
             "scope": state.scope,
             JEV_DONE_PRESERVATION_FIELD: state.preserve,
@@ -979,7 +979,7 @@ class JevRunState(BaseAgent):
         # Claims are created from this final answer, not predicted before work; omit the handoff's own missing judgment.
         if handoff.claims is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
+        question = JevDoneRegistry.question(JevContinuationGate.CLAIMS)
         entries: dict[str, object] = {}
         for claim in handoff.claims.claims:
             for assertion in claim.claim.assertions:
@@ -1014,7 +1014,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.phase_progress
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.PHASE_PROGRESS)
+        question = JevDoneRegistry.question(JevContinuationGate.PHASE_PROGRESS)
         evidence_by_id = {item.id: item.evidence for item in evidence.stages}
         entries = {
             item.id: {
@@ -1035,7 +1035,7 @@ class JevRunState(BaseAgent):
         section = handoff.scope_coverage
         if state is None or section is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.SCOPE_COVERAGE)
+        question = JevDoneRegistry.question(JevContinuationGate.SCOPE_COVERAGE)
         entries: dict[str, object] = {}
         questions: list[JevQuestion] = []
         for identifier, dimension, unit in section.question_items(state):
@@ -1059,7 +1059,7 @@ class JevRunState(BaseAgent):
         if state is None or evidence is None:
             return {}, ()
         by_id = {item.id: item for item in evidence.scenarios}
-        question = JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE)
+        question = JevDoneRegistry.question(JevContinuationGate.MOTIVATING_CASE)
         entries = {
             scenario.id: {
                 JEV_DONE_MOTIVATING_CASE_FIELD: {
@@ -1091,7 +1091,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.target_outcome
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.TARGET_OUTCOME)
+        question = JevDoneRegistry.question(JevContinuationGate.TARGET_OUTCOME)
         evidence_by_id = {item.id: item for item in evidence.items}
         entries = {
             item.id: {
@@ -1114,7 +1114,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.problems_resolved
         if evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
+        question = JevDoneRegistry.question(JevContinuationGate.PROBLEMS_RESOLVED)
         entries = {
             item.id: {
                 "identity": {JEV_DONE_PROBLEM_TITLE_FIELD: item.title, JEV_DONE_PROBLEM_DESCRIPTION_FIELD: item.description},
@@ -1139,7 +1139,7 @@ class JevRunState(BaseAgent):
         item = handoff.completion_evidence
         if item is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.COMPLETION_EVIDENCE)
+        question = JevDoneRegistry.question(JevContinuationGate.COMPLETION_EVIDENCE)
         entry = {
             JEV_DONE_COMPLETION_STATUS_FIELD: item.completion_status.value,
             JEV_DONE_REQUESTED_OUTCOMES_FIELD: list(item.requested_outcomes),
@@ -1156,7 +1156,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.input_set_coverage
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
+        question = JevDoneRegistry.question(JevContinuationGate.INPUT_SET_COVERAGE)
         evidence_by_id = {item.id: item.evidence for item in evidence.targets}
         entries = {
             target.id: {
@@ -1177,7 +1177,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.output_count
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+        question = JevDoneRegistry.question(JevContinuationGate.OUTPUT_COUNT)
         evidence_by_id = {item.id: item for item in evidence.obligations}
         entries: dict[str, object] = {}
         for obligation in state.obligations:
@@ -1211,7 +1211,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.output_extent
         if state is None or evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT)
+        question = JevDoneRegistry.question(JevContinuationGate.OUTPUT_EXTENT)
         evidence_by_id = {item.id: item for item in evidence.items}
         entries = {}
         for item in state.items:
@@ -1239,7 +1239,7 @@ class JevRunState(BaseAgent):
         alignment = handoff.report_action_alignment
         if alignment is None or not alignment.items:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+        question = JevDoneRegistry.question(JevContinuationGate.REPORT_ACTION_ALIGNMENT)
         entries = {
             item.id: {
                 JEV_DONE_PLAN_FIELD: item.plan,
@@ -1259,7 +1259,7 @@ class JevRunState(BaseAgent):
         evidence = handoff.assumptions_reconciled
         if evidence is None:
             return {}, ()
-        question = JevDoneRegistry.question(JevDoneCheck.ASSUMPTIONS_RECONCILED)
+        question = JevDoneRegistry.question(JevContinuationGate.ASSUMPTIONS_RECONCILED)
         entries = {
             item.id: {
                 JEV_DONE_ORIGINAL_ASSUMPTION_FIELD: item.original_assumption,
@@ -1273,42 +1273,42 @@ class JevRunState(BaseAgent):
         }
         return {JEV_DONE_ASSUMPTIONS_RECONCILED_FIELD: {"items": entries}}, tuple(question.to_question(identifier) for identifier in evidence.ids())
 
-    def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _judge(self, check: JevContinuationGate, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         # @intent each-enabled-check-keeps-its-own-verdict
         # Dispatch preserves each scorer's threshold, missing-answer, and fail-open rules as gates are added.
-        handlers: Mapping[JevDoneCheck, Callable[[JevHandoffRecord | None, DecisionModelResponse | None], JevDoneResult]] = {
-            JevDoneCheck.MULTI_PART: self._multi_part,
-            JevDoneCheck.CAN_SIMPLIFY: self._can_simplify,
-            JevDoneCheck.CLAIMS: self._claims,
-            JevDoneCheck.PHASE_PROGRESS: self._phase_progress,
-            JevDoneCheck.COMPLETION_EVIDENCE: self._completion_evidence,
-            JevDoneCheck.SCOPE_COVERAGE: self._scope_coverage,
-            JevDoneCheck.TARGET_OUTCOME: self._target_outcome,
-            JevDoneCheck.MOTIVATING_CASE: self._motivating_case,
-            JevDoneCheck.PROBLEMS_RESOLVED: self._problems_resolved,
-            JevDoneCheck.INPUT_SET_COVERAGE: self._input_set_coverage,
-            JevDoneCheck.OUTPUT_COUNT: self._output_count,
-            JevDoneCheck.OUTPUT_EXTENT: self._output_extent,
-            JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._report_action_alignment,
-            JevDoneCheck.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled,
-            JevDoneCheck.INPUT_EXHAUSTION: self._input_exhaustion,
-            JevDoneCheck.NEGATIVE_COVERAGE: self._negative_coverage,
-            JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions,
-            JevDoneCheck.REQUIRED_ACTIONS: self._required_actions,
-            JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations,
-            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._discovered_item_coverage,
-            JevDoneCheck.FAITHFUL_SCOPE: self._faithful_scope,
-            JevDoneCheck.EXPERT_DEPTH: self._expert_depth,
-            JevDoneCheck.SELF_REVIEW: self._self_review,
-            JevDoneCheck.REQUIRED_SEQUENCE: self._required_sequence,
+        handlers: Mapping[JevContinuationGate, Callable[[JevHandoffRecord | None, DecisionModelResponse | None], JevContinuationGateResult]] = {
+            JevContinuationGate.MULTI_PART: self._multi_part,
+            JevContinuationGate.CAN_SIMPLIFY: self._can_simplify,
+            JevContinuationGate.CLAIMS: self._claims,
+            JevContinuationGate.PHASE_PROGRESS: self._phase_progress,
+            JevContinuationGate.COMPLETION_EVIDENCE: self._completion_evidence,
+            JevContinuationGate.SCOPE_COVERAGE: self._scope_coverage,
+            JevContinuationGate.TARGET_OUTCOME: self._target_outcome,
+            JevContinuationGate.MOTIVATING_CASE: self._motivating_case,
+            JevContinuationGate.PROBLEMS_RESOLVED: self._problems_resolved,
+            JevContinuationGate.INPUT_SET_COVERAGE: self._input_set_coverage,
+            JevContinuationGate.OUTPUT_COUNT: self._output_count,
+            JevContinuationGate.OUTPUT_EXTENT: self._output_extent,
+            JevContinuationGate.REPORT_ACTION_ALIGNMENT: self._report_action_alignment,
+            JevContinuationGate.ASSUMPTIONS_RECONCILED: self._assumptions_reconciled,
+            JevContinuationGate.INPUT_EXHAUSTION: self._input_exhaustion,
+            JevContinuationGate.NEGATIVE_COVERAGE: self._negative_coverage,
+            JevContinuationGate.GUARANTEED_NEXT_ACTIONS: self._guaranteed_next_actions,
+            JevContinuationGate.REQUIRED_ACTIONS: self._required_actions,
+            JevContinuationGate.CUMULATIVE_OBLIGATIONS: self._cumulative_obligations,
+            JevContinuationGate.DISCOVERED_ITEM_COVERAGE: self._discovered_item_coverage,
+            JevContinuationGate.FAITHFUL_SCOPE: self._faithful_scope,
+            JevContinuationGate.EXPERT_DEPTH: self._expert_depth,
+            JevContinuationGate.SELF_REVIEW: self._self_review,
+            JevContinuationGate.REQUIRED_SEQUENCE: self._required_sequence,
         }
         handler = handlers.get(check)
         if handler is None:
-            return JevDoneResult(check=check, score=None, available=False)
+            return JevContinuationGateResult(check=check, score=None, available=False)
         result = handler(handoff, decision)
         return replace(result, failed_questions=self._failed_questions(result))
 
-    def _failed_questions(self, result: JevDoneResult) -> tuple[JevFailedDoneQuestion, ...]:
+    def _failed_questions(self, result: JevContinuationGateResult) -> tuple[JevFailedDoneQuestion, ...]:
         # Stores exact registered question sentences for the questions blocking one result.
         """Retain the exact question sentences that caused this gate's latest failure."""
         threshold = JevDoneRegistry.threshold(result.check)
@@ -1320,10 +1320,10 @@ class JevRunState(BaseAgent):
         return tuple(failed)
 
     @staticmethod
-    def _blocking_answer_names(result: JevDoneResult, threshold: float) -> tuple[str, ...]:
+    def _blocking_answer_names(result: JevContinuationGateResult, threshold: float) -> tuple[str, ...]:
         # Preserves the unusual affirmative-answer rules used by composite gates.
         """Select answers that the check's own composite rule treats as blocking."""
-        if result.check in (JevDoneCheck.GUARANTEED_NEXT_ACTIONS, JevDoneCheck.SELF_REVIEW):
+        if result.check in (JevContinuationGate.GUARANTEED_NEXT_ACTIONS, JevContinuationGate.SELF_REVIEW):
             questions = JevDoneRegistry.questions(result.check)
             return tuple(question.name(item) for item in result.incomplete for question in questions if question.name(item) in result.answers)
         return tuple(
@@ -1334,17 +1334,17 @@ class JevRunState(BaseAgent):
 
     def _self_review(
         self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None
-    ) -> JevDoneResult:
+    ) -> JevContinuationGateResult:
         """Clear a reviewer objection only when it is resolved or clearly outside the request."""
         review = self.review
         evidence = None if handoff is None else handoff.self_review
         if review is None or evidence is None:
-            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.SELF_REVIEW, score=None, available=False)
         if not review.objections:
-            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.SELF_REVIEW, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None, available=False)
-        resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+            return JevContinuationGateResult(check=JevContinuationGate.SELF_REVIEW, score=None, available=False)
+        resolved, in_scope = JevDoneRegistry.questions(JevContinuationGate.SELF_REVIEW)
         names = tuple(
             question.name(identifier)
             for identifier in review.ids()
@@ -1352,8 +1352,8 @@ class JevRunState(BaseAgent):
         )
         answers = {name: decision.answers[name] for name in names if name in decision.answers}
         if len(answers) != len(names) or any(answer.question_type is not JevQuestionType.NOUL for answer in answers.values()):
-            return JevDoneResult(check=JevDoneCheck.SELF_REVIEW, score=None, available=False)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.SELF_REVIEW)
+            return JevContinuationGateResult(check=JevContinuationGate.SELF_REVIEW, score=None, available=False)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.SELF_REVIEW)
         clearance = {
             identifier: max(
                 answers[resolved.name(identifier)].probabilities[JEV_NOUL_TRUE],
@@ -1363,8 +1363,8 @@ class JevRunState(BaseAgent):
         }
         standing = tuple(identifier for identifier in review.ids() if clearance[identifier] < threshold)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
-            check=JevDoneCheck.SELF_REVIEW,
+        return JevContinuationGateResult(
+            check=JevContinuationGate.SELF_REVIEW,
             score=math.fsum(clearance.values()) / len(clearance),
             passed=not standing,
             answers=answers,
@@ -1372,16 +1372,16 @@ class JevRunState(BaseAgent):
             usage=usage,
         )
 
-    def _expert_depth(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _expert_depth(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Score every named weak point with a per-item veto and preserve weakest-first failures."""
         state = None if self.record is None else self.record.expert_depth
         if state is None or handoff is None or handoff.expert_depth is None:
-            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.EXPERT_DEPTH, score=None, available=False)
         if not state.deliverables:
-            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.EXPERT_DEPTH, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+            return JevContinuationGateResult(check=JevContinuationGate.EXPERT_DEPTH, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.EXPERT_DEPTH)
         identifiers = state.ids()
         answers = {
             identifier: decision.answers[question.name(identifier)]
@@ -1390,7 +1390,7 @@ class JevRunState(BaseAgent):
         }
         verdict = DecisionModelHelper.score_noul(answers, identifiers, JEV_EXPERT_DEPTH_THRESHOLD, JEV_EXPERT_DEPTH_THRESHOLD)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.EXPERT_DEPTH, score=None, available=False)
         yes = {identifier: verdict.answers[identifier].probabilities[JEV_NOUL_TRUE] for identifier in identifiers}
         incomplete = tuple(
             sorted(
@@ -1399,8 +1399,8 @@ class JevRunState(BaseAgent):
             )
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
-            check=JevDoneCheck.EXPERT_DEPTH,
+        return JevContinuationGateResult(
+            check=JevContinuationGate.EXPERT_DEPTH,
             score=verdict.score,
             passed=verdict.passed,
             answers=verdict.answers,
@@ -1408,21 +1408,21 @@ class JevRunState(BaseAgent):
             usage=usage,
         )
 
-    def _faithful_scope(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _faithful_scope(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Judge the one request-selected hard part from the handoff evidence and one bounded answer."""
         if self.record is None or handoff is None or handoff.faithful_scope is None or decision is None:
-            return JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+            return JevContinuationGateResult(check=JevContinuationGate.FAITHFUL_SCOPE, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.FAITHFUL_SCOPE)
         answer_name = question.name(JEV_DONE_HARD_PART_FIELD)
         answers = {JEV_DONE_HARD_PART_FIELD: decision.answers[answer_name]} if answer_name in decision.answers else {}
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.FAITHFUL_SCOPE)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.FAITHFUL_SCOPE)
         verdict = DecisionModelHelper.score_noul(answers, (JEV_DONE_HARD_PART_FIELD,), threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.FAITHFUL_SCOPE, score=None, available=False)
         incomplete = () if verdict.passed else (JEV_DONE_HARD_PART_FIELD,)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
-            check=JevDoneCheck.FAITHFUL_SCOPE,
+        return JevContinuationGateResult(
+            check=JevContinuationGate.FAITHFUL_SCOPE,
             score=verdict.score,
             passed=verdict.passed,
             answers=verdict.answers,
@@ -1430,19 +1430,19 @@ class JevRunState(BaseAgent):
             usage=usage,
         )
 
-    def _discovered_item_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _discovered_item_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Require every recorded source inventory and discovered item to meet its own coverage threshold."""
         evidence = None if handoff is None else handoff.discovered_item_coverage
         if evidence is None:
-            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
         identifiers = tuple(f"inventory:{batch.source_id}" for batch in evidence.batches)
         identifiers += tuple(f"item:{identifier}" for identifier in evidence.item_ids())
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.DISCOVERED_ITEM_COVERAGE, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
-        item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
-        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+            return JevContinuationGateResult(check=JevContinuationGate.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
+        item_question = JevDoneRegistry.question(JevContinuationGate.DISCOVERED_ITEM_COVERAGE)
+        inventory_question = JevDoneRegistry.inventory_question(JevContinuationGate.DISCOVERED_ITEM_COVERAGE)
         question_names = {
             **{
                 f"inventory:{batch.source_id}": inventory_question.name(batch.source_id)
@@ -1458,18 +1458,18 @@ class JevRunState(BaseAgent):
             for identifier, name in question_names.items()
             if name in decision.answers
         }
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.DISCOVERED_ITEM_COVERAGE)
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.DISCOVERED_ITEM_COVERAGE, score=None, available=False)
         incomplete = tuple(
             identifier
             for identifier in identifiers
             if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
-            check=JevDoneCheck.DISCOVERED_ITEM_COVERAGE,
+        return JevContinuationGateResult(
+            check=JevContinuationGate.DISCOVERED_ITEM_COVERAGE,
             score=verdict.score,
             passed=verdict.passed,
             answers=verdict.answers,
@@ -1477,22 +1477,22 @@ class JevRunState(BaseAgent):
             usage=usage,
         )
 
-    def _cumulative_obligations(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _cumulative_obligations(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Require each surviving obligation and each supplied user turn's evidence inventory to pass."""
         state = None if self.record is None else self.record.cumulative_obligations
         evidence = None if handoff is None else handoff.cumulative_obligations
         if state is None or evidence is None:
-            return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.CUMULATIVE_OBLIGATIONS, score=None, available=False)
         obligation_ids = state.ids()
         turn_ids = tuple(f"__inventory_turn_{index}__" for index in range(len(state.user_turns)))
         identifiers = (*obligation_ids, *turn_ids)
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.CUMULATIVE_OBLIGATIONS, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
-        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+            return JevContinuationGateResult(check=JevContinuationGate.CUMULATIVE_OBLIGATIONS, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.CUMULATIVE_OBLIGATIONS)
+        inventory_question = JevDoneRegistry.inventory_question(JevContinuationGate.CUMULATIVE_OBLIGATIONS)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.CUMULATIVE_OBLIGATIONS)
         answers = {
             identifier: decision.answers[question.name(identifier)]
             for identifier in obligation_ids
@@ -1505,30 +1505,30 @@ class JevRunState(BaseAgent):
         })
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.CUMULATIVE_OBLIGATIONS, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.CUMULATIVE_OBLIGATIONS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.CUMULATIVE_OBLIGATIONS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _guaranteed_next_actions(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _guaranteed_next_actions(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Continue only when a candidate is both necessary and independently unfinished."""
         # @intent necessity-is-a-hard-continuation-gate
         # A plausible but optional next step could exceed the user's authorization; only two affirmative judgments permit it.
         candidates = None if handoff is None else handoff.guaranteed_next_actions
         if candidates is None:
-            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
         if not candidates.actions:
-            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.GUARANTEED_NEXT_ACTIONS, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
-        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+            return JevContinuationGateResult(check=JevContinuationGate.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        necessary, unfinished = JevDoneRegistry.questions(JevContinuationGate.GUARANTEED_NEXT_ACTIONS)
         identifiers = candidates.ids()
         expected = tuple(question.name(identifier) for question in (necessary, unfinished) for identifier in identifiers)
         answers = {name: decision.answers[name] for name in expected if name in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, expected, 0.0)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+            return JevContinuationGateResult(check=JevContinuationGate.GUARANTEED_NEXT_ACTIONS, score=None, available=False)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.GUARANTEED_NEXT_ACTIONS)
         action_scores = {
             identifier: min(
                 verdict.answers[necessary.name(identifier)].probabilities[JEV_NOUL_TRUE],
@@ -1538,8 +1538,8 @@ class JevRunState(BaseAgent):
         }
         incomplete = tuple(identifier for identifier, score in action_scores.items() if score >= threshold)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
-            check=JevDoneCheck.GUARANTEED_NEXT_ACTIONS,
+        return JevContinuationGateResult(
+            check=JevContinuationGate.GUARANTEED_NEXT_ACTIONS,
             score=verdict.score,
             passed=not incomplete,
             answers=verdict.answers,
@@ -1547,22 +1547,22 @@ class JevRunState(BaseAgent):
             usage=usage,
         )
 
-    def _required_actions(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _required_actions(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Judge each requested action and apply deterministic trace/order requirements."""
         state = None if self.record is None else self.record.required_actions
         if state is None or handoff is None or handoff.required_actions is None:
-            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.REQUIRED_ACTIONS, score=None, available=False)
         if not state.actions:
-            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.REQUIRED_ACTIONS, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.REQUIRED_ACTIONS)
+            return JevContinuationGateResult(check=JevContinuationGate.REQUIRED_ACTIONS, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.REQUIRED_ACTIONS)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.REQUIRED_ACTIONS)
         identifiers = state.ids()
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.REQUIRED_ACTIONS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.REQUIRED_ACTIONS, score=None, available=False)
         evidence = {item.id: item for item in handoff.required_actions.actions}
         incomplete = {
             identifier
@@ -1573,8 +1573,8 @@ class JevRunState(BaseAgent):
         incomplete.update(self._ordered_action_failures(state, evidence, incomplete))
         ordered_incomplete = tuple(identifier for identifier in identifiers if identifier in incomplete)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
-            check=JevDoneCheck.REQUIRED_ACTIONS,
+        return JevContinuationGateResult(
+            check=JevContinuationGate.REQUIRED_ACTIONS,
             score=verdict.score,
             passed=verdict.passed and not incomplete,
             answers=verdict.answers,
@@ -1602,65 +1602,65 @@ class JevRunState(BaseAgent):
 
     # @intent absence-conclusions-require-inspection-evidence
     # A clean outcome is valid when the requested target was examined; this check only rejects an unsupported all-clear or explicitly incomplete inspection.
-    def _negative_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _negative_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         state = None if self.record is None else self.record.negative_coverage
         evidence = None if handoff is None else handoff.negative_coverage
         if state is None or evidence is None or sorted(state.ids()) != sorted(evidence.ids()):
-            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.NEGATIVE_COVERAGE, score=None, available=False)
         if not state.inspections:
-            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.NEGATIVE_COVERAGE, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.NEGATIVE_COVERAGE)
+            return JevContinuationGateResult(check=JevContinuationGate.NEGATIVE_COVERAGE, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.NEGATIVE_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.NEGATIVE_COVERAGE)
         identifiers = state.ids()
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.NEGATIVE_COVERAGE, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.NEGATIVE_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.NEGATIVE_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _input_exhaustion(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _input_exhaustion(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Score each traversal while keeping deterministic gaps incomplete and Jev failures fail open."""
         state = None if self.record is None else self.record.input_exhaustion
         evidence = None if handoff is None else handoff.input_exhaustion
         if state is None or evidence is None:
-            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_EXHAUSTION, score=None, available=False)
         if not state.collections:
-            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_EXHAUSTION, score=None)
         observations = {item.id: item for item in evidence.collections}
         assessments = {item.id: self._input_exhaustion_assessment(item, observations[item.id]) for item in state.collections}
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.INPUT_EXHAUSTION)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_EXHAUSTION, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.INPUT_EXHAUSTION)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.INPUT_EXHAUSTION)
         identifiers = state.ids()
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_EXHAUSTION, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if assessments[identifier][1] or DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.INPUT_EXHAUSTION, score=verdict.score, passed=not incomplete, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.INPUT_EXHAUSTION, score=verdict.score, passed=not incomplete, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
         # The deliverables the run state listed are what this check judges; without them, or without the
         # handoff's evidence for them, there is nothing to judge, so the check is unavailable and fails open.
         state = None if self.record is None else self.record.multi_part
         if state is None or handoff is None or handoff.multi_part is None:
-            return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.MULTI_PART, score=None, available=False)
         # A request that asks for no output (a greeting, a plain question) has no deliverable to miss, so it
         # passes; combine() asked Jev nothing for it, so there is no score.
         if not state.deliverables:
-            return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.MULTI_PART, score=None)
         # Deliverables were asked about, but the one combined Jev request failed: fail open like preflight.
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.MULTI_PART)
+            return JevContinuationGateResult(check=JevContinuationGate.MULTI_PART, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.MULTI_PART)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.MULTI_PART)
         # The combined reply holds every enabled check's answers under their question names; pick out this
         # check's answers and key them by deliverable id, which is how the result and the continuation name them.
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in state.ids() if question.name(identifier) in decision.answers}
@@ -1668,30 +1668,30 @@ class JevRunState(BaseAgent):
         # and one clear no is never averaged away by the others. A missing answer makes score_noul return None.
         verdict = DecisionModelHelper.score_noul(answers, state.ids(), threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.MULTI_PART, score=None, available=False)
         # The deliverables below the threshold are the ones the continuation sends the main agent back to finish.
         incomplete = tuple(identifier for identifier in state.ids() if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         # One request answered every enabled check, so its usage is the cost of this finish attempt's checks.
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.MULTI_PART, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _can_simplify(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _can_simplify(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Score the one implementation answer with the registered threshold and fail-open rules."""
         state = None if self.record is None else self.record.can_simplify
         if state is None or handoff is None or handoff.can_simplify is None or decision is None:
-            return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+            return JevContinuationGateResult(check=JevContinuationGate.CAN_SIMPLIFY, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.CAN_SIMPLIFY)
         identifier = JEV_DONE_IMPLEMENTATION_FIELD
         name = question.name(identifier)
         answers = {identifier: decision.answers[name]} if name in decision.answers else {}
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.CAN_SIMPLIFY)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.CAN_SIMPLIFY)
         verdict = DecisionModelHelper.score_noul(answers, (identifier,), threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.CAN_SIMPLIFY, score=None, available=False)
         incomplete = () if verdict.passed else (identifier,)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
-            check=JevDoneCheck.CAN_SIMPLIFY,
+        return JevContinuationGateResult(
+            check=JevContinuationGate.CAN_SIMPLIFY,
             score=verdict.score,
             passed=verdict.passed,
             answers=verdict.answers,
@@ -1709,25 +1709,25 @@ class JevRunState(BaseAgent):
     # one generative model validate its own judgment. Keep Jev's input to the claim and tool-call evidence.
     # A rewrite that checks only the final answer or merges claims can let an unperformed change or failed test
     # pass without evidence, misleading the SDK caller about what this run actually accomplished.
-    def _claims(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _claims(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         # Uses only claims extracted from this finish attempt's final answer and paired with the run's tool-call evidence.
         if handoff is None or handoff.claims is None:
-            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.CLAIMS, score=None, available=False)
         # A final answer with no concrete, checkable claims has nothing for Jev to check and passes without a call.
         if not handoff.claims.claims:
-            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.CLAIMS, score=None)
         # Missing credentials or a failed combined Jev request leaves the main agent's answer standing.
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.CLAIMS)
+            return JevContinuationGateResult(check=JevContinuationGate.CLAIMS, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.CLAIMS)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.CLAIMS)
         # The combined reply holds every enabled check's answers; keep one answer for each parent.assertion id.
         assertion_ids = handoff.claims.assertion_ids()
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in assertion_ids if question.name(identifier) in decision.answers}
         # The threshold is also the veto, so one unsupported assertion cannot be hidden by sibling assertions.
         verdict = DecisionModelHelper.score_noul(answers, assertion_ids, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.CLAIMS, score=None, available=False)
         # Answers remain assertion-keyed; the continuation receives parent ids if any child assertion fails.
         incomplete = tuple(
             claim.id
@@ -1742,130 +1742,130 @@ class JevRunState(BaseAgent):
             )
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _completion_evidence(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _completion_evidence(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Score the single stable whole-task status from the combined Jev request."""
         if handoff is None or handoff.completion_evidence is None or decision is None:
-            return JevDoneResult(check=JevDoneCheck.COMPLETION_EVIDENCE, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.COMPLETION_EVIDENCE)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.COMPLETION_EVIDENCE)
+            return JevContinuationGateResult(check=JevContinuationGate.COMPLETION_EVIDENCE, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.COMPLETION_EVIDENCE)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.COMPLETION_EVIDENCE)
         identifier = handoff.completion_evidence.id
         question_name = question.name(identifier)
         answers = {identifier: decision.answers[question_name]} if question_name in decision.answers else {}
         verdict = DecisionModelHelper.score_noul(answers, (identifier,), threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.COMPLETION_EVIDENCE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.COMPLETION_EVIDENCE, score=None, available=False)
         incomplete = () if verdict.passed else (identifier,)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.COMPLETION_EVIDENCE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.COMPLETION_EVIDENCE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _phase_progress(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _phase_progress(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Score whether each request-required outcome stage has substantive run evidence."""
         state = None if self.record is None else self.record.phase_progress
         if state is None:
-            return JevDoneResult(check=JevDoneCheck.PHASE_PROGRESS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.PHASE_PROGRESS, score=None, available=False)
         # A request with no meaningful staged outcome has nothing for Jev to judge and passes without a call.
         if not state.stages:
-            return JevDoneResult(check=JevDoneCheck.PHASE_PROGRESS, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.PHASE_PROGRESS, score=None)
         if handoff is None or handoff.phase_progress is None or decision is None:
-            return JevDoneResult(check=JevDoneCheck.PHASE_PROGRESS, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.PHASE_PROGRESS)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.PHASE_PROGRESS)
+            return JevContinuationGateResult(check=JevContinuationGate.PHASE_PROGRESS, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.PHASE_PROGRESS)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.PHASE_PROGRESS)
         identifiers = state.ids()
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.PHASE_PROGRESS, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.PHASE_PROGRESS, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.PHASE_PROGRESS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.PHASE_PROGRESS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     # @intent scope-coverage-keeps-each-member-visible
     # A check-wide average could hide one omitted provider or endpoint, so every required member is its own
     # question and one missing or sub-threshold member keeps the gate open until the continuation cap.
-    def _scope_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _scope_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Require evidence for every checked member and score its work in the shared Jev response."""
         state = None if self.record is None else self.record.scope_coverage
         if state is None or handoff is None or handoff.scope_coverage is None:
-            return JevDoneResult(check=JevDoneCheck.SCOPE_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.SCOPE_COVERAGE, score=None, available=False)
         items = handoff.scope_coverage.question_items(state)
         question_items = tuple(item for item in items if item[2].work.strip())
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.SCOPE_COVERAGE)
-        question = JevDoneRegistry.question(JevDoneCheck.SCOPE_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.SCOPE_COVERAGE)
+        question = JevDoneRegistry.question(JevContinuationGate.SCOPE_COVERAGE)
         identifiers = tuple(identifier for identifier, _, _ in question_items)
         automatic_gaps = tuple(identifier for identifier, _, unit in items if not unit.work.strip())
         automatic_gaps += tuple(f"{identifier}.inventory" for identifier in handoff.scope_coverage.inventory_gaps(state))
         if identifiers and decision is None:
-            return JevDoneResult(check=JevDoneCheck.SCOPE_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.SCOPE_COVERAGE, score=None, available=False)
         answers = {} if decision is None else {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold) if identifiers else None
         if identifiers and verdict is None:
-            return JevDoneResult(check=JevDoneCheck.SCOPE_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.SCOPE_COVERAGE, score=None, available=False)
         failed_answers = () if verdict is None else tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         incomplete = tuple(dict.fromkeys((*automatic_gaps, *failed_answers)))
         usage = None if decision is None else JevUsage.from_usage_payload(decision.usage or {})
         score = None if verdict is None else verdict.score
         passed = not incomplete and (verdict is None or verdict.passed)
-        return JevDoneResult(check=JevDoneCheck.SCOPE_COVERAGE, score=score, passed=passed, answers={} if verdict is None else verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.SCOPE_COVERAGE, score=score, passed=passed, answers={} if verdict is None else verdict.answers, incomplete=incomplete, usage=usage)
 
     # @intent every-bounded-input-target-needs-its-own-answer
     # Use an item-level veto so evidence for one source cannot hide a skipped required target.
-    def _input_set_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _input_set_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         state = None if self.record is None else self.record.input_set_coverage
         if state is None or handoff is None or handoff.input_set_coverage is None:
-            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_SET_COVERAGE, score=None, available=False)
         identifiers = state.ids()
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_SET_COVERAGE, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.INPUT_SET_COVERAGE)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_SET_COVERAGE, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.INPUT_SET_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.INPUT_SET_COVERAGE)
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.INPUT_SET_COVERAGE, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.INPUT_SET_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _output_count(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _output_count(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         state = None if self.record is None else self.record.output_count
         if state is None or handoff is None or handoff.output_count is None:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_COUNT, score=None, available=False)
         identifiers = state.ids()
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_COUNT, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_COUNT)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_COUNT, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.OUTPUT_COUNT)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.OUTPUT_COUNT)
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_COUNT, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_COUNT, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     # @intent explicit-text-bound-can-veto-a-positive-evidence-answer
     # A deterministic count that misses the original bound remains incomplete even if Jev recognizes the evidence.
-    def _output_extent(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _output_extent(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         state = None if self.record is None else self.record.output_extent
         if state is None or handoff is None or handoff.output_extent is None:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_EXTENT, score=None, available=False)
         identifiers = state.ids()
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_EXTENT, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_EXTENT)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_EXTENT, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.OUTPUT_EXTENT)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.OUTPUT_EXTENT)
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_EXTENT, score=None, available=False)
         failed = tuple(
             item.id
             for item in state.items
@@ -1873,49 +1873,49 @@ class JevRunState(BaseAgent):
             or not self._extent_within_bound(item)
         )
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=verdict.score, passed=not failed, answers=verdict.answers, incomplete=failed, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.OUTPUT_EXTENT, score=verdict.score, passed=not failed, answers=verdict.answers, incomplete=failed, usage=usage)
 
     # @intent reported-plans-are-checked-against-observed-execution
     # Every post-run candidate must pass independently; a single clear mismatch is a veto, while no candidates pass without asking Jev.
-    def _report_action_alignment(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _report_action_alignment(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         if handoff is None or handoff.report_action_alignment is None:
-            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.REPORT_ACTION_ALIGNMENT, score=None, available=False)
         alignment = handoff.report_action_alignment
         identifiers = alignment.ids()
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.REPORT_ACTION_ALIGNMENT, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+            return JevContinuationGateResult(check=JevContinuationGate.REPORT_ACTION_ALIGNMENT, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.REPORT_ACTION_ALIGNMENT)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.REPORT_ACTION_ALIGNMENT)
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.REPORT_ACTION_ALIGNMENT, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.REPORT_ACTION_ALIGNMENT, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.REPORT_ACTION_ALIGNMENT, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _assumptions_reconciled(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _assumptions_reconciled(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         # @intent changed-assumption-items-are-vetoed-individually
         # One changed premise below threshold cannot be covered by another premise's successful reconciliation.
         """Score each explicit changed premise against its own handoff evidence and the shared Jev response."""
         if handoff is None or handoff.assumptions_reconciled is None:
-            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.ASSUMPTIONS_RECONCILED, score=None, available=False)
         identifiers = handoff.assumptions_reconciled.ids()
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.ASSUMPTIONS_RECONCILED, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.ASSUMPTIONS_RECONCILED)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.ASSUMPTIONS_RECONCILED)
+            return JevContinuationGateResult(check=JevContinuationGate.ASSUMPTIONS_RECONCILED, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.ASSUMPTIONS_RECONCILED)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.ASSUMPTIONS_RECONCILED)
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.ASSUMPTIONS_RECONCILED, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.ASSUMPTIONS_RECONCILED, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.ASSUMPTIONS_RECONCILED, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     # @intent only-a-supported-answer-target-has-a-deterministic-counter
     # Named artifacts remain unmeasured until the run exposes their current contents directly.
@@ -1964,50 +1964,50 @@ class JevRunState(BaseAgent):
         keys = {" ".join(entry.distinct_key.casefold().split()) for entry in item.entries}
         return len(keys)
 
-    def _target_outcome(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _target_outcome(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         # Missing records or evidence make the check unavailable; done checks are advisory and always fail open.
         state = None if self.record is None else self.record.target_outcome
         if state is None or handoff is None or handoff.target_outcome is None:
-            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.TARGET_OUTCOME, score=None, available=False)
         # Requests without a distinct, sufficiently specified real target have no outcomes to judge and pass cleanly.
         if not state.items:
-            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.TARGET_OUTCOME, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.TARGET_OUTCOME)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.TARGET_OUTCOME)
+            return JevContinuationGateResult(check=JevContinuationGate.TARGET_OUTCOME, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.TARGET_OUTCOME)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.TARGET_OUTCOME)
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in state.ids() if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, state.ids(), threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.TARGET_OUTCOME, score=None, available=False)
         incomplete = tuple(identifier for identifier in state.ids() if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.TARGET_OUTCOME, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.TARGET_OUTCOME, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
-    def _motivating_case(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _motivating_case(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         # Scores the answers only for the user-named scenarios; implied entries never block a finish attempt.
         state = None if self.record is None else self.record.motivating_case
         if state is None or handoff is None or handoff.motivating_case is None:
-            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.MOTIVATING_CASE, score=None, available=False)
         identifiers = state.ids(blocking_only=True)
         if not identifiers:
-            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None)
+            return JevContinuationGateResult(check=JevContinuationGate.MOTIVATING_CASE, score=None)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.MOTIVATING_CASE)
+            return JevContinuationGateResult(check=JevContinuationGate.MOTIVATING_CASE, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.MOTIVATING_CASE)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.MOTIVATING_CASE)
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in identifiers if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, identifiers, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.MOTIVATING_CASE, score=None, available=False)
         incomplete = tuple(identifier for identifier in identifiers if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.MOTIVATING_CASE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.MOTIVATING_CASE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _needs_motivating_case_recall(self) -> bool:
         # Runs the recall guard only when the enabled check has no directly blocking scenario to ask about.
         state = None if self.record is None else self.record.motivating_case
-        return JevDoneCheck.MOTIVATING_CASE in self.checks and state is not None and not state.ids(blocking_only=True)
+        return JevContinuationGate.MOTIVATING_CASE in self.checks and state is not None and not state.ids(blocking_only=True)
 
     async def _motivating_case_recall_guard(self) -> float | None:
         # Uses Jev once before the main loop to catch an empty state that missed an explicit boundary condition.
@@ -2021,7 +2021,7 @@ class JevRunState(BaseAgent):
         return None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
 
 
-    def _problems_resolved(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _problems_resolved(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Score every dynamic problem item and the original-request completion item with a veto threshold."""
         # @intent every-observed-problem-and-the-original-task-are-required
         # Dynamic failures cannot be predicted before the work, so every finish attempt must score the handoff's
@@ -2029,26 +2029,26 @@ class JevRunState(BaseAgent):
         # unresolved issue or the original request's unfinished work; a missing answer remains unavailable.
         evidence = None if handoff is None else handoff.problems_resolved
         if evidence is None:
-            return JevDoneResult(check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.PROBLEMS_RESOLVED, score=None, available=False)
         if decision is None:
-            return JevDoneResult(check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False)
-        question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.PROBLEMS_RESOLVED)
+            return JevContinuationGateResult(check=JevContinuationGate.PROBLEMS_RESOLVED, score=None, available=False)
+        question = JevDoneRegistry.question(JevContinuationGate.PROBLEMS_RESOLVED)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.PROBLEMS_RESOLVED)
         ids = evidence.ids()
         answers = {identifier: decision.answers[question.name(identifier)] for identifier in ids if question.name(identifier) in decision.answers}
         verdict = DecisionModelHelper.score_noul(answers, ids, threshold, threshold)
         if verdict is None:
-            return JevDoneResult(check=JevDoneCheck.PROBLEMS_RESOLVED, score=None, available=False)
+            return JevContinuationGateResult(check=JevContinuationGate.PROBLEMS_RESOLVED, score=None, available=False)
         incomplete = tuple(identifier for identifier in ids if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
         usage = JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(check=JevDoneCheck.PROBLEMS_RESOLVED, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+        return JevContinuationGateResult(check=JevContinuationGate.PROBLEMS_RESOLVED, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     # @intent request-derived-quotes-are-verified-before-recording
     # A boundary scenario can affect whether the run continues only when its source quote and literal inputs are present in the original user request.
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.
         multi_part = None
-        section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
+        section = getattr(payload, JevContinuationGate.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
         can_simplify = JevRunState._can_simplify_record(payload)
@@ -2056,18 +2056,18 @@ class JevRunState(BaseAgent):
         required_actions = self._required_actions_record(payload)
         output_count = self._output_count_record(payload)
         scope_coverage = None
-        scope_section = getattr(payload, JevDoneCheck.SCOPE_COVERAGE.value, None)
+        scope_section = getattr(payload, JevContinuationGate.SCOPE_COVERAGE.value, None)
         if isinstance(scope_section, JevScopeCoveragePayload):
             scope_coverage = JevScopeCoverage.from_payload(scope_section, self.request)
         target_outcome = None
-        outcome_section = getattr(payload, JevDoneCheck.TARGET_OUTCOME.value, None)
+        outcome_section = getattr(payload, JevContinuationGate.TARGET_OUTCOME.value, None)
         if isinstance(outcome_section, JevTargetOutcomePayload):
             target_outcome = JevTargetOutcome(tuple(
                 JevTargetOutcomeItem(item.id, item.outcome.strip(), item.target.strip(), item.scope.strip(), item.completion_criterion.strip())
                 for item in outcome_section.items
             ))
         phase_progress = None
-        phase_section = getattr(payload, JevDoneCheck.PHASE_PROGRESS.value, None)
+        phase_section = getattr(payload, JevContinuationGate.PHASE_PROGRESS.value, None)
         if isinstance(phase_section, JevPhaseProgressPayload):
             phase_progress = JevPhaseProgress(tuple(
                 JevPhaseStage(item.id, item.stage.strip(), item.required_result.strip(), item.request_scope.strip(), item.output_criterion.strip())
@@ -2079,7 +2079,7 @@ class JevRunState(BaseAgent):
         negative_coverage = self._negative_coverage_record(payload)
 
         motivating_case = None
-        motivating_section = getattr(payload, JevDoneCheck.MOTIVATING_CASE.value, None)
+        motivating_section = getattr(payload, JevContinuationGate.MOTIVATING_CASE.value, None)
         if isinstance(motivating_section, JevMotivatingCasePayload):
             restriction = motivating_section.testing_restriction_quote.strip() or None
             if restriction is not None and not _verbatim_contains(self.request, restriction):
@@ -2144,7 +2144,7 @@ class JevRunState(BaseAgent):
         # @intent sequence-stages-come-from-explicit-request-order
         # Stage numbers are later used to check whether dependent work follows the user's stated order.
         # Reject absent or unsupported source phrases instead of creating a plausible sequence from the generated state alone.
-        section = getattr(payload, JevDoneCheck.REQUIRED_SEQUENCE.value, None)
+        section = getattr(payload, JevContinuationGate.REQUIRED_SEQUENCE.value, None)
         if not isinstance(section, JevRequiredSequencePayload):
             return None
         raw_stages = section.stages
@@ -2182,7 +2182,7 @@ class JevRunState(BaseAgent):
     @staticmethod
     def _can_simplify_record(payload: JevRunStatePayload) -> JevCanSimplify | None:
         """Convert request-derived implementation scope and preservation requirements."""
-        section = getattr(payload, JevDoneCheck.CAN_SIMPLIFY.value, None)
+        section = getattr(payload, JevContinuationGate.CAN_SIMPLIFY.value, None)
         if not isinstance(section, JevCanSimplifyPayload):
             return None
         return JevCanSimplify(section.scope.strip(), section.preserve.strip())
@@ -2190,7 +2190,7 @@ class JevRunState(BaseAgent):
     @staticmethod
     def _expert_depth_record(payload: JevRunStatePayload) -> JevExpertDepth | None:
         """Convert weak points in request order, retaining each detail's own shallow and deep criteria."""
-        section = getattr(payload, JevDoneCheck.EXPERT_DEPTH.value, None)
+        section = getattr(payload, JevContinuationGate.EXPERT_DEPTH.value, None)
         if not isinstance(section, JevExpertDepthPayload):
             return None
         deliverables = tuple(
@@ -2214,7 +2214,7 @@ class JevRunState(BaseAgent):
 
     def _cumulative_obligations_record(self, payload: JevRunStatePayload) -> JevCumulativeObligations | None:
         """Convert supplied-turn obligation statuses while retaining their exact history indices."""
-        section = getattr(payload, JevDoneCheck.CUMULATIVE_OBLIGATIONS.value, None)
+        section = getattr(payload, JevContinuationGate.CUMULATIVE_OBLIGATIONS.value, None)
         if not isinstance(section, JevCumulativeObligationsPayload):
             return None
         obligations = tuple(
@@ -2235,7 +2235,7 @@ class JevRunState(BaseAgent):
     @staticmethod
     def _required_actions_record(payload: JevRunStatePayload) -> JevRequiredActions | None:
         """Convert explicit action obligations while preserving their requested order and predecessors."""
-        section = getattr(payload, JevDoneCheck.REQUIRED_ACTIONS.value, None)
+        section = getattr(payload, JevContinuationGate.REQUIRED_ACTIONS.value, None)
         if not isinstance(section, JevRequiredActionsPayload):
             return None
         actions = tuple(
@@ -2246,7 +2246,7 @@ class JevRunState(BaseAgent):
 
     @staticmethod
     def _input_set_coverage_record(payload: JevRunStatePayload) -> JevInputSetCoverage | None:
-        section = getattr(payload, JevDoneCheck.INPUT_SET_COVERAGE.value, None)
+        section = getattr(payload, JevContinuationGate.INPUT_SET_COVERAGE.value, None)
         if not isinstance(section, JevInputSetCoveragePayload):
             return None
         targets = tuple(JevInputTarget(item.id, item.identity.strip(), item.scope.strip(), item.action.strip(), item.engagement_signal.strip()) for item in section.targets)
@@ -2254,7 +2254,7 @@ class JevRunState(BaseAgent):
 
     @staticmethod
     def _input_exhaustion_record(payload: JevRunStatePayload) -> JevInputExhaustion | None:
-        section = getattr(payload, JevDoneCheck.INPUT_EXHAUSTION.value, None)
+        section = getattr(payload, JevContinuationGate.INPUT_EXHAUSTION.value, None)
         if not isinstance(section, JevInputExhaustionPayload):
             return None
         obligations = tuple(JevInputExhaustionObligation(item.id, item.collection.strip(), item.scope.strip(), item.unit.strip(), item.expected_total, item.exhaustion_condition.strip()) for item in section.collections)
@@ -2262,7 +2262,7 @@ class JevRunState(BaseAgent):
 
     @staticmethod
     def _negative_coverage_record(payload: JevRunStatePayload) -> JevNegativeCoverage | None:
-        section = getattr(payload, JevDoneCheck.NEGATIVE_COVERAGE.value, None)
+        section = getattr(payload, JevContinuationGate.NEGATIVE_COVERAGE.value, None)
         if not isinstance(section, JevNegativeCoveragePayload):
             return None
         inspections = tuple(JevNegativeCoverageTarget(item.id, item.target.strip(), item.inspection_signal.strip()) for item in section.inspections)
@@ -2270,7 +2270,7 @@ class JevRunState(BaseAgent):
 
     @staticmethod
     def _output_count_record(payload: JevRunStatePayload) -> JevOutputCount | None:
-        section = getattr(payload, JevDoneCheck.OUTPUT_COUNT.value, None)
+        section = getattr(payload, JevContinuationGate.OUTPUT_COUNT.value, None)
         if not isinstance(section, JevOutputCountPayload):
             return None
         obligations = tuple(
@@ -2292,7 +2292,7 @@ class JevRunState(BaseAgent):
     # Copy the original target, amount, unit, and comparator without deriving a quota from general wording.
     @staticmethod
     def _output_extent_record(payload: JevRunStatePayload) -> JevOutputExtent | None:
-        section = getattr(payload, JevDoneCheck.OUTPUT_EXTENT.value, None)
+        section = getattr(payload, JevContinuationGate.OUTPUT_EXTENT.value, None)
         if not isinstance(section, JevOutputExtentPayload):
             return None
         items = tuple(
@@ -2302,18 +2302,18 @@ class JevRunState(BaseAgent):
         return JevOutputExtent(items)
 
 
-    def _required_sequence(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+    def _required_sequence(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevContinuationGateResult:
         """Combine event-order facts with Jev's recognition answers for every active sequence stage."""
         # @intent code-owns-stage-presence-and-order
         # Missing work and overlapping or reversed event spans are exact facts; Jev only recognizes work quality
         # and input reuse, so an unavailable Jev response cannot hide a missing or out-of-order stage.
         state = None if self.record is None else self.record.required_sequence
         evidence = None if handoff is None else handoff.required_sequence
-        check = JevDoneCheck.REQUIRED_SEQUENCE
+        check = JevContinuationGate.REQUIRED_SEQUENCE
         if state is None or not state.active or not state.stages:
-            return JevDoneResult(check=check, score=None)
+            return JevContinuationGateResult(check=check, score=None)
         if evidence is None:
-            return JevDoneResult(check=check, score=None, available=False)
+            return JevContinuationGateResult(check=check, score=None, available=False)
         evidence_by_id = {item.stage_id: item for item in evidence.stages}
         work_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_WORK_SHOWN)
         previous_question = JevDoneRegistry.question_for_key(JevDoneQuestionKey.REQUIRED_SEQUENCE_USES_PREVIOUS_OUTPUT)
@@ -2343,10 +2343,10 @@ class JevRunState(BaseAgent):
             probabilities.extend(stage_probabilities)
         unique_incomplete = tuple(dict.fromkeys(incomplete))
         if not available and not unique_incomplete:
-            return JevDoneResult(check=check, score=None, available=False)
+            return JevContinuationGateResult(check=check, score=None, available=False)
         score = None if not probabilities else sum(probabilities) / len(probabilities)
         usage = None if decision is None else JevUsage.from_usage_payload(decision.usage or {})
-        return JevDoneResult(
+        return JevContinuationGateResult(
             check=check,
             score=score,
             passed=not unique_incomplete,

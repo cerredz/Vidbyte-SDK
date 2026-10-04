@@ -1,11 +1,11 @@
 ---
 name: jev-continuation
-description: Step-by-step guide to adding a continuation done check (a preset continuation setting enabled through JevContinualSettings.checks) to JevAgent. Covers the run-state and handoff section subclasses, the Jev question and its structure, batching every check into one Jev request, what the main agent receives when a check fails, the important files, and the invariants the tests enforce. Use it before adding or changing any JevDoneCheck, done question, run-state or handoff section, or JevContinuation.
+description: Step-by-step guide to adding a continuation done check (a preset continuation setting enabled through JevContinuationGateSettings.enabled) to JevAgent. Covers the run-state and handoff section subclasses, the Jev question and its structure, batching every check into one Jev request, what the main agent receives when a check fails, the important files, and the invariants the tests enforce. Use it before adding or changing any JevContinuationGate, done question, run-state or handoff section, or JevContinuation.
 ---
 
 # Adding a JevAgent continuation done check
 
-Use this skill before you add a new continuation setting to `JevAgent`, or change how one works. In code, a continuation setting is a **done check**. It is a `JevDoneCheck` member that a user enables through `JevRuntimeSettings(continual=JevContinualSettings(checks=(...)))`. The check runs every time the main agent tries to finish. When it fails, the main agent goes back to work in the same loop. `MULTI_PART` checks requested outputs; `CAN_SIMPLIFY` checks whether the implementation can remain as-is without a supported, behavior-preserving simplification. Every file and method named below exists on `main` and is the model to copy.
+Use this skill before you add a new continuation setting to `JevAgent`, or change how one works. In code, a continuation setting is a **done check**. It is a `JevContinuationGate` member that a user enables through `JevRuntimeSettings(continuation_gate=JevContinuationGateSettings(enabled=(...)))`. The check runs every time the main agent tries to finish. When it fails, the main agent goes back to work in the same loop. `MULTI_PART` checks requested outputs; `CAN_SIMPLIFY` checks whether the implementation can remain as-is without a supported, behavior-preserving simplification. Every file and method named below exists on `main` and is the model to copy.
 
 Load these first:
 
@@ -21,7 +21,7 @@ This skill assumes that you want a new **kind of done check** under the existing
 
 ```
 JevAgent.__init__
-  ├─ JevRunState(settings, runtime_settings, response)      # only when continual.checks is non-empty
+  ├─ JevRunState(settings, runtime_settings, response)      # only when continual.enabled is non-empty
   │    └─ JevHandoff(settings, continual)
   └─ JevDoneContinuation(run_state, continual, response)
 
@@ -35,7 +35,7 @@ JevRuntime.arun(message)
             │         ├─ JevHandoff.window(...)               #     main agent's context window as ContextManager
             │         ├─ handoff_writer.compile(...)          #     (C) evidence for every enabled check
             │         ├─ _ask → combine(handoff)              #     (D) ONE Jev request, every check's questions
-            │         └─ _judge(check, …) per check           #     (E) JevDoneResult per check → response.done()
+            │         └─ _judge(check, …) per check           #     (E) JevContinuationGateResult per check → response.continuation_gates()
             └─ if True: continuation.continue_(messages)      # (F) append one user message to the SAME loop
 ```
 
@@ -46,7 +46,7 @@ The five stages, and who does the work in each:
 | (A) Run state | `JevRunState`, a generative `BaseAgent` with no tools | Generation. For checks whose items are knowable before work, it reads the user's request and lists what the check will verify. | `JevRunStateRecord`, plus `rendered` JSON |
 | (C) Handoff | `JevHandoff`, a generative `BaseAgent` with no tools | Generation. It reads the main agent's run, compiles evidence for request-derived items, and extracts final-answer claims when items only exist after work. | `JevHandoffRecord`, plus `rendered` JSON |
 | (D) Jev | `DecisionModelRunner` (TypeSafe) | Recognition only. It answers one yes/no question per item. | `DecisionModelResponse` |
-| (E) Judge | `JevRunState._judge` (code) | Scoring. `score_noul` applies a threshold and a veto, then lists the incomplete items. | `JevDoneResult` |
+| (E) Judge | `JevRunState._judge` (code) | Scoring. `score_noul` applies a threshold and a veto, then lists the incomplete items. | `JevContinuationGateResult` |
 | (F) Continue | `JevDoneContinuation` (code and a prompt asset) | Formatting. It builds one message for the main agent. | a `{"role": "user"}` message |
 
 The core split, which comes from `asking-jev-questions` strategy 16: **generative agents write the state and the evidence, and Jev only recognizes whether the evidence shows each item.** Never ask Jev to list, count, or produce anything.
@@ -69,8 +69,8 @@ At each finish attempt, the handoff reports tool-call evidence for every target 
 
 | File | What it holds | What a new check does there |
 |---|---|---|
-| `vidbyte/lib/enums/jev.py` | `JevDoneCheck`, `JevDoneQuestionKey` | Add one member to each. |
-| `vidbyte/lib/dataclasses/jev.py` | Section payloads (`JevSectionPayload` subclasses), records, `JevRunStateRecord`, `JevHandoffRecord`, `JevDoneQuestion`, `JevDoneResult` | Add payloads and frozen records where items come from; a post-run-derived check adds its section and optional field to `JevHandoffRecord`, not `JevRunStateRecord`. |
+| `vidbyte/lib/enums/jev.py` | `JevContinuationGate`, `JevDoneQuestionKey` | Add one member to each. |
+| `vidbyte/lib/dataclasses/jev.py` | Section payloads (`JevSectionPayload` subclasses), records, `JevRunStateRecord`, `JevHandoffRecord`, `JevDoneQuestion`, `JevContinuationGateResult` | Add payloads and frozen records where items come from; a post-run-derived check adds its section and optional field to `JevHandoffRecord`, not `JevRunStateRecord`. |
 | `vidbyte/lib/constants/jev.py` | `JEV_<CHECK>_THRESHOLD`, shared-state field names (`JEV_DONE_*_FIELD`), limits | Add the threshold and any new state field names. |
 | `vidbyte/lib/jev/done/<check>.py` | One `JevDoneQuestion` subclass per question | **New file**, one per check (`multi_part.py` is the model). |
 | `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions`, `_thresholds`, `_descriptions`, `validate`) | Register the question, the threshold, and the check's `JevDoneGateDescription`. |
@@ -82,9 +82,9 @@ At each finish attempt, the handoff reports tool-call evidence for every target 
 | `vidbyte/agents/jev/done/handoff.py` | `JevHandoff`: `_SECTIONS`, `schema`, `window`, `compile`, `_record` | One `_SECTIONS` entry and the `_record` conversion with id validation. |
 | `vidbyte/agents/jev/continuation/done.py` | `JevDoneContinuation`: `should_continue`, `continue_`, `message`, `_explain` | One `case` in `_explain`, with the concrete improvement and original constraints in Failed checks and Focus. |
 | `vidbyte/agents/jev/continuation/base.py` | `JevContinuation` ABC | Nothing, unless you are writing a new continuation kind. |
-| `vidbyte/agents/jev/settings.py` | `JevContinualSettings` (`checks`, `max_continuations`, limits) | Usually nothing, because `checks` already accepts every registered member. |
+| `vidbyte/agents/jev/settings.py` | `JevContinuationGateSettings` (`checks`, `max_continuations`, limits) | Usually nothing, because `checks` already accepts every registered member. |
 | `vidbyte/agents/jev/runtime.py`, `agent.py` | Wiring | **Nothing.** A check never touches the runtime. |
-| `vidbyte/agents/jev/response.py` | `JevResponse` (`run_state`, `handoff`, `done`, `continued`) | Nothing. `done` is keyed by check. |
+| `vidbyte/agents/jev/response.py` | `JevResponse` (`run_state`, `handoff`, `continuation_gates`, `continued`) | Nothing. `continuation_gates` is keyed by check. |
 | `vidbyte/prompts/prompts/jev_run_state/`, `jev_handoff/` | General system prompts | **Nothing.** They must stay check-agnostic, and a test enforces this. |
 | `vidbyte/prompts/prompts/jev_continuation/continue_prompt.md` | The continuation message template | Nothing. Its Goal and Instructions are check-agnostic; your gate description and `_explain` fill `{failed}` and `{focus}`. |
 | `vidbyte/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/agents/jev/__init__.py` | Public exports | Export new records a user reads on `JevAgent.response`, as `JevDeliverable` is exported. |
@@ -120,7 +120,7 @@ The reviews on #470 rejected "one class per shape". The design is one general ag
 Work through the steps in order. Each is explained in detail below.
 
 - [ ] 1. Design the check in product terms: its items, its evidence, its question, and the action for every outcome.
-- [ ] 2. Add the `JevDoneCheck` member and its `JevDoneQuestionKey`.
+- [ ] 2. Add the `JevContinuationGate` member and its `JevDoneQuestionKey`.
 - [ ] 3. Write a run-state section payload when the check's items are knowable from the request before work; post-run-derived items such as CLAIMS omit it.
 - [ ] 4. Write the handoff evidence section payload (a `JevSectionPayload` subclass).
 - [ ] 5. Add frozen records and optional fields only to the top-level records that carry the check's payloads.
@@ -164,7 +164,7 @@ A check that judges the run as a whole still fits this model: it has one item wi
 
 The `CLAIMS` check is the exception to the usual pre-run item list. Its items are the concrete, checkable factual assertions in the main agent's final answer, so they cannot be truthfully written from the user's request before work begins. Do not add a claims list to `JevRunStateRecord` or ask the run-state writer to predict what the main agent will say. Instead, `JevHandoff` extracts rich parent claims at each finish attempt, separates independently checkable assertions, and pairs each parent with relevant `ToolCallContextItem` evidence or an explicit statement that no supporting call exists. The handoff creates one question per assertion, and code later combines those answers under their parent claim.
 
-The state entry for each assertion uses five named context sections. The five sections give Jev a compact, consistent frame for what the answer claimed, what the claim covers, what kind of fact is involved, what result is named, and which single assertion is being checked. The handoff may contain several assertions for one parent claim, but each Jev state entry repeats the parent's context and contains only one assertion. The question names a `parent_id.assertion_id` reference, and the answer is keyed by that same reference. Code marks the parent claim incomplete if any of its assertions falls below the CLAIMS threshold; `JevDoneResult.answers` remains assertion-keyed while `incomplete` remains parent-keyed.
+The state entry for each assertion uses five named context sections. The five sections give Jev a compact, consistent frame for what the answer claimed, what the claim covers, what kind of fact is involved, what result is named, and which single assertion is being checked. The handoff may contain several assertions for one parent claim, but each Jev state entry repeats the parent's context and contains only one assertion. The question names a `parent_id.assertion_id` reference, and the answer is keyed by that same reference. Code marks the parent claim incomplete if any of its assertions falls below the CLAIMS threshold; `JevContinuationGateResult.answers` remains assertion-keyed while `incomplete` remains parent-keyed.
 
 The structured handoff shape is:
 
@@ -239,7 +239,7 @@ The failure is checked against the original request-derived amount even when the
 This check uses only the handoff because the premises and dependent work are known from the complete run, not the original request. Keep each explicit consequential assumption that later concrete evidence contradicted or materially changed, including cases where dependent work was revised, left untouched, abandoned, or made irrelevant. The projection gives Jev the original assumption and basis, later observation, affected work, revision, and run evidence; the handoff's `missing` note stays in continuation feedback. Score each candidate independently at its registered threshold. An empty item list asks no question and passes; uncertainty, lack of verification, and plan changes alone are not candidates. On failure, focus only on the incomplete premise and do not demand a generic repair or validation ritual when the run already shows reconciliation.
 
 ```python
-class JevDoneCheck(str, Enum):
+class JevContinuationGate(str, Enum):
     MULTI_PART = "multi_part"
     <CHECK> = "<check>"            # the value is the section field name in both schemas
 
@@ -249,7 +249,7 @@ class JevDoneQuestionKey(str, Enum):
 ```
 
 - The member's **value** becomes the field name of the section in the schema that carries the check's items (`check.value` in `schema()`). Request-derived checks use both schemas; CLAIMS uses the handoff schema because its items are created from the final answer.
-- `JevDoneCheck` is already exported from `vidbyte/lib/enums/__init__.py` and `vidbyte`, so users can enable the check the moment it is registered.
+- `JevContinuationGate` is already exported from `vidbyte/lib/enums/__init__.py` and `vidbyte`, so users can enable the check the moment it is registered.
 - Schema tests assert that each check is registered in the schema that carries its items. The run-state and handoff maps intentionally differ for CLAIMS.
 
 ### Step 3: The run-state section subclass (`vidbyte/lib/dataclasses/jev.py`)
@@ -350,7 +350,7 @@ class JevHandoffRecord:
 
 - `JEV_<CHECK>_THRESHOLD: float`, with a comment explaining that the value is used as both the mean threshold and the veto, and that it is a starting point, not a tuned value (strategy 25).
 - One `JEV_DONE_<NAME>_FIELD: str` for every **new** key your check puts into the shared Jev state. Reuse `JEV_DONE_REQUEST_FIELD` and `JEV_DONE_EVIDENCE_FIELD` where the meaning is identical. Add each name to `__all__`.
-- A per-check calibration value stays a constant. Promote it to a `JevContinualSettings` field only when users need to tune it, and then validate it in `__post_init__` as the existing limits are.
+- A per-check calibration value stays a constant. Promote it to a `JevContinuationGateSettings` field only when users need to tune it, and then validate it in `__post_init__` as the existing limits are.
 
 ### Step 7: Write the Jev question (`vidbyte/lib/jev/done/<check>.py`, new file)
 
@@ -397,24 +397,24 @@ Run the "Checklist before you ship a question" in `asking-jev-questions` before 
 ### Step 8: Register it (`vidbyte/lib/jev/done/done.py`, `__init__.py`, `README.md`)
 
 ```python
-_questions = MappingProxyType({JevDoneCheck.MULTI_PART: MultiPartDeliveredQuestion(), JevDoneCheck.<CHECK>: <Check><Property>Question()})
-_thresholds = MappingProxyType({JevDoneCheck.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevDoneCheck.<CHECK>: JEV_<CHECK>_THRESHOLD})
+_questions = MappingProxyType({JevContinuationGate.MULTI_PART: MultiPartDeliveredQuestion(), JevContinuationGate.<CHECK>: <Check><Property>Question()})
+_thresholds = MappingProxyType({JevContinuationGate.MULTI_PART: JEV_MULTI_PART_THRESHOLD, JevContinuationGate.<CHECK>: JEV_<CHECK>_THRESHOLD})
 ```
 
-`JevDoneRegistry.validate` runs when `JevContinualSettings` is constructed. It rejects an unknown check, a repeated check, a bare string, and a check with no registered question or threshold. That is the only "settings" work a new check needs. Export the question class from `vidbyte/lib/jev/done/__init__.py`, and add a bullet for your module to `vidbyte/lib/jev/done/README.md`.
+`JevDoneRegistry.validate` runs when `JevContinuationGateSettings` is constructed. It rejects an unknown check, a repeated check, a bare string, and a check with no registered question or threshold. That is the only "settings" work a new check needs. Export the question class from `vidbyte/lib/jev/done/__init__.py`, and add a bullet for your module to `vidbyte/lib/jev/done/README.md`.
 
 ### Step 9: The `_SECTIONS` maps and `_record` conversions
 
 `vidbyte/agents/jev/done/run_state.py`:
 
 ```python
-_SECTIONS = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.<CHECK>: <Check>Payload})
+_SECTIONS = MappingProxyType({JevContinuationGate.MULTI_PART: JevMultiPartPayload, JevContinuationGate.<CHECK>: <Check>Payload})
 ```
 
 `vidbyte/agents/jev/done/handoff.py`:
 
 ```python
-_SECTIONS = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.<CHECK>: <Check>EvidencePayload})
+_SECTIONS = MappingProxyType({JevContinuationGate.MULTI_PART: JevMultiPartEvidencePayload, JevContinuationGate.<CHECK>: <Check>EvidencePayload})
 ```
 
 The run-state map contains only checks whose items are known before work; the handoff map contains every check. Each schema adds `check.value: (payload, Field(description=payload.SECTION))` for every enabled check it carries, so users never pay for disabled sections. For CLAIMS, add no run-state section.
@@ -431,8 +431,8 @@ Every enabled check's questions go to Jev in **one** `JevDecisionRequest` per fi
 ```python
 def _section(self, check, handoff):
     handlers = {
-        JevDoneCheck.MULTI_PART: self._multi_part_section,
-        JevDoneCheck.<CHECK>: self._<check>_section,
+        JevContinuationGate.MULTI_PART: self._multi_part_section,
+        JevContinuationGate.<CHECK>: self._<check>_section,
     }
     handler = handlers.get(check)
     return ({}, ()) if handler is None else handler(handoff)
@@ -442,7 +442,7 @@ def _<check>_section(self, handoff):
     state = None if self.record is None else self.record.<check>
     if state is None or handoff.<check> is None:
         return {}, ()                                        # nothing to ask → _judge handles it
-    question = JevDoneRegistry.question(JevDoneCheck.<CHECK>)
+    question = JevDoneRegistry.question(JevContinuationGate.<CHECK>)
     evidence = {item.id: item.evidence for item in handoff.<check>.items}   # evidence only, never `missing`
     entries = {item.id: {JEV_DONE_<A>_FIELD: item.<a>, JEV_DONE_EVIDENCE_FIELD: evidence[item.id]} for item in state.items}
     return {JEV_DONE_<ITEMS>_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
@@ -493,12 +493,12 @@ Before you ship:
 ```python
 def _judge(self, check, handoff, decision):
     handlers = {
-        JevDoneCheck.MULTI_PART: self._multi_part,
-        JevDoneCheck.<CHECK>: self._<check>,
+        JevContinuationGate.MULTI_PART: self._multi_part,
+        JevContinuationGate.<CHECK>: self._<check>,
     }
     handler = handlers.get(check)
     if handler is None:
-        return JevDoneResult(check=check, score=None, available=False)
+        return JevContinuationGateResult(check=check, score=None, available=False)
     return handler(handoff, decision)
 
 def _<check>(self, handoff, decision):
@@ -506,20 +506,20 @@ def _<check>(self, handoff, decision):
     ...
 ```
 
-`_<check>` must return a `JevDoneResult` on **every** path. Copy the order of `_multi_part`, and comment each step:
+`_<check>` must return a `JevContinuationGateResult` on **every** path. Copy the order of `_multi_part`, and comment each step:
 
-1. There is no required run-state section, no handoff, or no handoff section: return `JevDoneResult(check=…, score=None, available=False)`. Dynamic checks such as CLAIMS require the handoff section but no run-state section. The check fails open, and `passed` stays True.
-2. There are no items: return `JevDoneResult(check=…, score=None)`. Nothing was asked, so the check passes.
+1. There is no required run-state section, no handoff, or no handoff section: return `JevContinuationGateResult(check=…, score=None, available=False)`. Dynamic checks such as CLAIMS require the handoff section but no run-state section. The check fails open, and `passed` stays True.
+2. There are no items: return `JevContinuationGateResult(check=…, score=None)`. Nothing was asked, so the check passes.
 3. `decision is None`, because Jev failed or no credentials were set: `available=False`, fail open.
 4. Pick out this check's answers from the **combined** reply: `{id: decision.answers[question.name(id)] for id in state.ids() if question.name(id) in decision.answers}`. The reply holds every check's answers, and the name prefix is what separates them.
 5. Call `DecisionModelRunner.score_noul(answers, state.ids(), threshold, threshold)`, where the threshold is also the veto. `None` means an answer was missing: `available=False`.
 6. `incomplete` is the ids whose P(yes) (`probabilities[JEV_NOUL_TRUE]`) is below the threshold. These are exactly what the continuation will name.
 7. `usage = JevUsage.from_usage_payload(decision.usage or {})`. This is the usage of the one batched request, so every check reports the same usage. Never sum it across checks.
-8. Return `JevDoneResult(check=…, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)`.
+8. Return `JevContinuationGateResult(check=…, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)`.
 
 For CLAIMS, use `handoff.claims.assertion_ids()` as the expected answer ids in steps 2, 4, and 5. The check passes when that assertion-id list is empty and asks no question in that case. Keep `answers` keyed by each `parent_id.assertion_id` reference, but set `incomplete` to parent claim ids when any assertion under that parent falls below threshold. Return unavailable if the handoff section or any expected Jev answer is missing.
 
-`check()` then records each result through `self.response.done(result)` and returns only the failed ones. You do not touch `check()`.
+`check()` then records each result through `self.response.continuation_gate(result)` and returns only the failed ones. You do not touch `check()`.
 
 ### Step 13: What the main agent receives (`JevDoneContinuation._explain`)
 
@@ -551,7 +551,7 @@ Register a typed `_explain_<check>` helper in `_explain`'s handler map. The help
 ```python
 def _explain_<check>(self, result):
     # <comment: what the main agent reads for this check and why>
-    question = JevDoneRegistry.question(JevDoneCheck.<CHECK>)
+    question = JevDoneRegistry.question(JevContinuationGate.<CHECK>)
     state = None if self.run_state.record is None else self.run_state.record.<check>
     handoff = None if self.run_state.handoff is None else self.run_state.handoff.<check>
     items = {} if state is None else {item.id: item for item in state.items}
@@ -575,7 +575,7 @@ def _explain_<check>(self, result):
 On the next finish attempt the whole cycle repeats:
 
 - `JevHandoff` clears its history and recompiles evidence from the now longer window.
-- Every enabled check is asked again, and `JevAgent.response.done` holds the latest results.
+- Every enabled check is asked again, and `JevAgent.response.continuation_gates` holds the latest results.
 - After `max_continuations`, the latest verdict stays on the response and the main agent's answer stands. With `max_continuations=0` the checks still run and report, but they never send the agent back.
 
 ### Step 14: What you leave alone
@@ -583,9 +583,9 @@ On the next finish attempt the whole cycle repeats:
 Confirm your diff does **not** touch any of these:
 
 - **`JevRuntime`** (`runtime.py`). It only asks `should_continue` and then calls `continue_`. The `@intent continuation-logic-lives-in-the-continuation` comment exists because a reviewer asked for exactly that split.
-- **`JevAgent.__init__`**. It already builds `JevRunState` and `JevDoneContinuation` whenever `continual.checks` is non-empty.
-- **`JevContinualSettings`** and **`JevRuntimeSettings`**. `checks` already validates through the registry.
-- **`JevResponse`**. `done` is keyed by `JevDoneCheck`.
+- **`JevAgent.__init__`**. It already builds `JevRunState` and `JevDoneContinuation` whenever `continual.enabled` is non-empty.
+- **`JevContinuationGateSettings`** and **`JevRuntimeSettings`**. `checks` already validates through the registry.
+- **`JevResponse`**. `continuation_gates` is keyed by `JevContinuationGate`.
 - **The run-state and handoff system prompts**. `test_prompts_are_general_not_multi_part_specific` forbids check-specific words in them. Your check's instructions live in `SECTION` and the field descriptions.
 
 ### Step 15: Exports, tests, docs
@@ -638,7 +638,7 @@ Your change must not raise any lint baseline count.
 - **A terminal signal cannot replace an incompatible explicit count.** When the request explicitly requires N units but the handoff's visited identifiers have a different or unknown unit type, code cannot verify N; even affirmative end-of-results evidence leaves that obligation incomplete. Terminal evidence is an alternative boundary only when the request did not state a total.
 - **A readable trace that does not establish exhaustion is incomplete.** An unknown total requires affirmative source end-of-results evidence; a first page, sample, search snippet, failed retrieval, or absence of a next-page call cannot establish completion. An outstanding cursor or failed fetch is concrete incompleteness. Return an unavailable result only when the run state, handoff, Jev request, or expected answers are missing or unusable, preserving the usual fail-open behavior.
 - **Everything fails open.** Every failure path in `_judge` returns `available=False`, and an unavailable check never continues the run.
-- **Continuations are bounded** by `JevContinualSettings.max_continuations` (default `JEV_DONE_MAX_CONTINUATIONS` = 3), and `0` means report only.
+- **Continuations are bounded** by `JevContinuationGateSettings.max_continuations` (default `JEV_DONE_MAX_CONTINUATIONS` = 3), and `0` means report only.
 - **The continuation appends to the same loop.** It never re-runs the main agent, which would lose its history.
 - **Outcomes reach the caller through `JevAgent.response`** (`run_state`, `handoff`, `done[check]`, `continuations`), never through result metadata.
 - **Placement is enforced.** Enums go in `lib/enums/jev.py`, records and payloads in `lib/dataclasses/jev.py`, constants in `lib/constants/jev.py`, and questions in `lib/jev/done/`. Logic goes in `agents/jev/done/` and `agents/jev/continuation/`.
@@ -665,7 +665,7 @@ Write a new subclass in its own module under `continuation/` **only** when the r
 - Record its outcomes through a new `JevResponse` method.
 - Give it its own settings field. That field lives in `vidbyte/agents/jev/settings.py`, because agent settings are the one exception to the dataclass placement rule.
 
-`JevContinualSettings.gate="fresh"` is a clean-context path for the existing done-check trigger: after a check fails, it gives a new agent the original request, run state, and handoff with the fresh-continuation prompt, then appends that agent's response to the main loop. It uses the existing continuation limit and fails open if the state, handoff, or fresh response is unavailable.
+`JevContinuationGateSettings.same_context=False` is a clean-context path for the existing done-check trigger: after a check fails, it gives a new agent the original request, run state, and handoff with the fresh-continuation prompt, then appends that agent's response to the main loop. It uses the existing continuation limit and fails open if the state, handoff, or fresh response is unavailable.
 
 A new kind of done check never needs a new continuation class, because `JevDoneContinuation` already runs every enabled check.
 

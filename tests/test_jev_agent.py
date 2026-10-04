@@ -22,12 +22,15 @@ from unittest.mock import patch
 from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent as RootJevAgent
 from vidbyte import JevAgentSettings as RootJevAgentSettings
+from vidbyte import JevContinuationGate as RootJevContinuationGate
+from vidbyte import JevContinuationGateResult as RootJevContinuationGateResult
+from vidbyte import JevContinuationGateSettings as RootJevContinuationGateSettings
 from vidbyte import JevRuntime as RootJevRuntime
 from vidbyte import JevRuntimeSettings as RootJevRuntimeSettings
 from vidbyte import JevSpecialist as RootJevSpecialist
 from vidbyte import VidbyteSDK, tool
 from vidbyte.agents import BaseAgent
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime, JevRuntimeSettings, JevSpecialist
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevContinuationGateSettings, JevRuntime, JevRuntimeSettings, JevSpecialist
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.settings import AgentLoopSettings
@@ -481,6 +484,13 @@ class JevPublicApiTests(unittest.TestCase):
         self.assertIs(RootJevRuntime, JevRuntime)
         self.assertIs(RootJevRuntimeSettings, JevRuntimeSettings)
         self.assertIs(RootJevSpecialist, JevSpecialist)
+        self.assertIs(RootJevContinuationGateSettings, JevContinuationGateSettings)
+
+    def test_new_continuation_gate_types_and_response_map_are_public(self) -> None:
+        self.assertEqual(RootJevContinuationGate.MULTI_PART.value, "multi_part")
+        self.assertEqual(RootJevContinuationGateResult.__name__, "JevContinuationGateResult")
+        response = JevAgent(_settings()).response
+        self.assertEqual(response.continuation_gates, {})
 
     def test_sdk_namespace_constructs_jev_agent(self) -> None:
         # [Silent Failure] the root namespace client exposes the opinionated constructor.

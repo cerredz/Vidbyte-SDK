@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/continuation/fresh.py
 
 PURPOSE: Implements the opt-in fresh-context continuation: when a done check fails, it sends the original request, run state, and handoff to a clean agent context, then returns that work to JevAgent's main loop.
-ROLE IN CODEBASE: JevAgent builds this continuation when JevContinualSettings.gate is FRESH; JevRuntime calls it at the same finish-attempt seam as JevDoneContinuation.
+ROLE IN CODEBASE: JevAgent builds this continuation when JevContinuationGateSettings.gate is FRESH; JevRuntime calls it at the same finish-attempt seam as JevDoneContinuation.
 ARCHITECTURE NOTE: The clean agent uses the configured JevAgent model, tools, and policy but has a fresh history; the existing loop receives its response as the next user message.
 COMMON MODIFICATION PATTERNS: Keep the context template in vidbyte/prompts/prompts/jev_fresh_continuation/ and preserve the existing done-check trigger and continuation cap.
 KNOWN EDGE CASES: A missing state, handoff, failed done check, exhausted limit, or fresh-agent error leaves the original answer in place.
@@ -18,7 +18,7 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.continuation.done import JevDoneContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
-from vidbyte.agents.jev.settings import JevContinualSettings
+from vidbyte.agents.jev.settings import JevContinuationGateSettings
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import JevContinuationEvidence
 from vidbyte.lib.dataclasses.tools import ToolCallContext
@@ -31,7 +31,7 @@ from vidbyte.prompts.catalog import Prompts
 class JevFreshContinuation(JevDoneContinuation):
     """Continue failed done checks through an agent with a clean context window."""
 
-    def __init__(self, run_state: JevRunState, continual: JevContinualSettings, response: JevResponse, fresh_agent_factory: Callable[[], BaseAgent]) -> None:
+    def __init__(self, run_state: JevRunState, continual: JevContinuationGateSettings, response: JevResponse, fresh_agent_factory: Callable[[], BaseAgent]) -> None:
         # Reuses the done-check state, cap, response writer, and faithful-scope budget policy while creating each fresh agent per attempt.
         super().__init__(run_state, continual, response)
         self.fresh_agent_factory = fresh_agent_factory

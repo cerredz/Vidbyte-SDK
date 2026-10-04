@@ -2,7 +2,7 @@
 
 PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run enabled checks, and on failure it sends the original request, run state, handoff, failed Jev questions, and focused missing work back to the main agent.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; it opens with general Goal and Instructions sections, and under Failed checks each failed check renders its JevDoneRegistry.description() (shared with the fresh continuation) followed by what its own helper in _explain() found. Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned; changed-assumption feedback names only failed premises and their dependent work. The cap on continuations is JevContinualSettings.max_continuations.
+ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; it opens with general Goal and Instructions sections, and under Failed checks each failed check renders its JevDoneRegistry.description() (shared with the fresh continuation) followed by what its own helper in _explain() found. Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned; changed-assumption feedback names only failed premises and their dependent work. The cap on continuations is JevContinuationGateSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
 RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
@@ -17,7 +17,7 @@ from typing import Any
 from vidbyte.agents.jev.continuation.base import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
-from vidbyte.agents.jev.settings import JevContinualSettings
+from vidbyte.agents.jev.settings import JevContinuationGateSettings
 from vidbyte.lib.constants.jev import (
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_DONE_COMPLETION_ITEM_ID,
@@ -31,13 +31,13 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimEvidence,
     JevCompletionEvidence,
     JevDoneQuestion,
-    JevDoneResult,
+    JevContinuationGateResult,
     JevProblemResolutionItem,
     JevRequiredAction,
     JevRequiredActionEvidence,
 )
 from vidbyte.lib.enums.jev import (
-    JevDoneCheck,
+    JevContinuationGate,
     JevDoneQuestionKey,
     JevProblemCheckItemType,
 )
@@ -57,22 +57,22 @@ def _event_position(event_id: str) -> int:
 class JevDoneContinuation(JevContinuation):
     """Continuation that sends the main agent back to finish what a failed done check found missing."""
 
-    def __init__(self, run_state: JevRunState, continual: JevContinualSettings, response: JevResponse) -> None:
+    def __init__(self, run_state: JevRunState, continual: JevContinuationGateSettings, response: JevResponse) -> None:
         # Fixes the done checks' run state, the continuation cap, and the response writer when JevAgent is built.
         self.run_state = run_state
         self.max_continuations = continual.max_continuations
-        self.continual = continual
+        self.settings = continual
         self.response = response
-        self.failed: tuple[JevDoneResult, ...] = ()
+        self.failed: tuple[JevContinuationGateResult, ...] = ()
 
     def budget_extension(self) -> tuple[int, int, int]:
         """Grant the configured bounded extension only when faithful-scope evidence failed."""
-        if not any(result.check is JevDoneCheck.FAITHFUL_SCOPE for result in self.failed):
+        if not any(result.check is JevContinuationGate.FAITHFUL_SCOPE for result in self.failed):
             return 0, 0, 0
         return (
-            self.continual.faithful_scope_extra_iterations,
-            self.continual.faithful_scope_extra_tokens,
-            self.continual.faithful_scope_extra_tool_calls,
+            self.settings.faithful_scope_extra_iterations,
+            self.settings.faithful_scope_extra_tokens,
+            self.settings.faithful_scope_extra_tool_calls,
         )
 
     async def should_continue(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> bool:
@@ -107,7 +107,7 @@ class JevDoneContinuation(JevContinuation):
         )
 
     @staticmethod
-    def _failed_check(check: JevDoneCheck, failed: str) -> str:
+    def _failed_check(check: JevContinuationGate, failed: str) -> str:
         """Render one failed check: its heading, its shared gate description, then its failed Jev questions."""
         # @intent each-failed-check-is-explained-before-its-questions
         # The owner asked for every failed check to open with paragraphs on what follows and what its failed Jev
@@ -116,38 +116,38 @@ class JevDoneContinuation(JevContinuation):
         title = check.value.replace("_", " ").title()
         return f"## {title}\n\n{JevDoneRegistry.description(check)}\n\nWhat the check found:\n{failed}"
 
-    def _explain(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # @intent each-failed-check-keeps-its-own-feedback
         # One typed formatter per check keeps feedback aligned with that check's evidence and gap rules.
-        handlers: Mapping[JevDoneCheck, Callable[[JevDoneResult], tuple[str, str]]] = {
-            JevDoneCheck.MULTI_PART: self._explain_multi_part,
-            JevDoneCheck.CAN_SIMPLIFY: self._explain_can_simplify,
-            JevDoneCheck.CLAIMS: self._explain_claims,
-            JevDoneCheck.COMPLETION_EVIDENCE: self._explain_completion_evidence,
-            JevDoneCheck.PHASE_PROGRESS: self._explain_phase_progress,
-            JevDoneCheck.TARGET_OUTCOME: self._explain_target_outcome,
-            JevDoneCheck.SCOPE_COVERAGE: self._explain_scope_coverage,
-            JevDoneCheck.MOTIVATING_CASE: self._explain_motivating_case,
-            JevDoneCheck.PROBLEMS_RESOLVED: self._explain_problems_resolved,
-            JevDoneCheck.INPUT_SET_COVERAGE: self._explain_input_set_coverage,
-            JevDoneCheck.OUTPUT_COUNT: self._explain_output_count,
-            JevDoneCheck.OUTPUT_EXTENT: self._explain_output_extent,
-            JevDoneCheck.REPORT_ACTION_ALIGNMENT: self._explain_report_action_alignment,
-            JevDoneCheck.ASSUMPTIONS_RECONCILED: self._explain_assumptions_reconciled,
-            JevDoneCheck.INPUT_EXHAUSTION: self._explain_input_exhaustion,
-            JevDoneCheck.NEGATIVE_COVERAGE: self._explain_negative_coverage,
-            JevDoneCheck.GUARANTEED_NEXT_ACTIONS: self._explain_guaranteed_next_actions,
-            JevDoneCheck.REQUIRED_ACTIONS: self._explain_required_actions,
-            JevDoneCheck.CUMULATIVE_OBLIGATIONS: self._explain_cumulative_obligations,
-            JevDoneCheck.DISCOVERED_ITEM_COVERAGE: self._explain_discovered_items,
-            JevDoneCheck.FAITHFUL_SCOPE: self._explain_faithful_scope,
-            JevDoneCheck.EXPERT_DEPTH: self._explain_expert_depth,
-            JevDoneCheck.SELF_REVIEW: self._explain_self_review,
-            JevDoneCheck.REQUIRED_SEQUENCE: self._explain_required_sequence,
+        handlers: Mapping[JevContinuationGate, Callable[[JevContinuationGateResult], tuple[str, str]]] = {
+            JevContinuationGate.MULTI_PART: self._explain_multi_part,
+            JevContinuationGate.CAN_SIMPLIFY: self._explain_can_simplify,
+            JevContinuationGate.CLAIMS: self._explain_claims,
+            JevContinuationGate.COMPLETION_EVIDENCE: self._explain_completion_evidence,
+            JevContinuationGate.PHASE_PROGRESS: self._explain_phase_progress,
+            JevContinuationGate.TARGET_OUTCOME: self._explain_target_outcome,
+            JevContinuationGate.SCOPE_COVERAGE: self._explain_scope_coverage,
+            JevContinuationGate.MOTIVATING_CASE: self._explain_motivating_case,
+            JevContinuationGate.PROBLEMS_RESOLVED: self._explain_problems_resolved,
+            JevContinuationGate.INPUT_SET_COVERAGE: self._explain_input_set_coverage,
+            JevContinuationGate.OUTPUT_COUNT: self._explain_output_count,
+            JevContinuationGate.OUTPUT_EXTENT: self._explain_output_extent,
+            JevContinuationGate.REPORT_ACTION_ALIGNMENT: self._explain_report_action_alignment,
+            JevContinuationGate.ASSUMPTIONS_RECONCILED: self._explain_assumptions_reconciled,
+            JevContinuationGate.INPUT_EXHAUSTION: self._explain_input_exhaustion,
+            JevContinuationGate.NEGATIVE_COVERAGE: self._explain_negative_coverage,
+            JevContinuationGate.GUARANTEED_NEXT_ACTIONS: self._explain_guaranteed_next_actions,
+            JevContinuationGate.REQUIRED_ACTIONS: self._explain_required_actions,
+            JevContinuationGate.CUMULATIVE_OBLIGATIONS: self._explain_cumulative_obligations,
+            JevContinuationGate.DISCOVERED_ITEM_COVERAGE: self._explain_discovered_items,
+            JevContinuationGate.FAITHFUL_SCOPE: self._explain_faithful_scope,
+            JevContinuationGate.EXPERT_DEPTH: self._explain_expert_depth,
+            JevContinuationGate.SELF_REVIEW: self._explain_self_review,
+            JevContinuationGate.REQUIRED_SEQUENCE: self._explain_required_sequence,
         }
         return handlers[result.check](result)
 
-    def _explain_required_sequence(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_required_sequence(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Name each stage that lacks shown work, dependency evidence, or strict event order."""
         state = None if self.run_state.record is None else self.run_state.record.required_sequence
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.required_sequence
@@ -170,9 +170,9 @@ class JevDoneContinuation(JevContinuation):
             previous_answer = result.answers.get(f"{stage_id}.uses_previous_output")
             if not item.observed_work:
                 failed.append(f"- {stage.label()} has no recorded work.")
-            elif work_answer is not None and work_answer.probabilities.get(JEV_NOUL_TRUE, 0.0) < JevDoneRegistry.threshold(JevDoneCheck.REQUIRED_SEQUENCE):
+            elif work_answer is not None and work_answer.probabilities.get(JEV_NOUL_TRUE, 0.0) < JevDoneRegistry.threshold(JevContinuationGate.REQUIRED_SEQUENCE):
                 failed.append(f"- {work_question.instructions.question.format(item=stage_id)} Jev's answer: no.")
-            elif previous_answer is not None and previous_answer.probabilities.get(JEV_NOUL_TRUE, 0.0) < JevDoneRegistry.threshold(JevDoneCheck.REQUIRED_SEQUENCE):
+            elif previous_answer is not None and previous_answer.probabilities.get(JEV_NOUL_TRUE, 0.0) < JevDoneRegistry.threshold(JevContinuationGate.REQUIRED_SEQUENCE):
                 failed.append(f"- {previous_question.instructions.question.format(item=stage_id)} Jev's answer: no.")
             else:
                 previous_index = stage.position - 2
@@ -191,9 +191,9 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- {stage.label()}: {stage.completion_criterion} Still missing or uncertain: {missing} Finish this stage before moving to later stages.")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_self_review(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_self_review(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Return unresolved reviewer objections in their original severity order."""
-        resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+        resolved, in_scope = JevDoneRegistry.questions(JevContinuationGate.SELF_REVIEW)
         review = self.run_state.review
         handoff_record = self.run_state.handoff
         handoff = None if handoff_record is None else handoff_record.self_review
@@ -213,9 +213,9 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- A strict reviewer would reject this: {objection.objection} Accept when: {objection.resolved_when}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_faithful_scope(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_faithful_scope(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Keep continuation feedback focused on the saved hard part and its evidence gap."""
-        question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+        question = JevDoneRegistry.question(JevContinuationGate.FAITHFUL_SCOPE)
         answer = result.answers.get(JEV_DONE_HARD_PART_FIELD)
         probability = None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
         answer_text = "Jev's answer was unavailable." if probability is None else f"Jev's answer: no (P(yes) = {probability:.2f})."
@@ -234,9 +234,9 @@ class JevDoneContinuation(JevContinuation):
 
     # @intent go-deep-on-the-weakest-few
     # List every shallow point weakest first, but focus the next round on only the weakest few; it will re-rank after more work.
-    def _explain_expert_depth(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_expert_depth(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Keep the failed-point list complete while concentrating recovery on its weakest details."""
-        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        question = JevDoneRegistry.question(JevContinuationGate.EXPERT_DEPTH)
         record = self.run_state.record
         state = None if record is None else record.expert_depth
         handoff_record = self.run_state.handoff
@@ -259,14 +259,14 @@ class JevDoneContinuation(JevContinuation):
 
     # @intent discovered-inventory-and-item-gaps-stay-separate
     # Source inventory failures need the original bounded output, while item failures need the specific requested action still missing.
-    def _explain_discovered_items(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_discovered_items(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Describe each failed source inventory or discovered item with its own evidence and recovery focus."""
         handoff = self.run_state.handoff
         evidence = None if handoff is None else handoff.discovered_item_coverage
         batches = {} if evidence is None else {batch.source_id: batch for batch in evidence.batches}
         items = {} if evidence is None else {item.id: item for item in evidence.items()}
-        item_question = JevDoneRegistry.question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
-        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.DISCOVERED_ITEM_COVERAGE)
+        item_question = JevDoneRegistry.question(JevContinuationGate.DISCOVERED_ITEM_COVERAGE)
+        inventory_question = JevDoneRegistry.inventory_question(JevContinuationGate.DISCOVERED_ITEM_COVERAGE)
         failed = [item_question.gap]
         focus = []
         for identifier in result.incomplete:
@@ -283,10 +283,10 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- {item.identity}. Requested: {item.requested_processing} Done when: {item.completion_criteria}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_cumulative_obligations(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_cumulative_obligations(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Name only failed obligations or user-turn inventories and reconnect them to the user's words."""
-        question = JevDoneRegistry.question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
-        inventory_question = JevDoneRegistry.inventory_question(JevDoneCheck.CUMULATIVE_OBLIGATIONS)
+        question = JevDoneRegistry.question(JevContinuationGate.CUMULATIVE_OBLIGATIONS)
+        inventory_question = JevDoneRegistry.inventory_question(JevContinuationGate.CUMULATIVE_OBLIGATIONS)
         state = None if self.run_state.record is None else self.run_state.record.cumulative_obligations
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.cumulative_obligations
         obligations = {} if state is None else {item.id: item for item in state.obligations}
@@ -312,9 +312,9 @@ class JevDoneContinuation(JevContinuation):
                 focus.append(f"- Treat this earlier obligation as active because no supported cancellation or incompatible replacement is shown: {item.instruction} Done when: {item.completion_signal}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_guaranteed_next_actions(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_guaranteed_next_actions(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Focus only on candidates Jev found both necessary and unfinished."""
-        necessary, unfinished = JevDoneRegistry.questions(JevDoneCheck.GUARANTEED_NEXT_ACTIONS)
+        necessary, unfinished = JevDoneRegistry.questions(JevContinuationGate.GUARANTEED_NEXT_ACTIONS)
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.guaranteed_next_actions
         actions = {} if handoff is None else {item.id: item for item in handoff.actions}
         failed = [unfinished.gap]
@@ -333,9 +333,9 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- Requested outcome: {item.outcome}\n  Observed trigger: {item.trigger}\n  Necessary action: {item.action}\n  Evidence gap: {item.missing}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_required_actions(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_required_actions(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Focus feedback on explicitly requested actions that remain incomplete or out of order."""
-        question = JevDoneRegistry.question(JevDoneCheck.REQUIRED_ACTIONS)
+        question = JevDoneRegistry.question(JevContinuationGate.REQUIRED_ACTIONS)
         state = None if self.run_state.record is None else self.run_state.record.required_actions
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.required_actions
         actions = {} if state is None else {item.id: item for item in state.actions}
@@ -356,9 +356,9 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- Required action: {action.action} Completion condition: {action.completion_signal}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_negative_coverage(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_negative_coverage(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Name requested inspection targets whose reported conclusions lack run evidence."""
-        question = JevDoneRegistry.question(JevDoneCheck.NEGATIVE_COVERAGE)
+        question = JevDoneRegistry.question(JevContinuationGate.NEGATIVE_COVERAGE)
         state = None if self.run_state.record is None else self.run_state.record.negative_coverage
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.negative_coverage
         targets = {} if state is None else {item.id: item for item in state.inspections}
@@ -371,9 +371,9 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- Inspect the requested target: {target.target}. Evidence that meets the request: {target.inspection_signal}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_input_exhaustion(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_input_exhaustion(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Give each incomplete traversal's boundary, last position, and next action."""
-        question = JevDoneRegistry.question(JevDoneCheck.INPUT_EXHAUSTION)
+        question = JevDoneRegistry.question(JevContinuationGate.INPUT_EXHAUSTION)
         state = None if self.run_state.record is None else self.run_state.record.input_exhaustion
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.input_exhaustion
         obligations = {} if state is None else {item.id: item for item in state.collections}
@@ -388,9 +388,9 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- Collection: {item.collection}. Scope: {item.scope}. {position} Next step: {observation.next_step} Exhaustion condition: {item.exhaustion_condition}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_multi_part(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_multi_part(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # Keep each incomplete deliverable's answer, handoff gap, and request wording together.
-        question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
+        question = JevDoneRegistry.question(JevContinuationGate.MULTI_PART)
         state = None if self.run_state.record is None else self.run_state.record.multi_part
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.multi_part
         deliverables = {} if state is None else {item.id: item for item in state.deliverables}
@@ -403,9 +403,9 @@ class JevDoneContinuation(JevContinuation):
             focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_can_simplify(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_can_simplify(self, result: JevContinuationGateResult) -> tuple[str, str]:
         """Return the candidate and original preservation requirements as one failed prompt and one focus string."""
-        question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+        question = JevDoneRegistry.question(JevContinuationGate.CAN_SIMPLIFY)
         record = self.run_state.record
         state = None if record is None else record.can_simplify
         handoff_record = self.run_state.handoff
@@ -421,14 +421,14 @@ Preserve: {state.preserve}
 Apply this smaller approach: {evidence.missing}"""
         return failed, focus
 
-    def _explain_claims(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_claims(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # Keep unsupported assertions paired with their exact tool-call evidence and gap.
-        question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
+        question = JevDoneRegistry.question(JevContinuationGate.CLAIMS)
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.claims
         claims = {} if handoff is None else {item.id: item for item in handoff.claims}
         failed = [question.gap]
         focus = []
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.CLAIMS)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.CLAIMS)
         for claim_id in result.incomplete:
             item = claims[claim_id]
             assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
@@ -436,20 +436,20 @@ Apply this smaller approach: {evidence.missing}"""
             focus.extend(assertion_focus)
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_completion_evidence(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_completion_evidence(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # The final answer's overall completion status is a claim; show the run-evidence gap to correct it.
         item = None if self.run_state.handoff is None else self.run_state.handoff.completion_evidence
-        failed = [JevDoneRegistry.question(JevDoneCheck.COMPLETION_EVIDENCE).gap]
+        failed = [JevDoneRegistry.question(JevContinuationGate.COMPLETION_EVIDENCE).gap]
         if item is None:
             return "\n".join(failed), "Review the original request and make the final answer accurately reflect the work shown in the run."
         yes = result.answers[JEV_DONE_COMPLETION_ITEM_ID].probabilities[JEV_NOUL_TRUE]
         failed.append(f"- The final answer communicates {item.completion_status.value} status. Jev's answer: unsupported (P(yes) = {yes:.2f}). Still missing: {item.missing}")
         return "\n".join(failed), self._completion_focus(item)
 
-    def _explain_phase_progress(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_phase_progress(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # @intent phase-progress-focuses-only-failed-stages
         # Send back only required phases that lack evidence of substantive requested work.
-        question = JevDoneRegistry.question(JevDoneCheck.PHASE_PROGRESS)
+        question = JevDoneRegistry.question(JevContinuationGate.PHASE_PROGRESS)
         state = None if self.run_state.record is None else self.run_state.record.phase_progress
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.phase_progress
         stages = {} if state is None else {item.id: item for item in state.stages}
@@ -463,9 +463,9 @@ Apply this smaller approach: {evidence.missing}"""
             focus.append(f"- Requested stage: {stage.stage}. Required result: {stage.required_result}. Scope: {stage.request_scope}. Output criterion: {stage.output_criterion}.")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_target_outcome(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_target_outcome(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # Return only target outcomes Jev could not recognize in direct evidence, with the proxy and gap visible.
-        question = JevDoneRegistry.question(JevDoneCheck.TARGET_OUTCOME)
+        question = JevDoneRegistry.question(JevContinuationGate.TARGET_OUTCOME)
         state = None if self.run_state.record is None else self.run_state.record.target_outcome
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.target_outcome
         items = {} if state is None else {item.id: item for item in state.items}
@@ -488,9 +488,9 @@ Apply this smaller approach: {evidence.missing}"""
             )))
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_problems_resolved(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_problems_resolved(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # Name only failed dynamic items, with the handoff gap and repair/revalidation focus.
-        question = JevDoneRegistry.question(JevDoneCheck.PROBLEMS_RESOLVED)
+        question = JevDoneRegistry.question(JevContinuationGate.PROBLEMS_RESOLVED)
         evidence = None if self.run_state.handoff is None else self.run_state.handoff.problems_resolved
         items = {} if evidence is None else {item.id: item for item in evidence.items}
         failed = [question.gap]
@@ -504,8 +504,8 @@ Apply this smaller approach: {evidence.missing}"""
 
     # @intent input-target-feedback-is-limited-to-incomplete-targets
     # Keep the original boundary and each missing-work note beside only the target Jev did not recognize.
-    def _explain_input_set_coverage(self, result: JevDoneResult) -> tuple[str, str]:
-        question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
+    def _explain_input_set_coverage(self, result: JevContinuationGateResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevContinuationGate.INPUT_SET_COVERAGE)
         state = None if self.run_state.record is None else self.run_state.record.input_set_coverage
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.input_set_coverage
         targets = {} if state is None else {item.id: item for item in state.targets}
@@ -521,8 +521,8 @@ Apply this smaller approach: {evidence.missing}"""
 
     # @intent output-count-focus-names-only-incomplete-quantities
     # Keep the requested unit and group boundary beside only the counts Jev did not recognize.
-    def _explain_output_count(self, result: JevDoneResult) -> tuple[str, str]:
-        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+    def _explain_output_count(self, result: JevContinuationGateResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevContinuationGate.OUTPUT_COUNT)
         state = None if self.run_state.record is None else self.run_state.record.output_count
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.output_count
         obligations = {} if state is None else {item.id: item for item in state.obligations}
@@ -536,15 +536,15 @@ Apply this smaller approach: {evidence.missing}"""
             focus.append(f"- {item.description} Target: {item.target_count} {item.unit}; scope: {item.scope}; distinctness: {item.distinctness}. Done when: {item.completion_criteria}")
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_output_extent(self, result: JevDoneResult) -> tuple[str, str]:
-        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT)
+    def _explain_output_extent(self, result: JevContinuationGateResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevContinuationGate.OUTPUT_EXTENT)
         state = None if self.run_state.record is None else self.run_state.record.output_extent
         evidence = None if self.run_state.handoff is None else self.run_state.handoff.output_extent
         items = {} if state is None else {item.id: item for item in state.items}
         missing = {} if evidence is None else {item.id: item.missing for item in evidence.items}
         failed = [question.gap]
         focus = []
-        threshold = JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_EXTENT)
+        threshold = JevDoneRegistry.threshold(JevContinuationGate.OUTPUT_EXTENT)
         for identifier in result.incomplete:
             item = items[identifier]
             observed = self.run_state._observed_extent.get(identifier)
@@ -563,13 +563,13 @@ Apply this smaller approach: {evidence.missing}"""
             )
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_report_action_alignment(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_report_action_alignment(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # @intent a-report-mismatch-focuses-one-plan-item
         # A planned route is not a user requirement by itself; repair only a still-required outcome or an inaccurate account.
         # Only failed account comparisons are sent back, with the original request relevance and evidence gap.
         alignment = None if self.run_state.handoff is None else self.run_state.handoff.report_action_alignment
         candidates = {} if alignment is None else {item.id: item for item in alignment.items}
-        question = JevDoneRegistry.question(JevDoneCheck.REPORT_ACTION_ALIGNMENT)
+        question = JevDoneRegistry.question(JevContinuationGate.REPORT_ACTION_ALIGNMENT)
         failed = [question.gap]
         focus = []
         for identifier in result.incomplete:
@@ -586,11 +586,11 @@ Apply this smaller approach: {evidence.missing}"""
             )))
         return "\n".join(failed), "\n".join(focus)
 
-    def _explain_assumptions_reconciled(self, result: JevDoneResult) -> tuple[str, str]:
+    def _explain_assumptions_reconciled(self, result: JevContinuationGateResult) -> tuple[str, str]:
         # @intent changed-assumption-feedback-names-failed-premises
         # Keep continuation feedback scoped to failed items, with source context and the separate missing note.
         # Return only failed changed premises, with dependent work and the handoff's separate gap.
-        question = JevDoneRegistry.question(JevDoneCheck.ASSUMPTIONS_RECONCILED)
+        question = JevDoneRegistry.question(JevContinuationGate.ASSUMPTIONS_RECONCILED)
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.assumptions_reconciled
         assumptions = {} if handoff is None else {item.id: item for item in handoff.items}
         failed = [question.gap]
@@ -611,8 +611,8 @@ Apply this smaller approach: {evidence.missing}"""
 
     # @intent scope-coverage-focus-names-every-missing-member
     # An omitted workspace inventory is a separate gap from missing evidence for any member already enumerated.
-    def _explain_scope_coverage(self, result: JevDoneResult) -> tuple[str, str]:
-        question = JevDoneRegistry.question(JevDoneCheck.SCOPE_COVERAGE)
+    def _explain_scope_coverage(self, result: JevContinuationGateResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevContinuationGate.SCOPE_COVERAGE)
         state = None if self.run_state.record is None else self.run_state.record.scope_coverage
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.scope_coverage
         if state is None or handoff is None:
@@ -640,8 +640,8 @@ Apply this smaller approach: {evidence.missing}"""
 
     # @intent motivating-case-focus-names-only-failed-user-scenarios
     # The handoff gap and request-derived boundary details let the main agent exercise only the missing scenario.
-    def _explain_motivating_case(self, result: JevDoneResult) -> tuple[str, str]:
-        question = JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE)
+    def _explain_motivating_case(self, result: JevContinuationGateResult) -> tuple[str, str]:
+        question = JevDoneRegistry.question(JevContinuationGate.MOTIVATING_CASE)
         state = None if self.run_state.record is None else self.run_state.record.motivating_case
         handoff = None if self.run_state.handoff is None else self.run_state.handoff.motivating_case
         scenarios = {} if state is None else {item.id: item for item in state.scenarios}
@@ -673,7 +673,7 @@ Apply this smaller approach: {evidence.missing}"""
             return f"The run does not show successful completion of {', '.join(action.predecessors)} before {action.id} in the requested order."
         return ""
 
-    def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
+    def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevContinuationGateResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""
         failed = []
         focus = []

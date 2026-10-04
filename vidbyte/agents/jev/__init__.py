@@ -13,7 +13,7 @@ from vidbyte.agents.jev.agent import JevAgent
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
-    JevContinualSettings,
+    JevContinuationGateSettings,
     JevRuntimeSettings,
 )
 from vidbyte.lib.dataclasses.jev import (
@@ -42,7 +42,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevDiscoveredItem,
     JevDiscoveredItemBatch,
     JevDiscoveredItemEvidence,
-    JevDoneResult,
+    JevContinuationGateResult,
     JevExpertDepthDeliverable,
     JevExpertDetail,
     JevExpertDetailEvidence,
@@ -114,7 +114,6 @@ from vidbyte.lib.enums.jev import (
     JevClaimKind,
     JevCompletionStatus,
     JevContinuationGate,
-    JevDoneCheck,
     JevExerciseMode,
     JevOutputExtentComparator,
     JevOutputExtentUnit,
@@ -152,7 +151,7 @@ __all__ = [
     "JevCumulativeObligations",
     "JevCumulativeObligationsEvidence",
     "JevCumulativeUserTurnEvidence",
-    "JevContinualSettings",
+    "JevContinuationGateSettings",
     "JevContinuationGate",
     "JevDeliverable",
     "JevDeliverableEvidence",
@@ -162,8 +161,7 @@ __all__ = [
     "JevExpertDepthDeliverable",
     "JevExpertDetail",
     "JevExpertDetailEvidence",
-    "JevDoneCheck",
-    "JevDoneResult",
+    "JevContinuationGateResult",
     "JevFailedDoneQuestion",
     "JevExerciseMode",
     "JevGuaranteedNextAction",

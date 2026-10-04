@@ -18,14 +18,14 @@ from typing import Any
 from vidbyte.agents.jev import (
     JevAgent,
     JevAgentSettings,
-    JevContinualSettings,
+    JevContinuationGateSettings,
     JevRuntimeSettings,
 )
 from vidbyte.agents.jev.continuation import JevFreshContinuation
 from vidbyte.agents.jev.response import JevResponse
-from vidbyte.lib.dataclasses.jev import JevDoneResult, JevFailedDoneQuestion
+from vidbyte.lib.dataclasses.jev import JevContinuationGateResult, JevFailedDoneQuestion
 from vidbyte.lib.dataclasses.tools import ToolCallContext
-from vidbyte.lib.enums import JevContinuationGate, JevDoneCheck
+from vidbyte.lib.enums import JevContinuationGate, JevContinuationGate
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry
 
@@ -51,14 +51,14 @@ class FreshAgentStub:
 class RunStateStub:
     """Expose the request, serialized state, and latest handoff expected by the continuation."""
 
-    def __init__(self, attempts: list[tuple[JevDoneResult, ...]] | None = None) -> None:
+    def __init__(self, attempts: list[tuple[JevContinuationGateResult, ...]] | None = None) -> None:
         self.request = "Original task"
         self.rendered = '{"goal":"finish task"}'
         self.handoff_writer = SimpleNamespace(rendered='{"evidence":"partial work"}')
         self.handoff = object()
         self.attempts = attempts or [(
-            JevDoneResult(
-                check=JevDoneCheck.MULTI_PART,
+            JevContinuationGateResult(
+                check=JevContinuationGate.MULTI_PART,
                 score=0.2,
                 passed=False,
                 incomplete=("README",),
@@ -68,15 +68,15 @@ class RunStateStub:
                 ),),
             ),
         )]
-        self.checks = tuple(dict.fromkeys(result.check for attempt in self.attempts for result in attempt)) or (JevDoneCheck.MULTI_PART,)
-        self.latest_results: tuple[JevDoneResult, ...] = ()
+        self.checks = tuple(dict.fromkeys(result.check for attempt in self.attempts for result in attempt)) or (JevContinuationGate.MULTI_PART,)
+        self.latest_results: tuple[JevContinuationGateResult, ...] = ()
         self.check_calls = 0
         self.failed = True
 
     async def check(self, final_answer: str, responses: Any, calls: Any) -> tuple[object, ...]:
         self.check_calls += 1
         if not self.failed:
-            self.latest_results = tuple(JevDoneResult(check=check, score=1.0) for check in self.checks)
+            self.latest_results = tuple(JevContinuationGateResult(check=check, score=1.0) for check in self.checks)
         else:
             attempt = min(self.check_calls - 1, len(self.attempts) - 1)
             self.latest_results = self.attempts[attempt]
@@ -86,15 +86,14 @@ class RunStateStub:
 class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
     """Pin the public gate and the fresh-context handoff behavior."""
 
-    def test_gate_defaults_to_existing_behavior_and_fresh_requires_a_check(self) -> None:
-        self.assertIs(JevContinualSettings().gate, JevContinuationGate.SAME_CONTEXT)
-        self.assertIs(JevContinualSettings(gate="fresh", checks=("multi_part",)).gate, JevContinuationGate.FRESH)
-        with self.assertRaises(ConfigurationError):
-            JevContinualSettings(gate="fresh")
+    def test_same_context_defaults_and_fresh_mode_accepts_disabled_gates(self) -> None:
+        self.assertIs(JevContinuationGateSettings().same_context, True)
+        self.assertIs(JevContinuationGateSettings(same_context=False, enabled=("multi_part",)).same_context, False)
+        self.assertIs(JevContinuationGateSettings(same_context=False).same_context, False)
 
     def test_agent_builds_fresh_continuation_when_selected(self) -> None:
         settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini")
-        runtime = JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,), gate="fresh"))
+        runtime = JevRuntimeSettings(continuation_gate=JevContinuationGateSettings(enabled=(JevContinuationGate.MULTI_PART,), same_context=False))
         agent = JevAgent(settings, runtime)
         self.assertIsInstance(agent.continuation, JevFreshContinuation)
         first = agent.continuation.fresh_agent_factory()
@@ -112,7 +111,7 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         response = JevResponse()
-        continuation = JevFreshContinuation(run_state, JevContinualSettings(max_continuations=1), response, lambda: fresh_agent)  # type: ignore[arg-type]
+        continuation = JevFreshContinuation(run_state, JevContinuationGateSettings(max_continuations=1), response, lambda: fresh_agent)  # type: ignore[arg-type]
 
         should_continue = await continuation.should_continue("draft", ("earlier",), ())
 
@@ -124,7 +123,7 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("finish task", prompt)
         self.assertIn("partial work", prompt)
         self.assertIn("<completion_gate_assessment>", prompt)
-        self.assertIn(JevDoneRegistry.description(JevDoneCheck.MULTI_PART), prompt)
+        self.assertIn(JevDoneRegistry.description(JevContinuationGate.MULTI_PART), prompt)
         self.assertIn("Does the evidence show that the README was produced in full?", prompt)
         self.assertNotIn("multi_part.delivered.README", prompt)
         self.assertNotIn("P(yes)", prompt)
@@ -147,7 +146,7 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
             run_state = RunStateStub()
             fresh_agent = FreshAgentStub()
             fresh_agent.reply = reply
-            continuation = JevFreshContinuation(run_state, JevContinualSettings(), JevResponse(), lambda: fresh_agent)  # type: ignore[arg-type]
+            continuation = JevFreshContinuation(run_state, JevContinuationGateSettings(), JevResponse(), lambda: fresh_agent)  # type: ignore[arg-type]
 
             self.assertTrue(await continuation.should_continue("draft", (), ()))
             evidence = continuation.continue_([])
@@ -159,8 +158,8 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_gate_assessment_lists_enabled_gates_and_recomputes_failed_questions(self) -> None:
         first = (
-            JevDoneResult(
-                check=JevDoneCheck.MULTI_PART,
+            JevContinuationGateResult(
+                check=JevContinuationGate.MULTI_PART,
                 score=0.3,
                 passed=False,
                 incomplete=("README", "tests"),
@@ -169,21 +168,21 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
                     JevFailedDoneQuestion("multi_part.delivered.tests", "Are the tests complete?"),
                 ),
             ),
-            JevDoneResult(
-                check=JevDoneCheck.CLAIMS,
+            JevContinuationGateResult(
+                check=JevContinuationGate.CLAIMS,
                 score=1.0,
                 passed=True,
             ),
         )
         second = (
-            JevDoneResult(
-                check=JevDoneCheck.MULTI_PART,
+            JevContinuationGateResult(
+                check=JevContinuationGate.MULTI_PART,
                 score=0.7,
                 passed=False,
                 incomplete=("tests",),
                 failed_questions=(JevFailedDoneQuestion("multi_part.delivered.tests", "Are the tests complete?"),),
             ),
-            JevDoneResult(check=JevDoneCheck.CLAIMS, score=1.0, passed=True),
+            JevContinuationGateResult(check=JevContinuationGate.CLAIMS, score=1.0, passed=True),
         )
         run_state = RunStateStub([first, second])
         agents: list[FreshAgentStub] = []
@@ -193,7 +192,7 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
             agents.append(agent)
             return agent
 
-        continuation = JevFreshContinuation(run_state, JevContinualSettings(max_continuations=2), JevResponse(), factory)  # type: ignore[arg-type]
+        continuation = JevFreshContinuation(run_state, JevContinuationGateSettings(max_continuations=2), JevResponse(), factory)  # type: ignore[arg-type]
         self.assertTrue(await continuation.should_continue("draft", (), ()))
         first_prompt = agents[0].inputs[0].prompt
         self.assertLess(first_prompt.index("## Multi Part"), first_prompt.index("## Claims"))
@@ -211,12 +210,12 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
     async def test_gate_assessment_distinguishes_unavailable_and_deterministic_failures(self) -> None:
         # Shows gate status without inventing a Jev question for deterministic evidence gaps.
         results = (
-            JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None, available=False),
-            JevDoneResult(check=JevDoneCheck.REQUIRED_SEQUENCE, score=None, passed=False, incomplete=("stage_2",)),
+            JevContinuationGateResult(check=JevContinuationGate.MULTI_PART, score=None, available=False),
+            JevContinuationGateResult(check=JevContinuationGate.REQUIRED_SEQUENCE, score=None, passed=False, incomplete=("stage_2",)),
         )
         run_state = RunStateStub([results])
         fresh_agent = FreshAgentStub()
-        continuation = JevFreshContinuation(run_state, JevContinualSettings(), JevResponse(), lambda: fresh_agent)  # type: ignore[arg-type]
+        continuation = JevFreshContinuation(run_state, JevContinuationGateSettings(), JevResponse(), lambda: fresh_agent)  # type: ignore[arg-type]
 
         self.assertTrue(await continuation.should_continue("draft", (), ()))
 
@@ -237,7 +236,7 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
 
         run_state = RunStateStub()
         response = JevResponse()
-        continuation = JevFreshContinuation(run_state, JevContinualSettings(max_continuations=2), response, factory)  # type: ignore[arg-type]
+        continuation = JevFreshContinuation(run_state, JevContinuationGateSettings(max_continuations=2), response, factory)  # type: ignore[arg-type]
         self.assertTrue(await continuation.should_continue("draft", (), ()))
         continuation.continue_([])
         self.assertTrue(await continuation.should_continue("draft", (), ()))
@@ -249,26 +248,26 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
 
         blank = FreshAgentStub(content="  ", metadata={"iteration_outputs": ("work happened",)})
         run_state = RunStateStub()
-        continuation = JevFreshContinuation(run_state, JevContinualSettings(), JevResponse(), lambda: blank)  # type: ignore[arg-type]
+        continuation = JevFreshContinuation(run_state, JevContinuationGateSettings(), JevResponse(), lambda: blank)  # type: ignore[arg-type]
         self.assertFalse(await continuation.should_continue("draft", (), ()))
         self.assertIsNone(continuation.continue_([]))
 
     async def test_sdk_failure_leaves_answer_in_place_and_fresh_inherits_budget_extension(self) -> None:
-        from vidbyte.lib.dataclasses.jev import JevDoneResult
+        from vidbyte.lib.dataclasses.jev import JevContinuationGateResult
 
         run_state = RunStateStub()
         response = JevResponse()
         broken = FreshAgentStub(fail=True)
-        continuation = JevFreshContinuation(run_state, JevContinualSettings(), response, lambda: broken)  # type: ignore[arg-type]
+        continuation = JevFreshContinuation(run_state, JevContinuationGateSettings(), response, lambda: broken)  # type: ignore[arg-type]
         self.assertFalse(await continuation.should_continue("draft", (), ()))
         self.assertIsNone(continuation.continue_([]))
         self.assertEqual(response.state.continuations, 0)
 
-        continuation.failed = (JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=None),)
+        continuation.failed = (JevContinuationGateResult(check=JevContinuationGate.FAITHFUL_SCOPE, score=None),)
         self.assertEqual(continuation.budget_extension(), (
-            continuation.continual.faithful_scope_extra_iterations,
-            continuation.continual.faithful_scope_extra_tokens,
-            continuation.continual.faithful_scope_extra_tool_calls,
+            continuation.settings.faithful_scope_extra_iterations,
+            continuation.settings.faithful_scope_extra_tokens,
+            continuation.settings.faithful_scope_extra_tool_calls,
         ))
 
 

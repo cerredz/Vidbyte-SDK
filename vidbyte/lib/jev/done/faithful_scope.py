@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/done/faithful_scope.py
 
 PURPOSE: Defines the fixed Jev question that checks whether the run evidence shows the request's hardest-to-avoid requirement was met without weakening its meaning.
-ROLE IN CODEBASE: JevDoneRegistry registers this question for JevDoneCheck.FAITHFUL_SCOPE; JevRunState asks it with the original request, hard_part, what_not_to_do, and the handoff's run evidence.
+ROLE IN CODEBASE: JevDoneRegistry registers this question for JevContinuationGate.FAITHFUL_SCOPE; JevRunState asks it with the original request, hard_part, what_not_to_do, and the handoff's run evidence.
 ARCHITECTURE NOTE: Jev only recognizes whether the evidence fits the defined true or false side. The generative run-state writer identifies hard_part before work begins, the handoff reports observations after a finish attempt, and code applies the fixed threshold.
 COMMON MODIFICATION PATTERNS: Follow skills/asking-jev-questions/SKILL.md; keep the question about one named hard part, define evasions in the brief, and keep examples in the criteria.
 KNOWN EDGE CASES: A mock or hard-coded value is not an evasion when the user asked for that implementation; it is false only when it substitutes for a different requested behavior. An unavailable state, handoff, or Jev answer fails open in JevRunState.

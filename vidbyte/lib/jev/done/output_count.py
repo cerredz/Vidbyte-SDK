@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/done/output_count.py
 
 PURPOSE: Defines the fixed OUTPUT_COUNT question Jev answers once per explicit numeric output obligation. It checks whether the handoff's candidate values and direct evidence fit the request's target, scope, and distinctness rule; deterministic code computes the count before Jev sees it.
-ROLE IN CODEBASE: JevDoneRegistry registers OutputCountSatisfiedQuestion under JevDoneCheck.OUTPUT_COUNT; JevRunState builds its per-obligation question in the shared batched request, and JevDoneContinuation uses its gap when the answer is no.
+ROLE IN CODEBASE: JevDoneRegistry registers OutputCountSatisfiedQuestion under JevContinuationGate.OUTPUT_COUNT; JevRunState builds its per-obligation question in the shared batched request, and JevDoneContinuation uses its gap when the answer is no.
 ARCHITECTURE NOTE: This question sits in vidbyte.lib and imports only shared records and the shared DONE_STATE. Request interpretation belongs to JevRunState, evidence compilation to JevHandoff, arithmetic to code, and recognition to Jev.
 FUNCTION INVENTORY: OutputCountSatisfiedQuestion.to_question(id) -> JevQuestion, inherited from JevDoneQuestion; names one obligation and is covered by tests/test_jev_done.py.
 COMMON MODIFICATION PATTERNS: Read skills/asking-jev-questions/SKILL.md before editing; keep arithmetic out of this question and keep the shared state description synchronized with each enabled done check.

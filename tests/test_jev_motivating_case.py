@@ -15,7 +15,7 @@ import unittest
 
 from vidbyte.agents.jev.done.handoff import JevHandoff
 from vidbyte.agents.jev.done.run_state import JevRunState
-from vidbyte.agents.jev.settings import JevContinualSettings
+from vidbyte.agents.jev.settings import JevContinuationGateSettings
 from vidbyte.lib.constants.jev import JEV_MOTIVATING_CASE_THRESHOLD
 from vidbyte.lib.dataclasses.jev import (
     JevMotivatingCase,
@@ -23,7 +23,7 @@ from vidbyte.lib.dataclasses.jev import (
 )
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
-    JevDoneCheck,
+    JevContinuationGate,
     JevExerciseMode,
     JevScenarioRole,
 )
@@ -34,16 +34,16 @@ class MotivatingCaseContinuationGateTests(unittest.TestCase):
     """Pin the public continuation setting and the shared state/handoff schemas."""
 
     def test_check_is_registered_and_enabled_through_continual_settings(self) -> None:
-        continual = JevContinualSettings(checks=(JevDoneCheck.MOTIVATING_CASE,))
-        self.assertEqual(continual.checks, (JevDoneCheck.MOTIVATING_CASE,))
-        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.MOTIVATING_CASE), JEV_MOTIVATING_CASE_THRESHOLD)
-        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.MOTIVATING_CASE).key.value, "motivating_case.exercised")
+        continual = JevContinuationGateSettings(enabled=(JevContinuationGate.MOTIVATING_CASE,))
+        self.assertEqual(continual.enabled, (JevContinuationGate.MOTIVATING_CASE,))
+        self.assertEqual(JevDoneRegistry.threshold(JevContinuationGate.MOTIVATING_CASE), JEV_MOTIVATING_CASE_THRESHOLD)
+        self.assertEqual(JevDoneRegistry.question(JevContinuationGate.MOTIVATING_CASE).key.value, "motivating_case.exercised")
 
     def test_request_and_handoff_sections_join_by_scenario_id(self) -> None:
-        self.assertIn(JevDoneCheck.MOTIVATING_CASE.value, JevRunState.schema((JevDoneCheck.MOTIVATING_CASE,)).model_fields)
-        self.assertIn(JevDoneCheck.MOTIVATING_CASE.value, JevHandoff.schema((JevDoneCheck.MOTIVATING_CASE,)).model_fields)
-        self.assertNotIn(JevDoneCheck.MOTIVATING_CASE.value, JevRunState.schema(()).model_fields)
-        self.assertNotIn(JevDoneCheck.MOTIVATING_CASE.value, JevHandoff.schema(()).model_fields)
+        self.assertIn(JevContinuationGate.MOTIVATING_CASE.value, JevRunState.schema((JevContinuationGate.MOTIVATING_CASE,)).model_fields)
+        self.assertIn(JevContinuationGate.MOTIVATING_CASE.value, JevHandoff.schema((JevContinuationGate.MOTIVATING_CASE,)).model_fields)
+        self.assertNotIn(JevContinuationGate.MOTIVATING_CASE.value, JevRunState.schema(()).model_fields)
+        self.assertNotIn(JevContinuationGate.MOTIVATING_CASE.value, JevHandoff.schema(()).model_fields)
 
     def test_scenario_record_preserves_request_derived_boundary_definition(self) -> None:
         scenario = JevMotivatingScenario(
