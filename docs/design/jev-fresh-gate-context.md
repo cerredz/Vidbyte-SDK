@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-When JevAgent uses its fresh-context continuation, the new agent will receive an assessment section describing every enabled continuation gate and its current failed questions. Each gate owns a stable two-to-three paragraph explanation of what it checks, how the agent should use it, and common failure patterns. The question list comes from the gate's latest Jev answers, includes the exact rendered question text, and excludes probabilities. Rebuilding the section on each retry ensures the next fresh agent sees the current failures.
+When JevAgent uses its fresh-context continuation, the new agent will receive an assessment section describing every enabled continuation gate and its current failed questions. Each gate owns a stable three-paragraph explanation, four to five sentences per paragraph, covering what it checks, how the agent should use its failed questions, and its common failure modes. The question list comes from the gate's latest Jev answers, includes the exact rendered question text, and excludes probabilities. Rebuilding the section on each retry ensures the next fresh agent sees the current failures.
 
 ---
 
@@ -46,7 +46,7 @@ The desired context is gate-oriented: one explanation for each enabled check, fo
 
 ### Functional Requirements
 
-1. Every registered `JevDoneCheck` has a non-empty, human-authored two-to-three paragraph description covering purpose, how the agent should use the check, and common failure modes.
+1. Every registered `JevDoneCheck` has a human-authored `JevDoneGateDescription` with three fields, `what_it_checks`, `how_to_use`, and `failure_modes`, each one paragraph of four to five sentences.
 2. Gate descriptions are registered with `JevDoneRegistry`, in configuration order when rendered.
 3. `JevDoneResult` retains the exact rendered question text that caused the result to fail under that gate's own scoring rule. Question text includes the concrete checked item name; composite checks retain each question involved in the blocking result.
 4. A passed answer is not listed as a failed question, even when a separate deterministic rule causes its gate result to fail.
@@ -137,7 +137,7 @@ def question_for_answer_name(cls, name: str) -> tuple[JevDoneQuestion, str]: ...
 
 #### Logic / Algorithm
 
-1. Add a mapping keyed by every `JevDoneCheck`; each value has a heading and a two-to-three paragraph description.
+1. Add a mapping keyed by every `JevDoneCheck`; each value is a `JevDoneGateDescription` whose three fields validate their own sentence counts, and `description(check)` joins them into three paragraphs.
 2. Validate that question checks, thresholds, and descriptions cover the same gate set.
 3. Resolve question names by testing registered question keys against the name prefix and returning the question plus the exact item suffix.
 4. Raise the repository's existing configuration error for an unknown/ambiguous name rather than silently dropping an answer.
@@ -272,8 +272,9 @@ N/A - This is an internal SDK continuation-context change. It adds a defaulted f
 
 | Action | File Path | Reason |
 |--------|-----------|--------|
-| MODIFY | `vidbyte/lib/dataclasses/jev.py` | Add failed question record and result field. |
-| MODIFY | `vidbyte/lib/jev/done/done.py` | Register gate descriptions and exact question lookup. |
+| MODIFY | `vidbyte/lib/dataclasses/jev.py` | Add failed question record, result field, and the three-part gate description record. |
+| MODIFY | `vidbyte/lib/jev/done/done.py` | Register three-part gate descriptions and exact question lookup. |
+| MODIFY | `vidbyte/lib/constants/jev.py` | Add the gate-description sentence bounds and sentence-end pattern. |
 | MODIFY | `vidbyte/agents/jev/done/run_state.py` | Capture the question text that blocks each result. |
 | MODIFY | `vidbyte/agents/jev/continuation/fresh.py` | Render the latest assessment per attempt. |
 | MODIFY | `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py` | Re-export the new result record with the existing public JEV result types. |
@@ -290,7 +291,7 @@ All cases run offline with deterministic typed records and no TypeSafe request. 
 
 ### Unit Tests
 
-- [Edge Case] Every registered gate has one two-paragraph description; registry validation rejects a missing description.
+- [Edge Case] Every registered gate has three four-to-five sentence paragraphs; a short paragraph is rejected at construction, and registry validation rejects a missing description.
 - [Edge Case] Compound follow-up and self-review gates preserve both exact questions that jointly block the result.
 - [Hidden Failure] Unknown question names raise a configuration error instead of silently dropping a failed answer.
 - [Silent Failure] Item ids containing dots and colons are preserved in the exact rendered question sentence.

@@ -27,6 +27,7 @@ from vidbyte.lib.dataclasses.jev import JevDoneResult, JevFailedDoneQuestion
 from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums import JevContinuationGate, JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev import JevDoneRegistry
 
 
 class FreshAgentStub:
@@ -123,7 +124,7 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("finish task", prompt)
         self.assertIn("partial work", prompt)
         self.assertIn("<completion_gate_assessment>", prompt)
-        self.assertIn("This gate checks each separate output", prompt)
+        self.assertIn(JevDoneRegistry.description(JevDoneCheck.MULTI_PART), prompt)
         self.assertIn("Does the evidence show that the README was produced in full?", prompt)
         self.assertNotIn("multi_part.delivered.README", prompt)
         self.assertNotIn("P(yes)", prompt)

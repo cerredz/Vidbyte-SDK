@@ -164,6 +164,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevDiscoveredItemBatchEntryPayload,
     JevDiscoveredItemBatchPayload,
     JevDiscoveredItemPayload,
+    JevDoneGateDescription,
     JevDoneQuestion,
     JevDoneResult,
     JevExpertDepth,
@@ -1098,16 +1099,19 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.readme_docs", JevQuestionType.NOUL))
         self.assertIn("with id `readme_docs`?", str(rendered.instructions))
 
-    def test_every_done_check_has_five_sentence_two_paragraph_fresh_agent_guidance(self) -> None:
-        # Pins complete guidance on each gate's purpose, failure follow-up, and common failure modes.
+    def test_every_done_check_has_three_four_to_five_sentence_guidance_paragraphs(self) -> None:
+        # [Review 4174791167] 4-5 sentences each on what the gate checks, how to use its results, and its failure modes.
         self.assertEqual(set(JevDoneRegistry._descriptions), set(JevDoneCheck))
         for check in JevDoneCheck:
             with self.subTest(check=check):
-                description = JevDoneRegistry.description(check)
-                self.assertEqual(len(description.split("\n\n")), 2)
-                self.assertEqual(description.count("."), 5)
-                self.assertTrue(description.startswith("This gate checks "))
-                self.assertIn("Use ", description)
+                what_it_checks, how_to_use, failure_modes = JevDoneRegistry.description(check).split("\n\n")
+                for paragraph in (what_it_checks, how_to_use, failure_modes):
+                    self.assertIn(_sentences(paragraph), range(4, 6))
+                self.assertTrue(what_it_checks.startswith("This gate checks "))
+                self.assertTrue(how_to_use.startswith("A failed question "))
+                self.assertIn("fail", failure_modes.lower())
+        with self.assertRaises(ConfigurationError):
+            JevDoneGateDescription(what_it_checks="One. Two. Three.", how_to_use="One. Two. Three. Four.", failure_modes="One. Two. Three. Four.")
         incomplete = dict(JevDoneRegistry._descriptions)
         incomplete.pop(JevDoneCheck.MULTI_PART)
         with patch.object(JevDoneRegistry, "_descriptions", incomplete), self.assertRaises(ConfigurationError):

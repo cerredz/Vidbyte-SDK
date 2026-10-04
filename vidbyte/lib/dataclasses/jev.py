@@ -30,6 +30,9 @@ from vidbyte.lib.constants.jev import (
     JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS,
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_DONE_COMPLETION_ITEM_ID,
+    JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES,
+    JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES,
+    JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN,
     JEV_EXPERT_DEPTH_MAX_DETAILS,
     JEV_EXPERT_DEPTH_MIN_DETAILS,
     JEV_MAX_CHOICE_OPTIONS,
@@ -79,6 +82,7 @@ JevContent = str | Mapping[str, object] | tuple[object, ...]
 
 _API_DOCS = "https://docs.typesafe.ai/api.md"
 _DELIVERABLE_ID = re.compile(JEV_DELIVERABLE_ID_PATTERN)
+_GATE_DESCRIPTION_SENTENCE_END = re.compile(JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN)
 
 
 def _normalize_scope_text(value: str) -> str:
@@ -3556,6 +3560,32 @@ class JevFailedDoneQuestion:
         # Keeps enough source identity to diagnose a failure while exposing only its rendered wording to agents.
         JevText.require(self.name, field_name="failed done question name")
         JevText.require(self.question, field_name="failed done question text")
+
+
+@dataclass(frozen=True, slots=True)
+class JevDoneGateDescription:
+    """The continuation guidance for one done gate, one field per topic, in the order the agent reads them.
+
+    `what_it_checks` describes the gate in general terms and what its Jev questions ask about each item;
+    `how_to_use` says what a failed question means and how the agent should act on it; `failure_modes`
+    names the common ways work fails the gate. Each part is one paragraph of four to five sentences.
+    """
+
+    what_it_checks: str
+    how_to_use: str
+    failure_modes: str
+
+    def __post_init__(self) -> None:
+        # Holds every topic the review asked for to the same paragraph length, so no gate's guidance thins out.
+        for field_name in ("what_it_checks", "how_to_use", "failure_modes"):
+            text = JevText.require(getattr(self, field_name), field_name=f"done gate description {field_name}")
+            sentences = len(_GATE_DESCRIPTION_SENTENCE_END.findall(text.strip()))
+            if "\n" in text or not JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES <= sentences <= JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES:
+                raise JevValidation.error(
+                    f"done gate description {field_name}",
+                    f"one paragraph of {JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES} to {JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES} sentences",
+                    text,
+                )
 
 
 @dataclass(frozen=True, slots=True)
