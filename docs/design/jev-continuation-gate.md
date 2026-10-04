@@ -8,7 +8,7 @@ base_commit: 7a174bb2a2b22b65f94fddd960a02846e2e08c26
 created: 2026-10-03
 updated: 2026-10-04
 approved_revision: r1
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/509
 ---
 
 # Spec: JEV Continuation Gates and Stable Run Context
@@ -443,7 +443,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
   - Acceptance: Same-context calls contain one immutable run state, one latest handoff, and one latest assessment; fresh worker sees matching latest data and returns only its output to the main history.
   - Verify: `python -m pytest tests/test_jev_done.py tests/test_jev_fresh_continuation.py`
   - Files: runtime, continuation contract/implementations, run_state, prompt assets, and focused tests listed in §26.
-- **P1.T3 — Run repo gates and close references** — Serves: FR-7, NFR-1–NFR-3 / all ACs
+- **P1.T3 - Run repo gates and close references** - Serves: FR-7, NFR-1-NFR-3 / all ACs - Complete locally; remote PR checks pending.
   - Acceptance: Repository-wide old-API search finds no unintended current public examples; package and docs pass full CI. Six caller-facing feature docs were updated under the recorded owner authorization. Historic examples remain in archival design records and the descriptive `AGENTS.md` map, which were outside that authorization.
   - Verify: `python scripts/run_ci.py`
   - Files: remaining references in §26 and any tests identified by the old-name search.
