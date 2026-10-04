@@ -162,6 +162,9 @@ JEV_CONTINUATION_SEGMENT_INCREMENT: int = 1
 # Default of JevContinuationGateSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
+JEV_RUN_STATE_CONTEXT_ID: str = "jev:run-state"
+JEV_HANDOFF_CONTEXT_ID: str = "jev:handoff"
+JEV_CONTINUATION_GATE_CONTEXT_ID: str = "jev:continuation-gate-assessment"
 # Sentence bounds for each part of a done gate's continuation description: what the gate checks, how to use
 # its failed questions, and its common failure modes.
 JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES: int = 4
@@ -469,6 +472,9 @@ __all__ = [
     "JEV_DONE_DONE_WHEN_FIELD",
     "JEV_DONE_EXPERT_DETAILS_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_RUN_STATE_CONTEXT_ID",
+    "JEV_HANDOFF_CONTEXT_ID",
+    "JEV_CONTINUATION_GATE_CONTEXT_ID",
     "JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES",
     "JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES",
     "JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN",

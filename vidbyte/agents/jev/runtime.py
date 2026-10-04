@@ -22,6 +22,10 @@ from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives.documents import TextContextItem
+from vidbyte.context.runtime import ContextWindowPlacement
+from vidbyte.lib.constants.jev import JEV_RUN_STATE_CONTEXT_ID
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -63,6 +67,7 @@ class JevRuntime(AgentRuntime):
         self.run_state = run_state
         self.continuation = continuation
         self.response = response
+        self.continuation_context = ContextManager()
         super().__init__(**kwargs)
 
     async def arun(
@@ -79,6 +84,7 @@ class JevRuntime(AgentRuntime):
         # @intent closed-gate-never-reaches-the-model
         # A closed gate returns without invoking the generative runner, so an unclear request is answered
         # with questions before any generative tokens are spent.
+        self.continuation_context.clear_registry()
         self.response.start(message)
         if not await self.preflight.pass_(message):
             return self.response.stopped()
@@ -86,6 +92,15 @@ class JevRuntime(AgentRuntime):
             return self.response.delegated(await self.preflight.specialist.agent.arun(message))
         if self.run_state is not None:
             await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
+            if self.run_state.record is not None and self.run_state.rendered:
+                self.continuation_context.upsert(
+                    TextContextItem(
+                        primitive_id=JEV_RUN_STATE_CONTEXT_ID,
+                        title="JEV run state reference data",
+                        content=f"<jev_run_state_reference_data>\n{self.run_state.rendered}\n</jev_run_state_reference_data>",
+                    ),
+                    placement=ContextWindowPlacement.END_OF_CONVERSATION,
+                ).set_frozen(JEV_RUN_STATE_CONTEXT_ID, True)
             sequence_instructions = self.run_state.agent_instructions()
             if sequence_instructions:
                 context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
@@ -153,7 +168,12 @@ class JevRuntime(AgentRuntime):
         # @intent continuation-logic-lives-in-the-continuation
         # The owner asked the runtime to only ask "should we continue?" and then "continue", so every reason to
         # continue and every message it sends lives in a JevContinuation subclass, never in this runtime.
-        if self.continuation is None or not await self.continuation.should_continue(result.output, state.iteration_outputs, state.call_contexts):
+        if self.continuation is None or not await self.continuation.should_continue(
+            result.output,
+            state.iteration_outputs,
+            state.call_contexts,
+            self.continuation_context,
+        ):
             return False
         extra_iterations, extra_tokens, extra_tool_calls = self.continuation.budget_extension()
         limits: dict[str, int] = {}
@@ -171,10 +191,16 @@ class JevRuntime(AgentRuntime):
             # The runtime is run-local; expand only configured ceilings before the same loop consumes the continuation.
             self.config = replace(self.config, **limits)
             self.response.continuation_budget(granted)
-        evidence = self.continuation.continue_(messages)
+        evidence = self.continuation.continue_(messages, self.continuation_context)
         if evidence is not None and self.run_state is not None:
             self.run_state.add_continuation_evidence(evidence)
         return True
+
+    def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+        """Append the current invocation's continuation snapshots after the inherited provider messages."""
+        inherited = super()._build_conversation_messages(messages)
+        current = self.continuation_context.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)
+        return (*inherited, *current)
 
 
 __all__ = ["JevRuntime"]

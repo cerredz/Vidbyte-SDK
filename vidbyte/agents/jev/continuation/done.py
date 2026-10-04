@@ -18,20 +18,25 @@ from vidbyte.agents.jev.continuation.base import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevContinuationGateSettings
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives.documents import TextContextItem
+from vidbyte.context.runtime import ContextWindowPlacement
 from vidbyte.lib.constants.jev import (
+    JEV_CONTINUATION_GATE_CONTEXT_ID,
     JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_DONE_COMPLETION_ITEM_ID,
     JEV_DONE_HARD_PART_FIELD,
     JEV_DONE_IMPLEMENTATION_FIELD,
     JEV_EXPERT_DEPTH_FOCUS_LIMIT,
+    JEV_HANDOFF_CONTEXT_ID,
     JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevClaimAssertion,
     JevClaimEvidence,
     JevCompletionEvidence,
-    JevDoneQuestion,
     JevContinuationGateResult,
+    JevDoneQuestion,
     JevProblemResolutionItem,
     JevRequiredAction,
     JevRequiredActionEvidence,
@@ -75,35 +80,72 @@ class JevDoneContinuation(JevContinuation):
             self.settings.faithful_scope_extra_tool_calls,
         )
 
-    async def should_continue(self, final_answer: str, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> bool:
+    async def should_continue(
+        self,
+        final_answer: str,
+        responses: Sequence[str],
+        calls: Sequence[ToolCallContext],
+        context_manager: ContextManager,
+    ) -> bool:
         """Run every enabled done check and return True when one failed and continuations remain."""
         self.failed = await self.run_state.check(final_answer, responses, calls)
+        self._update_context(context_manager)
         # @intent continuations-are-bounded
         # A check that keeps failing must not trap the run: after the cap the latest verdict stays on the
         # response for the caller to read, but the main agent's answer stands.
         return bool(self.failed) and self.run_state.handoff is not None and self.response.state.continuations < self.max_continuations
 
-    def continue_(self, messages: list[dict[str, Any]]) -> None:
-        """Record the continuation and append the message that sends the main agent back to finish the missing parts."""
-        # @intent a-failed-done-check-keeps-the-same-loop
-        # The message joins this loop's own messages, so the main agent keeps its history, tools, and budgets
-        # and finishes the missing work instead of starting a second run that has forgotten the first.
+    def continue_(self, messages: list[dict[str, Any]], context_manager: ContextManager) -> None:
+        """Record the continuation; its current slots are rendered with every subsequent provider call."""
+        # @intent same-context-continuation-replaces-managed-snapshots
+        # The existing history stays in place while the overlay supplies one current state, handoff, and assessment.
         self.response.continued()
-        messages.append({"role": "user", "content": self.message()})
 
-    def message(self) -> str:
-        """Return what the main agent reads: the original request, the run state, the handoff, the failed questions, and the focus."""
-        # @intent the-continuation-message-is-a-prompt-asset
-        # The owner asked for the main agent to get the original prompt, the run state, the handoff, and the failed
-        # Jev questions with more focus on what is missing; the instructions live in the prompt asset so they stay
-        # reviewable, and only the run's own text is filled in here.
-        explained = [(result.check, *self._explain(result)) for result in self.failed]
-        return Prompts().get(Prompt.JEV_CONTINUATION_CONTINUE_PROMPT).format(
-            request=self.run_state.request,
-            run_state=self.run_state.rendered,
-            handoff=self.run_state.handoff_writer.rendered,
-            failed="\n\n".join(self._failed_check(check, failed) for check, failed, _ in explained),
-            focus="\n".join(focus for _, _, focus in explained),
+    def _update_context(self, context_manager: ContextManager) -> None:
+        """Replace this attempt's handoff and assessment in the runtime-owned overlay."""
+        handoff = self.run_state.handoff_writer.rendered
+        if self.run_state.handoff is None or not handoff:
+            context_manager.remove_by_id(JEV_HANDOFF_CONTEXT_ID)
+        else:
+            context_manager.upsert(
+                TextContextItem(
+                    primitive_id=JEV_HANDOFF_CONTEXT_ID,
+                    title="Latest JEV handoff observed evidence",
+                    content=f"<jev_handoff_observed_evidence>\n{handoff}\n</jev_handoff_observed_evidence>",
+                ),
+                placement=ContextWindowPlacement.END_OF_CONVERSATION,
+            )
+        context_manager.upsert(
+            TextContextItem(
+                primitive_id=JEV_CONTINUATION_GATE_CONTEXT_ID,
+                title="Latest JEV continuation gate assessment",
+                content=self._render_gate_assessment(),
+            ),
+            placement=ContextWindowPlacement.END_OF_CONVERSATION,
+        )
+
+    def _render_gate_assessment(self) -> str:
+        """Render current status for every gate and question/focus detail for failures only."""
+        results = {result.check: result for result in self.run_state.latest_results}
+        sections = []
+        for check in self.run_state.checks:
+            result = results.get(check)
+            if result is None or not result.available:
+                status = "Status: unavailable; do not rely on an earlier assessment."
+                detail = ""
+            elif result.passed:
+                status = "Status: passed; no questions failed."
+                detail = ""
+            else:
+                status = "Status: failed; address the current missing work before finishing."
+                failed, focus = self._explain(result)
+                detail = f"\n\nDescription and failed questions:\n{self._failed_check(check, failed)}\n\nFocus:\n{focus}"
+            sections.append(f"## {check.value.replace('_', ' ').title()}\n\n{JevDoneRegistry.description(check)}\n\n{status}{detail}")
+        assessment = "\n\n".join(sections)
+        directive = Prompts().get(Prompt.JEV_CONTINUATION_CONTINUE_PROMPT)
+        return (
+            f"<jev_continuation_directive>\n{directive}\n</jev_continuation_directive>\n\n"
+            f"<jev_gate_assessment_reference_data>\n{assessment}\n</jev_gate_assessment_reference_data>"
         )
 
     @staticmethod
