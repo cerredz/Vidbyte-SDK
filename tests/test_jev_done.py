@@ -1534,10 +1534,27 @@ class JevDonePromptTests(unittest.TestCase):
             self.assertNotIn("deliverable", text)
         self.assertIn("evidence of a specific shape", Prompts().get(Prompt.JEV_HANDOFF_SYSTEM_PROMPT))
 
-    def test_continuation_prompt_repairs_then_returns_to_original_request(self) -> None:
+    def test_continuation_prompt_opens_with_general_goal_and_instructions(self) -> None:
+        # The owner asked for goal and instructions paragraphs that explain the request, run state, and handoff.
         prompt = Prompts().get(Prompt.JEV_CONTINUATION_CONTINUE_PROMPT)
-        self.assertIn("fully repair it and successfully revalidate", prompt)
-        self.assertIn("return to the original request and complete every remaining part", prompt)
+        parts = re.split(r"^# (.+)$", prompt, flags=re.MULTILINE)[1:]
+        sections = {parts[index]: parts[index + 1].strip() for index in range(0, len(parts), 2)}
+        self.assertEqual(list(sections), ["Goal", "Instructions", "Original request", "Run state", "Handoff", "Failed checks", "Focus"])
+        self.assertIn(_sentences(sections["Goal"]), range(6, 9))
+        instructions = sections["Instructions"].split("\n\n")
+        self.assertEqual(len(instructions), 2)
+        for paragraph in instructions:
+            self.assertIn(_sentences(paragraph), range(4, 9))
+        for name in ("original request", "run state", "handoff", "failed checks section is the most important part"):
+            self.assertIn(name, sections["Instructions"])
+        # Check-specific rules live in each gate's shared description, never in the general prompt.
+        self.assertNotIn("SELF_REVIEW", prompt)
+        self.assertNotIn("FAITHFUL_SCOPE", prompt)
+
+    def test_problem_repair_guidance_repairs_then_returns_to_original_request(self) -> None:
+        guidance = JevDoneRegistry.description(JevDoneCheck.PROBLEMS_RESOLVED)
+        self.assertIn("Fully repair each named problem", guidance)
+        self.assertIn("return to the original request and complete every remaining part", guidance)
 
 
 class JevHandoffWindowTests(unittest.TestCase):
@@ -3288,6 +3305,14 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(MultiPartDeliveredQuestion().gap, feedback)
         self.assertIn("with id `readme_docs`? Jev's answer: no", feedback)
         self.assertIn("The README section for --dry-run.", feedback)
+        # Each failed check opens with its shared gate description, and its failed Jev questions follow it.
+        failed = feedback.split("# Failed checks", 1)[1].split("# Focus", 1)[0]
+        description = JevDoneRegistry.description(JevDoneCheck.MULTI_PART)
+        self.assertTrue(failed.strip().startswith(f"## Multi Part\n\n{description}\n\nWhat the check found:\n"))
+        self.assertLess(failed.index(description), failed.index("with id `readme_docs`? Jev's answer: no"))
+        for other in set(JevDoneCheck) - {JevDoneCheck.MULTI_PART}:
+            self.assertNotIn(JevDoneRegistry.description(other), feedback)
+        self.assertLess(feedback.index("# Goal"), feedback.index("# Original request"))
         focus = feedback.split("# Focus", 1)[1]
         self.assertIn("README documentation for the --dry-run flag.", focus)
         self.assertNotIn("A --dry-run flag on the deploy CLI.", focus)

@@ -2,7 +2,7 @@
 
 PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run enabled checks, and on failure it sends the original request, run state, handoff, failed Jev questions, and focused missing work back to the main agent.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; each failed check contributes its own helper in _explain(). Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned; changed-assumption feedback names only failed premises and their dependent work. The cap on continuations is JevContinualSettings.max_continuations.
+ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; it opens with general Goal and Instructions sections, and under Failed checks each failed check renders its JevDoneRegistry.description() (shared with the fresh continuation) followed by what its own helper in _explain() found. Phase progress feedback names only request-required stages Jev did not see entered; whole-task completion feedback compares final status with requested outcomes and run evidence; report/action alignment feedback names only plan/account mismatches Jev did not recognize as aligned; changed-assumption feedback names only failed premises and their dependent work. The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
 RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
@@ -97,14 +97,24 @@ class JevDoneContinuation(JevContinuation):
         # The owner asked for the main agent to get the original prompt, the run state, the handoff, and the failed
         # Jev questions with more focus on what is missing; the instructions live in the prompt asset so they stay
         # reviewable, and only the run's own text is filled in here.
-        explained = [self._explain(result) for result in self.failed]
+        explained = [(result.check, *self._explain(result)) for result in self.failed]
         return Prompts().get(Prompt.JEV_CONTINUATION_CONTINUE_PROMPT).format(
             request=self.run_state.request,
             run_state=self.run_state.rendered,
             handoff=self.run_state.handoff_writer.rendered,
-            failed="\n\n".join(failed for failed, _ in explained),
-            focus="\n".join(focus for _, focus in explained),
+            failed="\n\n".join(self._failed_check(check, failed) for check, failed, _ in explained),
+            focus="\n".join(focus for _, _, focus in explained),
         )
+
+    @staticmethod
+    def _failed_check(check: JevDoneCheck, failed: str) -> str:
+        """Render one failed check: its heading, its shared gate description, then its failed Jev questions."""
+        # @intent each-failed-check-is-explained-before-its-questions
+        # The owner asked for every failed check to open with paragraphs on what follows and what its failed Jev
+        # questions mean, with the questions after them; the text is the same registry description the fresh
+        # continuation renders, so both continuations explain a gate the same way.
+        title = check.value.replace("_", " ").title()
+        return f"## {title}\n\n{JevDoneRegistry.description(check)}\n\nWhat the check found:\n{failed}"
 
     def _explain(self, result: JevDoneResult) -> tuple[str, str]:
         # @intent each-failed-check-keeps-its-own-feedback
