@@ -44,6 +44,9 @@ this is not the way that i want to do things. i think that ideally I just want t
 #### implementation instructions — 2026-10-04
 $spec-implement great, you can implement the spec
 
+#### implementer question — 2026-10-04
+1
+
 ---
 
 ## Part A — Framing
