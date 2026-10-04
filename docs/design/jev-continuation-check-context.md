@@ -14,7 +14,7 @@ The owner asked for the continuation to read as a real prompt:
 - for each failed check, paragraphs that explain what follows in the context window and what that check's failed Jev questions mean;
 - that check's failed questions placed directly after those paragraphs.
 
-PR #506 adds the same kind of per-check explanation for the fresh continuation. After the owner's review there, it is a `JevDoneGateDescription` per check in `JevDoneRegistry`, with three paragraphs of four to five sentences each: what the gate checks, how to use its failed questions, and its common failure modes. The owner chose one shared source for both continuations. This PR is stacked on #506 and renders the same descriptions, so the two continuations never explain a gate differently.
+PR #506 (merged) added the same kind of per-check explanation for the fresh continuation. After the owner's review there, it is a `JevDoneGateDescription` per check in `JevDoneRegistry`, with three paragraphs of four to five sentences each: what the gate checks, how to use its failed questions, and its common failure modes. The owner chose one shared source for both continuations. This PR renders the same descriptions, so the two continuations never explain a gate differently.
 
 ## How it works
 
@@ -57,7 +57,6 @@ The `_explain_*` helpers, `{focus}`, the runtime, and `should_continue()` are un
 ## Risks
 
 - Each failed check's block grows by 12–15 sentences, and earlier continuation messages stay in history. This is bounded by `max_continuations`.
-- The PR is stacked on #506 and must merge after it.
 
 ## Verification
 
