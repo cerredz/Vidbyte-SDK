@@ -73,7 +73,7 @@ At each finish attempt, the handoff reports tool-call evidence for every target 
 | `vidbyte/lib/dataclasses/jev.py` | Section payloads (`JevSectionPayload` subclasses), records, `JevRunStateRecord`, `JevHandoffRecord`, `JevDoneQuestion`, `JevDoneResult` | Add payloads and frozen records where items come from; a post-run-derived check adds its section and optional field to `JevHandoffRecord`, not `JevRunStateRecord`. |
 | `vidbyte/lib/constants/jev.py` | `JEV_<CHECK>_THRESHOLD`, shared-state field names (`JEV_DONE_*_FIELD`), limits | Add the threshold and any new state field names. |
 | `vidbyte/lib/jev/done/<check>.py` | One `JevDoneQuestion` subclass per question | **New file**, one per check (`multi_part.py` is the model). |
-| `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions`, `_thresholds`, `validate`) | Register the question and the threshold. |
+| `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions`, `_thresholds`, `_descriptions`, `validate`) | Register the question, the threshold, and the check's `JevDoneGateDescription`. |
 | `vidbyte/lib/jev/done/__init__.py`, `README.md` | Exports and a folder guide | Export the question and list it in the README. |
 | `vidbyte/agents/jev/done/run_state.py` | `JevRunState`: `_SECTIONS`, `schema`, `begin`, `check`, `combine`, `_section`, `_judge`, `_record` | Request-derived checks add a run-state `_SECTIONS` entry and `_record` conversion; each check adds a typed `_section` helper and `_judge` scorer to their dispatch maps; post-run items come from the handoff. |
 | `vidbyte/agents/jev/done/handoff.py` | `JevHandoff`: `_SECTIONS`, `schema`, `window`, `compile`, `_record` | Add the handoff section and conversion; require exact run-state id matching only when the check's items were written before work. |
@@ -86,7 +86,7 @@ At each finish attempt, the handoff reports tool-call evidence for every target 
 | `vidbyte/agents/jev/runtime.py`, `agent.py` | Wiring | **Nothing.** A check never touches the runtime. |
 | `vidbyte/agents/jev/response.py` | `JevResponse` (`run_state`, `handoff`, `done`, `continued`) | Nothing. `done` is keyed by check. |
 | `vidbyte/prompts/prompts/jev_run_state/`, `jev_handoff/` | General system prompts | **Nothing.** They must stay check-agnostic, and a test enforces this. |
-| `vidbyte/prompts/prompts/jev_continuation/continue_prompt.md` | The continuation message template | Usually nothing. `_explain` fills `{failed}` and `{focus}`. |
+| `vidbyte/prompts/prompts/jev_continuation/continue_prompt.md` | The continuation message template | Nothing. Its Goal and Instructions are check-agnostic; your gate description and `_explain` fill `{failed}` and `{focus}`. |
 | `vidbyte/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/agents/jev/__init__.py` | Public exports | Export new records a user reads on `JevAgent.response`, as `JevDeliverable` is exported. |
 | `tests/test_jev_done.py`, `scripts/test-jev-multipart-done-criteria.py` | Tests and the focused runner | Extend the test classes, and keep the script's loader exhaustive. |
 
@@ -131,7 +131,7 @@ Work through the steps in order. Each is explained in detail below.
 - [ ] 10. Add a typed section helper and register it in `JevRunState._section`'s dispatch map: its part of the shared state and batched questions.
 - [ ] 11. Keep the shared state description (`DONE_STATE`) true for every combination of enabled checks.
 - [ ] 12. Add the check's `_<check>` scorer to `JevRunState._judge`'s dispatch map, preserving its fail-open and empty-item behavior.
-- [ ] 13. Add a typed explanation helper to `JevDoneContinuation` and register it in `_explain`'s dispatch map: what the main agent reads when the check fails.
+- [ ] 13. Write the check's `JevDoneGateDescription` in `JevDoneRegistry._descriptions`, then add a typed explanation helper to `JevDoneContinuation` and register it in `_explain`'s dispatch map: what the main agent reads when the check fails.
 - [ ] 14. Leave the runtime, the agent, the settings, and the system prompts alone, and confirm that you did.
 - [ ] 15. Export public records, extend the tests, and update the docs and skills.
 - [ ] 16. Run the verification commands.
@@ -536,14 +536,14 @@ This is what happens **after** `should_continue` returns True.
 1. `self.response.continued()` increments `JevAgent.response.continuations`.
 2. It appends **one** `{"role": "user", "content": self.message()}` to the **same** loop's `messages`. The main agent keeps its history, tools, and budgets and resumes work. It is never re-run from scratch.
 
-`message()` fills the `jev_continuation/continue_prompt.md` asset (`Prompt.JEV_CONTINUATION_CONTINUE_PROMPT`). The asset carries fixed instructions: finish only what is missing, focus on the Focus list, make each part visible in the work, do not redo work, do not add work. After those instructions come five sections:
+`message()` fills the `jev_continuation/continue_prompt.md` asset (`Prompt.JEV_CONTINUATION_CONTINUE_PROMPT`). The asset opens with general `# Goal` and `# Instructions` sections: close only the gaps the checks found, what the original request, run state, and handoff are, what a failed Jev question means, make each part visible in the work, do not redo work, do not add work. They name no single check. After them come five sections:
 
 | Section | Filled from | Your check's contribution |
 |---|---|---|
 | `# Original request` | `run_state.request` | none |
 | `# Run state` | `run_state.rendered`, the JSON of the whole run state including your section | automatic, via your payload |
 | `# Handoff` | `run_state.handoff_writer.rendered`, the JSON of the whole handoff including your section and its `missing` text | automatic, via your payload |
-| `# Failed checks` | `"\n\n".join(failed …)` over the `_explain` results | the **first** string you return |
+| `# Failed checks` | one block per failed check: `## <Check>`, then `JevDoneRegistry.description(check)`, then `What the check found:` and the `_explain` failed text | your gate description, then the **first** string you return |
 | `# Focus` | `"\n".join(focus …)` over the `_explain` results | the **second** string you return |
 
 Register a typed `_explain_<check>` helper in `_explain`'s handler map. The helper returns `(failed, focus)`:
@@ -569,6 +569,7 @@ def _explain_<check>(self, result):
 - **Focus** lists only incomplete items. Request-derived items use the pre-run state; CLAIMS resolves each incomplete parent id to its assertions and includes only assertion answers below threshold, with the parent context and evidence gap. Supported sibling assertions and claims never appear in this focus. `test_incomplete_deliverable_sends_the_main_agent_back_in_the_same_loop` asserts this for multi-part.
 - **Focus** lists the incomplete items in the user's own terms, from the run state, which was written before any work. Items that passed never appear here. `test_incomplete_deliverable_sends_the_main_agent_back_in_the_same_loop` asserts this for multi-part.
 - For `CAN_SIMPLIFY`, **Failed checks** includes the supported smaller alternative and **Focus** repeats the implementation scope and preservation requirements. The continuation prompt explicitly asks the agent to apply the smallest such change while keeping those requirements.
+- Your check's `JevDoneGateDescription` has three fields, `what_it_checks`, `how_to_use`, and `failure_modes`, each one paragraph of four to five sentences, validated at construction. It is the only place for instructions specific to your check; the same text opens your block in both the same-context and the fresh continuation.
 - Only change `continue_prompt.md` when the instructions for **every** check need to change. Its placeholders are fixed: `{request}`, `{run_state}`, `{handoff}`, `{failed}`, `{focus}`.
 
 On the next finish attempt the whole cycle repeats:
