@@ -31,7 +31,7 @@ access remain outside this package.
 
 ## JevAgent continuation checks
 
-`JevAgent` can run named done checks whenever its main agent attempts to finish. Enable whole-task completion evidence alongside other checks through `JevContinuationGateSettings.enabled`:
+`JevAgent` can evaluate named continuation gates whenever its main agent attempts to finish. Gates are disabled by default; enable any combination through `JevContinuationGateSettings.enabled`:
 
 ```python
 from vidbyte import JevContinuationGateSettings, JevContinuationGate, JevRuntimeSettings
@@ -40,11 +40,16 @@ runtime_settings = JevRuntimeSettings(
     continuation_gate=JevContinuationGateSettings(
         enabled=(JevContinuationGate.COMPLETION_EVIDENCE,),
         max_continuations=2,
+        same_context=True,
     ),
 )
 ```
 
 `COMPLETION_EVIDENCE` checks whether the final answer's overall complete, incomplete, or blocked status matches the requested outcomes and observations in the run. An unqualified final answer implies completion, even when it does not say “done.” Honest incomplete or blocked reports can pass when the run evidence supports them. The final answer's own claim that external work happened does not count as evidence for that work. The result is available as `agent.response.continuation_gates[JevContinuationGate.COMPLETION_EVIDENCE]`; if Jev cannot evaluate it, the check fails open.
+
+`same_context=True` is the default: a failed gate returns the main agent to its existing loop and history. Set `same_context=False` to run the repair attempt in a clean worker context; that worker's reply returns to the main loop. Across retries, the request-derived run state stays fixed, while the runtime replaces the latest handoff evidence and gate assessment in stable context slots. The model sees each current snapshot once instead of another appended copy after every retry.
+
+This alpha API rename is breaking: replace `JevDoneCheck` with `JevContinuationGate`, `JevContinualSettings` with `JevContinuationGateSettings`, `JevRuntimeSettings.continual` with `continuation_gate`, and the settings field `checks` with `enabled`. Replace the old `SAME_CONTEXT`/`FRESH` mode enum with the boolean `same_context`; inspect results through `agent.response.continuation_gates` instead of `agent.response.done`.
 
 ## Layer Guide
 

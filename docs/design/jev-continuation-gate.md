@@ -106,12 +106,12 @@ The caller wants a public setting named around continuation gates, a choice betw
 
 | ID | Given | When | Then | Priority | Proof |
 |---|---|---|---|---|---|
-| AC-1 | A same-context run has at least three failed finish attempts and distinct handoffs | Each attempt is assembled for the main runner | Every call has one run-state block with identical content, one handoff with that attempt's content, and one latest gate assessment; no previous snapshot block remains | P0 | _(implementer)_ |
-| AC-2 | Shared gate descriptions from #506 produce different failed questions across attempts | The same-context continuation assessment is rendered | It contains the current enabled-gate statuses and only the latest failed question text | P0 | _(implementer)_ |
-| AC-3 | A caller configures `same_context=False` and a gate fails | The fresh continuation path runs | The fresh worker receives the current request, immutable run state, latest handoff, and gate assessment; its response returns to the main loop without a duplicate full prompt block | P0 | _(implementer)_ |
-| AC-4 | No gates are enabled, or `max_continuations=0` | The run reaches a finish attempt | No repair is started; zero-cap runs still evaluate and expose gate results when gates are enabled | P0 | _(implementer)_ |
-| AC-5 | A caller uses the renamed public configuration and result surface | The SDK is imported and a run completes | The new `continuation_gate` setting and response field are available; removed public names are documented as migration changes | P0 | _(implementer)_ |
-| AC-6 | A single handoff is large but history has no duplicate JEV blocks | A continuation is assembled | Only one latest handoff is present; its size is not silently truncated by this change | P1 | _(implementer)_ |
+| AC-1 | A same-context run has at least three failed finish attempts and distinct handoffs | Each attempt is assembled for the main runner | Every call has one run-state block with identical content, one handoff with that attempt's content, and one latest gate assessment; no previous snapshot block remains | P0 | `tests/test_jev_done.py::JevDoneRuntimeTests::test_same_context_replaces_stable_continuation_slots` — captured provider payload across four calls verifies one frozen state, current handoff, and replaced slots |
+| AC-2 | Shared gate descriptions from #506 produce different failed questions across attempts | The same-context continuation assessment is rendered | It contains the current enabled-gate statuses and only the latest failed question text | P0 | `test_same_context_replaces_stable_continuation_slots` and `tests/test_jev_fresh_continuation.py::test_gate_assessment_lists_enabled_gates_and_recomputes_failed_questions` — later question text replaces earlier failed text |
+| AC-3 | A caller configures `same_context=False` and a gate fails | The fresh continuation path runs | The fresh worker receives the current request, immutable run state, latest handoff, and gate assessment; its response returns to the main loop without a duplicate full prompt block | P0 | `tests/test_jev_fresh_continuation.py::test_failed_check_runs_in_clean_context_and_returns_response_to_main_loop` and `test_fresh_gate_uses_latest_stable_snapshots` — clean history, latest snapshots, and reply handoff |
+| AC-4 | No gates are enabled, or `max_continuations=0` | The run reaches a finish attempt | No repair is started; zero-cap runs still evaluate and expose gate results when gates are enabled | P0 | `tests/test_jev_agent.py` and `tests/test_jev_done.py::JevDoneRuntimeTests` — disabled gates stop, zero cap records outcomes without retry |
+| AC-5 | A caller uses the renamed public configuration and result surface | The SDK is imported and a run completes | The new `continuation_gate` setting and response field are available; removed public names are documented as migration changes | P0 | `tests/test_jev_agent.py` — public construction, import, renamed settings, and `response.continuation_gates` coverage; README and JEV guide examples updated |
+| AC-6 | A single handoff is large but history has no duplicate JEV blocks | A continuation is assembled | Only one latest handoff is present; its size is not silently truncated by this change | P1 | `tests/test_jev_done.py::JevDoneRuntimeTests::test_overlay_preserves_full_latest_handoff` — 8,000 repeated evidence units and the terminal marker survive in the single assembled slot |
 
 ## §7 Edge cases, failure modes, and rollback
 
@@ -419,13 +419,14 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 
 - [ ] Every command in §11 Commands passes in the implementation worktree.
 - [ ] Remote PR checks are green.
-- [ ] Every P0 AC in §6 has proof.
-- [ ] Tests cover positive, negative, edge, and security cases listed in §12.
-- [ ] Complexity budget (§10.5) is respected, or exceedance is approved.
-- [ ] No new dependency outside §27; no suppressed lint; no skipped/deleted tests.
-- [ ] Public exports, README examples, and both JEV skills use the new public names.
-- [ ] Captured provider-call payloads prove fixed run-state and latest-value handoff/assessment behavior across multiple continuations.
-- [ ] `same_context=False` remains a clean-worker continuation returning to the existing main loop unless the user changes A-2.
+- [x] Every P0 AC in §6 has focused test proof; see the AC proof cells.
+- [x] Tests cover positive, negative, edge, and security cases listed in §12; focused JEV suite passed.
+- [x] Complexity budget (§10.5) is respected without additional production files or dependencies.
+- [x] No lint suppressions or skipped/deleted tests were introduced.
+- [x] Public exports, README examples, and both JEV skills use the new public names.
+- [x] Captured provider-call payloads prove fixed run-state and latest-value handoff/assessment behavior across multiple continuations.
+- [x] `same_context=False` remains a clean-worker continuation returning to the existing main loop unless the user changes A-2.
+- [ ] Full repository gates and remote PR checks remain pending because P1.T3 is blocked on out-of-scope stale feature documentation; see §31 implementation boundary.
 
 ## §15 Phased implementation plan
 
@@ -440,7 +441,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
   - Verify: `python -m pytest tests/test_jev_done.py tests/test_jev_fresh_continuation.py`
   - Files: runtime, continuation contract/implementations, run_state, prompt assets, and focused tests listed in §26.
 - **P1.T3 — Run repo gates and close references** — Serves: FR-7, NFR-1–NFR-3 / all ACs
-  - Acceptance: Repository-wide old-API search finds no unintended public references; package and docs pass full CI.
+  - Acceptance: Repository-wide old-API search finds no unintended public references; package and docs pass full CI. **BLOCKED:** stale caller-facing feature docs outside §26 require an owner decision before edits.
   - Verify: `python scripts/run_ci.py`
   - Files: remaining references in §26 and any tests identified by the old-name search.
 
@@ -472,16 +473,16 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 
 | Requirement | Invariants | Acceptance | Tests | Tasks | Proof |
 |---|---|---|---|---|---|
-| FR-1 | INV-1, INV-8 | AC-4, AC-5 | `test_jev_agent.py`; `test_jev_done.py` | P1.T1 | _(implementer)_ |
-| FR-2 | INV-11, INV-12 | AC-5 | public import/response tests; JEV suite | P1.T1 | _(implementer)_ |
-| FR-3 | INV-2, INV-10 | AC-1 | `test_same_context_replaces_stable_continuation_slots`; isolation test | P1.T2 | _(implementer)_ |
-| FR-4 | INV-3, INV-4, INV-5 | AC-1, AC-2, AC-6 | stable slot, latest assessment, and full handoff tests | P1.T2 | _(implementer)_ |
-| FR-5 | INV-6, INV-7, INV-9 | AC-3, AC-4 | done and fresh continuation tests | P1.T1, P1.T2 | _(implementer)_ |
-| FR-6 | INV-1, INV-11, INV-12 | AC-2, AC-4 | `test_jev_done.py`; fresh assessment tests | P1.T1, P1.T2 | _(implementer)_ |
-| FR-7 | INV-12 | AC-5 | docs/import checks; full suite | P1.T1, P1.T3 | _(implementer)_ |
-| NFR-1 | INV-3, INV-4 | AC-1 | captured provider payload test | P1.T2 | _(implementer)_ |
-| NFR-2 | INV-10 | AC-1 | overlay does not mutate agent context manager | P1.T2 | _(implementer)_ |
-| NFR-3 | INV-4 | AC-6 | latest handoff content assertion | P1.T2 | _(implementer)_ |
+| FR-1 | INV-1, INV-8 | AC-4, AC-5 | `tests/test_jev_agent.py`; `tests/test_jev_done.py` | P1.T1 | `python -m pytest tests/test_jev_agent.py tests/test_jev_done.py tests/test_jev_fresh_continuation.py -q` — 213 passed |
+| FR-2 | INV-11, INV-12 | AC-5 | public import/response tests; JEV suite | P1.T1 | Same focused command — 213 passed; public enum, result, settings, and response surface asserted |
+| FR-3 | INV-2, INV-10 | AC-1 | `test_same_context_replaces_stable_continuation_slots`; isolation test | P1.T2 | `test_same_context_replaces_stable_continuation_slots` and `test_overlay_does_not_mutate_agent_context_manager` — captured payload and caller registry unchanged |
+| FR-4 | INV-3, INV-4, INV-5 | AC-1, AC-2, AC-6 | stable slot, latest assessment, and full handoff tests | P1.T2 | Same-context/fresh latest-snapshot tests and 8,000-unit handoff test; focused JEV suite 213 passed |
+| FR-5 | INV-6, INV-7, INV-9 | AC-3, AC-4 | done and fresh continuation tests | P1.T1, P1.T2 | Focused JEV suite 213 passed, including clean-worker reply, unavailable, cap, and no-gate cases |
+| FR-6 | INV-1, INV-11, INV-12 | AC-2, AC-4 | `test_jev_done.py`; fresh assessment tests | P1.T1, P1.T2 | Focused JEV suite 213 passed; current batched results remain in response |
+| FR-7 | INV-12 | AC-5 | docs/import checks; full suite | P1.T1, P1.T3 | README, JEV README, and both JEV skills updated; P1.T3 blocked by out-of-scope feature references listed in implementation report |
+| NFR-1 | INV-3, INV-4 | AC-1 | captured provider payload test | P1.T2 | `test_same_context_replaces_stable_continuation_slots` — one current block per slot in captured provider payloads |
+| NFR-2 | INV-10 | AC-1 | overlay does not mutate agent context manager | P1.T2 | `test_overlay_does_not_mutate_agent_context_manager` — caller registry content and ids unchanged |
+| NFR-3 | INV-4 | AC-6 | latest handoff content assertion | P1.T2 | `test_overlay_preserves_full_latest_handoff` — full evidence and final marker survive unchanged |
 
 ## §31 Review log
 
@@ -491,6 +492,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 | r1-2 | R-2 | Major | §10, §16, §26 | The overlay was not connected concretely to provider-call assembly, so the default runtime would omit it. | accepted | Spec requires `JevRuntime._build_conversation_messages(messages)` to call `super()` and append `overlay.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)`, pass the overlay through the continuation hook, and test the assembled provider payload. |
 | r1-3 | R-3 | Minor | §26 | Directly editing the descriptive AGENTS map would conflict with its instruction to regenerate rather than patch. | accepted | Removed `AGENTS.md` from the modification list; it is a lossy map and no regeneration workflow was found. |
 | r2-1 | R-4 | Minor | §5 | The initial wording said #508 already supplied the full per-gate status assessment to same-context continuation. | accepted | Clarified that #506 reports every gate's status, #508 adds failed-gate explanations only, and this change must share one renderer combining those behaviors for both paths. |
+| implementation-1 | P1.T3 | Blocking | §26, §15 | Repository-wide rename search found active public API examples in feature specs outside §26. | stopped for owner decision | Did not edit the `tests/features/jev_*/FEATURE.md` files. Exact paths and stale examples are reported with the implementation boundary; options are to authorize those files for migration or explicitly exclude them from the no-stale-public-reference acceptance check. |
 
 ## §32 Revision history
 
@@ -498,3 +500,4 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 |---|---|---|---|
 | r1 | 2026-10-03 | spec-create | Initial repo-grounded spec; applied R-2, R-3, and R-4; rejected R-1 with code evidence and narrowed the concurrency contract. |
 | r2 | 2026-10-04 | spec-implement | Approved for implementation; handed to implementer subagent. |
+| implementation | 2026-10-04 | spec-implement | P1.T1 and P1.T2 implemented and focused JEV tests passed; P1.T3 stopped because stale feature docs outside §26 need an owner scope decision. |
