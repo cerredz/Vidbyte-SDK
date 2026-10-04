@@ -143,7 +143,7 @@ The caller wants a public setting named around continuation gates, a choice betw
 | FR-4 | Store the latest handoff and latest shared failed-gate assessment in stable, replaceable runtime context slots; do not append full request/state/handoff/assessment blocks to the same-context transcript on every retry. | P0 | §0, §1, US-2 |
 | FR-5 | Preserve the same-context and fresh-worker continuation behavior, selected by `same_context`. | P0 | §0, US-1 |
 | FR-6 | Keep one batched Jev evaluation per finish attempt and expose each enabled gate's latest outcome through the response writer. | P0 | §0, US-3 |
-| FR-7 | Update all public exports, examples, and JEV developer documentation for the renamed configuration and result surface. | P0 | §0, US-1 |
+| FR-7 | INV-12 | AC-5 | docs/import checks; full suite | P1.T1, P1.T3 | README, JEV READMEs, both JEV skills, and all six authorized caller-facing feature docs updated; remaining references in README migration guidance, archival `docs/design/jev-*.md` records, and `AGENTS.md` are historical/reference-only |
 
 **Non-functional**
 
@@ -420,7 +420,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 
 ## §29 Quality gates and definition of done
 
-- [ ] Every command in §11 Commands passes in the implementation worktree.
+- [x] Every command in §11 Commands passes in the implementation worktree. (`python scripts/run_ci.py`: 2,118 passed, 1 skipped; package build, install, and smoke checks passed)
 - [ ] Remote PR checks are green.
 - [x] Every P0 AC in §6 has focused test proof; see the AC proof cells.
 - [x] Tests cover positive, negative, edge, and security cases listed in §12; focused JEV suite passed.
@@ -429,7 +429,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 - [x] Public exports, README examples, and both JEV skills use the new public names.
 - [x] Captured provider-call payloads prove fixed run-state and latest-value handoff/assessment behavior across multiple continuations.
 - [x] `same_context=False` remains a clean-worker continuation returning to the existing main loop unless the user changes A-2.
-- [ ] Full repository gates and remote PR checks remain pending because P1.T3 is blocked on out-of-scope stale feature documentation; see §31 implementation boundary.
+- [x] Full repository gates passed. The six authorized caller-facing feature docs were migrated; remaining old names in the README migration note, archival `docs/design/jev-*.md` records, and the descriptive `AGENTS.md` map are historical/reference material, not current public examples. Remote PR checks remain pending.
 
 ## §15 Phased implementation plan
 
@@ -444,7 +444,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
   - Verify: `python -m pytest tests/test_jev_done.py tests/test_jev_fresh_continuation.py`
   - Files: runtime, continuation contract/implementations, run_state, prompt assets, and focused tests listed in §26.
 - **P1.T3 — Run repo gates and close references** — Serves: FR-7, NFR-1–NFR-3 / all ACs
-  - Acceptance: Repository-wide old-API search finds no unintended public references; package and docs pass full CI. **BLOCKED:** stale caller-facing feature docs outside §26 require an owner decision before edits.
+  - Acceptance: Repository-wide old-API search finds no unintended current public examples; package and docs pass full CI. Six caller-facing feature docs were updated under the recorded owner authorization. Historic examples remain in archival design records and the descriptive `AGENTS.md` map, which were outside that authorization.
   - Verify: `python scripts/run_ci.py`
   - Files: remaining references in §26 and any tests identified by the old-name search.
 
@@ -482,7 +482,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 | FR-4 | INV-3, INV-4, INV-5 | AC-1, AC-2, AC-6 | stable slot, latest assessment, and full handoff tests | P1.T2 | Same-context/fresh latest-snapshot tests and 8,000-unit handoff test; focused JEV suite 213 passed |
 | FR-5 | INV-6, INV-7, INV-9 | AC-3, AC-4 | done and fresh continuation tests | P1.T1, P1.T2 | Focused JEV suite 213 passed, including clean-worker reply, unavailable, cap, and no-gate cases |
 | FR-6 | INV-1, INV-11, INV-12 | AC-2, AC-4 | `test_jev_done.py`; fresh assessment tests | P1.T1, P1.T2 | Focused JEV suite 213 passed; current batched results remain in response |
-| FR-7 | INV-12 | AC-5 | docs/import checks; full suite | P1.T1, P1.T3 | README, JEV README, and both JEV skills updated; P1.T3 blocked by out-of-scope feature references listed in implementation report |
+| FR-7 | INV-12 | AC-5 | docs/import checks; full suite | P1.T1, P1.T3 | README, JEV READMEs, both JEV skills, and all six authorized caller-facing feature docs updated; remaining references in README migration guidance, archival `docs/design/jev-*.md` records, and `AGENTS.md` are historical/reference-only |
 | NFR-1 | INV-3, INV-4 | AC-1 | captured provider payload test | P1.T2 | `test_same_context_replaces_stable_continuation_slots` — one current block per slot in captured provider payloads |
 | NFR-2 | INV-10 | AC-1 | overlay does not mutate agent context manager | P1.T2 | `test_overlay_does_not_mutate_agent_context_manager` — caller registry content and ids unchanged |
 | NFR-3 | INV-4 | AC-6 | latest handoff content assertion | P1.T2 | `test_overlay_preserves_full_latest_handoff` — full evidence and final marker survive unchanged |
@@ -495,7 +495,8 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 | r1-2 | R-2 | Major | §10, §16, §26 | The overlay was not connected concretely to provider-call assembly, so the default runtime would omit it. | accepted | Spec requires `JevRuntime._build_conversation_messages(messages)` to call `super()` and append `overlay.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)`, pass the overlay through the continuation hook, and test the assembled provider payload. |
 | r1-3 | R-3 | Minor | §26 | Directly editing the descriptive AGENTS map would conflict with its instruction to regenerate rather than patch. | accepted | Removed `AGENTS.md` from the modification list; it is a lossy map and no regeneration workflow was found. |
 | r2-1 | R-4 | Minor | §5 | The initial wording said #508 already supplied the full per-gate status assessment to same-context continuation. | accepted | Clarified that #506 reports every gate's status, #508 adds failed-gate explanations only, and this change must share one renderer combining those behaviors for both paths. |
-| implementation-1 | P1.T3 | Blocking | §26, §15 | Repository-wide rename search found active public API examples in feature specs outside §26. | stopped for owner decision | Did not edit the `tests/features/jev_*/FEATURE.md` files. Exact paths and stale examples are reported with the implementation boundary; options are to authorize those files for migration or explicitly exclude them from the no-stale-public-reference acceptance check. |
+| implementation-1 | P1.T3 | Scope decision | spec section 0.2, file map | Repository-wide search found current caller-facing examples in six feature docs omitted from the original file map. | resolved by owner authorization `1` (2026-10-04) | Updated only `tests/features/jev_required_actions/FEATURE.md`, `tests/features/jev_problem_repair/FEATURE.md`, `tests/features/jev_output_extent/FEATURE.md`, `tests/features/jev_input_exhaustion/FEATURE.md`, `tests/features/jev_input_set_coverage/FEATURE.md`, and `tests/features/jev_claims/FEATURE.md`; no archival design document or `AGENTS.md` was edited. |
+| implementation-2 | P1.T3 | Review note | implementation reference audit | Broad terminology search still finds old public API examples in historical materials. | classified; no edit authorized or needed | `README.md` names old symbols solely in its breaking-migration instruction. Old examples in `docs/design/jev-*.md` are archival design records. `AGENTS.md` is the descriptive map and was excluded from scope. These are not current public examples; all six current caller-facing feature docs are migrated. |
 
 ## §32 Revision history
 
@@ -503,4 +504,4 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 |---|---|---|---|
 | r1 | 2026-10-03 | spec-create | Initial repo-grounded spec; applied R-2, R-3, and R-4; rejected R-1 with code evidence and narrowed the concurrency contract. |
 | r2 | 2026-10-04 | spec-implement | Approved for implementation; handed to implementer subagent. |
-| implementation | 2026-10-04 | spec-implement | P1.T1 and P1.T2 implemented and focused JEV tests passed; P1.T3 stopped because stale feature docs outside §26 need an owner scope decision. |
+| implementation | 2026-10-04 | spec-implement | P1.T1 through P1.T3 implemented; six authorized feature docs migrated; full local CI passed (2,118 passed, 1 skipped). Draft PR and remote checks pending. |

@@ -2,15 +2,15 @@
 
 ## User outcome
 
-When enabled with `JevDoneCheck.REQUIRED_ACTIONS`, JevAgent checks that explicitly requested procedures or actions have observable completion evidence before accepting a finish attempt. The check does not invent useful steps, conflate procedure with output count, or accept the final answer's bare statement that an action happened.
+When enabled with `JevContinuationGate.REQUIRED_ACTIONS`, JevAgent checks that explicitly requested procedures or actions have observable completion evidence before accepting a finish attempt. The gate does not invent useful steps, conflate procedure with output count, or accept the final answer's bare statement that an action happened.
 
 ## Callers and flow
 
-- Caller: `JevAgent` configured through `JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.REQUIRED_ACTIONS,)))`.
+- Caller: `JevAgent` configured through `JevRuntimeSettings(continuation_gate=JevContinuationGateSettings(enabled=(JevContinuationGate.REQUIRED_ACTIONS,)))`.
 - `JevRunState.begin()` extracts stable, explicit action ids and observable completion conditions before work starts.
 - At each finish attempt, `JevHandoff` collects the per-action trace observations and may cite an exact substantive excerpt from a recorded response or final answer.
 - One Jev yes/no question is sent per action in the same batched request as any other enabled checks. Deterministic code vetoes a positive answer when neither a successful completion call nor a source-validated output excerpt exists, and checks explicit ordering from successful call indices.
-- On failure, `JevDoneContinuation` returns the run to the same model loop with the request, state, evidence, failed questions, and action-specific focus. Continuations obey the existing cap; unavailable model stages fail open.
+- On failure in same-context mode, `JevDoneContinuation` resumes the same model loop with the current gate assessment and the latest state/evidence snapshots. Failed questions and action-specific focus are refreshed after each attempt; continuations obey the existing cap, and unavailable model stages fail open.
 
 ## Invariants
 

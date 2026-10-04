@@ -6,7 +6,7 @@ The opt-in `OUTPUT_EXTENT` continuation gate tracks explicit numeric constraints
 
 ## Contract
 
-When enabled through `JevContinualSettings.checks`, run state records every unambiguous explicit text extent before work starts. The handoff returns one observed-evidence item per obligation. Each obligation contributes one question to the single batched Jev request. Code applies exact numeric comparisons to supported final-answer scopes even when the final answer omits the requested quota; Jev recognizes that evidence is about the correct target. If an extent fails, continuation feedback names the target, bound, observed amount when available, and handoff gap. If evidence or Jev is unavailable, the advisory check fails open, consistent with other Jev done checks.
+When enabled through `JevContinuationGateSettings.enabled`, run state records every unambiguous explicit text extent before work starts. The handoff returns one observed-evidence item per obligation. Each obligation contributes one question to the single batched Jev request. Code applies exact numeric comparisons to supported final-answer scopes even when the final answer omits the requested quota; Jev recognizes that evidence is about the correct target. If an extent fails, the latest continuation-gate assessment names the target, bound, observed amount when available, and handoff gap. If evidence or Jev is unavailable, the advisory gate fails open, consistent with other continuation gates.
 
 ## Failure Inventory
 

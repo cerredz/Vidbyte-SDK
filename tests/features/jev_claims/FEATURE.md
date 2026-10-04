@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-The opt-in CLAIMS done check reviews concrete, checkable factual assertions in JevAgent's final answer. Each parent claim carries five context groups: identity, scope, kind, output, and its assertions with completion criteria. The check pairs each assertion with the parent context and relevant tool-call evidence, asks Jev one yes/no question per assertion, and sends only unsupported assertions back to the main agent. This prevents an unsupported self-report from being mistaken for evidence while leaving the ordinary answer intact if the checker is unavailable.
+The opt-in CLAIMS continuation gate reviews concrete, checkable factual assertions in JevAgent's final answer. Each parent claim carries five context groups: identity, scope, kind, output, and its assertions with completion criteria. The gate pairs each assertion with the parent context and relevant tool-call evidence, asks Jev one yes/no question per assertion, and directs the main agent to unsupported assertions. This prevents an unsupported self-report from being mistaken for evidence while leaving the ordinary answer intact if the checker is unavailable.
 
 ## Contract
 
@@ -11,13 +11,13 @@ The opt-in CLAIMS done check reviews concrete, checkable factual assertions in J
 - Each assertion has a stable id, exact factual statement, and one observable `completion_criteria` string. Parent and assertion ids combine as `parent_id.assertion_id` for state entries and answers.
 - Every Jev state entry repeats the five context groups for exactly one assertion and pairs them with tool-call evidence or an explicit no-evidence statement.
 - Jev's judgment uses only that assertion's context and evidence; it does not treat the final answer or the handoff's `missing` summary as evidence.
-- One unsupported assertion fails the parent claim regardless of the mean score; continuation focus includes only failed assertions and their specific evidence gaps.
-- An answer with no concrete, checkable factual assertions adds no CLAIMS questions and passes. If another enabled done check has items, its questions still use the shared Jev request. Missing handoff evidence, missing credentials, or provider errors fail open.
-- Every enabled done check still shares one Jev request per finish attempt.
+- One unsupported assertion fails the parent claim regardless of the mean score; the current gate assessment focuses only on failed assertions and their specific evidence gaps.
+- An answer with no concrete, checkable factual assertions adds no CLAIMS questions and passes. If another enabled continuation gate has items, its questions still use the shared Jev request. Missing handoff evidence, missing credentials, or provider errors fail open.
+- Every enabled continuation gate still shares one Jev request per finish attempt.
 
 ## Actors / Callers
 
-An SDK caller enables CLAIMS with `JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.CLAIMS,)))`. JevRuntime invokes the done check when the main agent tries to finish. The handoff model extracts rich parent claims and evidence; Jev judges each assertion; the continuation prompt returns only unsupported assertion references, parent context, tool evidence, and gaps.
+An SDK caller enables CLAIMS with `JevRuntimeSettings(continuation_gate=JevContinuationGateSettings(enabled=(JevContinuationGate.CLAIMS,)))`. JevRuntime evaluates the gate when the main agent tries to finish. The handoff model extracts rich parent claims and evidence; Jev judges each assertion; in same-context mode the latest assessment includes the current gate status and focuses only on unsupported assertion references, parent context, tool evidence, and gaps.
 
 ## Inputs and Preconditions
 
@@ -25,7 +25,7 @@ The main agent must have a final answer and an available handoff model. The hand
 
 ## Observable Outcomes
 
-`JevAgent.response.handoff.claims` contains structured claim/evidence/missing records. `JevAgent.response.done[JevDoneCheck.CLAIMS]` reports a score over assertions, answers keyed by `parent_id.assertion_id`, incomplete parent claim ids, availability, and pass status. On a failed check, the next main-agent prompt includes only unsupported assertions, their full context, tool evidence, and gaps.
+`JevAgent.response.handoff.claims` contains structured claim/evidence/missing records. `JevAgent.response.continuation_gates[JevContinuationGate.CLAIMS]` reports a score over assertions, answers keyed by `parent_id.assertion_id`, incomplete parent claim ids, availability, and pass status. On a failed gate, the latest assessment focuses only on unsupported assertions, their full context, tool evidence, and gaps; the run state and handoff remain in stable slots instead of being appended again.
 
 ## State Transitions
 
