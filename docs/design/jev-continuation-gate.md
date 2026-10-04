@@ -1,7 +1,7 @@
 ---
 spec: jev-continuation-gate
 title: JEV Continuation Gates and Stable Run Context
-status: implementing
+status: pr-open
 revision: 1
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 base_commit: 7a174bb2a2b22b65f94fddd960a02846e2e08c26
@@ -421,7 +421,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 ## §29 Quality gates and definition of done
 
 - [x] Every command in §11 Commands passes in the implementation worktree. (`python scripts/run_ci.py`: 2,118 passed, 1 skipped; package build, install, and smoke checks passed)
-- [ ] Remote PR checks are green.
+- [x] Required remote CI checks are green (manual GitHub Actions run 37229426468: Python 3.11, Python 3.12, Package).
 - [x] Every P0 AC in §6 has focused test proof; see the AC proof cells.
 - [x] Tests cover positive, negative, edge, and security cases listed in §12; focused JEV suite passed.
 - [x] Complexity budget (§10.5) is respected without additional production files or dependencies.
@@ -429,7 +429,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 - [x] Public exports, README examples, and both JEV skills use the new public names.
 - [x] Captured provider-call payloads prove fixed run-state and latest-value handoff/assessment behavior across multiple continuations.
 - [x] `same_context=False` remains a clean-worker continuation returning to the existing main loop unless the user changes A-2.
-- [x] Full repository gates passed. The six authorized caller-facing feature docs were migrated; remaining old names in the README migration note, archival `docs/design/jev-*.md` records, and the descriptive `AGENTS.md` map are historical/reference material, not current public examples. Remote PR checks remain pending.
+- [x] Full repository gates passed. The six authorized caller-facing feature docs were migrated; remaining old names in the README migration note, archival `docs/design/jev-*.md` records, and the descriptive `AGENTS.md` map are historical/reference material, not current public examples. Required remote CI checks passed: Python 3.11, Python 3.12, and Package (GitHub Actions workflow run 37229426468).
 
 ## §15 Phased implementation plan
 
@@ -443,7 +443,7 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
   - Acceptance: Same-context calls contain one immutable run state, one latest handoff, and one latest assessment; fresh worker sees matching latest data and returns only its output to the main history.
   - Verify: `python -m pytest tests/test_jev_done.py tests/test_jev_fresh_continuation.py`
   - Files: runtime, continuation contract/implementations, run_state, prompt assets, and focused tests listed in §26.
-- **P1.T3 - Run repo gates and close references** - Serves: FR-7, NFR-1-NFR-3 / all ACs - Complete locally; remote PR checks pending.
+- **P1.T3 - Run repo gates and close references** - Serves: FR-7, NFR-1-NFR-3 / all ACs - Complete; local and remote checks passed.
   - Acceptance: Repository-wide old-API search finds no unintended current public examples; package and docs pass full CI. Six caller-facing feature docs were updated under the recorded owner authorization. Historic examples remain in archival design records and the descriptive `AGENTS.md` map, which were outside that authorization.
   - Verify: `python scripts/run_ci.py`
   - Files: remaining references in §26 and any tests identified by the old-name search.
@@ -504,4 +504,4 @@ Branch: `feat/jev-continuation-gate` (per `CONTRIBUTING.md` focused-branch guida
 |---|---|---|---|
 | r1 | 2026-10-03 | spec-create | Initial repo-grounded spec; applied R-2, R-3, and R-4; rejected R-1 with code evidence and narrowed the concurrency contract. |
 | r2 | 2026-10-04 | spec-implement | Approved for implementation; handed to implementer subagent. |
-| implementation | 2026-10-04 | spec-implement | P1.T1 through P1.T3 implemented; six authorized feature docs migrated; full local CI passed (2,118 passed, 1 skipped). Draft PR and remote checks pending. |
+| implementation | 2026-10-04 | spec-implement | P1.T1 through P1.T3 implemented; six authorized feature docs migrated; full local CI passed (2,118 passed, 1 skipped); draft PR #509 is open; required remote CI checks passed (Python 3.11, Python 3.12, Package). |
