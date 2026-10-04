@@ -144,8 +144,7 @@ class JevDoneContinuation(JevContinuation):
         assessment = "\n\n".join(sections)
         directive = Prompts().get(Prompt.JEV_CONTINUATION_CONTINUE_PROMPT)
         return (
-            f"<jev_continuation_directive>\n{directive}\n</jev_continuation_directive>\n\n"
-            f"<jev_gate_assessment_reference_data>\n{assessment}\n</jev_gate_assessment_reference_data>"
+            f"<jev_continuation_directive>\n{directive}\n</jev_continuation_directive>\n\n<jev_gate_assessment_reference_data>\n{assessment}\n</jev_gate_assessment_reference_data>"
         )
 
     @staticmethod
