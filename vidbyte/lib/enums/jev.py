@@ -295,4 +295,14 @@ class JevComputeQuestionKey(str, Enum):
     SELF_CONTAINED_STEP_REQUESTED = "self_contained_step.requested"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevComputeSituation", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefItemStatus", "JevRunBriefOutcome", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+class JevComputeMoveStatus(str, Enum):
+    """What happened when the compute checkpoint went to act on a recognized situation."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    MOVE_LIMIT = "move_limit"
+    HELPER_LIMIT = "helper_limit"
+    COOLDOWN = "cooldown"
+
+
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeMoveStatus", "JevComputeQuestionKey", "JevComputeSituation", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefItemStatus", "JevRunBriefOutcome", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

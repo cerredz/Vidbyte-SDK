@@ -21,6 +21,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
     JevClarification,
     JevComputeDecision,
+    JevComputeMove,
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
@@ -99,6 +100,10 @@ class JevResponse:
     def compute_decision(self, decision: JevComputeDecision) -> None:
         """Record what Jev recognized about the run at one compute checkpoint."""
         self.state.compute_decisions.append(decision)
+
+    def compute_move(self, move: JevComputeMove) -> None:
+        """Record what the compute checkpoint did about one recognized situation."""
+        self.state.compute_moves.append(move)
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

@@ -407,6 +407,19 @@ JEV_COMPUTE_ATTEMPTS_FIELD: str = "attempts"
 JEV_COMPUTE_FAILURES_FIELD: str = "failures"
 JEV_COMPUTE_NEXT_STEP_FIELD: str = "next_step"
 JEV_COMPUTE_BRIEF_FIELD: str = "brief"
+# Compute moves: defaults of the run-local budget in JevComputeSettings. A run makes at most max_moves moves and
+# starts at most max_helpers helper agents, and waits cooldown_iterations main-loop iterations after a move
+# before making another, so one recognition cannot cascade into a run of moves.
+JEV_COMPUTE_MAX_MOVES: int = 3
+JEV_COMPUTE_MAX_HELPERS: int = 8
+JEV_COMPUTE_COOLDOWN_ITERATIONS: int = 5
+# Defaults of each helper agent's own loop limits.
+JEV_COMPUTE_HELPER_MAX_ITERATIONS: int = 30
+JEV_COMPUTE_HELPER_MAX_TOKENS: int = 300_000
+# A helper's report is clipped to this length before the main agent reads it.
+JEV_COMPUTE_HELPER_REPORT_MAX_CHARS: int = 12_000
+# The evidence source a reset helper's work is recorded under for the done checks.
+JEV_COMPUTE_RESET_SOURCE: str = "compute:reset"
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -708,4 +721,11 @@ __all__ = [
     "JEV_COMPUTE_FAILURES_FIELD",
     "JEV_COMPUTE_NEXT_STEP_FIELD",
     "JEV_COMPUTE_BRIEF_FIELD",
+    "JEV_COMPUTE_MAX_MOVES",
+    "JEV_COMPUTE_MAX_HELPERS",
+    "JEV_COMPUTE_COOLDOWN_ITERATIONS",
+    "JEV_COMPUTE_HELPER_MAX_ITERATIONS",
+    "JEV_COMPUTE_HELPER_MAX_TOKENS",
+    "JEV_COMPUTE_HELPER_REPORT_MAX_CHARS",
+    "JEV_COMPUTE_RESET_SOURCE",
 ]

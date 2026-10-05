@@ -16,6 +16,11 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_COMPUTE_COOLDOWN_ITERATIONS,
+    JEV_COMPUTE_HELPER_MAX_ITERATIONS,
+    JEV_COMPUTE_HELPER_MAX_TOKENS,
+    JEV_COMPUTE_MAX_HELPERS,
+    JEV_COMPUTE_MAX_MOVES,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_TOKENS,
@@ -248,16 +253,29 @@ class JevComputeSettings:
     Setting `JevRuntimeSettings.compute` turns the compute checkpoint on. The checkpoint keeps the run brief current
     through its own writer agent, on the cadence and model `brief` sets, and after each verified refresh asks Jev
     which of the enabled `situations` the run is in. Situations are kept in priority order; an empty tuple keeps
-    the brief and asks Jev nothing.
+    the brief and asks Jev nothing. When a situation is recognized, the checkpoint acts on it with helper agents,
+    within a run-local budget: at most `max_moves` moves and `max_helpers` helpers per run, and `cooldown_iterations`
+    main-loop iterations between moves. `max_moves=0` keeps recognition but never acts. Each helper is a separate,
+    linear agent with the main agent's model, tools, and permissions and its own `helper_max_iterations` and
+    `helper_max_tokens` limits.
     """
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
     situations: tuple[JevComputeSituation | str, ...] = (JevComputeSituation.REPEATING, JevComputeSituation.EACH_OF_SEVERAL, JevComputeSituation.SELF_CONTAINED_STEP)
+    max_moves: int = JEV_COMPUTE_MAX_MOVES
+    max_helpers: int = JEV_COMPUTE_MAX_HELPERS
+    cooldown_iterations: int = JEV_COMPUTE_COOLDOWN_ITERATIONS
+    helper_max_iterations: int = JEV_COMPUTE_HELPER_MAX_ITERATIONS
+    helper_max_tokens: int = JEV_COMPUTE_HELPER_MAX_TOKENS
 
     def __post_init__(self) -> None:
         if not isinstance(self.brief, JevRunBriefSettings):
             raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
         object.__setattr__(self, "situations", JevComputeRegistry.validate(self.situations))
+        for field_name, minimum in (("max_moves", 0), ("max_helpers", 1), ("cooldown_iterations", 0), ("helper_max_iterations", 1), ("helper_max_tokens", 1)):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ConfigurationError(f"JevComputeSettings.{field_name} must be an integer of at least {minimum}.", details={"received": repr(value)})
 
 
 @dataclass(frozen=True, slots=True)

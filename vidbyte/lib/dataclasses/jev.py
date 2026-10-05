@@ -68,6 +68,7 @@ from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
+    JevComputeMoveStatus,
     JevComputeQuestionKey,
     JevComputeSituation,
     JevDoneCheck,
@@ -3705,6 +3706,7 @@ class JevAgentResponse:
     With mid-run compute enabled, `run_facts` holds the exact run facts read at the latest checkpoint,
     `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
     `compute_decisions` records, in order, each checkpoint at which Jev was asked which compute situation the run is in.
+    `compute_moves` records, in order, what the checkpoint did about each recognized situation.
     """
 
     input: str = ""
@@ -3723,6 +3725,7 @@ class JevAgentResponse:
     run_brief: JevRunBrief | None = None
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
     compute_decisions: list[JevComputeDecision] = field(default_factory=list)
+    compute_moves: list[JevComputeMove] = field(default_factory=list)
 
     @property
     def needs_clarification(self) -> bool:
@@ -4355,7 +4358,47 @@ class JevComputeDecision:
             raise JevValidation.error("compute decision situation", f"the first situation that passed ({first!r})", self.situation)
 
 
+@dataclass(frozen=True, slots=True)
+class JevComputeHelperResult:
+    """What one compute helper agent produced: its final report, its run as evidence for the done checks, and its usage."""
+
+    output: str
+    evidence: JevContinuationEvidence
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a non-blank report and the helper's evidence segment.
+        JevText.require(self.output, field_name="compute helper output")
+        if not isinstance(self.evidence, JevContinuationEvidence):
+            raise JevValidation.error("compute helper evidence", "a JevContinuationEvidence", self.evidence)
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeMove:
+    """What the compute checkpoint did about one recognized situation: the move's status, how many helpers it started, the report the main agent read, and the helpers' usage."""
+
+    situation: JevComputeSituation
+    iteration: int
+    status: JevComputeMoveStatus
+    helpers: int = 0
+    output: str | None = None
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a known situation and status, a valid iteration and helper count, and a report only for a completed move.
+        if not isinstance(self.situation, JevComputeSituation):
+            raise JevValidation.error("compute move situation", "a JevComputeSituation member", self.situation)
+        if not isinstance(self.status, JevComputeMoveStatus):
+            raise JevValidation.error("compute move status", "a JevComputeMoveStatus member", self.status)
+        JevCount.require(self.iteration, field_name="compute move iteration")
+        JevCount.require(self.helpers, field_name="compute move helpers")
+        if (self.output is not None) != (self.status is JevComputeMoveStatus.COMPLETED):
+            raise JevValidation.error("compute move output", "a report exactly when the move completed", self.output)
+
+
 __all__ = [
+    "JevComputeHelperResult",
+    "JevComputeMove",
     "JevComputeDecision",
     "JevComputeQuestion",
     "JevComputeSituationDefinition",

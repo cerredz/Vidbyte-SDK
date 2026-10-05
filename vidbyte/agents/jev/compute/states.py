@@ -30,7 +30,11 @@ from vidbyte.lib.constants.jev import (
     JEV_COMPUTE_REQUEST_FIELD,
     JEV_RUN_BRIEF_REQUEST_MAX_CHARS,
 )
-from vidbyte.lib.dataclasses.jev import JevRunBrief, JevRunBriefQuote
+from vidbyte.lib.dataclasses.jev import (
+    JevRunBrief,
+    JevRunBriefApproach,
+    JevRunBriefQuote,
+)
 from vidbyte.lib.enums.jev import (
     JevComputeSituation,
     JevRunBriefItemStatus,
@@ -62,22 +66,30 @@ class JevComputeStates:
                 specific = cls._self_contained_step(brief)
         return None if specific is None else {**common, **specific}
 
-    @classmethod
-    def _repeating(cls, brief: JevRunBrief) -> ComputeState | None:
-        # Picks the first problem a failed approach targeted that no approach has solved, with every attempt on it.
+    @staticmethod
+    def stuck_problem(brief: JevRunBrief) -> tuple[str, tuple[JevRunBriefApproach, ...]] | None:
+        """Return the first problem a failed approach targeted that no approach has solved, with every approach taken on it."""
         solved = {approach.target for approach in brief.approaches if approach.outcome is JevRunBriefOutcome.WORKED}
         problem = next((approach.target for approach in brief.approaches if approach.outcome is JevRunBriefOutcome.FAILED and approach.target not in solved), None)
         if problem is None:
             return None
+        return problem, tuple(approach for approach in brief.approaches if approach.target == problem)
+
+    @classmethod
+    def _repeating(cls, brief: JevRunBrief) -> ComputeState | None:
+        # Describes the stuck problem, every attempt on it, and the open failures.
+        stuck = cls.stuck_problem(brief)
+        if stuck is None:
+            return None
+        problem, approaches = stuck
         attempts = tuple(
-            {"approach": approach.approach, "outcome": approach.outcome.value, "evidence": tuple(cls._quote(quote) for quote in approach.evidence)}
-            for approach in brief.approaches
-            if approach.target == problem
+            {"approach": approach.approach, "outcome": approach.outcome.value, "evidence": tuple(cls.quote(quote) for quote in approach.evidence)}
+            for approach in approaches
         )
         return {
             JEV_COMPUTE_PROBLEM_FIELD: problem,
             JEV_COMPUTE_ATTEMPTS_FIELD: attempts,
-            JEV_COMPUTE_FAILURES_FIELD: tuple(cls._quote(quote) for quote in brief.open_failures),
+            JEV_COMPUTE_FAILURES_FIELD: tuple(cls.quote(quote) for quote in brief.open_failures),
         }
 
     @classmethod
@@ -92,7 +104,7 @@ class JevComputeStates:
         steps = ((brief.current_step,) if brief.current_step is not None else ()) + brief.next_steps
         return {
             JEV_COMPUTE_GROUP_FIELD: {"name": group, "items": tuple({"name": item.name, "status": item.status.value} for item in brief.items if item.group == group)},
-            JEV_COMPUTE_PLAN_FIELD: tuple(cls._quote(quote) for quote in steps),
+            JEV_COMPUTE_PLAN_FIELD: tuple(cls.quote(quote) for quote in steps),
         }
 
     @classmethod
@@ -100,11 +112,11 @@ class JevComputeStates:
         # Picks the soonest stated next step, with the whole brief so references to the run can be recognized.
         if not brief.next_steps:
             return None
-        return {JEV_COMPUTE_NEXT_STEP_FIELD: cls._quote(brief.next_steps[0]), JEV_COMPUTE_BRIEF_FIELD: brief.render()}
+        return {JEV_COMPUTE_NEXT_STEP_FIELD: cls.quote(brief.next_steps[0]), JEV_COMPUTE_BRIEF_FIELD: brief.render()}
 
     @staticmethod
-    def _quote(quote: JevRunBriefQuote) -> str:
-        # Keeps each quote's event id beside its text, as the state descriptions promise.
+    def quote(quote: JevRunBriefQuote) -> str:
+        """Return a brief quote with its event id beside its text, as the state descriptions and helper prompts show it."""
         return f"{quote.event}: {quote.quote}"
 
 
