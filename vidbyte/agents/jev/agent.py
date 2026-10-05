@@ -42,7 +42,7 @@ class JevAgent(BaseAgent):
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
-        self.compute = None if runtime_settings.compute is None else JevComputeController(settings, runtime_settings.compute, self._response)
+        self.compute = None if runtime_settings.compute is None else JevComputeController(settings, runtime_settings.compute, runtime_settings.decision, self._response)
         self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
         if self.run_state is None:
             self.continuation = None

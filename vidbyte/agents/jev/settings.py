@@ -38,6 +38,7 @@ from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import (
     DecisionModelMode,
+    JevComputeSituation,
     JevContinuationGate,
     JevDoneCheck,
     JevPreflightPreset,
@@ -45,6 +46,7 @@ from vidbyte.lib.enums import (
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
+from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -235,15 +237,17 @@ class JevRunBriefSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevComputeSettings:
-    """Validated settings for the optional mid-run compute checkpoint."""
+    """Validated run-brief settings and enabled situation recognitions for the mid-run checkpoint."""
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
+    situations: tuple[JevComputeSituation | str, ...] = tuple(JevComputeSituation)
 
     def __post_init__(self) -> None:
         # @intent compute-uses-supported-brief-settings
         # Rejecting other objects here keeps the optional checkpoint fully configured before an agent is built.
         if not isinstance(self.brief, JevRunBriefSettings):
             raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
+        object.__setattr__(self, "situations", JevComputeRegistry.validate(self.situations))
 
 
 @dataclass(frozen=True, slots=True)

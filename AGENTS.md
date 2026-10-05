@@ -49,6 +49,8 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Structured note-taking compaction: `JevRunBriefKeeper` and its tool-free writer | `vidbyte/agents/jev/brief/` |
 | `JevRunBriefSettings` (the note writer's model, limits, and cadence) | `vidbyte/agents/jev/settings.py` |
 | Mid-run compute checkpoint: `JevComputeController` and `JevComputeSettings` | `vidbyte/agents/jev/compute/`; loop hook `AgentRuntime._after_tool_iteration` in `vidbyte/agents/runtime.py` |
+| Compute situation recognition: `JevComputeRecognizer` and `JevComputeStates` | `vidbyte/agents/jev/compute/` |
+| Fixed compute sign questions (one module per situation), `JevComputeSituations`, and `JevComputeRegistry` | `vidbyte/lib/jev/compute/` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
 | Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |

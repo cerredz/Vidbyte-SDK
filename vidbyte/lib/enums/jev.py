@@ -247,4 +247,29 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+class JevComputeSituation(str, Enum):
+    """A compute situation recognized between the main agent's tool iterations, in priority order."""
+
+    REPEATING = "repeating"
+    EACH_OF_SEVERAL = "each_of_several"
+    SELF_CONTAINED_STEP = "self_contained_step"
+
+
+class JevComputeQuestionKey(str, Enum):
+    """The fixed sign question keys asked for each compute situation."""
+
+    REPEATING_SAME_APPROACH = "repeating.same_approach"
+    REPEATING_SAME_RESULT = "repeating.same_result"
+    REPEATING_NO_NEW_CAUSE = "repeating.no_new_cause"
+    REPEATING_BLOCKS_REQUEST = "repeating.blocks_request"
+    EACH_OF_SEVERAL_SAME_WORK = "each_of_several.same_work"
+    EACH_OF_SEVERAL_INDEPENDENT = "each_of_several.independent"
+    EACH_OF_SEVERAL_SUBSTANTIAL = "each_of_several.substantial"
+    EACH_OF_SEVERAL_REQUESTED = "each_of_several.requested"
+    SELF_CONTAINED_STEP_SUBSTANTIAL = "self_contained_step.substantial"
+    SELF_CONTAINED_STEP_STATES_ALL = "self_contained_step.states_all"
+    SELF_CONTAINED_STEP_HANDS_BACK = "self_contained_step.hands_back"
+    SELF_CONTAINED_STEP_REQUESTED = "self_contained_step.requested"
+
+
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevComputeSituation", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
