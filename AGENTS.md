@@ -49,7 +49,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Run brief: `JevRunBriefKeeper`, its writer agent, verifier, event windows, and run facts | `vidbyte/agents/jev/brief/` |
 | Mid-run compute checkpoint: `JevComputeController` | `vidbyte/agents/jev/compute/`; settings `JevComputeSettings` in `vidbyte/agents/jev/settings.py`; loop hook `AgentRuntime._after_tool_iteration` in `vidbyte/agents/runtime.py` |
 | Compute situation recognition: `JevComputeRecognizer` and `JevComputeStates` | `vidbyte/agents/jev/compute/` |
-| Compute moves: `JevComputeBudget`, `JevComputeHelpers`, and one module per move (`JevComputeReset`) | `vidbyte/agents/jev/compute/`; prompts in `vidbyte/prompts/prompts/jev_compute/` |
+| Compute moves: `JevComputeBudget`, `JevComputeHelpers`, and one module per move (`JevComputeReset`, `JevComputeFanOut`) | `vidbyte/agents/jev/compute/`; prompts in `vidbyte/prompts/prompts/jev_compute/` |
 | Fixed compute sign questions (one module per situation), `JevComputeSituations`, and `JevComputeRegistry` | `vidbyte/lib/jev/compute/` |
 | `JevRunBriefSettings` (the run-brief writer's model, limits, and cadence) | `vidbyte/agents/jev/settings.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |

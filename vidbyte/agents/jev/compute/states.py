@@ -94,18 +94,28 @@ class JevComputeStates:
 
     @classmethod
     def _each_of_several(cls, brief: JevRunBrief) -> ComputeState | None:
-        # Picks the group with the most pending items, and quotes the agent's current and next steps as its plan.
+        # Describes the busiest group, every item in it with its status, and the agent's plan.
+        busiest = cls.busiest_group(brief)
+        if busiest is None:
+            return None
+        return {
+            JEV_COMPUTE_GROUP_FIELD: {"name": busiest, "items": tuple({"name": item.name, "status": item.status.value} for item in brief.items if item.group == busiest)},
+            JEV_COMPUTE_PLAN_FIELD: tuple(cls.quote(quote) for quote in cls.plan(brief)),
+        }
+
+    @staticmethod
+    def busiest_group(brief: JevRunBrief) -> str | None:
+        """Return the group with the most pending items when it has enough to split, or None."""
         pending = Counter(item.group for item in brief.items if item.status is JevRunBriefItemStatus.PENDING)
         if not pending:
             return None
         group, count = pending.most_common(1)[0]
-        if count < JEV_COMPUTE_EACH_OF_SEVERAL_MIN_PENDING:
-            return None
-        steps = ((brief.current_step,) if brief.current_step is not None else ()) + brief.next_steps
-        return {
-            JEV_COMPUTE_GROUP_FIELD: {"name": group, "items": tuple({"name": item.name, "status": item.status.value} for item in brief.items if item.group == group)},
-            JEV_COMPUTE_PLAN_FIELD: tuple(cls.quote(quote) for quote in steps),
-        }
+        return group if count >= JEV_COMPUTE_EACH_OF_SEVERAL_MIN_PENDING else None
+
+    @staticmethod
+    def plan(brief: JevRunBrief) -> tuple[JevRunBriefQuote, ...]:
+        """Return the agent's current step and stated next steps, in that order, as the brief quotes them."""
+        return ((brief.current_step,) if brief.current_step is not None else ()) + brief.next_steps
 
     @classmethod
     def _self_contained_step(cls, brief: JevRunBrief) -> ComputeState | None:

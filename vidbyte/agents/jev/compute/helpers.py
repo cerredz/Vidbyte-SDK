@@ -15,6 +15,7 @@ from collections.abc import Mapping
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.settings import JevAgentSettings, JevComputeSettings
+from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.agents import AgentInput, AgentMessage
 from vidbyte.lib.dataclasses.jev import JevComputeHelperResult, JevContinuationEvidence
@@ -62,6 +63,17 @@ class JevComputeHelpers:
         if not output:
             return None
         return JevComputeHelperResult(output=output, evidence=self._evidence(reply, source), usage=helper.get_usage())
+
+    @staticmethod
+    def combined_usage(results: tuple[JevComputeHelperResult, ...]) -> UsageRollup | None:
+        """Return the helpers' usage folded into one rollup without repricing, or None when none reported usage."""
+        rollups = tuple(result.usage for result in results if result.usage is not None)
+        if not rollups:
+            return None
+        tracker = UsageTracker()
+        for rollup in rollups:
+            tracker.merge(rollup)
+        return tracker.rollup()
 
     @staticmethod
     def _evidence(reply: AgentMessage, source: str) -> JevContinuationEvidence:

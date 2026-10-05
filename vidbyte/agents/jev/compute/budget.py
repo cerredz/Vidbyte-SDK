@@ -42,6 +42,10 @@ class JevComputeBudget:
             return JevComputeMoveStatus.COOLDOWN
         return None
 
+    def available_helpers(self) -> int:
+        """Return how many more helpers the run may start."""
+        return max(self.compute.max_helpers - self.helpers, 0)
+
     def spend(self, iteration: int, helpers: int) -> None:
         """Charge one move that started `helpers` helpers at this iteration."""
         self.moves += 1

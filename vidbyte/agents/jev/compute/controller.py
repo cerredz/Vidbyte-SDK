@@ -3,10 +3,10 @@
 PURPOSE: Implements JevComputeController, the owner of JevAgent's mid-run compute checkpoint: between the main agent's tool iterations it reads the run's exact facts, keeps the run brief current, asks Jev which compute situation the run is in after each verified refresh, acts on a recognized situation within the run's compute budget, and reports all of it through JevResponse.
 ROLE IN CODEBASE: JevAgent builds one controller at construction when JevRuntimeSettings.compute is set; JevRuntime calls `begin` when the main agent is about to run and `checkpoint` from AgentRuntime's `_after_tool_iteration` hook with the loop's state and messages.
 ARCHITECTURE NOTE: The runtime holds no compute logic; every step the checkpoint takes lives here and in the modules it composes. Recognition runs only right after a verified brief refresh, so Jev's cadence follows the brief's. A recognized situation is acted on by its own move module, after JevComputeBudget allows it; the move's result reaches the main agent as one appended message, and its helpers' work reaches the done checks as evidence in run order.
-COMMON MODIFICATION PATTERNS: Add a move for a situation as its own module under this package and one case in `_act`; keep its prompt in vidbyte/prompts/prompts/jev_compute/ and report its outcome as a JevComputeMove.
+COMMON MODIFICATION PATTERNS: Add a move for a situation as its own module under this package, one case in `_act`, and one method here that checks the budget, runs the move, and calls `_report`; keep its prompts in vidbyte/prompts/prompts/jev_compute/ and report its outcome as a JevComputeMove.
 KNOWN EDGE CASES: Like the JevAgent that owns it, one controller serves one run at a time. A writer outage or a rejected refresh asks Jev nothing; a Jev outage recognizes nothing. Situations with no move yet are recognized and recorded but not acted on. A failed helper is charged to the budget and recorded, and the main loop continues unchanged.
-RELATED DOCS: docs/design/jev-compute-checkpoint.md, docs/design/jev-compute-situations.md, docs/design/jev-compute-reset.md, and docs/design/jev-run-brief.md.
-TESTS: tests/test_jev_compute.py, tests/test_jev_compute_situations.py, and tests/test_jev_compute_reset.py.
+RELATED DOCS: docs/design/jev-compute-checkpoint.md, docs/design/jev-compute-situations.md, docs/design/jev-compute-reset.md, docs/design/jev-compute-fan-out.md, and docs/design/jev-run-brief.md.
+TESTS: tests/test_jev_compute.py, tests/test_jev_compute_situations.py, tests/test_jev_compute_reset.py, and tests/test_jev_compute_fan_out.py.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import Any
 
 from vidbyte.agents.jev.brief import JevRunBriefEvents, JevRunBriefKeeper
 from vidbyte.agents.jev.compute.budget import JevComputeBudget
+from vidbyte.agents.jev.compute.fan_out import JevComputeFanOut
 from vidbyte.agents.jev.compute.helpers import JevComputeHelpers
 from vidbyte.agents.jev.compute.recognizer import JevComputeRecognizer
 from vidbyte.agents.jev.compute.reset import JevComputeReset
@@ -23,8 +24,10 @@ from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevComputeSettings
 from vidbyte.agents.runtime import BaseAgentRuntimeLoopState
 from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.constants.jev import JEV_COMPUTE_EACH_OF_SEVERAL_MIN_PENDING
 from vidbyte.lib.dataclasses.jev import (
     JevComputeDecision,
+    JevComputeHelperResult,
     JevComputeMove,
     JevRunBrief,
     JevRunBriefUpdate,
@@ -49,7 +52,9 @@ class JevComputeController:
         situations = JevComputeRegistry.validate(compute.situations)
         self.recognizer = JevComputeRecognizer(decision, situations) if situations else None
         self.budget = JevComputeBudget(compute)
-        self.reset = JevComputeReset(JevComputeHelpers(settings, compute))
+        helpers = JevComputeHelpers(settings, compute)
+        self.reset = JevComputeReset(helpers)
+        self.fan_out = JevComputeFanOut(helpers, compute)
         self.response = response
         self.run_state = run_state
 
@@ -60,6 +65,7 @@ class JevComputeController:
         # event pointer, or spent moves, which would cite events that no longer exist or block moves it never made.
         self.keeper.begin(request)
         self.budget.begin()
+        self.fan_out.begin()
 
     async def checkpoint(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
         """Read the run's facts, refresh the brief on its cadence, recognize the run's situation after a verified refresh, act on it, and report each step."""
@@ -90,15 +96,17 @@ class JevComputeController:
         return decision
 
     async def _act(self, decision: JevComputeDecision, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
-        # Runs the recognized situation's move when the budget allows it, and records what happened.
+        # Runs the recognized situation's move, each of which checks the budget before starting any helper, and records it.
         situation, iteration, brief = decision.situation, decision.iteration, self.keeper.brief
         if situation is None or brief is None:
             return
         match situation:
             case JevComputeSituation.REPEATING:
                 # The main agent keeps retrying a failed approach: a fresh helper takes the problem.
-                blocked = self.budget.blocked(iteration, _RESET_HELPERS)
-                move = JevComputeMove(situation, iteration, blocked) if blocked is not None else await self._reset(iteration, brief, state, messages)
+                move = await self._reset(iteration, brief, state, messages)
+            case JevComputeSituation.EACH_OF_SEVERAL:
+                # The main agent plans the same work on each of several items: one helper per item, in parallel.
+                move = await self._fan_out(iteration, brief, state, messages)
             case _:
                 # Recognized and recorded; this situation has no move yet.
                 return
@@ -109,17 +117,51 @@ class JevComputeController:
         # @intent a-move-is-charged-once-its-helper-starts
         # The budget is spent as soon as a helper runs, even if it fails, because its compute is spent either way; only a
         # report is appended to the loop, and the helper's run reaches the done checks after the main work that preceded it.
+        situation = JevComputeSituation.REPEATING
+        blocked = self.budget.blocked(iteration, _RESET_HELPERS)
+        if blocked is not None:
+            return JevComputeMove(situation, iteration, blocked)
         outcome = await self.reset.run(self.keeper.request, brief)
         if outcome is None:
-            return JevComputeMove(JevComputeSituation.REPEATING, iteration, JevComputeMoveStatus.FAILED)
+            return JevComputeMove(situation, iteration, JevComputeMoveStatus.NO_WORK)
         self.budget.spend(iteration, _RESET_HELPERS)
         problem, result = outcome
         if result is None:
-            return JevComputeMove(JevComputeSituation.REPEATING, iteration, JevComputeMoveStatus.FAILED, helpers=_RESET_HELPERS)
-        messages.append({"role": "user", "content": self.reset.message(problem, result.output)})
-        if self.run_state is not None:
-            self.run_state.add_helper_evidence(state.iteration_outputs, state.call_contexts, result.evidence)
-        return JevComputeMove(JevComputeSituation.REPEATING, iteration, JevComputeMoveStatus.COMPLETED, helpers=_RESET_HELPERS, output=result.output, usage=result.usage)
+            return JevComputeMove(situation, iteration, JevComputeMoveStatus.FAILED, helpers=_RESET_HELPERS)
+        self._report(self.reset.message(problem, result.output), (result,), state, messages)
+        return JevComputeMove(situation, iteration, JevComputeMoveStatus.COMPLETED, helpers=_RESET_HELPERS, output=result.output, usage=result.usage)
 
+    async def _fan_out(self, iteration: int, brief: JevRunBrief, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> JevComputeMove:
+        # Hands each pending item of the busiest group to its own helper, as many as the budget allows, and brings every report back.
+        # @intent a-fan-out-takes-only-what-the-budget-allows
+        # The items helpers can take are cut to the helpers the run has left, and a cut that leaves fewer than two items is
+        # not worth a fan-out; items left over stay with the main agent and are named in the message it reads.
+        situation = JevComputeSituation.EACH_OF_SEVERAL
+        subject = self.fan_out.subject(brief)
+        if subject is None:
+            return JevComputeMove(situation, iteration, JevComputeMoveStatus.NO_WORK)
+        count = min(len(subject.items), self.budget.available_helpers())
+        if count < JEV_COMPUTE_EACH_OF_SEVERAL_MIN_PENDING:
+            return JevComputeMove(situation, iteration, JevComputeMoveStatus.HELPER_LIMIT)
+        blocked = self.budget.blocked(iteration, count)
+        if blocked is not None:
+            return JevComputeMove(situation, iteration, blocked)
+        plan = subject.first(count)
+        reports = await self.fan_out.run(self.keeper.request, brief, plan)
+        self.budget.spend(iteration, count)
+        results = tuple(report.result for report in reports if report.result is not None)
+        if not results:
+            return JevComputeMove(situation, iteration, JevComputeMoveStatus.FAILED, helpers=count)
+        message = self.fan_out.message(plan, reports)
+        self._report(message, results, state, messages)
+        return JevComputeMove(situation, iteration, JevComputeMoveStatus.COMPLETED, helpers=count, output=message, usage=JevComputeHelpers.combined_usage(results))
+
+    def _report(self, message: str, results: tuple[JevComputeHelperResult, ...], state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
+        # Appends the one message the main agent reads, and records each helper's run as done-check evidence in run order.
+        messages.append({"role": "user", "content": message})
+        if self.run_state is None:
+            return
+        for result in results:
+            self.run_state.add_helper_evidence(state.iteration_outputs, state.call_contexts, result.evidence)
 
 __all__ = ["JevComputeController"]

@@ -4396,7 +4396,49 @@ class JevComputeMove:
             raise JevValidation.error("compute move output", "a report exactly when the move completed", self.output)
 
 
+@dataclass(frozen=True, slots=True)
+class JevComputeFanOutPlan:
+    """The per-item work one fan-out hands to helpers: the group, the items helpers take now, the items left to the main agent, and the agent's own plan.
+
+    `plan` quotes the agent's current and next steps, which state the per-item work every helper repeats on its item.
+    """
+
+    group: str
+    items: tuple[JevRunBriefItem, ...]
+    plan: tuple[JevRunBriefQuote, ...]
+    left: tuple[JevRunBriefItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires a group, at least one item to hand out, and typed plan quotes and leftover items.
+        JevText.require(self.group, field_name="fan-out group")
+        _require_brief_entries(self.items, JevRunBriefItem, field_name="fan-out items", minimum=1, maximum=JEV_RUN_BRIEF_ITEMS_MAX)
+        _require_brief_entries(self.left, JevRunBriefItem, field_name="fan-out left items", maximum=JEV_RUN_BRIEF_ITEMS_MAX)
+        _require_brief_entries(self.plan, JevRunBriefQuote, field_name="fan-out plan", maximum=JEV_RUN_BRIEF_NEXT_STEPS_MAX + 1)
+
+    def first(self, count: int) -> JevComputeFanOutPlan:
+        """Return this plan with only its first `count` items handed out and the rest left to the main agent."""
+        JevCount.require(count, field_name="fan-out count", minimum=1)
+        return replace(self, items=self.items[:count], left=self.items[count:] + self.left)
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeFanOutReport:
+    """What one fan-out helper did with its item: the item, and the helper's result, or None when the helper failed."""
+
+    item: JevRunBriefItem
+    result: JevComputeHelperResult | None = None
+
+    def __post_init__(self) -> None:
+        # Requires the item and, when present, a helper result.
+        if not isinstance(self.item, JevRunBriefItem):
+            raise JevValidation.error("fan-out report item", "a JevRunBriefItem", self.item)
+        if self.result is not None and not isinstance(self.result, JevComputeHelperResult):
+            raise JevValidation.error(f"fan-out report result of {self.item.id!r}", "a JevComputeHelperResult or None", self.result)
+
+
 __all__ = [
+    "JevComputeFanOutPlan",
+    "JevComputeFanOutReport",
     "JevComputeHelperResult",
     "JevComputeMove",
     "JevComputeDecision",

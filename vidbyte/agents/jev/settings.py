@@ -21,6 +21,7 @@ from vidbyte.lib.constants.jev import (
     JEV_COMPUTE_HELPER_MAX_TOKENS,
     JEV_COMPUTE_MAX_HELPERS,
     JEV_COMPUTE_MAX_MOVES,
+    JEV_COMPUTE_MAX_PARALLEL_HELPERS,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_TOKENS,
@@ -257,7 +258,7 @@ class JevComputeSettings:
     within a run-local budget: at most `max_moves` moves and `max_helpers` helpers per run, and `cooldown_iterations`
     main-loop iterations between moves. `max_moves=0` keeps recognition but never acts. Each helper is a separate,
     linear agent with the main agent's model, tools, and permissions and its own `helper_max_iterations` and
-    `helper_max_tokens` limits.
+    `helper_max_tokens` limits; a fan-out runs at most `max_parallel_helpers` helpers at once.
     """
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
@@ -267,12 +268,13 @@ class JevComputeSettings:
     cooldown_iterations: int = JEV_COMPUTE_COOLDOWN_ITERATIONS
     helper_max_iterations: int = JEV_COMPUTE_HELPER_MAX_ITERATIONS
     helper_max_tokens: int = JEV_COMPUTE_HELPER_MAX_TOKENS
+    max_parallel_helpers: int = JEV_COMPUTE_MAX_PARALLEL_HELPERS
 
     def __post_init__(self) -> None:
         if not isinstance(self.brief, JevRunBriefSettings):
             raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
         object.__setattr__(self, "situations", JevComputeRegistry.validate(self.situations))
-        for field_name, minimum in (("max_moves", 0), ("max_helpers", 1), ("cooldown_iterations", 0), ("helper_max_iterations", 1), ("helper_max_tokens", 1)):
+        for field_name, minimum in (("max_moves", 0), ("max_helpers", 1), ("cooldown_iterations", 0), ("helper_max_iterations", 1), ("helper_max_tokens", 1), ("max_parallel_helpers", 1)):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                 raise ConfigurationError(f"JevComputeSettings.{field_name} must be an integer of at least {minimum}.", details={"received": repr(value)})

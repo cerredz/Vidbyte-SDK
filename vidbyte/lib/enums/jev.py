@@ -296,13 +296,17 @@ class JevComputeQuestionKey(str, Enum):
 
 
 class JevComputeMoveStatus(str, Enum):
-    """What happened when the compute checkpoint went to act on a recognized situation."""
+    """What happened when the compute checkpoint went to act on a recognized situation.
+
+    NO_WORK means the situation's subject was already handed to helpers earlier in the run, or is too small to act on.
+    """
 
     COMPLETED = "completed"
     FAILED = "failed"
     MOVE_LIMIT = "move_limit"
     HELPER_LIMIT = "helper_limit"
     COOLDOWN = "cooldown"
+    NO_WORK = "no_work"
 
 
 __all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeMoveStatus", "JevComputeQuestionKey", "JevComputeSituation", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefItemStatus", "JevRunBriefOutcome", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

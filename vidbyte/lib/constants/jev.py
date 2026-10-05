@@ -420,6 +420,11 @@ JEV_COMPUTE_HELPER_MAX_TOKENS: int = 300_000
 JEV_COMPUTE_HELPER_REPORT_MAX_CHARS: int = 12_000
 # The evidence source a reset helper's work is recorded under for the done checks.
 JEV_COMPUTE_RESET_SOURCE: str = "compute:reset"
+# Fan-out: default of how many fan-out helpers run at once, the evidence source of their work, and the total length
+# of the item reports the main agent reads, shared evenly across the items.
+JEV_COMPUTE_MAX_PARALLEL_HELPERS: int = 4
+JEV_COMPUTE_FAN_OUT_SOURCE: str = "compute:fan_out"
+JEV_COMPUTE_FAN_OUT_REPORTS_MAX_CHARS: int = 24_000
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -728,4 +733,7 @@ __all__ = [
     "JEV_COMPUTE_HELPER_MAX_TOKENS",
     "JEV_COMPUTE_HELPER_REPORT_MAX_CHARS",
     "JEV_COMPUTE_RESET_SOURCE",
+    "JEV_COMPUTE_MAX_PARALLEL_HELPERS",
+    "JEV_COMPUTE_FAN_OUT_SOURCE",
+    "JEV_COMPUTE_FAN_OUT_REPORTS_MAX_CHARS",
 ]
