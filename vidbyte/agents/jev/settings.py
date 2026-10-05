@@ -27,8 +27,13 @@ from vidbyte.lib.constants.jev import (
     JEV_BULK_MIN_PLANNER_MAX_ITERATIONS,
     JEV_BULK_MIN_PLANNER_MAX_TOKENS,
     JEV_DONE_MAX_CONTINUATIONS,
+    JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS,
+    JEV_FAITHFUL_SCOPE_EXTRA_TOKENS,
+    JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS,
     JEV_HANDOFF_MAX_ITERATIONS,
     JEV_HANDOFF_MAX_TOKENS,
+    JEV_REVIEW_MAX_ITERATIONS,
+    JEV_REVIEW_MAX_TOKENS,
     JEV_NOUL_YES_THRESHOLD,
     JEV_RUN_STATE_MAX_ITERATIONS,
     JEV_RUN_STATE_MAX_TOKENS,
@@ -41,7 +46,7 @@ from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
 from vidbyte.lib.dataclasses.tool_catalogs import ToolCatalogCredentials
-from vidbyte.lib.enums import JevDoneCheck, JevPreflightPreset, ModelProvider
+from vidbyte.lib.enums import JevContinuationGate, JevDoneCheck, JevPreflightPreset, ModelProvider
 from vidbyte.lib.enums.tool_catalogs import ToolCatalogName, ToolInstallKind
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
@@ -336,7 +341,7 @@ class JevAgentSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevContinualSettings:
-    """Validated continuation settings: the done checks run at every finish attempt, how often a failed one may send the main agent back to work, and the limits of the run-state and handoff agents."""
+    """Validated done checks, continuation gate and cap, and run-state, reviewer, and handoff limits."""
 
     checks: tuple[JevDoneCheck | str, ...] = ()
     max_continuations: int = JEV_DONE_MAX_CONTINUATIONS
@@ -344,6 +349,12 @@ class JevContinualSettings:
     run_state_max_tokens: int = JEV_RUN_STATE_MAX_TOKENS
     handoff_max_iterations: int = JEV_HANDOFF_MAX_ITERATIONS
     handoff_max_tokens: int = JEV_HANDOFF_MAX_TOKENS
+    faithful_scope_extra_iterations: int = JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS
+    faithful_scope_extra_tokens: int = JEV_FAITHFUL_SCOPE_EXTRA_TOKENS
+    faithful_scope_extra_tool_calls: int = JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS
+    review_max_iterations: int = JEV_REVIEW_MAX_ITERATIONS
+    review_max_tokens: int = JEV_REVIEW_MAX_TOKENS
+    gate: JevContinuationGate | str = JevContinuationGate.SAME_CONTEXT
 
     def __post_init__(self) -> None:
         # Rejects unknown or repeated done checks and non-integer limits before JevAgent builds its run state.
@@ -352,8 +363,17 @@ class JevContinualSettings:
         # check never sends the main agent back to work.
         object.__setattr__(self, "checks", JevDoneRegistry.validate(self.checks))
         self._validate_count("max_continuations", minimum=0)
-        for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens"):
+        for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens", "review_max_iterations", "review_max_tokens"):
             self._validate_count(field_name, minimum=1)
+        for field_name in ("faithful_scope_extra_iterations", "faithful_scope_extra_tokens", "faithful_scope_extra_tool_calls"):
+            self._validate_count(field_name, minimum=0)
+        try:
+            gate = self.gate if isinstance(self.gate, JevContinuationGate) else JevContinuationGate(self.gate)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Unsupported Jev continuation gate: {self.gate!r}") from exc
+        if gate is JevContinuationGate.FRESH and not self.checks:
+            raise ConfigurationError("JevContinualSettings.gate='fresh' requires at least one done check.")
+        object.__setattr__(self, "gate", gate)
 
     def _validate_count(self, field_name: str, *, minimum: int) -> None:
         # Requires a whole number at or above the minimum, excluding bool.

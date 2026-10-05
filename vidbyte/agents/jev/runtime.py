@@ -11,7 +11,7 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -32,6 +32,7 @@ from vidbyte.agents.jev.preload import JevPreload
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAlignmentSettings, JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
+from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.jev import JevBulkWorkResult
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -100,7 +101,7 @@ class JevRuntime(AgentRuntime):
             return self.response.stopped()
         if self.preflight.specialist is not None:
             if self.run_state is not None:
-                await self.run_state.begin_delegated(message)
+                await self.run_state.begin_delegated(message, prior_user_turns=self._prior_user_turns(context.history))
             return self.response.delegated(await self.preflight.specialist.agent.arun(message))
 
         alignment = self.alignment
@@ -121,7 +122,10 @@ class JevRuntime(AgentRuntime):
             context, options = await self._preload_skills(message, context, options)
 
             if self.run_state is not None:
-                await self.run_state.begin(message)
+                await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
+                sequence_instructions = self.run_state.agent_instructions()
+                if sequence_instructions:
+                    context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
             context, options, selector_metadata = await self._select_tools(message, context, options)
             context, bulk_outcome = await self._run_bulk_work(message, context)
             context, options = self._prepare_bulk_synthesis(context, options, bulk_outcome)
@@ -247,6 +251,15 @@ class JevRuntime(AgentRuntime):
         self.system_prompt = aligned.system_prompt
         return aligned, replace(context, system_prompt=aligned.system_prompt.strip() + current[len(prefix):])
 
+    @staticmethod
+    def _prior_user_turns(history: Sequence[object]) -> tuple[str, ...]:
+        """Keep caller-provided user messages; BaseAgent also stores its own replies in context history."""
+        return tuple(
+            message.content
+            for message in history
+            if isinstance(message, AgentMessage) and message.sender.casefold() == "user" and message.content.strip()
+        )
+
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
         """Ask the continuation whether this finish attempt continues the loop, and let it shape what the main agent reads next."""
         # @intent continuation-logic-lives-in-the-continuation
@@ -254,7 +267,24 @@ class JevRuntime(AgentRuntime):
         # continue and every message it sends lives in a JevContinuation subclass, never in this runtime.
         if self.continuation is None or not await self.continuation.should_continue(result.output, state.iteration_outputs, state.call_contexts):
             return False
-        self.continuation.continue_(messages)
+        extra_iterations, extra_tokens, extra_tool_calls = self.continuation.budget_extension()
+        limits: dict[str, int] = {}
+        granted: dict[str, int] = {}
+        for field_name, extra in (
+            ("max_iterations", extra_iterations),
+            ("max_tokens", extra_tokens),
+            ("max_tool_calls", extra_tool_calls),
+        ):
+            configured = getattr(self.config, field_name)
+            if configured is not None and extra:
+                limits[field_name] = configured + extra
+                granted[field_name] = extra
+        if limits:
+            self.config = replace(self.config, **limits)
+            self.response.continuation_budget(granted)
+        evidence = self.continuation.continue_(messages)
+        if evidence is not None and self.run_state is not None:
+            self.run_state.add_continuation_evidence(evidence)
         return True
 
 

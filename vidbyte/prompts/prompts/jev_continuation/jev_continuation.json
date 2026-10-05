@@ -1,6 +1,6 @@
 {
   "name": "Jev Continuation",
-  "description": "The message a JevAgent's continuation appends to its main agent's loop when an enabled done check fails at a finish attempt. It hands the main agent the original request, the run state, the handoff, and the Jev questions that failed, and tells it to complete only the parts it did not complete, with more focus on what is missing. Its placeholders are {request}, {run_state}, {handoff}, {failed}, and {focus}.",
+  "description": "The message a JevAgent's continuation appends to its main agent's loop when an enabled done check fails at a finish attempt. It hands the main agent the original request, run state, handoff, failed Jev questions, and focus, directing it to finish missing work or apply a concrete simplification while preserving requirements. Its placeholders are {request}, {run_state}, {handoff}, {failed}, and {focus}.",
   "key": "jev_continuation",
   "prompts": {
     "continue_prompt": {

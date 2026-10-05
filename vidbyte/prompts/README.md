@@ -67,8 +67,9 @@ prompt text.
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
 | Jev Bulk Work | `jev_bulk_work` | system_prompt, worker_system_prompt, synthesis_prompt | [jev_bulk_work/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work) |
 | Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
+| Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
 | Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
-| Jev Run State | `jev_run_state` | system_prompt | [jev_run_state/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md) |
+  | Jev Run State | `jev_run_state` | system_prompt, required_sequence_agent | [jev_run_state/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
@@ -249,6 +250,14 @@ to complete only the missing parts, with more focus on them.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md>
 
+#### Jev Fresh Continuation — `jev_fresh_continuation`
+
+Instructions for a clean-context JevAgent continuation. It gives the fresh agent
+the original request, the run state, and the latest handoff, then asks it to
+complete the request using those references.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md>
+
 #### Jev Handoff — `jev_handoff`
 
 The system prompt for JevHandoff, the small generative agent a JevAgent with done
@@ -266,7 +275,12 @@ checks runs once before its main agent starts. It receives the user's request an
 returns a structured run state: a central goal, objective, mission, and limits, plus
 one section for every enabled done check.
 
-Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md>
+  Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md>
+
+  The `required_sequence_agent` asset is appended to the main agent's system prompt
+  when REQUIRED_SEQUENCE derives an active ordered stage list from the request.
+  It names those stages and explains how the finish check handles missing or
+  out-of-order work.
 
 #### Mimic Behavior — `mimic_behavior`
 
