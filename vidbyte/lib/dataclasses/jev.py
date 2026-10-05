@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence. It also defines the mid-run run brief: the writer's output payloads, the verified JevRunBrief with its quote, item, and approach entries, the event window, run facts, and refresh records.
+PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence. It also defines the mid-run run brief: the writer's output payloads, the verified JevRunBrief with its quote, item, and approach entries, the event window, run facts, and refresh records. Mid-run compute adds the fixed sign-question base, each situation's scoring policy, and the per-checkpoint decision record.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through. Continuation evidence uses the canonical ToolCallContext defined in `vidbyte/lib/dataclasses/tools.py`.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Required sequences hold only explicitly ordered request stages and keep stage ids and order stable; their event-backed evidence belongs on JevHandoffRecord. JevContinuationEvidence preserves the source and response strings and original ToolCallContext objects in typed immutable tuples; empty response strings and tuples are valid. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes requested members, workspace inventory, and unsupported mentions. Completion evidence is one handoff-only whole-task item. PHASE_PROGRESS is omitted when no substantive outcome stage exists; INPUT_SET_COVERAGE is omitted when no explicitly bounded input target exists. An ordered sequence is inactive when the request does not require distinct work in a specific order; ordering alone does not imply that a stage uses the preceding stage's output. Continuation evidence requires a nonblank source but preserves its original text; response strings may be empty, and the response tuple may be empty. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because concrete subclasses redeclare defaulted fields. Pydantic payload descriptions are the instructions generative agents receive; records built from those replies hold validated values, and conversion remains with the agent that requested the reply. Report/action candidates compare an explicit earlier plan with recorded execution, the final account, and request relevance; they do not turn an agent plan into a user requirement. Include a consequential assumption even when later work recovers or makes dependent work irrelevant; Jev judges whether the work was revised or became irrelevant.
-RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md, docs/design/jev-run-brief.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_required_sequence.py, and tests/test_jev_run_brief.py.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md, docs/design/jev-run-brief.md, docs/design/jev-compute-situations.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_required_sequence.py, tests/test_jev_run_brief.py, and tests/test_jev_compute_situations.py.
 """
 
 from __future__ import annotations
@@ -68,6 +68,8 @@ from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
+    JevComputeQuestionKey,
+    JevComputeSituation,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevExerciseMode,
@@ -3702,6 +3704,7 @@ class JevAgentResponse:
     `review` records JevReviewer's objections at the latest finish attempt.
     With mid-run compute enabled, `run_facts` holds the exact run facts read at the latest checkpoint,
     `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
+    `compute_decisions` records, in order, each checkpoint at which Jev was asked which compute situation the run is in.
     """
 
     input: str = ""
@@ -3719,6 +3722,7 @@ class JevAgentResponse:
     run_facts: JevRunFacts | None = None
     run_brief: JevRunBrief | None = None
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
+    compute_decisions: list[JevComputeDecision] = field(default_factory=list)
 
     @property
     def needs_clarification(self) -> bool:
@@ -4228,7 +4232,134 @@ class JevRunBriefUpdate:
         JevCount.require(self.dropped, field_name="run brief update dropped")
 
 
+# Mid-run compute: the fixed sign questions the checkpoint asks, the policy that turns their answers into one
+# situation's verdict, and the per-checkpoint record of what Jev recognized.
+@dataclass(frozen=True)
+class JevComputeQuestion:
+    """One fixed compute sign question: what Jev reads and what each answer looks like.
+
+    Every concrete question in `vidbyte/lib/jev/compute/` subclasses this with a default for every field, so each
+    question is its own dataclass constructed with no arguments. `instructions` holds every rule, and `when_true`
+    always describes the sign being present, so a situation's score is the plain mean of P(yes) with no inversion.
+    No reader is shown a failed sign, so a compute question carries no gap text.
+    """
+
+    key: JevComputeQuestionKey
+    instructions: JevBrief
+    when_true: JevCriterion
+    when_false: JevCriterion
+
+    def __post_init__(self) -> None:
+        # Requires a registered key, a brief, and two criteria.
+        if not isinstance(self.key, JevComputeQuestionKey):
+            raise JevValidation.error("compute question key", "a JevComputeQuestionKey member", self.key)
+        if not isinstance(self.instructions, JevBrief):
+            raise JevValidation.error(f"instructions of compute question {self.key.value!r}", "a JevBrief", self.instructions)
+        for field_name in ("when_true", "when_false"):
+            if not isinstance(getattr(self, field_name), JevCriterion):
+                raise JevValidation.error(f"{field_name} of compute question {self.key.value!r}", "a JevCriterion", getattr(self, field_name))
+
+    def to_question(self) -> JevQuestion:
+        """Return the noul JevQuestion sent to Jev, named by the key so its answer comes back under it."""
+        return JevQuestion(
+            name=self.key.value,
+            question_type=JevQuestionType.NOUL,
+            instructions=self.instructions.render(),
+            options=(JevOption(name=JEV_NOUL_TRUE, description=self.when_true.to_content()), JevOption(name=JEV_NOUL_FALSE, description=self.when_false.to_content())),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeSituationDefinition:
+    """The fixed policy for recognizing one compute situation: its sign questions, and the score they must reach.
+
+    `threshold` is the mean P(yes) the signs must reach. `veto` fails the situation whenever any one sign's P(yes)
+    falls below it, so many easy yes answers never hide one clear no. `gate` names the sign every other sign
+    depends on; when its own P(yes) is below `threshold`, the situation is not recognized whatever the mean.
+    """
+
+    situation: JevComputeSituation
+    question_keys: tuple[JevComputeQuestionKey, ...]
+    threshold: float
+    veto: float | None = None
+    gate: JevComputeQuestionKey | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a known situation, a non-empty tuple of unique keys, probability thresholds, and a gate among the keys.
+        if not isinstance(self.situation, JevComputeSituation):
+            raise JevValidation.error("compute situation definition situation", "a JevComputeSituation member", self.situation)
+        keys = self.question_keys
+        if not isinstance(keys, tuple) or not keys or not all(isinstance(key, JevComputeQuestionKey) for key in keys):
+            raise JevValidation.error(f"question_keys of situation {self.situation.value!r}", "a non-empty tuple of JevComputeQuestionKey members", keys)
+        if len(set(keys)) != len(keys):
+            raise JevValidation.error(f"question_keys of situation {self.situation.value!r}", "unique question keys", keys)
+        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name=f"threshold of situation {self.situation.value!r}"))
+        if self.veto is not None:
+            object.__setattr__(self, "veto", JevProbability.require(self.veto, field_name=f"veto of situation {self.situation.value!r}"))
+        if self.gate is not None and self.gate not in keys:
+            raise JevValidation.error(f"gate of situation {self.situation.value!r}", "one of the situation's question keys", self.gate)
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeSituationResult:
+    """What one compute situation's sign questions decided at one checkpoint.
+
+    `eligible` is False when code found the situation's preconditions absent and asked Jev nothing. With
+    `available=False` Jev could not answer and `score` is None. `passed` is True only when Jev answered and the
+    signs met the situation's gate, veto, and threshold; every other case recognizes nothing, so no compute is
+    spent on a decision Jev did not make.
+    """
+
+    situation: JevComputeSituation
+    eligible: bool = True
+    available: bool = True
+    score: float | None = None
+    passed: bool = False
+    answers: Mapping[JevComputeQuestionKey, JevAnswer] = field(default_factory=dict)
+    usage: ProviderUsage | None = None
+
+    def __post_init__(self) -> None:
+        # Validates the situation and score, refuses a pass Jev never answered, and freezes the answer evidence.
+        if not isinstance(self.situation, JevComputeSituation):
+            raise JevValidation.error("compute situation result situation", "a JevComputeSituation member", self.situation)
+        if self.score is not None:
+            object.__setattr__(self, "score", JevProbability.require(self.score, field_name=f"score of situation {self.situation.value!r}"))
+        if self.passed and (not self.eligible or not self.available or self.score is None):
+            raise JevValidation.error(f"passed of situation {self.situation.value!r}", "False unless the situation was eligible and Jev answered", self.passed)
+        object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
+
+    def yes(self) -> dict[JevComputeQuestionKey, float]:
+        """Return each sign question's P(yes), in the order the situation asked them."""
+        return {key: answer.probabilities[JEV_NOUL_TRUE] for key, answer in self.answers.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeDecision:
+    """What the mid-run compute checkpoint recognized after one main-agent iteration.
+
+    `results` holds one entry per enabled situation in priority order, and `situation` is the first of them that
+    passed, or None when none did.
+    """
+
+    iteration: int
+    results: tuple[JevComputeSituationResult, ...]
+    situation: JevComputeSituation | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a valid iteration, typed results, and a chosen situation that is the first one that passed.
+        JevCount.require(self.iteration, field_name="compute decision iteration")
+        if not isinstance(self.results, tuple) or not all(isinstance(result, JevComputeSituationResult) for result in self.results):
+            raise JevValidation.error("compute decision results", "a tuple of JevComputeSituationResult values", self.results)
+        first = next((result.situation for result in self.results if result.passed), None)
+        if self.situation != first:
+            raise JevValidation.error("compute decision situation", f"the first situation that passed ({first!r})", self.situation)
+
+
 __all__ = [
+    "JevComputeDecision",
+    "JevComputeQuestion",
+    "JevComputeSituationDefinition",
+    "JevComputeSituationResult",
     "JevCount",
     "JevRepeatedCall",
     "JevRunBrief",

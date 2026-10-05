@@ -383,6 +383,30 @@ JEV_EVENT_ID_PATTERN: str = r"^E[1-9][0-9]{0,6}$"
 JEV_RUN_FACTS_REPEAT_MIN: int = 2
 JEV_RUN_FACTS_REPEATED_CALLS_MAX: int = 5
 JEV_RUN_FACTS_ARGUMENTS_PREVIEW_CHARS: int = 160
+# Mid-run compute situations: each situation passes when its sign questions' mean P(yes) reaches its threshold,
+# no single sign falls below its veto, and its gate sign reaches the threshold on its own. A wrong recognition
+# spends compute, so thresholds start high; fit them per situation once logged decisions have labels.
+JEV_COMPUTE_REPEATING_THRESHOLD: float = 0.8
+JEV_COMPUTE_REPEATING_VETO: float = 0.3
+JEV_COMPUTE_EACH_OF_SEVERAL_THRESHOLD: float = 0.8
+JEV_COMPUTE_EACH_OF_SEVERAL_VETO: float = 0.3
+JEV_COMPUTE_SELF_CONTAINED_STEP_THRESHOLD: float = 0.8
+JEV_COMPUTE_SELF_CONTAINED_STEP_VETO: float = 0.3
+# EACH_OF_SEVERAL is eligible only when one group in the run brief has at least this many pending items.
+JEV_COMPUTE_EACH_OF_SEVERAL_MIN_PENDING: int = 2
+# The newest run events every situation's state carries, and the clip each of them gets.
+JEV_COMPUTE_RECENT_EVENTS: int = 6
+JEV_COMPUTE_RECENT_EVENT_MAX_CHARS: int = 2_000
+# The state fields the compute sign questions read.
+JEV_COMPUTE_REQUEST_FIELD: str = "request"
+JEV_COMPUTE_RECENT_FIELD: str = "recent"
+JEV_COMPUTE_GROUP_FIELD: str = "group"
+JEV_COMPUTE_PLAN_FIELD: str = "plan"
+JEV_COMPUTE_PROBLEM_FIELD: str = "problem"
+JEV_COMPUTE_ATTEMPTS_FIELD: str = "attempts"
+JEV_COMPUTE_FAILURES_FIELD: str = "failures"
+JEV_COMPUTE_NEXT_STEP_FIELD: str = "next_step"
+JEV_COMPUTE_BRIEF_FIELD: str = "brief"
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -666,4 +690,22 @@ __all__ = [
     "JEV_RUN_FACTS_REPEAT_MIN",
     "JEV_RUN_FACTS_REPEATED_CALLS_MAX",
     "JEV_RUN_FACTS_ARGUMENTS_PREVIEW_CHARS",
+    "JEV_COMPUTE_REPEATING_THRESHOLD",
+    "JEV_COMPUTE_REPEATING_VETO",
+    "JEV_COMPUTE_EACH_OF_SEVERAL_THRESHOLD",
+    "JEV_COMPUTE_EACH_OF_SEVERAL_VETO",
+    "JEV_COMPUTE_SELF_CONTAINED_STEP_THRESHOLD",
+    "JEV_COMPUTE_SELF_CONTAINED_STEP_VETO",
+    "JEV_COMPUTE_EACH_OF_SEVERAL_MIN_PENDING",
+    "JEV_COMPUTE_RECENT_EVENTS",
+    "JEV_COMPUTE_RECENT_EVENT_MAX_CHARS",
+    "JEV_COMPUTE_REQUEST_FIELD",
+    "JEV_COMPUTE_RECENT_FIELD",
+    "JEV_COMPUTE_GROUP_FIELD",
+    "JEV_COMPUTE_PLAN_FIELD",
+    "JEV_COMPUTE_PROBLEM_FIELD",
+    "JEV_COMPUTE_ATTEMPTS_FIELD",
+    "JEV_COMPUTE_FAILURES_FIELD",
+    "JEV_COMPUTE_NEXT_STEP_FIELD",
+    "JEV_COMPUTE_BRIEF_FIELD",
 ]

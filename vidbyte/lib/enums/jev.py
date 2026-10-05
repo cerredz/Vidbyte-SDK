@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, scope-coverage, output-extent, report/action-alignment, assumption-reconciliation, required-actions, cumulative-obligations, discovered-item-coverage, expert-depth, and self-review checks), motivating-case classifications, and dynamic problem-item kinds. Negative coverage is an opt-in done check with a fixed question key. Guaranteed-next-action judgments have separate fixed question keys. Run-brief item statuses, approach outcomes, and refresh statuses describe the mid-run brief `vidbyte/agents/jev/brief/` keeps.
+PURPOSE: Defines Jev's closed vocabularies: TypeSafe question types, preflight presets, every opt-in done check and fixed question key (including output-count, input-set, motivating-case, scope-coverage, output-extent, report/action-alignment, assumption-reconciliation, required-actions, cumulative-obligations, discovered-item-coverage, expert-depth, and self-review checks), motivating-case classifications, and dynamic problem-item kinds. Negative coverage is an opt-in done check with a fixed question key. Guaranteed-next-action judgments have separate fixed question keys. Run-brief item statuses, approach outcomes, and refresh statuses describe the mid-run brief `vidbyte/agents/jev/brief/` keeps. Compute situations and their sign-question keys are what the mid-run compute checkpoint asks Jev to recognize.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on presets, and `vidbyte/agents/jev/done/` builds enabled done-check schemas and questions.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, record layer, and tool layer all read it, and lower layers may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a TypeSafe question type only when documented, and extend validation and answer normalization with it. Add preflight keys with their fixed question dataclasses and preset registration. Add a done check together with its run-state and handoff sections and one fixed question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff.
@@ -264,4 +264,35 @@ class JevRunBriefUpdateStatus(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefItemStatus", "JevRunBriefOutcome", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+class JevComputeSituation(str, Enum):
+    """A state of the main agent's run that the mid-run compute checkpoint recognizes, in priority order.
+
+    When several situations are recognized at one checkpoint, the first one declared here is the one acted on.
+    """
+
+    REPEATING = "repeating"
+    EACH_OF_SEVERAL = "each_of_several"
+    SELF_CONTAINED_STEP = "self_contained_step"
+
+
+class JevComputeQuestionKey(str, Enum):
+    """The key of every fixed compute sign question, prefixed by the situation that asks it.
+
+    The value is the question name sent to Jev and the key its answer comes back under.
+    """
+
+    REPEATING_SAME_APPROACH = "repeating.same_approach"
+    REPEATING_SAME_RESULT = "repeating.same_result"
+    REPEATING_NO_NEW_CAUSE = "repeating.no_new_cause"
+    REPEATING_BLOCKS_REQUEST = "repeating.blocks_request"
+    EACH_OF_SEVERAL_SAME_WORK = "each_of_several.same_work"
+    EACH_OF_SEVERAL_INDEPENDENT = "each_of_several.independent"
+    EACH_OF_SEVERAL_SUBSTANTIAL = "each_of_several.substantial"
+    EACH_OF_SEVERAL_REQUESTED = "each_of_several.requested"
+    SELF_CONTAINED_STEP_SUBSTANTIAL = "self_contained_step.substantial"
+    SELF_CONTAINED_STEP_STATES_ALL = "self_contained_step.states_all"
+    SELF_CONTAINED_STEP_HANDS_BACK = "self_contained_step.hands_back"
+    SELF_CONTAINED_STEP_REQUESTED = "self_contained_step.requested"
+
+
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevComputeSituation", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefItemStatus", "JevRunBriefOutcome", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

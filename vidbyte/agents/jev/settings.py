@@ -38,6 +38,7 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import (
+    JevComputeSituation,
     JevContinuationGate,
     JevDoneCheck,
     JevPreflightPreset,
@@ -45,6 +46,7 @@ from vidbyte.lib.enums import (
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
+from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -244,14 +246,18 @@ class JevComputeSettings:
     """Validated settings for mid-run dynamic compute: what JevAgent keeps and decides between the main agent's tool iterations.
 
     Setting `JevRuntimeSettings.compute` turns the compute checkpoint on. The checkpoint keeps the run brief current
-    through its own writer agent, on the cadence and model `brief` sets.
+    through its own writer agent, on the cadence and model `brief` sets, and after each verified refresh asks Jev
+    which of the enabled `situations` the run is in. Situations are kept in priority order; an empty tuple keeps
+    the brief and asks Jev nothing.
     """
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
+    situations: tuple[JevComputeSituation | str, ...] = (JevComputeSituation.REPEATING, JevComputeSituation.EACH_OF_SEVERAL, JevComputeSituation.SELF_CONTAINED_STEP)
 
     def __post_init__(self) -> None:
         if not isinstance(self.brief, JevRunBriefSettings):
             raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
+        object.__setattr__(self, "situations", JevComputeRegistry.validate(self.situations))
 
 
 @dataclass(frozen=True, slots=True)

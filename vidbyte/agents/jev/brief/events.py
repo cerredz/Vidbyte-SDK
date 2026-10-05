@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/brief/events.py
 
 PURPOSE: Gives the run brief a numbered view of the main agent's run: the full text of every event by id, which verification checks quotes against, and a bounded window of the events after a given id, which the writer reads.
-ROLE IN CODEBASE: JevRunBriefKeeper builds one view per refresh attempt; JevRunBriefWriter reads its window, and JevRunBriefVerifier asks it whether an event contains a quote.
+ROLE IN CODEBASE: JevRunBriefKeeper builds one view per refresh attempt; JevRunBriefWriter reads its window, and JevRunBriefVerifier asks it whether an event contains a quote. The compute checkpoint reads its `tail` as the newest events each situation's questions see.
 ARCHITECTURE NOTE: Event ids come from JevRunEventLog, so the brief cites the same E-numbered events as REQUIRED_SEQUENCE evidence. This view only reads the log's lines and never renumbers them, and it keeps the full text even when a window shows an event shortened.
 COMMON MODIFICATION PATTERNS: Tune window sizes through the JEV_RUN_BRIEF_* character constants; change how events are numbered in JevRunEventLog, not here.
 KNOWN EDGE CASES: E1 is the user's request: it is never part of a window, but a quote may cite it. Main-loop tool calls carry their iteration, so ids already assigned do not shift as the run grows. A window always shows at least the newest event's header, even when that header alone exceeds the budget.
@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from vidbyte.agents.jev.done.event_log import JevRunEventLog
 from vidbyte.lib.constants.jev import (
     JEV_EVENT_ID_PREFIX,
+    JEV_EVENT_LOG_FIRST_ID,
     JEV_RUN_BRIEF_CLIP_HEAD_SHARE,
     JEV_RUN_BRIEF_EVENT_HEADER_CHARS,
     JEV_RUN_BRIEF_EVENT_MAX_CHARS,
@@ -72,6 +73,11 @@ class JevRunBriefEvents:
         lines = [self._omitted_note(omitted)] if omitted else []
         lines.extend(shown)
         return JevRunBriefWindow(first_event=fresh[0][0], last_event=fresh[-1][0], text=_LINE_BREAK.join(lines), omitted=omitted)
+
+    def tail(self, count: int, *, event_chars: int) -> str:
+        """Return the newest `count` events after the request, oldest first, each clipped to `event_chars`."""
+        newest = tuple(event for event in self._events if event[0] > JEV_EVENT_LOG_FIRST_ID)[-count:]
+        return _LINE_BREAK.join(self._line(number, self.clip(text, event_chars)) for number, text in newest)
 
     @staticmethod
     def clip(text: str, limit: int) -> str:
