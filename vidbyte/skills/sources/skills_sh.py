@@ -1,4 +1,4 @@
-"""FILE: vidbyte/providers/skills/skills_sh.py
+"""FILE: vidbyte/skills/sources/skills_sh.py
 
 PURPOSE: Resolves explicit skills.sh owner/repository/skill-slug references through GitHub.
 ROLE IN CODEBASE: Converts a skills.sh catalog selection to the shared GitHub skill-document adapter.
@@ -14,17 +14,23 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 
+import yaml
+
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
 from vidbyte.lib.enums.skills import SkillSourceKind
-from vidbyte.lib.errors import ProviderRequestError
-from vidbyte.lib.http.parser import HttpResponseParser
-from vidbyte.lib.http.transport import HttpTransport
-from vidbyte.providers.skills.base import (
-    SkillDocumentParser,
-    SkillSourceAdapter,
+from vidbyte.lib.errors import (
+    ConfigurationError,
+    ProviderRequestError,
     SkillSourceError,
 )
-from vidbyte.providers.skills.github import GitHubSkillSourceAdapter
+from vidbyte.lib.errors.skills import provider_failure_reason
+from vidbyte.lib.http.parser import HttpResponseParser
+from vidbyte.lib.http.transport import HttpTransport
+from vidbyte.skills.sources.base import (
+    SkillDocumentParser,
+    SkillSourceAdapter,
+)
+from vidbyte.skills.sources.github import GitHubSkillSourceAdapter
 
 _SKILL_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -38,11 +44,11 @@ class SkillsShSkillSourceAdapter(SkillSourceAdapter):
         self.github_adapter = GitHubSkillSourceAdapter(transport=transport, response_parser=response_parser, document_parser=document_parser)
 
     async def resolve(self, source: SkillSource) -> SkillDocument:
-        # Resolves the selected owner/repository/slug without calling or installing through skills.sh.
-        if not isinstance(source, SkillSource) or source.kind is not SkillSourceKind.SKILLS_SH:
-            raise SkillSourceError("skills.sh adapter requires a SKILLS_SH SkillSource.")
-        owner, repo, slug = self._parse_location(source)
         try:
+            # Resolves the selected owner/repository/slug without calling or installing through skills.sh.
+            if not isinstance(source, SkillSource) or source.kind is not SkillSourceKind.SKILLS_SH:
+                raise SkillSourceError("skills.sh adapter requires a SKILLS_SH SkillSource.")
+            owner, repo, slug = self._parse_location(source)
             github_source = SkillSource(
                 kind=SkillSourceKind.GITHUB,
                 location=f"{owner}/{repo}",
@@ -50,12 +56,21 @@ class SkillsShSkillSourceAdapter(SkillSourceAdapter):
                 api_key=source.api_key,
                 skill_name=source.skill_name,
             )
-        except (TypeError, ValueError) as exc:
-            raise SkillSourceError("skills.sh source could not be resolved.") from exc
-        try:
             return await self.github_adapter._resolve_repository_path(github_source, slug)
-        except ProviderRequestError:
-            raise SkillSourceError("skills.sh source could not be resolved.") from None
+        except SkillSourceError as exc:
+            raise SkillSourceError(exc.reason, source_kind="skills.sh", status_code=exc.status_code) from exc
+        except ProviderRequestError as exc:
+            raise SkillSourceError(provider_failure_reason(exc.status_code, message=exc.message), source_kind="skills.sh", status_code=exc.status_code) from exc
+        except TimeoutError as exc:
+            raise SkillSourceError("the GitHub catalog request timed out", source_kind="skills.sh") from exc
+        except OSError as exc:
+            raise SkillSourceError("the GitHub catalog could not be reached", source_kind="skills.sh") from exc
+        except UnicodeError as exc:
+            raise SkillSourceError("the returned skill document contains invalid UTF-8", source_kind="skills.sh") from exc
+        except yaml.YAMLError as exc:
+            raise SkillSourceError("the returned skill frontmatter is not valid YAML", source_kind="skills.sh") from exc
+        except (ConfigurationError, ValueError, TypeError) as exc:
+            raise SkillSourceError("the source descriptor or returned skill did not satisfy the SDK contract", source_kind="skills.sh") from exc
 
     def _parse_location(self, source: SkillSource) -> tuple[str, str, str]:
         # Accepts only owner/repo/slug or its public skills.sh URL form.
@@ -63,11 +78,8 @@ class SkillsShSkillSourceAdapter(SkillSourceAdapter):
         if "://" not in location:
             parts = location.split("/")
         else:
-            try:
-                parsed = urlsplit(location)
-                port = parsed.port
-            except ValueError:
-                raise SkillSourceError("skills.sh source URL is invalid.") from None
+            parsed = urlsplit(location)
+            port = parsed.port
             if parsed.scheme != "https" or parsed.hostname != "skills.sh" or parsed.username is not None or parsed.password is not None or port not in (None, 443):
                 raise SkillSourceError("skills.sh sources must use an approved HTTPS URL without user information.")
             if parsed.query or parsed.fragment:

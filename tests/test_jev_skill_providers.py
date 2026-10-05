@@ -4,17 +4,15 @@ PURPOSE: Verifies explicit skill source contracts, bounded FILE resolution, stab
 ROLE IN CODEBASE: Covers the first implementation stage of docs/design/jev-skill-providers.md without live provider calls.
 ARCHITECTURE NOTE: Tests use temporary files and replace only the TypeSafe/generative model boundaries.
 COMMON MODIFICATION PATTERNS: Add focused cases beside the contract, preload, provider, or runtime behavior they protect.
-KNOWN EDGE CASES: The tiktoken floor test skips only when its optional tokenizer is absent; tests never call live providers.
+KNOWN EDGE CASES: Jev sees only fixed question prose while candidate-specific content stays in state; tests never call live providers.
 RELATED DOCS: docs/design/jev-skill-providers.md and docs/jev-skill-providers.md.
 TESTS: Run with python scripts/test-jev-skill-providers.py.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import base64
-import importlib.util
 import json
 import os
 import tempfile
@@ -23,7 +21,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import patch
 
-import vidbyte.lib.jev.preflight.skills as skill_question_module
 from tests.agent_test_support import bind_test_runner
 from vidbyte import ClaudeSkillReference as RootClaudeSkillReference
 from vidbyte import ClaudeSkillSession as RootClaudeSkillSession
@@ -55,6 +52,7 @@ from vidbyte.lib.enums.skills import ClaudeSkillType, SkillSourceKind
 from vidbyte.lib.errors import (
     ConfigurationError,
     ProviderResponseError,
+    SkillSourceError,
     UnsupportedProviderError,
 )
 from vidbyte.lib.http import HttpResponse
@@ -64,9 +62,9 @@ from vidbyte.lib.runners.streaming_text import StreamingTextModelRunner
 from vidbyte.lib.runners.text import TextModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse, TextModelResponse
 from vidbyte.providers.anthropic import AnthropicProvider
-from vidbyte.providers.skills import SkillSourceError, SkillSourceResolver
-from vidbyte.providers.skills.claude import ClaudeSkillSourceAdapter
-from vidbyte.providers.skills.file import _MAX_SKILL_FILE_BYTES, FileSkillSourceAdapter
+from vidbyte.skills.sources import SkillSourceResolver
+from vidbyte.skills.sources.claude import ClaudeSkillSourceAdapter
+from vidbyte.skills.sources.file import _MAX_SKILL_FILE_BYTES, FileSkillSourceAdapter
 from vidbyte.tools.decorators import tool
 
 _HELPER_PATH = "vidbyte.agents.jev.alignment.skills.DecisionModelHelper"
@@ -139,41 +137,20 @@ class _CapturingGenerativeRunner:
 
 
 class SkillQuestionContractTests(unittest.TestCase):
-    """Checks question length, metadata boundaries, and standalone rubric literals."""
+    """Checks the short runtime-use question and metadata boundaries."""
 
-    def test_text_and_native_questions_exceed_two_thousand_tokens(self) -> None:
-        # [Silent Failure] both body-aware and metadata-only questions carry complete recognition rubrics.
-        if importlib.util.find_spec("tiktoken") is None:
-            self.skipTest("tiktoken is not installed")
-        import tiktoken
-
-        encoding = tiktoken.get_encoding("cl100k_base")
+    def test_text_and_native_questions_use_four_sentences_and_simple_options(self) -> None:
+        # [User Requirement] both forms ask the runtime-use question in plain, fixed wording.
         for metadata_only in (False, True):
             with self.subTest(metadata_only=metadata_only):
                 question = JevSkillRelevanceQuestion(7, metadata_only=metadata_only).to_question()
-                parts = [question.instructions]
-                parts.extend(json.dumps(JevJson.thaw(option.description), ensure_ascii=False) for option in question.options)
-                self.assertGreaterEqual(len(encoding.encode("\n".join(parts))), 2_000)
+                instructions = question.instructions
+                self.assertEqual(instructions.count(". ") + 1, 4)
+                self.assertIn("user's request", instructions)
                 self.assertIn("skills.skill_7", question.instructions)
-                self.assertNotIn("CALLER_PRIVATE", question.instructions)
-
-    def test_metadata_definitions_and_rules_are_standalone_literals(self) -> None:
-        # [Hidden Assumption] every rubric entry remains one literal rather than split adjacent strings.
-        self.assertEqual(len(skill_question_module._NATIVE_DEFINITIONS), 11)
-        self.assertEqual(len(skill_question_module._NATIVE_RULES), 10)
-        module_path = Path(skill_question_module.__file__)
-        syntax = ast.parse(module_path.read_text(encoding="utf-8"))
-        assignments = {
-            target.id: node.value
-            for node in ast.walk(syntax)
-            if isinstance(node, ast.Assign)
-            for target in node.targets
-            if isinstance(target, ast.Name) and target.id in {"_NATIVE_DEFINITIONS", "_NATIVE_RULES"}
-        }
-        for name in ("_NATIVE_DEFINITIONS", "_NATIVE_RULES"):
-            value = assignments[name]
-            self.assertIsInstance(value, ast.Tuple)
-            self.assertTrue(all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in value.elts))
+                self.assertIn("Should the agent runtime use this skill file", instructions)
+                self.assertEqual(question.option_names(), ("true", "false"))
+                self.assertTrue(all(option.description is None for option in question.options))
 
 
 class SkillSourceContractTests(unittest.TestCase):
@@ -283,7 +260,8 @@ class SkillPreloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         results = preload.response.state.skills.results
         self.assertEqual(tuple(result.status for result in results), (JevSkillStatus.UNAVAILABLE, JevSkillStatus.SELECTED))
-        self.assertEqual(results[0].detail, "Skill source could not be resolved.")
+        self.assertIn("The file skill source could not be resolved.", results[0].detail or "")
+        self.assertIn("the file could not be opened or read", results[0].detail or "")
         self.assertEqual(_AlwaysYesDecisionHelper.requests[0].questions[0].name, "skills.skill_2")
         self.assertIn("inline exact text", context.system_prompt)
         self.assertNotIn(temporary, repr(results))
@@ -416,7 +394,7 @@ class SkillPreloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
         candidate = decision_request.state["skills"]["skills.skill_1"]
         self.assertEqual(candidate["kind"], "claude_native_metadata")
         self.assertNotIn("text", candidate)
-        self.assertIn("full body is unavailable", decision_request.questions[0].instructions)
+        self.assertIn("whose body is not provided", decision_request.questions[0].instructions)
 
     async def test_non_anthropic_agent_does_not_resolve_or_score_claude_candidates(self) -> None:
         # [Hidden Failure] an OpenAI key is never forwarded to Anthropic, and unsupported native candidates skip Jev scoring.
@@ -473,7 +451,7 @@ class SkillPreloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
         requested = [question.name for call in _SelectiveDecisionHelper.requests for question in call.questions]
         self.assertEqual(requested, [f"skills.skill_{index}" for index in range(1, 22)])
         first_native_question = _SelectiveDecisionHelper.requests[0].questions[0]
-        self.assertIn("full body is unavailable", first_native_question.instructions)
+        self.assertIn("whose body is not provided", first_native_question.instructions)
         self.assertEqual(len(response.state.skills.claude_skills), 1)
         self.assertEqual(response.state.skills.claude_skills[0].skill_id, "skill_21")
         self.assertEqual(response.state.skills.results[0].status, JevSkillStatus.SKIPPED)

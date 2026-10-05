@@ -1,4 +1,4 @@
-"""FILE: vidbyte/providers/skills/claude.py
+"""FILE: vidbyte/skills/sources/claude.py
 
 PURPOSE: Resolves explicit Claude Skills identifiers into safe metadata and concrete native references.
 ROLE IN CODEBASE: SkillSourceResolver uses this adapter during Jev preload; the Messages provider later mounts selected opaque references.
@@ -16,15 +16,22 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote
 
+import yaml
+
 from vidbyte.lib.dataclasses.skills import (
     ClaudeSkillReference,
     SkillDocument,
     SkillSource,
 )
 from vidbyte.lib.enums.skills import ClaudeSkillType, SkillSourceKind
-from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.errors import (
+    ConfigurationError,
+    ProviderRequestError,
+    SkillSourceError,
+)
+from vidbyte.lib.errors.skills import provider_failure_reason
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
-from vidbyte.providers.skills.base import SkillSourceAdapter, SkillSourceError
+from vidbyte.skills.sources.base import SkillSourceAdapter
 
 _CLAUDE_API_ROOT = "https://api.anthropic.com/v1"
 _CLAUDE_API_VERSION = "2023-06-01"
@@ -46,21 +53,36 @@ class ClaudeSkillSourceAdapter(SkillSourceAdapter):
         self._default_api_key = default_api_key
 
     async def resolve(self, source: SkillSource) -> SkillDocument:
-        # Resolves the requested identity and version using only the fixed trusted Anthropic host.
-        if not isinstance(source, SkillSource) or source.kind is not SkillSourceKind.CLAUDE:
-            raise SkillSourceError("Claude adapter requires a CLAUDE SkillSource.")
-        headers = self._headers(source)
-        skill = await self._find_skill(source, headers)
-        skill_id = skill.get("id")
-        latest_version_id = skill.get("latest_version_id")
-        if not isinstance(skill_id, str) or not skill_id.strip() or not isinstance(latest_version_id, str) or not latest_version_id.strip():
-            raise SkillSourceError("Claude skill metadata did not include a usable skill and version ID.")
-        version_id = latest_version_id if source.version in (None, "latest") else source.version
-        version_record = await self._get_json(
-            f"{_CLAUDE_API_ROOT}/skills/{quote(skill_id, safe='')}/versions/{quote(version_id, safe='')}",
-            headers,
-        )
-        return self._document(source, skill, version_record, skill_id)
+        # Resolves identity and version, with one boundary for safe source-specific diagnostics.
+        try:
+            if not isinstance(source, SkillSource) or source.kind is not SkillSourceKind.CLAUDE:
+                raise SkillSourceError("Claude adapter requires a CLAUDE SkillSource.")
+            headers = self._headers(source)
+            skill = await self._find_skill(source, headers)
+            skill_id = skill.get("id")
+            latest_version_id = skill.get("latest_version_id")
+            if not isinstance(skill_id, str) or not skill_id.strip() or not isinstance(latest_version_id, str) or not latest_version_id.strip():
+                raise SkillSourceError("Claude skill metadata did not include a usable skill and version ID.")
+            version_id = latest_version_id if source.version in (None, "latest") else source.version
+            version_record = await self._get_json(
+                f"{_CLAUDE_API_ROOT}/skills/{quote(skill_id, safe='')}/versions/{quote(version_id, safe='')}",
+                headers,
+            )
+            return self._document(source, skill, version_record, skill_id)
+        except SkillSourceError as exc:
+            raise SkillSourceError(exc.reason, source_kind="claude", status_code=exc.status_code) from exc
+        except ProviderRequestError as exc:
+            raise SkillSourceError(provider_failure_reason(exc.status_code, message=exc.message), source_kind="claude", status_code=exc.status_code) from exc
+        except TimeoutError as exc:
+            raise SkillSourceError("the Anthropic metadata request timed out", source_kind="claude") from exc
+        except OSError as exc:
+            raise SkillSourceError("the Anthropic metadata service could not be reached", source_kind="claude") from exc
+        except UnicodeError as exc:
+            raise SkillSourceError("the metadata response contains invalid text encoding", source_kind="claude") from exc
+        except yaml.YAMLError as exc:
+            raise SkillSourceError("the metadata response could not be parsed", source_kind="claude") from exc
+        except (ConfigurationError, ValueError, TypeError) as exc:
+            raise SkillSourceError("the skill metadata or version did not satisfy the SDK contract", source_kind="claude") from exc
 
     def _headers(self, source: SkillSource) -> dict[str, str]:
         # Sends credentials only to api.anthropic.com and never reads credentials from source locations.
@@ -114,26 +136,20 @@ class ClaudeSkillSourceAdapter(SkillSourceAdapter):
     async def _get_json(self, url: str, headers: Mapping[str, str]) -> dict[str, Any]:
         # @intent bound-and-redact-claude-metadata-requests
         # Fixed-host bounded requests replace upstream error details so credentials and provider response bodies never escape resolution.
-        try:
-            response = await self._transport.request(
-                method="GET",
-                url=url,
-                headers=headers,
-                timeout_seconds=_REQUEST_TIMEOUT_SECONDS,
-                max_response_bytes=_MAX_RESPONSE_BYTES,
-            )
-            return self._parser.parse_json_response(response, provider="anthropic")
-        except ProviderRequestError as exc:
-            raise SkillSourceError("Claude skill metadata could not be resolved.") from exc
+        response = await self._transport.request(
+            method="GET",
+            url=url,
+            headers=headers,
+            timeout_seconds=_REQUEST_TIMEOUT_SECONDS,
+            max_response_bytes=_MAX_RESPONSE_BYTES,
+        )
+        return self._parser.parse_json_response(response, provider="anthropic")
 
     def _document(self, source: SkillSource, skill: Mapping[str, Any], version: Mapping[str, Any], skill_id: str) -> SkillDocument:
         # Builds metadata-only output and pins the exact version ID returned by Claude.
         skill_source = skill.get("source")
         source_kind = skill_source.get("type") if isinstance(skill_source, Mapping) else None
-        try:
-            native_type = ClaudeSkillType(source_kind)
-        except ValueError as exc:
-            raise SkillSourceError("Claude skill source type is not supported.") from exc
+        native_type = ClaudeSkillType(source_kind)
         resolved_id = version.get("id")
         resolved_skill_id = version.get("skill_id")
         name = version.get("name")

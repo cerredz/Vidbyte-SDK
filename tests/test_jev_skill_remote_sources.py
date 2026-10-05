@@ -21,10 +21,10 @@ from vidbyte.lib.dataclasses.skills import SkillSource
 from vidbyte.lib.enums.skills import SkillSourceKind
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.http.transport import HttpResponse
-from vidbyte.providers.skills import SkillSourceResolver
-from vidbyte.providers.skills.base import SkillSourceError
-from vidbyte.providers.skills.github import GitHubSkillSourceAdapter
-from vidbyte.providers.skills.skills_sh import SkillsShSkillSourceAdapter
+from vidbyte.lib.errors import SkillSourceError
+from vidbyte.skills.sources import SkillSourceResolver
+from vidbyte.skills.sources.github import GitHubSkillSourceAdapter
+from vidbyte.skills.sources.skills_sh import SkillsShSkillSourceAdapter
 
 
 class _FakeTransport:
@@ -306,7 +306,7 @@ class GitHubSkillSourceTests(unittest.IsolatedAsyncioTestCase):
         failures = {second_url: ProviderRequestError("simulated timeout", provider="github")}
         transport = _FakeTransport(responses, failures=failures)
 
-        with self.assertRaisesRegex(SkillSourceError, "request could not be completed"):
+        with self.assertRaisesRegex(SkillSourceError, "did not produce a usable response"):
             await GitHubSkillSourceAdapter(transport=transport).resolve(SkillSource(kind=SkillSourceKind.GITHUB, location=url))
 
         self.assertEqual([call["url"] for call in transport.calls], ["https://api.github.com/repos/acme/skills", first_url, second_url])
@@ -383,6 +383,29 @@ class GitHubSkillSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport.calls[0]["headers"].get("Authorization"), f"Bearer {key}")
         self.assertTrue(all(urlsplit(str(call["url"])).hostname == "api.github.com" for call in transport.calls))
         self.assertNotIn(key, str(caught.exception))
+
+    async def test_provider_statuses_get_actionable_redacted_source_errors(self) -> None:
+        # [Failure Detail] common auth, missing, rate-limit, and server failures stay typed and omit upstream text.
+        cases = (
+            (401, "rejected the request or its credentials"),
+            (404, "requested skill or pinned revision was not found"),
+            (429, "rate limiting requests"),
+            (503, "temporary server error"),
+        )
+        for status, expected in cases:
+            with self.subTest(status=status):
+                secret = "upstream-private-error-marker"
+                transport = _FakeTransport({"https://api.github.com/repos/acme/skills": _response({"message": secret}, status=status)})
+                with self.assertRaises(SkillSourceError) as caught:
+                    await GitHubSkillSourceAdapter(transport=transport).resolve(
+                        SkillSource(kind=SkillSourceKind.GITHUB, location="acme/skills", api_key="api-key-marker")
+                    )
+
+                detail = caught.exception.message
+                self.assertIn(expected, detail)
+                self.assertNotIn(secret, detail)
+                self.assertNotIn("api-key-marker", detail)
+                self.assertEqual(detail.replace("SKILL.md", "SKILL-md").count(". ") + 1, 8)
 
     async def test_raw_file_read_is_bounded_and_never_sends_api_key(self) -> None:
         # [Response Limit] a raw response over the local cap fails and receives no API credential.

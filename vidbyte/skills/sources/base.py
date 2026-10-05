@@ -1,4 +1,4 @@
-"""FILE: vidbyte/providers/skills/base.py
+"""FILE: vidbyte/skills/sources/base.py
 
 PURPOSE: Defines the narrow adapter boundary and safe per-source resolution failure.
 ROLE IN CODEBASE: SkillSourceResolver dispatches explicit caller descriptors to a closed set of providers.
@@ -17,13 +17,9 @@ from collections.abc import Mapping
 import yaml
 
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
-from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
+from vidbyte.lib.errors import ConfigurationError, SkillSourceError
 
 _FRONTMATTER_MARKER = b"---"
-
-
-class SkillSourceError(VidbyteSdkError):
-    """A safe source lookup failure that Jev can record for one candidate."""
 
 
 class SkillDocumentParser:

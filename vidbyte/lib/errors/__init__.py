@@ -2,8 +2,8 @@
 
 PURPOSE: Exports the canonical typed SDK exception hierarchy through one stable import surface.
 ROLE IN CODEBASE: Runtime boundaries import error types from this package instead of depending on the base module's layout.
-ARCHITECTURE NOTE: This module re-exports only; error behavior and safe fields remain owned by vidbyte.lib.errors.base.
-COMMON MODIFICATION PATTERNS: Add a new base error to both the import tuple and __all__ in alphabetical family order.
+ARCHITECTURE NOTE: This module re-exports errors; shared types live in base.py and domain errors live beside their owning boundary.
+COMMON MODIFICATION PATTERNS: Re-export a new error here while keeping its behavior in base.py or a focused domain module.
 KNOWN EDGE CASES: Missing re-exports break public imports even when the underlying class exists.
 RELATED DOCS: field-guide/vidbyte-sdk/runtime-boundaries.md.
 TESTS: Existing error-path tests and the source/package stages in scripts/run_ci.py.
@@ -66,6 +66,7 @@ from vidbyte.lib.errors.base import (
     UnsupportedProviderError,
     VidbyteSdkError,
 )
+from vidbyte.lib.errors.skills import SkillSourceError
 
 __all__ = [
     "AgentExecutionError",
@@ -104,6 +105,7 @@ __all__ = [
     "SourceParseError",
     "SourcePinMismatchError",
     "SourceSecurityError",
+    "SkillSourceError",
     "ToolExecutionError",
     "ToolRegistrationError",
     "ToolRegistryError",

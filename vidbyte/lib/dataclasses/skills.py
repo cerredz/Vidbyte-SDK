@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Source descriptors do not fetch during construction; resoluti
 FUNCTION INVENTORY:
     SkillSource.__post_init__() -> None: validates named descriptor fields and options compatible with its closed source kind.
     SkillDocument.__post_init__() -> None: validates text-backed or native-reference content while retaining accepted text exactly.
-COMMON MODIFICATION PATTERNS: Keep retrieval in vidbyte.providers.skills and provider-specific request handling in the owning model provider.
+COMMON MODIFICATION PATTERNS: Keep skill retrieval in vidbyte.skills.sources and model API calls in vidbyte.providers.
 WHAT NOT TO DO:
     1. Do not normalize, trim, or rewrite the supplied body.
     2. Do not fetch source locations from these dataclasses.

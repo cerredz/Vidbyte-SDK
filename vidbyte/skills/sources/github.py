@@ -1,4 +1,4 @@
-"""FILE: vidbyte/providers/skills/github.py
+"""FILE: vidbyte/skills/sources/github.py
 
 PURPOSE: Resolves explicit GitHub skill repository, tree, blob, and raw sources.
 ROLE IN CODEBASE: Supplies bounded GitHub catalog lookup for Jev's GITHUB and SKILLS_SH source adapters.
@@ -17,16 +17,19 @@ import re
 from dataclasses import replace
 from urllib.parse import SplitResult, parse_qsl, quote, unquote, urlencode, urlsplit
 
+import yaml
+
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
 from vidbyte.lib.enums.skills import SkillSourceKind
-from vidbyte.lib.errors import ProviderRequestError
-from vidbyte.lib.http.parser import HttpResponseParser
-from vidbyte.lib.http.transport import HttpResponse, HttpTransport
-from vidbyte.providers.skills.base import (
-    SkillDocumentParser,
-    SkillSourceAdapter,
+from vidbyte.lib.errors import (
+    ConfigurationError,
+    ProviderRequestError,
     SkillSourceError,
 )
+from vidbyte.lib.errors.skills import provider_failure_reason
+from vidbyte.lib.http.parser import HttpResponseParser
+from vidbyte.lib.http.transport import HttpResponse, HttpTransport
+from vidbyte.skills.sources.base import SkillDocumentParser, SkillSourceAdapter
 
 _GITHUB_API_BASE = "https://api.github.com"
 _GITHUB_API_HOST = "api.github.com"
@@ -42,6 +45,8 @@ _GITHUB_HTTP_OK = 200
 _GITHUB_HTTP_MULTIPLE_CHOICES = 300
 _GITHUB_HTTP_NOT_FOUND = 404
 _GITHUB_RETRY_COUNT = 0
+_MULTIPLE_REF_CANDIDATE_BOUNDARY = 1
+_PATH_COMPONENT_SEPARATOR_COUNT = 1
 _CREDENTIAL_QUERY_PARTS = ("token", "auth", "key", "secret", "credential", "password")
 _OWNER_OR_REPO = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -57,16 +62,33 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         self.document_parser = document_parser or SkillDocumentParser()
 
     async def resolve(self, source: SkillSource) -> SkillDocument:
-        # Resolves only the explicit source's selected document and converts network failures to safe SDK errors.
+        try:
+            return await self._resolve_source(source)
+        except SkillSourceError as exc:
+            raise SkillSourceError(exc.reason, source_kind="github", status_code=exc.status_code) from exc
+        except ProviderRequestError as exc:
+            raise SkillSourceError(provider_failure_reason(exc.status_code, message=exc.message), source_kind="github", status_code=exc.status_code) from exc
+        except TimeoutError as exc:
+            raise SkillSourceError("the GitHub request timed out", source_kind="github") from exc
+        except OSError as exc:
+            raise SkillSourceError("the GitHub service could not be reached", source_kind="github") from exc
+        except UnicodeError as exc:
+            raise SkillSourceError("the returned skill document contains invalid UTF-8", source_kind="github") from exc
+        except yaml.YAMLError as exc:
+            raise SkillSourceError("the returned skill frontmatter is not valid YAML", source_kind="github") from exc
+        except (ConfigurationError, ValueError, TypeError, binascii.Error) as exc:
+            raise SkillSourceError("the source descriptor or returned skill did not satisfy the SDK contract", source_kind="github") from exc
+
+    async def _resolve_source(self, source: SkillSource) -> SkillDocument:
+        # Routes one validated descriptor through raw, blob, or repository catalog resolution.
         if not isinstance(source, SkillSource) or source.kind is not SkillSourceKind.GITHUB:
             raise SkillSourceError("GitHub adapter requires a GITHUB SkillSource.")
-        location = self._parse_location(source)
-        mode, owner, repo, revision, path = location
+        mode, owner, repo, revision, path = self._parse_location(source)
         ref_candidates = self._revision_candidates(source)
         if mode == "raw":
             if path is None:
                 raise SkillSourceError("GitHub raw URL must identify a SKILL.md file.")
-            if len(ref_candidates) > 1:
+            if len(ref_candidates) > _MULTIPLE_REF_CANDIDATE_BOUNDARY:
                 return await self._resolve_url_candidates(source, owner, repo, mode, ref_candidates)
             return await self._resolve_raw(source, owner, repo, revision, path)
         repository = await self._get_repository(source, owner, repo)
@@ -74,10 +96,10 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         if not isinstance(default_branch, str) or not default_branch.strip():
             raise SkillSourceError("GitHub repository metadata did not include a default branch.")
         selected_revision = revision or source.revision or default_branch
-        if len(ref_candidates) > 1:
+        if len(ref_candidates) > _MULTIPLE_REF_CANDIDATE_BOUNDARY:
             return await self._resolve_url_candidates(source, owner, repo, mode, ref_candidates)
         if mode == "blob":
-            if not path or path.rsplit("/", 1)[-1] != "SKILL.md":
+            if not path or path.rsplit("/", _PATH_COMPONENT_SEPARATOR_COUNT)[-1] != "SKILL.md":
                 raise SkillSourceError("GitHub blob sources must identify a SKILL.md file.")
             return await self._resolve_contents(source, owner, repo, selected_revision, path)
         return await self._resolve_tree(source, owner, repo, selected_revision, path)
@@ -104,7 +126,7 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         url = self._raw_url(owner, repo, revision, path)
         response = await self._request(url, source, raw=True, maximum_bytes=_GITHUB_DOCUMENT_MAX_BYTES + 1)
         if not _GITHUB_HTTP_OK <= response.status_code < _GITHUB_HTTP_MULTIPLE_CHOICES:
-            raise SkillSourceError("GitHub skill document could not be retrieved.")
+            raise ProviderRequestError("GitHub raw content endpoint returned a non-success status.", provider="github", status_code=response.status_code)
         content = response.raw_bytes if response.raw_bytes is not None else response.body.encode("utf-8")
         if len(content) > _GITHUB_DOCUMENT_MAX_BYTES:
             raise SkillSourceError("GitHub skill document exceeds the SDK size limit.")
@@ -114,7 +136,7 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
     async def _resolve_contents(self, source: SkillSource, owner: str, repo: str, revision: str, path: str) -> SkillDocument:
         # Reads one selected file from the authenticated API without exposing its key to the raw host.
         url = self._contents_url(owner, repo, revision, path)
-        payload = await self._get_json(url, source, maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES, purpose="skill file")
+        payload = await self._get_json(url, source, maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES)
         content, returned_path = self._decode_api_file(payload)
         if returned_path != path:
             raise SkillSourceError("GitHub API returned a different skill file than requested.")
@@ -124,7 +146,7 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
     async def _resolve_tree(self, source: SkillSource, owner: str, repo: str, revision: str, selected_path: str | None = None, *, selected_slug: str | None = None) -> SkillDocument:
         # Parses every matching catalog candidate so malformed entries cannot hide a valid requested name.
         url = self._tree_url(owner, repo, revision)
-        payload = await self._get_json(url, source, maximum_bytes=_GITHUB_TREE_MAX_BYTES, purpose="repository tree")
+        payload = await self._get_json(url, source, maximum_bytes=_GITHUB_TREE_MAX_BYTES)
         documents = await self._tree_documents(source, owner, repo, revision, payload, selected_path)
         if selected_slug is not None:
             documents = [(document, path) for document, path in documents if self._matches_slug(document, path, selected_slug)]
@@ -161,7 +183,6 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
                 self._contents_url(owner, repo, revision, path),
                 source,
                 maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES,
-                purpose="skill file",
             )
             if payload is not None:
                 file_candidates.append((payload, revision, path))
@@ -187,7 +208,6 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
                 self._tree_url(owner, repo, revision),
                 source,
                 maximum_bytes=_GITHUB_TREE_MAX_BYTES,
-                purpose="repository tree",
             )
             if payload is None:
                 continue
@@ -208,31 +228,25 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
     async def _get_repository(self, source: SkillSource, owner: str, repo: str) -> dict[str, object]:
         # Uses repository metadata rather than assuming a branch named main.
         url = f"{_GITHUB_API_BASE}/repos/{quote(owner, safe='')}/{quote(repo, safe='')}"
-        return await self._get_json(url, source, maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES, purpose="repository metadata")
+        return await self._get_json(url, source, maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES)
 
     async def _get_blob(self, source: SkillSource, owner: str, repo: str, sha: str) -> bytes:
         # Reads blob bytes through the authenticated API endpoint and enforces the decoded file cap.
         if not isinstance(sha, str) or not sha:
             raise SkillSourceError("GitHub repository tree contained an invalid skill blob.")
         url = f"{_GITHUB_API_BASE}/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/git/blobs/{quote(sha, safe='')}"
-        payload = await self._get_json(url, source, maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES, purpose="skill blob")
+        payload = await self._get_json(url, source, maximum_bytes=_GITHUB_BLOB_MAX_RESPONSE_BYTES)
         content, _ = self._decode_api_file(payload, require_path=False, expected_type=None, expected_sha=sha)
         return content
 
-    async def _get_json(self, url: str, source: SkillSource, *, maximum_bytes: int, purpose: str) -> dict[str, object]:
-        # @intent bound-and-redact-github-api-errors
-        # Host, timeout, body ceiling, and safe SDK errors are enforced before upstream details can escape.
+    async def _get_json(self, url: str, source: SkillSource, *, maximum_bytes: int) -> dict[str, object]:
+        # Enforces the fixed GitHub API host and response cap; resolve() translates transport failures once.
         if urlsplit(url).hostname != _GITHUB_API_HOST:
             raise SkillSourceError("GitHub API request did not use the approved host.")
-        try:
-            response = await self._request(url, source, raw=False, maximum_bytes=maximum_bytes)
-            return self.response_parser.parse_json_response(response, provider="github")
-        except ProviderRequestError as exc:
-            if "exceeded the configured size ceiling" in str(exc):
-                raise SkillSourceError(f"GitHub {purpose} exceeded the SDK response size limit.") from None
-            raise SkillSourceError(f"GitHub {purpose} could not be resolved.") from None
+        response = await self._request(url, source, raw=False, maximum_bytes=maximum_bytes)
+        return self.response_parser.parse_json_response(response, provider="github")
 
-    async def _try_get_json(self, url: str, source: SkillSource, *, maximum_bytes: int, purpose: str) -> dict[str, object] | None:
+    async def _try_get_json(self, url: str, source: SkillSource, *, maximum_bytes: int) -> dict[str, object] | None:
         # @intent ignore-only-definite-github-404
         # Only an actual 404 means a probe did not match; auth, parse, size, and transport failures invalidate the source.
         if urlsplit(url).hostname != _GITHUB_API_HOST:
@@ -240,12 +254,7 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
         response = await self._request(url, source, raw=False, maximum_bytes=maximum_bytes)
         if response.status_code == _GITHUB_HTTP_NOT_FOUND:
             return None
-        try:
-            return self.response_parser.parse_json_response(response, provider="github")
-        except ProviderRequestError as exc:
-            if "exceeded the configured size ceiling" in str(exc):
-                raise SkillSourceError(f"GitHub {purpose} exceeded the SDK response size limit.") from None
-            raise SkillSourceError(f"GitHub {purpose} could not be resolved.") from None
+        return self.response_parser.parse_json_response(response, provider="github")
 
     async def _request(self, url: str, source: SkillSource, *, raw: bool, maximum_bytes: int) -> HttpResponse:
         # @intent scope-github-credentials-to-api-host
@@ -259,22 +268,15 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             headers["X-GitHub-Api-Version"] = _GITHUB_API_VERSION
             if source.api_key is not None:
                 headers["Authorization"] = f"Bearer {source.api_key}"
-        try:
-            return await self.transport.request(
-                method="GET",
-                url=url,
-                headers=headers,
-                timeout_seconds=_GITHUB_TIMEOUT_SECONDS,
-                retry_count=_GITHUB_RETRY_COUNT,
-                max_response_bytes=maximum_bytes,
-                follow_redirects=False,
-            )
-        except ProviderRequestError as exc:
-            if "exceeded the configured size ceiling" in str(exc):
-                if raw:
-                    raise SkillSourceError("GitHub skill document exceeds the SDK size limit.") from None
-                raise SkillSourceError("GitHub response exceeds the SDK size limit.") from None
-            raise SkillSourceError("GitHub request could not be completed.") from None
+        return await self.transport.request(
+            method="GET",
+            url=url,
+            headers=headers,
+            timeout_seconds=_GITHUB_TIMEOUT_SECONDS,
+            retry_count=_GITHUB_RETRY_COUNT,
+            max_response_bytes=maximum_bytes,
+            follow_redirects=False,
+        )
 
     def _parse_location(self, source: SkillSource) -> tuple[str, str, str, str, str | None]:
         # Keeps shorthand parsing separate from URL parsing and host validation.
@@ -293,12 +295,9 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
 
     def _parse_url_location(self, source: SkillSource) -> tuple[str, str, str, str, str | None]:
         # Validates URL credentials, query data, protocol, port, and approved hosts before routing.
-        try:
-            parsed = urlsplit(source.location)
-            hostname = parsed.hostname
-            port = parsed.port
-        except ValueError:
-            raise SkillSourceError("GitHub skill source URL is invalid.") from None
+        parsed = urlsplit(source.location)
+        hostname = parsed.hostname
+        port = parsed.port
         if parsed.scheme != "https" or parsed.username is not None or parsed.password is not None or port not in (None, 443):
             raise SkillSourceError("GitHub skill sources must use an approved HTTPS URL without user information.")
         if parsed.fragment:
@@ -473,10 +472,7 @@ class GitHubSkillSourceAdapter(SkillSourceAdapter):
             raise SkillSourceError("GitHub API returned a different skill blob than requested.")
         if size is not None and size > _GITHUB_DOCUMENT_MAX_BYTES:
             raise SkillSourceError("GitHub skill document exceeds the SDK size limit.")
-        try:
-            content = base64.b64decode("".join(encoded.split()), validate=True)
-        except (binascii.Error, ValueError):
-            raise SkillSourceError("GitHub API returned malformed skill file bytes.") from None
+        content = base64.b64decode("".join(encoded.split()), validate=True)
         if len(content) > _GITHUB_DOCUMENT_MAX_BYTES:
             raise SkillSourceError("GitHub skill document exceeds the SDK size limit.")
         if size is not None and len(content) != size:

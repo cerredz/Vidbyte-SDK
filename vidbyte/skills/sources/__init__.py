@@ -1,4 +1,4 @@
-"""FILE: vidbyte/providers/skills/__init__.py
+"""FILE: vidbyte/skills/sources/__init__.py
 
 PURPOSE: Exposes the closed class-first resolver for explicit Jev skill sources.
 ROLE IN CODEBASE: JevSkillsPreload calls this facade at run time; it never fetches during agent construction.
@@ -13,12 +13,13 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
 from vidbyte.lib.enums.skills import SkillSourceKind
+from vidbyte.lib.errors import SkillSourceError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
-from vidbyte.providers.skills.base import SkillSourceAdapter, SkillSourceError
-from vidbyte.providers.skills.claude import ClaudeSkillSourceAdapter
-from vidbyte.providers.skills.file import FileSkillSourceAdapter
-from vidbyte.providers.skills.github import GitHubSkillSourceAdapter
-from vidbyte.providers.skills.skills_sh import SkillsShSkillSourceAdapter
+from vidbyte.skills.sources.base import SkillSourceAdapter
+from vidbyte.skills.sources.claude import ClaudeSkillSourceAdapter
+from vidbyte.skills.sources.file import FileSkillSourceAdapter
+from vidbyte.skills.sources.github import GitHubSkillSourceAdapter
+from vidbyte.skills.sources.skills_sh import SkillsShSkillSourceAdapter
 
 
 class SkillSourceResolver:

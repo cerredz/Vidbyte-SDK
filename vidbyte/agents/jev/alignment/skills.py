@@ -24,6 +24,7 @@ TESTS: `tests/test_jev_skill_preload.py` and `scripts/test-jev-skills-preload.py
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
@@ -40,14 +41,26 @@ from vidbyte.lib.dataclasses.jev import (
     JevSkillResult,
     JevSkillsOutcome,
 )
-from vidbyte.lib.dataclasses.skills import ClaudeSkillReference, SkillDocument, SkillSource
-from vidbyte.lib.enums.jev import JevQuestionType, JevSkillStatus
+from vidbyte.lib.dataclasses.skills import (
+    ClaudeSkillReference,
+    SkillDocument,
+    SkillSource,
+)
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums.jev import JevQuestionType, JevSkillStatus
 from vidbyte.lib.enums.skills import SkillSourceKind
-from vidbyte.lib.errors import VidbyteSdkError
+from vidbyte.lib.errors import SkillSourceError, VidbyteSdkError
+from vidbyte.lib.errors.skills import (
+    DECISION_FAILURE_DETAIL,
+    DUPLICATE_SOURCE_DETAIL,
+    NATIVE_CAP_DETAIL,
+    OVERSIZED_DETAIL,
+    SOURCE_FAILURE_DETAIL,
+    UNSUPPORTED_NATIVE_DETAIL,
+)
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev.preflight.skills import JevSkillRelevanceQuestion
-from vidbyte.providers.skills import SkillSourceError, SkillSourceResolver
+from vidbyte.skills.sources import SkillSourceResolver
 
 _SKILL_SECTION = """
 
@@ -58,14 +71,6 @@ _SKILL_INDEX_BASE = 1
 _MAX_REQUEST_JSON_BYTES = 60_000
 _MAX_STATE_AND_QUESTION_JSON_BYTES = 30_000
 _SkillBatch = tuple[tuple[int, ...], JevDecisionRequest]
-
-
-_SOURCE_FAILURE_DETAIL = "Skill source could not be resolved."
-_DUPLICATE_SOURCE_DETAIL = "Resolved skill name is ambiguous."
-_DECISION_FAILURE_DETAIL = "Skill relevance could not be evaluated."
-_UNSUPPORTED_NATIVE_DETAIL = "Native Claude skills require an Anthropic model."
-_OVERSIZED_DETAIL = "Skill candidate exceeds Jev's request size limit."
-_NATIVE_CAP_DETAIL = "Anthropic supports at most 20 skills per request."
 
 
 class JevSkillsPreload(JevPreload):
@@ -82,32 +87,34 @@ class JevSkillsPreload(JevPreload):
         self.source_resolver = source_resolver or SkillSourceResolver(claude_api_key=claude_api_key)
 
     async def run(self, message: str, context: BaseAgentContext) -> BaseAgentContext:
-        # @intent each-candidate-has-an-independent-result
-        # Batching bounds the request without truncating candidate text; an outage or oversized record only affects its own batch or candidate.
+        # Resolve sources before scoring so every configured candidate keeps its original result index.
         available, results = await self._resolve_candidates()
         indexed_skills = tuple(sorted(available.items()))
         batches, oversized = self._build_batches(message, indexed_skills)
+        # An oversized skill stays unavailable in its slot; none of its text is silently truncated.
         for index in oversized:
             skill = available[index]
-            results[index] = self._unavailable_result(index, skill, _OVERSIZED_DETAIL)
+            results[index] = self._unavailable_result(index, skill, OVERSIZED_DETAIL)
         selected_indices: set[int] = set()
         usages: list[JevUsage | None] = []
         for indices, request in batches:
             try:
                 decision = await DecisionModelHelper(self.decision).arun(request)
             except VidbyteSdkError:
+                # A failed Jev batch affects its own candidates while later batches still run.
                 for index in indices:
                     skill = available[index]
-                    results[index] = self._unavailable_result(index, skill, _DECISION_FAILURE_DETAIL)
+                    results[index] = self._unavailable_result(index, skill, DECISION_FAILURE_DETAIL)
                 continue
             usages.append(JevUsage.from_usage_payload(decision.usage or {}))
+            # Score answers by their fixed identifiers and collect selected positions for ordered output.
             for index in indices:
                 skill = available[index]
                 result = self._score_skill(index, skill, decision.answers)
                 results[index] = result
                 if result.status is JevSkillStatus.SELECTED:
                     selected_indices.add(index)
-        ordered_results = tuple(results[index] for index in range(1, len(self.skills) + 1))
+        # Separate prompt text from opaque Claude references before building the provider outcome.
         selected_text: list[SkillDocument] = []
         native_refs: list[ClaudeSkillReference] = []
         for index in sorted(selected_indices):
@@ -116,44 +123,50 @@ class JevSkillsPreload(JevPreload):
                 selected_text.append(skill)
                 continue
             if len(native_refs) >= 20:
-                results[index] = self._unavailable_result(index, self.skills[index - _SKILL_INDEX_BASE], _NATIVE_CAP_DETAIL, resolved=skill)
+                results[index] = self._unavailable_result(index, self.skills[index - _SKILL_INDEX_BASE], NATIVE_CAP_DETAIL, resolved=skill)
                 continue
             native_refs.append(skill.claude_reference)
+        # Report one result per original candidate and append only the selected text-backed bodies.
         ordered_results = tuple(results[index] for index in range(1, len(self.skills) + 1))
         self.response.skills(JevSkillsOutcome(results=ordered_results, usage=self._sum_usage(usages), claude_skills=tuple(native_refs)))
         return self._append_selected(context, tuple(selected_text))
 
     async def _resolve_candidates(self) -> tuple[dict[int, SkillDocument], dict[int, JevSkillResult]]:
-        # @intent preserve-candidate-indexes-through-source-failures
-        # Each configured source keeps its original slot; expected lookup failures stay local so sibling candidates remain selectable.
+        # Resolves candidates independently, then removes every member of any duplicate-name group.
         available: dict[int, SkillDocument] = {}
         results: dict[int, JevSkillResult] = {}
         for index, candidate in enumerate(self.skills, start=_SKILL_INDEX_BASE):
-            if isinstance(candidate, SkillSource) and candidate.kind is SkillSourceKind.CLAUDE and self.provider is not ModelProvider.ANTHROPIC:
-                results[index] = self._unavailable_result(index, candidate, _UNSUPPORTED_NATIVE_DETAIL)
-                continue
-            if isinstance(candidate, SkillSource):
-                try:
-                    document = await self.source_resolver.resolve(candidate)
-                except SkillSourceError:
-                    results[index] = self._unavailable_result(index, candidate, _SOURCE_FAILURE_DETAIL)
-                    continue
+            resolved = await self._resolve_candidate(index, candidate)
+            if isinstance(resolved, JevSkillResult):
+                results[index] = resolved
             else:
-                document = candidate
-            if document.claude_reference is not None and self.provider is not ModelProvider.ANTHROPIC:
-                results[index] = self._unavailable_result(index, candidate, _UNSUPPORTED_NATIVE_DETAIL, resolved=document)
-                continue
-            available[index] = document
-        names: dict[str, list[int]] = {}
-        for index, skill in available.items():
-            names.setdefault(skill.name, []).append(index)
-        for indices in names.values():
-            if len(indices) < 2:
-                continue
-            for index in indices:
-                results[index] = self._unavailable_result(index, self.skills[index - _SKILL_INDEX_BASE], _DUPLICATE_SOURCE_DETAIL, resolved=available[index])
-                available.pop(index)
+                available[index] = resolved
+        duplicate_indices = self._duplicate_name_indices(available)
+        for index in duplicate_indices:
+            document = available.pop(index)
+            results[index] = self._unavailable_result(index, self.skills[index - _SKILL_INDEX_BASE], DUPLICATE_SOURCE_DETAIL, resolved=document)
         return available, results
+
+    async def _resolve_candidate(self, index: int, candidate: SkillDocument | SkillSource) -> SkillDocument | JevSkillResult:
+        # Handles provider compatibility and one source lookup without changing candidate order.
+        if isinstance(candidate, SkillSource) and candidate.kind is SkillSourceKind.CLAUDE and self.provider is not ModelProvider.ANTHROPIC:
+            return self._unavailable_result(index, candidate, UNSUPPORTED_NATIVE_DETAIL)
+        if isinstance(candidate, SkillDocument):
+            document = candidate
+        else:
+            try:
+                document = await self.source_resolver.resolve(candidate)
+            except SkillSourceError as exc:
+                return self._unavailable_result(index, candidate, exc.message or SOURCE_FAILURE_DETAIL)
+        if document.claude_reference is not None and self.provider is not ModelProvider.ANTHROPIC:
+            return self._unavailable_result(index, candidate, UNSUPPORTED_NATIVE_DETAIL, resolved=document)
+        return document
+
+    @staticmethod
+    def _duplicate_name_indices(available: Mapping[int, SkillDocument]) -> tuple[int, ...]:
+        # Returns all indexes whose resolved name appears more than once.
+        counts = Counter(document.name for document in available.values())
+        return tuple(index for index, document in available.items() if counts[document.name] > 1)
 
     def _unavailable_result(self, index: int, candidate: SkillDocument | SkillSource, detail: str, *, resolved: SkillDocument | None = None) -> JevSkillResult:
         # Builds a safe per-index unavailable record without copying source locations, exception text, or credentials.
@@ -249,7 +262,7 @@ class JevSkillsPreload(JevPreload):
         valid_answer = isinstance(answer, JevAnswer) and answer.question_name == identifier and answer.question_type is JevQuestionType.NOUL
         verdict = DecisionModelHelper.score_noul(answers, (identifier,), self.threshold) if valid_answer else None
         if verdict is None:
-            return JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=JevSkillStatus.UNAVAILABLE, detail=_DECISION_FAILURE_DETAIL)
+            return JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=JevSkillStatus.UNAVAILABLE, detail=DECISION_FAILURE_DETAIL)
         status = JevSkillStatus.SELECTED if verdict.passed else JevSkillStatus.SKIPPED
         return JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=status, probability=answer.noul)
 
