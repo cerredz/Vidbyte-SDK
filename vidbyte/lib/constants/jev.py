@@ -425,6 +425,8 @@ JEV_COMPUTE_RESET_SOURCE: str = "compute:reset"
 JEV_COMPUTE_MAX_PARALLEL_HELPERS: int = 4
 JEV_COMPUTE_FAN_OUT_SOURCE: str = "compute:fan_out"
 JEV_COMPUTE_FAN_OUT_REPORTS_MAX_CHARS: int = 24_000
+# The evidence source a delegate helper's work is recorded under for the done checks.
+JEV_COMPUTE_DELEGATE_SOURCE: str = "compute:delegate"
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -736,4 +738,5 @@ __all__ = [
     "JEV_COMPUTE_MAX_PARALLEL_HELPERS",
     "JEV_COMPUTE_FAN_OUT_SOURCE",
     "JEV_COMPUTE_FAN_OUT_REPORTS_MAX_CHARS",
+    "JEV_COMPUTE_DELEGATE_SOURCE",
 ]

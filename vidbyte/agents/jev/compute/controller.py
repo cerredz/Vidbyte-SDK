@@ -4,9 +4,9 @@ PURPOSE: Implements JevComputeController, the owner of JevAgent's mid-run comput
 ROLE IN CODEBASE: JevAgent builds one controller at construction when JevRuntimeSettings.compute is set; JevRuntime calls `begin` when the main agent is about to run and `checkpoint` from AgentRuntime's `_after_tool_iteration` hook with the loop's state and messages.
 ARCHITECTURE NOTE: The runtime holds no compute logic; every step the checkpoint takes lives here and in the modules it composes. Recognition runs only right after a verified brief refresh, so Jev's cadence follows the brief's. A recognized situation is acted on by its own move module, after JevComputeBudget allows it; the move's result reaches the main agent as one appended message, and its helpers' work reaches the done checks as evidence in run order.
 COMMON MODIFICATION PATTERNS: Add a move for a situation as its own module under this package, one case in `_act`, and one method here that checks the budget, runs the move, and calls `_report`; keep its prompts in vidbyte/prompts/prompts/jev_compute/ and report its outcome as a JevComputeMove.
-KNOWN EDGE CASES: Like the JevAgent that owns it, one controller serves one run at a time. A writer outage or a rejected refresh asks Jev nothing; a Jev outage recognizes nothing. Situations with no move yet are recognized and recorded but not acted on. A failed helper is charged to the budget and recorded, and the main loop continues unchanged.
-RELATED DOCS: docs/design/jev-compute-checkpoint.md, docs/design/jev-compute-situations.md, docs/design/jev-compute-reset.md, docs/design/jev-compute-fan-out.md, and docs/design/jev-run-brief.md.
-TESTS: tests/test_jev_compute.py, tests/test_jev_compute_situations.py, tests/test_jev_compute_reset.py, and tests/test_jev_compute_fan_out.py.
+KNOWN EDGE CASES: Like the JevAgent that owns it, one controller serves one run at a time. A writer outage or a rejected refresh asks Jev nothing; a Jev outage recognizes nothing. Every situation has a move: REPEATING resets, EACH_OF_SEVERAL fans out, and SELF_CONTAINED_STEP delegates. A failed helper is charged to the budget and recorded, and the main loop continues unchanged.
+RELATED DOCS: docs/design/jev-compute-checkpoint.md, docs/design/jev-compute-situations.md, docs/design/jev-compute-reset.md, docs/design/jev-compute-fan-out.md, docs/design/jev-compute-delegate.md, and docs/design/jev-run-brief.md.
+TESTS: tests/test_jev_compute.py, tests/test_jev_compute_situations.py, tests/test_jev_compute_reset.py, tests/test_jev_compute_fan_out.py, and tests/test_jev_compute_delegate.py.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import Any
 
 from vidbyte.agents.jev.brief import JevRunBriefEvents, JevRunBriefKeeper
 from vidbyte.agents.jev.compute.budget import JevComputeBudget
+from vidbyte.agents.jev.compute.delegate import JevComputeDelegate
 from vidbyte.agents.jev.compute.fan_out import JevComputeFanOut
 from vidbyte.agents.jev.compute.helpers import JevComputeHelpers
 from vidbyte.agents.jev.compute.recognizer import JevComputeRecognizer
@@ -39,8 +40,9 @@ from vidbyte.lib.enums.jev import (
 )
 from vidbyte.lib.jev.compute import JevComputeRegistry
 
-# The number of helper agents the reset move starts.
+# The number of helper agents the reset and delegate moves each start.
 _RESET_HELPERS = 1
+_DELEGATE_HELPERS = 1
 
 
 class JevComputeController:
@@ -55,6 +57,7 @@ class JevComputeController:
         helpers = JevComputeHelpers(settings, compute)
         self.reset = JevComputeReset(helpers)
         self.fan_out = JevComputeFanOut(helpers, compute)
+        self.delegate = JevComputeDelegate(helpers)
         self.response = response
         self.run_state = run_state
 
@@ -66,6 +69,7 @@ class JevComputeController:
         self.keeper.begin(request)
         self.budget.begin()
         self.fan_out.begin()
+        self.delegate.begin()
 
     async def checkpoint(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
         """Read the run's facts, refresh the brief on its cadence, recognize the run's situation after a verified refresh, act on it, and report each step."""
@@ -107,9 +111,9 @@ class JevComputeController:
             case JevComputeSituation.EACH_OF_SEVERAL:
                 # The main agent plans the same work on each of several items: one helper per item, in parallel.
                 move = await self._fan_out(iteration, brief, state, messages)
-            case _:
-                # Recognized and recorded; this situation has no move yet.
-                return
+            case JevComputeSituation.SELF_CONTAINED_STEP:
+                # The main agent's next step states everything it needs: a fresh helper takes it.
+                move = await self._delegate(iteration, brief, state, messages)
         self.response.compute_move(move)
 
     async def _reset(self, iteration: int, brief: JevRunBrief, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> JevComputeMove:
@@ -155,6 +159,25 @@ class JevComputeController:
         message = self.fan_out.message(plan, reports)
         self._report(message, results, state, messages)
         return JevComputeMove(situation, iteration, JevComputeMoveStatus.COMPLETED, helpers=count, output=message, usage=JevComputeHelpers.combined_usage(results))
+
+    async def _delegate(self, iteration: int, brief: JevRunBrief, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> JevComputeMove:
+        # Hands the main agent's next self-contained step to a fresh helper and brings its report back.
+        # @intent a-delegated-step-keeps-the-main-context-clean
+        # The step's reads and tool output stay in the helper and only its report joins the main loop; the budget is
+        # charged once the helper starts, and a step already delegated in this run is recorded as no work.
+        situation = JevComputeSituation.SELF_CONTAINED_STEP
+        step = self.delegate.subject(brief)
+        if step is None:
+            return JevComputeMove(situation, iteration, JevComputeMoveStatus.NO_WORK)
+        blocked = self.budget.blocked(iteration, _DELEGATE_HELPERS)
+        if blocked is not None:
+            return JevComputeMove(situation, iteration, blocked)
+        result = await self.delegate.run(self.keeper.request, step)
+        self.budget.spend(iteration, _DELEGATE_HELPERS)
+        if result is None:
+            return JevComputeMove(situation, iteration, JevComputeMoveStatus.FAILED, helpers=_DELEGATE_HELPERS)
+        self._report(self.delegate.message(step, result.output), (result,), state, messages)
+        return JevComputeMove(situation, iteration, JevComputeMoveStatus.COMPLETED, helpers=_DELEGATE_HELPERS, output=result.output, usage=result.usage)
 
     def _report(self, message: str, results: tuple[JevComputeHelperResult, ...], state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
         # Appends the one message the main agent reads, and records each helper's run as done-check evidence in run order.

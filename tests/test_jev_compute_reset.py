@@ -287,21 +287,19 @@ class JevComputeControllerMoveTests(unittest.IsolatedAsyncioTestCase):
         helper.assert_not_awaited()
         self.assertEqual([(move.status, move.helpers, move.output) for move in agent.response.compute_moves], [(JevComputeMoveStatus.MOVE_LIMIT, 0, None)])
 
-    async def test_an_unrecognized_situation_or_one_without_a_move_starts_no_helper(self) -> None:
-        for yes, situations in ((0.1, (JevComputeSituation.REPEATING,)), (0.95, (JevComputeSituation.SELF_CONTAINED_STEP,))):
-            agent, _ = self._agent(JevComputeSettings(situations=situations))
-            assert agent.compute is not None
-            payload = _stuck_payload().model_copy(update={"next_steps": [JevRunBriefQuotePayload(event="E1", quote="Get the test suite passing.")]})
-            with (
-                self.subTest(yes=yes, situations=situations),
-                patch.object(agent.compute.keeper.writer, "arun", new=AsyncMock(return_value=SimpleNamespace(structured=payload))),
-                patch(_HELPER, new=_jev(ScriptedJev(yes))),
-                patch.object(agent.compute.reset.helpers, "run", new=AsyncMock()) as helper,
-            ):
-                await agent.arun(REQUEST)
-                helper.assert_not_awaited()
-                self.assertEqual(agent.response.compute_moves, [])
-                self.assertEqual(len(agent.response.compute_decisions), 1)
+    async def test_an_unrecognized_situation_starts_no_helper(self) -> None:
+        agent, _ = self._agent(JevComputeSettings(situations=(JevComputeSituation.REPEATING,)))
+        assert agent.compute is not None
+        payload = _stuck_payload().model_copy(update={"next_steps": [JevRunBriefQuotePayload(event="E1", quote="Get the test suite passing.")]})
+        with (
+            patch.object(agent.compute.keeper.writer, "arun", new=AsyncMock(return_value=SimpleNamespace(structured=payload))),
+            patch(_HELPER, new=_jev(ScriptedJev(0.1))),
+            patch.object(agent.compute.reset.helpers, "run", new=AsyncMock()) as helper,
+        ):
+            await agent.arun(REQUEST)
+        helper.assert_not_awaited()
+        self.assertEqual(agent.response.compute_moves, [])
+        self.assertEqual(len(agent.response.compute_decisions), 1)
 
 
 if __name__ == "__main__":

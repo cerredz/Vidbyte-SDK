@@ -1,8 +1,16 @@
 {
   "name": "Jev Compute",
-  "description": "The prompts JevAgent's mid-run compute checkpoint uses when it acts on a situation Jev recognized. reset_prompt is the task given to a fresh helper agent when the main agent keeps retrying an approach that already failed: it carries the user's request, the stuck problem, the approaches already tried, and the open errors, and asks the helper to find the cause, fix it without repeating those approaches, and report. Its placeholders are {request}, {problem}, {attempts}, and {failures}. reset_result is the message the main agent then reads, carrying the helper's report; its placeholders are {problem} and {report}. fan_out_prompt is the task given to each of several helpers when the main agent plans the same work on each of several items: it carries the request, the run brief, the agent's plan, the group, and the one item that helper takes; its placeholders are {request}, {brief}, {plan}, {group}, and {item}. fan_out_result is the message the main agent then reads, with every item's report and the items still left to it; its placeholders are {group}, {count}, {reports}, and {left}.",
+  "description": "The prompts JevAgent's mid-run compute checkpoint uses when it acts on a situation Jev recognized. reset_prompt is the task given to a fresh helper agent when the main agent keeps retrying an approach that already failed: it carries the user's request, the stuck problem, the approaches already tried, and the open errors, and asks the helper to find the cause, fix it without repeating those approaches, and report. Its placeholders are {request}, {problem}, {attempts}, and {failures}. reset_result is the message the main agent then reads, carrying the helper's report; its placeholders are {problem} and {report}. fan_out_prompt is the task given to each of several helpers when the main agent plans the same work on each of several items: it carries the request, the run brief, the agent's plan, the group, and the one item that helper takes; its placeholders are {request}, {brief}, {plan}, {group}, and {item}. fan_out_result is the message the main agent then reads, with every item's report and the items still left to it; its placeholders are {group}, {count}, {reports}, and {left}. delegate_prompt is the task given to a fresh helper when the main agent's next stated step is self-contained: it carries only the request and the step; its placeholders are {request} and {step}. delegate_result is the message the main agent then reads; its placeholders are {step} and {report}.",
   "key": "jev_compute",
   "prompts": {
+    "delegate_prompt": {
+      "path": "delegate_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute/delegate_prompt.md"
+    },
+    "delegate_result": {
+      "path": "delegate_result.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute/delegate_result.md"
+    },
     "fan_out_prompt": {
       "path": "fan_out_prompt.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute/fan_out_prompt.md"
