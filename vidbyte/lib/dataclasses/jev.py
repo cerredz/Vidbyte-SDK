@@ -3700,6 +3700,8 @@ class JevAgentResponse:
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
     `continuation_budget` records cumulative additional loop limits granted to faithful-scope continuations.
     `review` records JevReviewer's objections at the latest finish attempt.
+    With mid-run compute enabled, `run_facts` holds the exact run facts read at the latest checkpoint,
+    `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
     """
 
     input: str = ""
@@ -3714,6 +3716,9 @@ class JevAgentResponse:
     continuations: int = 0
     continuation_budget: dict[str, int] = field(default_factory=dict)
     review: JevReviewRecord | None = None
+    run_facts: JevRunFacts | None = None
+    run_brief: JevRunBrief | None = None
+    run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
 
     @property
     def needs_clarification(self) -> bool:

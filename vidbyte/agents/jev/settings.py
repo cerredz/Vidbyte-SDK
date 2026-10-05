@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations. JevRunBriefSettings configures the mid-run brief: the separate writer's model and limits and the brief's refresh cadence.
+PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations. JevRunBriefSettings configures the mid-run brief: the separate writer's model and limits and the brief's refresh cadence. JevComputeSettings, set on JevRuntimeSettings.compute, turns on the mid-run compute checkpoint and holds its brief settings.
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-run-brief.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-run-brief.md, docs/design/jev-compute-checkpoint.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, tests/test_jev_compute.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -240,13 +240,29 @@ class JevRunBriefSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class JevComputeSettings:
+    """Validated settings for mid-run dynamic compute: what JevAgent keeps and decides between the main agent's tool iterations.
+
+    Setting `JevRuntimeSettings.compute` turns the compute checkpoint on. The checkpoint keeps the run brief current
+    through its own writer agent, on the cadence and model `brief` sets.
+    """
+
+    brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.brief, JevRunBriefSettings):
+            raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
+
+
+@dataclass(frozen=True, slots=True)
 class JevRuntimeSettings:
-    """Validated Jev decision policy: the TypeSafe model, the preflight flags, the continuation settings, and the tool-selector threshold."""
+    """Validated Jev decision policy: the TypeSafe model, the preflight flags, the continuation settings, the tool-selector threshold, and mid-run compute (off when None)."""
 
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     continual: JevContinualSettings = field(default_factory=JevContinualSettings)
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+    compute: JevComputeSettings | None = None
 
     def __post_init__(self) -> None:
         # Rejects invalid decision policy before JevAgent builds its preflight gate and run state.
@@ -255,6 +271,8 @@ class JevRuntimeSettings:
         object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
         if not isinstance(self.continual, JevContinualSettings):
             raise ConfigurationError("JevRuntimeSettings.continual must be a JevContinualSettings instance.")
+        if self.compute is not None and not isinstance(self.compute, JevComputeSettings):
+            raise ConfigurationError("JevRuntimeSettings.compute must be a JevComputeSettings instance or None.")
         self._validate_tool_selector_threshold()
 
     def _validate_tool_selector_threshold(self) -> None:
@@ -270,4 +288,4 @@ class JevRuntimeSettings:
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
 
-__all__ = ["JevAgentSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
