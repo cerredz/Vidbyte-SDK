@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/compute/states.py
 
 PURPOSE: Build bounded shared dynamic-compute state from the request, verified brief, exact facts, and recent numbered events.
-ROLE IN CODEBASE: JevComputeRecognizer sends this mapping with all enabled option questions in one Jev request.
-ARCHITECTURE NOTE: Every option reads the same state; only the newest bounded event-log tail is included.
-COMMON MODIFICATION PATTERNS: Keep the state keys shared with question records in vidbyte/lib/jev/compute/.
-KNOWN EDGE CASES: The request and each recent event are clipped with an omitted-character marker; only the latest twelve events are retained.
-RELATED DOCS: docs/design/jev-compute-situations.md.
-TESTS: tests/test_jev_compute_situations.py.
+ROLE IN CODEBASE: JevComputeRecognizer evaluates every enabled option against this mapping; fresh-agent helpers receive the same verified evidence.
+ARCHITECTURE NOTE: Every option reads one shared state. Only the newest bounded, numbered event-log tail is included.
+COMMON MODIFICATION PATTERNS: Add evidence fields here once and keep the shared request shape aligned for recognition questions and fresh-agent prompts.
+KNOWN EDGE CASES: The request and each recent event are clipped with an omitted-character marker; only the latest twelve non-request events are retained.
+RELATED DOCS: docs/design/jev-compute-situations.md and docs/design/jev-compute-reset.md.
+TESTS: tests/test_jev_compute_situations.py and tests/test_jev_compute_reset.py.
 """
 
 from __future__ import annotations
@@ -29,17 +29,17 @@ _CLIP_NO_OVERFLOW = 0
 
 
 class JevComputeStates:
-    """Render request, verified brief, exact facts, and a bounded event-log tail."""
+    """Render request, verified brief, exact run facts, and a bounded event-log tail."""
 
     @classmethod
     def build(cls, request: str, brief: JevRunBrief, facts: JevRunFacts, events: JevRunEventLog) -> ComputeState:
-        """Return the single shared evidence mapping used for every enabled option."""
-        # @intent every-option-reads-the-same-bounded-evidence
-        # The verified brief and exact fact fields stay intact, while request and recent event text have explicit size bounds.
+        """Return the single shared evidence mapping used by recognition and helper prompts."""
+        # @intent every-option-and-helper-reads-the-same-verified-state
+        # The exact facts and verified brief remain intact while request and recent event text have explicit size bounds.
         event_lines = tuple(line for line in events.lines if not line.partition(" ")[2].startswith("USER: "))
-        recent = "\n".join(cls._clip(line, _RECENT_EVENT_MAX_CHARS) for line in event_lines[-_RECENT_EVENT_COUNT:])
+        recent = "\n".join(cls.clip(line, _RECENT_EVENT_MAX_CHARS) for line in event_lines[-_RECENT_EVENT_COUNT:])
         return {
-            "request": cls._clip(request, JEV_RUN_BRIEF_REQUEST_MAX_CHARS),
+            "request": cls.clip(request, JEV_RUN_BRIEF_REQUEST_MAX_CHARS),
             "brief": brief.render(),
             "facts": {
                 "iteration": facts.iteration,
@@ -51,7 +51,7 @@ class JevComputeStates:
         }
 
     @staticmethod
-    def _clip(text: str, limit: int) -> str:
+    def clip(text: str, limit: int) -> str:
         """Keep a bounded head and tail and show how many characters were omitted."""
         if len(text) <= limit:
             return text

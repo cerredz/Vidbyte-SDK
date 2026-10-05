@@ -569,6 +569,15 @@ class JevRunState(BaseAgent):
             evidence = replace(evidence, source=f"fresh:{self._fresh_segment_number}")
         self._evidence_segments.append(evidence)
 
+    def add_helper_evidence(self, responses: Sequence[str], calls: Sequence[ToolCallContext], evidence: JevContinuationEvidence) -> None:
+        """Record a mid-run helper agent's observations after the main-loop work that preceded it."""
+        # @intent helper-work-keeps-run-order
+        # A helper runs between main-loop iterations, so the main slice up to that point is captured first and the
+        # helper's segment follows it; ordered checks such as REQUIRED_SEQUENCE then read events in the order they
+        # happened, and the helper's work counts as evidence instead of as the main agent's claim.
+        self._capture_main_evidence(responses, calls)
+        self._evidence_segments.append(evidence)
+
     def _capture_main_evidence(self, responses: Sequence[str], calls: Sequence[ToolCallContext]) -> None:
         """Append only the newly observed main-loop slice, normalized to its local response chronology."""
         new_responses = tuple(responses[self._main_response_cursor:])

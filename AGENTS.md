@@ -51,6 +51,8 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Mid-run compute checkpoint: `JevComputeController` and `JevComputeSettings` | `vidbyte/agents/jev/compute/`; loop hook `AgentRuntime._after_tool_iteration` in `vidbyte/agents/runtime.py` |
 | Dynamic-compute recognition and the shared `{request, brief, facts, recent}` state | `JevComputeRecognizer` and `JevComputeStates` in `vidbyte/agents/jev/compute/` |
 | Twelve fixed evidence questions per dynamic-compute option and `JevComputeRegistry` | `vidbyte/lib/jev/compute/situations.py` and `vidbyte/lib/jev/compute/compute.py` |
+| Fresh-agent move, per-run budget, helper runner, and run-ordered helper evidence | `JevComputeReset`, `JevComputeBudget`, and `JevComputeHelpers` in `vidbyte/agents/jev/compute/`; `JevRunState.add_helper_evidence` in `vidbyte/agents/jev/done/run_state.py` |
+| Compute move prompts | `vidbyte/prompts/prompts/jev_compute/`; keys in `vidbyte/lib/enums/prompts.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
 | Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |

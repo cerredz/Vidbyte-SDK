@@ -183,12 +183,12 @@ class JevRuntime(AgentRuntime):
 
 
     async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
-        """Hand the mid-run compute checkpoint the live loop state after each tool iteration that continues the run."""
+        """Hand the mid-run compute checkpoint the live loop state and messages after each tool iteration that continues the run."""
         # @intent the-runtime-only-forwards-the-checkpoint
         # Every mid-run compute step lives in JevComputeController, so adding one never adds a branch here; without
         # compute settings there is no controller and the loop runs exactly as the linear runtime does.
         if self.compute is not None:
-            await self.compute.checkpoint(state)
+            await self.compute.checkpoint(state, messages)
 
 
 __all__ = ["JevRuntime"]

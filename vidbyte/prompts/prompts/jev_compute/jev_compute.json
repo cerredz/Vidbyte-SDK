@@ -1,0 +1,15 @@
+{
+  "name": "Jev Compute",
+  "description": "The prompts JevAgent's mid-run compute checkpoint uses when FRESH_AGENT is selected. reset_prompt gives the fresh helper the user's request, verified run brief, exact run facts, and bounded recent numbered events so it can make independent progress. Its placeholders are {request}, {brief}, {facts}, and {recent}. reset_result carries the helper's report back to the main agent; its placeholder is {report}.",
+  "key": "jev_compute",
+  "prompts": {
+    "reset_prompt": {
+      "path": "reset_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute/reset_prompt.md"
+    },
+    "reset_result": {
+      "path": "reset_result.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute/reset_result.md"
+    }
+  }
+}

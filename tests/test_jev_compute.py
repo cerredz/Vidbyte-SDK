@@ -21,7 +21,14 @@ from tests.agent_test_support import bind_test_runner
 from vidbyte import JevComputeSettings as RootJevComputeSettings
 from vidbyte import JevRunBriefSettings as RootJevRunBriefSettings
 from vidbyte import tool
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevComputeSettings, JevRunBriefSettings, JevRuntimeSettings, JevSpecialist
+from vidbyte.agents.jev import (
+    JevAgent,
+    JevAgentSettings,
+    JevComputeSettings,
+    JevRunBriefSettings,
+    JevRuntimeSettings,
+    JevSpecialist,
+)
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.lib.dataclasses.jev import JevRunBriefAppendPayload
 from vidbyte.lib.enums import JevRunBriefUpdateStatus, ModelProvider
@@ -97,7 +104,7 @@ class JevComputeHookTests(unittest.IsolatedAsyncioTestCase):
         agent = bind_test_runner(JevAgent(_settings(), _compute()), _lookups_then_done(("alpha", "beta", "gamma")))
         seen: list[tuple[int, int]] = []
 
-        async def record(state: Any) -> None:
+        async def record(state: Any, messages: Any) -> None:
             # The loop state is one mutable object, so read it at call time rather than after the run.
             seen.append((state.iteration_count, len(state.call_contexts)))
 

@@ -63,6 +63,7 @@ from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
+    JevComputeMoveStatus,
     JevComputeQuestionKey,
     JevDoneCheck,
     JevDoneQuestionKey,
@@ -3730,6 +3731,7 @@ class JevAgentResponse:
     `review` records JevReviewer's objections at the latest finish attempt.
     With mid-run compute enabled, `run_facts` holds the exact run facts read at the latest checkpoint,
     `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
+    `compute_decisions` records each dynamic-compute selection and `compute_moves` records each supported action, in order.
     """
 
     input: str = ""
@@ -3748,6 +3750,7 @@ class JevAgentResponse:
     run_brief: JevRunBrief | None = None
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
     compute_decisions: list[JevComputeDecision] = field(default_factory=list)
+    compute_moves: list[JevComputeMove] = field(default_factory=list)
 
     @property
     def needs_clarification(self) -> bool:
@@ -4163,6 +4166,42 @@ class JevComputeDecision:
             raise JevValidation.error("compute decision option", f"the highest qualifying option ({expected!r})", self.option)
 
 
+@dataclass(frozen=True, slots=True)
+class JevComputeHelperResult:
+    """What one compute helper produced: its report, run evidence, and usage."""
+
+    output: str
+    evidence: JevContinuationEvidence
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        JevText.require(self.output, field_name="compute helper output")
+        if not isinstance(self.evidence, JevContinuationEvidence):
+            raise JevValidation.error("compute helper evidence", "a JevContinuationEvidence", self.evidence)
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeMove:
+    """What the checkpoint did about one selected dynamic-compute option."""
+
+    option: JevDynamicComputeOption
+    iteration: int
+    status: JevComputeMoveStatus
+    helpers: int = 0
+    output: str | None = None
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.option, JevDynamicComputeOption):
+            raise JevValidation.error("compute move option", "a JevDynamicComputeOption member", self.option)
+        if not isinstance(self.status, JevComputeMoveStatus):
+            raise JevValidation.error("compute move status", "a JevComputeMoveStatus member", self.status)
+        JevCount.require(self.iteration, field_name="compute move iteration")
+        JevCount.require(self.helpers, field_name="compute move helpers")
+        if (self.output is not None) != (self.status is JevComputeMoveStatus.COMPLETED):
+            raise JevValidation.error("compute move output", "a report exactly when the move completed", self.output)
+
+
 __all__ = [
     "JevCount",
     "JevRunBrief",
@@ -4174,6 +4213,8 @@ __all__ = [
     "JevComputeQuestion",
     "JevComputeOptionResult",
     "JevComputeDecision",
+    "JevComputeHelperResult",
+    "JevComputeMove",
     "JevRunBriefWindow",
     "JevRunBriefUpdate",
     "JevRunFacts",

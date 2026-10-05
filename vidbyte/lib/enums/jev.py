@@ -296,4 +296,14 @@ class JevComputeQuestionKey(str, Enum):
     SUBAGENT_SUBSTANTIVE_WORK = "subagent.substantive_work"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+class JevComputeMoveStatus(str, Enum):
+    """What happened when the compute checkpoint acted on a recognized option."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    MOVE_LIMIT = "move_limit"
+    HELPER_LIMIT = "helper_limit"
+    COOLDOWN = "cooldown"
+
+
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeMoveStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

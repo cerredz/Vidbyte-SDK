@@ -8,7 +8,7 @@ The mid-run compute checkpoint keeps a compact, verified note brief while the ma
 - **FORK_AGENT**: signs that distinct approaches or experiments can be compared.
 - **SUBAGENT**: signs that an independent helper can complete and return bounded work.
 
-The checkpoint records recognition on `JevAgent.response.compute_decisions`. It observes the run only: it does not launch an agent, fork work, or delegate a subtask.
+The checkpoint records recognition on `JevAgent.response.compute_decisions`. When `FRESH_AGENT` is selected, a run-local budget may start one separate helper; the other options are recognized but have no move yet. Each attempted move is recorded on `JevAgent.response.compute_moves`.
 
 ## Brief and checkpoint timing
 
@@ -43,12 +43,12 @@ Each question asks about one positive, observable signal. Missing evidence can b
 
 For each option, `DecisionModelHelper.score_noul` computes the arithmetic mean of P(true) across its twelve answers. The common `JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD` is `0.8`; an option qualifies at or above it. The recognizer selects the qualifying option with the highest mean. Enum order (`FRESH_AGENT`, `FORK_AGENT`, `SUBAGENT`) breaks ties. A missing or non-NOUL answer makes only its option unavailable; a provider or response-normalization failure selects no option.
 
-`JevComputeDecision.option` records the selected option or `None`. Its results contain the per-option mean and returned answers; request usage is recorded once. The result remains observe-only.
+`JevComputeDecision.option` records the selected option or `None`. Its results contain the per-option mean and returned answers; request usage is recorded once. A selected `FRESH_AGENT` move passes the same shared state to a separate linear helper, appends a successful report to the main loop, and records the helper run as done-check evidence in event order. Move and helper limits live in `JevComputeSettings`; other selected options have no action yet.
 
 ## Files
 
 - `vidbyte/agents/jev/brief/`: the separate brief writer, keeper, and verification of append-only note updates.
-- `vidbyte/agents/jev/compute/`: controller, shared-state builder, and one-request recognizer.
+- `vidbyte/agents/jev/compute/`: controller, shared-state builder, one-request recognizer, budget, helper runner, and fresh-agent move.
 - `vidbyte/agents/jev/done/event_log.py`: `JevRunEventLog.from_run`, the numbered run-event source.
 - `vidbyte/lib/jev/compute/`: twelve questions per option and the option registry.
 - `vidbyte/agents/jev/settings.py`: `JevComputeSettings.dynamic_compute`.

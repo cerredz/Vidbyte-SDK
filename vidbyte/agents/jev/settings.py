@@ -16,6 +16,11 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_COMPUTE_COOLDOWN_ITERATIONS,
+    JEV_COMPUTE_HELPER_MAX_ITERATIONS,
+    JEV_COMPUTE_HELPER_MAX_TOKENS,
+    JEV_COMPUTE_MAX_HELPERS,
+    JEV_COMPUTE_MAX_MOVES,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_TOKENS,
@@ -237,7 +242,14 @@ class JevRunBriefSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevComputeSettings:
-    """Validated run-brief settings and enabled dynamic-compute options for the mid-run checkpoint."""
+    """Validated run-brief, dynamic-compute option, and helper-budget settings for the mid-run checkpoint.
+
+    An empty `dynamic_compute` tuple keeps the brief current without asking Jev. A selected `FRESH_AGENT` option may
+    start an independent linear helper within a run-local budget: at most `max_moves` moves and `max_helpers` helpers
+    per run, with `cooldown_iterations` main-loop iterations between moves. `max_moves=0` keeps recognition but never
+    acts. Each helper uses the main agent's model, tools, and permissions and its own `helper_max_iterations` and
+    `helper_max_tokens` limits.
+    """
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
     dynamic_compute: tuple[JevDynamicComputeOption | str, ...] = (
@@ -245,11 +257,20 @@ class JevComputeSettings:
         JevDynamicComputeOption.FORK_AGENT,
         JevDynamicComputeOption.SUBAGENT,
     )
+    max_moves: int = JEV_COMPUTE_MAX_MOVES
+    max_helpers: int = JEV_COMPUTE_MAX_HELPERS
+    cooldown_iterations: int = JEV_COMPUTE_COOLDOWN_ITERATIONS
+    helper_max_iterations: int = JEV_COMPUTE_HELPER_MAX_ITERATIONS
+    helper_max_tokens: int = JEV_COMPUTE_HELPER_MAX_TOKENS
 
     def __post_init__(self) -> None:
         if not isinstance(self.brief, JevRunBriefSettings):
             raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
         object.__setattr__(self, "dynamic_compute", JevComputeRegistry.validate(self.dynamic_compute))
+        for field_name, minimum in (("max_moves", 0), ("max_helpers", 1), ("cooldown_iterations", 0), ("helper_max_iterations", 1), ("helper_max_tokens", 1)):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ConfigurationError(f"JevComputeSettings.{field_name} must be an integer of at least {minimum}.", details={"received": repr(value)})
 
 
 @dataclass(frozen=True, slots=True)

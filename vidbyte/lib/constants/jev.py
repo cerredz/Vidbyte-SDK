@@ -365,6 +365,17 @@ JEV_EVENT_ID_PATTERN: str = r"^E[1-9][0-9]{0,6}$"
 
 # Minimum mean P(true) required to select a dynamic-compute option.
 JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD: float = 0.8
+# Run-local move budget: one run makes at most this many moves and starts at most this many helpers.
+JEV_COMPUTE_MAX_MOVES: int = 3
+JEV_COMPUTE_MAX_HELPERS: int = 8
+JEV_COMPUTE_COOLDOWN_ITERATIONS: int = 5
+# Limits for each helper agent's linear loop.
+JEV_COMPUTE_HELPER_MAX_ITERATIONS: int = 30
+JEV_COMPUTE_HELPER_MAX_TOKENS: int = 300_000
+# A helper report is clipped to this length before the main agent reads it.
+JEV_COMPUTE_HELPER_REPORT_MAX_CHARS: int = 12_000
+# Source label used to retain a fresh helper's evidence in done-check history.
+JEV_COMPUTE_RESET_SOURCE: str = "compute:reset"
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -634,4 +645,11 @@ __all__ = [
     "JEV_EVENT_ID_PREFIX",
     "JEV_EVENT_ID_PATTERN",
     "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
+    "JEV_COMPUTE_MAX_MOVES",
+    "JEV_COMPUTE_MAX_HELPERS",
+    "JEV_COMPUTE_COOLDOWN_ITERATIONS",
+    "JEV_COMPUTE_HELPER_MAX_ITERATIONS",
+    "JEV_COMPUTE_HELPER_MAX_TOKENS",
+    "JEV_COMPUTE_HELPER_REPORT_MAX_CHARS",
+    "JEV_COMPUTE_RESET_SOURCE",
 ]
