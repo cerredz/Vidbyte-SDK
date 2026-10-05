@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/response.py
 
-PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return.
+PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature, including skill preloading, reports what it decided through a method here instead of through result metadata.
+ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes done outcomes, JevSkillsPreload writes its redacted selection result through it, and JevRuntime asks it for the result to return.
 ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
 KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
@@ -22,6 +22,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevPresetResult,
     JevPromptAlignmentOutcome,
     JevRunStateRecord,
+    JevSkillsPreloadResult,
     JevSpecialist,
     JevToolAlignmentOutcome,
 )
@@ -79,6 +80,10 @@ class JevResponse:
     def tool_alignment(self, outcome: JevToolAlignmentOutcome) -> None:
         """Record the tool-settings alignment outcome for this run."""
         self.state.tool_alignment = outcome
+
+    def skill_preload(self, outcome: JevSkillsPreloadResult) -> None:
+        """Record skill-selection status without exposing selected instruction bodies."""
+        self.state.skill_preload = outcome
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""
