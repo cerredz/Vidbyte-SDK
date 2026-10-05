@@ -1,17 +1,17 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
-PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the gate's prompt to the specialist the gate chose, or writes the run state from the user's message, applies the tool selector, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
+PURPOSE: Provides the JevAgent execution seam: it runs JevPreflightGate, returns a closed gate's response, hands the gate prompt (refined when enabled) to a chosen specialist, or writes run state from the user's request and prior turns before applying the tool selector and inherited loop; failed done checks may send that loop back to work.
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
 KNOWN EDGE CASES: With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-refine.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-refine.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-tool-selector.py.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -22,6 +22,7 @@ from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
+from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -88,7 +89,10 @@ class JevRuntime(AgentRuntime):
         if self.preflight.specialist is not None:
             return self.response.delegated(await self.preflight.specialist.agent.arun(prompt))
         if self.run_state is not None:
-            await self.run_state.begin(message)
+            await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
+            sequence_instructions = self.run_state.agent_instructions()
+            if sequence_instructions:
+                context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
         if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
             return self.response.finished(await super().arun(
                 prompt,
@@ -135,6 +139,19 @@ class JevRuntime(AgentRuntime):
             },
         ))
 
+    @staticmethod
+    def _prior_user_turns(history: Sequence[object]) -> tuple[str, ...]:
+        """Keep only caller-provided user messages; BaseAgent also places its own replies in context history."""
+        # @intent completion-requires-the-users-turns
+        # Earlier user requirements remain binding when later turns add detail or move to another topic. The
+        # same history also contains this agent's prior replies, so only messages explicitly sent by the user
+        # may define obligations or explicitly cancel them.
+        return tuple(
+            message.content
+            for message in history
+            if isinstance(message, AgentMessage) and message.sender.casefold() == "user" and message.content.strip()
+        )
+
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
         """Ask the continuation whether this finish attempt continues the loop, and let it shape what the main agent reads next."""
         # @intent continuation-logic-lives-in-the-continuation
@@ -142,7 +159,25 @@ class JevRuntime(AgentRuntime):
         # continue and every message it sends lives in a JevContinuation subclass, never in this runtime.
         if self.continuation is None or not await self.continuation.should_continue(result.output, state.iteration_outputs, state.call_contexts):
             return False
-        self.continuation.continue_(messages)
+        extra_iterations, extra_tokens, extra_tool_calls = self.continuation.budget_extension()
+        limits: dict[str, int] = {}
+        granted: dict[str, int] = {}
+        for field_name, extra in (
+            ("max_iterations", extra_iterations),
+            ("max_tokens", extra_tokens),
+            ("max_tool_calls", extra_tool_calls),
+        ):
+            configured = getattr(self.config, field_name)
+            if configured is not None and extra:
+                limits[field_name] = configured + extra
+                granted[field_name] = extra
+        if limits:
+            # The runtime is run-local; expand only configured ceilings before the same loop consumes the continuation.
+            self.config = replace(self.config, **limits)
+            self.response.continuation_budget(granted)
+        evidence = self.continuation.continue_(messages)
+        if evidence is not None and self.run_state is not None:
+            self.run_state.add_continuation_evidence(evidence)
         return True
 
 
