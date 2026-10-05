@@ -55,16 +55,22 @@ class JevRunBriefWriter(BaseAgent):
 
     async def write(self, request: str, previous: JevRunBrief | None, window: JevRunBriefWindow) -> JevRunBriefPayload | None:
         """Return the complete updated brief the writer wrote for these events, or None when it wrote none."""
+        # @intent each-refresh-starts-from-the-verified-brief
+        # History is cleared so one refresh never reads an earlier refresh's unverified reply; the previous brief
+        # reaches the writer only as verified JSON in the prompt. Any SDK failure returns None and the keeper keeps
+        # the previous brief, because a missing refresh must never stop or change the main agent's run.
         self.history.clear()
         try:
             reply = await self.arun(AgentInput(prompt=self.prompt(request, previous, window)))
         except VidbyteSdkError:
-            # A writer outage, or a reply that never matched the schema, keeps the previous brief in place.
             return None
         return reply.structured if isinstance(reply.structured, JevRunBriefPayload) else None
 
     def prompt(self, request: str, previous: JevRunBrief | None, window: JevRunBriefWindow) -> str:
         """Return the update message: the clipped request, the previous brief or none, and the window of new events."""
+        # @intent the-writer-reads-a-bounded-message
+        # The request is clipped and the events arrive as a budgeted window, so a long request or a long stretch of
+        # run never grows the writer's input past the cost the brief was sized for.
         return self._update_prompt.format(
             request=JevRunBriefEvents.clip(request, JEV_RUN_BRIEF_REQUEST_MAX_CHARS),
             previous_brief=JEV_RUN_BRIEF_NONE if previous is None else previous.render(),

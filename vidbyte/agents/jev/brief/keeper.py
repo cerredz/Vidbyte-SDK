@@ -57,6 +57,9 @@ class JevRunBriefKeeper:
 
     async def refresh_if_due(self, responses: Sequence[str], calls: Sequence[ToolCallContext], *, tokens_used: int | None) -> JevRunBriefUpdate | None:
         """Read the run's facts and refresh the brief when a refresh is due; return the attempt, or None when none ran."""
+        # @intent code-decides-when-the-brief-refreshes
+        # Facts are read at every checkpoint because they are exact and free, while the writer is a model call; only
+        # code policy over those facts decides when that call is worth making, so the brief's cost stays bounded.
         facts = self.read_facts(responses, calls, tokens_used=tokens_used)
         if not self.due(facts):
             return None
@@ -80,6 +83,9 @@ class JevRunBriefKeeper:
 
     async def _refresh(self, responses: Sequence[str], calls: Sequence[ToolCallContext], facts: JevRunFacts) -> JevRunBriefUpdate | None:
         # Shows the writer the events after the last verified brief, verifies its reply, and keeps the brief only when verification does.
+        # @intent only-a-verified-brief-moves-the-pointer
+        # The event pointer advances only with a verified brief, so a writer outage or a rejected reply leaves the
+        # previous brief standing and the next attempt re-reads the same events instead of silently skipping them.
         events = JevRunBriefEvents.from_run(self.request, responses, calls)
         window = events.window(after=self._through_event)
         self._attempted_at, self._tokens_at_attempt = facts.iteration, facts.tokens_used
@@ -95,17 +101,14 @@ class JevRunBriefKeeper:
     def _update(self, facts: JevRunFacts, window: JevRunBriefWindow, verification: JevRunBriefVerification | None) -> JevRunBriefUpdate:
         # Records what the attempt did: unavailable without a reply, rejected without a verified brief, updated otherwise.
         if verification is None:
-            status, kept, dropped = JevRunBriefUpdateStatus.UNAVAILABLE, 0, 0
-        else:
-            status = JevRunBriefUpdateStatus.REJECTED if verification.brief is None else JevRunBriefUpdateStatus.UPDATED
-            kept, dropped = verification.kept, verification.dropped
+            return JevRunBriefUpdate(status=JevRunBriefUpdateStatus.UNAVAILABLE, iteration=facts.iteration, first_event=window.first_event, last_event=window.last_event, usage=self.writer.get_usage())
         return JevRunBriefUpdate(
-            status=status,
+            status=JevRunBriefUpdateStatus.REJECTED if verification.brief is None else JevRunBriefUpdateStatus.UPDATED,
             iteration=facts.iteration,
             first_event=window.first_event,
             last_event=window.last_event,
-            kept=kept,
-            dropped=dropped,
+            kept=verification.kept,
+            dropped=verification.dropped,
             usage=self.writer.get_usage(),
         )
 

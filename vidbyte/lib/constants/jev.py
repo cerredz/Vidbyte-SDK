@@ -359,6 +359,9 @@ JEV_RUN_BRIEF_EVENT_MAX_CHARS: int = 4_000
 JEV_RUN_BRIEF_EVENT_HEADER_CHARS: int = 240
 JEV_RUN_BRIEF_WINDOW_MAX_CHARS: int = 80_000
 JEV_RUN_BRIEF_REQUEST_MAX_CHARS: int = 8_000
+# A clipped event keeps this share of its budget from the start, where the event names its kind, tool, and arguments,
+# and the rest from the end, where outputs usually report their result.
+JEV_RUN_BRIEF_CLIP_HEAD_SHARE: float = 2 / 3
 # Brief caps keep the rendered brief, together with run facts and a recent-event tail, inside Jev's state limit.
 JEV_RUN_BRIEF_TEXT_MAX_CHARS: int = 200
 JEV_RUN_BRIEF_QUOTE_MAX_CHARS: int = 300
@@ -647,6 +650,7 @@ __all__ = [
     "JEV_RUN_BRIEF_EVENT_HEADER_CHARS",
     "JEV_RUN_BRIEF_WINDOW_MAX_CHARS",
     "JEV_RUN_BRIEF_REQUEST_MAX_CHARS",
+    "JEV_RUN_BRIEF_CLIP_HEAD_SHARE",
     "JEV_RUN_BRIEF_TEXT_MAX_CHARS",
     "JEV_RUN_BRIEF_QUOTE_MAX_CHARS",
     "JEV_RUN_BRIEF_EVIDENCE_MAX",

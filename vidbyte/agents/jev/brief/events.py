@@ -16,12 +16,16 @@ from collections.abc import Sequence
 from vidbyte.agents.jev.done.event_log import JevRunEventLog
 from vidbyte.lib.constants.jev import (
     JEV_EVENT_ID_PREFIX,
+    JEV_RUN_BRIEF_CLIP_HEAD_SHARE,
     JEV_RUN_BRIEF_EVENT_HEADER_CHARS,
     JEV_RUN_BRIEF_EVENT_MAX_CHARS,
     JEV_RUN_BRIEF_WINDOW_MAX_CHARS,
 )
 from vidbyte.lib.dataclasses.jev import JevRunBriefWindow
 from vidbyte.lib.dataclasses.tools import ToolCallContext
+
+# Events in a window are separated by one line break, which counts against the window's character budget.
+_LINE_BREAK = "\n"
 
 
 class JevRunBriefEvents:
@@ -67,14 +71,14 @@ class JevRunBriefEvents:
         omitted = len(fresh) - len(shown)
         lines = [self._omitted_note(omitted)] if omitted else []
         lines.extend(shown)
-        return JevRunBriefWindow(first_event=fresh[0][0], last_event=fresh[-1][0], text="\n".join(lines), omitted=omitted)
+        return JevRunBriefWindow(first_event=fresh[0][0], last_event=fresh[-1][0], text=_LINE_BREAK.join(lines), omitted=omitted)
 
     @staticmethod
     def clip(text: str, limit: int) -> str:
         """Return the text unchanged when it fits, otherwise its head and tail around a marker that counts what was cut."""
         if len(text) <= limit:
             return text
-        head = limit * 2 // 3
+        head = int(limit * JEV_RUN_BRIEF_CLIP_HEAD_SHARE)
         tail = limit - head
         return f"{text[:head]} [... {len(text) - limit} characters left out ...] {text[-tail:]}"
 
@@ -91,18 +95,18 @@ class JevRunBriefEvents:
         # events keep their detail and the oldest new ones shrink first, then drop out and are only counted.
         # The budget covers each line's id prefix and newline and keeps room for the omitted note, so the whole
         # rendered window stays within JEV_RUN_BRIEF_WINDOW_MAX_CHARS.
-        budget = JEV_RUN_BRIEF_WINDOW_MAX_CHARS - len(cls._omitted_note(len(events))) - 1
+        budget = JEV_RUN_BRIEF_WINDOW_MAX_CHARS - len(cls._omitted_note(len(events))) - len(_LINE_BREAK)
         shown: list[str] = []
         headers_only = False
         for number, text in reversed(events):
             line = cls._line(number, cls._header(text) if headers_only else cls.clip(text, JEV_RUN_BRIEF_EVENT_MAX_CHARS))
-            if not headers_only and len(line) + 1 > budget:
+            if not headers_only and len(line) + len(_LINE_BREAK) > budget:
                 headers_only = True
                 line = cls._line(number, cls._header(text))
-            if len(line) + 1 > budget and shown:
+            if len(line) + len(_LINE_BREAK) > budget and shown:
                 break
             shown.append(line)
-            budget -= len(line) + 1
+            budget -= len(line) + len(_LINE_BREAK)
         return tuple(reversed(shown))
 
     @staticmethod
@@ -118,7 +122,7 @@ class JevRunBriefEvents:
     @staticmethod
     def _header(text: str) -> str:
         # Returns the event's first line, bounded, which names the event's kind, tool, and arguments.
-        first_line = text.split("\n", 1)[0]
+        first_line = text.split(_LINE_BREAK, 1)[0]
         return f"{first_line[:JEV_RUN_BRIEF_EVENT_HEADER_CHARS]} [... rest of this event left out for length ...]"
 
     @staticmethod
