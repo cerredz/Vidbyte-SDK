@@ -206,6 +206,14 @@ class JevProblemCheckItemType(str, Enum):
     REQUEST_COMPLETION = "request_completion"
 
 
+class JevRunBriefUpdateStatus(str, Enum):
+    """Outcome of one scheduled mid-run brief refresh attempt."""
+
+    UPDATED = "updated"
+    REJECTED = "rejected"
+    UNAVAILABLE = "unavailable"
+
+
 class JevClaimKind(str, Enum):
     """The closed categories of factual assertions the CLAIMS handoff can describe."""
 
@@ -239,4 +247,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

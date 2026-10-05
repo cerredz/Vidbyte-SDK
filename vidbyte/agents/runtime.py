@@ -576,6 +576,7 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+            await self._after_tool_iteration(state, messages)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
@@ -760,6 +761,13 @@ class AgentRuntime:
         # A check that runs when the model tries to finish (JevRuntime's done checks) must be able to keep this loop's
         # messages, tool history, and budgets, so the hook sits at both finish points instead of re-running the agent.
         return False
+
+    async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
+        """Let a specialized linear runtime act between a finished tool iteration and the next model call."""
+        # Default runtimes do nothing here; a specialized runtime reads the loop state and may append to messages.
+        # @intent iterations-can-be-observed-mid-run
+        # A decision made while the agent works (JevRuntime's compute checkpoint) needs the live loop state after each
+        # iteration's tool calls, and must run only once the middleware has let the loop continue, so it is called last.
 
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
