@@ -11,5 +11,6 @@ TESTS: tests/test_jev_done.py.
 
 from vidbyte.agents.jev.continuation.base import JevContinuation
 from vidbyte.agents.jev.continuation.done import JevDoneContinuation
+from vidbyte.agents.jev.continuation.fresh import JevFreshContinuation
 
-__all__ = ["JevContinuation", "JevDoneContinuation"]
+__all__ = ["JevContinuation", "JevDoneContinuation", "JevFreshContinuation"]

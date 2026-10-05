@@ -11,6 +11,8 @@ TESTS: tests/test_jev_run_state_relation.py and scripts/test-jev-run-state-relat
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from vidbyte.agents.jev.done.run_state import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.response import JevResponse
@@ -27,15 +29,27 @@ class JevRunStateRelation(JevRunState):
         super().__init__(settings, runtime_settings, response)
         self.preflight = preflight
 
-    async def begin(self, request: str) -> None:
+    async def begin(self, request: str, prior_user_turns: Sequence[str] = ()) -> None:
         # Clears only the previous handoff and keeps an existing record unless the current gate explicitly rejects it.
         # @intent related-request-preserves-existing-record
         # Done checks must read the request-derived baseline unchanged; merging a related request would silently rewrite that baseline.
         """Retain and report a related record, or use JevRunState's existing replacement generation path."""
         self.handoff = None
         if self.record is None or self.preflight.run_state_related is False:
-            await super().begin(request)
+            await super().begin(request, prior_user_turns)
             return
+        self.request = request
+        self.prior_user_turns = tuple(turn for turn in prior_user_turns if turn.strip())
+        self.user_turns = (*self.prior_user_turns, request)
+        self._recall_guard_probability = None
+        self._state_builder_disagreement = False
+        self._observed_extent = {}
+        self._evidence_segments = []
+        self._main_response_cursor = 0
+        self._main_call_cursor = 0
+        self._main_segment_number = 0
+        self._fresh_segment_number = 0
+        self.history.clear()
         self.response.run_state(self.record)
 
     async def begin_delegated(self, message: str) -> None:

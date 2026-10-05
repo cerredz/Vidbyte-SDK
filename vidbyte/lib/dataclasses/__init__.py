@@ -44,13 +44,10 @@ from vidbyte.lib.dataclasses.agents import (
     AgentRuntimeStats,
     AgentSpec,
     AgentStopReason,
+    FinishReview,
+    FinishReviewAction,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.config import (
-    AgentSettings,
-    MiddlewareDefinition,
-    ToolDefinition,
-)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -66,8 +63,13 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
-    CodexTurnSettings,
     CodexTurnError,
+    CodexTurnSettings,
+)
+from vidbyte.lib.dataclasses.config import (
+    AgentSettings,
+    MiddlewareDefinition,
+    ToolDefinition,
 )
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -349,6 +351,8 @@ __all__ = [
     "FileSystemToolConfig",
     "FinalizationContext",
     "FinalizationRenderer",
+    "FinishReview",
+    "FinishReviewAction",
     "ForkRecoverySettings",
     "GitDiffContextItem",
     "HandoffAgentDescriptor",
