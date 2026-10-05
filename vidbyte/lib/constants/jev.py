@@ -340,6 +340,47 @@ JEV_REVIEW_MAX_TOKENS: int = 400_000
 # Keep the reviewer question batch bounded and focused on the most serious objections.
 JEV_REVIEW_MAX_OBJECTIONS: int = 5
 
+# Run brief: JevRunBriefKeeper keeps a structured, verified record of the main agent's current work between
+# iterations. Cadence defaults of JevRunBriefSettings: refreshes at most every_iterations apart and never closer
+# than min_gap, with the first brief once the run reaches JEV_RUN_BRIEF_FIRST_ITERATION so the opening plan is kept.
+JEV_RUN_BRIEF_EVERY_ITERATIONS: int = 20
+JEV_RUN_BRIEF_MIN_GAP: int = 3
+JEV_RUN_BRIEF_FIRST_ITERATION: int = 3
+# Writer loop defaults: one structured reply with room for schema retries; the window budget bounds its input.
+JEV_RUN_BRIEF_MAX_ITERATIONS: int = 3
+JEV_RUN_BRIEF_MAX_TOKENS: int = 120_000
+# Early-refresh triggers, read from the run facts since the last refresh attempt.
+JEV_RUN_BRIEF_ERROR_STREAK_TRIGGER: int = 3
+JEV_RUN_BRIEF_REPEAT_TRIGGER: int = 3
+JEV_RUN_BRIEF_TOKEN_GROWTH_TRIGGER: float = 0.25
+# Event window budget in characters: each event is clipped head and tail, older events shrink to headers once
+# the window is full, and the oldest are counted as omitted. The request is clipped the same way.
+JEV_RUN_BRIEF_EVENT_MAX_CHARS: int = 4_000
+JEV_RUN_BRIEF_EVENT_HEADER_CHARS: int = 240
+JEV_RUN_BRIEF_WINDOW_MAX_CHARS: int = 80_000
+JEV_RUN_BRIEF_REQUEST_MAX_CHARS: int = 8_000
+# Brief caps keep the rendered brief, together with run facts and a recent-event tail, inside Jev's state limit.
+JEV_RUN_BRIEF_TEXT_MAX_CHARS: int = 200
+JEV_RUN_BRIEF_QUOTE_MAX_CHARS: int = 300
+JEV_RUN_BRIEF_EVIDENCE_MAX: int = 2
+JEV_RUN_BRIEF_NEXT_STEPS_MAX: int = 5
+JEV_RUN_BRIEF_ITEMS_MAX: int = 30
+JEV_RUN_BRIEF_APPROACHES_MAX: int = 8
+JEV_RUN_BRIEF_FAILURES_MAX: int = 5
+JEV_RUN_BRIEF_RENDER_MAX_CHARS: int = 60_000
+# An update whose share of unverifiable quotes exceeds this is rejected, and the previous brief is kept.
+JEV_RUN_BRIEF_MAX_DROP_SHARE: float = 0.5
+# What the writer reads in place of a previous brief on the first refresh of a run.
+JEV_RUN_BRIEF_NONE: str = "none"
+# A run event id exactly as JevRunEventLog prints it.
+JEV_EVENT_ID_PREFIX: str = "E"
+JEV_EVENT_ID_PATTERN: str = r"^E[1-9][0-9]{0,6}$"
+# Run facts: a call signature counts as repeated from this many occurrences; list at most this many repeated
+# signatures, each with a bounded preview of its arguments.
+JEV_RUN_FACTS_REPEAT_MIN: int = 2
+JEV_RUN_FACTS_REPEATED_CALLS_MAX: int = 5
+JEV_RUN_FACTS_ARGUMENTS_PREVIEW_CHARS: int = 160
+
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
@@ -352,7 +393,6 @@ __all__ = [
     "JEV_INPUT_EXHAUSTION_THRESHOLD",
     "JEV_INPUT_SET_COVERAGE_THRESHOLD",
     "JEV_ASSUMPTIONS_RECONCILED_THRESHOLD",
-
     "JEV_OUTPUT_EXTENT_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
@@ -417,7 +457,6 @@ __all__ = [
     "JEV_DONE_INPUT_EXHAUSTION_FIELD",
     "JEV_DONE_INPUT_TARGETS_FIELD",
     "JEV_DONE_INPUT_TARGET_FIELD",
-
     "JEV_DONE_OUTPUT_EXTENTS_FIELD",
     "JEV_DONE_OUTPUT_EXTENT_FIELD",
     "JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD",
@@ -596,4 +635,31 @@ __all__ = [
     "JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD",
     "JEV_TOOL_SELECTOR_MAX_THRESHOLD",
     "JEV_TOOL_SELECTOR_MIN_THRESHOLD",
+    "JEV_RUN_BRIEF_EVERY_ITERATIONS",
+    "JEV_RUN_BRIEF_MIN_GAP",
+    "JEV_RUN_BRIEF_FIRST_ITERATION",
+    "JEV_RUN_BRIEF_MAX_ITERATIONS",
+    "JEV_RUN_BRIEF_MAX_TOKENS",
+    "JEV_RUN_BRIEF_ERROR_STREAK_TRIGGER",
+    "JEV_RUN_BRIEF_REPEAT_TRIGGER",
+    "JEV_RUN_BRIEF_TOKEN_GROWTH_TRIGGER",
+    "JEV_RUN_BRIEF_EVENT_MAX_CHARS",
+    "JEV_RUN_BRIEF_EVENT_HEADER_CHARS",
+    "JEV_RUN_BRIEF_WINDOW_MAX_CHARS",
+    "JEV_RUN_BRIEF_REQUEST_MAX_CHARS",
+    "JEV_RUN_BRIEF_TEXT_MAX_CHARS",
+    "JEV_RUN_BRIEF_QUOTE_MAX_CHARS",
+    "JEV_RUN_BRIEF_EVIDENCE_MAX",
+    "JEV_RUN_BRIEF_NEXT_STEPS_MAX",
+    "JEV_RUN_BRIEF_ITEMS_MAX",
+    "JEV_RUN_BRIEF_APPROACHES_MAX",
+    "JEV_RUN_BRIEF_FAILURES_MAX",
+    "JEV_RUN_BRIEF_RENDER_MAX_CHARS",
+    "JEV_RUN_BRIEF_MAX_DROP_SHARE",
+    "JEV_RUN_BRIEF_NONE",
+    "JEV_EVENT_ID_PREFIX",
+    "JEV_EVENT_ID_PATTERN",
+    "JEV_RUN_FACTS_REPEAT_MIN",
+    "JEV_RUN_FACTS_REPEATED_CALLS_MAX",
+    "JEV_RUN_FACTS_ARGUMENTS_PREVIEW_CHARS",
 ]

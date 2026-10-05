@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations.
+PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations. JevRunBriefSettings configures the mid-run brief: the separate writer's model and limits and the brief's refresh cadence.
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-run-brief.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -24,6 +24,10 @@ from vidbyte.lib.constants.jev import (
     JEV_HANDOFF_MAX_TOKENS,
     JEV_REVIEW_MAX_ITERATIONS,
     JEV_REVIEW_MAX_TOKENS,
+    JEV_RUN_BRIEF_EVERY_ITERATIONS,
+    JEV_RUN_BRIEF_MAX_ITERATIONS,
+    JEV_RUN_BRIEF_MAX_TOKENS,
+    JEV_RUN_BRIEF_MIN_GAP,
     JEV_RUN_STATE_MAX_ITERATIONS,
     JEV_RUN_STATE_MAX_TOKENS,
     JEV_SPECIALIST_MAX_COUNT,
@@ -178,6 +182,64 @@ class JevContinualSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class JevRunBriefSettings:
+    """Validated settings for the run brief: the writer's model, its loop limits, and how often the brief is refreshed.
+
+    The writer is a separate, tool-free agent. Leave `provider` and `model_name` unset to reuse the main agent's
+    model and key, set only `model_name` for a cheaper model from the same provider, or set both for another
+    provider, which then uses `api_key` or that provider's environment variable instead of the main agent's key.
+    """
+
+    provider: ModelProvider | str | None = None
+    model_name: str | None = None
+    api_key: str | None = field(default=None, repr=False)
+    temperature: float | None = None
+    every_iterations: int = JEV_RUN_BRIEF_EVERY_ITERATIONS
+    min_gap: int = JEV_RUN_BRIEF_MIN_GAP
+    max_iterations: int = JEV_RUN_BRIEF_MAX_ITERATIONS
+    max_tokens: int = JEV_RUN_BRIEF_MAX_TOKENS
+
+    def __post_init__(self) -> None:
+        self._validate_model()
+        self._validate_temperature()
+        for field_name in ("every_iterations", "min_gap", "max_iterations", "max_tokens"):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ConfigurationError(f"JevRunBriefSettings.{field_name} must be an integer of at least 1.", details={"received": repr(value)})
+        if self.min_gap > self.every_iterations:
+            # @intent the-cadence-has-room-for-early-refreshes
+            # min_gap is the floor between refreshes and every_iterations the ceiling; a floor above the ceiling
+            # would silently turn every early trigger off, so the contradiction is refused instead.
+            raise ConfigurationError("JevRunBriefSettings.min_gap cannot exceed every_iterations.", details={"min_gap": self.min_gap, "every_iterations": self.every_iterations})
+
+    def _validate_model(self) -> None:
+        # Normalizes the writer's provider and requires a model name with it.
+        # @intent a-writer-provider-names-its-own-model
+        # A model name belongs to one provider, so a writer moved to another provider cannot silently inherit the
+        # main agent's model name; and Jev decides rather than writes, so it can never be the writer's provider.
+        if self.model_name is not None and (not isinstance(self.model_name, str) or not self.model_name.strip()):
+            raise ConfigurationError("JevRunBriefSettings.model_name must be a non-blank string when set.")
+        if self.provider is None:
+            return
+        try:
+            provider = self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Unsupported model provider: {self.provider!r}") from exc
+        if provider is ModelProvider.TYPESAFE:
+            raise ConfigurationError("JevRunBriefSettings.provider must be a generative model provider, not TypeSafe.")
+        if self.model_name is None:
+            raise ConfigurationError("JevRunBriefSettings.provider requires model_name, because a model name belongs to one provider.")
+        object.__setattr__(self, "provider", provider)
+
+    def _validate_temperature(self) -> None:
+        value = self.temperature
+        if value is None:
+            return
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.0 <= value <= 2.0:
+            raise ConfigurationError("JevRunBriefSettings.temperature must be a finite number between 0 and 2.")
+
+
+@dataclass(frozen=True, slots=True)
 class JevRuntimeSettings:
     """Validated Jev decision policy: the TypeSafe model, the preflight flags, the continuation settings, and the tool-selector threshold."""
 
@@ -208,4 +270,4 @@ class JevRuntimeSettings:
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
 
-__all__ = ["JevAgentSettings", "JevContinualSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]

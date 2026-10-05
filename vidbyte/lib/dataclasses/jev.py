@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence.
+PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence. It also defines the mid-run run brief: the writer's output payloads, the verified JevRunBrief with its quote, item, and approach entries, the event window, run facts, and refresh records.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through. Continuation evidence uses the canonical ToolCallContext defined in `vidbyte/lib/dataclasses/tools.py`.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Required sequences hold only explicitly ordered request stages and keep stage ids and order stable; their event-backed evidence belongs on JevHandoffRecord. JevContinuationEvidence preserves the source and response strings and original ToolCallContext objects in typed immutable tuples; empty response strings and tuples are valid. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes requested members, workspace inventory, and unsupported mentions. Completion evidence is one handoff-only whole-task item. PHASE_PROGRESS is omitted when no substantive outcome stage exists; INPUT_SET_COVERAGE is omitted when no explicitly bounded input target exists. An ordered sequence is inactive when the request does not require distinct work in a specific order; ordering alone does not imply that a stage uses the preceding stage's output. Continuation evidence requires a nonblank source but preserves its original text; response strings may be empty, and the response tuple may be empty. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because concrete subclasses redeclare defaulted fields. Pydantic payload descriptions are the instructions generative agents receive; records built from those replies hold validated values, and conversion remains with the agent that requested the reply. Report/action candidates compare an explicit earlier plan with recorded execution, the final account, and request relevance; they do not turn an agent plan into a user requirement. Include a consequential assumption even when later work recovers or makes dependent work irrelevant; Jev judges whether the work was revised or became irrelevant.
-RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, and tests/test_jev_required_sequence.py.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md, docs/design/jev-run-brief.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_required_sequence.py, and tests/test_jev_run_brief.py.
 """
 
 from __future__ import annotations
@@ -33,6 +33,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES,
     JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES,
     JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN,
+    JEV_EVENT_ID_PATTERN,
+    JEV_EVENT_LOG_FIRST_ID,
     JEV_EXPERT_DEPTH_MAX_DETAILS,
     JEV_EXPERT_DEPTH_MIN_DETAILS,
     JEV_MAX_CHOICE_OPTIONS,
@@ -50,6 +52,15 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
     JEV_REVIEW_MAX_OBJECTIONS,
+    JEV_RUN_BRIEF_APPROACHES_MAX,
+    JEV_RUN_BRIEF_EVIDENCE_MAX,
+    JEV_RUN_BRIEF_FAILURES_MAX,
+    JEV_RUN_BRIEF_ITEMS_MAX,
+    JEV_RUN_BRIEF_NEXT_STEPS_MAX,
+    JEV_RUN_BRIEF_QUOTE_MAX_CHARS,
+    JEV_RUN_BRIEF_TEXT_MAX_CHARS,
+    JEV_RUN_FACTS_REPEAT_MIN,
+    JEV_RUN_FACTS_REPEATED_CALLS_MAX,
     JEV_SPECIALIST_NONE,
 )
 from vidbyte.lib.dataclasses.tools import ToolCallContext
@@ -66,6 +77,9 @@ from vidbyte.lib.enums.jev import (
     JevPreflightQuestionKey,
     JevProblemCheckItemType,
     JevQuestionType,
+    JevRunBriefItemStatus,
+    JevRunBriefOutcome,
+    JevRunBriefUpdateStatus,
     JevScenarioRole,
     JevScopeBreadth,
     JevScopeUnitSource,
@@ -3887,7 +3901,343 @@ class JevContinuationEvidence:
                 raise TypeError(f"JevContinuationEvidence.tool_calls[{index}] must be a ToolCallContext")
 
 
+
+# Run brief: the structured, verified record of the main agent's current work that JevRunBriefKeeper keeps
+# between iterations, the writer's output schema, and the run facts code computes beside it.
+_EVENT_ID = re.compile(JEV_EVENT_ID_PATTERN)
+
+
+class JevCount:
+    """Shared validation for the whole-number counts and positions the run-brief records carry."""
+
+    @staticmethod
+    def require(value: object, *, field_name: str, minimum: int = 0) -> int:
+        # Returns an int of at least `minimum`, rejecting bool (an int subclass) and every other type.
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise JevValidation.error(field_name, f"an integer of at least {minimum}", value)
+        return value
+
+
+def _require_bounded_text(value: object, *, field_name: str, maximum: int) -> None:
+    """Require non-blank text no longer than the brief cap that keeps the rendered brief inside Jev's state limit."""
+    JevText.require(value, field_name=field_name)
+    if isinstance(value, str) and len(value) > maximum:
+        raise JevValidation.error(field_name, f"at most {maximum} characters", value)
+
+
+def _require_brief_entries(values: object, expected: type[object], *, field_name: str, maximum: int, minimum: int = 0) -> None:
+    """Require a tuple of one record type whose length stays within the brief's bounds."""
+    if not isinstance(values, tuple) or not all(isinstance(value, expected) for value in values):
+        raise JevValidation.error(field_name, f"a tuple of {expected.__name__} values", values)
+    if not minimum <= len(values) <= maximum:
+        raise JevValidation.error(field_name, f"between {minimum} and {maximum} entries", f"{len(values)} entries")
+
+
+class JevRunBriefQuotePayload(BaseModel):
+    """Text the run-brief writer copied from one numbered run event, with that event's id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: str = Field(pattern=JEV_EVENT_ID_PATTERN, description="The event is the id of the one run event the quote is copied from, written exactly as the run shows it, such as E14. Every event in the run carries such an id, and the id is how a later check finds the text you quote. Cite an event shown in the new events or an event the previous brief already cites, and never invent an id. Use one id per quote, so a quote never spans two events.")
+    quote: str = Field(min_length=1, description=f"The quote is text copied character for character from the cited event, such as a sentence the agent wrote or an error line from a tool output. It is never reworded, summarized, translated, or corrected, because a later check looks for it in the event exactly as written and drops it when it is not there. Keep it to the shortest passage that shows the point, and never longer than {JEV_RUN_BRIEF_QUOTE_MAX_CHARS} characters. Do not copy across a gap where the event was shortened for length.")
+
+
+class JevRunBriefItemPayload(BaseModel):
+    """One member of a collection the main agent works through, as the run-brief writer records it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short, stable identifier for this item, written in lowercase letters, digits, and underscores and starting with a letter. When the previous brief already lists the item, copy its id unchanged, because later steps track the item across briefs by this id. A new item gets a new id that names it, such as auth_service_py, rather than a number. Every item id is unique within the brief.")
+    name: str = Field(min_length=1, description=f"The name is the item exactly as the run names it: a file path, a test name, a record id, a URL, or a title. Copy it from the run rather than describing it, so that the item can be found in the agent's own work. Keep it under {JEV_RUN_BRIEF_TEXT_MAX_CHARS} characters. Two different items never share a name within the same group.")
+    group: str = Field(min_length=1, description=f"The group is the collection the item belongs to, in the run's own words, such as the files under src/api or the failing tests. Items that the agent works through as one collection share the same group text exactly. A group lets a reader see how many members a collection has and how many are done. Keep it under {JEV_RUN_BRIEF_TEXT_MAX_CHARS} characters.")
+    status: JevRunBriefItemStatus = Field(description="The status is where the item stands as the cited events show it. Pending means the run names the item but has not started work on it, and in_progress means work on it has started but not finished. Done means an event shows its work finished, and failed means an event shows its work failed and was not retried successfully. Change an item's status only when a new event shows the change.")
+    evidence: list[JevRunBriefQuotePayload] = Field(description=f"The evidence is the quotes that show the item and its status, most recent first, at most {JEV_RUN_BRIEF_EVIDENCE_MAX}. At least one quote must name the item, such as the tool output that listed it or the response that planned it. When the status changes, the newest quote shows the event that changed it. An item with no quote that a later check can find is dropped.")
+
+
+class JevRunBriefApproachPayload(BaseModel):
+    """One distinct way the main agent tried to solve a problem, and how it turned out, as the writer records it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short, stable identifier for this approach, written in lowercase letters, digits, and underscores and starting with a letter. When the previous brief already lists the approach, copy its id unchanged. A new approach gets an id that names what it did, such as retry_with_cache_cleared. Every approach id is unique within the brief.")
+    target: str = Field(min_length=1, description=f"The target is the problem this approach tried to solve, in the run's own words, such as the failing login test or the import error in setup.py. Approaches aimed at the same problem share the same target text exactly, so a reader can see every way one problem was attacked. Name the problem, not the approach. Keep it under {JEV_RUN_BRIEF_TEXT_MAX_CHARS} characters.")
+    approach: str = Field(min_length=1, description=f"The approach is what the agent did, as a short, factual description of its actions, such as reran the tests after deleting the cache directory. Two attempts that make the same change to the same target are one approach, while a different change is a different approach. Describe actions only, never whether they were wise. Keep it under {JEV_RUN_BRIEF_TEXT_MAX_CHARS} characters.")
+    outcome: JevRunBriefOutcome = Field(description="The outcome is how the approach turned out as the cited events show it. Worked means an event shows the target problem resolved by this approach, and failed means an event shows the approach did not resolve it. Unresolved means no event yet shows either result. Never infer an outcome the events do not show.")
+    evidence: list[JevRunBriefQuotePayload] = Field(description=f"The evidence is the quotes that show the approach and its outcome, most recent first, at most {JEV_RUN_BRIEF_EVIDENCE_MAX}. One quote shows what the agent did, and when the outcome is known, another shows the result, such as a passing test or the same error again. Quotes come from tool calls and outputs or from the agent's own responses. An approach with no quote that a later check can find is dropped.")
+
+
+class JevRunBriefPayload(BaseModel):
+    """The run-brief writer's structured reply: the complete updated record of the main agent's current work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(min_length=1, description=f"The goal is what the main agent is working toward now, in one sentence written from the request and the agent's own words. It describes the current aim, which may be the part of the request the agent is on, not a restatement of every requirement. Keep the previous brief's goal unless new events show the agent's aim has changed. Keep it under {JEV_RUN_BRIEF_TEXT_MAX_CHARS} characters.")
+    goal_evidence: list[JevRunBriefQuotePayload] = Field(description=f"The goal evidence is the quotes that show the goal, at most {JEV_RUN_BRIEF_EVIDENCE_MAX}, from the request in E1 or from the agent's own responses. Prefer the agent's latest statement of what it is doing over older ones. Each quote is copied exactly from the event it cites. Leave the list empty only when no event states the aim.")
+    current_step: JevRunBriefQuotePayload | None = Field(description="The current step is the agent's own words for what it is doing in the newest events, quoted from its latest response that says so. It shows the work in progress right now, such as a sentence announcing the file it is editing or the test it is running. When the newest events contain no such statement, use null rather than a guess. Never describe the step in your own words.")
+    next_steps: list[JevRunBriefQuotePayload] = Field(description=f"The next steps are plans the agent stated and has not yet carried out, each quoted from the response that states it, at most {JEV_RUN_BRIEF_NEXT_STEPS_MAX}. Keep a step from the previous brief until an event shows it done or the agent says it dropped it, then remove it. List the soonest step first. Include only plans the agent itself stated, never steps you think it should take.")
+    items: list[JevRunBriefItemPayload] = Field(description=f"The items are the members of collections the run names and the agent works through, such as files to audit, tests to fix, or records to process, one entry per member, at most {JEV_RUN_BRIEF_ITEMS_MAX}. Record an item when the run lists or names it as part of the work, and keep each listed member as its own entry rather than a summary of the group. List pending and in-progress items before done and failed ones, so the entries that matter most survive the limit. Leave the list empty when the work has no such collection.")
+    approaches: list[JevRunBriefApproachPayload] = Field(description=f"The approaches are the distinct ways the agent tried to solve each problem it met, with their outcomes, at most {JEV_RUN_BRIEF_APPROACHES_MAX}. Record an approach when the agent acts to fix, unblock, or work around something, and update its outcome when an event shows the result. List unresolved and failed approaches before ones that worked. Leave the list empty when the agent has met no problem yet.")
+    open_failures: list[JevRunBriefQuotePayload] = Field(description=f"The open failures are error text from tool outputs that no later event resolves, each quoted from the output that reported it, at most {JEV_RUN_BRIEF_FAILURES_MAX}. An error is resolved when a later event shows the same operation succeed or the agent's work moves past it. Remove a failure from the previous brief once an event resolves it. Quote the error line itself, not the agent's comment on it.")
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefQuote:
+    """Text copied verbatim from one numbered run event, with the id of that event."""
+
+    event: str
+    quote: str
+
+    def __post_init__(self) -> None:
+        # Requires an event id as JevRunEventLog prints it and a non-blank quote within the brief's cap.
+        if not isinstance(self.event, str) or _EVENT_ID.fullmatch(self.event) is None:
+            raise JevValidation.error("run brief quote event", "a run event id such as E14", self.event)
+        _require_bounded_text(self.quote, field_name=f"quote from {self.event}", maximum=JEV_RUN_BRIEF_QUOTE_MAX_CHARS)
+
+    def payload(self) -> JevRunBriefQuotePayload:
+        """Return this quote in the writer's output shape."""
+        return JevRunBriefQuotePayload(event=self.event, quote=self.quote)
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefItem:
+    """One member of a collection the main agent works through: a stable id, its name and group, its status, and the quotes that show it."""
+
+    id: str
+    name: str
+    group: str
+    status: JevRunBriefItemStatus
+    evidence: tuple[JevRunBriefQuote, ...]
+
+    def __post_init__(self) -> None:
+        # Requires a stable id, bounded name and group text, a known status, and at least one verified quote.
+        JevDeliverableId.require(self.id, field_name="run brief item id")
+        _require_bounded_text(self.name, field_name=f"name of run brief item {self.id!r}", maximum=JEV_RUN_BRIEF_TEXT_MAX_CHARS)
+        _require_bounded_text(self.group, field_name=f"group of run brief item {self.id!r}", maximum=JEV_RUN_BRIEF_TEXT_MAX_CHARS)
+        if not isinstance(self.status, JevRunBriefItemStatus):
+            raise JevValidation.error(f"status of run brief item {self.id!r}", "a JevRunBriefItemStatus member", self.status)
+        _require_brief_entries(self.evidence, JevRunBriefQuote, field_name=f"evidence of run brief item {self.id!r}", minimum=1, maximum=JEV_RUN_BRIEF_EVIDENCE_MAX)
+
+    def payload(self) -> JevRunBriefItemPayload:
+        """Return this item in the writer's output shape."""
+        return JevRunBriefItemPayload(id=self.id, name=self.name, group=self.group, status=self.status, evidence=[quote.payload() for quote in self.evidence])
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefApproach:
+    """One distinct way the main agent tried to solve a problem: a stable id, its target and actions, its outcome, and the quotes that show it."""
+
+    id: str
+    target: str
+    approach: str
+    outcome: JevRunBriefOutcome
+    evidence: tuple[JevRunBriefQuote, ...]
+
+    def __post_init__(self) -> None:
+        # Requires a stable id, bounded target and approach text, a known outcome, and at least one verified quote.
+        JevDeliverableId.require(self.id, field_name="run brief approach id")
+        _require_bounded_text(self.target, field_name=f"target of run brief approach {self.id!r}", maximum=JEV_RUN_BRIEF_TEXT_MAX_CHARS)
+        _require_bounded_text(self.approach, field_name=f"approach of run brief approach {self.id!r}", maximum=JEV_RUN_BRIEF_TEXT_MAX_CHARS)
+        if not isinstance(self.outcome, JevRunBriefOutcome):
+            raise JevValidation.error(f"outcome of run brief approach {self.id!r}", "a JevRunBriefOutcome member", self.outcome)
+        _require_brief_entries(self.evidence, JevRunBriefQuote, field_name=f"evidence of run brief approach {self.id!r}", minimum=1, maximum=JEV_RUN_BRIEF_EVIDENCE_MAX)
+
+    def payload(self) -> JevRunBriefApproachPayload:
+        """Return this approach in the writer's output shape."""
+        return JevRunBriefApproachPayload(id=self.id, target=self.target, approach=self.approach, outcome=self.outcome, evidence=[quote.payload() for quote in self.evidence])
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBrief:
+    """The verified record of the main agent's current work, as of one iteration and one run event.
+
+    Every quote in it was found in the event it cites. `iteration` is the main-loop iteration the brief was
+    written at and `through_event` is the newest run event the writer read, so the next refresh reads only
+    later events. Its caps bound `render()`, which is what Jev and the next writer call read.
+    """
+
+    goal: str
+    iteration: int
+    through_event: int
+    goal_evidence: tuple[JevRunBriefQuote, ...] = ()
+    current_step: JevRunBriefQuote | None = None
+    next_steps: tuple[JevRunBriefQuote, ...] = ()
+    items: tuple[JevRunBriefItem, ...] = ()
+    approaches: tuple[JevRunBriefApproach, ...] = ()
+    open_failures: tuple[JevRunBriefQuote, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires bounded goal text, valid positions, every section within its cap, and unique item and approach ids.
+        _require_bounded_text(self.goal, field_name="run brief goal", maximum=JEV_RUN_BRIEF_TEXT_MAX_CHARS)
+        JevCount.require(self.iteration, field_name="run brief iteration")
+        JevCount.require(self.through_event, field_name="run brief through_event", minimum=JEV_EVENT_LOG_FIRST_ID)
+        if self.current_step is not None and not isinstance(self.current_step, JevRunBriefQuote):
+            raise JevValidation.error("run brief current_step", "a JevRunBriefQuote or None", self.current_step)
+        sections: tuple[tuple[str, object, type[object], int], ...] = (
+            ("goal_evidence", self.goal_evidence, JevRunBriefQuote, JEV_RUN_BRIEF_EVIDENCE_MAX),
+            ("next_steps", self.next_steps, JevRunBriefQuote, JEV_RUN_BRIEF_NEXT_STEPS_MAX),
+            ("items", self.items, JevRunBriefItem, JEV_RUN_BRIEF_ITEMS_MAX),
+            ("approaches", self.approaches, JevRunBriefApproach, JEV_RUN_BRIEF_APPROACHES_MAX),
+            ("open_failures", self.open_failures, JevRunBriefQuote, JEV_RUN_BRIEF_FAILURES_MAX),
+        )
+        for field_name, values, expected, maximum in sections:
+            _require_brief_entries(values, expected, field_name=f"run brief {field_name}", maximum=maximum)
+        JevDeliverableId.require_unique(tuple(item.id for item in self.items), field_name="run brief items")
+        JevDeliverableId.require_unique(tuple(approach.id for approach in self.approaches), field_name="run brief approaches")
+
+    def payload(self) -> JevRunBriefPayload:
+        """Return the brief in the writer's output shape, which is also the shape the next writer call reads."""
+        return JevRunBriefPayload(
+            goal=self.goal,
+            goal_evidence=[quote.payload() for quote in self.goal_evidence],
+            current_step=None if self.current_step is None else self.current_step.payload(),
+            next_steps=[quote.payload() for quote in self.next_steps],
+            items=[item.payload() for item in self.items],
+            approaches=[approach.payload() for approach in self.approaches],
+            open_failures=[quote.payload() for quote in self.open_failures],
+        )
+
+    def render(self) -> str:
+        """Return the brief as compact JSON in the writer's output shape, bounded by the brief's caps."""
+        return self.payload().model_dump_json()
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefWindow:
+    """The numbered run events one refresh shows the writer: their id range, the rendered text, and how many were left out for space."""
+
+    first_event: int
+    last_event: int
+    text: str
+    omitted: int = 0
+
+    def __post_init__(self) -> None:
+        # Requires an ordered, non-empty event range, rendered text, and a non-negative omitted count.
+        first = JevCount.require(self.first_event, field_name="run brief window first_event", minimum=JEV_EVENT_LOG_FIRST_ID)
+        last = JevCount.require(self.last_event, field_name="run brief window last_event", minimum=first)
+        JevText.require(self.text, field_name=f"run brief window E{first}..E{last}")
+        JevCount.require(self.omitted, field_name="run brief window omitted")
+
+
+@dataclass(frozen=True, slots=True)
+class JevRepeatedCall:
+    """One tool call signature, a tool name and its exact arguments, that the run made more than once."""
+
+    tool_name: str
+    arguments: str
+    count: int
+
+    def __post_init__(self) -> None:
+        # Requires a tool name, the argument preview as text, and a count that is really a repeat.
+        JevText.require(self.tool_name, field_name="repeated call tool_name")
+        if not isinstance(self.arguments, str):
+            raise JevValidation.error(f"arguments of repeated call {self.tool_name!r}", "a string", self.arguments)
+        JevCount.require(self.count, field_name=f"count of repeated call {self.tool_name!r}", minimum=JEV_RUN_FACTS_REPEAT_MIN)
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunFacts:
+    """Exact facts code reads from the main agent's run between iterations, with no model involved.
+
+    The `_since_refresh` fields count from the last refresh attempt of the run brief, so a trigger fires on new
+    activity rather than on history. `repeats_since_refresh` is the highest number of times one call signature
+    occurred since then. Token fields are None when the provider reports no usage.
+    """
+
+    iteration: int
+    tool_calls: int
+    error_streak: int
+    iterations_since_refresh: int
+    errors_since_refresh: int
+    repeats_since_refresh: int
+    repeated_calls: tuple[JevRepeatedCall, ...] = ()
+    tokens_used: int | None = None
+    tokens_at_refresh: int | None = None
+
+    def __post_init__(self) -> None:
+        # Requires non-negative counts, at most the listed repeated calls, and non-negative token totals when known.
+        for field_name in ("iteration", "tool_calls", "error_streak", "iterations_since_refresh", "errors_since_refresh", "repeats_since_refresh"):
+            JevCount.require(getattr(self, field_name), field_name=f"run facts {field_name}")
+        _require_brief_entries(self.repeated_calls, JevRepeatedCall, field_name="run facts repeated_calls", maximum=JEV_RUN_FACTS_REPEATED_CALLS_MAX)
+        for field_name in ("tokens_used", "tokens_at_refresh"):
+            if getattr(self, field_name) is not None:
+                JevCount.require(getattr(self, field_name), field_name=f"run facts {field_name}")
+
+    def token_growth(self) -> float | None:
+        """Return the fraction tokens grew since the last refresh attempt, or None when either total is unknown or zero."""
+        if self.tokens_used is None or not self.tokens_at_refresh:
+            return None
+        return (self.tokens_used - self.tokens_at_refresh) / self.tokens_at_refresh
+
+    def render(self) -> str:
+        """Return the facts as short labeled lines for a reader that has no other view of the run's counts."""
+        tokens = "unknown" if self.tokens_used is None else str(self.tokens_used)
+        lines = [
+            f"iteration: {self.iteration}",
+            f"tool calls: {self.tool_calls}",
+            f"consecutive failed tool calls, counted back from the latest: {self.error_streak}",
+            f"iterations since the last brief refresh: {self.iterations_since_refresh}",
+            f"failed tool calls since the last brief refresh: {self.errors_since_refresh}",
+            f"most repeats of one identical tool call since the last brief refresh: {self.repeats_since_refresh}",
+            f"tokens used: {tokens}",
+        ]
+        lines.extend(f"repeated call: {call.tool_name} {call.arguments} x{call.count}" for call in self.repeated_calls)
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefVerification:
+    """What verification kept of one writer reply: the brief built from its verified quotes, or None when the reply was rejected."""
+
+    brief: JevRunBrief | None
+    kept: int
+    dropped: int
+
+    def __post_init__(self) -> None:
+        # Requires a brief or None and non-negative quote counts.
+        if self.brief is not None and not isinstance(self.brief, JevRunBrief):
+            raise JevValidation.error("run brief verification brief", "a JevRunBrief or None", self.brief)
+        JevCount.require(self.kept, field_name="run brief verification kept")
+        JevCount.require(self.dropped, field_name="run brief verification dropped")
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefUpdate:
+    """What one attempt to refresh the run brief did, which events it read, how many quotes survived verification, and the writer's usage."""
+
+    status: JevRunBriefUpdateStatus
+    iteration: int
+    first_event: int
+    last_event: int
+    kept: int = 0
+    dropped: int = 0
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a known status, the iteration of the attempt, an ordered event range, and non-negative quote counts.
+        if not isinstance(self.status, JevRunBriefUpdateStatus):
+            raise JevValidation.error("run brief update status", "a JevRunBriefUpdateStatus member", self.status)
+        JevCount.require(self.iteration, field_name="run brief update iteration")
+        first = JevCount.require(self.first_event, field_name="run brief update first_event", minimum=JEV_EVENT_LOG_FIRST_ID)
+        JevCount.require(self.last_event, field_name="run brief update last_event", minimum=first)
+        JevCount.require(self.kept, field_name="run brief update kept")
+        JevCount.require(self.dropped, field_name="run brief update dropped")
+
+
 __all__ = [
+    "JevCount",
+    "JevRepeatedCall",
+    "JevRunBrief",
+    "JevRunBriefApproach",
+    "JevRunBriefApproachPayload",
+    "JevRunBriefItem",
+    "JevRunBriefItemPayload",
+    "JevRunBriefPayload",
+    "JevRunBriefQuote",
+    "JevRunBriefQuotePayload",
+    "JevRunBriefUpdate",
+    "JevRunBriefVerification",
+    "JevRunBriefWindow",
+    "JevRunFacts",
     "JevAgentResponse",
     "JevAnswer",
     "JevAssumptionEvidence",
