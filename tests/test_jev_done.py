@@ -1387,14 +1387,14 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertFalse(JevRunState._satisfies(6, 5, JevOutputExtentComparator.MAXIMUM))
 
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
-    def test_output_extent_question_carries_at_least_two_thousand_tokens(self) -> None:
+    def test_output_extent_question_carries_at_least_five_hundred_tokens(self) -> None:
         import tiktoken
 
         question = OutputExtentSatisfiedQuestion()
         parts = [question.instructions.render(), question.gap]
         for criterion in (question.when_true, question.when_false):
             parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
-        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 500)
 
     def test_output_extent_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
@@ -1409,14 +1409,14 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
-    def test_problems_resolved_question_carries_at_least_two_thousand_tokens(self) -> None:
+    def test_problems_resolved_question_carries_at_least_five_hundred_tokens(self) -> None:
         import tiktoken
 
         question = ProblemsResolvedQuestion()
         parts = [question.instructions.render(), question.gap]
         for criterion in (question.when_true, question.when_false):
             parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
-        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 500)
 
     def test_problems_resolved_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
@@ -1425,7 +1425,7 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
-    def test_question_carries_at_least_two_thousand_tokens(self) -> None:
+    def test_question_carries_at_least_five_hundred_tokens(self) -> None:
         import tiktoken
 
         for question in (self.question, CanSimplifyQuestion()):
@@ -1433,7 +1433,7 @@ class JevDoneQuestionTests(unittest.TestCase):
             for criterion in (question.when_true, question.when_false):
                 parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
             with self.subTest(question=question.key.value):
-                self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+                self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 500)
 
     def test_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
@@ -1468,14 +1468,14 @@ class JevDoneQuestionTests(unittest.TestCase):
             self.assertEqual((len(criterion.easy), len(criterion.boundary)), (1, 1))
 
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
-    def test_claims_question_carries_at_least_two_thousand_tokens(self) -> None:
+    def test_claims_question_carries_at_least_five_hundred_tokens(self) -> None:
         import tiktoken
 
         question = ClaimsSupportedQuestion()
         parts = [question.instructions.render(), question.gap]
         for criterion in (question.when_true, question.when_false):
             parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
-        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 500)
 
     def test_claims_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()

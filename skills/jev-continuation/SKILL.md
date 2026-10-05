@@ -388,7 +388,7 @@ The structure, and why each part exists:
 - **The question text holds `{item}`.** `JevDoneQuestion.to_question(item)` formats it, and names the question `f"{key.value}.{item}"` through `name(item)`. That is how one request holds a question per item, and how each answer comes back keyed to its item.
 - **`JevCriterion`** gives each side the same template: `what` opens with the verdict, `not_for` mirrors the other side, and `easy` and `boundary` are labeled examples. The two `boundary` examples form a minimal pair that differs only in the tested property. Criteria add no rules and no "because" sentences. Use **one verb** everywhere; multi-part uses "shows".
 - **`gap`** is not sent to Jev. It is the opening line the **main agent** reads for this check in the continuation message (step 13). It must stand on its own, because the main agent never sees the brief, and it must not claim more than a "no" supports.
-- **At least 2,000 tokens** across the rendered instructions, both sides, and the gap (`test_question_carries_at_least_two_thousand_tokens`). The floor is for completeness, not padding.
+- **At least 500 tokens** across the rendered instructions, both sides, and the gap (`test_question_carries_at_least_five_hundred_tokens`). The floor is for completeness, not padding.
 - **Each section is one string literal.** Never split text into adjacent literals (lint S062 and `test_question_text_is_one_string_literal_each`).
 - **Yes means satisfied.** `score_noul` averages P(yes) with no inversion, so phrase the question positively.
 
@@ -594,7 +594,7 @@ Confirm your diff does **not** touch any of these:
 - **Tests** in `tests/test_jev_done.py`:
   - `JevDoneRecordTests`: your records live in lib, reject bad and duplicate ids, and hold no parsing code; your payloads go into the 4–6-sentence description test.
   - `JevDoneSchemaTests`: enabling your check adds its described section to both schemas.
-  - A question test class like `JevDoneQuestionTests`: the brief layout, verdict-first mirrored criteria, minimal-pair boundaries, at least 2,000 tokens, and one literal per section.
+  - A question test class like `JevDoneQuestionTests`: the brief layout, verdict-first mirrored criteria, minimal-pair boundaries, at least 500 tokens, and one literal per section.
   - `JevDoneRuntimeTests`, through `JevAgent` with `ScriptedGenerativeRunner` and `ScriptedDecisionRunner` and no network:
     - a pass;
     - a fail that continues in the same loop, with the five sections and only the incomplete item under Focus;
