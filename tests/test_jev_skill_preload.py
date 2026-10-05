@@ -4,14 +4,13 @@ PURPOSE: Verifies validated skill settings, fixed relevance questions, bounded r
 ROLE IN CODEBASE: Covers docs/design/jev-skills-preload.md and tests/features/jev_skills_preload/FEATURE.md without contacting TypeSafe or a generative provider.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace only external model boundaries; production settings, preload batching, response writing, and JevRuntime ordering remain active.
 COMMON MODIFICATION PATTERNS: Add contract tests for new status, batching, serialization, and cleanup behavior; keep candidate text out of response assertions except to prove it is absent.
-KNOWN EDGE CASES: tiktoken is optional in the dev environment, so only the token-floor check is skipped when unavailable. No test sends a live request.
+KNOWN EDGE CASES: Candidate-specific content stays in state and is not interpolated into question wording. No test sends a live request.
 RELATED DOCS: docs/design/jev-skills-preload.md, tests/features/jev_skills_preload/FEATURE.md, and skills/jev-agent/SKILL.md.
 TESTS: `python scripts/test-jev-skills-preload.py`.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import unittest
 from collections.abc import Mapping, Sequence
@@ -43,7 +42,6 @@ from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.enums import JevDoneCheck, JevQuestionType, JevSkillStatus, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev.decision import DecisionModelHelper
-from vidbyte.lib.jev.preflight import skills as skill_question_module
 from vidbyte.lib.jev.preflight.skills import JevSkillRelevanceQuestion
 from vidbyte.lib.runners.types import DecisionModelResponse, TextModelResponse
 
@@ -188,27 +186,19 @@ class SkillDocumentSettingsTests(unittest.TestCase):
 
 
 class SkillQuestionTests(unittest.TestCase):
-    """Checks the fixed indexed rubric, single-literal house style, and its minimum reasoning length."""
+    """Checks the concise indexed runtime-use question."""
 
-    def test_dynamic_question_uses_only_its_fixed_index_and_one_string_per_rule_section(self) -> None:
+    def test_dynamic_question_uses_only_its_fixed_index_in_four_sentences(self) -> None:
         # [Hidden Failure] caller metadata can remain state evidence but cannot shape trusted question prose.
         question = JevSkillRelevanceQuestion(7).to_question()
         self.assertEqual(question.name, "skills.skill_7")
         self.assertIs(question.question_type, JevQuestionType.NOUL)
-        self.assertEqual(len(skill_question_module._DEFINITIONS), 1)
-        self.assertEqual(len(skill_question_module._RULES), 1)
+        self.assertEqual(question.instructions.count(". ") + 1, 4)
+        self.assertIn("user's request", question.instructions)
+        self.assertIn("Should the agent runtime use this skill file", question.instructions)
+        self.assertEqual(question.option_names(), ("true", "false"))
         self.assertNotIn("UNIQUE_CALLER_NAME", question.instructions)
         self.assertNotIn("UNIQUE_CALLER_BODY", question.instructions)
-
-    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
-    def test_question_carries_at_least_two_thousand_meaningful_tokens(self) -> None:
-        # [Silent Failure] the relevance rubric has enough instruction and boundary examples to support the classification.
-        import tiktoken
-
-        question = JevSkillRelevanceQuestion(1).to_question()
-        parts = [question.instructions]
-        parts.extend(json.dumps(JevJson.thaw(option.description), ensure_ascii=False) for option in question.options)
-        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
 
 
 class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
@@ -254,7 +244,10 @@ class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_many_candidates_use_bounded_batches_with_stable_global_indices(self) -> None:
         # [Edge Case] every full candidate appears exactly once, even after question packing splits the settings order.
-        documents = _skills(8)
+        documents = tuple(
+            SkillDocument(name=f"skill_{index}", description="Relevant guidance", text=f"FULL BODY {index} " + "x" * 16_000)
+            for index in range(1, 5)
+        )
         preload = _preloader(documents)
         batches, oversized = preload._build_batches("Do the requested work")
         self.assertFalse(oversized)
@@ -284,12 +277,16 @@ class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_batch_and_oversized_skill_only_affect_their_own_candidates(self) -> None:
         # [Hidden Failure] neither an outage nor one too-large document blocks passing siblings in other batches.
-        documents = (_skills(3)[0], SkillDocument(name="too_large", description="oversized", text="x" * 35_000), *_skills(4)[1:])
+        documents = (
+            SkillDocument(name="skill_1", description="Relevant guidance", text="FULL BODY 1 " + "y" * 16_000),
+            SkillDocument(name="too_large", description="oversized", text="x" * 35_000),
+            *(SkillDocument(name=f"skill_{index}", description="Relevant guidance", text=f"FULL BODY {index} " + "y" * 16_000) for index in range(3, 8)),
+        )
         preload = _preloader(tuple(documents))
         batches, oversized = preload._build_batches("Classify each configured item")
         self.assertIn(2, oversized)
         self.assertGreaterEqual(len(batches), 2)
-        scripted = ScriptedDecisionRunner(probabilities={index: 0.9 for index in range(1, 7)}, fail_calls=frozenset({1}))
+        scripted = ScriptedDecisionRunner(probabilities={index: 0.9 for index in range(1, 8)}, fail_calls=frozenset({1}))
         with patch(_HELPER_PATH, new=_helper_class(scripted)):
             context = await preload.run("Classify each configured item", BaseAgentContext(system_prompt="Base."))
 
