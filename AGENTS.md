@@ -43,7 +43,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | `JevAgent` facade | `vidbyte/agents/jev/agent.py` |
 | `JevAgentSettings`, the whole public configuration surface | `vidbyte/agents/jev/settings.py` |
 | `JevRuntime` (runs the gate, then the inherited loop) | `vidbyte/agents/jev/runtime.py`; resolved from `AgentRuntimeType.JEV` in `vidbyte/lib/registries/runtimes.py` |
-| `JevPreflightGate` and `JevClarificationAgent` | `vidbyte/agents/jev/gate/` |
+| `JevPreflightGate`, `JevClarificationAgent`, and `JevRefinementAgent` | `vidbyte/agents/jev/gate/` |
 | `JevPreflight` contract and the `JevPreflightTools` tool selector | `vidbyte/agents/jev/preflight.py` |
 | `JevResponse`, the only writer of `JevAgentResponse` | `vidbyte/agents/jev/response.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
@@ -58,6 +58,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | TypeSafe System One provider adapter (wire shape, HTTP) | `vidbyte/providers/typesafe.py` |
 | TypeSafe usage pricing (`ModelProvider.TYPESAFE`) | `vidbyte/agents/pricing/typesafe.py` |
 | Clarification agent prompt family | `vidbyte/prompts/prompts/jev_clarification/`; key in `vidbyte/lib/enums/prompts.py` |
+| Refinement agent prompt family | `vidbyte/prompts/prompts/jev_refinement/`; key in `vidbyte/lib/enums/prompts.py` |
 | House style for writing Jev questions (load it before writing or reviewing one) | `skills/asking-jev-questions/SKILL.md` |
 | Guide to extending `JevAgent` | `skills/jev-agent/SKILL.md` |
 | Step-by-step guide to adding a continuation done check (load it before adding a `JevDoneCheck`) | `skills/jev-continuation/SKILL.md` |

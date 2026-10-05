@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/gate/gate.py
 
-PURPOSE: Implements JevPreflightGate, the gate in front of JevAgent's generative agent: it combines every enabled fixed-question preset's questions and the specialist question into one Jev request, then one match statement acts on the answers and decides whether the generative agent runs, and which specialist runs instead of it.
-ROLE IN CODEBASE: JevAgent builds one JevPreflightGate from its settings at construction and passes it to JevRuntime, which calls pass_() before the inherited linear loop, stops the run when it returns False, and hands the run to `specialist` when the gate chose one.
-ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets), and DecisionModelHelper handles request execution and answer scoring; this class owns failing open, the action each preset triggers (JevClarificationAgent), and choosing the JevSpecialist, and it reports every outcome through JevResponse. The tool selector is not a gate case: it keeps its own path in vidbyte/agents/jev/preflight.py.
+PURPOSE: Implements JevPreflightGate, the gate in front of JevAgent's generative agent: it combines every enabled fixed-question preset's questions and the specialist question into one Jev request, then one match statement acts on the answers and decides whether the generative agent runs, which specialist runs instead of it, and which prompt it reads.
+ROLE IN CODEBASE: JevAgent builds one JevPreflightGate from its settings at construction and passes it to JevRuntime, which calls pass_() before the inherited linear loop, stops the run when it returns False, hands the run to `specialist` when the gate chose one, and sends `prompt` (the user's message, or the refined prompt) to whichever agent runs.
+ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets), and DecisionModelHelper handles request execution and answer scoring; this class owns failing open, the action each preset triggers (JevClarificationAgent for an unclear request, JevRefinementAgent for a clear one when REFINE is enabled), and choosing the JevSpecialist, and it reports every outcome through JevResponse. The tool selector is not a gate case: it keeps its own path in vidbyte/agents/jev/preflight.py.
 COMMON MODIFICATION PATTERNS: Add a fixed-question preset by adding its definition to JevPresets and one commented case to the match in pass_(); never add preset checks to JevRuntime.
-KNOWN EDGE CASES: No enabled fixed-question preset and no specialist makes no Jev call; a missing credential, a provider failure, or a local request-validation error marks every preset unavailable; a missing answer marks only its own preset unavailable. Every unavailable preset fails open, so the run continues as the owner configured it, and an unavailable or `none` specialist answer leaves the main JevAgent on the run.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+KNOWN EDGE CASES: No enabled fixed-question preset and no specialist makes no Jev call; a missing credential, a provider failure, or a local request-validation error marks every preset unavailable; a missing answer marks only its own preset unavailable. Every unavailable preset fails open, so the run continues as the owner configured it, and an unavailable or `none` specialist answer leaves the main JevAgent on the run. REFINE asks Jev nothing of its own and is never in `presets`; a failed refinement keeps the user's message as `prompt`.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-refine.md, docs/design/jev-specialist-routing.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 """
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from vidbyte.agents.jev.gate.clarification import JevClarificationAgent
+from vidbyte.agents.jev.gate.refinement import JevRefinementAgent
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
@@ -46,8 +47,10 @@ class JevPreflightGate:
         self.decision = runtime_settings.decision
         self.response = response
         self.clarification = JevClarificationAgent(settings) if JevPreflightPreset.CLARITY in self.presets else None
+        self.refinement = JevRefinementAgent(settings) if JevPreflightPreset.REFINE in runtime_settings.preflight else None
         self.specialists = settings.agents
         self.specialist: JevSpecialist | None = None
+        self.prompt = ""
 
     def combine(self, message: str) -> JevDecisionRequest | None:
         """Return one Jev request holding every enabled preset's questions, or None when no preset has a question to ask."""
@@ -60,8 +63,9 @@ class JevPreflightGate:
         return JevDecisionRequest(state={JEV_PREFLIGHT_REQUEST_FIELD: message}, questions=tuple(questions))
 
     async def pass_(self, message: str) -> bool:
-        """Act on every enabled preset's answers, choose the specialist, and return True when a generative agent should run."""
+        """Act on every enabled preset's answers, choose the specialist and the prompt it reads, and return True when a generative agent should run."""
         self.specialist = None
+        self.prompt = message
         answers = await self._ask(message)
         for outcome in (self._score(preset, answers) for preset in self.presets):
             self.response.preset(outcome)
@@ -75,6 +79,10 @@ class JevPreflightGate:
                     # run stops so the user answers them before any generative-agent tokens are spent.
                     if await self._clarify(message, outcome):
                         return False
+                case JevPresetResult(preset=JevPreflightPreset.CLARITY, passed=True) if self.refinement is not None:
+                    # The request is clear enough to start: JevRefinementAgent rewrites it into a clearer prompt
+                    # from every clarity check's answer, and whichever agent runs reads that prompt instead.
+                    await self._refine(message, outcome)
                 case _:
                     # A preset that passed needs no action.
                     continue
@@ -129,6 +137,15 @@ class JevPreflightGate:
             return False
         self.response.needs_clarification(clarification)
         return True
+
+    async def _refine(self, message: str, result: JevPresetResult) -> None:
+        # Routes a clear request to JevRefinementAgent and, when it wrote a prompt, makes that the prompt the run reads.
+        refinement = None if self.refinement is None else await self.refinement.refine(message, result)
+        if refinement is None:
+            # The refiner failed or wrote nothing; fail open and keep the user's own message.
+            return
+        self.prompt = refinement.prompt
+        self.response.refined(refinement)
 
 
 __all__ = ["JevPreflightGate"]

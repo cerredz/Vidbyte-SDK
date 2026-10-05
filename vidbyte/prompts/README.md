@@ -68,7 +68,8 @@ prompt text.
 | Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
 | Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
 | Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
-  | Jev Run State | `jev_run_state` | system_prompt, required_sequence_agent | [jev_run_state/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state) |
+| Jev Refinement | `jev_refinement` | system_prompt | [jev_refinement/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_refinement/system_prompt.md) |
+| Jev Run State | `jev_run_state` | system_prompt, required_sequence_agent | [jev_run_state/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
@@ -256,6 +257,17 @@ context manager, and returns structured evidence shaped by the enabled done chec
 without giving a verdict.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md>
+
+#### Jev Refinement — `jev_refinement`
+
+The system prompt for JevRefinementAgent, the small generative agent a JevAgent
+routes a clear request to when its REFINE preflight is enabled. It receives the
+user's request and Jev's answer to every clarity check, and returns an improved
+prompt the main agent reads instead, with what it changed and what is still open.
+Its guidelines hold the full checklist of ways it may improve a request without
+adding facts or requirements.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_refinement/system_prompt.md>
 
 #### Jev Run State — `jev_run_state`
 

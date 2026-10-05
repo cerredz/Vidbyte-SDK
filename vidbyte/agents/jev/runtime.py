@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
-PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state with supplied prior user turns, applies the tool selector, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
+PURPOSE: Provides the JevAgent execution seam: it runs JevPreflightGate, returns a closed gate's response, hands the gate prompt (refined when enabled) to a chosen specialist, or writes run state from the user's request and prior turns before applying the tool selector and inherited loop; failed done checks may send that loop back to work.
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
 KNOWN EDGE CASES: With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-refine.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-tool-selector.py.
 """
 
@@ -82,8 +82,12 @@ class JevRuntime(AgentRuntime):
         self.response.start(message)
         if not await self.preflight.pass_(message):
             return self.response.stopped()
+        # @intent agents-read-the-gate-prompt-done-checks-read-the-user
+        # Whichever agent runs reads the gate's prompt (the refined prompt when REFINE rewrote the request), but
+        # the run state is written from the user's own words, so a refinement can never add work a done check demands.
+        prompt = self.preflight.prompt or message
         if self.preflight.specialist is not None:
-            return self.response.delegated(await self.preflight.specialist.agent.arun(message))
+            return self.response.delegated(await self.preflight.specialist.agent.arun(prompt))
         if self.run_state is not None:
             await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
             sequence_instructions = self.run_state.agent_instructions()
@@ -91,7 +95,7 @@ class JevRuntime(AgentRuntime):
                 context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
         if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
             return self.response.finished(await super().arun(
-                message,
+                prompt,
                 handle=handle,
                 context=context,
                 metadata=metadata,
@@ -104,13 +108,13 @@ class JevRuntime(AgentRuntime):
             self.runtime_settings.decision,
             self.runtime_settings.tool_selector_threshold,
         )
-        self.user_tools = await selector.run(message, self.user_tools)
+        self.user_tools = await selector.run(prompt, self.user_tools)
         self.tools = with_internal_agent_tools(self.user_tools)
         context = replace(context, tools=self.tools.specs())
         run_options = dict(options or {})
         run_options.pop("tools", None)
         result = await super().arun(
-            message,
+            prompt,
             handle=handle,
             context=context,
             metadata=metadata,

@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/response.py
 
 PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the self-review, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return.
+ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, refinements, and the chosen specialist through it, JevRunState writes run state, self-review, handoff, and done-check results, and JevRuntime asks it for the result to return.
 ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
 KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
@@ -23,6 +23,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevRefinement,
     JevReviewRecord,
     JevRunStateRecord,
     JevSpecialist,
@@ -53,6 +54,10 @@ class JevResponse:
         """Record the questions the user must answer; their rendered text becomes the run's output."""
         self.state.clarification = clarification
         self.state.output = clarification.render()
+
+    def refined(self, refinement: JevRefinement) -> None:
+        """Record the improved prompt the run reads instead of the user's message."""
+        self.state.refinement = refinement
 
     def specialist(self, chosen: JevSpecialist | None) -> None:
         """Record the title of the specialist Jev chose to run the task, or None when the main JevAgent keeps it."""

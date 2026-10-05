@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence.
+PURPOSE: Defines validated TypeSafe decision and JevAgent preflight records (including REFINE results), response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through. Continuation evidence uses the canonical ToolCallContext defined in `vidbyte/lib/dataclasses/tools.py`.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Required sequences hold only explicitly ordered request stages and keep stage ids and order stable; their event-backed evidence belongs on JevHandoffRecord. JevContinuationEvidence preserves the source and response strings and original ToolCallContext objects in typed immutable tuples; empty response strings and tuples are valid. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes requested members, workspace inventory, and unsupported mentions. Completion evidence is one handoff-only whole-task item. PHASE_PROGRESS is omitted when no substantive outcome stage exists; INPUT_SET_COVERAGE is omitted when no explicitly bounded input target exists. An ordered sequence is inactive when the request does not require distinct work in a specific order; ordering alone does not imply that a stage uses the preceding stage's output. Continuation evidence requires a nonblank source but preserves its original text; response strings may be empty, and the response tuple may be empty. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because concrete subclasses redeclare defaulted fields. Pydantic payload descriptions are the instructions generative agents receive; records built from those replies hold validated values, and conversion remains with the agent that requested the reply. Report/action candidates compare an explicit earlier plan with recorded execution, the final account, and request relevance; they do not turn an agent plan into a user requirement. Include a consequential assumption even when later work recovers or makes dependent work irrelevant; Jev judges whether the work was revised or became irrelevant.
 RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, and tests/test_jev_required_sequence.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_required_sequence.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -683,6 +683,16 @@ class JevClarificationPayload(BaseModel):
         max_length=JEV_CLARIFICATION_MAX_QUESTIONS,
         description="The clarifying questions for the user, most important missing detail first.",
     )
+
+
+class JevRefinementPayload(BaseModel):
+    """The structured reply JevRefinementAgent must return: the improved prompt, what changed, and what it could not fill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(min_length=1, description="The prompt is the complete improved request that the main agent will read instead of the user's original message. It must stand on its own, because the main agent never sees the original wording beside it. It keeps everything the user asked for, every name the user used, and every piece of pasted text, code, or data exactly as it was given. It only makes clearer, better ordered, or more explicit what the request already says or unavoidably implies, and it never adds facts, requirements, or choices the user did not make. When the original request cannot be improved, return it unchanged.")
+    changes: list[str] = Field(description="The changes list says what you improved, one short item per kind of change, such as splitting the work into numbered parts or separating pasted code from the instructions. Each item names the change in plain words and, where useful, the part of the request it touched. It is shown to the user and to the developer who reads the run, so it must be honest and specific rather than general praise of the new prompt. List only changes that are actually in the prompt you returned. Return an empty list when you returned the request unchanged.")
+    unresolved: list[str] = Field(description="The unresolved list names every detail the request still leaves open that you could not fill without guessing or inventing facts. Each item is one short sentence that says what is missing, in the user's terms, such as the version of a library or the audience of a document. These details stay open in the prompt rather than being filled with your own choices, and the list tells the user what they may want to add next time. Include a detail here only when it matters for doing the work. Return an empty list when nothing important is left open.")
 
 
 class JevSectionPayload(BaseModel):
@@ -3673,13 +3683,49 @@ class JevClarification:
         return "\n".join(blocks)
 
 
+@dataclass(frozen=True, slots=True)
+class JevRefinement:
+    """The improved prompt JevRefinementAgent wrote for a clear request, and what it changed and left open.
+
+    `original` is the user's message, `prompt` is the improved prompt the main agent (or the chosen
+    specialist) reads instead, `changes` lists what was improved, `unresolved` lists what the request
+    still leaves open, and `usage` is the refinement agent's own model usage.
+    """
+
+    original: str
+    prompt: str
+    changes: tuple[str, ...] = ()
+    unresolved: tuple[str, ...] = ()
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a non-blank improved prompt and non-blank list items.
+        JevText.require(self.prompt, field_name="refined prompt")
+        for field_name in ("changes", "unresolved"):
+            values = getattr(self, field_name)
+            if values:
+                JevText.require_all(values, field_name=f"refinement {field_name}")
+
+    @classmethod
+    def from_payload(cls, payload: JevRefinementPayload, original: str, usage: UsageRollup | None = None) -> JevRefinement:
+        """Build the frozen record from the agent's validated structured reply, dropping blank list items."""
+        return cls(
+            original=original,
+            prompt=payload.prompt.strip(),
+            changes=tuple(text.strip() for text in payload.changes if text.strip()),
+            unresolved=tuple(text.strip() for text in payload.unresolved if text.strip()),
+            usage=usage,
+        )
+
+
 @dataclass(slots=True)
 class JevAgentResponse:
     """Everything JevAgent's opinionated features produced for its most recent run, read as `JevAgent.response`.
 
     JevResponse is the only writer: it resets this record at the start of each run and fills it as the
     preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
-    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
+    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user,
+    `refinement` is set only when the REFINE preset rewrote a clear request into the prompt the run read, and
     `specialist` is the title of the JevSpecialist that ran the task, or None when the main JevAgent ran it.
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
     `review` records JevReviewer's objections at the latest finish attempt, and `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
@@ -3692,6 +3738,7 @@ class JevAgentResponse:
     output: str | None = None
     results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
     clarification: JevClarification | None = None
+    refinement: JevRefinement | None = None
     usage: ProviderUsage | None = None
     specialist: str | None = None
     run_state: JevRunStateRecord | None = None
@@ -4044,6 +4091,8 @@ __all__ = [
     "JevProblemsResolvedEvidence",
     "JevProblemsResolvedEvidencePayload",
     "JevQuestion",
+    "JevRefinement",
+    "JevRefinementPayload",
     "JevReportActionAlignment",
     "JevReportActionAlignmentEvidencePayload",
     "JevReportActionAlignmentEvidenceSectionPayload",
