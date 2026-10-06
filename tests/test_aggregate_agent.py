@@ -2,11 +2,11 @@
 
 Description:
     Tests for the Multi-Provider Aggregator (Mixture-of-Agents) engine, the
-    AggregateAgent class, and BaseAgent's native multi-model overload.
+    AggregateAgent class, and BaseAgent's explicit non-aggregation boundary.
 Purpose:
     Validates concurrent fan-out, resilient partial failure, synthesis (not
-    selection), same-provider labeling, as_tool exposure, and the constructor
-    overload that activates aggregation when multiple models are configured.
+    selection), same-provider labeling, as_tool exposure, and BaseAgent rejection
+    of the removed transparent aggregation configuration.
 Architecture:
     - Fake agent-likes (generate_reply only) stand in for real provider runners.
 Relations:
@@ -27,9 +27,10 @@ from vidbyte import (
     BaseAgent,
     MultiProviderAggregator,
     ProposerSpec,
+    Trace,
+    TraceProfile,
 )
-from vidbyte.lib.dataclasses.agents import AgentMessage, AgentMetadata
-from vidbyte.lib.enums import AgentRuntimeType
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMessage, AgentMetadata
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
 from vidbyte.tools.types import ToolCall, ToolStatus
 
@@ -139,6 +140,17 @@ class MultiProviderAggregatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["aggregate"]["failed_labels"], ["bad"])
         self.assertEqual(result.metadata["aggregate"]["successful_labels"], ["ok"])
 
+    async def test_engine_records_aggregate_spans_with_semantic_tracer(self) -> None:
+        # [Silent Failure] Aggregate prebuilt tracing should expose run/proposer/synthesis phases.
+        events: list[dict[str, object]] = []
+        tracer = Trace.profile(Trace.debug(events), TraceProfile.verbose())
+        engine = MultiProviderAggregator([("a", FakeAgent("a", "alpha"))], EchoAggregator(), AggregateConfig(), _TEMPLATE, tracer=tracer)
+        await engine.aggregate("q")
+        names = [event.get("name") for event in events if event["type"] == "start_span"]
+        self.assertIn("aggregate.run", names)
+        self.assertIn("aggregate.proposer", names)
+        self.assertIn("aggregate.synthesis", names)
+
     async def test_all_proposers_failing_raises(self) -> None:
         # [Edge Case] When every proposer fails, AggregateExecutionError is raised.
         engine = _engine([("x", FailingAgent("x")), ("y", FailingAgent("y"))])
@@ -243,6 +255,12 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         reply = await child.generate_reply("q")
         self.assertTrue(reply.content.startswith("SYNTH::"))
 
+    def test_fork_rejects_unsupported_overrides(self) -> None:
+        # [Hidden Failure] Unsupported AggregateAgent fork overrides must not be silently ignored.
+        with self.assertRaises(ConfigurationError) as ctx:
+            self._agent().fork(AgentForkSettings(system_prompt="different"))
+        self.assertIn("system_prompt", str(ctx.exception))
+
     def test_as_tool_requires_metadata(self) -> None:
         # [Hidden Assumption] as_tool() refuses to expose an agent without agent_metadata.
         with self.assertRaises(ConfigurationError):
@@ -276,55 +294,41 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# BaseAgent native overload
+# BaseAgent aggregation removal
 # ---------------------------------------------------------------------------
 
-class BaseAgentOverloadTests(unittest.IsolatedAsyncioTestCase):
-    def test_model_name_list_builds_plan(self) -> None:
-        # [Edge Case] Two model names activate an aggregate plan.
-        agent = BaseAgent(name="w", system_prompt="s", provider="openai", model_name=["gpt-4.1", "gpt-4.1-mini"])
-        self.assertIsNotNone(agent._aggregate_agent)
+class BaseAgentAggregationRemovalTests(unittest.TestCase):
+    def test_model_name_list_rejected(self) -> None:
+        # [Edge Case] A model list no longer activates hidden aggregation.
+        with self.assertRaises(ConfigurationError):
+            BaseAgent(name="w", system_prompt="s", provider="openai", model_name=["gpt-4.1", "gpt-4.1-mini"])
+
+    def test_single_element_model_name_list_rejected(self) -> None:
+        # [Edge Case] Single-element model lists are rejected instead of unwrapped.
+        with self.assertRaises(ConfigurationError):
+            BaseAgent(name="w", system_prompt="s", provider="openai", model_name=["gpt-4.1"])
 
     def test_single_model_name_no_plan(self) -> None:
         # [Silent Failure] A single string model keeps the normal single-model path.
         agent = BaseAgent(name="w", system_prompt="s", provider="openai", model_name="gpt-4.1")
-        self.assertIsNone(agent._aggregate_agent)
+        self.assertFalse(hasattr(agent, "_aggregate_agent"))
+        self.assertFalse(hasattr(agent, "_aggregate_plan"))
         self.assertEqual(agent.runner_config.model_name, "gpt-4.1")
 
-    def test_single_element_model_list_unwrapped(self) -> None:
-        # [Edge Case] A one-element model list unwraps to a single model, no plan.
-        agent = BaseAgent(name="w", system_prompt="s", provider="openai", model_name=["gpt-4.1"])
-        self.assertIsNone(agent._aggregate_agent)
-        self.assertEqual(agent.runner_config.model_name, "gpt-4.1")
+    def test_proposers_keyword_rejected(self) -> None:
+        # [Hidden Assumption] BaseAgent no longer accepts proposer configuration.
+        with self.assertRaises(TypeError):
+            BaseAgent(name="w", system_prompt="s", proposers=[FakeAgent("a", "alpha")])
 
-    async def test_generate_reply_delegates_to_aggregate(self) -> None:
-        # [Hidden Failure] When a plan exists, generate_reply returns the synthesized answer.
-        agent = BaseAgent(
-            name="w",
-            system_prompt="s",
-            proposers=[FakeAgent("a", "alpha"), FakeAgent("b", "beta")],
-            aggregator=EchoAggregator(),
-            aggregate=AggregateConfig(synthesis_prompt_template=_TEMPLATE),
-        )
-        reply = await agent.generate_reply("q")
-        self.assertTrue(reply.content.startswith("SYNTH::"))
-        self.assertIn("alpha", reply.content)
+    def test_aggregator_keyword_rejected(self) -> None:
+        # [Hidden Assumption] BaseAgent no longer accepts aggregator configuration.
+        with self.assertRaises(TypeError):
+            BaseAgent(name="w", system_prompt="s", aggregator=EchoAggregator())
 
-    def test_multi_model_with_mcts_runtime_raises(self) -> None:
-        # [Hidden Assumption] Aggregation is incompatible with non-linear runtimes.
-        with self.assertRaises(ConfigurationError):
-            BaseAgent(
-                name="w",
-                system_prompt="s",
-                provider="openai",
-                model_name=["a", "b"],
-                runtime=AgentRuntimeType.MCTS_SEARCH,
-            )
-
-    def test_model_name_list_without_provider_raises(self) -> None:
-        # [Hidden Assumption] The model-name-list sugar requires a provider.
-        with self.assertRaises(ConfigurationError):
-            BaseAgent(name="w", system_prompt="s", model_name=["a", "b"])
+    def test_aggregate_keyword_rejected(self) -> None:
+        # [Hidden Assumption] BaseAgent no longer accepts aggregate run configuration.
+        with self.assertRaises(TypeError):
+            BaseAgent(name="w", system_prompt="s", aggregate=AggregateConfig())
 
 
 # ---------------------------------------------------------------------------

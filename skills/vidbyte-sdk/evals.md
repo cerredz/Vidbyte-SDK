@@ -5,11 +5,12 @@ Description:
     Reference and how-to for the Vidbyte SDK evals subsystem.
 Purpose:
     Helps developers build eval suites, run them against an agent/runner, and add
-    new graders. Covers EvalSuite, EvalCase, the grader catalog, EvalRunner, and
-    the evals prompt family.
+    new graders and templates. Covers EvalSuite, EvalCase, the grader catalog,
+    template bundles, EvalRunner, and the evals prompt family.
 Architecture:
     - EvalCase / EvalSuite: test cases and their grouping.
     - Graders: pluggable scoring strategies under vidbyte/evals/graders/.
+    - Templates: reusable multi-grader bundles under vidbyte/evals/templates/.
     - EvalRunner: executes a suite against a target and returns results.
 Relations:
     Implementation under vidbyte/evals/. Prompts under the `evals` family
@@ -27,7 +28,7 @@ using pluggable **graders**.
 
 | Type | Module | Role |
 |------|--------|------|
-| `EvalCase` | `vidbyte/evals/types.py` | One test case: `prompt`, optional `expected`, `tags`, optional per-case `grader`, `metadata`. |
+| `EvalCase` | `vidbyte/evals/types.py` | One test case: `prompt`, optional `expected`, `tags`, optional per-case `grader`, optional `templates`, `metadata`. |
 | `EvalSuite` | `vidbyte/evals/suite.py` | Named collection of `EvalCase`s. `EvalSuite(name, cases)`; also `EvalSuite.from_json(path)`. |
 | `BaseGrader` | `vidbyte/evals/base.py` | Abstract grader: `async agrade(case, actual) -> GraderResult` and sync `grade(...)`. |
 | `GraderResult` | `vidbyte/evals/types.py` | `score: float`, `passed: bool`, `reason: str`. |
@@ -57,6 +58,47 @@ from vidbyte.evals import (
 | `JSONSchemaGrader` | `JSONSchemaGrader(...)` | Pass when `actual` parses and validates against a JSON schema. |
 | `LLMJudgeGrader` | `LLMJudgeGrader(*, judge_runner, prompt_template=None)` | Uses a judge model (LLM-as-judge). Default prompt is `Prompt.EVALS_LLM_JUDGE`. |
 | `RubricGrader` | `RubricGrader(*, judge_runner, rubric: dict[str, float], threshold=0.7, prompt_template=None)` | Weighted rubric scoring via a judge model. Default prompt is `Prompt.EVALS_RUBRIC`. |
+
+## Template Catalog
+
+Templates live under `vidbyte/evals/templates/`. They are reusable presets that
+build one or more graders. Keep scoring logic in `vidbyte/evals/graders/`; keep
+template composition and user-facing bundles in `vidbyte/evals/templates/`.
+
+```python
+from vidbyte.evals import EvalCase, templates as T
+
+case = EvalCase(
+    prompt="What is our refund window?",
+    expected="30 days",
+    templates=(T.short_answer_fact(), T.safe_customer_support()),
+)
+```
+
+Built-in templates:
+
+| Template | Purpose |
+|----------|---------|
+| `short_answer_fact` | Expected answer must appear and output must stay concise. |
+| `multiple_choice` | Output must contain exactly one allowed choice matching expected. |
+| `structured_json` | Output must be raw JSON and can satisfy schema/subset checks. |
+| `classification` | Output must contain one allowed label matching expected. |
+| `numeric_answer` | Output must contain a numeric value within tolerance. |
+| `concise_grounded_answer` | Required terms must appear, forbidden terms must not, and output must be bounded. |
+| `safe_customer_support` | Expected answer must appear, leakage terms must not, and output must be bounded. |
+
+Custom templates subclass `EvalTemplate` and implement `build_grader()`:
+
+```python
+from vidbyte.evals import EvalTemplate, ContainsGrader
+
+class MyTemplate(EvalTemplate):
+    name = "my_template"
+
+    def build_grader(self):
+        # Returns the concrete grader used by EvalRunner.
+        return ContainsGrader()
+```
 
 ## Running a Suite
 
@@ -92,6 +134,16 @@ result = await runner.arun(suite, tags=["geography"])  # filter by tag
 5. Add tests to `tests/test_evals.py` covering pass, fail, and edge cases (empty `expected`,
    malformed output, missing grader).
 
+## Adding a New Template
+
+1. Add a template class or factory in `vidbyte/evals/templates/builtins.py`, or a new module under
+   `vidbyte/evals/templates/` if the bundle becomes large.
+2. Implement `build_grader()` and return a `BaseGrader`, usually `AllOfGrader`, `AnyOfGrader`, or
+   `WeightedGrader`.
+3. Register the template in `register_builtin_templates(...)` if JSON suites should be able to use it.
+4. Export it from `vidbyte/evals/templates/__init__.py` and `vidbyte/evals/__init__.py`.
+5. Add tests to `tests/test_evals.py` covering Python usage, JSON spec loading, malformed options, pass, and fail.
+
 ## Verification
 
 ```powershell
@@ -101,7 +153,7 @@ python -m unittest tests.test_evals
 
 ## Rules
 
-- Keep eval suites, graders, runner, and registry under `vidbyte/evals/`.
+- Keep eval suites, graders, templates, runner, and registry under `vidbyte/evals/`.
 - Graders must be deterministic given the same inputs, except LLM-backed graders which must
   accept an injected `judge_runner` (no hidden provider calls).
 - Do not embed customer data or private scoring logic; evals here are reusable SDK abstractions.

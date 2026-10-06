@@ -73,6 +73,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         # Setup clean test context before each run.
         self.original_env = dict(os.environ)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
 
     def tearDown(self) -> None:
         # Restore environment variables after each run.
@@ -202,7 +204,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         os.environ["OPENAI_API_KEY"] = "fake-openai-key"
         os.environ["ANTHROPIC_API_KEY"] = "fake-anthropic-key"
 
-        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"openai": "gpt-4o", "anthropic": "claude-3"})
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"openai": "gpt-4o", "anthropic": "claude-sonnet-5"})
         runtime = AgentRuntime(
             agent_name="worker",
             system_prompt="Work.",

@@ -1,30 +1,81 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidbyte-sdk"
-version = "0.1.0"
-description = "Python SDK namespace scaffold for Vidbyte integrations."
+version = "0.2.0"
+description = "Python SDK for building, evaluating, and debugging reliable AI agent harnesses."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "UNLICENSED" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
-  { name = "Vidbyte" }
+  { name = "Vidbyte", email = "hello@vidbyte.ai" }
+]
+keywords = [
+  "ai-agents",
+  "agent-harnesses",
+  "harness-engineering",
+  "llm",
+  "mcp",
+  "context-engineering",
+  "evals",
+  "observability",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
   "pydantic>=2,<3",
   "httpx>=0.27",
+  "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+codex = [
+  "openai-codex>=0.147.0,<0.148.0",
+]
+dev = [
+  "build==1.5.0",
+  "mypy==2.3.1",
+  "pytest==8.3.5",
+  "pytest-asyncio==1.3.0",
+  "ruff==0.16.4",
+  "twine==6.2.0",
 ]
 
 [project.urls]
 Homepage = "https://vidbyte.ai"
+Documentation = "https://github.com/cerredz/Vidbyte-SDK/tree/main/docs"
+Repository = "https://github.com/cerredz/Vidbyte-SDK"
+Issues = "https://github.com/cerredz/Vidbyte-SDK/issues"
+Changelog = "https://github.com/cerredz/Vidbyte-SDK/releases"
 
 [tool.setuptools.packages.find]
 include = ["vidbyte*"]
 
 [project.scripts]
+vidbyte-sdk = "vidbyte.cli:main"
 vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
 
 [tool.setuptools.package-data]
-"vidbyte.prompts.prompts" = ["*.json", "*/*.json", "*/*.md"]
+"vidbyte.prompts.prompts" = ["*.json", "*.md", "*/*.json", "*/*.md"]
+"vidbyte.paradigms.context_minimal_fanout" = [
+  "*.md",
+  "prompts/*.md",
+  "skills/*/*.md",
+  "skills/references/*.md",
+  "skills/skills.json",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-config", "--strict-markers"]
+asyncio_default_fixture_loop_scope = "function"

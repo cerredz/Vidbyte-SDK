@@ -121,7 +121,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         grader_prompt = self.algorithm.render_grader_prompt(message, candidates_text)
         grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model)
         grader_handle = handle.with_runner(grader_runner, self.algorithm.grader_provider)
-        raw_result, _ = await self.runtime._invoke_with_middleware(
+        raw_result, _, _ = await self.runtime._invoke_with_middleware(
             grader_handle,
             grader_prompt,
             {"system": self.algorithm.grader_system_prompt_text()},

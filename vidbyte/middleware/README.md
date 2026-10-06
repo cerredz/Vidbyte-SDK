@@ -19,6 +19,12 @@ structured `MiddlewareDecision` objects instead of mutating hidden global state.
 By default middleware fails closed, while individual middleware can opt into
 fail-open behavior when policy failure should not abort the run.
 
+With `TraceProfile.diagnostic()`, the SDK records every hook invocation as a
+`middleware.hook` trace span with its elapsed duration and safe decision data.
+The final agent result's `middleware.events` remains intentionally smaller: it
+contains only control-flow decisions and fail-open exceptions, not ordinary
+continue decisions.
+
 ## Usage
 
 ```python
@@ -33,7 +39,8 @@ class TenantPolicy(AgentMiddleware):
 agent = Agent(
     name="guarded",
     system_prompt="Use tools only when they help.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     middleware=[TenantPolicy()],
     metadata={"tenant_id": "demo"},
@@ -44,6 +51,23 @@ Built-ins are available from `vidbyte.middleware.builtins` and include rate
 limits, token and cost budgets, runtime limits, retry, circuit breaker, audit,
 tool policy, tool-result compaction, message-history compaction, canary tripwire,
 confused-deputy guard, and honeypot tool checks.
+
+`TokenBudgetMiddleware(max_tokens=...)` is a hard cap by default: once
+provider-reported cumulative usage reaches the limit, the run stops before the
+next iteration. Set `allow_final_response_over_budget=True` to allow one final
+over-budget model call with an injected instruction to answer immediately:
+
+```python
+from vidbyte.middleware.builtins import TokenBudgetMiddleware
+
+middleware = [
+    TokenBudgetMiddleware(max_tokens=50_000, allow_final_response_over_budget=True),
+]
+```
+
+This soft-overrun mode depends on provider-reported token usage. It is separate
+from `Agent(max_tokens=...)`, which remains a runtime hard cap and can stop the
+run before middleware gets a chance to request the final response.
 
 ## Key Modules
 

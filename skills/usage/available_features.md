@@ -1,6 +1,6 @@
 # Available Features
 
-Features, strategies, middleware, pipelines, tools, and orchestration primitives included out of the box in the Vidbyte SDK.
+Features, runtimes, middleware, pipelines, tools, durable sessions, artifact sources, and orchestration primitives included out of the box in the Vidbyte SDK.
 
 ## Root SDK Client
 
@@ -18,9 +18,9 @@ sdk = VidbyteSDK()
 
 ## Pipelines
 
-Pipelines wire agents together by connecting outputs to inputs. Each pipeline stage is a fully-configured agent or another pipeline. Pipelines move strings between stages and do not manage shared context, budget, or artifacts — each agent carries its own configuration, strategy, tools, and history.
+Pipelines wire agents together by connecting outputs to inputs. Each pipeline stage is a fully-configured agent or another pipeline. Pipelines move strings between stages and do not manage shared context, budget, or artifacts — each agent carries its own configuration, runtime, tools, and history.
 
-Use pipelines to compose multi-agent workflows where one agent's full output (including its strategy and tool calls) feeds into the next agent.
+Use pipelines to compose multi-agent workflows where one agent's full output (including runtime/tool-call results) feeds into the next agent.
 
 ### Pipeline Types
 
@@ -54,6 +54,33 @@ from vidbyte import (
 
 For detailed usage examples, see [`skills/usage/create_pipeline.md`](create_pipeline.md).
 
+## Ledger-Driven Multi-Agent Teams
+
+`MultiAgent` is a `BaseAgent`-compatible facade for open-ended work that needs a manager to own the overall goal, delegate ready tasks, evaluate evidence, and replan after stalls or failures. Unlike a pipeline, a team shares an immutable view of a run-local `TaskLedger` and can choose a different next action after every worker report.
+
+Developers keep fine-grained control over the worker boundary with `AgentBinding` and `AgentTransfer`: request builders decide what each worker receives, report parsers decide what comes back, and validators decide whether evidence is verified. `MultiAgentSettings` bounds rounds, retries, stalls, replans, events, and timeouts.
+
+```python
+from vidbyte import Agent, AgentBinding, AgentTransfer, MultiAgent, MultiAgentSettings
+
+team = MultiAgent(
+    name="delivery-team",
+    system_prompt="Own the goal, delegate bounded tasks, and finish from verified evidence.",
+    orchestrator=Agent(name="manager", system_prompt="Manage the task ledger.", provider="openai", model_name="gpt-4.1"),
+    agents=[
+        AgentBinding(
+            Agent(name="researcher", system_prompt="Research assigned tasks.", provider="openai", model_name="gpt-4.1"),
+            transfer=AgentTransfer(),
+        )
+    ],
+    settings=MultiAgentSettings(max_rounds=12, replan_after_stalls=2),
+)
+
+reply = await team.arun("Produce an evidence-backed launch recommendation.")
+```
+
+The facade intentionally does not support tools, MCP attachment, structured output, or durable sessions; configure those capabilities on manager and worker agents. See [`skills/vidbyte-sdk/multi-agent.md`](../vidbyte-sdk/multi-agent.md) for contracts, lifecycle, custom payloads, gates, and error behavior.
+
 ## Middleware
 
 Middleware is **deterministic runtime policy code** that runs inside the agent execution loop. It observes, validates, filters, or transforms agent behavior at lifecycle hooks — but it is never exposed to the model. Middleware is injected on the agent constructor via `middleware=[...]`.
@@ -80,9 +107,28 @@ Decisions: `MiddlewareDecision.continue_()`, `abort(reason)`, `deny_tool(reason)
 
 ### Built-in Middleware
 
-Built-in middleware lives under `vidbyte/middleware/builtins/`. Security/defense: `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`. Budgets: `TokenBudgetMiddleware`, `CostBudgetMiddleware`. Reliability: `ModelRetryMiddleware`, `ExponentialBackoffRetryMiddleware`, `CircuitBreakerMiddleware`. Safety/observability: `LoopDetectionMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `TokenRateLimitMiddleware`, `AuditLogMiddleware`. Compaction: `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. See [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md) for the full catalog and arguments.
+Built-in middleware lives under `vidbyte/middleware/builtins/`. Security/defense: `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`. Budgets: `TokenBudgetMiddleware`, `CostBudgetMiddleware`. Reliability: `ModelRetryMiddleware`, `ExponentialBackoffRetryMiddleware`, `CircuitBreakerMiddleware`, `ToolErrorPolicyMiddleware`. Safety/observability: `LoopDetectionMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `TokenRateLimitMiddleware`, `AuditLogMiddleware`. Compaction: `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. See [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md) for the full catalog and arguments.
 
 > Context compaction is **middleware**, not a tool. Use the compaction middlewares above; the legacy `ContextCompactionTool` is for manual/legacy flows only.
+
+### Tool Error Policy
+
+`AgentLoopSettings(tool_error_policy=ToolErrorPolicy(...))` auto-registers `ToolErrorPolicyMiddleware` on compatible agent loops. The policy retries transient tool failures, gates retries to idempotent tools by default, applies exponential backoff, enforces optional max total tool errors, and can continue or abort on terminal failures. Terminal tool errors are rendered with full detail; there is no separate verbosity/render-options API.
+
+```python
+from vidbyte import Agent
+from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
+
+agent = Agent(
+    name="robust-worker",
+    system_prompt="Use tools carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    agent_loop_settings=AgentLoopSettings(
+        tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2),
+    ),
+)
+```
 
 ### Building Custom Middleware
 
@@ -113,7 +159,7 @@ The SDK includes a rich catalog of built-in tools and a framework for building y
 
 ### Built-in Tools
 
-The SDK ships with prebuilt tool categories covering code search, code execution, filesystem operations, document retrieval, context compaction, patch editing, and calculation. These are ready to attach to any agent.
+The SDK ships with prebuilt tool categories covering code search, code execution, filesystem operations, document retrieval, web search and page fetch (with per-operation pricing), context compaction, patch editing, and calculation. These are ready to attach to any agent.
 
 For a complete catalog of every built-in tool, see [`skills/usage/available_tools.md`](available_tools.md).
 
@@ -143,9 +189,35 @@ class StockPriceTool(BaseTool):
         return ToolResult.success(self.name, fetch_from_api(call.arguments["symbol"]))
 ```
 
+## Durable Sessions
+
+Durable sessions persist agent state as a checkpoint DAG through `Session`, `SessionStore`, and `SessionScope`. They support per-turn or manual checkpoints, cold-process resume, rewind/edit, single and batch fork, cross-thread resume, tags/name resolution, usage rollups, trace capture, and portable zip export/import.
+
+```python
+from vidbyte import Agent, FileSessionStore
+
+store = FileSessionStore("./.vidbyte/sessions")
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1")
+session = agent.persist(store=store)
+
+await session.arun("start the research")
+branches = session.batch_fork(3)
+session.tag("research-main")
+bundle = session.export()
+usage = session.usage()
+```
+
+Attach session tools such as `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeAppendTool`, `ResumeOutputTool`, `ResumeReplaceTool`, and `SessionTool` when the model itself should manipulate durable threads.
+
+## Artifact Sources and Repository Artifacts
+
+The `vidbyte.sources` package provides deterministic artifact-to-context loaders and fetchers for public documents such as `llms.txt`. Repository artifacts also include `artifacts/file_index.md`, a generated source map for fast agent navigation across SDK packages, tests, skills, prompts, and design docs.
+
+Use sources when a caller needs explicit trust boundaries, content hashing, caching, or selection over external or repository-backed documents.
+
 ## Prompt Collection
 
-The SDK includes a built-in prompt catalog with 13 prompt families covering handoffs, reflexion, actor-runtime personas, goals, evals, templates, and more. Prompts are repository-backed text assets accessible through enum keys and direct Python imports — no API keys or network calls needed.
+The SDK includes a built-in prompt catalog with 51 prompts across 19 prompt families covering orchestration, handoffs, reflexion, actor-runtime personas, goals, evals, templates, and more. Prompts are repository-backed text assets accessible through enum keys and direct Python imports — no API keys or network calls needed.
 
 ### Accessing Prompts
 
@@ -252,6 +324,8 @@ Create variant agents from a base without re-declaring all configuration. Forkin
 child = agent.fork(name="child", temperature=0.1)                # override any kwarg
 child_with_context = agent.fork(include_history=True, name="ctx") # copies message history
 ```
+
+`ForkConversationTool` exposes immediate child execution to the model while keeping the same non-escalation rules as `BaseAgent.fork(...)`: model changes must be allowlisted, extra tools must come from developer-provided toolsets, permission policy is inherited, and child state stays isolated unless its returned answer is incorporated into the parent.
 
 ## MCP Server Attachment
 

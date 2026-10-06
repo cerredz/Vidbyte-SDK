@@ -5,7 +5,8 @@ import unittest
 
 from pydantic import BaseModel, Field
 
-from vidbyte import Agent, TraceOption, TraceSchema
+from tests.agent_test_support import build_test_agent
+from vidbyte import Agent, AgentForkSettings, TraceOption, TraceSchema
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType
 from vidbyte.lib.errors import ConfigurationError
@@ -220,7 +221,7 @@ class BaseAgentTraceWiringTests(unittest.TestCase):
 
     def test_fork_preserves_trace_option(self) -> None:  # [Edge Case]
         agent = Agent(name="a", system_prompt="s", trace_option=TraceOption.continual(_ProgressModel))
-        child = agent.fork(name="b")
+        child = agent.fork(AgentForkSettings(name="b"))
         self.assertIsNotNone(child._trace_option)
         self.assertTrue(child._trace_option.enabled)
 
@@ -277,7 +278,7 @@ class ScriptedRunner:
 class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_trace_accumulates_and_surfaces(self) -> None:  # [Silent Failure]
         runner = ScriptedRunner()
-        agent = Agent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=runner,
@@ -294,7 +295,7 @@ class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_trace_never_leaks_into_main_context(self) -> None:  # [Silent Failure]
         runner = ScriptedRunner()
-        agent = Agent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=runner,
@@ -309,7 +310,7 @@ class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_main_run_succeeds_when_trace_fails(self) -> None:  # [Hidden Failure]
         runner = ScriptedRunner(trace_raises=True)
-        agent = Agent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=runner,

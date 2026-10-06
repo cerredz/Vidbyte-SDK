@@ -1,0 +1,11 @@
+{
+  "name": "Problem-Space Search",
+  "description": "Prompts used to surface unconsidered angles during an agent run.",
+  "key": "problem_space_search",
+  "prompts": {
+    "explorer": {
+      "path": "problem_space_search_explorer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/problem_space_search_explorer.md"
+    }
+  }
+}

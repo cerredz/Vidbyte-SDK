@@ -81,9 +81,22 @@ def _make_server_entry(qualified_name: str, display_name: str = "", description:
 class MockMcpStdioTransport:
     """Minimal MCP transport mock for attach tests."""
 
-    def __init__(self, command: list[str], *, env: dict | None = None) -> None:
+    def __init__(
+        self,
+        command: list[str],
+        *,
+        env: dict | None = None,
+        request_timeout: float = 30.0,
+        shutdown_timeout: float = 5.0,
+        stderr_max_bytes: int = 64 * 1024,
+        **_: object,
+    ) -> None:
         """Store command and track closed state."""
         self.command = command
+        self.env = env
+        self.request_timeout = request_timeout
+        self.shutdown_timeout = shutdown_timeout
+        self.stderr_max_bytes = stderr_max_bytes
         self.closed = False
 
     async def start(self) -> None:

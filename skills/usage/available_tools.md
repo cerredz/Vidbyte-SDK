@@ -61,14 +61,25 @@ from vidbyte.tools.builtins.context import ContextCompactionTool
 Context-primitive tools let the model read and write structured items in the agent's context window through the shared `ContextManager`. They are `SAFE` (no filesystem, network, or external state).
 
 ```python
-from vidbyte.tools.builtins.context_primitives import ContextUpsertTool, ContextListTool, ContextRemoveTool
+from vidbyte import ContextManager
+from vidbyte.tools.builtins.context_primitives import ContextWindowFactory
+
+ctx = ContextManager()
+tools = ContextWindowFactory(ctx).build()
 ```
 
 | Tool | Description |
 |------|-------------|
-| `ContextUpsertTool(context_manager)` | Insert or update a structured context item in the context window. |
+| `ContextWindowFactory(context_manager).build(include=None, management=True)` | Mount per-primitive create tools plus list/remove/stats/edit/move management tools. |
+| `context_window_tools(...)` | Convenience wrapper around `ContextWindowFactory(...).build(...)`. |
+| `context_create_<key>` | Typed create/upsert tools for `text`, `document`, `memory`, `plan`, `task`, `progress`, `artifact`, `environment`, and `git_diff`. |
 | `ContextListTool(context_manager)` | List the current context items. |
-| `ContextRemoveTool(context_manager)` | Remove a context item by id. |
+| `ContextRemoveTool(context_manager)` | Remove a non-frozen context item by id. |
+| `ContextStatsTool(context_manager)` | Inspect id, kind, title, placement, frozen flag, and char count. |
+| `ContextEditTool(context_manager)` | Replace one exact, unique string across editable string/tuple fields. |
+| `ContextReciteTool(context_manager)` | Re-emit a primitive at end-of-conversation attention via a recitation copy. |
+| `ContextMoveTool(context_manager)` | Move a non-frozen primitive to a different context placement. |
+| `ContextUpsertTool(context_manager)` | Legacy flattened insert/update tool retained for compatibility. |
 
 See [`skills/vidbyte-sdk/context-primitives.md`](../vidbyte-sdk/context-primitives.md).
 
@@ -85,6 +96,130 @@ from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointToo
 |------|-------------|
 | `ReflexionTool(context_manager)` | Record a self-critique and correction plan when the model detects a reasoning error. |
 | `TrajectoryCheckpointTool(context_manager)` | Record a compressed checkpoint of reasoning, trajectory, output, score, and feedback. |
+
+## Reasoning Strategy Tools
+
+Model-callable tools anchored to named strategies from the scientific/philosophical reasoning literature. Each tool forces the model to fill in the specific fields that make that reasoning pattern checkable, rather than asserting a conclusion. Pure `SAFE` tools — no filesystem, network, or external state — that write their own `ContextItem` into the shared `ContextManager`, following the same pattern as the Context Algorithm Tools above.
+
+```python
+from vidbyte.tools.builtins.reasoning import (
+    AbduceTool,
+    AbsenceEvidenceTool,
+    AnalogyTool,
+    BayesianUpdateTool,
+    BurdenOfProofTool,
+    CausalChainTool,
+    CircularityTool,
+    CompositionDivisionTool,
+    ConsistencyTool,
+    CounterexampleTool,
+    DeduceTool,
+    DefeasibleTool,
+    DialecticTool,
+    DifferentialDiagnosisTool,
+    DilemmaTool,
+    EquivocationTool,
+    FalsifyTool,
+    FermiEstimateTool,
+    IdentityTool,
+    InduceTool,
+    InstantiateTool,
+    ModalTool,
+    NecessarySufficientTool,
+    ParadoxTool,
+    PartitionTool,
+    PredictTool,
+    QuantifierTool,
+    RegressTool,
+    SocraticTool,
+    StatisticalSyllogismTool,
+    SteelmanTool,
+    StrawmanTool,
+    TestimonyTool,
+    ThoughtExperimentTool,
+    TransitivityTool,
+)
+```
+
+| Tool | Description |
+|------|-------------|
+| `DeduceTool(context_manager)` | Record a deductive chain — premises, a named inference rule, the conclusion they force, and a soundness caveat naming the weakest premise. |
+| `InduceTool(context_manager)` | Record an inductive generalization projected from specific observations, with its sample-bias risk and a concrete falsifying case. |
+| `AbduceTool(context_manager)` | Record an inference to the best explanation across 2-4 genuinely competing hypotheses, with the winning pick and a discriminating test. |
+| `AnalogyTool(context_manager)` | Record an analogical transfer's mapped relations between a source and target domain, and the point where the analogy breaks down. |
+| `CausalChainTool(context_manager)` | Record a causal claim anchored to an explicit mechanism, its confounders, and an intervention test. |
+| `BayesianUpdateTool(context_manager)` | Record an explicit prior-to-posterior belief revision with both conditional likelihoods, so the shift in confidence is auditable. |
+| `DifferentialDiagnosisTool(context_manager)` | Record a candidate set narrowed by concrete disconfirming evidence, plus the next check that best discriminates what remains. |
+| `FermiEstimateTool(context_manager)` | Record a Fermi estimate: a quantity decomposed into checkable sub-estimates, with a sanity band and anchor-risk note. |
+| `SteelmanTool(context_manager)` | Record a position pressure-tested against its strongest opposition, with a required revision whenever it does not survive unchanged. |
+| `FalsifyTool(context_manager)` | Record a Popperian falsification test for a claim — the test design, the riskiest prediction it forbids, and whether it has actually been run. |
+| `CounterexampleTool(context_manager)` | Record a formal disproof: a general claim, its scope, a constructed violating case, the condition it breaks, and the refined claim that survives. |
+| `ConsistencyTool(context_manager)` | Record a belief-set audit: the claims, the concrete contradictory pairs, the status, and the resolution. |
+| `DilemmaTool(context_manager)` | Record a proof by exhaustive cases: the branches, the reasoning from each, the shared conclusion, and the exclusion argument. |
+| `QuantifierTool(context_manager)` | Record a quantified-claim analysis: the quantifier in force, the instance checked, the deciding counterexample, the scope, and a verdict. |
+| `TransitivityTool(context_manager)` | Record a transitive-chain audit: entities, relation, checked links, derived chain, cycles, and consistency. |
+| `IdentityTool(context_manager)` | Record an identity judgment between two referents: shared properties, the distinguisher, the grounds, and a verdict. |
+| `PartitionTool(context_manager)` | Record a classification audit: items, categories, membership rules, coverage, overlap, and a verdict. |
+| `ModalTool(context_manager)` | Record a modality analysis: whether the claim is necessary, possible, contingent, or impossible, with the evidence and actuality. |
+| `EquivocationTool(context_manager)` | Record a term-ambiguity audit: the term, its senses, each occurrence, the drift, the corrected argument, and whether a fallacy is present. |
+| `NecessarySufficientTool(context_manager)` | Record a condition-relationship analysis: necessity and sufficiency directions, the verdict, and the implications. |
+| `CompositionDivisionTool(context_manager)` | Record a part-to-whole property-transfer audit, with the aggregation claim, verdict, and deciding counterexample. |
+| `CircularityTool(context_manager)` | Record a circular-reasoning audit: premises, conclusion, the dependency map, the found circle, and the fix. |
+| `RegressTool(context_manager)` | Record a justification-chain analysis: every 'why' step, where the chain terminates, the regress style, and adequacy. |
+| `BurdenOfProofTool(context_manager)` | Record an evidence-burden resolution: the claim, presumption, both evidence sides, the burden holder, verdict, and decision. |
+| `TestimonyTool(context_manager)` | Record a testimony evaluation: source, claim, reliability factors, corroboration, conflicts, and a trust verdict with residual uncertainty. |
+| `AbsenceEvidenceTool(context_manager)` | Record an absence-of-evidence analysis: the hypothesis, expected evidence, the search, its adequacy, and the significance. |
+| `DefeasibleTool(context_manager)` | Record a defeasible-reasoning application: the default rule, case, applicability, defeaters, final conclusion, and retraction note. |
+| `StatisticalSyllogismTool(context_manager)` | Record a frequency-to-individual probability transfer with its membership, defeater, probable conclusion, and optional confidence. |
+| `SocraticTool(context_manager)` | Record one step of Socratic interrogation: the claim, the probing question, the assumption surfaced, and the revised claim. |
+| `DialecticTool(context_manager)` | Record a thesis-antithesis-synthesis resolution with what each side preserved, discarded, and the synthesis's stability. |
+| `ParadoxTool(context_manager)` | Record a paradox dissection: premises, the hidden assumption, the single premise to drop, the resolution, and the revealed lesson. |
+| `StrawmanTool(context_manager)` | Record an argument-restatement audit: original, restatement, distortion, fair restatement, and the criticism that genuinely applies. |
+| `PredictTool(context_manager)` | Record a theory-derived prediction checked against the observed outcome, with the match and the forced revision. |
+| `ThoughtExperimentTool(context_manager)` | Record a gedankenexperiment: setup, single manipulation, predicted outcome, the insight, and the limits. |
+| `InstantiateTool(context_manager)` | Record a rule-to-case instantiation: the rule, case, applicability conditions, per-condition checks, conclusion, and scope check. |
+
+## Agent Forking
+
+`ForkConversationTool` lets a model ask its current agent to run an isolated child conversation immediately. It calls `BaseAgent.fork(...)`, runs the child branch on a focused prompt, and returns the child answer as a normal tool result.
+
+```python
+from vidbyte.tools.builtins import ForkConversationTool
+```
+
+| Tool | Description |
+|------|-------------|
+| `ForkConversationTool(allowed_models=..., extra_toolsets=...)` | Agent-bound fork tool for immediate isolated child execution. Model swaps are allowlisted, extra tools must come from developer-provided toolsets, permission policy is inherited, and child state does not mutate the parent. |
+
+Use this for live scratch work inside an agent run. Use durable session fork tools when you only need to create checkpoint-DAG branches for later execution.
+
+## Session Tools
+
+Durable session tools bind to a live `Session` and operate through a `SessionStore`. Cross-session reads are gated by `SessionScope`.
+
+```python
+from vidbyte.tools.builtins.sessions import (
+    BatchForkTool,
+    CheckpointTool,
+    ForkTool,
+    ResumeAppendTool,
+    ResumeOutputTool,
+    ResumeReplaceTool,
+    RewindTool,
+    SessionTool,
+)
+```
+
+| Tool | Description |
+|------|-------------|
+| `CheckpointTool(store)` | Snapshot the current thread or copy an in-scope session head as a labeled checkpoint. |
+| `ForkTool(store)` | Create one durable child session from the current head or an in-scope checkpoint. |
+| `BatchForkTool(store)` | Create 1-64 durable child sessions from the same checkpoint and return compact created/failed results. It does not run the children. |
+| `RewindTool(store)` | Move the current session head back to an earlier checkpoint. |
+| `ResumeReplaceTool(store)` | Replace the current context with another in-scope checkpoint. |
+| `ResumeAppendTool(store)` | Append another in-scope checkpoint history as a framed resumed thread. |
+| `ResumeOutputTool(store)` | Append only the final assistant output from a completed in-scope session. |
+| `SessionTool(store)` | Combined session utility for checkpoint, fork, list, and read operations. |
 
 ## Memory
 
@@ -123,6 +258,70 @@ from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
 | `CalculatorTool()` | Evaluate mathematical expressions safely. Supports standard arithmetic, functions, and constants. |
 | `CodeExecutionTool()` | Execute Python code in a sandboxed environment. Useful for agents that need to test or run code snippets. Requires `EXECUTE` permission. |
 | `DocumentRetrievalTool()` | Retrieve documents from a pre-built index. Useful for agents that need to search through documentation or knowledge bases. |
+
+## Search & Fetch (Priced Operations)
+
+Priced operation tools give agents first-class web search and page-fetch capabilities. Each tool declares a `(operation, provider)` identity so the runtime can track and bill tool spend through the `UsageTracker`. Use these when your agent needs to search the web, fetch page content, or extract structured data — and you want transparent per-operation pricing reflected in `agent.get_cost_usd()`.
+
+```python
+from vidbyte.tools.builtins.operations import (
+    BraveSearchTool, ExaSearchTool, TavilySearchTool,
+    LinkupSearchTool, ParallelSearchTool, OpenAlexSearchTool,
+    SemanticScholarSearchTool,
+    FirecrawlFetchTool, ParallelExtractTool, TavilyExtractTool,
+    LinkupFetchTool, DirectHttpFetchTool,
+    PricedOperationTool,  # base class for creating your own
+)
+```
+
+### Search Tools (7)
+
+| Tool | Provider | Billing | Description |
+|------|----------|---------|-------------|
+| `BraveSearchTool()` | Brave | Flat per-request ($0.005) | Privacy-focused web search returning ranked result snippets. |
+| `ExaSearchTool()` | Exa | Per-result ($0.007 base + $0.001/result beyond 10) | Neural search returning hyper-relevant results with contents. Supports `type` param: `auto`, `fast`, `deep-lite`, `deep`, `deep-reasoning`. |
+| `TavilySearchTool()` | Tavily | Depth-tiered (basic $0.008 / advanced $0.016) | LLM-optimized web search returning ready-to-consume snippets. Supports `search_depth`: `basic`, `advanced`. |
+| `LinkupSearchTool()` | Linkup | Depth-tiered (standard $0.005 / deep $0.05) | Web search returning sourced results or answers. Supports `depth`: `standard`, `deep`. |
+| `ParallelSearchTool()` | Parallel | Per-result (turbo $0.001/req, pro $0.005/req, + $0.001/result beyond 10) | Web search with processor tier selection. Supports `processor`: `turbo`, `pro`. |
+| `OpenAlexSearchTool()` | OpenAlex | Flat per-request ($0.001) | Scholarly works search returning matching academic records. |
+| `SemanticScholarSearchTool()` | Semantic Scholar | Free | Paper search returning matching academic records from Semantic Scholar. |
+
+All search tools accept a `query` (or `objective` for Parallel) parameter. Exa, Parallel, and OpenAlex also accept a result count parameter controlling how many results are returned — and therefore how many units are billed.
+
+### Fetch Tools (5)
+
+| Tool | Provider | Billing | Description |
+|------|----------|---------|-------------|
+| `FirecrawlFetchTool()` | Firecrawl | Per-page ($0.00083/page) | Scrapes web pages into clean markdown. Accepts `url` or `urls` (array). |
+| `ParallelExtractTool()` | Parallel | Per-URL ($0.001/URL) | Extracts LLM-ready content from web pages via Parallel Extract API. Accepts `urls` array. |
+| `TavilyExtractTool()` | Tavily | Per-URL, depth-tiered, 5-URL batch (basic $0.008 / advanced $0.016 per batch) | Extracts cleaned content from web pages. Accepts `urls` array and `extract_depth`: `basic`, `advanced`. |
+| `LinkupFetchTool()` | Linkup | Per-page, tiered (no-JS $0.001 / JS $0.005) | Fetches a single web page's content. Accepts `url` and `render_js` (bool). |
+| `DirectHttpFetchTool()` | Direct HTTP | Free | Fetches a single URL over plain HTTP using the SDK's built-in `HttpFetcher`. No third-party cost. Accepts `url`. |
+
+All fetch tools (except Linkup and DirectHttp) price by the number of URLs/pages requested. Tavily batches in groups of 5 URLs.
+
+### Creating a Priced Operation Tool
+
+Subclass `PricedOperationTool` and set the `operation` and `provider` ClassVars:
+
+```python
+from vidbyte.tools.builtins.operations import PricedOperationTool
+from vidbyte.tools.types import ToolCall, ToolResult, ToolSpec, ToolParameter
+
+class MySearchTool(PricedOperationTool):
+    operation = "search"
+    provider = "my_provider"
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="my_search",
+            description="Custom search tool.",
+            parameters=(ToolParameter(name="query", type="string", description="Search query.", required=True),),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return self._contract_result(f"search: {call.arguments.get('query', '')}", units=1)
+```
 
 ## Filesystem (21 tools)
 

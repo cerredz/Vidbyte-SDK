@@ -25,6 +25,122 @@ When you change the Vidbyte SDK repository, you must update the corresponding sk
 | `skills/usage/available_features.md` | Reference in the Tools section linking to the tools catalog |
 | `skills/sdk/SKILL.md` | Add the category name to the "built-in tool categories" rule; update Framework Boundaries if the tools introduce a new concept |
 
+### Add or Change Durable Sessions
+
+**Example:** Adding `Session.batch_fork`, portable session bundles, usage rollups, or tag lookup.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/sessions.md` | Public API, code examples, checkpoint policy, tool binding, tags, usage, export/import, and rules of thumb |
+| `skills/forking.md` | Fork/resume semantics, lineage, batch fork behavior, and cross-agent patterns |
+| `skills/usage/available_features.md` | Durable Sessions feature summary and key APIs |
+| `skills/usage/available_tools.md` | Session tools table if model-callable tools changed |
+| `skills/usage/create_agent.md` | `agent.persist(...)`, `agent.session`, or constructor-related session entry points |
+| `README.md` | Central durable-session examples and package/layer guide |
+| `llms.txt` | Agent-facing summary, imports, feature map, and design-doc links |
+| `skills/sdk/SKILL.md` | Framework boundary, package rules, and built-in tool category rules |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Public import surface, package map, design-doc references, and test map |
+
+### Add or Change Agent Forking
+
+**Example:** Adding `ForkConversationTool` or changing `BaseAgent.fork(...)` non-escalation rules.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/forking.md` | Distinguish immediate agent-native forks from durable session DAG forks |
+| `skills/usage/available_tools.md` | Agent Forking tool section and safety boundaries |
+| `skills/usage/create_agent_with_tools.md` | Code example attaching `ForkConversationTool` |
+| `skills/usage/available_features.md` | Agent Forking feature notes |
+| `README.md` | Tool catalog or agent-forking overview |
+| `llms.txt` | Agent-facing summary and imports |
+| `skills/sdk/SKILL.md` | Built-in tool category and non-escalation rules |
+
+### Add or Change Tool Error Policy
+
+**Example:** Adding `ToolErrorPolicyMiddleware` or changing `AgentLoopSettings.tool_error_policy`.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/vidbyte-sdk/middleware.md` | Built-in catalog entry, count, arguments, and rendering semantics |
+| `skills/usage/available_features.md` | Middleware summary and code example |
+| `skills/usage/create_agent.md` | `AgentLoopSettings` example and constructor docs |
+| `README.md` | Middleware overview and loop-settings example |
+| `llms.txt` | Agent-facing feature summary and correct import paths |
+| `skills/sdk/SKILL.md` | Middleware rules and removed/stable API notes |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Public import surface and tests/design docs |
+
+### Add or Change Tool Settings
+
+**Example:** Adding a new field to `ToolSettings`, changing denial/abort/truncate
+semantics, or wiring new enforcement in `AgentRuntime`.
+
+**Do not confuse with Tool Error Policy** — `ToolSettings` is runtime-enforced
+universal tool-use policy (deny/cap/truncate). `ToolErrorPolicy` is
+middleware-oriented retry/render for tool *failures*.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/tool-settings/SKILL.md` | Process steps, field table, invariants, NOT-to-do rules |
+| `skills/agentic-loop-settings/SKILL.md` | Nested `tool_settings` pointer / stop reasons if budgets change |
+| `README.md` | Developer-facing `ToolSettings` example if public behavior changes |
+| `docs/design/tool-settings-runtime-enforcement.md` or a new design doc | Non-trivial architecture changes |
+| `vidbyte/agents/settings/tool.py` | Field, validation, pure decision methods |
+| `vidbyte/agents/settings/loop.py` | Nesting, reconcile with `max_tool_calls`, `to_runtime_config()` |
+| `vidbyte/lib/dataclasses/agents.py` | `AgentRuntimeConfig` / `AgentStopReason` when needed |
+| `vidbyte/agents/runtime.py` | Pre-exec / post-exec enforcement helpers |
+| `vidbyte/agents/base.py` | Non-linear runtime construction guard when policy is linear-only |
+| `vidbyte/agents/settings/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py` | Public exports for new symbols |
+
+**Process skill:** follow `skills/tool-settings/SKILL.md` end-to-end before opening a PR.
+
+### Add or Change Output Contracts
+
+**Example:** Adding a new effort floor (`MinCompactions`, `MinSuccessfulToolCalls`),
+extending `_contract_counters`, or changing contract enforcement boundaries.
+
+**Do not confuse with loop ceilings** — output contracts are **floors** (when the
+agent may stop). `max_iterations` / `max_tokens` / `max_tool_calls` are **ceilings**
+(when it must stop). See `skills/output-contracts/SKILL.md`.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/output-contracts/SKILL.md` | Floor table, counter keys, process steps, invariants |
+| `skills/agentic-loop-settings/SKILL.md` | Nested `output_contracts` / `max_contract_rejections` / `contract_unsatisfied` |
+| `vidbyte/agents/contracts/floors.py` | New floor class |
+| `vidbyte/agents/contracts/__init__.py` | Export base + floors |
+| `vidbyte/agents/__init__.py` | Public re-exports |
+| `vidbyte/agents/contract.py` | Owner (`report` / evaluation helpers) when metadata shape changes |
+| `vidbyte/agents/settings/loop.py` | Validation (floor vs ceiling / special pairings) |
+| `vidbyte/agents/runtime.py` | Counter snapshot + finalization-boundary wiring |
+| `vidbyte/agents/base.py` | Linear-only guard (already present; extend only if needed) |
+| `docs/design/output-contracts-loop-settings.md` or a new design doc | Non-trivial architecture changes |
+
+**Process skill:** follow `skills/output-contracts/SKILL.md` end-to-end before opening a PR.
+
+### Add or Change Repository Artifacts
+
+**Example:** Adding or regenerating `artifacts/file_index.md`.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `artifacts/file_index.md` | Regenerated or newly documented artifact content |
+| `README.md` | Central reference for why the artifact exists and who uses it |
+| `llms.txt` | Agent-facing retrieval/navigation guidance |
+| `skills/sdk/SKILL.md` | Repository-artifact maintenance rule |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Package map or playbook entry |
+
 ### Add a New Individual Tool (within existing category)
 
 **Example:** Adding a `SummarizeTool` to `vidbyte/tools/builtins/context/`.
@@ -48,6 +164,25 @@ When you change the Vidbyte SDK repository, you must update the corresponding sk
 | `skills/usage/available_features.md` | Add the pipeline type to the Pipelines section with description and import |
 | `skills/vidbyte-sdk/pipelines.md` | New topology subsection under Topology Types with description, code example, composability notes, and error handling; add entry to Error Handling table; update Module Layout |
 | `skills/sdk/SKILL.md` | Add the new file to Current Layout tree; update the pipelines rule if the new type introduces a new pattern |
+
+### Add or Change Ledger-Driven Multi-Agent Orchestration
+
+**Example:** Changing `MultiAgent`, `TaskLedger`, `MagenticOneOrchestrator`, transfer callbacks, completion gates, or controller limits.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/vidbyte-sdk/multi-agent.md` | Public contracts, lifecycle, invariants, extension seams, limits, errors, and unsupported facade behavior |
+| `skills/usage/create_agents.md` | Team construction and custom transfer examples |
+| `skills/usage/available_features.md` | Feature summary, pipeline distinction, key imports, and minimal example |
+| `skills/usage/create_pipeline.md` | Preserve the fixed-topology pipeline versus adaptive ledger-team decision rule |
+| `skills/vidbyte-sdk/pipelines.md` | Preserve the package boundary and cross-link the multi-agent reference |
+| `skills/sdk/SKILL.md` | Framework boundary, core use cases, and routing table |
+| `skills/vidbyte-sdk/SKILL.md` | Package layout, ownership rules, and trace-impact guidance |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Package map, public surface, namespace client, architecture, prompts, and verification map |
+| `README.md`, `llms.txt`, `vidbyte/agents/README.md`, `vidbyte/trace/README.md` | User- and agent-facing imports, boundaries, lifecycle, and trace semantics |
+| `artifacts/file_index.md` | New or moved multi-agent source, prompt, skill, and design-doc paths |
 
 ### Add a New Context-Window Algorithm
 
@@ -84,7 +219,7 @@ When you change the Vidbyte SDK repository, you must update the corresponding sk
 |------|-------------|
 | `skills/usage/import_prompt.md` | Add the new family section to the Complete Prompt Listing; add enum names + direct imports; update the family/prompt counts in the header |
 | `skills/vidbyte-sdk/adding-prompts.md` | (This doc is the process reference; confirm the steps are still accurate) |
-| `skills/sdk/SKILL.md` | Update the prompt-family count in Core Use Cases (currently 13) |
+| `skills/sdk/SKILL.md` | Update the prompt and family counts in Core Use Cases (currently 51 prompts across 19 families) |
 | `skills/usage/available_features.md` | Update the prompt-family count in the Prompt Collection section |
 | `skills/vidbyte-sdk-doc/SKILL.md` | Update the "Current prompt families" list |
 
@@ -264,10 +399,14 @@ After updating skill files, verify:
 - [ ] Every file path reference (`[link](path)`) resolves to an existing file
 - [ ] Every `from vidbyte import ...` example compiles against the current SDK
 - [ ] All constructor signatures match the current `BaseAgent.__init__` parameter list
-- [ ] All provider names match the current `ModelProvider` enum (10 members: openai, anthropic, gemini, xai, deepseek, glm, minimax, openrouter, elevenlabs, playai)
-- [ ] All `Prompt.<X>` enum names and direct imports resolve (13 families / 34 prompts)
+- [ ] All provider names match the current `ModelProvider` enum (12 members: openai, anthropic, gemini, xai, deepseek, glm, minimax, kimi, mistral, openrouter, elevenlabs, playai)
+- [ ] All `Prompt.<X>` enum names and direct imports resolve (19 families / 51 prompts)
 - [ ] No skill references the removed `vidbyte/strategies/` package, `sdk.strategies`, removed Strategy classes, or the old `MiddlewareDecision.ALLOW/BLOCK/SKIP` API
 - [ ] All tool names match the current tool files
+- [ ] Session changes mention `agent.persist`, session tools, `BatchForkTool`, tag lookup, usage rollups, and portable export/import where applicable
+- [ ] Agent-forking changes distinguish durable session forks from immediate `ForkConversationTool` execution and preserve non-escalation rules
+- [ ] Tool-error-policy docs use `AgentLoopSettings(tool_error_policy=ToolErrorPolicy(...))` and do not mention removed verbosity/render-options APIs
+- [ ] Repository artifacts such as `artifacts/file_index.md` are listed in README/llms when they are agent-facing
 - [ ] The Usage Skill Files table in `skills/sdk/SKILL.md` lists all usage files
 - [ ] The SDK Developer Reference table in `skills/sdk/SKILL.md` lists all reference docs (including evals, memory-tools, context-primitives, middleware, agent-runtimes)
 

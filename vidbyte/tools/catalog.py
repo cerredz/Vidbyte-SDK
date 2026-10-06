@@ -18,9 +18,10 @@ from typing import Any, overload
 
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.adapters import ToolInput, ensure_tool
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolSpec
+from vidbyte.tools.types import ToolCall, ToolSpec
 
 
 class Tools(Sequence[BaseTool]):
@@ -63,6 +64,14 @@ class Tools(Sequence[BaseTool]):
         """Return provider-native tool declarations for this catalog."""
         return ToolsFormatter.format_tools(self, provider_or_model)
 
+    def prepare_call(self, call: ToolCall) -> ToolCall:
+        """Return the call with any validated activity annotation separated from its arguments."""
+        try:
+            tool = self._get(call.tool_name)
+        except ToolRegistryError:
+            return call
+        return ActivityToolFormatter.prepare_call(tool, call)
+
     def add(self, tool: ToolInput, *, replace: bool = False) -> "Tools":
         """Return a new catalog with one tool added."""
         normalized = _ensure_catalog_tool(tool)
@@ -82,6 +91,15 @@ class Tools(Sequence[BaseTool]):
         """Return a new catalog without the exact tool objects supplied."""
         removed = set(tools)
         return Tools(tool for tool in self._tools if tool not in removed)
+
+    def subset(self, names: Iterable[str]) -> "Tools":
+        """Return a new catalog containing exactly the requested names in catalog order."""
+        requested = tuple(str(name) for name in names)
+        unknown = tuple(name for name in requested if name not in self._by_name)
+        if unknown:
+            raise ToolRegistryError(f"Tool not found in registry: {', '.join(repr(name) for name in unknown)}")
+        requested_set = set(requested)
+        return Tools(tool for tool in self._tools if tool.name in requested_set)
 
     def _get(self, name: str) -> BaseTool:
         """Return a tool by name for internal agent execution."""

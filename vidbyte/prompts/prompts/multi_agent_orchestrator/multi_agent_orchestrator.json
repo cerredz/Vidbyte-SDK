@@ -1,0 +1,23 @@
+{
+  "name": "Multi-Agent Orchestrator",
+  "description": "Magentic-One-inspired manager prompts for planning, progress decisions, recovery replanning, and final synthesis over an immutable TaskLedger snapshot.",
+  "key": "multi_agent_orchestrator",
+  "prompts": {
+    "planning_prompt": {
+      "path": "planning_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator/planning_prompt.md"
+    },
+    "progress_prompt": {
+      "path": "progress_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator/progress_prompt.md"
+    },
+    "replanning_prompt": {
+      "path": "replanning_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator/replanning_prompt.md"
+    },
+    "final_prompt": {
+      "path": "final_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator/final_prompt.md"
+    }
+  }
+}

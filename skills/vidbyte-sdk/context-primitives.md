@@ -10,7 +10,7 @@ Purpose:
 Architecture:
     - vidbyte/context/primitives/: ContextItem dataclasses (one module per group).
     - ContextManager: runtime-scoped collection + placement + rendering.
-    - context_primitives tools: model-callable upsert/list/remove.
+    - context_primitives tools: model-callable create/list/remove/view/stats/edit/move.
 Relations:
     See skills/vidbyte-sdk/context-algorithm-to-tool.md (algorithm/tool forms),
     skills/vidbyte-sdk/adding-context-window-algorithms.md, and
@@ -34,7 +34,14 @@ vidbyte/context/primitives/
 |-- records.py      text/file/response/tool-call/artifact-style items
 |-- documents.py    document/environment/memory items
 |-- tasks.py        TaskContextItem, PlanContextItem
-`-- checkpoints.py  TrajectoryCheckpointContextItem (and similar)
+|-- checkpoints.py  TrajectoryCheckpointContextItem (and similar)
+|-- reasoning.py    algorithm-authored search and correction items
+|-- multi_agent.py  multi-agent orchestration state
+|-- framing.py      frame, objective, boundary, ambiguity, perspective challenges
+|-- epistemics.py   assumption, model, and evidence challenges
+|-- decisions.py    decision, alternative, and tradeoff challenges
+|-- execution.py    invariant, dependency, intervention-risk, feedback-gap challenges
+`-- closure.py      process-stall, completion-gate, and risk-escalation challenges
 ```
 
 Public items are importable from `vidbyte.context.primitives` (and most from
@@ -42,9 +49,21 @@ Public items are importable from `vidbyte.context.primitives` (and most from
 
 ```python
 from vidbyte.context.primitives import (
-    TextContextItem, FileContextItem, GitDiffContextItem, TaskContextItem, PlanContextItem,
-    DocumentContextItem, EnvironmentContextItem, MemoryContextItem, ProgressContextItem,
-    ArtifactContextItem, ResponseContextItem, ToolCallContextItem, TrajectoryCheckpointContextItem,
+    ArtifactContextItem,
+    AssumptionChallengeContextItem,
+    CompletionGateContextItem,
+    DocumentContextItem,
+    EnvironmentContextItem,
+    FileContextItem,
+    GitDiffContextItem,
+    MemoryContextItem,
+    PlanContextItem,
+    ProgressContextItem,
+    ResponseContextItem,
+    TaskContextItem,
+    TextContextItem,
+    ToolCallContextItem,
+    TrajectoryCheckpointContextItem,
 )
 ```
 
@@ -52,6 +71,23 @@ Every primitive implements the `ContextItem` protocol — it carries a stable
 `primitive_id` and renders to text via `to_context_text()`. Use `_truncate_text(text, max_chars)`
 from `vidbyte/context/primitives/base.py` to bound rendered output (it passes through when
 `max_chars <= 0`).
+
+### General problem-solving challenge records
+
+The `framing`, `epistemics`, `decisions`, `execution`, and `closure` modules
+contain caller- or worker-authored records for adversarial problem solving in
+any domain. Their lifecycle convention is descriptive: `status` commonly uses
+`open`, `acknowledged`, `investigating`, `resolved`, `invalidated`, or
+`accepted_risk`; `severity` commonly uses `observation`, `concern`, `blocking`,
+or `critical`. Applications may use other strings.
+
+These primitives record concerns but do not automatically investigate them,
+enforce them, transition status, or block completion. They intentionally have
+no `TOOL_CREATE_META` and are not registered as model-create tools. This keeps
+them distinct from algorithm-authored `ProblemSpaceSearchContextItem` and
+`ErrorCorrectionContextItem`, which are produced by context-window algorithms.
+Use a stable `primitive_id` and deliberate `ContextManager` placement when an
+unresolved concern must remain persistent and prominent.
 
 ## ContextManager
 
@@ -65,6 +101,11 @@ context items, their placement in the context window, and rendering. It is insta
 | `place_after_system_prompt(item) -> str` | Render the item at the top of the context zone; mints a `primitive_id`. |
 | `place_after_tools(item) -> str` | Render the item at the end of the context zone; mints a `primitive_id`. |
 | `get_by_id(primitive_id)` / `remove_by_id(primitive_id)` | Look up / remove by id. |
+| `registry_items()` | Ordered, read-only view of managed registry entries. |
+| `set_placement(primitive_id, placement)` | Move an existing managed primitive to a new render placement. |
+| `set_frozen(primitive_id, frozen)` | Mark an existing managed primitive developer-owned or agent-editable. |
+| `upsert_preserving_placement(item)` | Re-upsert using the id's prior placement (default `END_OF_CONTEXT`). |
+| `recite(primitive_id, *, slot_id=None) -> str` | Copy a primitive to `END_OF_CONVERSATION` under `slot_id` or `recite:{id}`. |
 | `items()` / `by_kind(kind)` | Inspect the current items. |
 | `render_primitives_zone()` | Render the primitives zone to text. |
 | `clear()` / `clear_registry()` | Reset. |
@@ -73,42 +114,87 @@ Inner-loop context-window algorithms write through the run context's
 `place_after_system_prompt` / `place_after_tools` rather than mutating provider messages —
 see `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 
+## Context write path integrity
+
+Managed context (registry primitives and placement-driven conversation injections)
+must be written only through public `ContextManager` APIs or
+`ContextWindowRunContext` wrappers. Provider transcripts (the agent loop message
+list), compaction middleware, and outer-loop trial orchestration are separate
+surfaces and are **not** forced through the manager.
+
+| Legal write surface | Illegal bypass |
+|---------------------|----------------|
+| `upsert` / `place_after_*` / `remove_by_id` / `set_placement` / `recite` | `manager._registry[...] = ...` or `._placements` |
+| `registry_items()` / `get_by_id` / `placement_for` | Reading `manager._registry` from tools/algorithms |
+| `ctx.place_after_tools` / `ctx.place_after_system_prompt` / `ctx.remove` | Inner-loop `ctx.messages.append` / message list surgery |
+| Context tools constructed with the live `ContextManager` | Ad-hoc in-memory stores that shadow the registry |
+
+CI hard rules (see `scripts/check_context_write_paths.py` and
+`docs/design/context-write-path-integrity.md`):
+
+- **CWP001** — no private `._registry` / `._placements` access outside `manager.py`
+  (scoped under context/agents/context tools).
+- **CWP002** — inner-loop `InnerContextWindowAlgorithm` modules must not mutate
+  provider `messages`.
+- **CWP004** — context primitive tools must accept a `ContextManager` in `__init__`.
+
+```bash
+python scripts/check_context_write_paths.py
+python scripts/run_ci.py --stage source
+```
+
+Examples of correct managed reads/writes: `ContextListTool` and `ContextStatsTool`
+use `registry_items()`; `ErrorCorrectionAlgorithm` lists removable managed
+primitives via `registry_items()` before the auditor pass.
+
 ## Model-Callable Context Tools
 
-The `context_primitives` tool family lets the model manage its own context window. Each tool is
-constructed with the live `ContextManager` and is `ToolPermission.SAFE`:
+The `context_primitives` tool family lets the model manage its own context window. Each tool is constructed with the same live `ContextManager` that is passed to `BaseAgent(context_manager=...)` and is `ToolPermission.SAFE`:
 
 ```python
-from vidbyte.tools.builtins.context_primitives import ContextUpsertTool, ContextListTool, ContextRemoveTool
+from vidbyte import Agent, ContextManager
+from vidbyte.tools.builtins.context_primitives import ContextWindowFactory
 
-# context_manager comes from the agent runtime; never pass it into execute()
-tools = [
-    ContextUpsertTool(context_manager),
-    ContextListTool(context_manager),
-    ContextRemoveTool(context_manager),
-]
+ctx = ContextManager()
+agent = Agent(
+    name="context-editor",
+    runner=my_runner,
+    context_manager=ctx,
+    tools=ContextWindowFactory(ctx).build(),
+)
 ```
 
 | Tool | Action |
 |------|--------|
-| `ContextUpsertTool` | Model inserts/updates a structured context item. |
+| `ContextWindowFactory(context_manager).build(include=None, management=True)` | Class factory mounting per-primitive create tools plus management tools. |
+| `context_window_tools(...)` | Thin convenience wrapper around `ContextWindowFactory(...).build(...)`. |
+| `CreateContextPrimitiveTool` | Registry-backed generic class used to instantiate `context_create_<key>` tools. |
+| `context_create_text`, `context_create_document`, `context_create_memory`, `context_create_plan`, `context_create_task`, `context_create_progress`, `context_create_artifact`, `context_create_environment`, `context_create_git_diff` | Typed create/upsert tools for supported primitive keys. Tool strings live on each primitive's `TOOL_CREATE_META`. Reusing `primitive_id` overwrites unless the existing primitive is frozen. |
 | `ContextListTool` | Model lists current context items. |
-| `ContextRemoveTool` | Model removes a context item by id. |
+| `ContextRemoveTool` | Model removes a non-frozen context item by id. |
+| `ContextStatsTool` | Model lists id, kind, title, placement, frozen flag, and rendered character count. |
+| `ContextEditTool` | Model performs an exact, unique string replacement across editable string/tuple fields (`content`, `goal`, `steps`, etc.). |
+| `ContextReciteTool` | Model re-emits a named primitive at `END_OF_CONVERSATION` (copy id `recite:{id}` or optional `slot_id`) for recent attention. |
+| `ContextMoveTool` | Model changes the placement for one non-frozen primitive. |
+| `ContextUpsertTool` | Legacy flattened insert/update tool retained for compatibility. |
 
-These tools share the same `ContextManager.upsert()` path that context-window algorithms use.
-The difference is who triggers the write (model vs. runtime) — see
-`skills/vidbyte-sdk/context-algorithm-to-tool.md`.
+These tools share the same `ContextManager.upsert()` path that context-window algorithms use. The difference is who triggers the write: model vs. runtime. Supported create keys intentionally exclude filesystem-backed `file`, event-record primitives (`response`, `tool_call`), and algorithm-owned primitives (`reflexion`, `trajectory_checkpoint`, `error_correction`, `problem_space_search`). Keep one shared manager instance everywhere; tools mutate that manager, and the linear runtime re-renders its registry on the next iteration.
 
 ## Adding a New Primitive
 
 1. Add the dataclass to the appropriate module under `vidbyte/context/primitives/`
    (or a new module), `@dataclass(frozen=True, slots=True)` with a `primitive_id` and a
    `to_context_text()` that bounds output with `_truncate_text`.
-2. Export it from `vidbyte/context/primitives/__init__.py` (and `vidbyte/context/__init__.py` /
+2. If the primitive should be model-creatable, add a `TOOL_CREATE_META` ClassVar dictionary
+   on the dataclass with `key`, `tool_name`, `default_title`, a detailed
+   `{tool_name} is ... {tool_name} does ...` description, and a `fields` map of detailed
+   parameter strings/schemas. Then register a builder row in
+   `vidbyte/tools/builtins/context_primitives/registry.py`.
+3. Export it from `vidbyte/context/primitives/__init__.py` (and `vidbyte/context/__init__.py` /
    `vidbyte/__init__.py` if public).
-3. If the primitive backs a context-window algorithm and a tool, follow
+4. If the primitive backs a context-window algorithm and a tool, follow
    `skills/vidbyte-sdk/context-algorithm-to-tool.md` so both forms share the one dataclass.
-4. Add tests (`tests/test_context_management.py`, `tests/test_context_primitives_*`).
+5. Add tests (`tests/test_context_management.py`, `tests/test_context_primitives_*`).
 
 ## Verification
 

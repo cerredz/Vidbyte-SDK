@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.env
+*.egg
+
+# Local eval database
+.vidbyte_evals.db

@@ -1,16 +1,12 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/continual_trace.py
 
-Description:
-    Defines the internal tool used by the continual trace agent.
-Purpose:
-    Provides one model-visible updateTrace function that validates trace updates
-    against the schema and deterministically merges them (append for arrays, deep
-    merge for objects, replace for scalars) into the accumulated artifact.
-Architecture:
-    - UpdateTraceTool: Schema-scoped tool with one required trace object argument.
-Relations:
-    Used by vidbyte.agents.continual_trace.ContinualTraceAgent. Depends on the public
-    tool contracts and on vidbyte.lib.dataclasses.trace.TraceSchema.
+PURPOSE: Defines the internal updateTrace tool used by the continual trace agent — the only model-visible tool for writing into a running continual trace artifact.
+ROLE IN CODEBASE: Used by vidbyte.agents.continual_trace.ContinualTraceAgent. Depends on the public tool contracts and on vidbyte.lib.dataclasses.trace.TraceSchema/TraceField, including TraceField's optional nested fields/items shape.
+ARCHITECTURE NOTE: UpdateTraceTool is a schema-scoped tool with one required trace object argument. Its JSON Schema and type validation walk a TraceField's declared fields/items recursively, but its merge policy stays exactly one level deep regardless of nesting: array fields append with exact-duplicate dedupe, object fields are shallow-merged one key at a time (never recursively), and scalar fields are replaced outright. A nested array declared inside an OBJECT field's fields is therefore still fully replaced, not appended to, every time that OBJECT field is touched — nesting changes what shape is validated and shown to the model, not how a value merges across calls.
+COMMON MODIFICATION PATTERNS: Change validation and JSON Schema rendering together in _first_shape_error/_json_schema_for_field, since both walk the same TraceField tree. Never change _merge_field's shallow-object/append-array policy to "fix" nested accumulation — instead move the field that needs to accumulate to its own top-level ARRAY field, per skills/vidbyte-sdk/continual-tracing.md.
+KNOWN EDGE CASES: An OBJECT field's undeclared subfields, or an ARRAY field's elements when items is None, are validated only at the outer type check and pass through to merge untouched, matching the top-level "unknown keys are dropped at merge, not at validation" policy.
+RELATED DOCS: docs/design/nested-continual-trace-shapes.md, docs/design/continual-trace-agent.md, skills/vidbyte-sdk/continual-tracing.md
+TESTS: tests/test_continual_trace.py, scripts/test-continual-trace.py
 """
 
 from __future__ import annotations
@@ -37,7 +33,12 @@ _TOOL_DESCRIPTION = (
     "(new items are added after existing ones; exact duplicates are skipped), object fields are "
     "shallow-merged (your keys overwrite matching keys, other keys are kept), and scalar fields "
     "are replaced outright. Fields you omit are left unchanged from the prior value. Only "
-    "fields declared in the schema are accepted; any extra keys are silently dropped."
+    "fields declared in the schema are accepted; any extra keys are silently dropped. Some "
+    "object and array fields declare their own nested subfields or item shape below — that "
+    "nested shape only tells you what to write, it does not change the merge rule above: within "
+    "an object field, a subfield you omit keeps its prior value, but a subfield you do include — "
+    "even one shaped as a list — is replaced with the new value you send whole, not merged "
+    "element-wise with what was there before."
 )
 
 _TRACE_PARAM_DESCRIPTION = (
@@ -99,11 +100,8 @@ class UpdateTraceTool(BaseTool):
         return dict(self._trace)
 
     def _input_schema(self) -> dict[str, Any]:
-        # Builds a provider-native JSON Schema for the typed updateTrace argument.
-        properties = {
-            field_name: {"type": spec.type.value, "description": spec.description}
-            for field_name, spec in self.schema.fields.items()
-        }
+        # Builds a provider-native JSON Schema for the typed updateTrace argument, recursing into declared nested shape.
+        properties = {field_name: self._json_schema_for_field(spec) for field_name, spec in self.schema.fields.items()}
         return {
             "type": "object",
             "properties": {
@@ -118,18 +116,47 @@ class UpdateTraceTool(BaseTool):
             "additionalProperties": False,
         }
 
+    def _json_schema_for_field(self, spec: TraceField) -> dict[str, Any]:
+        # Renders one TraceField as JSON Schema, recursing into its declared fields/items when present.
+        schema: dict[str, Any] = {"type": spec.type.value, "description": spec.description}
+        if spec.type is TraceFieldType.OBJECT and spec.fields:
+            schema["properties"] = {name: self._json_schema_for_field(sub) for name, sub in spec.fields.items()}
+            schema["additionalProperties"] = False
+        if spec.type is TraceFieldType.ARRAY and spec.items is not None:
+            schema["items"] = self._json_schema_for_field(spec.items)
+        return schema
+
     def _first_type_error(self, update: Mapping[str, Any]) -> str | None:
-        # Returns the first declared-field value whose type violates its schema, or None.
+        # Returns the first declared-field value whose shape violates its schema, or None.
         for field_name, spec in self.schema.fields.items():
             if field_name not in update or update[field_name] is None:
                 continue
-            if not self._value_matches_type(update[field_name], spec.type):
-                return f"{field_name} expected {spec.type.value}"
+            error = self._first_shape_error(update[field_name], spec, field_name)
+            if error is not None:
+                return error
+        return None
+
+    def _first_shape_error(self, value: Any, spec: TraceField, path: str) -> str | None:
+        # Recursively checks one value against a TraceField's leaf type and, when declared, its nested fields/items.
+        if not self._value_matches_type(value, spec.type):
+            return f"{path} expected {spec.type.value}"
+        if spec.type is TraceFieldType.OBJECT and spec.fields:
+            for sub_name, sub_spec in spec.fields.items():
+                if sub_name not in value or value[sub_name] is None:
+                    continue
+                error = self._first_shape_error(value[sub_name], sub_spec, f"{path}.{sub_name}")
+                if error is not None:
+                    return error
+        if spec.type is TraceFieldType.ARRAY and spec.items is not None:
+            for index, element in enumerate(value):
+                error = self._first_shape_error(element, spec.items, f"{path}[{index}]")
+                if error is not None:
+                    return error
         return None
 
     @staticmethod
     def _value_matches_type(value: Any, field_type: TraceFieldType) -> bool:
-        # Checks one JSON-like value against a declared trace field type.
+        # Checks one JSON-like value against a declared trace field's own leaf type.
         if field_type is TraceFieldType.ARRAY:
             return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
         if field_type is TraceFieldType.OBJECT:
@@ -143,7 +170,7 @@ class UpdateTraceTool(BaseTool):
         return isinstance(value, str)
 
     def _merge_known_fields(self, base: Mapping[str, Any], update: Mapping[str, Any]) -> dict[str, Any]:
-        # Merges only declared schema fields, appending arrays and deep-merging objects.
+        # Merges only declared schema fields, appending arrays and shallow-merging objects one level deep.
         merged = {field_name: base.get(field_name) for field_name in self.schema.fields}
         for field_name, spec in self.schema.fields.items():
             if field_name not in update:
@@ -152,7 +179,7 @@ class UpdateTraceTool(BaseTool):
         return merged
 
     def _merge_field(self, spec: TraceField, previous: Any, incoming: Any) -> Any:
-        # Applies the per-type merge policy for a single field value.
+        # Applies the per-type merge policy for a single field value; object merges never recurse past one level.
         if incoming is None:
             return previous
         if spec.type is TraceFieldType.ARRAY:

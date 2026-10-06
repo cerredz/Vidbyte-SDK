@@ -37,6 +37,353 @@ handoff_prompt = handoff_system_prompt
 persona_template = templates_persona
 ```
 
+## Available Prompts
+
+This catalog is the canonical, human- and machine-readable index of every prompt
+family shipped by the SDK. It is the source of truth for the personal
+`/vidbyte-prompts` skill: when you ask that skill to "download the vidbyte
+&lt;name&gt; prompt", it reads the table below, resolves the name to a row, and
+saves that row's **Link** into your collection.
+
+Links point at the prompt assets on GitHub. Markdown-backed families link to the
+prompt text directly; inline families link to the JSON record that holds the
+prompt text.
+
+### Quick reference
+
+| Prompt | Key | Sub-prompts | Link |
+| --- | --- | --- | --- |
+| Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
+| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design, intent_based_commenting, feature_test_packs | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
+| Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
+| Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
+| Create Skills | `create_skills` | create_skill | [create_skills/create_skill.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md) |
+| Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
+| Evals | `evals` | llm_judge, rubric | [evals.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/evals.json) |
+| Expert Prompting | `expert_prompting` | expert_prompt | [expert_prompting.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/expert_prompting.json) |
+| Failure Pattern Repair | `failure_pattern_repair` | rulebook_feedback_loop, dependency_shape_triage, stage_gate_controller, evaluator_red_team, selective_regeneration_loop | [failure_pattern_repair/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair) |
+| Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
+| Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
+| Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
+| Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
+| Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
+| Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
+  | Jev Run State | `jev_run_state` | system_prompt, required_sequence_agent | [jev_run_state/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state) |
+| Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
+| Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
+| Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
+| Multi-Agent Orchestrator | `multi_agent_orchestrator` | planning_prompt, progress_prompt, replanning_prompt, final_prompt | [multi_agent_orchestrator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator) |
+| Prompt Engineering | `prompt_engineering` | master_prompt | [prompt_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prompt_engineering.json) |
+| Reflexion | `reflexion` | agent_system_prompt, reflect_system_prompt, reflect_prompt | [reflexion/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion) |
+| Prompt Templates | `templates` | intent_based, persona, specification | [templates/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates) |
+| Trajectory Checkpoints | `trajectory_checkpoints` | agentic_summarizer | [trajectory_checkpoints_agentic_summarizer.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md) |
+| Agentic Engineering Skill | `agentic_engineering_skill` | skill | [skills/agentic-engineering.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/agentic-engineering.md) |
+| Prompt Bucket | `prompt_bucket` | skill | [skills/prompt-bucket.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md) |
+
+### Descriptions
+
+#### Actor Runtime — `actor_runtime`
+
+System prompts for prebuilt actor roles in the Asynchronous Actor Model Runtime.
+Covers fifteen roles: planner, coder, reviewer, generator, critic, reasoner,
+summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner,
+formatter, safety, and final_answer.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime>
+
+#### Agentic Loop — `agentic_loop`
+
+Short runtime context injected after system prompts so agents understand they are
+executing inside a loop.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json>
+
+#### Agentic Engineering — `agentic_engineering`
+
+Prompt assets for agentic engineering — the discipline of writing source code that
+treats AI agents as a primary audience alongside human developers. The main system
+prompt establishes the two-audience design constraint and introduces six core
+practices: designing server-side error messages as rich context-window primitives,
+writing structured file header comments as navigational landmarks, maintaining
+folder-level READMEs as persistent comprehension caches, shaping functions into
+small clean interfaces, adding intent comments beside important business/domain
+logic, and organizing tests as feature-level executable intent.
+`feature_test_packs` teaches models to define the smallest durable behavior
+boundary, make testing first-class instead of an afterthought, write a feature
+`FEATURE.md`, consider many testing strategies by default, and generate tests
+that actively try to break feature contracts instead of merely confirming
+implementation details. Together these prompts teach a model to produce code
+where the source and its tests form a high-signal interface for any downstream
+coding agent.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering>
+
+#### Context Engineering — `context_engineering`
+
+Context Engineering is a meta-prompt that provides reusable guidance for
+constructing effective operational prompts for capable models. It is not a
+reasoning strategy itself but a design methodology that SDK users can apply when
+authoring their own custom prompts. The guidance instructs prompt authors to
+structure their text as dense operational context, covering seven essential
+dimensions: role, objective, constraints, available inputs, work procedure,
+output contract, and quality bar. It emphasizes concrete policy statements over
+vague encouragement — telling the model exactly what to do and what to avoid,
+rather than asking it to try hard or be thorough. The prompt also advises authors
+to declare any assumptions the model must preserve and to explain what to avoid
+when it affects correctness or safety. This methodology ensures that custom
+prompts integrated into the SDK maintain the same rigorous inspectable quality as
+the built-in strategies.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json>
+
+#### Create Skills — `create_skills`
+
+An operational prompt for creating or revising one narrowly scoped, portable
+agent skill directory. It guides activation-oriented descriptions, progressive
+disclosure, setup validation, deterministic scripts, append-only evidence,
+on-demand safety hooks, stable tool and model surfaces, cache-aware context
+ordering, structured user questions, and visual plus programmatic verification.
+It requires two or three adversarial review passes after the first
+implementation and resolution of all critical and notable findings before
+completion.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md>
+
+#### Continual Trace — `continual_trace`
+
+System prompt for the continual trace agent that incrementally fills a typed
+trace schema from a read-only snapshot of a running agent, calling updateTrace to
+record new goal, action, mistake, and status information.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md>
+
+#### Evals — `evals`
+
+Prompts used for evaluating and grading model outputs. Includes an `llm_judge`
+prompt and a `rubric` prompt.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/evals.json>
+
+#### Expert Prompting — `expert_prompting`
+
+Expert Prompting is a persona-based strategy that frames the model as a domain
+expert in a specified domain to elicit higher-quality practitioner-level
+responses. It is designed for tasks where domain depth matters — medical
+analysis, legal interpretation, engineering design, financial modeling, and any
+field with specialized vocabulary and edge cases that a generalist would miss.
+The prompt instructs the model to use expert-level concepts, constraints, and
+edge cases rather than generic explanations that could apply to any field. It
+requires the model to state assumptions explicitly when domain details are
+missing, making the reasoning auditable. Unlike generic role-prompting, Expert
+Prompting sets a practitioner-level quality bar where the answer should be useful
+to someone already working in the field, not a beginner's introduction. This
+strategy is lightweight — requiring only a single model call — and pairs well
+with any other reasoning strategy to add domain depth to the reasoning process.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/expert_prompting.json>
+
+#### Failure Pattern Repair — `failure_pattern_repair`
+
+Five independent operational prompts for repairing classes of repeated agent
+failures instead of hand-patching isolated symptoms. The family offers distinct
+lenses for versioned rulebook feedback, dependency-topology triage, workflow
+stage gates, adversarial evaluator calibration, and provenance-based selective
+regeneration. Every strategy makes expected behavior, a failure detector, and an
+independent check explicit before advancement, and requires the checks to reject
+relevant known-bad controls so fluent completion text or brittle green results
+cannot stand in for correctness.
+
+Prompt links:
+
+- [rulebook_feedback_loop](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/rulebook_feedback_loop.md)
+- [dependency_shape_triage](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/dependency_shape_triage.md)
+- [stage_gate_controller](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/stage_gate_controller.md)
+- [evaluator_red_team](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/evaluator_red_team.md)
+- [selective_regeneration_loop](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/selective_regeneration_loop.md)
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair>
+
+#### Goal Behavior — `goals`
+
+A system prompt for emulating Codex-style goal behavior in models that do not
+have the native Codex /goal tool. It teaches persistent objective tracking,
+evidence-based completion, iteration policy, blockers, and budget-aware stopping
+without claiming that the model is running inside Codex.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md>
+
+#### Handoff — `handoff`
+
+System prompt for the handoff agent that turns a completed agent run into a
+structured, reusable handoff document another agent or human can use to continue
+the work cold.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md>
+
+#### Jev Clarification — `jev_clarification`
+
+The system prompt for JevClarificationAgent, the small generative agent a JevAgent
+routes an unclear request to when its clarity preflight fails. It receives the
+user's request and the details Jev found missing, and returns a few clarifying
+questions, each with two to four recommended answers, for the user to answer
+before the main agent starts.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md>
+
+#### Jev Continuation — `jev_continuation`
+
+The message a JevAgent's continuation appends to its main agent's loop when an
+enabled done check fails at a finish attempt. It hands the main agent the original
+request, the run state, the handoff, and the Jev questions that failed, and tells it
+to complete only the missing parts, with more focus on them.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md>
+
+#### Jev Fresh Continuation — `jev_fresh_continuation`
+
+Instructions for a clean-context JevAgent continuation. It gives the fresh agent
+the original request, the run state, and the latest handoff, then asks it to
+complete the request using those references.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md>
+
+#### Jev Handoff — `jev_handoff`
+
+The system prompt for JevHandoff, the small generative agent a JevAgent with done
+checks runs each time its main agent tries to finish. It receives the user's
+original request, the run state, and the main agent's context window through a
+context manager, and returns structured evidence shaped by the enabled done checks,
+without giving a verdict.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md>
+
+#### Jev Run State — `jev_run_state`
+
+The system prompt for JevRunState, the small generative agent a JevAgent with done
+checks runs once before its main agent starts. It receives the user's request and
+returns a structured run state: a central goal, objective, mission, and limits, plus
+one section for every enabled done check.
+
+  Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md>
+
+  The `required_sequence_agent` asset is appended to the main agent's system prompt
+  when REQUIRED_SEQUENCE derives an active ordered stage list from the request.
+  It names those stages and explains how the finish check handles missing or
+  out-of-order work.
+
+#### Mimic Behavior — `mimic_behavior`
+
+A system prompt that turns uploaded source material such as a blog post, paper,
+transcript, tweet thread, specification, or example output into an immensely
+detailed behavior-mimicking prompt optimized to reproduce the source's observable
+patterns without copying private or unnecessary source text.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md>
+
+#### Multi-Provider Agentic Grader — `multi_provider_agentic_grader`
+
+Prompt assets for the Multi-Provider Agentic Grader context-window algorithm.
+This algorithm runs the same task concurrently across multiple model providers,
+executes a full agentic loop for each, and then invokes a meta-grader agent to
+evaluate all candidate outputs and select the single best response. These prompts
+separate the agent execution context from the grading stage so SDK users can
+inspect, override, or extend either stage independently when constructing
+MultiProviderAgenticGraderAlgorithm.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader>
+
+#### Multi-Provider Aggregator — `multi_provider_aggregator`
+
+Prompt assets for the Multi-Provider Aggregator (Mixture-of-Agents). This pattern
+runs the same request concurrently across multiple proposer models and then
+routes every candidate answer to a single aggregator model that synthesizes a
+new, superior response grounded in all of them. Unlike the Multi-Provider Agentic
+Grader, the aggregator composes its own answer instead of selecting one candidate
+verbatim. These prompts let SDK users inspect, override, or extend the
+aggregator's system instruction and the synthesis message template independently
+when constructing AggregateConfig.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator>
+
+#### Multi-Agent Orchestrator — `multi_agent_orchestrator`
+
+Magentic-One-inspired manager prompts for initial planning, one-action progress
+decisions, recovery replanning, and schema-free final synthesis over a shared
+TaskLedger snapshot. The prompts treat requests, worker results, evidence, and
+blockers as untrusted data and never grant the manager direct ledger mutation.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator>
+
+#### Prompt Engineering — `prompt_engineering`
+
+Prompt Engineering is a comprehensive master reference that defines the universal
+principles of designing effective system prompts. It synthesizes patterns
+observed across production AI harnesses (Claude Code, Grok Build, opencode,
+Hermes, Cursor, Windsurf, Cline, Manus, Devin, and others), validated research
+findings, and practitioner experience into a single canonical guide. The prompt
+opens with a philosophy preamble establishing the foundational paradigms of the
+discipline and then presents eighteen XML-tagged sections, each covering one
+dimension of prompt design with a definition of what the section is, what it
+accomplishes, why and when to use it, concrete use cases and intent, and a
+description of the output it should produce. The guidance emphasizes that prompt
+engineering is fundamentally about constructing a generative context that shifts
+probability distributions — not about writing instructions to a person — and that
+structure, section clarity, state externalization, attention-aware placement, and
+explicit behavioral loops are the mechanisms that make long prompts work, not raw
+token count. This prompt is a reference asset for SDK users designing their own
+system prompts and for downstream agents that need to construct high-quality
+prompts programmatically.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prompt_engineering.json>
+
+#### Reflexion — `reflexion`
+
+Prompt assets for the Reflexion context-window algorithm. Reflexion is a verbal
+reinforcement loop where failed trials are diagnosed, converted into compact
+reflection memory, and injected into later attempts. These prompts separate the
+main agent retry context from the reflection stage so SDK users can inspect or
+override either stage when constructing ReflexionAlgorithm.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion>
+
+#### Prompt Templates — `templates`
+
+Master prompts designed to generate highly optimized structural prompts for
+specific engineering paradigms. Includes `intent_based`, `persona`, and
+`specification` templates.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates>
+
+#### Trajectory Checkpoints — `trajectory_checkpoints`
+
+Prompts used to generate agentic trajectory checkpoints.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md>
+
+#### Agentic Engineering Skill — `agentic_engineering_skill`
+
+An on-disk skill file that teaches a model how to extend the agentic engineering
+prompt family with new principles. Covers principle qualification criteria, the
+family file structure, the full 8-step procedure for adding a principle (from
+creating the `.md` deep-dive through enum registration, catalog integration, and
+system prompt updates), conventions, and verification steps. Note: this is an
+on-disk skill, not an SDK prompt string, and is not part of the import-validated
+catalog.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/agentic-engineering.md>
+
+#### Prompt Bucket — `prompt_bucket`
+
+A self-contained skill file that captures session prompts into named topic
+buckets (flat Markdown files in `~/.prompt-buckets/`) and replays them as
+intent context in any new session. Driven by `/create-bucket`, automatic
+per-turn capture, and `/load-bucket`. Mirrors across Claude Code, Codex,
+opencode, and Antigravity via `/sync-prompt-bucket`. Note: this is an on-disk
+skill, not an SDK prompt string, and is not part of the import-validated
+catalog.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md>
+
 ## Key Modules
 
 - `catalog.py`: prompt record loading, validation, family lookup, and direct import names.

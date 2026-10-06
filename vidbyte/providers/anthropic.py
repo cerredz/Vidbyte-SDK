@@ -43,9 +43,15 @@ class AnthropicProvider:
         self._attach_instructions(payload, config, system)
         self._attach_sampling(payload, config)
         self._attach_tools(payload, config)
+        self._attach_response_format(payload, config)
         self._attach_metadata(payload, config, metadata)
         self._attach_extra_body(payload, config)
         return payload
+
+    def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
+        # Anthropic carries the schema under output_config.format rather than a response_format field.
+        if config.response_format is not None:
+            payload["output_config"] = {"format": {"type": "json_schema", "schema": dict(config.response_format)}}
 
     def _create_headers(self, config: TextModelConfig) -> dict[str, str]:
         # Include the required Anthropic version and API key headers.

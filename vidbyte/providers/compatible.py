@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import ModelProvider, StructuredOutputSupport
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
 
 
@@ -76,9 +77,30 @@ class OpenAICompatibleProvider:
             payload["tool_choice"] = config.tool_choice
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # Preserve structured output options for compatible chat APIs.
-        if config.response_format is not None:
-            payload["response_format"] = dict(config.response_format)
+        # Sends the strongest structured-output request this endpoint is declared to support.
+        if config.response_format is None:
+            return
+        schema = dict(config.response_format)
+        tier = StructuredOutputRegistry.resolve(self.provider, config.model)
+        match tier:
+            case StructuredOutputSupport.NATIVE_SCHEMA:
+                payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": schema, "strict": True}}
+                return
+            case StructuredOutputSupport.JSON_MODE:
+                payload["response_format"] = {"type": "json_object"}
+            case StructuredOutputSupport.STRICT_TOOLS | StructuredOutputSupport.PROMPT_ONLY:
+                pass
+            case _:
+                raise ProviderConfigurationError(f"{self.provider.value} resolved unsupported structured-output tier {tier!r}.", provider=self.provider.value)
+        # @intent below-native-the-fields-only-reach-the-model-as-text
+        # JSON mode guarantees parseable JSON rather than field conformance, so each lower tier needs
+        # schema guidance in the system prompt; DeepSeek also requires the word "JSON" before enabling it.
+        description = StructuredOutputRegistry.describe(self.provider, config.model).schema_instruction(schema)
+        messages = payload["messages"]
+        if messages[0].get("role") == "system":
+            messages[0]["content"] += description
+        else:
+            messages.insert(0, {"role": "system", "content": description.strip()})
 
     def _attach_metadata(self, payload: dict[str, Any], config: TextModelConfig, metadata: Mapping[str, object] | None) -> None:
         # Merge runner-call metadata with static config metadata.
@@ -109,6 +131,47 @@ class OpenAICompatibleProvider:
 class DeepSeekProvider(OpenAICompatibleProvider):
     provider = ModelProvider.DEEPSEEK
 
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        # DeepSeek may return tool_calls even when no tools are configured,
+        # and may wrap JSON in markdown code fences.
+        # Always prefer text content; strip markdown wrappers.
+        choices = parsed.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
+        first = choices[0]
+        message = first.get("message") if isinstance(first, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str) and content.strip():
+            import re
+            return re.sub(r'\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z', r'\1', content.strip(), flags=re.DOTALL)
+        if not isinstance(content, str):
+            raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
+        return content
+
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        import re
+
+        choices = parsed.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
+        first = choices[0]
+        message = first.get("message") if isinstance(first, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        has_tool_calls = isinstance(message, dict) and isinstance(message.get("tool_calls"), list) and len(message["tool_calls"]) > 0
+        if isinstance(content, str) and content.strip():
+            text = content
+        elif has_tool_calls:
+            tool_args = message["tool_calls"][0].get("function", {}).get("arguments", "")
+            text = tool_args if isinstance(tool_args, str) else ""
+        else:
+            text = content if isinstance(content, str) else ""
+        if not text or not text.strip():
+            raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
+        text = text.strip()
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        return text
+
 
 class GLMProvider(OpenAICompatibleProvider):
     provider = ModelProvider.GLM
@@ -118,9 +181,24 @@ class MiniMaxProvider(OpenAICompatibleProvider):
     provider = ModelProvider.MINIMAX
 
 
+class KimiProvider(OpenAICompatibleProvider):
+    provider = ModelProvider.KIMI
+
+
+class MetaProvider(OpenAICompatibleProvider):
+    provider = ModelProvider.META
+
+
+class MistralProvider(OpenAICompatibleProvider):
+    provider = ModelProvider.MISTRAL
+
+
 __all__ = [
     "DeepSeekProvider",
     "GLMProvider",
+    "KimiProvider",
+    "MetaProvider",
     "MiniMaxProvider",
+    "MistralProvider",
     "OpenAICompatibleProvider",
 ]

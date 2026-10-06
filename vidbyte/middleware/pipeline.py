@@ -1,14 +1,17 @@
 """Context Protocol Header
 
 Description:
-    Implements ordered middleware hook dispatch for agent runtime middleware.
+    Implements ordered middleware hook dispatch and diagnostic invocation recording.
 Purpose:
     Centralizes middleware decision handling, sleeps, exception policy, and
-    metadata events so AgentRuntime remains focused on the model/tool loop.
+    metadata events so AgentRuntime remains focused on the model/tool loop. It
+    records every hook invocation separately from consumer-facing policy events.
 Architecture:
     - MiddlewarePipeline: Runs middleware hooks in configured order.
+    - hook_invocations: Captures elapsed time and outcome for diagnostic tracing.
 Relations:
-    Used by vidbyte.agents.runtime and public middleware tests.
+    Used by vidbyte.agents.runtime, which turns hook invocations into diagnostic
+    semantic spans before the enclosing agent trace closes.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareHookInvocation,
     MiddlewareTransform,
 )
 from vidbyte.middleware.base import AgentMiddleware
@@ -43,11 +47,17 @@ class MiddlewarePipeline:
         self._sleeper = sleeper or asyncio.sleep
         self.clock = clock or time.monotonic
         self._events: list[MiddlewareEvent] = []
+        self._hook_invocations: list[MiddlewareHookInvocation] = []
 
     @property
     def events(self) -> tuple[MiddlewareEvent, ...]:
         """Return middleware events recorded so far."""
         return tuple(self._events)
+
+    @property
+    def hook_invocations(self) -> tuple[MiddlewareHookInvocation, ...]:
+        """Return diagnostic records for every middleware hook invocation."""
+        return tuple(self._hook_invocations)
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         return await self._run(MiddlewareHook.BEFORE_RUN, ctx)
@@ -103,11 +113,21 @@ class MiddlewarePipeline:
     ) -> MiddlewareDecision:
         aggregate = MiddlewareDecision.continue_()
         for middleware in self.middleware:
+            started_at = self.clock()
+            error_type: str | None = None
             try:
                 raw_decision = await getattr(middleware, hook.value)(ctx)
                 decision = raw_decision or MiddlewareDecision.continue_()
             except Exception as exc:
+                error_type = type(exc).__name__
                 decision = self._exception_decision(middleware, hook, exc)
+            self._record_hook_invocation(
+                middleware,
+                hook,
+                decision,
+                duration_seconds=max(0, self.clock() - started_at),
+                error_type=error_type,
+            )
 
             if decision.action is MiddlewareAction.CONTINUE:
                 aggregate = self._merge_continue_decisions(aggregate, decision)
@@ -152,7 +172,11 @@ class MiddlewarePipeline:
         metadata = {"error_type": type(exc).__name__, "error": str(exc)}
         if middleware.fail_closed:
             return MiddlewareDecision.abort("middleware_error", metadata=metadata)
-        decision = MiddlewareDecision.continue_(metadata=metadata)
+        decision = MiddlewareDecision(
+            action=MiddlewareAction.CONTINUE,
+            reason="middleware_error_fail_open",
+            metadata=metadata,
+        )
         self._events.append(
             MiddlewareEvent(
                 middleware_name=middleware.middleware_name,
@@ -177,6 +201,29 @@ class MiddlewarePipeline:
                 action=decision.action,
                 reason=decision.reason,
                 metadata=dict(decision.metadata),
+            )
+        )
+
+    def _record_hook_invocation(
+        self,
+        middleware: AgentMiddleware,
+        hook: MiddlewareHook,
+        decision: MiddlewareDecision,
+        *,
+        duration_seconds: float,
+        error_type: str | None,
+    ) -> None:
+        # Exception text may include provider payloads, so diagnostics retain only the exception class.
+        metadata = {key: value for key, value in dict(decision.metadata).items() if key != "error"}
+        self._hook_invocations.append(
+            MiddlewareHookInvocation(
+                middleware_name=middleware.middleware_name,
+                hook=hook,
+                action=decision.action,
+                duration_seconds=duration_seconds,
+                reason=decision.reason,
+                metadata=metadata,
+                error_type=error_type,
             )
         )
 

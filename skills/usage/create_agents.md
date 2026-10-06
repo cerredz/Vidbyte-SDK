@@ -130,12 +130,18 @@ This pattern works well for linear, fixed-role workflows where you know the exac
 
 ## Multi-Agent Orchestration
 
-Wire multiple agents together using pipelines for sequential, parallel, conditional, or map-reduce workflows. See [`skills/usage/create_pipeline.md`](create_pipeline.md) for details.
+Use `MultiAgent` when a manager must own the overall goal, shared task progress,
+evidence, blockers, retries, and replanning. The team delegates one ready worker
+per round through an explicit `AgentTransfer` boundary. See
+[`skills/vidbyte-sdk/multi-agent.md`](../vidbyte-sdk/multi-agent.md).
+
+Use pipelines for fixed sequential, parallel, conditional, or map-reduce string
+flow. See [`skills/usage/create_pipeline.md`](create_pipeline.md).
 
 ## Best Practices
 
 - **Use descriptive names and capabilities** â€” they are the primary keys for registry lookups and orchestration selection.
 - **Register agents early** â€” in a single setup function before any execution, not lazily during runs.
-- **Use pipelines for multi-step workflows** — pipelines wire agents together by output, each carrying its own configuration and tools.
+- **Choose orchestration intentionally** — pipelines wire fixed output flow; `MultiAgent` gives a manager a shared ledger and recovery loop.
 - **Keep agents focused** â€” each agent should have a single, clear responsibility defined by its system prompt and tools.
 

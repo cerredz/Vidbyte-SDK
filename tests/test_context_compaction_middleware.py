@@ -128,6 +128,28 @@ class MiddlewareTransformTests(unittest.IsolatedAsyncioTestCase):
         decision = await MiddlewarePipeline((middleware,)).before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker"))
         self.assertEqual(decision.action.value, "continue")
 
+    async def test_pipeline_records_continue_hook_duration(self) -> None:
+        # Verifies diagnostic invocation records retain ordinary continuations without expanding policy events.
+        clock = iter((10.0, 10.025)).__next__
+        pipeline = MiddlewarePipeline((TransformMiddleware(MiddlewareTransform(metadata={"rewritten": True})),), clock=clock)
+        await pipeline.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker"))
+        invocation = pipeline.hook_invocations[0]
+        self.assertEqual(invocation.action, MiddlewareAction.CONTINUE)
+        self.assertAlmostEqual(invocation.duration_seconds, 0.025)
+        self.assertEqual(invocation.metadata, {})
+        self.assertEqual(pipeline.events, ())
+
+    async def test_pipeline_records_exception_type_without_error_text(self) -> None:
+        # Verifies potentially sensitive exception text does not enter diagnostic hook metadata.
+        middleware = ExplodingTransformMiddleware()
+        middleware.fail_closed = False
+        pipeline = MiddlewarePipeline((middleware,))
+        await pipeline.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker"))
+        invocation = pipeline.hook_invocations[0]
+        self.assertEqual(invocation.error_type, "RuntimeError")
+        self.assertEqual(invocation.reason, "middleware_error_fail_open")
+        self.assertNotIn("error", invocation.metadata)
+
 
 class CompactionMiddlewareTests(unittest.IsolatedAsyncioTestCase):
     async def test_tool_result_truncate_transforms_visible_result_only(self) -> None:

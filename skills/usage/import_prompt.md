@@ -1,6 +1,6 @@
 # Import Prompt
 
-Access the SDK's built-in prompt catalog — 34 prompts across 13 prompt families covering handoffs, reflexion, actor-runtime personas, goals, evals, grading, templates, and more. Prompts are repository-backed text assets that can be accessed through enum keys or direct Python imports. The authoritative source of truth is `vidbyte/lib/enums/prompts.py`.
+Access the SDK's built-in prompt catalog — 51 prompts across 19 prompt families covering orchestration, agentic engineering, handoffs, reflexion, actor-runtime personas, goals, evals, grading, templates, and more. Prompts are repository-backed text assets that can be accessed through enum keys or direct Python imports. The authoritative source of truth is `vidbyte/lib/enums/prompts.py`.
 
 ## Getting a Prompt by Enum
 
@@ -23,8 +23,16 @@ Every prompt is also importable as a module-level constant from `vidbyte.prompts
 
 ```python
 from vidbyte.prompts import (
+    agentic_engineering_error_messages,
+    agentic_engineering_feature_test_packs,
+    agentic_engineering_file_headers,
+    agentic_engineering_folder_readme,
+    agentic_engineering_function_design,
+    agentic_engineering_intent_based_commenting,
+    agentic_engineering_system_prompt,
     agentic_loop_context_prompt,
     handoff_system_prompt,
+    continual_trace_system_prompt,
     context_engineering_guideline_prompt,
     expert_prompting_expert_prompt,
     goals_goal_prompt,
@@ -38,9 +46,16 @@ from vidbyte.prompts import (
     multi_provider_agentic_grader_agent_system_prompt,
     multi_provider_agentic_grader_grader_system_prompt,
     multi_provider_agentic_grader_grader_prompt,
+    multi_provider_aggregator_synthesis_system_prompt,
+    multi_provider_aggregator_synthesis_prompt,
+    multi_agent_orchestrator_planning_prompt,
+    multi_agent_orchestrator_progress_prompt,
+    multi_agent_orchestrator_replanning_prompt,
+    multi_agent_orchestrator_final_prompt,
     templates_intent_based,
     templates_persona,
     templates_specification,
+    templates_master,
     actor_runtime_planner,
     actor_runtime_coder,
     actor_runtime_reviewer,
@@ -57,6 +72,8 @@ from vidbyte.prompts import (
     actor_runtime_safety,
     actor_runtime_final_answer,
     trajectory_checkpoints_agentic_summarizer,
+    problem_space_search_explorer,
+    error_correction_auditor,
 )
 ```
 
@@ -95,11 +112,26 @@ family = Prompts().family("reflexion")
 
 family = Prompts().family("actor_runtime")
 # {"planner": "...", "coder": "...", "reviewer": "...", ...}  # 15 persona prompts
+
+family = Prompts().family("multi_agent_orchestrator")
+# {"planning_prompt": "...", "progress_prompt": "...", "replanning_prompt": "...", "final_prompt": "..."}
 ```
 
 ## Complete Prompt Listing
 
 Below is every prompt available in the SDK, organized by family. Each prompt can be accessed via `Prompts().get(Prompt.<ENUM>)` or imported directly.
+
+### agentic_engineering
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.AGENTIC_ENGINEERING_ERROR_MESSAGES` | `agentic_engineering_error_messages` | Guidance for actionable, context-rich errors |
+| `Prompt.AGENTIC_ENGINEERING_FEATURE_TEST_PACKS` | `agentic_engineering_feature_test_packs` | Guidance for feature-level verification packs |
+| `Prompt.AGENTIC_ENGINEERING_FILE_HEADERS` | `agentic_engineering_file_headers` | Context Protocol Header guidance |
+| `Prompt.AGENTIC_ENGINEERING_FOLDER_README` | `agentic_engineering_folder_readme` | Folder-level README guidance |
+| `Prompt.AGENTIC_ENGINEERING_FUNCTION_DESIGN` | `agentic_engineering_function_design` | Function design guidance for agent-readable code |
+| `Prompt.AGENTIC_ENGINEERING_INTENT_BASED_COMMENTING` | `agentic_engineering_intent_based_commenting` | Intent-based commenting guidance |
+| `Prompt.AGENTIC_ENGINEERING_SYSTEM_PROMPT` | `agentic_engineering_system_prompt` | Combined agentic-engineering system prompt |
 
 ### agentic_loop
 
@@ -112,6 +144,12 @@ Below is every prompt available in the SDK, organized by family. Each prompt can
 | Enum | Import Name | Description |
 |------|-------------|-------------|
 | `Prompt.HANDOFF_SYSTEM_PROMPT` | `handoff_system_prompt` | System prompt for the handoff agent that produces structured handoff documents |
+
+### continual_trace
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.CONTINUAL_TRACE_SYSTEM_PROMPT` | `continual_trace_system_prompt` | System prompt for continual trace synthesis |
 
 ### context_engineering
 
@@ -166,6 +204,24 @@ Below is every prompt available in the SDK, organized by family. Each prompt can
 | `Prompt.MULTI_PROVIDER_AGENTIC_GRADER_GRADER_SYSTEM_PROMPT` | `multi_provider_agentic_grader_grader_system_prompt` | System prompt for the grader model |
 | `Prompt.MULTI_PROVIDER_AGENTIC_GRADER_GRADER_PROMPT` | `multi_provider_agentic_grader_grader_prompt` | Grading instruction prompt |
 
+### multi_provider_aggregator
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_SYSTEM_PROMPT` | `multi_provider_aggregator_synthesis_system_prompt` | System prompt for multi-provider synthesis |
+| `Prompt.MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT` | `multi_provider_aggregator_synthesis_prompt` | Task prompt for multi-provider synthesis |
+
+### multi_agent_orchestrator
+
+Magentic-One-inspired manager prompts used by the default `MultiAgent` orchestrator.
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.MULTI_AGENT_ORCHESTRATOR_PLANNING_PROMPT` | `multi_agent_orchestrator_planning_prompt` | Creates the initial ledger plan |
+| `Prompt.MULTI_AGENT_ORCHESTRATOR_PROGRESS_PROMPT` | `multi_agent_orchestrator_progress_prompt` | Chooses the next action from current progress |
+| `Prompt.MULTI_AGENT_ORCHESTRATOR_REPLANNING_PROMPT` | `multi_agent_orchestrator_replanning_prompt` | Revises the plan after stalls or failures |
+| `Prompt.MULTI_AGENT_ORCHESTRATOR_FINAL_PROMPT` | `multi_agent_orchestrator_final_prompt` | Synthesizes the schema-free final response |
+
 ### templates
 
 | Enum | Import Name | Description |
@@ -173,6 +229,7 @@ Below is every prompt available in the SDK, organized by family. Each prompt can
 | `Prompt.TEMPLATES_INTENT_BASED` | `templates_intent_based` | Intent-based system-prompt template |
 | `Prompt.TEMPLATES_PERSONA` | `templates_persona` | Persona system-prompt template |
 | `Prompt.TEMPLATES_SPECIFICATION` | `templates_specification` | Specification system-prompt template |
+| `Prompt.TEMPLATES_MASTER` | `templates_master` | Master system-prompt template |
 
 ### actor_runtime
 
@@ -201,6 +258,18 @@ Persona system prompts for the actor-model runtime (15 prompts).
 | Enum | Import Name | Description |
 |------|-------------|-------------|
 | `Prompt.TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER` | `trajectory_checkpoints_agentic_summarizer` | Summarizer prompt for trajectory-checkpoint context-window algorithm |
+
+### problem_space_search
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.PROBLEM_SPACE_SEARCH_EXPLORER` | `problem_space_search_explorer` | Explorer prompt for problem-space search |
+
+### error_correction
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.ERROR_CORRECTION_AUDITOR` | `error_correction_auditor` | Auditor prompt for error-correction passes |
 
 ## Using Prompts with Agents
 

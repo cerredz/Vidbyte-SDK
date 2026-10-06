@@ -34,6 +34,11 @@ class CostBudgetMiddleware(AgentMiddleware):
         self._last_tokens_seen: int | None = None
         self._estimated_spend_usd: float = 0.0
 
+    @property
+    def estimated_spend_usd(self) -> float:
+        # Returns the current estimated USD spend accumulated for this middleware instance.
+        return self._estimated_spend_usd
+
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Reset accumulated cost state so this instance can be safely reused across runs."""
         del ctx

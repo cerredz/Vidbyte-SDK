@@ -10,6 +10,7 @@ Key Functions:
     - text: Resolves text adapters.
     - image: Resolves image adapters.
     - video: Resolves video adapters.
+    - decision: Resolves calibrated decision-model adapters (TypeSafe Jev).
 Relations:
     Used by ModalityDetector and runner modules to obtain provider adapters for executions.
 Similar Files:
@@ -18,18 +19,19 @@ Similar Files:
 
 from __future__ import annotations
 
-from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
+from vidbyte.lib.config import AudioModelConfig, DecisionModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderSelectionError
 from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.providers.client import ProvidersClient
-from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, MiniMaxProvider
+from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, KimiProvider, MetaProvider, MiniMaxProvider, MistralProvider
 from vidbyte.providers.elevenlabs import ElevenLabsProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.playai import PlayAIProvider
 from vidbyte.providers.base import tool_spec_to_provider_schema
+from vidbyte.providers.typesafe import TypeSafeProvider
 from vidbyte.providers.xai import XAIProvider
 
 
@@ -37,7 +39,7 @@ class ModelProviders:
     """Central factory for SDK provider adapters."""
 
     @staticmethod
-    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider | OpenRouterProvider:
+    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider | KimiProvider | MetaProvider | MistralProvider | OpenRouterProvider:
         # Return a text-capable adapter for the requested model provider.
         providers = {
             ModelProvider.OPENAI: OpenAIProvider,
@@ -47,6 +49,9 @@ class ModelProviders:
             ModelProvider.DEEPSEEK: DeepSeekProvider,
             ModelProvider.GLM: GLMProvider,
             ModelProvider.MINIMAX: MiniMaxProvider,
+            ModelProvider.KIMI: KimiProvider,
+            ModelProvider.META: MetaProvider,
+            ModelProvider.MISTRAL: MistralProvider,
             ModelProvider.OPENROUTER: OpenRouterProvider,
         }
         return ModelProviders._build_text_provider(config, providers)
@@ -78,6 +83,15 @@ class ModelProviders:
         # Return an embedding-capable adapter for vector embedding provider APIs.
         providers = {ModelProvider.OPENAI: OpenAIProvider, ModelProvider.GEMINI: GeminiProvider}
         return ModelProviders._build_embedding_provider(config, providers)
+
+    @staticmethod
+    def decision(config: DecisionModelConfig) -> TypeSafeProvider:
+        # Return a decision-capable adapter for calibrated decision-model APIs.
+        # @intent decision-capability-is-its-own-factory
+        # Decision models are not text models, so they get a dedicated factory and can never
+        # be selected by the text, streaming, or modality paths.
+        providers: dict[ModelProvider, type] = {ModelProvider.TYPESAFE: TypeSafeProvider}
+        return ModelProviders._build_provider(config.normalized_provider(), providers, capability="decision", decision_config=config)
 
     @staticmethod
     def streaming_text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider:
@@ -140,12 +154,16 @@ __all__ = [
     "ElevenLabsProvider",
     "GLMProvider",
     "GeminiProvider",
+    "KimiProvider",
+    "MetaProvider",
     "MiniMaxProvider",
+    "MistralProvider",
     "ModelProviders",
     "OpenAIProvider",
     "OpenRouterProvider",
     "PlayAIProvider",
     "ProvidersClient",
+    "TypeSafeProvider",
     "XAIProvider",
     "get_image_provider",
     "get_text_provider",

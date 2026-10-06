@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - Trace: Tracer client namespace for built-in and provider-backed tracers.
     - DebugTracer: In-memory tracer from vidbyte.trace.debug.
+    - SessionTracer: Session wrapper that groups many agent runs under one root.
     - ContinualTracer: Continual trace capture preset from vidbyte.trace.continual.
     - ContinualTraceAgent / ContinualTraceMiddleware: Structured trace artifact agent.
     - TraceOption / TraceSchema / ActionTrace: Continual trace configuration.
@@ -20,19 +21,60 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType, TraceMode, TraceOption, TraceSchema
 from vidbyte.trace.base import Trace
-from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware, ContinualTracer
+from vidbyte.trace.controller import TraceController
+from vidbyte.trace.continual import (
+    ActionTrace,
+    CalibrationTrace,
+    ContinualTraceAgent,
+    ContinualTraceMiddleware,
+    ContinualTracer,
+    CounterfactualAlternativesTrace,
+    ErrorTaxonomyTrace,
+    HierarchicalTaskTreeTrace,
+    SelfConsistencyEnsembleTrace,
+    SymmetricChecklistTrace,
+    SymmetricEventLedgerTrace,
+    SymmetricEvidenceTrace,
+    SymmetricFlatTrace,
+    SymmetricSubScoreTrace,
+    SymmetricTimelineTrace,
+)
 from vidbyte.trace.debug import DebugTracer
+from vidbyte.trace.profiles import TraceComponentSettings, TraceProfile
+from vidbyte.trace.schema import ParentPolicy, SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
+from vidbyte.trace.session import SessionTraceController, SessionTracer
 
 __all__ = [
     "ActionTrace",
+    "CalibrationTrace",
     "ContinualTraceAgent",
     "ContinualTraceMiddleware",
     "ContinualTracer",
+    "CounterfactualAlternativesTrace",
     "DebugTracer",
+    "ErrorTaxonomyTrace",
+    "HierarchicalTaskTreeTrace",
+    "ParentPolicy",
+    "SelfConsistencyEnsembleTrace",
+    "SemanticSpanContext",
+    "SessionTraceController",
+    "SessionTracer",
+    "SpanKind",
+    "SpanSpec",
+    "SymmetricChecklistTrace",
+    "SymmetricEventLedgerTrace",
+    "SymmetricEvidenceTrace",
+    "SymmetricFlatTrace",
+    "SymmetricSubScoreTrace",
+    "SymmetricTimelineTrace",
     "Trace",
+    "TraceComponentSettings",
+    "TraceController",
+    "TraceDetail",
     "TraceField",
     "TraceFieldType",
     "TraceMode",
     "TraceOption",
+    "TraceProfile",
     "TraceSchema",
 ]

@@ -66,11 +66,14 @@ class LangfuseTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         if not isinstance(context, LangfuseSpanContext) or context.handle is None:
             return
         try:
+            if metadata:
+                context.handle.update(metadata=dict(metadata))
             if error is not None:
                 context.handle.update(status_message=str(error), level="ERROR")
             elif output is not None:
@@ -108,15 +111,11 @@ class LangfuseTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
-        metadata: Mapping[str, Any] | None = None,
+        error: BaseException | None = None,
     ) -> None:
-        # Closes a Langfuse span with output/error plus optional structured metadata.
         if not isinstance(context, LangfuseSpanContext) or context.handle is None:
             return
         try:
-            if metadata:
-                context.handle.update(metadata=dict(metadata))
             if error is not None:
                 context.handle.update(status_message=str(error), level="ERROR")
             if hasattr(context.handle, "end"):

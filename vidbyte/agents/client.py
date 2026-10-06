@@ -1,9 +1,22 @@
+"""Context Protocol Header
+
+Description:
+    Provides the lightweight namespace client for constructing Vidbyte agent facades.
+Purpose:
+    Keeps `sdk.agents` ergonomic while deferring feature imports until their constructor is requested.
+Architecture:
+    AgentClient routes base, handoff, continual-trace, aggregate, and ledger-driven multi-agent constructors.
+Relations:
+    Constructed by `VidbyteSDK`; feature implementations remain owned by their packages under `vidbyte.agents`.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.handoff import HandoffAgent
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntimeSettings
 from vidbyte.context.handoff import Handoff
 
 
@@ -18,6 +31,10 @@ class AgentClient:
         # Construct a handoff agent for a given handoff spec, defaulting to MinimalHandoff.
         return HandoffAgent(handoff, **kwargs)
 
+    def jev(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings | None = None) -> JevAgent:
+        # Construct the opinionated Jev agent from its agent settings and optional Jev runtime settings.
+        return JevAgent(settings, runtime_settings)
+
     def continual_trace(self, schema: Any, **kwargs: Any) -> Any:
         # Construct a continual trace agent that fills the given trace schema.
         from vidbyte.agents.continual_trace import ContinualTraceAgent
@@ -27,6 +44,11 @@ class AgentClient:
         # Construct an AggregateAgent that fans out to multiple proposer models and synthesizes one answer.
         from vidbyte.agents.aggregation import AggregateAgent
         return AggregateAgent(**kwargs)
+
+    def multi(self, **kwargs: Any) -> Any:
+        # Construct a ledger-driven MultiAgent team with explicit manager and worker controls.
+        from vidbyte.agents.multi import MultiAgent
+        return MultiAgent(**kwargs)
 
 
 __all__ = [

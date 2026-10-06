@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.agents.base import BaseAgent
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.errors import ConfigurationError
@@ -45,7 +46,7 @@ def _make_agent(
         description="A test agent.",
         use_cases="Testing agent delegation.",
     )
-    return BaseAgent(
+    return build_test_agent(
         name=name,
         system_prompt="You are a helpful assistant.",
         runner=FakeRunner(),
@@ -138,7 +139,7 @@ class AgentToolExecuteTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("runner failed")
 
         meta = AgentMetadata(name="broken", description="desc", use_cases="use")
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="broken",
             system_prompt="broken",
             runner=BrokenRunner(),
@@ -238,7 +239,7 @@ class ContextGetterBindingTests(unittest.TestCase):
 
     def test_context_getter_bound_at_construction(self) -> None:
         child_tool = AgentTool(_make_agent("child"))
-        parent = BaseAgent(
+        parent = build_test_agent(
             name="parent",
             system_prompt="parent system",
             runner=FakeRunner(),

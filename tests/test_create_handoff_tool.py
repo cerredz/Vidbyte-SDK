@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from vidbyte.agents import BaseAgent
+from tests.agent_test_support import build_test_agent
+from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.context import ContextManager
 from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.config import ModelProvider
@@ -174,7 +175,7 @@ class CreateHandoffToolTests(unittest.IsolatedAsyncioTestCase):
 
 class BaseAgentHandoffRecordingTests(unittest.IsolatedAsyncioTestCase):
     def _agent(self, *, context_manager: ContextManager | None = None, tools: list | None = None) -> BaseAgent:
-        return BaseAgent(name="worker", system_prompt="Work.", runner=FakeRunner(), context_manager=context_manager, tools=tools or [])
+        return build_test_agent(name="worker", system_prompt="Work.", runner=FakeRunner(), context_manager=context_manager, tools=tools or [])
 
     def test_record_handoff_appends_updates_last_and_upserts(self) -> None:
         manager = ContextManager()
@@ -215,14 +216,14 @@ class BaseAgentHandoffRecordingTests(unittest.IsolatedAsyncioTestCase):
     def test_forked_agent_starts_with_empty_handoffs(self) -> None:
         agent = self._agent()
         agent.record_handoff(MinimalHandoff(primitive_id="handoff:1"))
-        child = agent.fork(name="child")
+        child = agent.fork(AgentForkSettings(name="child"))
         self.assertEqual(child.handoffs, [])
 
 
 class CreateHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_two_handoffs_visible_in_context_list(self) -> None:
         manager = ContextManager()
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=FakeRunner(),

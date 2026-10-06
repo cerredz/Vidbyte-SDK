@@ -43,3 +43,9 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/chat/completions", headers=headers, json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_chat_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
+
+    def _create_payload(self, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None) -> dict[str, Any]:
+        # Build the chat payload and ask OpenRouter to report per-generation cost.
+        payload = super()._create_payload(config, prompt, system, metadata)
+        payload["usage"] = {"include": True}
+        return payload

@@ -12,7 +12,9 @@ Architecture:
 Relations:
     Subclasses vidbyte.agents.base.BaseAgent, consumes vidbyte.context.handoff.Handoff,
     reads Prompt.HANDOFF_SYSTEM_PROMPT through vidbyte.prompts.Prompts. Constructed by
-    AgentClient.handoff() and by BaseAgent.handoff().
+    AgentClient.handoff() and by BaseAgent.handoff(). Source-agent construction
+    carries the inferred runner cache so handoffs reuse the already-selected
+    execution boundary without reviving a public runner argument.
 Similar Files:
     - vidbyte/agents/base.py: The base agent this configures.
     - vidbyte/context/handoff/base.py: The Handoff spec/primitive this fills.
@@ -25,10 +27,11 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from vidbyte.agents.base import BaseAgent, ConfiguredAgentRunner
+from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.errors import OutputSchemaViolationError
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.types import ToolCallContext
 
@@ -49,16 +52,19 @@ class HandoffAgent(BaseAgent):
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, spec: Handoff) -> "HandoffAgent":
         """Build a handoff agent that reuses a source agent's runner and provider configuration."""
-        real_runner = source_agent.runner if not isinstance(source_agent.runner, ConfiguredAgentRunner) else None
-        return cls(
+        # @intent handoff-reuses-the-selected-runner
+        # The source agent may already own provider-specific runner state and authentication; copying its cache
+        # preserves that selected execution boundary. Rebuilding the runner can lose that state and make a
+        # handoff fail even though the source run already succeeded with the same configured provider.
+        generator = cls(
             spec,
-            runner=real_runner,
-            runners=dict(source_agent.runners),
             provider=source_agent.runner_config.provider,
             model_name=source_agent.runner_config.model_name,
             api_key=source_agent.runner_config.api_key,
             temperature=source_agent.runner_config.temperature,
         )
+        generator._runner_cache.update(source_agent._runner_cache)
+        return generator
 
     @classmethod
     async def run_auto_handoff(cls, source_agent: BaseAgent, spec: Handoff | None) -> Handoff:
@@ -134,10 +140,20 @@ class HandoffAgent(BaseAgent):
 
     async def generate_handoff(self, source: str) -> Handoff:
         # Run the agent over the source-run digest and return a filled Handoff of the spec's subclass.
-        reply = await self.arun(source)
-        payload = self._structured_payload(reply)
-        sections, extra = self._sections_from_payload(payload) if payload is not None else self._split_sections(reply.content)
-        return self._build_filled(reply.content, sections, extra)
+        content, payload = await self._run_source(source)
+        sections, extra = self._sections_from_payload(payload) if payload is not None else self._split_sections(content)
+        return self._build_filled(content, sections, extra)
+
+    async def _run_source(self, source: str) -> tuple[str, Mapping[str, Any] | None]:
+        # @intent handoff-degrades-to-prose-on-purpose
+        # Every section this spec wants is also recoverable from markdown headers, so a schema miss
+        # should yield a sparser document rather than fail the run that merely asked for a handoff.
+        # This is the deliberate exception to output_schema being fatal, not a general escape hatch.
+        try:
+            reply = await self.arun(source)
+        except OutputSchemaViolationError as violation:
+            return violation.raw_output, self._parse_json_payload(violation.raw_output)
+        return reply.content, self._structured_payload(reply)
 
     def parse_sections(self, text: str) -> dict[str, str]:
         # Public helper returning only the spec-matching section content parsed from model output.
@@ -220,7 +236,7 @@ class HandoffAgent(BaseAgent):
     def _coerce_payload(value: Any) -> Mapping[str, Any] | None:
         # Normalize dict-like structured outputs, including Pydantic model instances.
         if hasattr(value, "model_dump"):
-            value = value.model_dump()
+            value = value.model_dump(mode="json")
         if isinstance(value, Mapping):
             return value
         return None

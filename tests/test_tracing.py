@@ -1,23 +1,3 @@
-"""Context Protocol Header
-
-Description:
-    Unit tests for the tracing provider adapters (LangSmith, Langfuse, Phoenix, and NullTracer).
-Purpose:
-    Verifies that root traces and child spans correctly record execution metadata, inputs/outputs,
-    filtering of environment keys/secrets, and error diagnostics under strict configuration modes.
-Architecture:
-    - LangSmithTracerTests, LangfuseTracerTests, PhoenixTracerTests: Test suites validating mock clients and metadata schemas.
-    - AgentRuntimeSpanTests: Integration tests executing mock runtimes and asserting correct span lifecycle logs.
-Key Functions:
-    - test_langsmith_update_uses_datetime_end_time: Confirms datetime object propagation to the LangSmith API.
-    - test_tool_span_inputs_include_arguments_call_id_and_fingerprint: Regression guard for issue #141 span details.
-Relation to Codebase:
-    Tests the adapters in vidbyte/providers/tracing/ and the core tracing lifecycle driven by AgentRuntime in vidbyte/agents/runtime.py.
-Similar Files:
-    - tests/test_agent_runtime.py
-    - tests/test_trace_facade.py
-"""
-
 from __future__ import annotations
 
 import os
@@ -26,6 +6,8 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
+from tests.agent_test_support import build_test_agent
+from vidbyte.agents import AgentForkSettings
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput
 from vidbyte.agents import AgentRuntime
@@ -33,7 +15,7 @@ from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.errors import ConfigurationError, TracerConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
-from vidbyte.trace import Trace
+from vidbyte.trace import Trace, TraceProfile
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools
 from vidbyte.tools.security import PermissionPolicy
 
@@ -163,7 +145,7 @@ class NullTracerTests(unittest.TestCase):
 
 class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
     def _make_agent(self, tracer=None) -> BaseAgent:
-        return BaseAgent(
+        return build_test_agent(
             name="test-agent",
             system_prompt="Be helpful.",
             runner=AlwaysDoneRunner(),
@@ -172,7 +154,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
 
     def _make_agent_with_trace(self, trace=None) -> BaseAgent:
         # Builds a test agent through the new trace= alias.
-        return BaseAgent(
+        return build_test_agent(
             name="test-agent",
             system_prompt="Be helpful.",
             runner=AlwaysDoneRunner(),
@@ -213,7 +195,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
             def run(self, *a: object, **kw: object) -> None:
                 raise RuntimeError("runner exploded")
 
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="bomb-agent",
             system_prompt="Crash.",
             runner=BombRunner(),
@@ -228,7 +210,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
     def test_fork_propagates_tracer_instance(self) -> None:
         tracer = RecordingTracer()
         parent = self._make_agent(tracer=tracer)
-        child = parent.fork(name="child-agent")
+        child = parent.fork(AgentForkSettings(name="child-agent"))
         self.assertIs(child._tracer, tracer)
 
     def test_trace_alias_accepts_off_preset(self) -> None:
@@ -250,7 +232,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
     def test_trace_alias_rejects_tracer_and_trace_together(self) -> None:
         # Verifies users cannot supply both tracing entry points at once.
         with self.assertRaises(ConfigurationError):
-            BaseAgent(
+            build_test_agent(
                 name="test-agent",
                 system_prompt="Be helpful.",
                 runner=AlwaysDoneRunner(),
@@ -262,7 +244,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
         # Verifies forking keeps the resolved trace alias tracer instance.
         tracer = RecordingTracer()
         parent = self._make_agent_with_trace(trace=tracer)
-        child = parent.fork(name="child-agent")
+        child = parent.fork(AgentForkSettings(name="child-agent"))
         self.assertIs(child._tracer, tracer)
 
     async def test_start_trace_attributes_include_agent_name(self) -> None:
@@ -449,6 +431,24 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         )
         tool_spans = [s for s in tracer.spans_started if s["name"] == "tool.call"]
         self.assertGreaterEqual(len(tool_spans), 1)
+
+    async def test_semantic_tool_span_attributes_include_arguments(self) -> None:
+        # Verifies prebuilt default tracing includes tool name, input, call id, and metadata.
+        events: list[dict[str, Any]] = []
+        tracer = Trace.profile(Trace.debug(events), TraceProfile.default())
+        runtime = AgentRuntime(
+            agent_name="rt-agent",
+            system_prompt="sys",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            tracer=tracer,
+        )
+        call = ToolCall(tool_name="isDone", arguments={"final_answer": "done"}, call_id="call-1")
+        await runtime.execute_tool_call(call, provider="openai")
+        tool_event = next(event for event in events if event.get("name") == "tool.call")
+        self.assertEqual(tool_event["attributes"]["tool_name"], "isDone")
+        self.assertEqual(tool_event["attributes"]["tool_input"], {"final_answer": "done"})
+        self.assertEqual(tool_event["attributes"]["call_id"], "call-1")
 
     async def test_tool_span_closed_even_when_tool_raises(self) -> None:
         tracer = RecordingTracer()
@@ -734,7 +734,7 @@ class GenerateReplyCancellationTests(unittest.IsolatedAsyncioTestCase):
     """Verifies generate_reply closes its root trace on CancelledError."""
 
     def _make_cancelling_agent(self, tracer: TracerBase) -> BaseAgent:
-        return BaseAgent(
+        return build_test_agent(
             name="cancel-agent",
             system_prompt="Be helpful.",
             runner=CancelledRunner(),
@@ -788,7 +788,7 @@ class GenerateReplyCancellationTests(unittest.IsolatedAsyncioTestCase):
             def run(self, *a: object, **kw: object) -> None:
                 raise RuntimeError("explode")
 
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="bomb-agent",
             system_prompt="Crash.",
             runner=BombRunner(),

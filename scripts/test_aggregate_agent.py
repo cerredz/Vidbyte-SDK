@@ -1,7 +1,7 @@
-"""Standalone verification script for the Aggregate Agent (Mixture-of-Agents) feature.
+"""Standalone verification script for aggregate agents and BaseAgent aggregation boundaries.
 
-Runs every test case from the design doc's Testing Plan (tests/test_aggregate_agent.py),
-printing PASS/FAIL per case with a final summary, and exits non-zero if any case fails.
+Runs every test case from tests/test_aggregate_agent.py, printing PASS/FAIL per case
+with a final summary, and exits non-zero if any case fails.
 
 Usage:
     python scripts/test_aggregate_agent.py

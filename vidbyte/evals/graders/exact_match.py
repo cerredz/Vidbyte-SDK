@@ -30,7 +30,7 @@ class ExactMatchGrader(BaseGrader):
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Asynchronously performs the exact match check and returns a GraderResult payload.
         expected = case.expected if case.expected is not None else ""
-        a, e = actual, expected
+        a, e = str(actual), str(expected)
 
         if self.strip:
             a = a.strip()

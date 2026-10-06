@@ -4,6 +4,11 @@ Compose agents into pipelines where one agent's output becomes the next agent's 
 
 Use pipelines to compose multi-agent workflows where the output of one agent (including its tool calls and strategy reasoning) feeds into the next.
 
+Do not use a pipeline when a manager must track evolving subtasks, owners,
+evidence, blockers, attempts, and replanning. Use `MultiAgent` and the
+[`multi-agent skill`](../vidbyte-sdk/multi-agent.md) for that controller shape;
+use `vidbyte.workflows` when Python code must own legal transitions.
+
 ## Choosing a Pipeline Type
 
 | Pipeline | Pattern | Best For |

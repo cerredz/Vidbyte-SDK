@@ -102,7 +102,7 @@ class ReflexionRuntimeAlgorithm:
     async def _reflect_after_failure(self, handle: RunnerHandle, *, task: str, failed_attempt: str, reflections: Sequence[str], context: BaseAgentContext, metadata: Mapping[str, Any] | None, trial_index: int, trace_context: SpanContext | None) -> str | AgentResult:
         """Run the reflection-stage model call through runtime middleware."""
         self.runtime.recorder.append("reflexion_reflection", iteration=trial_index)
-        raw_result, _ = await self.runtime._invoke_with_middleware(
+        raw_result, _, _ = await self.runtime._invoke_with_middleware(
             handle,
             self.algorithm.render_reflection_prompt(
                 task=task,

@@ -4,15 +4,25 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import Iterator
-from dataclasses import dataclass, field
-from typing import Mapping
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, replace
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import httpx
 
 from vidbyte.lib.errors import ProviderRequestError
+
+# HTTP methods safe to retry without an explicit idempotency key: repeating them cannot duplicate
+# a server-side mutation. POST/PATCH and other methods require a caller-supplied idempotency_key
+# before retry_count > 0 is honored.
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+
+
+def _require_idempotency_guard(*, method: str, retry_count: int, idempotency_key: str | None) -> None:
+    # Raises when a retry is requested for a non-idempotent method with no caller-supplied key.
+    if retry_count > 0 and method.upper() not in _IDEMPOTENT_METHODS and idempotency_key is None:
+        raise ProviderRequestError(f"Retrying {method.upper()} requires an explicit idempotency_key: repeating it after a network ambiguity can duplicate the underlying side effect.", provider="http")
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,21 +31,23 @@ class HttpResponse:
     body: str
     headers: Mapping[str, str]
     raw_bytes: bytes | None = None
+    attempts: int = 1
 
 
 class HttpTransport:
     """Async HTTP transport using httpx; releases the event loop during all I/O."""
 
-    async def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504)) -> HttpResponse:
+    async def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), max_response_bytes: int | None = None, idempotency_key: str | None = None, follow_redirects: bool = False) -> HttpResponse:
         # Send one async HTTP request with optional non-blocking exponential backoff.
+        _require_idempotency_guard(method=method, retry_count=retry_count, idempotency_key=idempotency_key)
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=follow_redirects) as client:
                 for attempt in range(attempts):
-                    response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds)
+                    response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds, max_response_bytes=max_response_bytes)
                     if response.status_code not in retry_status_codes or attempt == attempts - 1:
-                        return response
+                        return replace(response, attempts=attempt + 1)
                     await asyncio.sleep(delay)
                     delay *= max(1.0, backoff_multiplier)
         except ProviderRequestError:
@@ -44,7 +56,7 @@ class HttpTransport:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
         raise ProviderRequestError("HTTP retry loop exited unexpectedly.", provider="http")
 
-    async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float) -> HttpResponse:
+    async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float, max_response_bytes: int | None = None) -> HttpResponse:
         # Execute a single httpx request and return HTTP errors as responses rather than exceptions.
         request_headers = dict(headers)
         content: bytes | None = None
@@ -52,18 +64,43 @@ class HttpTransport:
             content = json.dumps(json_body).encode("utf-8")
             request_headers.setdefault("content-type", "application/json")
         request = client.build_request(method, url, headers=request_headers, content=content)
+        if max_response_bytes is not None:
+            return await self._send_bounded(client, request, max_response_bytes=max_response_bytes)
         try:
             response = await client.send(request)
             return HttpResponse(status_code=response.status_code, body=response.text, headers=dict(response.headers))
         except httpx.RequestError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
 
+    async def _send_bounded(self, client: httpx.AsyncClient, request: httpx.Request, *, max_response_bytes: int) -> HttpResponse:
+        # Stream one response and refuse any body above the ceiling without buffering it whole.
+        ceiling = max(1, max_response_bytes)
+        try:
+            response = await client.send(request, stream=True)
+        except httpx.RequestError as exc:
+            raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
+        try:
+            declared = response.headers.get("content-length")
+            if declared is not None and declared.isdigit() and int(declared) > ceiling:
+                raise ProviderRequestError("Provider response exceeded the configured size ceiling.", provider="http", status_code=response.status_code)
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(body) + len(chunk) > ceiling:
+                    raise ProviderRequestError("Provider response exceeded the configured size ceiling.", provider="http", status_code=response.status_code)
+                body.extend(chunk)
+        except httpx.RequestError as exc:
+            raise ProviderRequestError("HTTP response stream failed before completion.", provider="http", response_excerpt=str(exc)) from exc
+        finally:
+            await response.aclose()
+        return HttpResponse(status_code=response.status_code, body=bytes(body).decode("utf-8", errors="replace"), headers=dict(response.headers), raw_bytes=bytes(body))
+
 
 class SyncHttpTransport:
     """Synchronous urllib-based transport; use only for test injection or non-async contexts."""
 
-    def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504)) -> HttpResponse:
+    def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), idempotency_key: str | None = None) -> HttpResponse:
         # Send one blocking HTTP request with optional exponential backoff.
+        _require_idempotency_guard(method=method, retry_count=retry_count, idempotency_key=idempotency_key)
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
         for attempt in range(attempts):

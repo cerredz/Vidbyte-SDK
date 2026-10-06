@@ -1,0 +1,15 @@
+{
+  "name": "Independent Critic",
+  "description": "Prompt assets for reviewing one completed producer candidate in a fresh, explicitly projected context. The critic receives only the original task, exact candidate, explicitly permitted artifacts, and explicitly permitted tool capabilities. Its findings remain advisory and unadjudicated.",
+  "key": "independent_critic",
+  "prompts": {
+    "reviewer_system_prompt": {
+      "path": "reviewer_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/independent_critic/reviewer_system_prompt.md"
+    },
+    "review_prompt": {
+      "path": "review_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/independent_critic/review_prompt.md"
+    }
+  }
+}

@@ -105,7 +105,6 @@ class StudioAgentsListTool(BaseTool):
             cards.append({
                 "name": card.name,
                 "description": card.description,
-                "modalities": [m.value for m in card.modalities] if hasattr(card, "modalities") else [],
                 "capabilities": list(card.capabilities),
                 "tool_names": list(card.tool_names),
                 "mcp_tool_names": list(card.mcp_tool_names),

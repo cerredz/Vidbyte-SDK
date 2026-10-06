@@ -13,6 +13,7 @@ Key Functions:
     - test_resolve_endpoint: Verifies custom and fallback endpoint handling.
     - test_supported_lists: Verifies retrieval of supported models/providers.
     - test_validations: Verifies validation logic raises ConfigurationError correctly.
+    - test_provider_predicate_and_coercion: Verifies is_valid_provider/resolve_provider.
 Relations:
     Validates the central ProviderModelRegistry code.
 Similar Files:
@@ -80,6 +81,20 @@ class ModelRegistryTests(unittest.TestCase):
         ProviderModelRegistry.validate_model("gpt-4o")
         with self.assertRaises(ConfigurationError):
             ProviderModelRegistry.validate_model(" ")
+
+    def test_provider_predicate_and_coercion(self) -> None:
+        # Verifies the non-raising provider surface agrees with validate_provider.
+        self.assertTrue(ProviderModelRegistry.is_valid_provider("openai"))
+        self.assertTrue(ProviderModelRegistry.is_valid_provider("  OpenAI  "))
+        self.assertFalse(ProviderModelRegistry.is_valid_provider("invalid-provider"))
+        self.assertEqual(
+            ProviderModelRegistry.resolve_provider("ANTHROPIC"),
+            ModelProvider.ANTHROPIC,
+        )
+        self.assertIsNone(ProviderModelRegistry.resolve_provider("invalid-provider"))
+        for name in ProviderModelRegistry.get_supported_providers():
+            self.assertTrue(ProviderModelRegistry.is_valid_provider(name))
+            ProviderModelRegistry.validate_provider(name)
 
 
 if __name__ == "__main__":

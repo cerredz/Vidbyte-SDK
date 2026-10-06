@@ -4,9 +4,13 @@ Description:
     Converts Vidbyte tool specs to model-provider tool formats.
 Purpose:
     Keeps provider schema formatting separate from tool execution contracts so
-    OpenAI, Anthropic, Grok, and Gemini adapters can share one SDK utility.
+    every supported provider can share one SDK utility. Anthropic and Gemini own
+    their tool shapes; OpenAI, xAI/Grok, DeepSeek, GLM, MiniMax, Kimi, and
+    OpenRouter all speak the OpenAI chat-completions tool format.
 Architecture:
-    - ToolsFormatter: Static provider conversion and parse helpers.
+    - ToolsFormatter: Static provider conversion, parse, and result rendering helpers.
+    - Tool errors are always rendered with full model-visible detail; callers do
+      not choose a reduced verbosity tier.
 Relations:
     Related to vidbyte.lib.dataclasses.tools and future provider clients.
 """
@@ -15,13 +19,36 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
-from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec
+from vidbyte.lib.dataclasses.tools import (
+    ACTIVITY_ARGUMENT_KEY,
+    ToolActivity,
+    ToolCall,
+    ToolParameter,
+    ToolResult,
+    ToolSpec,
+    ToolStatus,
+)
+from vidbyte.lib.errors import ConfigurationError
 
 
 class ToolsFormatter:
     """Formats SDK tool specs and provider tool calls."""
+
+    # Provider/model substrings mapped, in priority order, to the tool wire-format
+    # family a model speaks. OpenRouter is matched first because it proxies every
+    # vendor (including Claude and Gemini models) but always exposes the OpenAI
+    # chat-completions tool format, so its Claude/Gemini model ids must not be
+    # misread as native Anthropic/Gemini payloads. DeepSeek, GLM, MiniMax, and Kimi
+    # are likewise OpenAI-compatible and fall through to the default OpenAI branch.
+    _PROVIDER_FAMILY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+        (("openrouter",), "openai"),
+        (("anthropic", "claude"), "anthropic"),
+        (("gemini", "google"), "gemini"),
+        (("grok", "xai"), "xai"),
+    )
 
     @staticmethod
     def provider_from_model(provider_or_model: str | None) -> str:
@@ -29,13 +56,21 @@ class ToolsFormatter:
         if not provider_or_model:
             return "openai"
         value = provider_or_model.lower()
-        if "anthropic" in value or "claude" in value:
-            return "anthropic"
-        if "gemini" in value or "google" in value:
-            return "gemini"
-        if "grok" in value or "xai" in value:
-            return "xai"
+        for tokens, family in ToolsFormatter._PROVIDER_FAMILY_HINTS:
+            if any(token in value for token in tokens):
+                return family
+        # openai, deepseek, glm, minimax, kimi, and any unrecognized provider all
+        # use the OpenAI tool format.
         return "openai"
+
+    @staticmethod
+    def wire_format(provider_or_model: str | None) -> str:
+        """Return the payload shape a provider speaks: 'openai', 'anthropic', or 'gemini'."""
+        # Only Anthropic and Gemini have distinct wire shapes; xAI and every
+        # OpenAI-compatible provider (deepseek, glm, minimax, kimi, openrouter)
+        # collapse to the OpenAI payload here so fallback treats them as one format.
+        family = ToolsFormatter.provider_from_model(provider_or_model)
+        return family if family in {"anthropic", "gemini"} else "openai"
 
     @staticmethod
     def format_tools(tools: object, provider_or_model: str) -> tuple[dict[str, Any], ...]:
@@ -83,9 +118,35 @@ class ToolsFormatter:
         }
 
     @staticmethod
+    def to_codex_tool(spec: ToolSpec) -> dict[str, Any]:
+        """Convert a ToolSpec into a Codex app-server dynamic function tool."""
+        return {
+            "type": "function",
+            "name": spec.name,
+            "description": spec.description,
+            "inputSchema": ToolsFormatter._schema_for_spec(spec),
+        }
+
+    @staticmethod
     def to_grok_tool(spec: ToolSpec) -> dict[str, Any]:
         """Convert a ToolSpec into a Grok/xAI OpenAI-compatible tool."""
         return ToolsFormatter.to_openai_tool(spec)
+
+    # Gemini's function-declaration `parameters` is an OpenAPI 3.0 Schema, not full JSON
+    # Schema. It rejects unknown keywords outright ("Invalid JSON payload received. Unknown
+    # name ..."), so anything outside this set has to be dropped before the call is made.
+    _GEMINI_SCHEMA_KEYWORDS: frozenset[str] = frozenset(
+        {
+            "type", "format", "title", "description", "nullable", "enum", "default", "example",
+            "properties", "required", "items", "anyOf", "propertyOrdering",
+            "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "pattern",
+        }
+    )
+    # `properties` maps arbitrary property names to subschemas, so its keys must never be
+    # filtered against the keyword set the way a schema node's keys are.
+    _GEMINI_SCHEMA_MAPS: frozenset[str] = frozenset({"properties"})
+    # Keywords whose value is itself a subschema (or a list of them).
+    _GEMINI_SCHEMA_NODES: frozenset[str] = frozenset({"items", "anyOf"})
 
     @staticmethod
     def to_gemini_tool(spec: ToolSpec) -> dict[str, Any]:
@@ -95,10 +156,56 @@ class ToolsFormatter:
                 {
                     "name": spec.name,
                     "description": spec.description,
-                    "parameters": ToolsFormatter._schema_for_spec(spec),
+                    "parameters": ToolsFormatter._gemini_schema(ToolsFormatter._schema_for_spec(spec)),
                 }
             ]
         }
+
+    @staticmethod
+    def _gemini_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+        """Reduce a JSON Schema to the OpenAPI subset Gemini's function declarations accept.
+
+        Two things break otherwise, and both fail the whole request rather than degrading:
+        `$defs`/`$ref`, which Pydantic emits for any nested model, and `additionalProperties`,
+        which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
+        place and unsupported keywords are dropped.
+        """
+        defs = dict(schema.get("$defs") or {})
+        root = {key: value for key, value in schema.items() if key != "$defs"}
+        return ToolsFormatter._gemini_node(root, defs, ())
+
+    @staticmethod
+    def _gemini_node(node: Mapping[str, Any], defs: Mapping[str, Any], seen: tuple[str, ...]) -> dict[str, Any]:
+        # Expands $ref against $defs and keeps only Gemini-supported keywords, depth-first.
+        kept: dict[str, Any] = {}
+        for key, value in node.items():
+            if key not in ToolsFormatter._GEMINI_SCHEMA_KEYWORDS:
+                continue
+            kept[key] = ToolsFormatter._gemini_keyword_value(key, value, defs, seen)
+        ref = node.get("$ref")
+        if not isinstance(ref, str):
+            return kept
+        target = ref.rsplit("/", 1)[-1]
+        if target in seen or target not in defs:
+            # A self-referential model has no finite inline form. Drop the ref and keep the
+            # sibling keywords so the node still describes an object Gemini can parse.
+            return kept
+        expanded = ToolsFormatter._gemini_node(defs[target], defs, (*seen, target))
+        expanded.update(kept)
+        return expanded
+
+    @staticmethod
+    def _gemini_keyword_value(key: str, value: Any, defs: Mapping[str, Any], seen: tuple[str, ...]) -> Any:
+        # Recurses only into keywords that actually carry subschemas; everything else
+        # (enum, required, default, example) is literal data and is passed through as-is.
+        if key in ToolsFormatter._GEMINI_SCHEMA_MAPS and isinstance(value, Mapping):
+            return {name: ToolsFormatter._gemini_node(sub, defs, seen) if isinstance(sub, Mapping) else sub for name, sub in value.items()}
+        if key in ToolsFormatter._GEMINI_SCHEMA_NODES:
+            if isinstance(value, Mapping):
+                return ToolsFormatter._gemini_node(value, defs, seen)
+            if isinstance(value, list):
+                return [ToolsFormatter._gemini_node(item, defs, seen) if isinstance(item, Mapping) else item for item in value]
+        return value
 
     @staticmethod
     def parse_tool_calls(raw: object, provider_or_model: str) -> tuple[ToolCall, ...]:
@@ -114,38 +221,26 @@ class ToolsFormatter:
         return ToolsFormatter._parse_openai_tool_calls(raw_payload)
 
     @staticmethod
-    def format_tool_result(
-        call: ToolCall,
-        result: ToolResult,
-        provider_or_model: str,
-    ) -> Mapping[str, Any]:
-        """Format a local tool result for a follow-up provider request."""
+    def format_assistant_tool_calls(raw: object, provider_or_model: str) -> Mapping[str, Any] | None:
+        """Extract the assistant/model turn from a tool-call response so it can precede tool results."""
+        raw_payload = getattr(raw, "raw", raw)
+        if not isinstance(raw_payload, Mapping):
+            return None
         provider = ToolsFormatter.provider_from_model(provider_or_model)
-        call_id = call.call_id or call.tool_name
         if provider == "anthropic":
-            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": result.output}]}
+            return ToolsFormatter._assistant_turn_anthropic(raw_payload)
         if provider == "gemini":
-            return {
-                "role": "function",
-                "parts": [
-                    {
-                        "functionResponse": {
-                            "name": call.tool_name,
-                            "response": {"output": result.output, "status": result.status.value},
-                        }
-                    }
-                ],
-            }
-        return {
-            "role": "tool",
-            "tool_call_id": call_id,
-            "name": call.tool_name,
-            "content": result.output,
-        }
+            return ToolsFormatter._assistant_turn_gemini(raw_payload)
+        return ToolsFormatter._assistant_turn_openai(raw_payload)
 
     @staticmethod
-    def format_assistant_tool_calls(calls: Sequence[ToolCall], text: str, provider_or_model: str, max_arg_chars: int | None = None) -> Mapping[str, Any]:
-        """Builds one assistant message carrying a turn's tool calls and arguments for follow-up requests."""
+    def format_parsed_assistant_tool_calls(
+        calls: Sequence[ToolCall],
+        text: str,
+        provider_or_model: str,
+        max_arg_chars: int | None = None,
+    ) -> Mapping[str, Any]:
+        """Serialize parsed tool calls when a provider's raw response has no assistant-turn formatter."""
         provider = ToolsFormatter.provider_from_model(provider_or_model)
         if provider == "anthropic":
             return ToolsFormatter._assistant_tool_calls_anthropic(calls, text, max_arg_chars)
@@ -155,7 +250,7 @@ class ToolsFormatter:
 
     @staticmethod
     def _assistant_tool_calls_openai(calls: Sequence[ToolCall], text: str, max_arg_chars: int | None) -> dict[str, Any]:
-        """Builds an OpenAI/xAI assistant message with a tool_calls array carrying JSON-encoded arguments."""
+        """Build an OpenAI-compatible assistant turn from normalized calls."""
         tool_calls = [
             {
                 "id": call.call_id or call.tool_name,
@@ -171,7 +266,7 @@ class ToolsFormatter:
 
     @staticmethod
     def _assistant_tool_calls_anthropic(calls: Sequence[ToolCall], text: str, max_arg_chars: int | None) -> dict[str, Any]:
-        """Builds an Anthropic assistant message with optional text plus tool_use content blocks."""
+        """Build an Anthropic assistant turn from normalized calls."""
         content: list[dict[str, Any]] = []
         if text:
             content.append({"type": "text", "text": text})
@@ -188,7 +283,7 @@ class ToolsFormatter:
 
     @staticmethod
     def _assistant_tool_calls_gemini(calls: Sequence[ToolCall], text: str, max_arg_chars: int | None) -> dict[str, Any]:
-        """Builds a Gemini model message with optional text plus functionCall parts."""
+        """Build a Gemini model turn from normalized calls."""
         parts: list[dict[str, Any]] = []
         if text:
             parts.append({"text": text})
@@ -200,17 +295,256 @@ class ToolsFormatter:
 
     @staticmethod
     def _cap_arguments(arguments: Mapping[str, Any], max_arg_chars: int | None) -> dict[str, Any]:
-        """Truncates oversized string argument values for token control; never removes keys."""
+        """Truncate oversized string values in echoed calls while retaining all argument keys."""
         if max_arg_chars is None:
             return dict(arguments)
         return {key: ToolsFormatter._cap_value(value, max_arg_chars) for key, value in arguments.items()}
 
     @staticmethod
     def _cap_value(value: Any, max_arg_chars: int) -> Any:
-        """Truncates a single string value beyond the cap, leaving non-string values untouched."""
+        """Bound a string argument value without changing non-string values."""
         if isinstance(value, str) and len(value) > max_arg_chars:
             return f"{value[:max_arg_chars]}...[truncated]"
         return value
+
+    @staticmethod
+    def _assistant_turn_openai(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """Return the assistant message from an OpenAI chat-completions payload, or None for Responses API."""
+        if isinstance(raw_payload.get("output"), list):
+            return None
+        choices = raw_payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        message = choices[0].get("message") if isinstance(choices[0], Mapping) else None
+        if isinstance(message, Mapping) and isinstance(message.get("tool_calls"), list):
+            return dict(message)
+        return None
+
+    @staticmethod
+    def _assistant_turn_anthropic(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """Return an assistant message wrapping the full content list from an Anthropic payload."""
+        content = raw_payload.get("content")
+        if not isinstance(content, list) or not content:
+            return None
+        has_tool_use = any(isinstance(item, Mapping) and item.get("type") == "tool_use" for item in content)
+        if not has_tool_use:
+            return None
+        return {"role": "assistant", "content": list(content)}
+
+    @staticmethod
+    def _assistant_turn_gemini(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """Return the model content from a Gemini candidates payload."""
+        candidates = raw_payload.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return None
+        content = candidates[0].get("content") if isinstance(candidates[0], Mapping) else None
+        if not isinstance(content, Mapping):
+            return None
+        parts = content.get("parts")
+        if not isinstance(parts, list):
+            return None
+        has_function_call = any(
+            isinstance(p, Mapping) and ("functionCall" in p or "function_call" in p) for p in parts
+        )
+        if not has_function_call:
+            return None
+        return dict(content)
+
+    @staticmethod
+    def format_tool_result(
+        call: ToolCall,
+        result: ToolResult,
+        provider_or_model: str,
+    ) -> Mapping[str, Any]:
+        """Format a local tool result for a follow-up provider request."""
+        provider = ToolsFormatter.provider_from_model(provider_or_model)
+        call_id = call.call_id or call.tool_name
+        if result.status is ToolStatus.ERROR:
+            return ToolsFormatter._format_tool_error_result(call, result, provider, call_id)
+        return ToolsFormatter._format_tool_success_result(call, result, provider, call_id)
+
+    @staticmethod
+    def _format_tool_success_result(
+        call: ToolCall,
+        result: ToolResult,
+        provider: str,
+        call_id: str,
+    ) -> Mapping[str, Any]:
+        if provider == "anthropic":
+            return ToolsFormatter._format_anthropic_tool_result(call_id, result.output)
+        if provider == "gemini":
+            response = {"output": result.output, "status": result.status.value}
+            return ToolsFormatter._format_gemini_tool_result(call.tool_name, response)
+        return ToolsFormatter._format_openai_tool_result(call, call_id, result.output)
+
+    @staticmethod
+    def _format_tool_error_result(
+        call: ToolCall,
+        result: ToolResult,
+        provider: str,
+        call_id: str,
+    ) -> Mapping[str, Any]:
+        envelope = ToolsFormatter._render_error_envelope(result)
+        if provider == "anthropic":
+            return ToolsFormatter._format_anthropic_tool_result(call_id, envelope, is_error=True)
+        if provider == "gemini":
+            error_parts = ToolsFormatter._error_parts(result)
+            return ToolsFormatter._format_gemini_tool_result(
+                call.tool_name,
+                ToolsFormatter._gemini_error_response(error_parts),
+            )
+        if ToolsFormatter._is_openai_responses_call(call):
+            return ToolsFormatter._format_openai_responses_tool_result(call_id, envelope)
+        return ToolsFormatter._format_openai_tool_result(call, call_id, envelope)
+
+    @staticmethod
+    def _format_anthropic_tool_result(
+        call_id: str,
+        content: str,
+        *,
+        is_error: bool = False,
+    ) -> Mapping[str, Any]:
+        block: dict[str, Any] = {
+            "type": "tool_result",
+            "tool_use_id": call_id,
+            "content": content,
+        }
+        if is_error:
+            block["is_error"] = True
+        return {"role": "user", "content": [block]}
+
+    @staticmethod
+    def _format_gemini_tool_result(tool_name: str, response: Mapping[str, Any]) -> Mapping[str, Any]:
+        # generateContent only accepts 'user' and 'model' turns; a functionResponse part is
+        # carried on a 'user' turn. Sending role 'function' fails the whole request with
+        # "Role 'function' is not supported."
+        return {
+            "role": "user",
+            "parts": [
+                {
+                    "functionResponse": {
+                        "name": tool_name,
+                        "response": dict(response),
+                    }
+                }
+            ],
+        }
+
+    @staticmethod
+    def _format_openai_responses_tool_result(call_id: str, output: str) -> Mapping[str, Any]:
+        return {"type": "function_call_output", "call_id": call_id, "output": output}
+
+    @staticmethod
+    def _format_openai_tool_result(call: ToolCall, call_id: str, content: str) -> Mapping[str, Any]:
+        return {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "name": call.tool_name,
+            "content": content,
+        }
+
+    @staticmethod
+    def _render_error_envelope(result: ToolResult) -> str:
+        # Keep every provider's text channel on the same full-detail contract:
+        # the first line is machine-parseable, and every available human-facing
+        # message, hint, and diagnostic detail follows in a stable order.
+        parts = ToolsFormatter._error_parts(result)
+        first_line = ToolsFormatter._error_envelope_header(parts)
+        lines = [first_line, parts["message"]]
+        if parts.get("hint"):
+            lines.append(f"Hint: {parts['hint']}")
+        if parts.get("detail"):
+            lines.append(f"Detail: {parts['detail']}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _error_parts(result: ToolResult) -> dict[str, Any]:
+        # Extract structured error metadata without applying a secrecy or verbosity
+        # policy here; tool authors control the public message and metadata they
+        # attach, and the formatter always forwards all of it to the model.
+        metadata = dict(result.metadata or {})
+        kind = ToolsFormatter._normalized_error_kind(metadata.get("error") or metadata.get("error_type"))
+        retryable = ToolsFormatter._normalized_retryable(metadata.get("retryable"))
+        return {
+            "kind": kind,
+            "message": ToolsFormatter._model_visible_error_message(result.output, metadata),
+            "hint": ToolsFormatter._clean_text(metadata.get("hint")),
+            "retryable": retryable,
+            "detail": ToolsFormatter._detail_text(metadata),
+        }
+
+    @staticmethod
+    def _gemini_error_response(parts: Mapping[str, Any]) -> dict[str, Any]:
+        # Builds Gemini's structured functionResponse.response object for errors.
+        response: dict[str, Any] = {"error": parts["kind"], "message": parts["message"], "status": "error"}
+        if parts.get("hint"):
+            response["hint"] = parts["hint"]
+        if parts.get("retryable") is not None:
+            response["retryable"] = parts["retryable"]
+        return response
+
+    @staticmethod
+    def _error_envelope_header(parts: Mapping[str, Any]) -> str:
+        # Builds the machine-parseable first line for text-only provider error channels.
+        tokens = [f"kind={parts['kind']}"]
+        if parts.get("retryable") is not None:
+            tokens.append(f"retryable={str(parts['retryable']).lower()}")
+        return f"[tool_error {' '.join(tokens)}]"
+
+    @staticmethod
+    def _normalized_error_kind(raw_kind: object) -> str:
+        # Normalizes legacy metadata names into stable model-visible error kinds.
+        raw = str(raw_kind or "execution_error").strip().lower()
+        aliases = {
+            "validation": "invalid_arguments",
+            "validation_error": "invalid_arguments",
+            "argument_error": "invalid_arguments",
+            "arguments_error": "invalid_arguments",
+        }
+        return aliases.get(raw, raw or "execution_error")
+
+    @staticmethod
+    def _normalized_retryable(raw_retryable: object) -> bool | None:
+        # Coerces retryable metadata into a bool while preserving an unspecified value.
+        if isinstance(raw_retryable, bool):
+            return raw_retryable
+        if isinstance(raw_retryable, str):
+            lowered = raw_retryable.strip().lower()
+            if lowered in {"true", "1", "yes"}:
+                return True
+            if lowered in {"false", "0", "no"}:
+                return False
+        return None
+
+    @staticmethod
+    def _model_visible_error_message(output: str, metadata: Mapping[str, Any]) -> str:
+        # Preserve ToolResult.output whenever it exists so execution failures stay
+        # fully visible to the next model turn. safe_message remains only a
+        # compatibility fallback for older structured-error payloads with no output.
+        cleaned = ToolsFormatter._clean_text(output)
+        return cleaned or ToolsFormatter._clean_text(metadata.get("safe_message")) or "Tool failed."
+
+    @staticmethod
+    def _detail_text(metadata: Mapping[str, Any]) -> str | None:
+        # Preserve the most specific diagnostic detail field available. This is
+        # intentionally unconditional: the current SDK behavior is full tool-error
+        # detail for the model on every failed tool result.
+        return ToolsFormatter._clean_text(metadata.get("detail") or metadata.get("exception") or metadata.get("traceback"))
+
+    @staticmethod
+    def _clean_text(value: object, *, max_chars: int = 1000) -> str | None:
+        # Converts optional metadata values into bounded one-line-ish text.
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return text[:max_chars]
+
+    @staticmethod
+    def _is_openai_responses_call(call: ToolCall) -> bool:
+        # Detects tool calls parsed from the OpenAI Responses API output shape.
+        return str(dict(call.metadata or {}).get("provider_shape", "")).lower() == "openai_responses"
 
     @staticmethod
     def parse_openai_tool_call(raw_call: Mapping[str, Any]) -> ToolCall:
@@ -260,10 +594,71 @@ class ToolsFormatter:
 
     @staticmethod
     def _schema_for_spec(spec: ToolSpec) -> dict[str, Any]:
-        """Return the best available JSON Schema for a tool spec."""
+        """Return the best available JSON Schema for a tool spec, including any activity annotation."""
         if isinstance(spec.input_schema, Mapping):
-            return dict(spec.input_schema)
-        return ToolsFormatter._parameters_schema(spec.parameters)
+            schema = dict(spec.input_schema)
+        else:
+            schema = ToolsFormatter._parameters_schema(spec.parameters)
+        if spec.activity is None:
+            return schema
+        return ToolsFormatter._schema_with_activity(schema, spec.activity, spec.name)
+
+    @staticmethod
+    def _schema_with_activity(schema: Mapping[str, Any], activity: ToolActivity, tool_name: str) -> dict[str, Any]:
+        """Merge an activity declaration into a tool's input schema under the reserved key."""
+        merged = deepcopy(dict(schema))
+        activity_schema = ToolsFormatter._activity_schema(activity)
+        ToolsFormatter._hoist_definitions(merged, activity_schema)
+        properties = ToolsFormatter._activity_properties(merged, tool_name)
+        properties[ACTIVITY_ARGUMENT_KEY] = activity_schema
+        merged["properties"] = properties
+        if activity.required:
+            required = list(merged.get("required") or ())
+            if ACTIVITY_ARGUMENT_KEY not in required:
+                required.append(ACTIVITY_ARGUMENT_KEY)
+            merged["required"] = required
+        return merged
+
+    @staticmethod
+    def _hoist_definitions(merged: dict[str, Any], nested: dict[str, Any]) -> None:
+        """Move nested Pydantic definitions to the provider schema root."""
+        # @intent provider-schema-ref-resolution
+        # Tool parameters are the JSON Schema document sent to providers. A nested
+        # Pydantic model keeps `$defs` beside `activity`, but JSON Schema resolves
+        # `#/$defs/...` from the document root. Hoisting preserves the references so
+        # xAI and other strict tool validators can resolve enum/list definitions.
+        for definitions_key in ("$defs", "definitions"):
+            definitions = nested.pop(definitions_key, None)
+            if not isinstance(definitions, Mapping):
+                continue
+            existing = merged.get(definitions_key)
+            root_definitions = dict(existing) if isinstance(existing, Mapping) else {}
+            for name, definition in definitions.items():
+                if name in root_definitions and root_definitions[name] != definition:
+                    raise ConfigurationError(
+                        f"Activity schema definition '{name}' conflicts with the tool schema."
+                    )
+                root_definitions[name] = definition
+            merged[definitions_key] = root_definitions
+
+    @staticmethod
+    def _activity_properties(merged: dict[str, Any], tool_name: str) -> dict[str, Any]:
+        # Returns the mutable property map an activity may be added to, rejecting a shadowed key.
+        raw_properties = merged.get("properties")
+        properties = dict(raw_properties) if isinstance(raw_properties, Mapping) else {}
+        if merged.get("type") not in (None, "object"):
+            raise ConfigurationError(f"Tool '{tool_name}' input schema must be an object to declare an activity annotation")
+        if ACTIVITY_ARGUMENT_KEY in properties:
+            raise ConfigurationError(f"Tool '{tool_name}' input schema already declares an '{ACTIVITY_ARGUMENT_KEY}' property")
+        merged.setdefault("type", "object")
+        return properties
+
+    @staticmethod
+    def _activity_schema(activity: ToolActivity) -> dict[str, Any]:
+        # Renders the annotation's Pydantic schema with the declaration's model-facing description.
+        schema = deepcopy(activity.schema.model_json_schema())
+        schema["description"] = activity.description
+        return schema
 
     @staticmethod
     def _parse_openai_tool_calls(raw_payload: Mapping[str, Any]) -> tuple[ToolCall, ...]:

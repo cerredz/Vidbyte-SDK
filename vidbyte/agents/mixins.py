@@ -198,6 +198,14 @@ class McpAttachableMixin:
             for name in handle.tool_names
         )
 
+    def _mcp_configs_for_fork(self) -> tuple[McpServerConfig, ...]:
+        # Returns replayable MCP server configs for child agents without sharing live handles.
+        return tuple(handle.config for handle in self._mcp_handles) + tuple(self._pending_mcp_configs)
+
+    def _mcp_bridged_tools_for_fork(self) -> tuple[BaseTool, ...]:
+        # Returns parent-owned bridged tool objects that must not be copied into forked agents.
+        return tuple(tool for handle in self._mcp_handles for tool in handle.bridged_tools)
+
     async def close_mcp_servers(self) -> None:
         """Close all attached MCP server subprocesses and clean up bridged tools.
 

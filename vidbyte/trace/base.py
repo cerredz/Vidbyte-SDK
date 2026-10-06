@@ -1,26 +1,18 @@
-"""Context Protocol Header
-
-Description:
-    Exposes the public Trace tracer client for ergonomic SDK tracing presets.
-Purpose:
-    Keeps tracing helpers importable from vidbyte.trace while implementation
-    details live in dedicated trace modules.
-Architecture:
-    - Trace: Tracer client namespace for off, debug, continual, custom, and provider tracers.
-    - _TraceFactory: Small validation helper for custom tracer normalization.
-Relations:
-    Used by BaseAgent through trace= and delegates to debug, continual, and provider tracers.
-"""
+"""Public Trace facade for SDK tracing presets."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
+from vidbyte.trace.controller import TraceController
 from vidbyte.trace.continual import ContinualTracer
 from vidbyte.trace.debug import DebugTracer
+from vidbyte.trace.profiles import TraceProfile
+from vidbyte.trace.providers import GenericProviderTranslator, LangSmithProviderTranslator, ProviderTraceTranslator
+from vidbyte.trace.session import SessionTraceController, SessionTracer
 
 
 class Trace:
@@ -42,6 +34,33 @@ class Trace:
         return _TraceFactory.resolve_custom_tracer(tracer)
 
     @staticmethod
+    def profile(inner: TracerBase, profile: TraceProfile | None = None, provider: str | ProviderTraceTranslator | None = None) -> TraceController:
+        # Wraps a low-level tracer in the semantic trace controller.
+        if inner is None:
+            raise ConfigurationError("Trace.profile() requires an inner tracer.")
+        return TraceController(inner=inner, profile=profile, translator=_TraceFactory.resolve_translator(provider))
+
+    @staticmethod
+    def session(
+        inner: type[TracerBase] | TracerBase,
+        name: str | None = None,
+        profile: TraceProfile | None = None,
+        provider: str | ProviderTraceTranslator | None = None,
+        *,
+        default_name: str | None = None,
+        default_attributes: Mapping[str, Any] | None = None,
+    ) -> SessionTraceController | SessionTracer:
+        # Supports the legacy SessionTracer path and the semantic session controller path.
+        if inner is None:
+            raise ConfigurationError("Trace.session() requires an inner tracer.")
+        if default_name is not None or default_attributes is not None:
+            if name is not None or profile is not None or provider is not None:
+                raise ConfigurationError("Trace.session() cannot mix default_name/default_attributes with semantic session options.")
+            return SessionTracer(inner, default_name=default_name or "session.run", default_attributes=default_attributes)
+        resolved_inner = _TraceFactory.resolve_custom_tracer(inner)
+        return SessionTraceController(inner=resolved_inner, profile=profile, translator=_TraceFactory.resolve_translator(provider), name=name)
+
+    @staticmethod
     def continual(remember: Sequence[str], *, max_memory_chars: int = 1200, redact: bool = True) -> ContinualTracer:
         # Returns a validated continual trace capture preset.
         return ContinualTracer(remember, max_memory_chars=max_memory_chars, redact=redact)
@@ -57,6 +76,43 @@ class Trace:
         # Builds the existing LangSmith provider tracer with forwarded settings.
         from vidbyte.providers.tracing import LangSmithTracer
         return LangSmithTracer(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info)
+
+    @staticmethod
+    def langsmith_default(api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False, include_runtime_info: bool = False) -> TraceController:
+        # Builds a LangSmith tracer wrapped in the default semantic profile.
+        return Trace.profile(
+            Trace.langsmith(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info),
+            profile=TraceProfile.default(),
+            provider="langsmith",
+        )
+
+    @staticmethod
+    def langsmith_verbose(api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False, include_runtime_info: bool = False) -> TraceController:
+        # Builds a LangSmith tracer wrapped in the verbose semantic profile.
+        return Trace.profile(
+            Trace.langsmith(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info),
+            profile=TraceProfile.verbose(),
+            provider="langsmith",
+        )
+
+    @staticmethod
+    def langsmith_session(
+        api_key: str | None = None,
+        project: str | None = None,
+        endpoint: str | None = None,
+        strict: bool = False,
+        include_runtime_info: bool = False,
+        name: str | None = None,
+        profile: TraceProfile | None = None,
+        *,
+        default_name: str | None = None,
+        default_attributes: Mapping[str, Any] | None = None,
+    ) -> SessionTraceController | SessionTracer:
+        # Builds a LangSmith tracer wrapped in a session-capable trace root.
+        inner = Trace.langsmith(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info)
+        if default_name is not None or default_attributes is not None:
+            return SessionTracer(inner, default_name=default_name or "session.run", default_attributes=default_attributes)
+        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="langsmith")
 
     @staticmethod
     def phoenix(endpoint: str | None = None) -> TracerBase:
@@ -78,5 +134,24 @@ class _TraceFactory:
             raise ConfigurationError("Trace.custom() requires a TracerBase class or instance.")
         return resolved
 
+    @staticmethod
+    def resolve_translator(provider: str | ProviderTraceTranslator | None) -> ProviderTraceTranslator:
+        # Converts a provider name or translator instance into a concrete translator.
+        if provider is None or provider == "generic":
+            return GenericProviderTranslator()
+        if provider == "langsmith":
+            return LangSmithProviderTranslator()
+        if hasattr(provider, "translate_start"):
+            return provider
+        raise ConfigurationError(f"Unknown trace provider translator: {provider}.")
 
-__all__ = ["ContinualTracer", "DebugTracer", "Trace"]
+
+__all__ = [
+    "ContinualTracer",
+    "DebugTracer",
+    "SessionTraceController",
+    "SessionTracer",
+    "Trace",
+    "TraceController",
+    "TraceProfile",
+]

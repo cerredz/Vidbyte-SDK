@@ -8,12 +8,14 @@ Purpose:
 Architecture:
     - AgentMiddleware: Optional hook base class for custom middleware.
     - MiddlewarePipeline: Ordered hook dispatcher used by AgentRuntime.
-    - Dataclass re-exports: hooks, actions, contexts, decisions, events.
+    - Dataclass re-exports: hooks, actions, contexts, decisions, policy events,
+      and diagnostic hook invocations.
     - Built-ins: AuditLogMiddleware, ModelRetryMiddleware, RuntimeLimitMiddleware,
       TokenRateLimitMiddleware, ToolPolicyMiddleware, TokenBudgetMiddleware,
       CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
       LoopDetectionMiddleware, CircuitBreakerMiddleware, CircuitState,
-      CanaryTripwireMiddleware, ConfusedDeputyGuardMiddleware, and HoneypotToolMiddleware.
+      CanaryTripwireMiddleware, ConfusedDeputyGuardMiddleware, HoneypotToolMiddleware,
+      and FailureMiddleware.
 Relations:
     Related to vidbyte.agents.runtime and vidbyte.middleware.builtins.
 """
@@ -26,6 +28,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareHookInvocation,
     MiddlewareTransform,
 )
 from vidbyte.middleware.base import AgentMiddleware
@@ -37,6 +40,7 @@ from vidbyte.middleware.builtins import (
     ConfusedDeputyGuardMiddleware,
     CostBudgetMiddleware,
     ExponentialBackoffRetryMiddleware,
+    FailureMiddleware,
     HoneypotToolMiddleware,
     LoopDetectionMiddleware,
     MessageHistoryCompactionMiddleware,
@@ -61,6 +65,7 @@ __all__ = [
     "ConfusedDeputyGuardMiddleware",
     "CostBudgetMiddleware",
     "ExponentialBackoffRetryMiddleware",
+    "FailureMiddleware",
     "HoneypotToolMiddleware",
     "LoopDetectionMiddleware",
     "MiddlewareAction",
@@ -68,6 +73,7 @@ __all__ = [
     "MiddlewareDecision",
     "MiddlewareEvent",
     "MiddlewareHook",
+    "MiddlewareHookInvocation",
     "MiddlewarePipeline",
     "MiddlewareTransform",
     "MessageHistoryCompactionMiddleware",

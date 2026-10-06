@@ -349,15 +349,15 @@ class CircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_half_open_calls_bounded_under_concurrency(self) -> None:
         # [Hidden Failure] half_open_max_calls=1 must reject all but one probe under concurrency.
-        import time
+        clock_value = [0.0]
         mw = CircuitBreakerMiddleware(
             failure_threshold=1, window_seconds=60.0, recovery_timeout=0.001,
-            half_open_max_calls=1, clock=time.monotonic,
+            half_open_max_calls=1, clock=lambda: clock_value[0],
         )
         run_state: dict = {}
         await mw.on_model_error(_make_ctx(MiddlewareHook.ON_MODEL_ERROR, run_state))
 
-        await asyncio.sleep(0.01)  # let recovery_timeout elapse
+        clock_value[0] = 0.01
 
         decisions = []
 
@@ -369,8 +369,8 @@ class CircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(probe(), probe(), probe())
         continues = decisions.count("continue")
         aborts = decisions.count("abort_run")
-        self.assertGreaterEqual(continues, 1)
-        self.assertGreaterEqual(aborts, 1)
+        self.assertEqual(continues, 1)
+        self.assertEqual(aborts, 2)
         self.assertEqual(continues + aborts, 3)
 
 

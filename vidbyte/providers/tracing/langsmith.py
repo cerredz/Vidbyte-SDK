@@ -1,25 +1,3 @@
-"""Context Protocol Header
-
-Description:
-    Tracer adapter implementation for the LangSmith observability platform.
-Purpose:
-    Enables logging agent and tool runs as structured chains, LLM calls, and tools within LangSmith, supporting debugging, dataset generation, and evaluation.
-Architecture:
-    - LangSmithSpanContext: Context structure carrying trace_id, run_id, and parent relationship for LangSmith.
-    - LangSmithTracer: Adapter wrapping the third-party langsmith Client to start/end traces and spans.
-Key Functions:
-    - start_trace: Initiates a root run trace.
-    - end_trace: Finalizes a root run trace, sending outputs/errors and flushing logs.
-    - start_span: Opens a child span (e.g. llm.call, tool.call).
-    - end_span: Closes a child span with outcome metadata.
-Relation to Codebase:
-    Implements TracerBase from vidbyte/lib/tracing/base.py. Loaded dynamically by AgentRuntime to track execution paths.
-Similar Files:
-    - vidbyte/providers/tracing/langfuse.py
-    - vidbyte/providers/tracing/phoenix.py
-    - vidbyte/lib/tracing/base.py
-"""
-
 from __future__ import annotations
 
 import os
@@ -131,16 +109,14 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
-        flush_fn = getattr(self._client, "flush", None)
-        if flush_fn is not None:
-            self._call_langsmith("flush", flush_fn)
+        self._flush()
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> LangSmithSpanContext:
         # Opens a child LangSmith run under the parent trace when available.
         run_id = str(uuid.uuid4())
         parent_run_id = parent.run_id if isinstance(parent, LangSmithSpanContext) else None
         trace_id = parent.trace_id if isinstance(parent, LangSmithSpanContext) else None
-        run_type = "llm" if name.startswith("llm.") else "tool"
+        run_type = self._resolve_run_type(name, attributes.pop("run_type", None))
         create_kwargs: dict[str, Any] = dict(
             id=run_id,
             name=name,
@@ -154,7 +130,14 @@ class LangSmithTracer(TracerBase):
         self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
         return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, metadata: Mapping[str, Any] | None = None) -> None:
+    def end_span(
+        self,
+        context: SpanContext,
+        *,
+        output: str | None = None,
+        error: BaseException | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
         # Closes a child LangSmith run with output or error plus optional structured metadata.
         if not isinstance(context, LangSmithSpanContext):
             return
@@ -163,9 +146,24 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), outputs=extra or None, end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output, **extra}, end_time=_now())
-        flush_fn = getattr(self._client, "flush", None)
-        if flush_fn is not None:
-            self._call_langsmith("flush", flush_fn)
+        self._flush()
+
+    @staticmethod
+    def _resolve_run_type(name: str, explicit: str | None) -> str:
+        # Classify a span name into a LangSmith run_type: chain, llm, or tool.
+        if explicit is not None:
+            return explicit
+        if name.startswith("llm."):
+            return "llm"
+        if name.startswith("tool."):
+            return "tool"
+        return "chain"
+
+    def _flush(self) -> None:
+        # Flushes clients that expose flush while tolerating lightweight test doubles.
+        flush = getattr(self._client, "flush", None)
+        if callable(flush):
+            self._call_langsmith("flush", flush)
 
 
 def _now() -> Any:

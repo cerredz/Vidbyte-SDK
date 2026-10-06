@@ -8,7 +8,8 @@ Purpose:
     dict-backed registry for addressable, window-resident managed primitives.
 Architecture:
     - ContextManager: Ordered context item collection with registry for managed primitives.
-    - Registry methods: upsert, get_by_id, remove_by_id, render_primitives_zone.
+    - Registry methods: upsert, get_by_id, remove_by_id, recite, upsert_preserving_placement,
+      render_primitives_zone, render_conversation_messages.
     - Compatibility conversion from context items to BaseContext fields.
 Relations:
     Used by BaseAgent/AgentRuntime and re-exported through vidbyte.context.
@@ -116,6 +117,27 @@ class ContextManager:
         """Return the managed primitive with the given id, or None if not found."""
         return self._registry.get(primitive_id)
 
+    def registry_items(self) -> tuple[tuple[str, ContextItem], ...]:
+        """Return an ordered, read-only view of managed primitive registry entries."""
+        return tuple(self._registry.items())
+
+    def set_placement(self, primitive_id: str, placement: ContextWindowPlacement) -> "ContextManager":
+        """Update the render placement for an existing managed primitive."""
+        if primitive_id not in self._registry:
+            raise ValueError(f"Primitive '{primitive_id}' does not exist in the context window registry.")
+        self._placements[primitive_id] = ContextWindowPlacement(placement)
+        return self
+
+    def set_frozen(self, primitive_id: str, frozen: bool) -> "ContextManager":
+        """Update the frozen flag for an existing managed primitive."""
+        item = self._registry.get(primitive_id)
+        if item is None:
+            raise ValueError(f"Primitive '{primitive_id}' does not exist in the context window registry.")
+        if not dataclasses.is_dataclass(item):
+            raise ValueError(f"Primitive '{primitive_id}' is not a dataclass and cannot be frozen.")
+        self._registry[primitive_id] = dataclasses.replace(item, primitive_frozen=bool(frozen))
+        return self
+
     def remove_by_id(self, primitive_id: str) -> "ContextManager":
         """Remove the managed primitive with the given id; silently ignores missing ids."""
         self._registry.pop(primitive_id, None)
@@ -133,6 +155,35 @@ class ContextManager:
         """Return the render placement for a managed primitive id."""
         # Exposes placement metadata without exposing the mutable placement registry.
         return self._placements.get(primitive_id)
+
+    def upsert_preserving_placement(self, item: ContextItem) -> "ContextManager":
+        """Re-upsert a managed primitive using its prior placement when known."""
+        # Defaults to END_OF_CONTEXT when the id has no stored placement yet.
+        primitive_id = getattr(item, "primitive_id", None)
+        if not primitive_id:
+            raise ValueError(
+                "upsert_preserving_placement() requires a primitive with a non-empty primitive_id."
+            )
+        placement = self.placement_for(str(primitive_id)) or ContextWindowPlacement.END_OF_CONTEXT
+        return self.upsert(item, placement=placement)
+
+    def recite(self, primitive_id: str, *, slot_id: str | None = None) -> str:
+        """Copy a managed primitive to END_OF_CONVERSATION under a recitation id."""
+        # Leaves the source id/placement unchanged; returns the recitation slot id used.
+        source = self.get_by_id(primitive_id)
+        if source is None:
+            raise ValueError(f"Unknown primitive '{primitive_id}'.")
+        if not dataclasses.is_dataclass(source):
+            raise ValueError(f"Primitive '{primitive_id}' is not a dataclass and cannot be recited.")
+        target_id = (slot_id or "").strip() or f"recite:{primitive_id}"
+        replace_kwargs: dict[str, Any] = {"primitive_id": target_id, "primitive_frozen": False}
+        field_names = {f.name for f in dataclasses.fields(source)}
+        if "title" in field_names:
+            title = str(getattr(source, "title", "") or "")
+            replace_kwargs["title"] = title if title.startswith("Recite: ") else f"Recite: {title}"
+        copy = dataclasses.replace(source, **replace_kwargs)
+        self.upsert(copy, placement=ContextWindowPlacement.END_OF_CONVERSATION)
+        return target_id
 
     def render_primitives_zone(self) -> str:
         """Return a formatted block of all registry primitives in insertion order."""

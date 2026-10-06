@@ -14,6 +14,7 @@ Relations:
     BaseAgent wiring lives in vidbyte/agents/base.py.
 Similar Files:
     - skills/agent-runtimes/SKILL.md: Covers swappable runtime topologies.
+    - skills/tool-settings/SKILL.md: Process guide for ToolSettings creation and extension.
     - skills/vidbyte-sdk/SKILL.md: Root SDK structure reference.
 -->
 
@@ -94,6 +95,58 @@ These parameters are stored on `AgentLoopSettings`, validated at construction ti
 | `compaction_trigger_tokens` | `int \| None` | `None` | Token usage level at which context compaction triggers. Must be greater than `compaction_target_tokens`. |
 | `compaction_target_tokens` | `int \| None` | `None` | Target token usage after compaction completes. Must be less than `compaction_trigger_tokens`. |
 
+### 3.1.1 Nested settings objects
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `tool_settings` | `ToolSettings \| None` | `None` | Nested universal tool-use constraints (deny/truncate plus hard budgets: per-iteration, identical-call, consecutive/total failures, per-call timeout, sliding window). Enforced **inline by the direct runtime** (not middleware). `ToolSettings.max_calls` maps to the same budget as `max_tool_calls` and must match if both are set. Non-linear runtimes reject `tool_settings` at construction. See `skills/tool-settings/SKILL.md`. |
+
+To **configure** tool settings, nest them on `AgentLoopSettings`. To **add or extend** tool settings fields, follow the process skill:
+
+- **Process guide:** `skills/tool-settings/SKILL.md`
+- **Architecture design:** `docs/design/tool-settings-runtime-enforcement.md`
+
+```python
+from vidbyte.agents import AgentLoopSettings, ToolSettings
+
+settings = AgentLoopSettings(
+    max_iterations=10,
+    tool_settings=ToolSettings(
+        denied_tools={"delete_file"},
+        max_calls=20,
+        result_max_chars=8000,
+        on_deny="continue",
+    ),
+)
+```
+
+> `tool_error_policy` is a separate nested object for tool-error retry/render behavior (middleware-oriented). Do not confuse it with `tool_settings`.
+
+### 3.1.2 Output contracts (effort floors)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `output_contracts` | `Sequence[OutputContract]` | `()` | Deterministic **floors** that gate when a linear agent may stop. Owned as `settings.output_contract` (`AgentLoopSettingsOutputContract`). Empty = no-op. |
+| `max_contract_rejections` | `int` | `3` | How many unmet finalization attempts are allowed before the run stops with `stop_reason=contract_unsatisfied`. Must be `> 0`. |
+
+**Ceilings say when the agent MUST stop. Output contracts say when it MAY stop.**
+
+When the model calls `isDone` (or tries to finalize with no tool calls) before every floor is met, the runtime injects corrective feedback and continues the loop. See the full process guide:
+
+- **Output contracts skill:** `skills/output-contracts/SKILL.md`
+- **Framework design:** `docs/design/output-contracts-loop-settings.md`
+- **Extended floors design:** `docs/design/output-contract-skill-and-extended-floors.md`
+
+```python
+from vidbyte.agents import AgentLoopSettings, MinToolCalls, MinSuccessfulToolCalls, MinTimeTaken
+
+settings = AgentLoopSettings(
+    max_tool_calls=20,
+    max_contract_rejections=5,
+    output_contracts=[MinToolCalls(5), MinSuccessfulToolCalls(3), MinTimeTaken(15)],
+)
+```
+
 ### 3.2 Validated but Reserved (Not Yet Enforced at Runtime)
 
 These parameters are accepted and validated on `AgentLoopSettings` at construction time, but the execution loop does not yet read or enforce them. They are stored on the settings object for introspection and documented here so that future runtime implementations have a stable API to target.
@@ -117,6 +170,10 @@ These parameters are accepted and validated on `AgentLoopSettings` at constructi
 | Any integer field is `0` or negative | `{field} must be greater than zero when provided` |
 | `timeout_seconds` is `0.0` or negative | `timeout_seconds must be greater than zero when provided` |
 | `compaction_target_tokens >= compaction_trigger_tokens` (when both set) | `compaction_target_tokens must be less than compaction_trigger_tokens` |
+| `tool_settings` is not a `ToolSettings` instance | `tool_settings must be a ToolSettings instance when provided` |
+| `max_tool_calls` and `ToolSettings.max_calls` both set and differ | must match when both are provided |
+| Effort floor `minimum >=` paired ceiling (when ceiling set) | floor is unreachable (require minimum < ceiling) |
+| `MinToolCallsById` minimum `>=` `ToolSettings.max_calls_per_tool[name]` when set | floor is unreachable for that tool |
 | Both `agent_loop_settings=` and flat params passed to `BaseAgent` | `Pass either agent_loop_settings= or individual loop params (...), not both.` |
 
 ---
@@ -129,9 +186,16 @@ When the runtime stops due to an `AgentLoopSettings` budget, the `AgentResult.me
 |-------------|-------------|
 | `"max_iterations"` | `max_iterations` reached |
 | `"max_tokens"` | `max_tokens` reached |
-| `"max_tool_calls"` | `max_tool_calls` reached |
+| `"max_tool_calls"` | `max_tool_calls` / `ToolSettings.max_calls` reached |
+| `"max_calls_per_iteration"` | `ToolSettings.max_calls_per_iteration` hard-stop |
+| `"max_identical_calls"` | `ToolSettings.max_identical_calls` hard-stop |
+| `"max_consecutive_failures"` | `ToolSettings.max_consecutive_failures` hard-stop |
+| `"max_error_calls"` | `ToolSettings.max_error_calls` hard-stop |
+| `"sliding_window_max_calls"` | `ToolSettings` sliding-window hard-stop |
+| `"tool_settings_denied"` | `ToolSettings` denial with `on_deny="abort"` |
 | `"final_response"` | Agent completed normally (no budget hit) |
 | `"is_done"` | Agent called the `isDone` tool explicitly |
+| `"contract_unsatisfied"` | Output-contract floors still unmet after `max_contract_rejections` attempts |
 
 ---
 
@@ -171,9 +235,11 @@ A budget that is not configured (`None`) is omitted from the block. When none of
 agent.agent_loop_settings.max_iterations   # int | None
 agent.agent_loop_settings.max_tool_calls   # int | None
 agent.agent_loop_settings.timeout_seconds  # float | None
+agent.agent_loop_settings.tool_settings    # ToolSettings | None
 
 # Check if a budget is set:
 has_tool_limit = agent.agent_loop_settings.max_tool_calls is not None
+has_tool_policy = agent.agent_loop_settings.tool_settings is not None
 ```
 
 ---

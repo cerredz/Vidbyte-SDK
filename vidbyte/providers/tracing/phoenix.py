@@ -63,13 +63,16 @@ class PhoenixTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         if not isinstance(context, PhoenixSpanContext) or context.span is None:
             return
         try:
             if output is not None:
                 context.span.set_attribute("output.value", output)
+            for key, value in dict(metadata or {}).items():
+                context.span.set_attribute(f"tool.{key}", value)
             if error is not None:
                 context.span.set_attribute("error.message", str(error))
                 context.span.record_exception(error)
@@ -90,10 +93,13 @@ class PhoenixTracer(TracerBase):
             span = self._tracer.start_span(name, context=ctx)
             for key, value in attributes.items():
                 span.set_attribute(key, str(value))
-            if name.startswith("llm."):
+            run_type = str(attributes.get("run_type", ""))
+            if name.startswith("llm.") or run_type == "llm":
                 span.set_attribute("openinference.span.kind", "LLM")
-            elif name.startswith("tool."):
+            elif name.startswith("tool.") or run_type == "tool":
                 span.set_attribute("openinference.span.kind", "TOOL")
+            elif run_type:
+                span.set_attribute("openinference.span.kind", run_type.upper())
             return PhoenixSpanContext(span=span)
         except Exception:
             return PhoenixSpanContext()
@@ -103,17 +109,13 @@ class PhoenixTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
-        metadata: Mapping[str, Any] | None = None,
+        error: BaseException | None = None,
     ) -> None:
-        # Closes a Phoenix span with output/error plus optional structured metadata as attributes.
         if not isinstance(context, PhoenixSpanContext) or context.span is None:
             return
         try:
             if output is not None:
                 context.span.set_attribute("output.value", output)
-            for key, value in dict(metadata or {}).items():
-                context.span.set_attribute(f"tool.{key}", value)
             if error is not None:
                 context.span.set_attribute("error.message", str(error))
                 context.span.record_exception(error)

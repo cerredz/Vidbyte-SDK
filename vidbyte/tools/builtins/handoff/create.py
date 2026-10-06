@@ -73,6 +73,10 @@ class CreateHandoffTool(BaseTool):
         """Attach the live agent used for handoff recording."""
         self._agent = agent
 
+    def clone_for_fork(self) -> CreateHandoffTool:
+        # Returns a fresh unbound handoff tool so parent and child handoff state stay separate.
+        return CreateHandoffTool()
+
     def spec(self) -> ToolSpec:
         """Return the model-facing declaration with a rich description including past handoff context."""
         return ToolSpec(
