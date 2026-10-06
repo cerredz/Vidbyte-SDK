@@ -1,70 +1,79 @@
 """FILE: tests/test_jev_compute_situations.py
 
-PURPOSE: Verifies mid-run compute situation recognition without network calls: the fixed sign questions and their house-style shape, each situation's policy and registry, the code-side state builders, the recognizer's scoring, and the checkpoint that runs it after a verified brief refresh.
-ROLE IN CODEBASE: Covers vidbyte/lib/jev/compute/, vidbyte/agents/jev/compute/states.py and recognizer.py, the recognition step of JevComputeController, and JevComputeSettings.situations.
-ARCHITECTURE NOTE: A scripted stand-in replaces DecisionModelHelper's request while its real scoring stays in use; the brief writer's model is patched; the loop, states, recognizer, and records run for real.
-COMMON MODIFICATION PATTERNS: Add a case when a situation gains a sign, a precondition changes, or the scoring policy changes.
-KNOWN EDGE CASES: A situation the brief cannot show asks Jev nothing; an unavailable answer never passes; the gate must pass on its own.
+PURPOSE: Verifies the fixed dynamic-compute evidence questions and their single-request selection behavior.
+ROLE IN CODEBASE: Covers the question registry, shared state, JevComputeRecognizer, decision records, and post-brief controller checkpoint.
+ARCHITECTURE NOTE: A scripted decision runner exercises the real request construction and score normalization without network calls.
+COMMON MODIFICATION PATTERNS: Add focused cases when question evidence, option scoring, state bounds, or checkpoint timing changes.
+KNOWN EDGE CASES: Incomplete option answers and provider failures produce no selection; disabled options skip recognition.
 RELATED DOCS: docs/design/jev-compute-situations.md.
 TESTS: python -m pytest tests/test_jev_compute_situations.py.
 """
 
 from __future__ import annotations
 
-import ast
-import importlib.util
 import json
 import re
 import unittest
 from collections.abc import Mapping
-from pathlib import Path
+from dataclasses import fields
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from lint.core.discovery import SourceFile
-from lint.rules.s062_no_implicit_string_concatenation import ImplicitConcatenationScanner
 from tests.agent_test_support import bind_test_runner
 from vidbyte import tool
 from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevComputeSettings, JevRuntimeSettings
-from vidbyte.agents.jev.brief import JevRunBriefEvents
 from vidbyte.agents.jev.compute.recognizer import JevComputeRecognizer
 from vidbyte.agents.jev.compute.states import JevComputeStates
+from vidbyte.agents.jev.done.event_log import JevRunEventLog
 from vidbyte.lib.config import DecisionModelConfig
-from vidbyte.lib.constants.jev import (
-    JEV_COMPUTE_EACH_OF_SEVERAL_THRESHOLD,
-    JEV_COMPUTE_EACH_OF_SEVERAL_VETO,
-)
+from vidbyte.lib.constants.jev import JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD, JEV_RUN_BRIEF_REQUEST_MAX_CHARS
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevComputeDecision,
+    JevComputeOptionResult,
     JevComputeQuestion,
-    JevComputeSituationResult,
     JevDecisionRequest,
     JevRunBrief,
-    JevRunBriefApproach,
-    JevRunBriefItem,
-    JevRunBriefPayload,
-    JevRunBriefQuote,
+    JevRunBriefAppendPayload,
+    JevRunBriefNote,
+    JevRunFacts,
 )
-from vidbyte.lib.enums import JevComputeQuestionKey, JevComputeSituation, JevQuestionType, JevRunBriefItemStatus, JevRunBriefOutcome, ModelProvider
+from vidbyte.lib.enums import DecisionModelMode, JevDynamicComputeOption, JevQuestionType, JevRunBriefUpdateStatus, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
-from vidbyte.lib.jev.compute import JevComputeRegistry, JevComputeSituations
+from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.runners.types import DecisionModelResponse
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _HELPER = "vidbyte.agents.jev.compute.recognizer.DecisionModelHelper"
 REQUEST = "Audit each file under src/api for SQL injection."
-Q = JevRunBriefQuote
+Q = JevRunBriefNote
+OPTIONS = tuple(JevDynamicComputeOption)
 
 
 def _answer(name: str, yes: float) -> JevAnswer:
     return JevAnswer(question_name=name, question_type=JevQuestionType.NOUL, choice="true" if yes >= 0.5 else "false", probabilities={"true": yes, "false": 1.0 - yes}, noul=yes)
 
 
+def _brief() -> JevRunBrief:
+    return JevRunBrief(
+        goal="Audit the API files",
+        notes=(Q("E2", "I am checking src/api/a.py."),),
+        iteration=3,
+        through_event=6,
+    )
+
+
+def _facts() -> JevRunFacts:
+    return JevRunFacts(iteration=3, tool_calls=2, error_streak=1, tokens_used=200)
+
+
+def _events() -> JevRunEventLog:
+    return JevRunEventLog.from_run(REQUEST, ["I will inspect the API files.", "The first check returned an error."], [])
+
+
 class ScriptedJev:
-    """Answers every question of each request from P(yes) values keyed by question name, with a default for the rest."""
+    """Returns scripted P(true) values keyed by question name and retains request bodies for assertions."""
 
     def __init__(self, yes: Mapping[str, float] | None = None, *, default: float = 0.9, error: Exception | None = None, missing: tuple[str, ...] = ()) -> None:
         self.yes = dict(yes or {})
@@ -82,7 +91,6 @@ class ScriptedJev:
 
 
 def _helper(scripted: ScriptedJev) -> type:
-    # Stands in for DecisionModelHelper: construction returns the scripted runner, while score_noul stays real.
     class ScriptedHelper:
         score_noul = staticmethod(DecisionModelHelper.score_noul)
 
@@ -92,169 +100,136 @@ def _helper(scripted: ScriptedJev) -> type:
     return ScriptedHelper
 
 
-def _brief(**overrides: Any) -> JevRunBrief:
-    values: dict[str, Any] = {
-        "goal": "Audit the API files",
-        "iteration": 3,
-        "through_event": 6,
-        "next_steps": (Q("E4", "I will audit each of these files"),),
-        "items": (
-            JevRunBriefItem("a_py", "src/api/a.py", "src/api files", JevRunBriefItemStatus.PENDING, (Q("E3", "a.py"),)),
-            JevRunBriefItem("b_py", "src/api/b.py", "src/api files", JevRunBriefItemStatus.PENDING, (Q("E3", "b.py"),)),
-            JevRunBriefItem("notes", "NOTES.md", "docs", JevRunBriefItemStatus.PENDING, (Q("E3", "NOTES.md"),)),
-        ),
-    }
-    values.update(overrides)
-    return JevRunBrief(**values)
-
-
-def _events() -> JevRunBriefEvents:
-    return JevRunBriefEvents.from_run(REQUEST, ["I will list the files.", "I will audit each of these files: a.py, b.py."], [])
-
-
 class JevComputeQuestionTests(unittest.TestCase):
-    def test_every_situation_lists_registered_questions_with_a_gate_among_them(self) -> None:
-        listed = [key for situation in JevComputeSituation for key in JevComputeSituations.definition(situation).question_keys]
-        self.assertEqual(sorted(listed), sorted(JevComputeQuestionKey))
-        for situation in JevComputeSituation:
-            definition = JevComputeSituations.definition(situation)
-            self.assertIn(definition.gate, definition.question_keys)
-            for key in definition.question_keys:
-                self.assertTrue(key.value.startswith(f"{situation.value}."))
-                self.assertIsInstance(JevComputeRegistry.get(key), JevComputeQuestion)
+    def test_registry_has_twelve_plain_questions_per_option(self) -> None:
+        self.assertEqual(OPTIONS, (JevDynamicComputeOption.FRESH_AGENT, JevDynamicComputeOption.FORK_AGENT, JevDynamicComputeOption.SUBAGENT))
+        flattened = tuple(key for option in OPTIONS for key in JevComputeRegistry.question_keys(option))
+        self.assertEqual(len(flattened), 36)
+        self.assertEqual(len(set(flattened)), 36)
+        questions = JevComputeRegistry.questions(OPTIONS)
+        self.assertEqual(len(questions), 36)
+        self.assertEqual([question.name for question in questions], [key.value for key in flattened])
+        for option in OPTIONS:
+            keys = JevComputeRegistry.question_keys(option)
+            self.assertEqual(len(keys), 12)
+            for key in keys:
+                question = JevComputeRegistry.get(key)
+                wire_question = next(item for item in questions if item.name == key.value)
+                self.assertIs(type(question), JevComputeQuestion)
+                self.assertIs(wire_question.question_type, JevQuestionType.NOUL)
+                self.assertEqual([item.name for item in wire_question.options], ["true", "false"])
+                state_fields = set(re.findall(r"`([a-z_]+)`", question.instructions))
+                self.assertTrue(state_fields, key.value)
+                self.assertLessEqual(state_fields, {"request", "brief", "facts", "recent"})
+                sentences = re.split(r"(?<=[.!?])\s+", question.instructions.strip())
+                self.assertEqual(len(sentences), 9, key.value)
+                self.assertEqual(len({sentence.casefold() for sentence in sentences[:8]}), 8, key.value)
+                self.assertTrue(all(sentence.endswith(".") for sentence in sentences[:8]), key.value)
+                self.assertTrue(sentences[-1].endswith("?"), key.value)
+                self.assertEqual(question.instructions.count("?"), 1, key.value)
+                self.assertLessEqual(max(len(question.when_true), len(question.when_false)), 160, key.value)
+                self.assertNotIn("example", question.when_true.casefold(), key.value)
+                self.assertNotIn("example", question.when_false.casefold(), key.value)
 
-    def test_each_question_is_a_noul_question_about_fields_its_state_describes(self) -> None:
-        for key in JevComputeQuestionKey:
-            question = JevComputeRegistry.get(key)
-            with self.subTest(key=key.value):
-                rendered = question.to_question()
-                self.assertEqual((rendered.name, rendered.question_type), (key.value, JevQuestionType.NOUL))
-                self.assertEqual([option.name for option in rendered.options], ["true", "false"])
-                self.assertTrue(question.when_true.what.startswith("Choose true when"))
-                self.assertTrue(question.when_false.what.startswith("Choose false when"))
-                fields = set(re.findall(r"`([a-z_]+)`", question.instructions.question))
-                self.assertTrue(fields)
-                for name in fields:
-                    self.assertIn(f"`{name}`", question.instructions.state)
+    def test_decision_records_and_registry_have_no_gate_or_veto_policy(self) -> None:
+        self.assertEqual({field.name for field in fields(JevComputeDecision)}, {"iteration", "results", "option", "usage"})
+        self.assertEqual({field.name for field in fields(JevComputeOptionResult)}, {"option", "score", "answers"})
+        self.assertFalse(hasattr(JevComputeRegistry, "definition"))
 
-    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
-    def test_each_question_carries_at_least_five_hundred_tokens(self) -> None:
-        import tiktoken
+    def test_settings_default_normalize_and_allow_disabling(self) -> None:
+        self.assertEqual(JevComputeSettings().dynamic_compute, OPTIONS)
+        normalized = JevComputeSettings(dynamic_compute=("subagent", JevDynamicComputeOption.FRESH_AGENT, "fresh_agent")).dynamic_compute
+        self.assertEqual(normalized, (JevDynamicComputeOption.FRESH_AGENT, JevDynamicComputeOption.SUBAGENT))
+        self.assertEqual(JevComputeSettings(dynamic_compute=()).dynamic_compute, ())
+        with self.assertRaises(ConfigurationError):
+            JevComputeSettings(dynamic_compute=("unknown",))
+        with self.assertRaises(ConfigurationError):
+            JevComputeSettings(dynamic_compute="fresh_agent")  # type: ignore[arg-type]
 
-        encoding = tiktoken.get_encoding("cl100k_base")
-        for key in JevComputeQuestionKey:
-            question = JevComputeRegistry.get(key)
-            parts = [question.instructions.render()]
-            for criterion in (question.when_true, question.when_false):
-                parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
-            with self.subTest(key=key.value):
-                self.assertGreaterEqual(len(encoding.encode("\n".join(parts))), 500)
+    def test_shared_state_uses_all_four_common_fields_and_existing_renderers(self) -> None:
+        request = "r" * (JEV_RUN_BRIEF_REQUEST_MAX_CHARS + 10)
+        brief, facts, events = _brief(), _facts(), _events()
+        state = JevComputeStates.build(request, brief, facts, events)
+        self.assertEqual(set(state), {"request", "brief", "facts", "recent"})
+        self.assertLessEqual(len(state["request"]), JEV_RUN_BRIEF_REQUEST_MAX_CHARS)
+        self.assertIn("chars omitted", state["request"])
+        self.assertEqual(state["brief"], brief.render())
+        self.assertEqual(state["facts"], {"iteration": 3, "tool_calls": 2, "error_streak": 1, "tokens_used": 200})
+        expected_events = tuple(line for line in events.lines if not line.partition(" ")[2].startswith("USER: "))
+        self.assertEqual(state["recent"], "\n".join(expected_events[-12:]))
 
-    def test_question_text_is_one_string_literal_each(self) -> None:
-        scanner = ImplicitConcatenationScanner()
-        for module in ("state", "repeating", "each_of_several", "self_contained_step"):
-            rel = f"vidbyte/lib/jev/compute/{module}.py"
-            text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
-            with self.subTest(module=module):
-                self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
-
-
-class JevComputeSettingsSituationTests(unittest.TestCase):
-    def test_situations_default_to_all_and_normalize_into_priority_order(self) -> None:
-        self.assertEqual(JevComputeSettings().situations, tuple(JevComputeSituation))
-        normalized = JevComputeSettings(situations=("self_contained_step", JevComputeSituation.REPEATING, "repeating")).situations
-        self.assertEqual(normalized, (JevComputeSituation.REPEATING, JevComputeSituation.SELF_CONTAINED_STEP))
-        self.assertEqual(JevComputeSettings(situations=()).situations, ())
-
-    def test_unknown_situations_and_strings_are_refused(self) -> None:
-        for value in (("nope",), "repeating"):
-            with self.subTest(value=value), self.assertRaises(ConfigurationError):
-                JevComputeSettings(situations=value)  # type: ignore[arg-type]
-
-
-class JevComputeStatesTests(unittest.TestCase):
-    def test_each_of_several_picks_the_group_with_the_most_pending_items(self) -> None:
-        state = JevComputeStates.build(JevComputeSituation.EACH_OF_SEVERAL, REQUEST, _brief(current_step=Q("E5", "Starting with a.py")), _events())
-        assert state is not None
-        group = state["group"]
-        self.assertEqual(group["name"], "src/api files")  # type: ignore[index]
-        self.assertEqual([item["name"] for item in group["items"]], ["src/api/a.py", "src/api/b.py"])  # type: ignore[index]
-        self.assertEqual(state["plan"], ("E5: Starting with a.py", "E4: I will audit each of these files"))
-        self.assertIn("E3 ASSISTANT", state["recent"])  # type: ignore[operator]
-        self.assertEqual(state["request"], REQUEST)
-
-    def test_each_of_several_needs_enough_pending_items_in_one_group(self) -> None:
-        done = JevRunBriefItem("a_py", "src/api/a.py", "src/api files", JevRunBriefItemStatus.DONE, (Q("E3", "a.py"),))
-        pending = JevRunBriefItem("b_py", "src/api/b.py", "src/api files", JevRunBriefItemStatus.PENDING, (Q("E3", "b.py"),))
-        self.assertIsNone(JevComputeStates.build(JevComputeSituation.EACH_OF_SEVERAL, REQUEST, _brief(items=(done, pending)), _events()))
-        self.assertIsNone(JevComputeStates.build(JevComputeSituation.EACH_OF_SEVERAL, REQUEST, _brief(items=()), _events()))
-
-    def test_repeating_picks_a_failed_problem_no_approach_has_solved(self) -> None:
-        def approach(identifier: str, target: str, outcome: JevRunBriefOutcome) -> JevRunBriefApproach:
-            return JevRunBriefApproach(identifier, target, f"tried {identifier}", outcome, (Q("E3", "a.py"),))
-
-        solved = (approach("first", "import error", JevRunBriefOutcome.FAILED), approach("second", "import error", JevRunBriefOutcome.WORKED))
-        self.assertIsNone(JevComputeStates.build(JevComputeSituation.REPEATING, REQUEST, _brief(approaches=solved), _events()))
-        stuck = (approach("reinstall", "test failure", JevRunBriefOutcome.FAILED), approach("rerun", "test failure", JevRunBriefOutcome.UNRESOLVED))
-        state = JevComputeStates.build(JevComputeSituation.REPEATING, REQUEST, _brief(approaches=stuck, open_failures=(Q("E3", "a.py"),)), _events())
-        assert state is not None
-        self.assertEqual(state["problem"], "test failure")
-        self.assertEqual([attempt["outcome"] for attempt in state["attempts"]], ["failed", "unresolved"])  # type: ignore[union-attr]
-        self.assertEqual(state["failures"], ("E3: a.py",))
-
-    def test_self_contained_step_needs_a_stated_next_step(self) -> None:
-        state = JevComputeStates.build(JevComputeSituation.SELF_CONTAINED_STEP, REQUEST, _brief(), _events())
-        assert state is not None
-        self.assertEqual(state["next_step"], "E4: I will audit each of these files")
-        self.assertEqual(json.loads(state["brief"])["goal"], "Audit the API files")  # type: ignore[arg-type]
-        self.assertIsNone(JevComputeStates.build(JevComputeSituation.SELF_CONTAINED_STEP, REQUEST, _brief(next_steps=()), _events()))
+    def test_shared_state_keeps_only_twelve_recent_non_request_events_and_clips_each(self) -> None:
+        events = JevRunEventLog((
+            "E1 USER: ignored request",
+            "E2 TOOL old: " + ("x" * 2_500),
+            "E3 TOOL older: completed",
+            "E4 TOOL kept: " + ("y" * 2_500),
+            *(f"E{number} TOOL call: done" for number in range(5, 16)),
+        ))
+        state = JevComputeStates.build(REQUEST, _brief(), _facts(), events)
+        recent = state["recent"].splitlines()  # type: ignore[union-attr]
+        self.assertEqual(len(recent), 12)
+        self.assertTrue(recent[0].startswith("E4 "))
+        self.assertTrue(recent[-1].startswith("E15 "))
+        self.assertIn("chars omitted", recent[0])
+        self.assertTrue(all(len(line) <= 2_000 for line in recent))
 
 
-class JevComputeRecognizerTests(unittest.IsolatedAsyncioTestCase):
-    async def _recognize(self, scripted: ScriptedJev, brief: JevRunBrief | None = None, situations: tuple[JevComputeSituation, ...] = tuple(JevComputeSituation)) -> JevComputeDecision:
-        recognizer = JevComputeRecognizer(DecisionModelConfig(api_key="typesafe-key"), situations)
+class JevComputeRecognitionTests(unittest.IsolatedAsyncioTestCase):
+    async def _recognize(self, scripted: ScriptedJev, options: tuple[JevDynamicComputeOption, ...] = OPTIONS) -> JevComputeDecision:
+        recognizer = JevComputeRecognizer(DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED), options)
         with patch(_HELPER, new=_helper(scripted)):
-            return await recognizer.recognize(3, REQUEST, brief or _brief(), _events())
+            return await recognizer.recognize(3, REQUEST, _brief(), _facts(), _events())
 
-    async def test_asks_only_eligible_situations_and_chooses_the_first_that_passes(self) -> None:
-        scripted = ScriptedJev(default=0.9)
+    async def test_one_combined_request_selects_highest_mean_over_enum_order(self) -> None:
+        keys = {option: JevComputeRegistry.question_keys(option) for option in OPTIONS}
+        scores = {
+            OPTIONS[0]: [0.99, *([0.72] * 11)],
+            OPTIONS[1]: [*([0.91] * 6), *([0.83] * 6)],
+            OPTIONS[2]: [0.82] * 12,
+        }
+        probabilities = {key.value: score for option in OPTIONS for key, score in zip(keys[option], scores[option])}
+        means = {option: sum(scores[option]) / len(scores[option]) for option in OPTIONS}
+        scripted = ScriptedJev(probabilities)
         decision = await self._recognize(scripted)
-        by_situation = {result.situation: result for result in decision.results}
-        self.assertFalse(by_situation[JevComputeSituation.REPEATING].eligible)
-        self.assertTrue(by_situation[JevComputeSituation.EACH_OF_SEVERAL].passed)
-        self.assertTrue(by_situation[JevComputeSituation.SELF_CONTAINED_STEP].passed)
-        self.assertIs(decision.situation, JevComputeSituation.EACH_OF_SEVERAL)
-        self.assertEqual(len(scripted.requests), 2)
-        self.assertEqual({question.name for question in scripted.requests[0].questions}, {key.value for key in JevComputeSituations.definition(JevComputeSituation.EACH_OF_SEVERAL).question_keys})
-        self.assertEqual(by_situation[JevComputeSituation.EACH_OF_SEVERAL].usage.input_tokens, 200)  # type: ignore[union-attr]
+        self.assertEqual(len(scripted.requests), 1)
+        sent = scripted.requests[0]
+        self.assertEqual([question.name for question in sent.questions], [key.value for option in OPTIONS for key in keys[option]])
+        self.assertEqual(set(sent.state), {"request", "brief", "facts", "recent"})  # type: ignore[arg-type]
+        self.assertEqual([result.option for result in decision.results], list(OPTIONS))
+        for result in decision.results:
+            self.assertAlmostEqual(result.score, means[result.option])  # type: ignore[arg-type]
+        self.assertIs(decision.option, JevDynamicComputeOption.FORK_AGENT)
+        self.assertEqual(decision.usage.input_tokens, 200)  # type: ignore[union-attr]
 
-    async def test_one_clear_no_vetoes_a_strong_mean(self) -> None:
-        veto = JEV_COMPUTE_EACH_OF_SEVERAL_VETO - 0.05
-        decision = await self._recognize(ScriptedJev({JevComputeQuestionKey.EACH_OF_SEVERAL_INDEPENDENT.value: veto}, default=0.99), situations=(JevComputeSituation.EACH_OF_SEVERAL,))
-        self.assertFalse(decision.results[0].passed)
-        self.assertIsNone(decision.situation)
+    async def test_threshold_is_inclusive_and_enum_order_breaks_ties(self) -> None:
+        probabilities = {
+            key.value: JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD if option is not OPTIONS[2] else JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD - 0.01
+            for option in OPTIONS
+            for key in JevComputeRegistry.question_keys(option)
+        }
+        scripted = ScriptedJev(probabilities)
+        decision = await self._recognize(scripted)
+        self.assertIs(decision.option, OPTIONS[0])
 
-    async def test_the_gate_must_pass_on_its_own(self) -> None:
-        gate = JevComputeQuestionKey.EACH_OF_SEVERAL_SAME_WORK.value
-        below = await self._recognize(ScriptedJev({gate: JEV_COMPUTE_EACH_OF_SEVERAL_THRESHOLD - 0.01}, default=1.0), situations=(JevComputeSituation.EACH_OF_SEVERAL,))
-        at = await self._recognize(ScriptedJev({gate: JEV_COMPUTE_EACH_OF_SEVERAL_THRESHOLD}, default=1.0), situations=(JevComputeSituation.EACH_OF_SEVERAL,))
-        self.assertGreater(below.results[0].score or 0.0, JEV_COMPUTE_EACH_OF_SEVERAL_THRESHOLD)
-        self.assertFalse(below.results[0].passed)
-        self.assertTrue(at.results[0].passed)
+    async def test_missing_answer_makes_only_that_option_unavailable(self) -> None:
+        missing_name = JevComputeRegistry.question_keys(OPTIONS[0])[0].value
+        decision = await self._recognize(ScriptedJev(default=0.9, missing=(missing_name,)))
+        self.assertIsNone(decision.results[0].score)
+        self.assertIs(decision.option, OPTIONS[1])
 
-    async def test_an_outage_or_a_missing_answer_recognizes_nothing(self) -> None:
-        outage = await self._recognize(ScriptedJev(error=VidbyteSdkError("down")))
-        missing = await self._recognize(ScriptedJev(missing=(JevComputeQuestionKey.SELF_CONTAINED_STEP_REQUESTED.value,)), situations=(JevComputeSituation.SELF_CONTAINED_STEP,))
-        self.assertIsNone(outage.situation)
-        self.assertTrue(all(not result.passed for result in outage.results))
-        self.assertFalse(missing.results[0].available)
+    async def test_provider_failure_selects_no_option(self) -> None:
+        decision = await self._recognize(ScriptedJev(error=VidbyteSdkError("down")))
+        self.assertIsNone(decision.option)
+        self.assertTrue(all(result.score is None for result in decision.results))
+        self.assertIsNone(decision.usage)
 
-    def test_records_refuse_a_pass_jev_never_made_and_a_wrong_choice(self) -> None:
-        with self.assertRaises(ConfigurationError):
-            JevComputeSituationResult(JevComputeSituation.REPEATING, available=False, passed=True)
-        passed = JevComputeSituationResult(JevComputeSituation.EACH_OF_SEVERAL, score=0.9, passed=True)
-        with self.assertRaises(ConfigurationError):
-            JevComputeDecision(iteration=1, results=(passed,), situation=None)
+    async def test_no_options_makes_no_request(self) -> None:
+        scripted = ScriptedJev()
+        decision = await self._recognize(scripted, ())
+        self.assertEqual(scripted.requests, [])
+        self.assertIsNone(decision.option)
+        self.assertEqual(decision.results, ())
 
 
 @tool
@@ -278,39 +253,51 @@ def _call(name: str, arguments: dict[str, Any], call_id: str) -> SimpleNamespace
 
 
 class JevComputeCheckpointRecognitionTests(unittest.IsolatedAsyncioTestCase):
-    def _agent(self, situations: tuple[JevComputeSituation, ...] = tuple(JevComputeSituation)) -> JevAgent:
+    def _agent(self, dynamic_compute: tuple[JevDynamicComputeOption, ...] = OPTIONS) -> JevAgent:
         settings = JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_key="main-key", tools=(lookup,))
-        runtime = JevRuntimeSettings(decision=DecisionModelConfig(api_key="typesafe-key"), compute=JevComputeSettings(situations=situations))
+        runtime = JevRuntimeSettings(decision=DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED), compute=JevComputeSettings(dynamic_compute=dynamic_compute))
         runner = ScriptedRunner(*(_call("lookup", {"topic": topic}, f"c{index}") for index, topic in enumerate(("a", "b", "c", "d"))), _call("isDone", {"final_answer": "done"}, "end"))
         return bind_test_runner(JevAgent(settings, runtime), runner)
 
-    def _payload(self) -> JevRunBriefPayload:
-        return JevRunBriefPayload.model_validate({
-            "goal": "Look up each topic", "goal_evidence": [], "current_step": None,
-            "next_steps": [{"event": "E1", "quote": "Audit each file under src/api"}],
-            "items": [], "approaches": [], "open_failures": [],
-        })
+    def _payload(self) -> JevRunBriefAppendPayload:
+        return JevRunBriefAppendPayload.model_validate({"notes": []})
 
-    async def test_recognition_runs_after_a_verified_refresh_and_is_reported(self) -> None:
+    async def test_checkpoint_asks_one_request_after_a_verified_update(self) -> None:
         agent = self._agent()
         scripted = ScriptedJev(default=0.9)
         assert agent.compute is not None
         with patch.object(agent.compute.keeper.writer, "arun", new=AsyncMock(return_value=SimpleNamespace(structured=self._payload()))), patch(_HELPER, new=_helper(scripted)):
             reply = await agent.arun(REQUEST)
         self.assertEqual(reply.content, "done")
-        decisions = agent.response.compute_decisions
-        self.assertEqual([(decision.iteration, decision.situation) for decision in decisions], [(3, JevComputeSituation.SELF_CONTAINED_STEP)])
         self.assertEqual(len(scripted.requests), 1)
+        self.assertEqual(agent.response.run_brief_updates[-1].status, JevRunBriefUpdateStatus.UPDATED)
+        self.assertEqual(len(agent.response.compute_decisions), 1)
+        self.assertIs(agent.response.compute_decisions[0].option, OPTIONS[0])
 
-    async def test_no_recognition_without_a_verified_refresh_or_without_situations(self) -> None:
-        for situations, writer in ((tuple(JevComputeSituation), AsyncMock(side_effect=VidbyteSdkError("down"))), ((), AsyncMock(return_value=SimpleNamespace(structured=self._payload())))):
-            agent = self._agent(situations)
-            scripted = ScriptedJev()
-            assert agent.compute is not None
-            with self.subTest(situations=situations), patch.object(agent.compute.keeper.writer, "arun", new=writer), patch(_HELPER, new=_helper(scripted)):
-                await agent.arun(REQUEST)
-                self.assertEqual(agent.response.compute_decisions, [])
-                self.assertEqual(scripted.requests, [])
+    async def test_checkpoint_skips_recognition_after_a_rejected_update(self) -> None:
+        agent = self._agent()
+        scripted = ScriptedJev(default=0.9)
+        rejected = JevRunBriefAppendPayload.model_validate({
+            "notes": [{"event": "E1", "text": "The user request is not a citable work event."}],
+        })
+        assert agent.compute is not None
+        with patch.object(agent.compute.keeper.writer, "arun", new=AsyncMock(return_value=SimpleNamespace(structured=rejected))), patch(_HELPER, new=_helper(scripted)):
+            reply = await agent.arun(REQUEST)
+        self.assertEqual(reply.content, "done")
+        self.assertEqual(agent.response.run_brief_updates[-1].status, JevRunBriefUpdateStatus.REJECTED)
+        self.assertEqual(scripted.requests, [])
+        self.assertEqual(agent.response.compute_decisions, [])
+
+    async def test_disabled_options_keep_brief_updates_and_make_no_recognition_request(self) -> None:
+        agent = self._agent(())
+        scripted = ScriptedJev()
+        assert agent.compute is not None
+        with patch.object(agent.compute.keeper.writer, "arun", new=AsyncMock(return_value=SimpleNamespace(structured=self._payload()))), patch(_HELPER, new=_helper(scripted)):
+            await agent.arun(REQUEST)
+        self.assertTrue(agent.response.run_brief_updates)
+        self.assertEqual(agent.response.run_brief_updates[-1].status, JevRunBriefUpdateStatus.UPDATED)
+        self.assertEqual(scripted.requests, [])
+        self.assertEqual(agent.response.compute_decisions, [])
 
 
 if __name__ == "__main__":

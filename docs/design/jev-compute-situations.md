@@ -1,63 +1,61 @@
-# Jev mid-run compute situations
+# Jev dynamic compute options
 
-## What and why
+## Purpose
 
-The compute checkpoint keeps a verified run brief between the main agent's iterations. This change has Jev read that brief and recognize which compute situation the run is in, so a later change can act on it:
+The mid-run compute checkpoint keeps a compact, verified note brief while the main agent works. After a refresh produces a verified brief update, Jev scores the evidence for three optional compute paths:
 
-- **REPEATING**: the agent is retrying an approach that already failed on a problem it has not solved.
-- **EACH_OF_SEVERAL**: the agent plans the same work on each of several items.
-- **SELF_CONTAINED_STEP**: the agent's next step is a self-contained piece of work a fresh helper could do.
+- **FRESH_AGENT**: signs that a fresh agent context could usefully resume the work.
+- **FORK_AGENT**: signs that distinct approaches or experiments can be compared.
+- **SUBAGENT**: signs that an independent helper can complete and return bounded work.
 
-It is observe-only: decisions are recorded on `JevAgent.response.compute_decisions` and nothing acts on them yet. That lets the thresholds be checked against real runs before any compute is spent on them.
+The checkpoint records recognition on `JevAgent.response.compute_decisions`. It observes the run only: it does not launch an agent, fork work, or delegate a subtask.
 
-## How it works
+## Brief and checkpoint timing
 
-Jev never answers "would extra compute help?", which is a forecast it answers poorly. Each situation is a set of narrow signs Jev can recognize in the run as it is now, and code does every fact, lookup, and combination around them.
+The brief remains #512's simple verified-note record. Its goal is the original request, supplied by code. A separate tool-free writer proposes short notes from numbered run events; code verifies each quoted passage against its cited event before appending it. The brief retains the newest bounded set of verified notes. It does not infer item lists, approaches, or next steps.
 
-1. **When.** Recognition runs only right after a checkpoint that produced a newly verified brief (`JevRunBriefUpdateStatus.UPDATED`), so Jev follows the brief's cadence and judges the brief that was just verified. A writer outage or a rejected refresh asks Jev nothing.
-2. **Preconditions in code** (`JevComputeStates`). Each situation is eligible only when the brief records a subject for it, and code picks that subject so no question searches for it:
-   - EACH_OF_SEVERAL: the group with the most pending items, if it has at least `JEV_COMPUTE_EACH_OF_SEVERAL_MIN_PENDING`;
-   - REPEATING: the first problem a failed approach targeted that no approach has solved;
-   - SELF_CONTAINED_STEP: the soonest stated next step.
+`JevComputeSettings.dynamic_compute` accepts `FRESH_AGENT`, `FORK_AGENT`, and `SUBAGENT`, enabled by default and normalized into enum order. An empty tuple disables recognition while leaving brief refreshes enabled.
 
-   An ineligible situation is recorded with `eligible=False`, and no Jev request is made for it.
-3. **One focused request per enabled situation.** Each request carries the user request, the verified run brief, exact live run facts, and a bounded tail from `JevRunEventLog.from_run(...).lines`, plus that situation's four sign questions. The requests run concurrently. Recent-event clipping is local to `compute/states.py`; the deleted `brief/events.py` module is not used.
-4. **Sign questions** (`vidbyte/lib/jev/compute/`). Twelve fixed noul questions, four per situation, each written to `skills/asking-jev-questions/SKILL.md` and recognizing one sign:
+At each continuing tool-iteration checkpoint, the controller reads exact run facts and refreshes the brief when due. Jev is asked only if that refresh returns `JevRunBriefUpdateStatus.UPDATED`. A rejected or unavailable update makes no recognition request. The Jev request uses the same newly verified brief as the update being reported.
 
-   | Situation | Signs (gate first) |
-   |---|---|
-   | REPEATING | same approach as a failed one; same failure again; no new cause offered; the request needs the problem solved |
-   | EACH_OF_SEVERAL | the plan applies the same work to each item; each item stands on its own; the work needs its own reading or changing of each item; the request asks for it |
-   | SELF_CONTAINED_STEP | the step takes its own tool calls; its words with the request state everything a helper needs; its result can be handed back; the request asks for it |
+## One shared request and state
 
-   Every `true` side is the sign being present.
-5. **Scoring** (`JevComputeSituations`, `JevComputeRecognizer`). A situation passes when the mean P(yes) reaches its threshold (0.8), no sign is below its veto (0.3), and its gate sign reaches the threshold on its own. A missing answer or an unavailable Jev never passes. `JevComputeDecision.situation` is the first passing situation in priority order: REPEATING, then EACH_OF_SEVERAL, then SELF_CONTAINED_STEP.
-6. **Settings.** `JevComputeSettings.situations` enables situations (all by default), validated and normalized into priority order by `JevComputeRegistry.validate`. An empty tuple keeps the brief and asks Jev nothing.
+The recognizer builds one `JevDecisionRequest` containing all questions for the enabled options. Each option contributes twelve questions; all three enabled options produce one request with 36 questions. Every question reads the same four fields:
+
+| Field | Source |
+|---|---|
+| `request` | Original request, clipped to the existing run-brief request bound |
+| `brief` | `JevRunBrief.render()`, containing the code-owned goal and verified notes |
+| `facts` | A mapping of exact `JevRunFacts` counts read from the main-agent loop: iteration, tool calls, error streak, and known token usage |
+| `recent` | The newest 12 non-request events from `JevRunEventLog.from_run`; each event is clipped to 2,000 characters |
+
+Questions live in `vidbyte/lib/jev/compute/situations.py`, use the existing `JevComputeQuestion` record, and are collected by `JevComputeRegistry`. The question writer guidance is in [`skills/asking-jev-dynamic-compute-questions/SKILL.md`](../../skills/asking-jev-dynamic-compute-questions/SKILL.md).
+
+Each question asks about one positive, observable signal. Missing evidence can be answered false. The questions do not ask Jev to forecast whether launching additional compute will help.
+
+| Option | Evidence signals |
+|---|---|
+| `FRESH_AGENT` | Rising errors; repeated failures; repeated tool work without new information; drift from the request; an omitted constraint; conflict with verified tool evidence; reliance on a disproven assumption; lost or ignored relevant evidence; a fix followed by a new failure; plan changes without measurable progress; growing continuity burden; enough verified brief context for a fresh agent to resume. |
+| `FORK_AGENT` | Distinct plausible approaches to one unresolved goal; a shared verified starting point; independent paths; bounded experiments; one success condition; no evidence-based winner yet; non-exclusive paths; isolated side effects; separately observable results; meaningfully different hypotheses; a result that can be selected or integrated; alignment with the request. |
+| `SUBAGENT` | Bounded work; an explicit deliverable; inputs packageable from the request and brief; distinct tool interactions; no need for mid-task direction; separation from the main decision path; an integratable result; useful parallel progress; focused evidence; independent items; isolated writes; enough work for a helper. |
+
+## Scoring and result
+
+For each option, `DecisionModelHelper.score_noul` computes the arithmetic mean of P(true) across its twelve answers. The common `JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD` is `0.8`; an option qualifies at or above it. The recognizer selects the qualifying option with the highest mean. Enum order (`FRESH_AGENT`, `FORK_AGENT`, `SUBAGENT`) breaks ties. A missing or non-NOUL answer makes only its option unavailable; a provider or response-normalization failure selects no option.
+
+`JevComputeDecision.option` records the selected option or `None`. Its results contain the per-option mean and returned answers; request usage is recorded once. The result remains observe-only.
 
 ## Files
 
-- `vidbyte/lib/jev/compute/`: `state.py` (shared sentences), `repeating.py`, `each_of_several.py`, `self_contained_step.py` (questions), `situations.py` (`JevComputeSituations`), `compute.py` (`JevComputeRegistry`), `README.md`.
-- `vidbyte/agents/jev/compute/`: `states.py` (`JevComputeStates`), `recognizer.py` (`JevComputeRecognizer`), and the controller's recognition step.
-- `vidbyte/agents/jev/done/event_log.py`: the current numbered run event source used to build recent context.
-- `vidbyte/agents/jev/settings.py`, `agent.py`, `response.py`: `situations`, the decision config passed to the controller, and `compute_decision`.
-- `vidbyte/lib/enums/jev.py`, `vidbyte/lib/dataclasses/jev.py`, `vidbyte/lib/constants/jev.py`: `JevComputeSituation`, `JevComputeQuestionKey`, the question base and records, thresholds, preconditions, and state field names.
-- Docs: Jev README, jev-agent skill, AGENTS.md JEV table.
-- `tests/test_jev_compute_situations.py`; `tests/test_jev_compute.py` pins its brief-only tests to no situations.
+- `vidbyte/agents/jev/brief/`: the separate brief writer, keeper, and verification of append-only note updates.
+- `vidbyte/agents/jev/compute/`: controller, shared-state builder, and one-request recognizer.
+- `vidbyte/agents/jev/done/event_log.py`: `JevRunEventLog.from_run`, the numbered run-event source.
+- `vidbyte/lib/jev/compute/`: twelve questions per option and the option registry.
+- `vidbyte/agents/jev/settings.py`: `JevComputeSettings.dynamic_compute`.
+- `vidbyte/lib/enums/jev.py`, `vidbyte/lib/dataclasses/jev.py`, `vidbyte/lib/constants/jev.py`: option and question keys, brief/facts/decision records, and the shared threshold.
+- `skills/asking-jev-dynamic-compute-questions/SKILL.md`: evidence and question-writing guidance.
+- `tests/test_jev_compute_situations.py` and `tests/test_jev_compute.py`: question, scoring, state, and checkpoint behavior.
 
-## Risks and open questions
+## Risks and verification
 
-- Thresholds are uncalibrated starting points. They are per-situation constants so they can be fitted separately once logged decisions are labeled (T17, T23 in the question skill).
-- A plan stated between brief refreshes is seen only at the next refresh; the brief's cadence and early triggers bound the delay.
-- Each eligible situation costs one Jev request of four questions of roughly 1,000 to 1,300 tokens, at most three requests per refresh.
-
-## Verification
-
-`tests/test_jev_compute_situations.py`:
-- the question set and its shape: registry completeness, gates, noul options, verdict-first criteria, fields described in the state, at least 500 tokens each, and one literal per section;
-- settings normalization;
-- every state precondition;
-- scoring: pass, veto, gate at and below the threshold, outage, missing answer, and priority choice;
-- the record invariants;
-- the checkpoint asking only after a verified refresh and only when situations are enabled.
-
-Then `python scripts/run_ci.py --stage source` with the worktree on `PYTHONPATH` and every file tracked.
+The threshold is an initial policy value, not a calibrated probability of compute being useful. Recognition is logged so later evaluations can compare the chosen option with run outcomes. The focused tests cover the question set, shared state, setting normalization, one combined request, mean scoring and tie order, missing answers, provider failure, and recognition only after a verified brief update.

@@ -64,8 +64,8 @@ def _settings(**overrides: Any) -> JevAgentSettings:
 
 
 def _compute(**brief: Any) -> JevRuntimeSettings:
-    # These tests cover the brief alone, so no situation is enabled and no Jev request can be made.
-    return JevRuntimeSettings(compute=JevComputeSettings(brief=JevRunBriefSettings(**brief), situations=()))
+    # These tests cover the brief alone, so no dynamic-compute option is enabled and no Jev request can be made.
+    return JevRuntimeSettings(compute=JevComputeSettings(brief=JevRunBriefSettings(**brief), dynamic_compute=()))
 
 
 def _lookups_then_done(topics: tuple[str, ...]) -> ScriptedRunner:
