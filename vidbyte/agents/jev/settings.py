@@ -234,6 +234,19 @@ class JevRunBriefSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class JevComputeSettings:
+    """Validated settings for the optional mid-run compute checkpoint."""
+
+    brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
+
+    def __post_init__(self) -> None:
+        # @intent compute-uses-supported-brief-settings
+        # Rejecting other objects here keeps the optional checkpoint fully configured before an agent is built.
+        if not isinstance(self.brief, JevRunBriefSettings):
+            raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
+
+
+@dataclass(frozen=True, slots=True)
 class JevRuntimeSettings:
     """Validated Jev decision policy: Vidbyte-managed decisions, preflight flags, continuation settings, and the tool-selector threshold."""
 
@@ -241,6 +254,7 @@ class JevRuntimeSettings:
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     continual: JevContinualSettings = field(default_factory=JevContinualSettings)
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+    compute: JevComputeSettings | None = None
 
     def __post_init__(self) -> None:
         # Keeps every JevAgent decision on the Vidbyte-managed path before runtime construction.
@@ -251,6 +265,8 @@ class JevRuntimeSettings:
         object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
         if not isinstance(self.continual, JevContinualSettings):
             raise ConfigurationError("JevRuntimeSettings.continual must be a JevContinualSettings instance.")
+        if self.compute is not None and not isinstance(self.compute, JevComputeSettings):
+            raise ConfigurationError("JevRuntimeSettings.compute must be a JevComputeSettings instance or None.")
         self._validate_tool_selector_threshold()
 
     def _validate_tool_selector_threshold(self) -> None:
@@ -266,4 +282,4 @@ class JevRuntimeSettings:
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
 
-__all__ = ["JevAgentSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]

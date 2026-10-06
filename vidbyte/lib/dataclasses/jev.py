@@ -71,6 +71,7 @@ from vidbyte.lib.enums.jev import (
     JevPreflightQuestionKey,
     JevProblemCheckItemType,
     JevQuestionType,
+    JevRunBriefUpdateStatus,
     JevScenarioRole,
     JevScopeBreadth,
     JevScopeUnitSource,
@@ -3678,6 +3679,39 @@ class JevClarification:
         return "\n".join(blocks)
 
 
+@dataclass(frozen=True, slots=True)
+class JevRunFacts:
+    """Exact run counts captured by code at a mid-run checkpoint."""
+
+    iteration: int
+    tool_calls: int
+    error_streak: int
+    tokens_used: int | None = None
+
+    def __post_init__(self) -> None:
+        # @intent checkpoint-facts-are-nonnegative-counts
+        # Reject booleans and invalid values so response facts remain exact runtime counts.
+        for field_name in ("iteration", "tool_calls", "error_streak"):
+            JevCount.require(getattr(self, field_name), field_name=f"run facts {field_name}")
+        if self.tokens_used is not None:
+            JevCount.require(self.tokens_used, field_name="run facts tokens_used")
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefUpdate:
+    """Outcome of one attempted run-brief refresh."""
+
+    status: JevRunBriefUpdateStatus
+    iteration: int
+
+    def __post_init__(self) -> None:
+        # @intent brief-update-has-known-outcome-and-position
+        # Every reported checkpoint attempt must identify a supported outcome and a valid loop iteration.
+        if not isinstance(self.status, JevRunBriefUpdateStatus):
+            raise JevValidation.error("run brief update status", "a JevRunBriefUpdateStatus member", self.status)
+        JevCount.require(self.iteration, field_name="run brief update iteration")
+
+
 @dataclass(slots=True)
 class JevAgentResponse:
     """Everything JevAgent's opinionated features produced for its most recent run, read as `JevAgent.response`.
@@ -3691,6 +3725,8 @@ class JevAgentResponse:
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
     `continuation_budget` records cumulative additional loop limits granted to faithful-scope continuations.
     `review` records JevReviewer's objections at the latest finish attempt.
+    With mid-run compute enabled, `run_facts` holds the exact run facts read at the latest checkpoint,
+    `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
     """
 
     input: str = ""
@@ -3705,6 +3741,9 @@ class JevAgentResponse:
     continuations: int = 0
     continuation_budget: dict[str, int] = field(default_factory=dict)
     review: JevReviewRecord | None = None
+    run_facts: JevRunFacts | None = None
+    run_brief: JevRunBrief | None = None
+    run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
 
     @property
     def needs_clarification(self) -> bool:
@@ -4047,6 +4086,8 @@ __all__ = [
     "JevRunBriefPayload",
     "JevRunBriefVerification",
     "JevRunBriefWindow",
+    "JevRunBriefUpdate",
+    "JevRunFacts",
     "JevAgentResponse",
     "JevAnswer",
     "JevAssumptionEvidence",
