@@ -9,6 +9,9 @@ Purpose:
 Architecture:
     - BaseAgent: Primary agent class inheriting MCP attachment capabilities and
       exposing shared async execution and pause behavior.
+    - Owns one UsageTracker (cost) and one AgentSpeedTracker (latency) for its
+      lifetime, both reset at the top of every generate_reply() and threaded
+      into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -18,12 +21,14 @@ Relations:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
+from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -33,6 +38,7 @@ from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
+from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
@@ -51,6 +57,10 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
+
+# Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
+# fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass.
+_LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV})
 
 
 class BaseAgent(McpAttachableMixin):
@@ -191,7 +201,7 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support tool_settings."
             )
-        if self.agent_loop_settings.output_contract.active() and self.runtime_type is not AgentRuntimeType.LINEAR:
+        if self.agent_loop_settings.output_contract.active() and self.runtime_type not in _LINEAR_LOOP_RUNTIMES:
             raise ConfigurationError(
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support output contracts."
@@ -222,6 +232,7 @@ class BaseAgent(McpAttachableMixin):
         # default rate table prices every model the agent can run. Per-call usage
         # is observable mid-run through MiddlewareContext.model_usage.
         self._usage_tracker = UsageTracker()
+        self._speed_tracker = AgentSpeedTracker()
         self._behavior_view: Any = None
         self._active_session: Session | None = None
         self._queued_prompts: list[str] = []
@@ -593,6 +604,8 @@ class BaseAgent(McpAttachableMixin):
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
             self._usage_tracker.reset()
+            self._speed_tracker.reset()
+            self._speed_tracker.record_run_start()
             self._behavior_view = None
             runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
@@ -628,10 +641,12 @@ class BaseAgent(McpAttachableMixin):
             self._record_agent_stop(trace_ctx, result)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
+            self._speed_tracker.record_run_end()
         except Exception as exc:
             self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
+            self._speed_tracker.record_run_end()
             self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -643,6 +658,7 @@ class BaseAgent(McpAttachableMixin):
             self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
+            self._speed_tracker.record_run_end()
             self._active_prompt = ""
             raise
         self._active_prompt = ""
@@ -684,26 +700,25 @@ class BaseAgent(McpAttachableMixin):
         # session keeps the evidence of what the model actually said instead of losing the turn.
         if self.output_schema is None or result.structured is not None:
             return
-        raise OutputSchemaViolationError(
+        error = OutputSchemaViolationError(
             f"Agent '{self.name}' declared an output_schema but produced no valid instance.",
             raw_output=result.output,
             validation_error=self._schema_violation_detail(result),
             stop_reason=str(result.metadata.get("stop_reason") or ""),
         )
+        # This raises after generate_reply()'s own try/except has already returned, so it must
+        # notify the Session boundary itself rather than relying on that method's exception path.
+        self._notify_session_exception(error)
+        raise error
 
     def _notify_session_exception(self, exc: BaseException) -> None:
-        # Record direct agent failures through the bound Session without changing the exception path.
+        # Delegate to the Session's own notification boundary so failure capture logic lives in
+        # one place (Session.notify_exception) instead of being re-implemented at every call site.
         session = self._active_session
-        failures = getattr(session, "failures", None)
-        capture = getattr(failures, "capture_exception", None)
-        if not callable(capture):
+        if session is None:
             return
-        try:
-            from vidbyte.sessions.failure import FailurePhase
-
-            capture(exc, phase=FailurePhase.RUNTIME, source="agent.generate_reply")
-        except Exception:
-            return
+        with contextlib.suppress(Exception):
+            session.notify_exception(exc, source="agent.generate_reply")
 
     @staticmethod
     def _schema_violation_detail(result: AgentResult) -> str | None:
@@ -740,6 +755,29 @@ class BaseAgent(McpAttachableMixin):
     def get_cost_usd(self) -> float | None:
         """Return total known USD cost for the current or most recent run, or None."""
         return self.get_usage().cost_usd
+
+    def get_speed_stats(self) -> AgentSpeedRollup:
+        """Return the live or final speed rollup for the current or most recent run."""
+        return self._speed_tracker.rollup()
+
+    def get_speed_history(self) -> AgentSpeedHistory:
+        """Return bounded speed summaries for completed runs of this agent."""
+        # @intent expose-bounded-speed-history
+        # History is separate from the current-run rollup so reset does not erase it.
+        return self._speed_tracker.history()
+
+    def measure_stream(self, source: Iterable[str], *, dispatched_at: float | None = None) -> Iterator[str]:
+        """Yield an existing stream unchanged while adding chunk timing to speed stats."""
+        # @intent expose-opt-in-stream-speed
+        # Streaming stays opt-in; this helper only wraps a stream the caller already owns.
+        return self._speed_tracker.measure_stream(
+            RecordStreamInput(
+                provider=str(self.runner_config.provider or "unknown"),
+                model=str(self.runner_config.model_name or "unknown"),
+                source=source,
+                dispatched_at=self._speed_tracker.now() if dispatched_at is None else dispatched_at,
+            )
+        )
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
@@ -792,8 +830,10 @@ class BaseAgent(McpAttachableMixin):
                 metadata["queued_prompts_truncated"] = len(self._queued_prompts)
                 self._queued_prompts.clear()
         except Exception as exc:
-            # A drained-run failure must not fail the already-successful primary reply.
+            # A drained-run failure must not fail the already-successful primary reply, but it must
+            # still reach Session.failures — this metadata key is not read by FailureMetadataNormalizer.
             metadata["queued_prompt_error"] = repr(exc)
+            self._notify_session_exception(exc)
             self._queued_prompts.clear()
         finally:
             self._draining_queued_prompts = False
@@ -830,7 +870,10 @@ class BaseAgent(McpAttachableMixin):
             self.record_handoff(produced)
             metadata["handoff"] = produced
         except Exception as exc:
+            # As with the queued-prompt drain above, this metadata key is not read by
+            # FailureMetadataNormalizer, so the Session boundary must be notified directly.
             metadata["handoff_error"] = repr(exc)
+            self._notify_session_exception(exc)
             self.last_handoff = None
 
     def _build_context(
@@ -966,7 +1009,7 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.lib.registries.runtimes import RuntimeRegistry
         runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
-        kwargs: dict[str, Any] = {}
+        kwargs = self._runtime_extension_kwargs()
         if self.runtime_type in (
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,
@@ -989,9 +1032,10 @@ class BaseAgent(McpAttachableMixin):
                     "include_actors": None,
                 }
 
-        if self.runtime_type is AgentRuntimeType.LINEAR:
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES:
             kwargs["output_contract"] = self._output_contract_with_schema()
             kwargs["usage_tracker"] = self._usage_tracker
+            kwargs["speed_tracker"] = self._speed_tracker
             kwargs["fallback"] = self.fallback
 
         return runtime_cls(
@@ -1009,13 +1053,18 @@ class BaseAgent(McpAttachableMixin):
             **kwargs,
         )
 
+    def _runtime_extension_kwargs(self) -> dict[str, Any]:
+        # Supplies runtime-specific constructor options (JevAgent passes its settings); standard agents add none.
+        return {}
+
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Appends settings-driven and tracing middleware to the user middleware.
         middleware = self.middleware
         active_session = getattr(self, "_active_session", None)
         session_failures = getattr(active_session, "failures", None)
-        if self.runtime_type is AgentRuntimeType.LINEAR and session_failures is not None and getattr(session_failures, "has_rules", False):
-            middleware = (*middleware, session_failures.middleware())
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES and session_failures is not None and getattr(session_failures, "has_rules", False):
+            from vidbyte.middleware.builtins import FailureMiddleware
+            middleware = (*middleware, FailureMiddleware(session_failures))
         if self.agent_loop_settings.tool_error_policy is not None:
             from vidbyte.middleware.builtins import ToolErrorPolicyMiddleware
             middleware = (*middleware, ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy))

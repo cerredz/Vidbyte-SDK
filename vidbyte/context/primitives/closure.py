@@ -1,31 +1,31 @@
 """Closure and escalation context primitives for general problem solving.
 
-FILE
+FILE:
     vidbyte/context/primitives/closure.py
-PURPOSE
+PURPOSE:
     Preserve unproductive repetition, premature completion concerns, and risks
     that require explicit ownership, acceptance, review, or escalation.
-ROLE IN CODEBASE
+ROLE IN CODEBASE:
     Supplies descriptive ContextItem implementations for ContextManager without
     controlling termination, authenticating authority, or accepting risk.
-ARCHITECTURE NOTE
+ARCHITECTURE NOTE:
     Each frozen, slotted record renders a stable, bounded snapshot; lifecycle
     fields remain caller-managed strings shared with the other new primitives.
-FUNCTION INVENTORY
+FUNCTION INVENTORY:
     ProcessStallContextItem, CompletionGateContextItem, and
     RiskEscalationContextItem render closure and escalation concerns.
-COMMON MODIFICATION PATTERNS
+COMMON MODIFICATION PATTERNS:
     Add descriptive closure fields before the lifecycle tail and preserve the
     distinction between evidence, validation, ownership, and authorization.
-WHAT NOT TO DO
+WHAT NOT TO DO IN THIS FILE:
     Do not block agent completion, infer accepted risk, authenticate an acceptor,
     validate repetition counts, or execute an escape or escalation action.
-KNOWN EDGE CASES
+KNOWN EDGE CASES:
     Repetition counts may be zero or negative; a named acceptor is merely a
     recorded assertion; accepted risk requires an explicit lifecycle status.
-RELATED DOCS
+RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/general-problem-solving-context-primitives.md
-TESTS
+TESTS:
     The approved no-tests workflow uses package compilation and import/render
     smoke checks described in the design document.
 """
@@ -63,7 +63,12 @@ class ProcessStallContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a diagnosis of a process that may be repeating without producing useful progress. Activity and repeated pattern describe what keeps happening, while repetition count and last new information show whether novelty is being produced. Observed drift and escape action identify how the process is moving off course and what could interrupt it. Use this record to make a stall visible before more repetition consumes effort.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -109,7 +114,12 @@ class CompletionGateContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a challenge to a claimed completion state. Claimed result and desired outcome distinguish what was reported from what should actually be true. Completion condition, current evidence, and missing validation show what still needs to be checked. Use this record to keep status from standing in for proof of the outcome.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -153,7 +163,12 @@ class RiskEscalationContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries an unresolved risk that may require explicit acceptance or escalation. Risk and impact describe the exposure, while mitigations record actions intended to reduce it. Authorized acceptor, review timing, and escalation trigger define who may accept the exposure and when it must be revisited. Use the resolution condition to keep risk ownership visible until the concern is closed.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:

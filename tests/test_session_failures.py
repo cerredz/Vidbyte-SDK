@@ -21,11 +21,13 @@ from vidbyte import (
     Failure,
     FailureCode,
     FailureDisposition,
+    FailureMiddleware,
     FailurePhase,
     FailureRaisedError,
     FailureRouter,
     FailureStatus,
     ForkRecovery,
+    RuleErrorMode,
     Session,
     StopRecovery,
     rule,
@@ -114,16 +116,16 @@ class FailureContractsTests(unittest.TestCase):
     def test_router_history_is_bounded_and_filterable(self) -> None:  # [Edge Case]
         # Verify the oldest record is evicted and filters preserve insertion order.
         router = FailureRouter(object(), max_history=2)
-        router.emit(FailureCode.ACTION_UNSAFE, phase="action", source="one")
-        router.emit(FailureCode.TOOL_TIMEOUT, phase="tool", source="two")
-        router.emit(FailureCode.ACTION_UNSAFE, phase="action", source="three")
+        router.emit(FailureCode.ACTION_UNSAFE, phase=FailurePhase.ACTION, source="one")
+        router.emit(FailureCode.TOOL_TIMEOUT, phase=FailurePhase.TOOL, source="two")
+        router.emit(FailureCode.ACTION_UNSAFE, phase=FailurePhase.ACTION, source="three")
         self.assertEqual([item.source for item in router.history()], ["two", "three"])
         self.assertEqual(len(router.history(code=FailureCode.ACTION_UNSAFE)), 1)
 
     def test_disabled_router_does_not_record(self) -> None:  # [Hidden Assumption]
         # Verify disabled instrumentation has no policy side effects.
         router = FailureRouter(object(), enabled=False)
-        failure = router.emit(FailureCode.ACTION_UNSAFE, phase="action", source="test")
+        failure = router.emit(FailureCode.ACTION_UNSAFE, phase=FailurePhase.ACTION, source="test")
         self.assertEqual(router.history(), ())
         self.assertEqual(failure.code, FailureCode.ACTION_UNSAFE)
 
@@ -134,12 +136,12 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         router = FailureRouter(object())
         seen: list[str] = []
 
-        @rule(code=FailureCode.ACTION_WRONG_TARGET, on="after_tool_call", on_match="record", priority=10)
+        @rule(code=FailureCode.ACTION_WRONG_TARGET, on=MiddlewareHook.AFTER_TOOL_CALL, on_match=FailureDisposition.RECORD, priority=10)
         def high(_context):
             seen.append("high")
             return Failure(code=FailureCode.ACTION_WRONG_TARGET, source="high", phase="action")
 
-        @rule(code=FailureCode.ACTION_UNSAFE, on="after_tool_call", on_match="record", priority=1)
+        @rule(code=FailureCode.ACTION_UNSAFE, on=MiddlewareHook.AFTER_TOOL_CALL, on_match=FailureDisposition.RECORD, priority=1)
         async def low(_context):
             await asyncio.sleep(0)
             seen.append("low")
@@ -155,7 +157,7 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         # Verify an optional detector cannot stop the run when it crashes.
         router = FailureRouter(object())
 
-        @rule(code=FailureCode.ACTION_POLICY_VIOLATION, on="before_tool_call", on_error="open")
+        @rule(code=FailureCode.ACTION_POLICY_VIOLATION, on=MiddlewareHook.BEFORE_TOOL_CALL, on_error=RuleErrorMode.OPEN)
         def broken(_context):
             raise RuntimeError("detector broke")
 
@@ -168,7 +170,7 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         # Verify a safety detector error is visible as a terminal failure.
         router = FailureRouter(object())
 
-        @rule(code=FailureCode.ACTION_UNSAFE, on="before_tool_call", on_match="stop", on_error="closed")
+        @rule(code=FailureCode.ACTION_UNSAFE, on=MiddlewareHook.BEFORE_TOOL_CALL, on_match=FailureDisposition.STOP, on_error=RuleErrorMode.CLOSED)
         def broken(_context):
             raise RuntimeError("detector broke")
 
@@ -182,12 +184,12 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         # Verify a detector crash cannot accidentally allow the protected hook.
         router = FailureRouter(object())
 
-        @rule(code=FailureCode.ACTION_UNSAFE, on="before_tool_call", on_match="stop", on_error="closed")
+        @rule(code=FailureCode.ACTION_UNSAFE, on=MiddlewareHook.BEFORE_TOOL_CALL, on_match=FailureDisposition.STOP, on_error=RuleErrorMode.CLOSED)
         def broken(_context):
             raise RuntimeError("detector broke")
 
         router.add_rule(broken)
-        decision = await router.middleware().before_tool_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="agent"))
+        decision = await FailureMiddleware(router).before_tool_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="agent"))
         self.assertEqual(decision.action, MiddlewareAction.ABORT_RUN)
 
     async def test_rule_route_runs_recovery_once(self) -> None:  # [Hidden Failure]
@@ -206,7 +208,7 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
 
         router.on(FailureCode.ACTION_WRONG_TARGET, Handler())
 
-        @rule(code=FailureCode.ACTION_WRONG_TARGET, on="after_tool_call", on_match="route")
+        @rule(code=FailureCode.ACTION_WRONG_TARGET, on=MiddlewareHook.AFTER_TOOL_CALL, on_match=FailureDisposition.ROUTE)
         def detected(_context):
             return Failure(code=FailureCode.ACTION_WRONG_TARGET, source="rule", phase="action")
 
@@ -219,12 +221,12 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         # Verify a fail-closed before-tool rule uses the existing middleware decision contract.
         router = FailureRouter(object())
 
-        @rule(code=FailureCode.ACTION_UNSAFE, on="before_tool_call", on_match="stop", on_error="closed")
+        @rule(code=FailureCode.ACTION_UNSAFE, on=MiddlewareHook.BEFORE_TOOL_CALL, on_match=FailureDisposition.STOP, on_error=RuleErrorMode.CLOSED)
         def safety(_context):
             return Failure(code=FailureCode.ACTION_UNSAFE, source="safety", phase="action")
 
         router.add_rule(safety)
-        decision = await router.middleware().before_tool_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="agent"))
+        decision = await FailureMiddleware(router).before_tool_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="agent"))
         self.assertEqual(decision.action, MiddlewareAction.ABORT_RUN)
 
 
@@ -320,7 +322,7 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Verify the built-in fork handler delegates to the existing Session fork seam.
         session = Session(_FakeAgent())
         await session.arun("checkpoint")
-        failure = session.failures.emit(FailureCode.ACTION_WRONG_TARGET, phase="action", source="test", status=FailureStatus.EXHAUSTED, disposition=FailureDisposition.ROUTE)
+        failure = session.failures.emit(FailureCode.ACTION_WRONG_TARGET, phase=FailurePhase.ACTION, source="test", status=FailureStatus.EXHAUSTED, disposition=FailureDisposition.ROUTE)
         session.failures.on(FailureCode.ACTION_WRONG_TARGET, ForkRecovery(at=session.head))
         result = await session.failures.route(failure)
         self.assertIsNotNone(result)
@@ -330,7 +332,7 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Verify explicit branch policy, trace, and tags are forwarded through fork_from().
         session = Session(_FakeAgent())
         await session.arun("checkpoint")
-        failure = session.failures.emit(FailureCode.ACTION_WRONG_TARGET, phase="action", source="test", status=FailureStatus.EXHAUSTED, disposition=FailureDisposition.ROUTE)
+        failure = session.failures.emit(FailureCode.ACTION_WRONG_TARGET, phase=FailurePhase.ACTION, source="test", status=FailureStatus.EXHAUSTED, disposition=FailureDisposition.ROUTE)
         session.failures.on(FailureCode.ACTION_WRONG_TARGET, ForkRecovery(at=session.head, policy=Session.MANUAL_POLICY, trace=Session.OFF_TRACE, tags=("repair",)))
         result = await session.failures.route(failure)
         self.assertTrue(result.succeeded)
@@ -340,7 +342,7 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_raise_recovery_uses_typed_error(self) -> None:  # [Hidden Assumption]
         # Verify terminal recovery never falls back to an untyped raw exception.
         router = FailureRouter(object())
-        failure = router.emit(FailureCode.ACTION_UNSAFE, phase="action", source="test")
+        failure = router.emit(FailureCode.ACTION_UNSAFE, phase=FailurePhase.ACTION, source="test")
         router.on(FailureCode.ACTION_UNSAFE, RaiseRecovery())
         with self.assertRaises(FailureRaisedError):
             await router.route(failure)
@@ -352,7 +354,7 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
             return {"compacted": True}
 
         router = FailureRouter(object())
-        failure = router.emit(FailureCode.RUNTIME_COMPACTION_FAILED, phase="runtime", source="test")
+        failure = router.emit(FailureCode.RUNTIME_COMPACTION_FAILED, phase=FailurePhase.RUNTIME, source="test")
         router.on(FailureCode.RUNTIME_COMPACTION_FAILED, CompactRecovery(compact))
         result = await router.route(failure)
         self.assertEqual(result.value, {"compacted": True})

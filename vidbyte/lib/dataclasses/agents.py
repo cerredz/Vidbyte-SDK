@@ -12,6 +12,7 @@ Architecture:
     - AgentCard: Local agent description, capabilities, and tools.
     - AgentMessage: Actor-to-actor message payload.
     - AgentSpec: Construction-friendly agent settings block.
+    - FinishReview: Accept, continue, or stop decision for one runtime finish attempt.
 Relations:
     Used by vidbyte.agents.base, vidbyte.agents.registry, and orchestration strategies.
 """
@@ -25,7 +26,11 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from vidbyte.lib.errors import AgentForkConfigurationError
 
 if TYPE_CHECKING:
-    from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
+    from vidbyte.agents.runtimes.configs import (
+        ActorRuntime,
+        LinearRuntime,
+        MctsSearchRuntime,
+    )
     from vidbyte.agents.settings import AgentLoopSettings
     from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.agents.settings.tool import ToolSettings
@@ -33,6 +38,7 @@ if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.lib.dataclasses.codex import CodexMessageData
     from vidbyte.lib.dataclasses.runner import RunnerHandle
     from vidbyte.lib.dataclasses.trace import TraceOption
     from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
@@ -59,7 +65,39 @@ class AgentStopReason(str, Enum):
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     CONTRACT_UNSATISFIED = "contract_unsatisfied"
+    FINISH_REVIEW_REJECTED = "finish_review_rejected"
     ERROR = "error"
+
+
+class FinishReviewAction(str, Enum):
+    """What a runtime does with a finish attempt after reviewing it."""
+
+    ACCEPT = "accept"
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+@dataclass(frozen=True, slots=True)
+class FinishReview:
+    """Outcome of AgentRuntime.review_finish_attempt for one proposed final answer."""
+
+    action: FinishReviewAction = FinishReviewAction.ACCEPT
+    feedback: str = ""
+
+    @classmethod
+    def accept(cls) -> "FinishReview":
+        """Let the run finish with the proposed answer."""
+        return cls()
+
+    @classmethod
+    def continue_with(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and send feedback back into the same loop."""
+        return cls(action=FinishReviewAction.CONTINUE, feedback=feedback)
+
+    @classmethod
+    def stop(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and end the run with FINISH_REVIEW_REJECTED."""
+        return cls(action=FinishReviewAction.STOP, feedback=feedback)
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +252,8 @@ class AgentMessage:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     # The validated instance when the sending agent declared an output_schema, else None.
     structured: Any = None
+    # Provider-specific deterministic result data; absent for non-Codex agents.
+    codex: CodexMessageData | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -30,6 +30,7 @@ class RuntimeRegistry:
     @classmethod
     def resolve(cls, runtime_type: AgentRuntimeType) -> type:
         # Returns the runtime class for the given AgentRuntimeType; lazy-imports avoid circular deps.
+        from vidbyte.agents.jev import JevRuntime
         from vidbyte.agents.runtimes import (
             LinearAgentRuntime,
             SearchTreeRuntimeComponent,
@@ -42,6 +43,7 @@ class RuntimeRegistry:
             AgentRuntimeType.ACTOR_MODEL: PointToPointActorRuntime,
             AgentRuntimeType.ACTOR_MODEL_P2P: PointToPointActorRuntime,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST: BroadcastActorRuntime,
+            AgentRuntimeType.JEV: JevRuntime,
         }
         runtime_cls = _registry.get(runtime_type)
         if runtime_cls is None:

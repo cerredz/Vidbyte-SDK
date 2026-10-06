@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 64 static prompt assets across 22
+    Defines the stable typed identifiers for all 70 static prompt assets across 28
     JSON/Markdown-backed families. This file owns identifiers only; prompt text and
     family metadata belong under ``vidbyte/prompts/prompts/``.
 
@@ -60,6 +60,7 @@ from enum import Enum
 class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
+    CREATE_SKILLS_CREATE_SKILL = "create_skills.create_skill"
     AGENTIC_ENGINEERING_ERROR_MESSAGES = "agentic_engineering.error_messages"
     AGENTIC_ENGINEERING_FEATURE_TEST_PACKS = "agentic_engineering.feature_test_packs"
     AGENTIC_ENGINEERING_FILE_HEADERS = "agentic_engineering.file_headers"
@@ -70,7 +71,14 @@ class Prompt(str, Enum):
     AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
     HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"
     INDEPENDENT_CRITIC_REVIEWER_SYSTEM_PROMPT = "independent_critic.reviewer_system_prompt"
+    JEV_RUN_STATE_REQUIRED_SEQUENCE_AGENT = "jev_run_state.required_sequence_agent"
     INDEPENDENT_CRITIC_REVIEW_PROMPT = "independent_critic.review_prompt"
+    JEV_CLARIFICATION_SYSTEM_PROMPT = "jev_clarification.system_prompt"
+    JEV_CONTINUATION_CONTINUE_PROMPT = "jev_continuation.continue_prompt"
+    JEV_FRESH_CONTINUATION_PROMPT = "jev_fresh_continuation.fresh_prompt"
+    JEV_HANDOFF_SYSTEM_PROMPT = "jev_handoff.system_prompt"
+    JEV_REVIEW_SYSTEM_PROMPT = "jev_review.system_prompt"
+    JEV_RUN_STATE_SYSTEM_PROMPT = "jev_run_state.system_prompt"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"

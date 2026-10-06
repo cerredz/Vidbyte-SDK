@@ -4,15 +4,25 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
-from typing import Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import httpx
 
 from vidbyte.lib.errors import ProviderRequestError
+
+# HTTP methods safe to retry without an explicit idempotency key: repeating them cannot duplicate
+# a server-side mutation. POST/PATCH and other methods require a caller-supplied idempotency_key
+# before retry_count > 0 is honored.
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+
+
+def _require_idempotency_guard(*, method: str, retry_count: int, idempotency_key: str | None) -> None:
+    # Raises when a retry is requested for a non-idempotent method with no caller-supplied key.
+    if retry_count > 0 and method.upper() not in _IDEMPOTENT_METHODS and idempotency_key is None:
+        raise ProviderRequestError(f"Retrying {method.upper()} requires an explicit idempotency_key: repeating it after a network ambiguity can duplicate the underlying side effect.", provider="http")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,12 +37,13 @@ class HttpResponse:
 class HttpTransport:
     """Async HTTP transport using httpx; releases the event loop during all I/O."""
 
-    async def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), max_response_bytes: int | None = None) -> HttpResponse:
+    async def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), max_response_bytes: int | None = None, idempotency_key: str | None = None, follow_redirects: bool = False) -> HttpResponse:
         # Send one async HTTP request with optional non-blocking exponential backoff.
+        _require_idempotency_guard(method=method, retry_count=retry_count, idempotency_key=idempotency_key)
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=follow_redirects) as client:
                 for attempt in range(attempts):
                     response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds, max_response_bytes=max_response_bytes)
                     if response.status_code not in retry_status_codes or attempt == attempts - 1:
@@ -87,8 +98,9 @@ class HttpTransport:
 class SyncHttpTransport:
     """Synchronous urllib-based transport; use only for test injection or non-async contexts."""
 
-    def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504)) -> HttpResponse:
+    def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), idempotency_key: str | None = None) -> HttpResponse:
         # Send one blocking HTTP request with optional exponential backoff.
+        _require_idempotency_guard(method=method, retry_count=retry_count, idempotency_key=idempotency_key)
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
         for attempt in range(attempts):

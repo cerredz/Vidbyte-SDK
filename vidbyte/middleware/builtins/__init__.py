@@ -25,6 +25,7 @@ Architecture:
     - CanaryTripwireMiddleware: Security boundary detection using system secrets.
     - ConfusedDeputyGuardMiddleware: Authorization check to prevent confused deputy exploits.
     - HoneypotToolMiddleware: Traps unauthorized tool usages with fake honey tools.
+    - FailureMiddleware: Bridges a Session's FailureRouter into the runtime lifecycle.
 Relations:
     Related to vidbyte.middleware and vidbyte.agents.runtime.
 """
@@ -43,6 +44,7 @@ from vidbyte.middleware.builtins.loop_detection import LoopDetectionMiddleware
 from vidbyte.middleware.builtins.rate_limit import TokenRateLimitMiddleware
 from vidbyte.middleware.builtins.retry import ModelRetryMiddleware
 from vidbyte.middleware.builtins.runtime_limits import RuntimeLimitMiddleware
+from vidbyte.middleware.builtins.session_failure_router import FailureMiddleware
 from vidbyte.middleware.builtins.token_budget import TokenBudgetMiddleware
 from vidbyte.middleware.builtins.tool_error_policy import ToolErrorPolicyMiddleware
 from vidbyte.middleware.builtins.tool_policy import ToolPolicyMiddleware
@@ -55,6 +57,7 @@ __all__ = [
     "ConfusedDeputyGuardMiddleware",
     "CostBudgetMiddleware",
     "ExponentialBackoffRetryMiddleware",
+    "FailureMiddleware",
     "HoneypotToolMiddleware",
     "LoopDetectionMiddleware",
     "ModelRetryMiddleware",

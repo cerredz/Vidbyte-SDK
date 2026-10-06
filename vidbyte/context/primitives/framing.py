@@ -1,32 +1,32 @@
 """General problem-framing context primitives.
 
-FILE
+FILE:
     vidbyte/context/primitives/framing.py
-PURPOSE
+PURPOSE:
     Preserve challenges to a problem's frame, objectives, boundaries, meanings,
     and represented perspectives as bounded model-visible context.
-ROLE IN CODEBASE
+ROLE IN CODEBASE:
     Supplies caller- or worker-authored records consumed structurally by
     ContextManager; it does not decide whether a challenge is correct.
-ARCHITECTURE NOTE
+ARCHITECTURE NOTE:
     Each frozen, slotted dataclass implements ContextItem structurally and owns
     deterministic rendering so no domain policy enters the context manager.
-FUNCTION INVENTORY
+FUNCTION INVENTORY:
     ProblemFrameContextItem, ObjectiveGapContextItem,
     ObjectiveConflictContextItem, BoundaryContextItem, AmbiguityContextItem,
     and PerspectiveGapContextItem each render one adversarial concern.
-COMMON MODIFICATION PATTERNS
+COMMON MODIFICATION PATTERNS:
     Add descriptive fields before the shared lifecycle tail, then render them in
     stable order and apply _truncate_text exactly once.
-WHAT NOT TO DO
+WHAT NOT TO DO IN THIS FILE:
     Do not enforce boundaries, infer missing perspectives, validate lifecycle
     strings, or register these records as model-creatable tools in this module.
-KNOWN EDGE CASES
+KNOWN EDGE CASES:
     Required strings may be empty; tuple sections are normally omitted when
     empty; custom status and severity strings are preserved.
-RELATED DOCS
+RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/general-problem-solving-context-primitives.md
-TESTS
+TESTS:
     The approved no-tests workflow uses package compilation and import/render
     smoke checks described in the design document.
 """
@@ -63,7 +63,12 @@ class ProblemFrameContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a challenge to the way a problem has been framed. Current frame and underlying need distinguish the stated issue from the need beneath it. Affected parties, suspected proxy, and alternative frames reveal who or what the current framing may omit. Use this record before optimizing a proxy that may not represent the real problem.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -106,7 +111,12 @@ class ObjectiveGapContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries an unresolved gap between an objective and its desired outcome. Unresolved parts identify what remains incomplete, while completion condition defines what would count as enough. Next evidence points to observations that can reduce the gap. Use the status and resolution condition to keep unfinished objectives visible.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -145,7 +155,12 @@ class ObjectiveConflictContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a conflict among objectives that cannot all be satisfied under current conditions. The objectives section names the competing aims, and the conflict states the incompatibility that connects them. Affected parties show who bears the tension, while decision needed identifies the next choice. Use this record to surface prioritization instead of silently sacrificing an objective.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -187,7 +202,12 @@ class BoundaryContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a challenged boundary around an action or scope. Boundary type and boundary state the governing limit, while challenged action identifies what may cross it. Non-goals, authority required, and escalation path describe exclusions and the route for exceptions. Use this record to keep scope and authority explicit before proceeding.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -230,7 +250,12 @@ class AmbiguityContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries an ambiguity that could change the meaning of the work. Term and context establish what is unclear, while interpretations preserve the plausible readings. Consequences show why the distinction matters, and clarification needed identifies the next question. Use this record to avoid committing to one interpretation without acknowledging the alternatives.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -268,7 +293,12 @@ class PerspectiveGapContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a perspective gap around a subject or decision. Missing perspectives identify viewpoints not yet represented, and affected parties show who may experience the consequences. Likely blind spots and value judgments expose assumptions that a single viewpoint can hide. Use this record to broaden review before treating the current account as complete.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:

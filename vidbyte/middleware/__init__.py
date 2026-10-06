@@ -14,7 +14,8 @@ Architecture:
       TokenRateLimitMiddleware, ToolPolicyMiddleware, TokenBudgetMiddleware,
       CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
       LoopDetectionMiddleware, CircuitBreakerMiddleware, CircuitState,
-      CanaryTripwireMiddleware, ConfusedDeputyGuardMiddleware, and HoneypotToolMiddleware.
+      CanaryTripwireMiddleware, ConfusedDeputyGuardMiddleware, HoneypotToolMiddleware,
+      and FailureMiddleware.
 Relations:
     Related to vidbyte.agents.runtime and vidbyte.middleware.builtins.
 """
@@ -39,6 +40,7 @@ from vidbyte.middleware.builtins import (
     ConfusedDeputyGuardMiddleware,
     CostBudgetMiddleware,
     ExponentialBackoffRetryMiddleware,
+    FailureMiddleware,
     HoneypotToolMiddleware,
     LoopDetectionMiddleware,
     MessageHistoryCompactionMiddleware,
@@ -63,6 +65,7 @@ __all__ = [
     "ConfusedDeputyGuardMiddleware",
     "CostBudgetMiddleware",
     "ExponentialBackoffRetryMiddleware",
+    "FailureMiddleware",
     "HoneypotToolMiddleware",
     "LoopDetectionMiddleware",
     "MiddlewareAction",

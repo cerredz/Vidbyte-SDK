@@ -1,16 +1,31 @@
-"""Context Protocol Header
+"""FILE: vidbyte/context/primitives/tasks.py
 
-Description:
-    Defines task-, progress-, and plan-style context primitives.
-Purpose:
-    Gives developers and algorithms immutable units of goal, progress, and
-    multi-step plan context.
-Architecture:
-    - Task/Progress/Plan context primitives.
-    - TOOL_CREATE_META ClassVar on create-enabled primitives holds model-facing
-      tool strings (description + field schemas) for the create-tool registry.
-Relations:
-    Re-exported through vidbyte.context.primitives.
+PURPOSE:
+    Defines immutable task, progress, and plan records for keeping execution
+    goals, completed work, and next actions visible in context windows.
+ROLE IN CODEBASE:
+    ContextManager renders these records, create-tool registry builders construct
+    the create-enabled types, and vidbyte.context.primitives re-exports them.
+ARCHITECTURE NOTE:
+    Dataclasses own stable task-oriented rendering while shared helpers format
+    sections and add the managed-context boundary.
+FUNCTION INVENTORY:
+    TaskContextItem, ProgressContextItem, and PlanContextItem each render one
+    execution record through to_context_text() -> str.
+COMMON MODIFICATION PATTERNS:
+    Add fields before metadata, render them in semantic order, and keep plan step
+    numbering and active-step marking stable for downstream agents.
+WHAT NOT TO DO IN THIS FILE:
+    Do not advance tasks, validate checks, or mutate the registry; callers and
+    ContextManager own lifecycle, placement, and replacement behavior.
+KNOWN EDGE CASES:
+    Progress sections may be empty, plans may contain no steps, and current_step
+    may not identify a displayed step without changing the stored plan.
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/tree/main/vidbyte/context/primitives
+TESTS:
+    Existing context primitive registry and built-in context-tool tests plus source
+    and package smoke gates cover task rendering and integration.
 """
 
 from __future__ import annotations
@@ -112,7 +127,12 @@ class TaskContextItem:
 
     def to_context_text(self) -> str:
         # Renders goal, status, optional progress, and bullet sections.
-        lines = [f"Task goal: {self.goal}", f"Status: {self.status}"]
+        lines = [
+            "This primitive carries an explicit work goal and its current execution state. The status and progress summarize where the work stands, while completed and next-step sections preserve the execution trail. Deterministic checks identify observable conditions that can support a completion claim. Use this record to continue the task from recorded state instead of reconstructing it from conversation alone.",
+            "",
+            f"Task goal: {self.goal}",
+            f"Status: {self.status}",
+        ]
         if self.progress:
             lines.append(f"Progress: {self.progress}")
         _extend_section(lines, "Completed", self.completed)
@@ -198,7 +218,11 @@ class ProgressContextItem:
 
     def to_context_text(self) -> str:
         # Renders all progress sections as bullet lists.
-        lines: list[str] = ["Progress:"]
+        lines: list[str] = [
+            "This primitive carries a compact journal of work already performed during a run. Completed tasks, touched files, and decisions show the path taken so far. Errors and next steps expose unresolved work and guide the next iteration. Use it as a progress snapshot rather than as a replacement for the underlying artifacts.",
+            "",
+            "Progress:",
+        ]
         _extend_section(lines, "Completed tasks", self.completed_tasks)
         _extend_section(lines, "Touched files", self.touched_files)
         _extend_section(lines, "Decisions", self.decisions)
@@ -265,7 +289,11 @@ class PlanContextItem:
 
     def to_context_text(self) -> str:
         # Renders numbered steps with an arrow marker on the current step.
-        lines = [f"Plan (status: {self.status}):"]
+        lines = [
+            "This primitive carries an ordered plan for multi-step execution. Each numbered step represents work in sequence, and the arrow marks the step currently considered active. The plan status describes the overall lifecycle without proving that any step is complete. Follow the listed steps while checking their real outcomes in the surrounding context.",
+            "",
+            f"Plan (status: {self.status}):",
+        ]
         for i, step in enumerate(self.steps):
             marker = "→" if i == self.current_step else " "
             lines.append(f"{marker} {i + 1}. {step}")

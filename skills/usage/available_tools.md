@@ -104,15 +104,40 @@ Model-callable tools anchored to named strategies from the scientific/philosophi
 ```python
 from vidbyte.tools.builtins.reasoning import (
     AbduceTool,
+    AbsenceEvidenceTool,
     AnalogyTool,
     BayesianUpdateTool,
+    BurdenOfProofTool,
     CausalChainTool,
+    CircularityTool,
+    CompositionDivisionTool,
+    ConsistencyTool,
+    CounterexampleTool,
     DeduceTool,
+    DefeasibleTool,
+    DialecticTool,
     DifferentialDiagnosisTool,
+    DilemmaTool,
+    EquivocationTool,
     FalsifyTool,
     FermiEstimateTool,
+    IdentityTool,
     InduceTool,
+    InstantiateTool,
+    ModalTool,
+    NecessarySufficientTool,
+    ParadoxTool,
+    PartitionTool,
+    PredictTool,
+    QuantifierTool,
+    RegressTool,
+    SocraticTool,
+    StatisticalSyllogismTool,
     SteelmanTool,
+    StrawmanTool,
+    TestimonyTool,
+    ThoughtExperimentTool,
+    TransitivityTool,
 )
 ```
 
@@ -128,6 +153,31 @@ from vidbyte.tools.builtins.reasoning import (
 | `FermiEstimateTool(context_manager)` | Record a Fermi estimate: a quantity decomposed into checkable sub-estimates, with a sanity band and anchor-risk note. |
 | `SteelmanTool(context_manager)` | Record a position pressure-tested against its strongest opposition, with a required revision whenever it does not survive unchanged. |
 | `FalsifyTool(context_manager)` | Record a Popperian falsification test for a claim — the test design, the riskiest prediction it forbids, and whether it has actually been run. |
+| `CounterexampleTool(context_manager)` | Record a formal disproof: a general claim, its scope, a constructed violating case, the condition it breaks, and the refined claim that survives. |
+| `ConsistencyTool(context_manager)` | Record a belief-set audit: the claims, the concrete contradictory pairs, the status, and the resolution. |
+| `DilemmaTool(context_manager)` | Record a proof by exhaustive cases: the branches, the reasoning from each, the shared conclusion, and the exclusion argument. |
+| `QuantifierTool(context_manager)` | Record a quantified-claim analysis: the quantifier in force, the instance checked, the deciding counterexample, the scope, and a verdict. |
+| `TransitivityTool(context_manager)` | Record a transitive-chain audit: entities, relation, checked links, derived chain, cycles, and consistency. |
+| `IdentityTool(context_manager)` | Record an identity judgment between two referents: shared properties, the distinguisher, the grounds, and a verdict. |
+| `PartitionTool(context_manager)` | Record a classification audit: items, categories, membership rules, coverage, overlap, and a verdict. |
+| `ModalTool(context_manager)` | Record a modality analysis: whether the claim is necessary, possible, contingent, or impossible, with the evidence and actuality. |
+| `EquivocationTool(context_manager)` | Record a term-ambiguity audit: the term, its senses, each occurrence, the drift, the corrected argument, and whether a fallacy is present. |
+| `NecessarySufficientTool(context_manager)` | Record a condition-relationship analysis: necessity and sufficiency directions, the verdict, and the implications. |
+| `CompositionDivisionTool(context_manager)` | Record a part-to-whole property-transfer audit, with the aggregation claim, verdict, and deciding counterexample. |
+| `CircularityTool(context_manager)` | Record a circular-reasoning audit: premises, conclusion, the dependency map, the found circle, and the fix. |
+| `RegressTool(context_manager)` | Record a justification-chain analysis: every 'why' step, where the chain terminates, the regress style, and adequacy. |
+| `BurdenOfProofTool(context_manager)` | Record an evidence-burden resolution: the claim, presumption, both evidence sides, the burden holder, verdict, and decision. |
+| `TestimonyTool(context_manager)` | Record a testimony evaluation: source, claim, reliability factors, corroboration, conflicts, and a trust verdict with residual uncertainty. |
+| `AbsenceEvidenceTool(context_manager)` | Record an absence-of-evidence analysis: the hypothesis, expected evidence, the search, its adequacy, and the significance. |
+| `DefeasibleTool(context_manager)` | Record a defeasible-reasoning application: the default rule, case, applicability, defeaters, final conclusion, and retraction note. |
+| `StatisticalSyllogismTool(context_manager)` | Record a frequency-to-individual probability transfer with its membership, defeater, probable conclusion, and optional confidence. |
+| `SocraticTool(context_manager)` | Record one step of Socratic interrogation: the claim, the probing question, the assumption surfaced, and the revised claim. |
+| `DialecticTool(context_manager)` | Record a thesis-antithesis-synthesis resolution with what each side preserved, discarded, and the synthesis's stability. |
+| `ParadoxTool(context_manager)` | Record a paradox dissection: premises, the hidden assumption, the single premise to drop, the resolution, and the revealed lesson. |
+| `StrawmanTool(context_manager)` | Record an argument-restatement audit: original, restatement, distortion, fair restatement, and the criticism that genuinely applies. |
+| `PredictTool(context_manager)` | Record a theory-derived prediction checked against the observed outcome, with the match and the forced revision. |
+| `ThoughtExperimentTool(context_manager)` | Record a gedankenexperiment: setup, single manipulation, predicted outcome, the insight, and the limits. |
+| `InstantiateTool(context_manager)` | Record a rule-to-case instantiation: the rule, case, applicability conditions, per-condition checks, conclusion, and scope check. |
 
 ## Agent Forking
 

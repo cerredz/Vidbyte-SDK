@@ -1,18 +1,31 @@
-"""Context Protocol Header
+"""FILE: vidbyte/context/primitives/reasoning.py
 
-Description:
-    Defines reasoning context primitives for inner-loop reflection algorithms.
-Purpose:
-    Gives the problem-space search and error-correction algorithms typed,
-    bounded context units that render model-visible reflection for the next call.
-Architecture:
-    - ProblemSpaceSearchContextItem: Ordered unconsidered/blind-spot/direction sections.
-    - ErrorCorrectionContextItem: Authoritative correction notice sections.
-Relations:
-    Written by ProblemSpaceSearchAlgorithm and ErrorCorrectionAlgorithm and
-    re-exported through vidbyte.context.primitives.
-Similar Files:
-    - `vidbyte/context/primitives/checkpoints.py`
+PURPOSE:
+    Defines bounded problem-space search and error-correction records for
+    model-visible reflection between inner-loop iterations.
+ROLE IN CODEBASE:
+    ProblemSpaceSearchAlgorithm and ErrorCorrectionAlgorithm write these records;
+    ContextManager renders them and primitives __init__ re-exports their types.
+ARCHITECTURE NOTE:
+    The records are immutable and descriptive; shared truncation adds the managed
+    context boundary while algorithms retain control of reflection policy.
+FUNCTION INVENTORY:
+    ProblemSpaceSearchContextItem.to_context_text() renders exploration gaps.
+    ErrorCorrectionContextItem.to_context_text() renders authoritative corrections.
+COMMON MODIFICATION PATTERNS:
+    Add reflection fields before the metadata tail, preserve section order, and
+    keep corrections visually distinct from the original context they override.
+WHAT NOT TO DO IN THIS FILE:
+    Do not perform searches, decide truth, mutate prior messages, or control loop
+    transitions; inner-loop algorithms and ContextManager own those operations.
+KNOWN EDGE CASES:
+    Empty correction collections render an explicit none marker, and oversized
+    reflection text is bounded only at render time.
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/tree/main/vidbyte/context/primitives
+TESTS:
+    Existing context algorithm tests plus source compilation and package smoke
+    gates cover rendering, importability, and correction integration.
 """
 
 from __future__ import annotations
@@ -42,21 +55,22 @@ class ProblemSpaceSearchContextItem:
 
     def to_context_text(self) -> str:
         # Renders the exploration sections in deterministic order, bounded by max_chars.
-        text = "\n".join(
-            (
-                f"Iteration: {self.iteration}",
-                f"Search Pass: {self.note_index}",
-                "",
-                "### Not Yet Considered",
-                self.unconsidered,
-                "",
-                "### Blind Spots",
-                self.blind_spots,
-                "",
-                "### Next Directions To Explore",
-                self.next_directions,
-            )
-        )
+        lines = [
+            "This primitive carries a bounded note about unexplored parts of a problem. The iteration and search-pass values locate the note within repeated exploration. The following sections name considerations still missing, blind spots, and directions for the next search. Use it to widen investigation before treating the current problem space as complete.",
+            "",
+            f"Iteration: {self.iteration}",
+            f"Search Pass: {self.note_index}",
+            "",
+            "### Not Yet Considered",
+            self.unconsidered,
+            "",
+            "### Blind Spots",
+            self.blind_spots,
+            "",
+            "### Next Directions To Explore",
+            self.next_directions,
+        ]
+        text = "\n".join(lines)
         return _truncate_text(text, self.max_chars)
 
 
@@ -78,6 +92,8 @@ class ErrorCorrectionContextItem:
     def to_context_text(self) -> str:
         # Renders an authoritative override note listing each correction, bounded by max_chars.
         lines = [
+            "This primitive carries an authoritative correction for earlier context that conflicts with the system prompt. The iteration and correction-pass values identify when the correction was produced. The summary and correction list state which claims must be replaced or disregarded. Give this notice priority over the flagged context while preserving its role as a correction record.",
+            "",
             "The following statements earlier in this context are incorrect or contradict the",
             "original system prompt. Treat this notice as authoritative and disregard the",
             "flagged content going forward.",

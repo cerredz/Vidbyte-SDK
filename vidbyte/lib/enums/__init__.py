@@ -28,8 +28,20 @@ TEST FILES:
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
+from vidbyte.lib.enums.codex import (
+    CodexApprovalMode,
+    CodexContextAnchor,
+    CodexInputType,
+    CodexPersonality,
+    CodexReasoningEffort,
+    CodexReasoningSummary,
+    CodexSandbox,
+    CodexThreadSource,
+    CodexThreadStartSource,
+)
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.decision_model import DecisionModelMode
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -40,6 +52,33 @@ from vidbyte.lib.enums.cot_events import (
     ReturnableOption,
     Reversibility,
 )
+from vidbyte.lib.enums.failure import (
+    FailureCode,
+    FailureDisposition,
+    FailurePhase,
+    FailureSeverity,
+    FailureStatus,
+    RuleErrorMode,
+)
+from vidbyte.lib.enums.jev import (
+    JevBoundaryKind,
+    JevClaimKind,
+    JevCompletionStatus,
+    JevContinuationGate,
+    JevDoneCheck,
+    JevDoneQuestionKey,
+    JevExerciseMode,
+    JevOutputExtentComparator,
+    JevOutputExtentUnit,
+    JevPreflightPreset,
+    JevPreflightQuestionKey,
+    JevProblemCheckItemType,
+    JevQuestionType,
+    JevScenarioRole,
+    JevScopeBreadth,
+    JevScopeUnitSource,
+    JevScopeUniverse,
+)
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.multi_agent import (
@@ -49,37 +88,112 @@ from vidbyte.lib.enums.multi_agent import (
 )
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.enums.reasoning_strategies import (
+    AbsenceEvidenceSignificance,
+    BurdenOfProofVerdict,
+    CircularityVerdict,
+    CompositionDivisionValidity,
+    ConsistencyStatus,
+    DefeasibleRuleApplies,
+    EquivocationFallacy,
+    IdentityVerdict,
+    ModalStatus,
+    NecessarySufficientVerdict,
+    PartitionVerdict,
+    PredictMatch,
+    QuantifierKind,
+    QuantifierVerdict,
+    ReasoningStrategyEnum,
+    RegressStyle,
+    StrawmanCriticism,
+    TestimonyTrust,
+    TransitivityConsistency,
+)
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
+from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
+    "AgentSpeedRecordingIntegrity",
     "AgentType",
     "AssumptionAction",
     "BasisType",
     "BudgetPreset",
+    "BurdenOfProofVerdict",
+    "CircularityVerdict",
+    "CodexApprovalMode",
+    "CodexContextAnchor",
+    "CodexInputType",
+    "CodexPersonality",
+    "CodexReasoningEffort",
+    "CodexReasoningSummary",
+    "CodexSandbox",
+    "CodexThreadSource",
+    "CodexThreadStartSource",
+    "CompositionDivisionValidity",
+    "ConsistencyStatus",
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
+    "DefeasibleRuleApplies",
     "DocumentType",
+    "DecisionModelMode",
+    "EquivocationFallacy",
+    "FailureCode",
+    "FailureDisposition",
+    "FailurePhase",
+    "FailureSeverity",
+    "FailureStatus",
     "HypothesisStatus",
+    "IdentityVerdict",
     "ImpactLevel",
+    "JevBoundaryKind",
+    "JevClaimKind",
+    "JevCompletionStatus",
+    "JevContinuationGate",
+    "JevDoneCheck",
+    "JevDoneQuestionKey",
+    "JevExerciseMode",
+    "JevOutputExtentComparator",
+    "JevOutputExtentUnit",
+    "JevPreflightPreset",
+    "JevPreflightQuestionKey",
+    "JevProblemCheckItemType",
+    "JevQuestionType",
+    "JevScenarioRole",
+    "JevScopeBreadth",
+    "JevScopeUnitSource",
+    "JevScopeUniverse",
+    "ModalStatus",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
     "MultiAgentStopReason",
+    "NecessarySufficientVerdict",
     "OrchestratorAction",
+    "PartitionVerdict",
     "PermissionPreset",
     "PinPolicy",
     "Platform",
+    "PredictMatch",
     "ProgressState",
     "Prompt",
+    "QuantifierKind",
+    "QuantifierVerdict",
+    "ReasoningStrategyEnum",
+    "RegressStyle",
     "ReturnableOption",
     "Reversibility",
+    "RuleErrorMode",
     "Skill",
     "SkillEnums",
+    "StrawmanCriticism",
     "StructuredOutputSupport",
     "TaskStatus",
+    "TestimonyTrust",
+    "TransitivityConsistency",
 ]

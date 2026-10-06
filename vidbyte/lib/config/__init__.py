@@ -12,8 +12,8 @@ from vidbyte.lib.config.sources import (
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
 from vidbyte.lib.dataclasses.harness_descriptor import HarnessDescriptor
-from vidbyte.lib.dataclasses.model_configs import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.dataclasses.model_configs import AudioModelConfig, DecisionModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
+from vidbyte.lib.enums import DecisionModelMode, ModelProvider
 
 __all__ = [
     "ALL_PRESETS",
@@ -22,6 +22,8 @@ __all__ = [
     "AgentDescriptor",
     "AudioModelConfig",
     "DEFAULT_ENDPOINTS",
+    "DecisionModelConfig",
+    "DecisionModelMode",
     "EmbeddingModelConfig",
     "EnvironmentDescriptor",
     "HarnessDescriptor",

@@ -43,6 +43,9 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
+    - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
+    - AgentSpeedError: Base exception for agent speed-tracking failures.
+    - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -121,6 +124,34 @@ class McpProtocolError(VidbyteSdkError):
 
 class AgentExecutionError(VidbyteSdkError):
     """Raised when an agent cannot generate a reply."""
+
+
+class CodexAgentError(AgentExecutionError):
+    """Carries one safe, vocabulary-backed Codex adapter failure."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, message: str, *, failure_code: str, operation: str, error_type: str = "") -> None:
+        self.failure_code = failure_code
+        self.operation = operation
+        self.error_kind = failure_code
+        self.expected = f"Codex adapter operation {operation!r} completing successfully"
+        self.actual = message
+        self.safe_runtime_details = {"operation": operation, "error_type": error_type}
+        self.likely_causes = ("The Codex SDK rejected input, failed a lifecycle operation, or returned an invalid result.",)
+        self.repair_approaches = ("Inspect the operation and chained exception, then correct the matching Codex settings or runtime state.",)
+        self.related_docs = ("https://developers.openai.com/codex/sdk", "https://developers.openai.com/codex/app-server")
+        self.relevant_tests = ("python scripts/run_ci.py",)
+        super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
 
 
 class AllModelsFailedError(AgentExecutionError):
@@ -320,6 +351,102 @@ class SessionUsageError(VidbyteSdkError):
 
 class SessionUsageValidationError(SessionUsageError):
     """Raised when persisted usage rollup inputs have an invalid shape."""
+
+
+class FailureRaisedError(VidbyteSdkError):
+    """Raised when a Session recovery policy escalates a deterministic failure to raise."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, failure: object) -> None:
+        # Kept loosely typed (not vidbyte.lib.dataclasses.failure.Failure) so this substrate
+        # module stays independent of the dataclasses module, mirroring how MiddlewareContext
+        # keeps model_usage loosely typed to avoid a lib-internal cross-module dependency.
+        self.failure = failure
+        code = getattr(getattr(failure, "code", None), "value", None) or str(getattr(failure, "code", "unknown"))
+        source = str(getattr(failure, "source", "unknown"))
+        summary = getattr(failure, "summary", None) or code
+        phase = getattr(getattr(failure, "phase", None), "value", None) or str(getattr(failure, "phase", "unknown"))
+        self.error_kind = "session_failure_raised"
+        self.expected = "a Session failure whose disposition allows the run to continue or stop cleanly"
+        self.actual = f"failure {code!r} from {source!r} was routed to raise: {summary}"
+        self.safe_runtime_details = {"code": code, "failure_id": getattr(failure, "id", None), "phase": phase, "source": source, "handled_by": getattr(failure, "handled_by", None)}
+        self.likely_causes = ("No local retry, fallback, or contract mechanism could recover this failure.", "A developer rule or recovery handler explicitly requested the raise disposition.")
+        self.repair_approaches = ("Bind a Session recovery handler for this failure code with session.failures.on(...).", "Change the matching @rule's on_match to a less severe disposition if raising is not intended.")
+        self.related_docs = ("docs/design/session-failure-vocabulary.md", "skills/failure/vocabulary.md")
+        self.relevant_tests = ("python -m pytest -q tests/test_session_failures.py",)
+        super().__init__(
+            f"Session failure '{code}' from {source!r} was routed to raise: {summary}.",
+            details={
+                "error_kind": self.error_kind,
+                "expected": self.expected,
+                "actual": self.actual,
+                "safe_runtime_details": self.safe_runtime_details,
+                "likely_causes": self.likely_causes,
+                "repair_approaches": self.repair_approaches,
+                "related_docs": self.related_docs,
+                "relevant_tests": self.relevant_tests,
+            },
+        )
+
+
+class AgentSpeedError(VidbyteSdkError):
+    """Base class for agent speed-tracking failures."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Populate the shared speed-tracking diagnostic packet from message/details alone."""
+        super().__init__(message, details=details)
+        self.error_kind = "agent_speed_tracking"
+        self.expected = "AgentSpeedTracker recording/rollup completing without an internal contract violation."
+        self.actual = message
+        self.safe_runtime_details = dict(self.details)
+        self.likely_causes = ("An internal AgentSpeedTracker invariant was violated; see subclasses for specifics.",)
+        self.repair_approaches = ("Inspect safe_runtime_details, then fix the AgentSpeedTracker call site that produced it.",)
+        self.related_docs = ("https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md",)
+        self.relevant_tests = ("tests/test_agent_speed.py",)
+
+
+class AgentSpeedValidationError(AgentSpeedError):
+    """Raised when a speed-tracking dataclass receives an invalid shape."""
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Populate the diagnostic packet with the specific field/value that failed validation."""
+        super().__init__(message, details=details)
+        self.error_kind = "agent_speed_validation"
+        self.expected = (
+            "A speed-tracking dataclass field within its documented range: non-negative timestamps, "
+            "first_token_at no earlier than dispatched_at, non-empty tool names, and ordered percentiles."
+        )
+        self.actual = message
+        self.likely_causes = (
+            "A caller assembled a speed dataclass from a raw timestamp/count computed incorrectly, e.g. "
+            "first_token_at captured before dispatched_at, or a negative duration from a non-monotonic "
+            "clock override in a test.",
+        )
+        self.repair_approaches = (
+            "Inspect safe_runtime_details for the offending field and value, then fix the call site in "
+            "vidbyte/agents/runtime.py or vidbyte/agents/base.py that assembled the dataclass.",
+        )
 
 
 class SourceError(VidbyteSdkError):

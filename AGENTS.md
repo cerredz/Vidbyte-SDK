@@ -5,6 +5,74 @@ Vidbyte is an agent engineering platform for building, evaluating, instrumenting
 The mental model is small and consistent. You create an `Agent` or `BaseAgent`, give it a system prompt plus optional model/provider config, runner, tools, context manager, middleware, trace settings, and runtime choice, then call `run()` or `arun()`. The SDK assembles the message context, appends an agentic-loop prompt, sends tool schemas to the model, executes permitted tool calls, folds results back into ordered history, applies middleware and context-window policy, and repeats until the model signals completion. Everything larger than a single agent — pipelines, paradigms, sessions, MCP exposure — is composition over that same primitive core. This repository is deliberately scoped to reusable, developer-facing abstractions: private Vidbyte service logic, proprietary learning systems, hosted scoring, and database-of-record access stay outside the package. Status is **alpha**, so APIs may change between minor versions.
 
 > **This file is a Map.** It is a lossy compression of what this repository already contains in full — folder topology and what each folder is for, nothing that isn't derivable from the tree itself. It exists to answer *where do I look next*, not to be correct in every detail. It is expected to drift; regenerate it rather than patching it. For a deeper structural index, read [`artifacts/file_index.md`](artifacts/file_index.md); for the code-heavy documentation bundle, read [`llms.txt`](llms.txt).
+>
+> **The exception is [Placement Rules](#placement-rules) below.** That section is prescriptive, not descriptive: it is binding for all new code, and the `AGENTS.md placement` workflow enforces it on every pull request by moving misplaced code to the location it names.
+
+## Placement Rules
+
+### Dataclasses go in `vidbyte/lib/dataclasses/`
+
+**Every new dataclass is defined in `vidbyte/lib/dataclasses/<domain>.py`**, where `<domain>` names the feature or subsystem it belongs to (`jev.py`, `sessions.py`, `tools.py`). This holds no matter which layer uses the dataclass, and whether it is public or underscore-prefixed.
+
+- Add to the existing domain module when there is one; create a new `<domain>.py` only for a new domain. Do not create `types.py`, `records.py`, `models.py`, or `schemas.py` modules next to the code that uses the dataclass.
+- Import it from its domain module, `vidbyte.lib.dataclasses.<domain>`. A feature package may re-export it from its own `__init__.py` as part of its public API, as `vidbyte/agents/jev/__init__.py` does, but the definition stays in `vidbyte/lib/dataclasses/`.
+- Validation of the record itself (`__post_init__`, field checks) lives with the dataclass. Behavior that acts on the record lives in the layer that owns that behavior.
+- `vidbyte/lib/` must never import from a layer above it. If a dataclass seems to need a type from a higher layer, move the contract down (a `Protocol` or a smaller record in `vidbyte/lib/`). Do not define the dataclass in the higher layer instead.
+
+There are exactly two exceptions:
+
+1. **Agent settings objects.** A `*Settings` class that configures an agent lives in `vidbyte/agents/settings/`, or in the owning agent's own `settings.py` (for example `vidbyte/agents/jev/settings.py`).
+2. **JEV preflight questions.** The `JevPreflightQuestion` subclasses, one dataclass per question, live in `vidbyte/lib/jev/preflight/<preset>.py`. See [JEV File Locations](#jev-file-locations).
+
+### Enums go in `vidbyte/lib/enums/`
+
+**Every new enum (any `Enum` subclass, including `str, Enum`, `StrEnum`, and `IntEnum`) is defined in `vidbyte/lib/enums/<domain>.py`**, and every public enum is added to the export list in `vidbyte/lib/enums/__init__.py`. There are no exceptions. An enum does not go in a domain module, a settings module, or a `vidbyte/lib/dataclasses/` module beside the dataclass that uses it.
+
+Any field, parameter, or registry key whose value comes from a small, closed set is typed with an enum from this folder, not a plain `str`.
+
+### Existing code
+
+Many modules on `main` still define dataclasses or enums outside these two folders; they predate these rules. Do not copy them as precedent. Editing one in place (adding a field or a member) is fine. Moving it to `vidbyte/lib/` is a change of its own and belongs in its own pull request, not folded into unrelated work. These rules govern newly defined dataclasses and enums.
+
+## JEV File Locations
+
+JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opinionated agent built on it. It spans several layers:
+
+| What | Where |
+|---|---|
+| `JevAgent` facade | `vidbyte/agents/jev/agent.py` |
+| `JevAgentSettings`, the whole public configuration surface | `vidbyte/agents/jev/settings.py` |
+| `JevRuntime` (runs the gate, then the inherited loop) | `vidbyte/agents/jev/runtime.py`; resolved from `AgentRuntimeType.JEV` in `vidbyte/lib/registries/runtimes.py` |
+| `JevPreflightGate` and `JevClarificationAgent` | `vidbyte/agents/jev/gate/` |
+| `JevPreflight` contract and the `JevPreflightTools` tool selector | `vidbyte/agents/jev/preflight.py` |
+| `JevResponse`, the only writer of `JevAgentResponse` | `vidbyte/agents/jev/response.py` |
+| `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
+| Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |
+| `JevPreflightRegistry` | `vidbyte/lib/jev/preflight/preflight.py` |
+| Fixed done questions, one module per check (`multi_part.py`, `claims.py`, `motivating_case.py`) | `vidbyte/lib/jev/done/` |
+| `JevDoneRegistry` (question, threshold, and enabled-check validation) | `vidbyte/lib/jev/done/done.py` |
+| Every JEV record: decision requests, answers, wire bodies, model cards, briefs, criteria, preset results, run-state and handoff sections, and `JevAgentResponse` | `vidbyte/lib/dataclasses/jev.py` |
+| Every JEV enum: question types, preflight presets and keys, done checks and keys, and motivating-case categories and exercise modes | `vidbyte/lib/enums/jev.py` |
+| JEV limits, defaults, wire literals, and preflight and done-check policy values | `vidbyte/lib/constants/jev.py` |
+| `DecisionModelRunner` (runs a decision request, `score_noul`) | `vidbyte/lib/runners/decision.py` |
+| TypeSafe System One provider adapter (wire shape, HTTP) | `vidbyte/providers/typesafe.py` |
+| TypeSafe usage pricing (`ModelProvider.TYPESAFE`) | `vidbyte/agents/pricing/typesafe.py` |
+| Clarification agent prompt family | `vidbyte/prompts/prompts/jev_clarification/`; key in `vidbyte/lib/enums/prompts.py` |
+| House style for writing Jev questions (load it before writing or reviewing one) | `skills/asking-jev-questions/SKILL.md` |
+| Guide to extending `JevAgent` | `skills/jev-agent/SKILL.md` |
+| Step-by-step guide to adding a continuation done check (load it before adding a `JevDoneCheck`) | `skills/jev-continuation/SKILL.md` |
+| Tests | `tests/test_jev_*.py`; focused scripts `scripts/test-jev-*.py` |
+
+Where new JEV code goes:
+
+- **A record** goes in `vidbyte/lib/dataclasses/jev.py`, **an enum or enum member** in `vidbyte/lib/enums/jev.py`, and **a constant** in `vidbyte/lib/constants/jev.py`. Never create a `types.py`, `enums.py`, or `constants.py` under `vidbyte/agents/jev/` or `vidbyte/lib/jev/`.
+- **A new fixed-question preset** needs four things:
+  - its flag on `JevPreflightPreset` and its keys on `JevPreflightQuestionKey`;
+  - its definition in `JevPresets`;
+  - its questions in a new `vidbyte/lib/jev/preflight/<preset>.py`, registered in `JevPreflightRegistry`;
+  - one case in the `match` in `JevPreflightGate.pass_()`. Never add preset checks to `JevRuntime`.
+- **A new JevAgent capability** is a named, validated field on `JevAgentSettings`. Its questions and actions stay inside `vidbyte/agents/jev/` and `vidbyte/lib/jev/`.
+- **A new Jev-facing prompt** is a new family under `vidbyte/prompts/prompts/`, with its key in `vidbyte/lib/enums/prompts.py`.
 
 ## File Index
 
@@ -71,6 +139,10 @@ Reusable multi-agent reasoning strategies packaged as ready-to-use agent behavio
 ##### `vidbyte/agents/contracts/`
 
 The invariants an agent's configuration must satisfy before it is allowed to run. This spans both the shape a structured output must conform to and the minimum acceptable settings below which a configuration is considered actively misconfigured rather than merely unusual. The folder is small, but its effect is outsized: it turns a bad configuration into an error raised at construction time instead of a confusing failure partway through a run. Anyone adding a new class of agent configuration should consider whether it needs a floor defined here.
+
+##### `vidbyte/agents/jev/`
+
+The opinionated JEV agent: its facade, its single public settings object, and a dedicated runtime that runs named, Jev-backed preflights before handing off to the ordinary linear loop. The preflight gate asks every enabled fixed-question preset's questions in one Jev request and decides whether the generative agent runs at all. A clarification agent turns an unclear request into structured questions for the user, and a tool selector narrows the tool catalog before the loop starts. One response writer is the only place a run's JEV outcomes are recorded. The question text, records, enums, and constants this agent uses deliberately live lower in the shared substrate; see [JEV File Locations](#jev-file-locations) for every file.
 
 ##### `vidbyte/agents/multi/`
 
@@ -158,15 +230,15 @@ Narrow, single-purpose configuration objects that do not belong in the general-p
 
 ##### `vidbyte/lib/constants/`
 
-Values declared exactly once because more than one part of the package needs to refer to the same thing. It currently holds shared runner identifiers and their defaults, referenced both by the low-level execution layer and by the agent layer that selects among them. The guiding rule for this folder is simple: if a literal value would otherwise need to appear in two places, it belongs here instead. This keeps values that must stay synchronized from silently drifting apart over time.
+Values declared exactly once because more than one part of the package needs to refer to the same thing. It holds shared runner identifiers and their defaults, referenced both by the low-level execution layer and by the agent layer that selects among them, and the JEV limits, defaults, and wire literals shared by the JEV records, runner, and provider adapter. The guiding rule for this folder is simple: if a literal value would otherwise need to appear in two places, it belongs here instead. This keeps values that must stay synchronized from silently drifting apart over time.
 
 ##### `vidbyte/lib/dataclasses/`
 
-The typed vocabulary shared across the entire package, and its largest single folder by file count. It defines the shapes used to describe agents themselves, along with the structures for context, tools, runs, usage, and results that cross between layers. These are exactly the types the package's static-analysis policy exists to protect, since they are what is meant to flow across layer boundaries instead of loosely-typed alternatives. Adding a new typed shape here before passing an untyped structure between layers is the expected discipline.
+The typed vocabulary shared across the entire package, and its largest single folder by file count. It defines the shapes used to describe agents themselves, along with the structures for context, tools, runs, usage, and results that cross between layers. These are exactly the types the package's static-analysis policy exists to protect, since they are what is meant to flow across layer boundaries instead of loosely-typed alternatives. Every new dataclass in the package is defined here, in a module named for its domain, with only the two exceptions listed under [Placement Rules](#placement-rules). That rule is binding, not advisory.
 
 ##### `vidbyte/lib/enums/`
 
-Closed sets of values used consistently across multiple layers of the package, covering things like execution runtime choice, model modality, and other configuration dimensions. Representing these as enumerations rather than free-form strings is what makes an invalid state structurally unrepresentable, and lets registries key lookups on something checkable rather than an arbitrary string. Extending an existing enumeration is treated as an interface change with its own weight, since code elsewhere may be matching against it exhaustively. Anywhere a value is drawn from a small, closed set, it belongs here rather than as a plain string.
+Closed sets of values used consistently across multiple layers of the package, covering things like execution runtime choice, model modality, and other configuration dimensions. Representing these as enumerations rather than free-form strings is what makes an invalid state structurally unrepresentable, and lets registries key lookups on something checkable rather than an arbitrary string. Extending an existing enumeration is treated as an interface change with its own weight, since code elsewhere may be matching against it exhaustively. Anywhere a value is drawn from a small, closed set, it belongs here rather than as a plain string. Every new enum in the package is defined here, with no exceptions; see [Placement Rules](#placement-rules).
 
 ##### `vidbyte/lib/errors/`
 
@@ -175,6 +247,10 @@ The package's exception hierarchy, rooted in a single common base so every failu
 ##### `vidbyte/lib/http/`
 
 The low-level HTTP substrate used for making outbound requests and reading their responses, supporting both synchronous and asynchronous call styles. Provider adapters and integrations with external protocol clients both build on top of this layer rather than reaching for a general-purpose HTTP client library directly. Centralizing this is what lets retry behavior, timeouts, and streaming be decided in exactly one place instead of reimplemented per integration. Nothing else in the package should reach for an HTTP client directly outside of this layer.
+
+##### `vidbyte/lib/jev/`
+
+The JEV agent's capability substrate, placed below the agent layer so the agent, its settings validation, and the gate can all share it without a cycle. It owns the preflight flags a user can enable, the question keys, scores, and vetoes each flag uses, and the fixed preflight questions themselves, one dataclass per question grouped into one module per preset, along with the registry over them. It holds question content and lookup, never the logic that asks Jev or acts on its answers; that stays in the agent layer's gate. Anyone writing or reviewing a question here must first load the question-writing house-style skill named in [JEV File Locations](#jev-file-locations).
 
 ##### `vidbyte/lib/models/`
 

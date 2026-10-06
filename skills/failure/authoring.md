@@ -7,13 +7,21 @@ on the Session that should own the policy. Importing a module must not change
 another Session's behavior.
 
 ```python
-from vidbyte import Failure, FailureCode, FailurePhase, rule
+from vidbyte import (
+    Failure,
+    FailureCode,
+    FailureDisposition,
+    FailurePhase,
+    MiddlewareHook,
+    RuleErrorMode,
+    rule,
+)
 
 @rule(
     code=FailureCode.ACTION_WRONG_TARGET,
-    on="after_tool_call",
-    on_match="route",
-    on_error="open",
+    on=MiddlewareHook.AFTER_TOOL_CALL,
+    on_match=FailureDisposition.ROUTE,
+    on_error=RuleErrorMode.OPEN,
     priority=50,
 )
 def detect_wrong_target(context):
@@ -92,6 +100,8 @@ When extending this system:
 - Keep failure records credential-free and bounded.
 - Treat failure-code changes as data-contract changes: update tests, docs, and
   downstream aggregation together.
-- For a new recovery mode, add a parameterized class under
-  `vidbyte/sessions/failure/recovery/`, expose its inputs, and define its
-  handler-error posture.
+- For a new recovery mode, add its own file under
+  `vidbyte/sessions/failure/recovery/` (one category per file, e.g.
+  `teacher_handoff_recovery.py`), back its constructor inputs with a
+  dataclass in `vidbyte/lib/dataclasses/failure_recovery.py`, and define its
+  handler-error posture explicitly rather than inheriting a default silently.

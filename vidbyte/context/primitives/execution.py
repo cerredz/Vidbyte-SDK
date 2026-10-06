@@ -1,32 +1,32 @@
 """Execution and feedback challenge context primitives.
 
-FILE
+FILE:
     vidbyte/context/primitives/execution.py
-PURPOSE
+PURPOSE:
     Preserve protected constraints, fragile dependencies, intervention risks,
     and missing feedback loops during execution in any problem domain.
-ROLE IN CODEBASE
+ROLE IN CODEBASE:
     Supplies descriptive ContextItem implementations that make execution risks
     model-visible while leaving enforcement and recovery to callers.
-ARCHITECTURE NOTE
+ARCHITECTURE NOTE:
     Frozen, slotted records separate observations from conclusions and render
     deterministically before applying one shared size bound.
-FUNCTION INVENTORY
+FUNCTION INVENTORY:
     InvariantContextItem, DependencyContextItem, InterventionRiskContextItem,
     and FeedbackGapContextItem cover constraints, dependencies, effects, and
     observation respectively.
-COMMON MODIFICATION PATTERNS
+COMMON MODIFICATION PATTERNS:
     Add opaque domain fields before the lifecycle tail, preserve semantic
     distinctions between similarly named concepts, and render in stable order.
-WHAT NOT TO DO
+WHAT NOT TO DO IN THIS FILE:
     Do not enforce invariants, invoke fallbacks, interpret units or thresholds,
     or imply that a documented recovery action ran successfully.
-KNOWN EDGE CASES
+KNOWN EDGE CASES:
     The shared owner resolves the record while dependency_owner identifies the
     dependency's owner; recovery and containment remain descriptive only.
-RELATED DOCS
+RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/general-problem-solving-context-primitives.md
-TESTS
+TESTS:
     The approved no-tests workflow uses package compilation and import/render
     smoke checks described in the design document.
 """
@@ -64,7 +64,12 @@ class InvariantContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries an invariant that execution is expected to preserve. Scope defines where the rule applies, and observed state plus violation evidence show whether it currently holds. Consequence explains why a breach matters, while check method describes how to verify it. Use this record to keep correctness conditions visible while implementation changes.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -108,7 +113,12 @@ class DependencyContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a dependency that an objective or plan cannot ignore. The required condition and owner identify what must be available and who controls it. Fragility describes how it may fail, and fallback records the alternate path if it does. Use this record to expose execution risk before the dependency blocks progress.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -157,7 +167,12 @@ class InterventionRiskContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a risk review for a proposed intervention. The intervention and intended effect state what is being changed and why, while reversible and irreversible effects separate recoverable from lasting consequences. Uncertainties, containment, and recovery describe how to limit or repair harm. Use the lifecycle fields to keep acceptance and resolution explicit.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -201,7 +216,12 @@ class FeedbackGapContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a monitoring plan for an intervention whose outcome is not yet observable. The expected outcome states what should happen, and observable signals identify what can reveal it. Measurement method, cadence, and response threshold turn observation into an actionable feedback loop. Use this record to avoid declaring success without a way to detect the result.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:

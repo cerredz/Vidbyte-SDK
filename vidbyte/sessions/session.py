@@ -32,7 +32,7 @@ from vidbyte.sessions.contracts import (
 )
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.sessions.errors import SessionError
-from vidbyte.sessions.failure import FailurePhase, FailureRouter
+from vidbyte.sessions.failure import Failure, FailurePhase, FailureRouter
 from vidbyte.sessions.portable import SessionBundleExporter
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
@@ -137,12 +137,22 @@ class Session:
         """Return this Session's bounded failure ledger and recovery router."""
         return self._failures
 
+    def notify_exception(self, exc: BaseException, *, source: str = "session") -> Failure:
+        """Record one SDK exception through this Session's failure router.
+
+        This is the single public boundary every caller (BaseAgent, Session.arun,
+        or a developer's own code) should use to report an exception into
+        Session.failures, so capture and deduplication logic lives in one place
+        instead of being re-implemented per call site.
+        """
+        return self._failures.capture_exception(exc, phase=FailurePhase.RUNTIME, source=source)
+
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Run the agent, persisting from the agent hook when available."""
         try:
             reply = await self._agent.arun(message, **options)
         except BaseException as exc:
-            self._failures.capture_exception(exc, phase=FailurePhase.RUNTIME, source="session.arun")
+            self.notify_exception(exc, source="session.arun")
             await self._failures.route_pending()
             raise
         if not self._agent_records_turns():

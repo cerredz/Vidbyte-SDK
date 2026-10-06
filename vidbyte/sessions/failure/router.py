@@ -3,6 +3,11 @@
 PURPOSE: Normalizes runtime outcomes and routes exhausted Session failures to explicit handlers.
 ROLE IN CODEBASE: Owns the bounded per-Session ledger, metadata adapter, middleware bridge, and recovery lifecycle.
 ARCHITECTURE NOTE: Existing local retries, fallbacks, policies, and contracts remain first recovery owners.
+    FailureMiddleware lives in vidbyte.middleware.builtins.session_failure_router, the shared home for
+    every other built-in policy middleware. This module cannot import it directly: vidbyte/lib's A006
+    dependency-graph policy treats vidbyte.sessions as a lower layer than vidbyte.middleware, so the
+    orchestration-tier caller (vidbyte.agents.base._runtime_middleware) constructs FailureMiddleware(router)
+    itself instead of calling a router.middleware() convenience method.
 COMMON MODIFICATION PATTERNS: Add a stable metadata adapter or recovery transition with a focused integration test.
 KNOWN EDGE CASES: Preserve bounded history, route each failure once, and keep fail-open/closed errors distinct.
 RELATED DOCS: docs/design/session-failure-vocabulary.md; skills/failure/vocabulary.md.
@@ -13,36 +18,15 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
-from vidbyte.middleware import AgentMiddleware
-from vidbyte.sessions.failure.recovery.base import (
-    FailureRaisedError,
-    RecoveryHandler,
-    RecoveryResult,
-)
+from vidbyte.lib.dataclasses.failure import Failure, RecoveryAttempt, RecoveryBinding, RecoveryHandler, RecoveryResult
+from vidbyte.lib.dataclasses.failure_recovery import FailureRouterSettings
+from vidbyte.lib.enums.failure import FailureCode, FailureDisposition, FailurePhase, FailureStatus, RuleErrorMode
+from vidbyte.lib.errors import FailureRaisedError
 from vidbyte.sessions.failure.rules import FailureRule
-from vidbyte.sessions.failure.types import (
-    Failure,
-    FailureCode,
-    FailureDisposition,
-    FailurePhase,
-    FailureStatus,
-    RecoveryAttempt,
-    RuleErrorMode,
-)
 
 _EMPTY_COUNT = 0
-
-
-@dataclass(frozen=True, slots=True)
-class _RecoveryBinding:
-    """Internal code-to-handler binding with recovered-event routing policy."""
-
-    handler: RecoveryHandler
-    include_recovered: bool
 
 
 class FailureMetadataNormalizer:
@@ -64,6 +48,9 @@ class FailureMetadataNormalizer:
         "contract_unsatisfied": FailureCode.CONTRACT_UNSATISFIED,
         "error": FailureCode.RUNTIME_ERROR,
     }
+    # @intent stop-codes-cover-agentstopreason
+    # Every vidbyte.lib.dataclasses.agents.AgentStopReason member is accounted for here except
+    # FINAL_RESPONSE and IS_DONE, which _append_stop_failure excludes as non-failure terminal states.
     _TOOL_ERROR_CODES: ClassVar[dict[str, FailureCode]] = {
         "unknown_tool": FailureCode.TOOL_NOT_FOUND,
         "permission_denied": FailureCode.TOOL_PERMISSION_DENIED,
@@ -74,7 +61,12 @@ class FailureMetadataNormalizer:
         "output_schema_violation": FailureCode.TOOL_RESULT_INVALID,
         "missing_result": FailureCode.TOOL_RESULT_MISSING,
         "execution_error": FailureCode.TOOL_EXECUTION_FAILED,
+        "mcp_error": FailureCode.DATA_SOURCE_UNAVAILABLE,
     }
+    # @intent tool-error-codes-cover-known-metadata-error-tokens
+    # "mcp_error" (vidbyte/tools/mcp/client.py) is mapped alongside the vidbyte/tools/executor.py
+    # and vidbyte/agents/runtime.py ToolResult.metadata["error"] tokens; a token with no entry here
+    # is simply left uncounted by _append_tool_context_failures rather than misclassified.
 
     @classmethod
     def from_reply(cls, reply: object) -> tuple[Failure, ...]:
@@ -225,76 +217,28 @@ class FailureMetadataNormalizer:
         return tuple(result)
 
 
-class FailureMiddleware(AgentMiddleware):
-    """Bridge Session rules into the existing linear AgentMiddleware lifecycle."""
-
-    name = "session_failure_router"
-    fail_closed = True
-
-    def __init__(self, router: FailureRouter) -> None:
-        """Bind one middleware instance to a Session failure router."""
-        self.router = router
-
-    async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules before a run begins."""
-        return await self._evaluate("before_run", ctx)
-
-    async def before_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules before each loop iteration."""
-        return await self._evaluate("before_iteration", ctx)
-
-    async def before_model_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules before a model request."""
-        return await self._evaluate("before_model_call", ctx)
-
-    async def after_model_response(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules after a model response."""
-        return await self._evaluate("after_model_response", ctx)
-
-    async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules when a model request errors."""
-        return await self._evaluate("on_model_error", ctx)
-
-    async def before_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules before a tool is permitted to execute."""
-        return await self._evaluate("before_tool_call", ctx)
-
-    async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules after a tool result is available."""
-        return await self._evaluate("after_tool_call", ctx)
-
-    async def after_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules after one loop iteration."""
-        return await self._evaluate("after_iteration", ctx)
-
-    async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Evaluate Session rules before the runtime returns its result."""
-        return await self._evaluate("after_run", ctx)
-
-    async def _evaluate(self, hook: str, context: MiddlewareContext) -> MiddlewareDecision:
-        # Translate rule dispositions into the existing middleware decision contract.
-        failures = await self.router.evaluate(hook, context)
-        for failure in failures:
-            if failure.disposition in (FailureDisposition.STOP, FailureDisposition.RAISE):
-                return MiddlewareDecision.abort("failure_rule", metadata={"failure_code": FailureCode.from_value(failure.code).value, "failure_id": failure.id, "rule": failure.source})
-        return MiddlewareDecision.continue_()
-
-
 class FailureRouter:
     """Session-scoped bounded ledger that escalates only exhausted failures."""
 
-    def __init__(self, session: object, *, max_history: int = 512, enabled: bool = True) -> None:
-        """Bind a router to one Session and configure its in-memory bound."""
-        if isinstance(max_history, bool) or max_history <= 0:
-            raise ValueError("FailureRouter.max_history must be greater than zero.")
+    def __init__(self, session: object, *, max_history: int = 512, enabled: bool = True, on_capture: Callable[[Failure], object] | None = None) -> None:
+        """Bind a router to one Session and validate its bounded ledger settings."""
         self.session = session
-        self.max_history = max_history
-        self.enabled = enabled
+        self._settings = FailureRouterSettings(max_history=max_history, enabled=enabled, on_capture=on_capture)
         self._history: list[Failure] = []
         self._rules: list[FailureRule] = []
-        self._bindings: dict[FailureCode, _RecoveryBinding] = {}
+        self._bindings: dict[FailureCode, RecoveryBinding] = {}
         self._recovery_attempts: list[RecoveryAttempt] = []
         self._routed_ids: set[str] = set()
+
+    @property
+    def max_history(self) -> int:
+        """Return the validated bound on failure and recovery-attempt history."""
+        return self._settings.max_history
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether this router currently records and routes failures."""
+        return self._settings.enabled
 
     @property
     def recovery_attempts(self) -> tuple[RecoveryAttempt, ...]:
@@ -305,10 +249,6 @@ class FailureRouter:
     def has_rules(self) -> bool:
         """Return whether this Session has any developer rules to evaluate."""
         return bool(self._rules)
-
-    def middleware(self) -> FailureMiddleware:
-        """Return a middleware bridge that evaluates this router's lifecycle rules."""
-        return FailureMiddleware(self)
 
     def record(self, failure: Failure) -> Failure:
         """Append one canonical failure to bounded history without routing it."""
@@ -321,13 +261,19 @@ class FailureRouter:
             evicted = self._history[: len(self._history) - self.max_history]
             del self._history[: len(evicted)]
             self._routed_ids.difference_update(item.id for item in evicted)
+        if self._settings.on_capture is not None:
+            # Fire-and-forget product-facing observability hook; a broken sink must never affect routing.
+            try:
+                self._settings.on_capture(failure)
+            except Exception:
+                pass
         return failure
 
-    def emit(self, code: FailureCode | str, *, phase: FailurePhase | str, source: str, status: FailureStatus | str = FailureStatus.OBSERVED, disposition: FailureDisposition | str = FailureDisposition.RECORD, details: Mapping[str, Any] | None = None, handled_by: str | None = None, summary: str | None = None) -> Failure:
+    def emit(self, code: FailureCode, *, phase: FailurePhase, source: str, status: FailureStatus = FailureStatus.OBSERVED, disposition: FailureDisposition = FailureDisposition.RECORD, details: Mapping[str, Any] | None = None, handled_by: str | None = None, summary: str | None = None) -> Failure:
         """Construct and record one canonical failure from concise runtime facts."""
         return self.record(Failure(code=code, phase=phase, source=source, status=status, disposition=disposition, details=details or {}, handled_by=handled_by, summary=summary))
 
-    def history(self, *, code: FailureCode | str | None = None, status: FailureStatus | str | None = None) -> tuple[Failure, ...]:
+    def history(self, *, code: FailureCode | None = None, status: FailureStatus | None = None) -> tuple[Failure, ...]:
         """Return history in insertion order, optionally filtered by code/status."""
         code_filter = FailureCode.from_value(code) if code is not None else None
         status_filter = FailureStatus(status) if status is not None else None
@@ -346,12 +292,12 @@ class FailureRouter:
         callback = rule.callback if isinstance(rule, FailureRule) else rule
         self._rules = [item for item in self._rules if item.callback is not callback]
 
-    def on(self, code: FailureCode | str, recovery: RecoveryHandler, *, include_recovered: bool = False) -> None:
+    def on(self, code: FailureCode, recovery: RecoveryHandler, *, include_recovered: bool = False) -> None:
         """Bind one recovery handler to a canonical code."""
         resolved = FailureCode.from_value(code)
         if not callable(getattr(recovery, "recover", None)):
             raise TypeError("FailureRouter.on requires a recovery handler with recover().")
-        self._bindings[resolved] = _RecoveryBinding(handler=recovery, include_recovered=include_recovered)
+        self._bindings[resolved] = RecoveryBinding(handler=recovery, include_recovered=include_recovered)
 
     async def evaluate(self, hook: str, context: object) -> tuple[Failure, ...]:
         """Evaluate matching rules, record their failures, and apply dispositions."""
@@ -390,6 +336,7 @@ class FailureRouter:
         # Apply one detector's action and report whether the hook must stop.
         if failure.disposition is FailureDisposition.ROUTE:
             await self.route(failure)
+            # route() may have replaced the ledger entry (status/handled_by); reflect that back to the caller.
             matched[-1] = next((item for item in reversed(self._history) if item.id == failure.id), failure)
             return False
         if failure.disposition is FailureDisposition.RAISE:
@@ -403,7 +350,7 @@ class FailureRouter:
         failures = FailureMetadataNormalizer.from_reply(reply)
         return tuple(self.record(failure) for failure in failures)
 
-    def capture_exception(self, exc: BaseException, *, phase: FailurePhase | str = FailurePhase.RUNTIME, source: str = "session") -> Failure:
+    def capture_exception(self, exc: BaseException, *, phase: FailurePhase = FailurePhase.RUNTIME, source: str = "session") -> Failure:
         """Record one SDK exception once, deduplicating Session and agent boundaries."""
         exception_ids: set[int] = set()
         current: BaseException | None = exc
@@ -437,6 +384,8 @@ class FailureRouter:
             if not isinstance(result, RecoveryResult):
                 raise TypeError(f"Recovery handler {binding.handler.name!r} must return RecoveryResult, got {type(result).__name__}.")
         except FailureRaisedError:
+            # A handler explicitly escalating to raise still gets a terminal ledger entry before re-raising,
+            # so history reflects what actually happened even though the caller never sees a RecoveryResult.
             self._replace(Failure(code=failure.code, source=failure.source, phase=failure.phase, status=FailureStatus.TERMINAL, disposition=FailureDisposition.RAISE, severity=failure.severity, summary=failure.summary, details=failure.details, handled_by=binding.handler.name, parent_id=failure.parent_id, iteration=failure.iteration, step=failure.step, id=failure.id, occurred_at=failure.occurred_at))
             raise
         except Exception as exc:
@@ -462,8 +411,10 @@ class FailureRouter:
                 results.append(result)
         return tuple(results)
 
-    async def _handle_recovery_error(self, failure: Failure, binding: _RecoveryBinding, exc: BaseException) -> RecoveryResult | None:
-        # Record handler failure separately so one broken strategy cannot recurse into itself.
+    async def _handle_recovery_error(self, failure: Failure, binding: RecoveryBinding, exc: BaseException) -> RecoveryResult | None:
+        # Record handler failure separately so one broken strategy cannot recurse into itself:
+        # this emits a distinct RECOVERY_HANDLER_FAILED record rather than re-routing the
+        # original failure code back through the same (evidently broken) binding.
         error_mode = self._handler_error_mode(binding.handler)
         handler_failure = self.emit(FailureCode.RECOVERY_HANDLER_FAILED, phase=FailurePhase.RECOVERY, source=binding.handler.name, status=FailureStatus.TERMINAL if error_mode is RuleErrorMode.CLOSED else FailureStatus.OBSERVED, disposition=FailureDisposition.RAISE if error_mode is RuleErrorMode.CLOSED else FailureDisposition.CONTINUE, details={"failure_id": failure.id, "error_type": type(exc).__name__})
         self._recovery_attempts.append(RecoveryAttempt(failure_id=failure.id, handler=binding.handler.name, succeeded=False, disposition=handler_failure.disposition, details=handler_failure.details, error_type=type(exc).__name__))
@@ -476,14 +427,17 @@ class FailureRouter:
 
     @staticmethod
     def _handler_error_mode(handler: RecoveryHandler) -> RuleErrorMode:
-        # Normalize custom handler error posture while defaulting unknown values to fail closed.
+        # Normalize custom handler error posture while defaulting unknown/invalid values to fail closed,
+        # since a third-party RecoveryHandler is not guaranteed to expose a valid RuleErrorMode.
         try:
             return RuleErrorMode(getattr(handler, "on_error", RuleErrorMode.CLOSED))
         except (TypeError, ValueError):
             return RuleErrorMode.CLOSED
 
     def _rule_error(self, current: FailureRule, exc: Exception) -> Failure:
-        # Convert a detector exception into a canonical open/closed failure record.
+        # Convert a detector exception into a canonical open/closed failure record. A closed rule
+        # escalates using its own on_match (raise if it was going to raise, stop otherwise); an open
+        # rule is recorded but never blocks the run, matching its declared telemetry-only intent.
         closed = current.on_error is RuleErrorMode.CLOSED
         disposition = FailureDisposition.CONTINUE
         if closed:
@@ -492,12 +446,15 @@ class FailureRouter:
 
     @staticmethod
     def _with_rule_disposition(failure: Failure, current: FailureRule) -> Failure:
-        # Apply decorator policy while retaining the rule's richer returned details.
+        # Apply decorator policy while retaining the rule's richer returned details. A rule that
+        # matched successfully always uses its own declared code/on_match, never the raw failure's.
         status = FailureStatus.TERMINAL if current.on_match in (FailureDisposition.STOP, FailureDisposition.RAISE) else FailureStatus.EXHAUSTED if current.on_match is FailureDisposition.ROUTE else failure.status
         return Failure(code=current.code, source=failure.source, phase=failure.phase, status=status, disposition=current.on_match, severity=failure.severity, summary=failure.summary, details=failure.details, handled_by=failure.handled_by, parent_id=failure.parent_id, iteration=failure.iteration, step=failure.step, id=failure.id, occurred_at=failure.occurred_at)
 
     def _replace(self, failure: Failure) -> None:
-        # Replace an in-progress record in place so one failure id has one current lifecycle state.
+        # Replace an in-progress record in place so one failure id has one current lifecycle state,
+        # instead of accumulating a new history row per lifecycle transition (observed -> recovering
+        # -> recovered/exhausted/terminal). Falls back to record() only if the id was already evicted.
         for index, existing in enumerate(self._history):
             if existing.id == failure.id:
                 self._history[index] = failure
@@ -505,4 +462,4 @@ class FailureRouter:
         self.record(failure)
 
 
-__all__ = ["FailureMetadataNormalizer", "FailureMiddleware", "FailureRouter"]
+__all__ = ["FailureMetadataNormalizer", "FailureRouter"]
