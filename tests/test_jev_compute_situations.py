@@ -126,9 +126,11 @@ class JevComputeQuestionTests(unittest.TestCase):
                 self.assertTrue(all(sentence.endswith(".") for sentence in (*sentences[:3], *sentences[8:])), key.value)
                 self.assertTrue(all(sentence.endswith("?") for sentence in sentences[3:8]), key.value)
                 openings.append(sentences[0].casefold())
-                self.assertLessEqual(max(len(question.when_true), len(question.when_false)), 160, key.value)
-                self.assertNotIn("example", question.when_true.casefold(), key.value)
-                self.assertNotIn("example", question.when_false.casefold(), key.value)
+                for criterion in (question.when_true, question.when_false):
+                    criterion_sentences = re.split(r"(?<=\.)\s+", criterion.strip())
+                    self.assertEqual(len(criterion_sentences), 3, key.value)
+                    self.assertTrue(all(sentence.endswith(".") for sentence in criterion_sentences), key.value)
+                    self.assertNotIn("example", criterion.casefold(), key.value)
         self.assertEqual(len(set(openings)), len(openings))
 
     def test_decision_records_and_registry_have_no_gate_or_veto_policy(self) -> None:
