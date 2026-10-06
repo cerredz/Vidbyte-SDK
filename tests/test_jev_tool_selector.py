@@ -232,7 +232,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         runtime_settings = _runtime_settings(
             preflight=(JevPreflightPreset.TOOL_SELECTOR,),
-            decision=DecisionModelConfig(api_key="test-key"),
+            decision=DecisionModelConfig.vidbyte_managed(),
             tool_selector_threshold=0.2,
         )
         agent = bind_test_runner(JevAgent(_settings(tools=(keep, hide)), runtime_settings), generative_runner)

@@ -20,7 +20,7 @@ from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
     JevClarification,
-    JevContinuationGateResult,
+    JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
     JevReviewRecord,
@@ -70,9 +70,9 @@ class JevResponse:
         """Record the evidence JevHandoff compiled at the latest finish attempt, or None when it compiled none."""
         self.state.handoff = record
 
-    def continuation_gate(self, result: JevContinuationGateResult) -> None:
-        """Record one enabled continuation gate's latest result."""
-        self.state.continuation_gates[result.check] = result
+    def done(self, result: JevDoneResult) -> None:
+        """Record what one enabled done check decided at the latest finish attempt."""
+        self.state.done[result.check] = result
 
     def continued(self) -> None:
         """Record that a failed done check sent the main agent back to work."""

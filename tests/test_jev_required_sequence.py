@@ -17,8 +17,8 @@ from types import SimpleNamespace
 from vidbyte import (
     JevAgent,
     JevAgentSettings,
-    JevContinuationGateSettings,
-    JevContinuationGate,
+    JevContinualSettings,
+    JevDoneCheck,
     JevRuntimeSettings,
 )
 from vidbyte.agents.jev.done.event_log import JevRunEventLog
@@ -26,7 +26,7 @@ from vidbyte.context.primitives import ResponseContextItem, TextContextItem
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevContinuationEvidence,
-    JevContinuationGateResult,
+    JevDoneResult,
     JevHandoffRecord,
     JevRequiredSequenceEvidence,
     JevSequenceStageEvidence,
@@ -50,11 +50,11 @@ STAGES = [
 
 
 def _agent(
-    checks: tuple[JevContinuationGate, ...] = (JevContinuationGate.REQUIRED_SEQUENCE,),
+    checks: tuple[JevDoneCheck, ...] = (JevDoneCheck.REQUIRED_SEQUENCE,),
 ) -> JevAgent:
     """Construct the public agent with the requested done checks enabled."""
     settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini")
-    runtime = JevRuntimeSettings(continuation_gate=JevContinuationGateSettings(enabled=checks))
+    runtime = JevRuntimeSettings(continual=JevContinualSettings(checks=checks))
     return JevAgent(settings, runtime)
 
 
@@ -249,10 +249,10 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_check_forwards_fresh_evidence_through_every_enabled_handoff_helper(self) -> None:
         checks = (
-            JevContinuationGate.CLAIMS,
-            JevContinuationGate.REQUIRED_SEQUENCE,
-            JevContinuationGate.REQUIRED_ACTIONS,
-            JevContinuationGate.DISCOVERED_ITEM_COVERAGE,
+            JevDoneCheck.CLAIMS,
+            JevDoneCheck.REQUIRED_SEQUENCE,
+            JevDoneCheck.REQUIRED_ACTIONS,
+            JevDoneCheck.DISCOVERED_ITEM_COVERAGE,
         )
         agent = _agent(checks)
         assert agent.run_state is not None
@@ -374,10 +374,10 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
         }
         handoff_payload = run_state.handoff_writer.payload(
             **{
-                JevContinuationGate.CLAIMS.value: claims_section,
-                JevContinuationGate.REQUIRED_SEQUENCE.value: sequence_section,
-                JevContinuationGate.REQUIRED_ACTIONS.value: required_actions_section,
-                JevContinuationGate.DISCOVERED_ITEM_COVERAGE.value: discovered_section,
+                JevDoneCheck.CLAIMS.value: claims_section,
+                JevDoneCheck.REQUIRED_SEQUENCE.value: sequence_section,
+                JevDoneCheck.REQUIRED_ACTIONS.value: required_actions_section,
+                JevDoneCheck.DISCOVERED_ITEM_COVERAGE.value: discovered_section,
             }
         )
 
@@ -426,7 +426,7 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         run_state._ask = no_decision
-        run_state._judge = lambda check, _handoff, _decision: JevContinuationGateResult(check=check, score=None)
+        run_state._judge = lambda check, _handoff, _decision: JevDoneResult(check=check, score=None)
         await run_state.check(
             "The draft uses the research and fresh item.",
             (main_raw, resumed_raw),

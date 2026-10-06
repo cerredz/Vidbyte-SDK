@@ -22,19 +22,16 @@ from unittest.mock import patch
 from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent as RootJevAgent
 from vidbyte import JevAgentSettings as RootJevAgentSettings
-from vidbyte import JevContinuationGate as RootJevContinuationGate
-from vidbyte import JevContinuationGateResult as RootJevContinuationGateResult
-from vidbyte import JevContinuationGateSettings as RootJevContinuationGateSettings
 from vidbyte import JevRuntime as RootJevRuntime
 from vidbyte import JevRuntimeSettings as RootJevRuntimeSettings
 from vidbyte import JevSpecialist as RootJevSpecialist
 from vidbyte import VidbyteSDK, tool
 from vidbyte.agents import BaseAgent
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevContinuationGateSettings, JevRuntime, JevRuntimeSettings, JevSpecialist
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime, JevRuntimeSettings, JevSpecialist
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.settings import AgentLoopSettings
-from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.config import DecisionModelConfig, DecisionModelMode
 from vidbyte.lib.constants.jev import JEV_DEFAULT_RETRY_COUNT, JEV_DEFAULT_TIMEOUT_SECONDS, JEV_MAX_CHOICE_OPTIONS, JEV_MAX_SCORE_LEVELS
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevOption, JevQuestion
 from vidbyte.lib.enums import AgentRuntimeType, JevQuestionType, ModelProvider
@@ -384,10 +381,11 @@ class JevSettingsTests(unittest.TestCase):
     def test_normalizes_provider_and_redacts_both_keys(self) -> None:
         # [Silent Failure] canonical provider identity is stored and neither credential appears in repr.
         settings = _settings(api_key="generative-secret")
-        rendered = repr(settings) + repr(JevRuntimeSettings(decision=DecisionModelConfig(api_key="decision-secret")))
+        managed_key = "vb_live_" + "a" * 32
+        rendered = repr(settings) + repr(JevRuntimeSettings(decision=DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED, api_key=managed_key)))
         self.assertIs(settings.provider, ModelProvider.OPENAI)
         self.assertNotIn("generative-secret", rendered)
-        self.assertNotIn("decision-secret", rendered)
+        self.assertNotIn(managed_key, rendered)
 
     def test_normalizes_tools_and_retains_valid_nested_objects(self) -> None:
         # [Hidden Assumption] iterable tools become immutable while policy and loop objects preserve identity.
@@ -484,13 +482,6 @@ class JevPublicApiTests(unittest.TestCase):
         self.assertIs(RootJevRuntime, JevRuntime)
         self.assertIs(RootJevRuntimeSettings, JevRuntimeSettings)
         self.assertIs(RootJevSpecialist, JevSpecialist)
-        self.assertIs(RootJevContinuationGateSettings, JevContinuationGateSettings)
-
-    def test_new_continuation_gate_types_and_response_map_are_public(self) -> None:
-        self.assertEqual(RootJevContinuationGate.MULTI_PART.value, "multi_part")
-        self.assertEqual(RootJevContinuationGateResult.__name__, "JevContinuationGateResult")
-        response = JevAgent(_settings()).response
-        self.assertEqual(response.continuation_gates, {})
 
     def test_sdk_namespace_constructs_jev_agent(self) -> None:
         # [Silent Failure] the root namespace client exposes the opinionated constructor.

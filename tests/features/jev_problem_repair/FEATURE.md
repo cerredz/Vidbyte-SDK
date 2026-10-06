@@ -2,19 +2,19 @@
 
 ## High-Level Feature Description
 
-The opt-in `PROBLEMS_RESOLVED` continuation gate reviews problems visible in a JevAgent run at each finish attempt. It requires evidence that each encountered error, failed operation, blocker, or failed validation was fully repaired and successfully revalidated, then separately checks that the original user request was completed after repairs. If any item is unsupported, same-context continuation returns the main agent to its existing loop with the current gate assessment focused on unresolved work. The feature matters because moving past an error is not evidence that it was fixed; an agent should not end a run with a known unresolved problem or stop after repair without finishing the requested work.
+The opt-in `PROBLEMS_RESOLVED` done check reviews problems visible in a JevAgent run at each finish attempt. It requires evidence that each encountered error, failed operation, blocker, or failed validation was fully repaired and successfully revalidated, then separately checks that the original user request was completed after repairs. If any item is unsupported, the existing continuation returns the main agent to the same loop with a focused repair list and the original request. The feature matters because moving past an error is not evidence that it was fixed; an agent should not end a run with a known unresolved problem or stop after repair without finishing the requested work.
 
 ## Contract
 
-When enabled in `JevContinuationGateSettings.enabled`, the handoff derives one item for each observed problem and one required original-request-completion item. Jev receives one question per item in the existing combined request. A repair is supported only when run evidence shows the fix and a relevant successful follow-up; a repair summary alone is not enough. Failed items trigger a bounded, same-loop continuation that fixes and revalidates unresolved problems, then completes remaining original-request work. Disabled gates do not add a section or Jev call. Unavailable handoff or Jev evaluation follows the existing fail-open policy.
+When enabled in `JevContinualSettings.checks`, the handoff derives one item for each observed problem and one required original-request-completion item. Jev receives one question per item in the existing combined request. A repair is supported only when run evidence shows the fix and a relevant successful follow-up; a repair summary alone is not enough. Failed items trigger a bounded, same-loop continuation that fixes and revalidates unresolved problems, then completes remaining original-request work. Disabled checks do not add a section or Jev call. Unavailable handoff or Jev evaluation follows the existing fail-open policy.
 
 ## Actors / Callers
 
-- SDK callers enable the named gate through `JevRuntimeSettings(continuation_gate=JevContinuationGateSettings(enabled=(JevContinuationGate.PROBLEMS_RESOLVED,)))`.
+- SDK callers enable the named check through `JevContinualSettings.checks`.
 - `JevHandoff` reviews the run window and emits problem evidence.
 - `JevRunState` projects handoff items into the one combined Jev request and scores results.
 - `JevDoneContinuation` explains failed items and resumes the same main-agent loop.
-- `JevAgent.response` exposes the handoff and latest continuation-gate result.
+- `JevAgent.response` exposes the handoff and latest done-check result.
 
 ## Inputs and Preconditions
 
@@ -29,7 +29,7 @@ When enabled in `JevContinuationGateSettings.enabled`, the handoff derives one i
 - The original-request-completion item exists even when no problems were observed.
 - A failed item appears in the continuation's Failed checks and Focus sections; resolved siblings do not.
 - After repair, revalidation, and completion of remaining original-request work, a later finish attempt can pass.
-- The gate result is visible through `JevAgent.response.continuation_gates[JevContinuationGate.PROBLEMS_RESOLVED]`.
+- The check result is visible through `JevAgent.response.done[PROBLEMS_RESOLVED]`.
 
 ## State Transitions
 
@@ -45,8 +45,8 @@ When enabled in `JevContinuationGateSettings.enabled`, the handoff derives one i
 - One question maps to one dynamic item; missing Jev answers make the check unavailable rather than silently pass.
 - Handoff `missing` text is for the main agent and is excluded from Jev evidence.
 - The required request-completion item is judged separately from problem repairs.
-- All enabled continuation-gate questions share one Jev request per finish attempt.
-- Same-context continuation keeps the main loop and history while updating the latest handoff and gate assessment in stable context slots; it does not append duplicate run-state or handoff blocks.
+- All enabled done-check questions share one Jev request per finish attempt.
+- The continuation appends to the same loop and never starts a fresh main-agent run.
 - Continuations remain bounded by existing settings; unavailable dependencies retain existing fail-open behavior.
 
 ## External Dependencies

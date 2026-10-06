@@ -4,7 +4,7 @@ PURPOSE: Implements JevPreflightGate, the gate in front of JevAgent's generative
 ROLE IN CODEBASE: JevAgent builds one JevPreflightGate from its settings at construction and passes it to JevRuntime, which calls pass_() before the inherited linear loop, stops the run when it returns False, and hands the run to `specialist` when the gate chose one.
 ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets), and DecisionModelHelper handles request execution and answer scoring; this class owns failing open, the action each preset triggers (JevClarificationAgent), and choosing the JevSpecialist, and it reports every outcome through JevResponse. The tool selector is not a gate case: it keeps its own path in vidbyte/agents/jev/preflight.py.
 COMMON MODIFICATION PATTERNS: Add a fixed-question preset by adding its definition to JevPresets and one commented case to the match in pass_(); never add preset checks to JevRuntime.
-KNOWN EDGE CASES: No enabled fixed-question preset and no specialist makes no Jev call; a missing credential, a provider failure, or a local request-validation error marks every preset unavailable; a missing answer marks only its own preset unavailable. Every unavailable preset fails open, so the run continues as the owner configured it, and an unavailable or `none` specialist answer leaves the main JevAgent on the run.
+KNOWN EDGE CASES: No enabled fixed-question preset and no specialist makes no Jev call; direct TypeSafe credential failures and transient managed failures mark every preset unavailable, while managed credential/access denials propagate; a missing answer marks only its own preset unavailable. Every unavailable preset fails open, and an unavailable or `none` specialist answer leaves the main JevAgent on the run.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from vidbyte.agents.jev.decision_failures import JevDecisionFailurePolicy
 from vidbyte.agents.jev.gate.clarification import JevClarificationAgent
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
@@ -97,14 +98,15 @@ class JevPreflightGate:
     async def _ask(self, message: str) -> Mapping[str, JevAnswer] | None:
         # Sends the one combined request and returns Jev's answers, {} when there was nothing to ask, or None on failure.
         # @intent preflight-fails-open
-        # Preflight is advisory: a missing TypeSafe key, a provider failure, or a request Jev cannot accept
-        # returns None, which marks every preset unavailable instead of blocking the agent.
+        # Transient or malformed decision failures are advisory; managed access/configuration failures propagate.
         try:
             request = self.combine(message)
             if request is None:
                 return {}
             decision = await DecisionModelHelper(self.decision).arun(request)
-        except VidbyteSdkError:
+        except VidbyteSdkError as exc:
+            if JevDecisionFailurePolicy.should_fail_closed(exc, self.decision):
+                raise
             return None
         self.response.preflight_usage(JevUsage.from_usage_payload(decision.usage or {}))
         return decision.answers

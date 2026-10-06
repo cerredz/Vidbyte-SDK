@@ -36,7 +36,7 @@ class JevPreflightPreset(str, Enum):
 
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
 # a continuation done check (run-state and handoff sections, the batched Jev question, and the continuation message).
-class JevContinuationGate(str, Enum):
+class JevDoneCheck(str, Enum):
     """The done checks a JevAgent user can enable; each assembles the items and evidence it needs and asks Jev before a run may finish."""
 
     MULTI_PART = "multi_part"
@@ -64,6 +64,13 @@ class JevContinuationGate(str, Enum):
     EXPERT_DEPTH = "expert_depth"
     SELF_REVIEW = "self_review"
     REQUIRED_SEQUENCE = "required_sequence"
+
+
+class JevContinuationGate(str, Enum):
+    """How JevAgent applies a failed done check before returning to work."""
+
+    SAME_CONTEXT = "same_context"
+    FRESH = "fresh"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -232,4 +239,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

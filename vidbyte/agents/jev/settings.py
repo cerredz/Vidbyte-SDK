@@ -1,6 +1,6 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinuationGateSettings for the done checks and continuations.
+PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations.
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
@@ -34,7 +34,9 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import (
+    DecisionModelMode,
     JevContinuationGate,
+    JevDoneCheck,
     JevPreflightPreset,
     ModelProvider,
 )
@@ -134,11 +136,10 @@ class JevAgentSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class JevContinuationGateSettings:
-    """Validated enabled continuation gates, continuation policy, and JEV limits."""
+class JevContinualSettings:
+    """Validated done checks, continuation gate and cap, and run-state, reviewer, and handoff limits."""
 
-    enabled: tuple[JevContinuationGate | str, ...] = ()
-    same_context: bool = True
+    checks: tuple[JevDoneCheck | str, ...] = ()
     max_continuations: int = JEV_DONE_MAX_CONTINUATIONS
     run_state_max_iterations: int = JEV_RUN_STATE_MAX_ITERATIONS
     run_state_max_tokens: int = JEV_RUN_STATE_MAX_TOKENS
@@ -149,43 +150,52 @@ class JevContinuationGateSettings:
     faithful_scope_extra_tool_calls: int = JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS
     review_max_iterations: int = JEV_REVIEW_MAX_ITERATIONS
     review_max_tokens: int = JEV_REVIEW_MAX_TOKENS
+    gate: JevContinuationGate | str = JevContinuationGate.SAME_CONTEXT
 
     def __post_init__(self) -> None:
         # Rejects unknown or repeated done checks and non-integer limits before JevAgent builds its run state.
         # @intent zero-continuations-still-checks
         # max_continuations may be 0: the checks still run and report on JevAgent.response, but a failed
         # check never sends the main agent back to work.
-        object.__setattr__(self, "enabled", JevDoneRegistry.validate(self.enabled))
-        if not isinstance(self.same_context, bool):
-            raise ConfigurationError("JevContinuationGateSettings.same_context must be a boolean.")
+        object.__setattr__(self, "checks", JevDoneRegistry.validate(self.checks))
         self._validate_count("max_continuations", minimum=0)
         for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens", "review_max_iterations", "review_max_tokens"):
             self._validate_count(field_name, minimum=1)
         for field_name in ("faithful_scope_extra_iterations", "faithful_scope_extra_tokens", "faithful_scope_extra_tool_calls"):
             self._validate_count(field_name, minimum=0)
+        try:
+            gate = self.gate if isinstance(self.gate, JevContinuationGate) else JevContinuationGate(self.gate)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Unsupported Jev continuation gate: {self.gate!r}") from exc
+        if gate is JevContinuationGate.FRESH and not self.checks:
+            raise ConfigurationError("JevContinualSettings.gate='fresh' requires at least one done check.")
+        object.__setattr__(self, "gate", gate)
+
     def _validate_count(self, field_name: str, *, minimum: int) -> None:
         # Requires a whole number at or above the minimum, excluding bool.
         value = getattr(self, field_name)
         if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-            raise ConfigurationError(f"JevContinuationGateSettings.{field_name} must be an integer of at least {minimum}.", details={"received": repr(value)})
+            raise ConfigurationError(f"JevContinualSettings.{field_name} must be an integer of at least {minimum}.", details={"received": repr(value)})
 
 
 @dataclass(frozen=True, slots=True)
 class JevRuntimeSettings:
-    """Validated Jev decision policy: the TypeSafe model, the preflight flags, the continuation settings, and the tool-selector threshold."""
+    """Validated Jev decision policy: Vidbyte-managed decisions, preflight flags, continuation settings, and the tool-selector threshold."""
 
-    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig.vidbyte_managed, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
-    continuation_gate: JevContinuationGateSettings = field(default_factory=JevContinuationGateSettings)
+    continual: JevContinualSettings = field(default_factory=JevContinualSettings)
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
 
     def __post_init__(self) -> None:
-        # Rejects invalid decision policy before JevAgent builds its preflight gate and run state.
-        if not isinstance(self.decision, DecisionModelConfig):
-            raise ConfigurationError("JevRuntimeSettings.decision must be a DecisionModelConfig instance.")
+        # Keeps every JevAgent decision on the Vidbyte-managed path before runtime construction.
+        if type(self.decision) is not DecisionModelConfig:
+            raise ConfigurationError("JevRuntimeSettings.decision must be an exact DecisionModelConfig instance; subclasses are not supported.")
+        if self.decision.mode is not DecisionModelMode.VIDBYTE_MANAGED:
+            raise ConfigurationError("JevRuntimeSettings.decision must use VIDBYTE_MANAGED mode; direct TypeSafe configurations are supported only with standalone DecisionModelRunner.")
         object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
-        if not isinstance(self.continuation_gate, JevContinuationGateSettings):
-            raise ConfigurationError("JevRuntimeSettings.continuation_gate must be a JevContinuationGateSettings instance.")
+        if not isinstance(self.continual, JevContinualSettings):
+            raise ConfigurationError("JevRuntimeSettings.continual must be a JevContinualSettings instance.")
         self._validate_tool_selector_threshold()
 
     def _validate_tool_selector_threshold(self) -> None:
@@ -201,4 +211,4 @@ class JevRuntimeSettings:
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
 
-__all__ = ["JevAgentSettings", "JevContinuationGateSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevContinualSettings", "JevRuntimeSettings"]

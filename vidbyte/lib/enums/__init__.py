@@ -41,6 +41,7 @@ from vidbyte.lib.enums.codex import (
 )
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.decision_model import DecisionModelMode
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -64,6 +65,7 @@ from vidbyte.lib.enums.jev import (
     JevClaimKind,
     JevCompletionStatus,
     JevContinuationGate,
+    JevDoneCheck,
     JevDoneQuestionKey,
     JevExerciseMode,
     JevOutputExtentComparator,
@@ -139,6 +141,7 @@ __all__ = [
     "CotEventEnum",
     "DefeasibleRuleApplies",
     "DocumentType",
+    "DecisionModelMode",
     "EquivocationFallacy",
     "FailureCode",
     "FailureDisposition",
@@ -152,6 +155,7 @@ __all__ = [
     "JevClaimKind",
     "JevCompletionStatus",
     "JevContinuationGate",
+    "JevDoneCheck",
     "JevDoneQuestionKey",
     "JevExerciseMode",
     "JevOutputExtentComparator",

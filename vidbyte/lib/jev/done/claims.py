@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/done/claims.py
 
 PURPOSE: Defines the fixed CLAIMS done question, which asks Jev whether run evidence supports one atomic assertion in the main agent's final answer, interpreted through its five-part context.
-ROLE IN CODEBASE: JevDoneRegistry registers ClaimsSupportedQuestion under JevContinuationGate.CLAIMS, and JevRunState asks it once per parent.assertion id beside every other enabled check in one request.
+ROLE IN CODEBASE: JevDoneRegistry registers ClaimsSupportedQuestion under JevDoneCheck.CLAIMS, and JevRunState asks it once per parent.assertion id beside every other enabled check in one request.
 ARCHITECTURE NOTE: JevHandoff extracts rich claim context after the work; Jev recognizes support for one assertion; code combines assertion answers under their parent claim; and JevDoneContinuation focuses only the failed assertions.
 COMMON MODIFICATION PATTERNS: Load skills/asking-jev-questions/SKILL.md before changing the question, preserve the shared state description from multi_part.py, and keep one question per assertion with combination handled by code.
 KNOWN EDGE CASES: No concrete, checkable final-answer assertions means there is nothing to ask and the check passes. A missing handoff or Jev answer fails open; neither the final answer nor the handoff's missing summary is evidence.

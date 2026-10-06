@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/continuation/fresh.py
 
 PURPOSE: Implements the opt-in fresh-context continuation: when a done check fails, it sends the original request, run state, and handoff to a clean agent context, then returns that work to JevAgent's main loop.
-ROLE IN CODEBASE: JevAgent builds this continuation when JevContinuationGateSettings.gate is FRESH; JevRuntime calls it at the same finish-attempt seam as JevDoneContinuation.
+ROLE IN CODEBASE: JevAgent builds this continuation when JevContinualSettings.gate is FRESH; JevRuntime calls it at the same finish-attempt seam as JevDoneContinuation.
 ARCHITECTURE NOTE: The clean agent uses the configured JevAgent model, tools, and policy but has a fresh history; the existing loop receives its response as the next user message.
 COMMON MODIFICATION PATTERNS: Keep the context template in vidbyte/prompts/prompts/jev_fresh_continuation/ and preserve the existing done-check trigger and continuation cap.
 KNOWN EDGE CASES: A missing state, handoff, failed done check, exhausted limit, or fresh-agent error leaves the original answer in place.
@@ -18,20 +18,21 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.continuation.done import JevDoneContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
-from vidbyte.agents.jev.settings import JevContinuationGateSettings
+from vidbyte.agents.jev.settings import JevContinualSettings
 from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import JevContinuationEvidence
 from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import VidbyteSdkError
+from vidbyte.lib.jev import JevDoneRegistry
 from vidbyte.prompts.catalog import Prompts
 
 
 class JevFreshContinuation(JevDoneContinuation):
     """Continue failed done checks through an agent with a clean context window."""
 
-    def __init__(self, run_state: JevRunState, continual: JevContinuationGateSettings, response: JevResponse, fresh_agent_factory: Callable[[], BaseAgent]) -> None:
+    def __init__(self, run_state: JevRunState, continual: JevContinualSettings, response: JevResponse, fresh_agent_factory: Callable[[], BaseAgent]) -> None:
         # Reuses the done-check state, cap, response writer, and faithful-scope budget policy while creating each fresh agent per attempt.
         super().__init__(run_state, continual, response)
         self.fresh_agent_factory = fresh_agent_factory
@@ -101,14 +102,35 @@ class JevFreshContinuation(JevDoneContinuation):
     def message(self) -> str:
         """Build the fresh agent's clean-context input from the original request, state, and latest handoff."""
         handoff = self.run_state.handoff_writer.rendered
-        if self.run_state.record is None or self.run_state.handoff is None or not self.run_state.rendered or not handoff:
+        if not self.run_state.rendered or not handoff:
             return ""
         return Prompts().get(Prompt.JEV_FRESH_CONTINUATION_PROMPT).format(
             request=self.run_state.request,
-            run_state=f"<jev_run_state_reference_data>\n{self.run_state.rendered}\n</jev_run_state_reference_data>",
-            handoff=f"<jev_handoff_observed_evidence>\n{handoff}\n</jev_handoff_observed_evidence>",
+            run_state=self.run_state.rendered,
+            handoff=handoff,
             gate_assessment=self._render_gate_assessment(),
         )
+
+    def _render_gate_assessment(self) -> str:
+        # Rebuilds the complete gate section from this attempt's latest check results.
+        """Render every enabled gate's stable guidance and its latest failed question text."""
+        results = {result.check: result for result in self.run_state.latest_results}
+        sections = []
+        for check in self.run_state.checks:
+            result = results.get(check)
+            if result is None or not result.available:
+                status = "Status: not evaluated."
+            elif result.passed:
+                status = "Status: passed; no questions failed."
+            elif result.failed_questions:
+                questions = "\n".join(f"- {item.question}" for item in result.failed_questions)
+                status = f"Questions that failed:\n{questions}"
+            else:
+                status = "Status: gate failed on deterministic evidence; no Jev question failed."
+            title = check.value.replace("_", " ").title()
+            sections.append(f"## {title}\n\n{JevDoneRegistry.description(check)}\n\n{status}")
+        content = "\n\n".join(sections)
+        return f"<completion_gate_assessment>\n{content}\n</completion_gate_assessment>"
 
 
 __all__ = ["JevFreshContinuation"]

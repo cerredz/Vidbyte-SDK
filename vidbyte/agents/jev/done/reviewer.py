@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/done/reviewer.py
 
 PURPOSE: Implements JevReviewer, the strict reviewer the self-review done check runs at every finish attempt, before any other check: one tool-free turn over the main agent's own run that lists what a strict reviewer would reject in the work, most serious first.
-ROLE IN CODEBASE: JevRunState builds one JevReviewer at construction when JevContinuationGate.SELF_REVIEW is enabled and calls review() from its check() before JevHandoff compiles evidence; the objections become the items the handoff gathers evidence for and Jev judges, and the record reaches the user as JevAgent.response.review.
+ROLE IN CODEBASE: JevRunState builds one JevReviewer at construction when JevDoneCheck.SELF_REVIEW is enabled and calls review() from its check() before JevHandoff compiles evidence; the objections become the items the handoff gathers evidence for and Jev judges, and the record reaches the user as JevAgent.response.review.
 ARCHITECTURE NOTE: The reviewer is the accuser, not the judge: it writes objections and acceptance conditions (generation), JevHandoff reports what the run shows about each one, and Jev decides which still stand and are in scope (recognition). It reuses the JevAgent's generative model and reads the same ContextManager window as the handoff, because the knowledge of the shortcuts lives in the main agent's own run; its prompt is fixed, it has no tools, and its reply is held to JevReviewPayload.
 COMMON MODIFICATION PATTERNS: Change the reviewer's stance in vidbyte/prompts/prompts/jev_review/system_prompt.md and what each objection holds in the JevObjectionPayload field descriptions in vidbyte/lib/dataclasses/jev.py.
 KNOWN EDGE CASES: A generative failure or a reply that never matches the schema returns None, so the self-review check fails open. Objections beyond JEV_REVIEW_MAX_OBJECTIONS are dropped, keeping the reviewer's most serious ones, rather than failing the whole review. History is cleared before every call, so an earlier finish attempt's review never leaks into a later one.
@@ -12,7 +12,7 @@ TESTS: tests/test_jev_done.py.
 from __future__ import annotations
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.jev.settings import JevAgentSettings, JevContinuationGateSettings
+from vidbyte.agents.jev.settings import JevAgentSettings, JevContinualSettings
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context import ContextManager
 from vidbyte.lib.constants.jev import JEV_REVIEW_MAX_OBJECTIONS
@@ -26,7 +26,7 @@ from vidbyte.prompts.catalog import Prompts
 class JevReviewer(BaseAgent):
     """Generative agent that reads the main agent's run as a strict reviewer and lists what it would reject, most serious first."""
 
-    def __init__(self, settings: JevAgentSettings, continual: JevContinuationGateSettings) -> None:
+    def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
         # @intent the-reviewer-can-only-criticize
         # One turn with no tools: the reviewer can neither continue the user's work nor fix what it finds, so its

@@ -31,25 +31,20 @@ access remain outside this package.
 
 ## JevAgent continuation checks
 
-`JevAgent` can evaluate named continuation gates whenever its main agent attempts to finish. Gates are disabled by default; enable any combination through `JevContinuationGateSettings.enabled`:
+`JevAgent` can run named done checks whenever its main agent attempts to finish. Enable whole-task completion evidence alongside other checks through `JevContinualSettings.checks`:
 
 ```python
-from vidbyte import JevContinuationGateSettings, JevContinuationGate, JevRuntimeSettings
+from vidbyte import JevContinualSettings, JevDoneCheck, JevRuntimeSettings
 
 runtime_settings = JevRuntimeSettings(
-    continuation_gate=JevContinuationGateSettings(
-        enabled=(JevContinuationGate.COMPLETION_EVIDENCE,),
+    continual=JevContinualSettings(
+        checks=(JevDoneCheck.COMPLETION_EVIDENCE,),
         max_continuations=2,
-        same_context=True,
     ),
 )
 ```
 
-`COMPLETION_EVIDENCE` checks whether the final answer's overall complete, incomplete, or blocked status matches the requested outcomes and observations in the run. An unqualified final answer implies completion, even when it does not say “done.” Honest incomplete or blocked reports can pass when the run evidence supports them. The final answer's own claim that external work happened does not count as evidence for that work. The result is available as `agent.response.continuation_gates[JevContinuationGate.COMPLETION_EVIDENCE]`; if Jev cannot evaluate it, the check fails open.
-
-`same_context=True` is the default: a failed gate returns the main agent to its existing loop and history. Set `same_context=False` to run the repair attempt in a clean worker context; that worker's reply returns to the main loop. Across retries, the request-derived run state stays fixed, while the runtime replaces the latest handoff evidence and gate assessment in stable context slots. The model sees each current snapshot once instead of another appended copy after every retry.
-
-This alpha API rename is breaking: replace `JevDoneCheck` with `JevContinuationGate`, `JevContinualSettings` with `JevContinuationGateSettings`, `JevRuntimeSettings.continual` with `continuation_gate`, and the settings field `checks` with `enabled`. Replace the old `SAME_CONTEXT`/`FRESH` mode enum with the boolean `same_context`; inspect results through `agent.response.continuation_gates` instead of `agent.response.done`.
+`COMPLETION_EVIDENCE` checks whether the final answer's overall complete, incomplete, or blocked status matches the requested outcomes and observations in the run. An unqualified final answer implies completion, even when it does not say “done.” Honest incomplete or blocked reports can pass when the run evidence supports them. The final answer's own claim that external work happened does not count as evidence for that work. The result is available as `agent.response.done[JevDoneCheck.COMPLETION_EVIDENCE]`; if Jev cannot evaluate it, the check fails open.
 
 ## Layer Guide
 
@@ -224,8 +219,8 @@ JevAgent continuation checks are opt-in. `ASSUMPTIONS_RECONCILED` adds a finish 
 from vidbyte import (
     JevAgent,
     JevAgentSettings,
-    JevContinuationGateSettings,
-    JevContinuationGate,
+    JevContinualSettings,
+    JevDoneCheck,
     JevRuntimeSettings,
 )
 
@@ -237,15 +232,15 @@ agent = JevAgent(
         model_name="gpt-4.1",
     ),
     JevRuntimeSettings(
-        continuation_gate=JevContinuationGateSettings(
-            enabled=(JevContinuationGate.ASSUMPTIONS_RECONCILED,),
+        continual=JevContinualSettings(
+            checks=(JevDoneCheck.ASSUMPTIONS_RECONCILED,),
             max_continuations=2,
         ),
     ),
 )
 
 reply = agent.run("Inspect the available source and summarize the result.")
-print(agent.response.continuation_gates[JevContinuationGate.ASSUMPTIONS_RECONCILED])
+print(agent.response.done[JevDoneCheck.ASSUMPTIONS_RECONCILED])
 ```
 
 ### Codex Harness Agent
@@ -541,7 +536,7 @@ context = ContextManager([
     TaskContextItem(
         goal="Fix failing tests",
         progress="Reviewed the runtime context builder.",
-        deterministic_enabled=("python -m unittest discover -s tests",),
+        deterministic_checks=("python -m unittest discover -s tests",),
     ),
     FileContextItem.from_path("README.md", include_content=True),
 ])

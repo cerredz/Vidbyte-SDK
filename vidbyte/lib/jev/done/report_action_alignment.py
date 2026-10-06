@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/done/report_action_alignment.py
 
 PURPOSE: Defines the fixed report/action alignment question, which checks one explicit earlier plan against recorded execution and the final account.
-ROLE IN CODEBASE: JevDoneRegistry registers ReportActionAlignmentQuestion under JevContinuationGate.REPORT_ACTION_ALIGNMENT, and JevRunState asks it once per handoff candidate in the same batched Jev request as every other enabled done check.
+ROLE IN CODEBASE: JevDoneRegistry registers ReportActionAlignmentQuestion under JevDoneCheck.REPORT_ACTION_ALIGNMENT, and JevRunState asks it once per handoff candidate in the same batched Jev request as every other enabled done check.
 ARCHITECTURE NOTE: The handoff creates candidates only when a visible earlier main-agent plan is referred to or implied as carried out in the final account. It reports both aligned and misaligned cases; Jev recognizes whether the account reflects the work and the request's actual requirements. The request, plan, and final account are context, not proof that a planned action happened.
 COMMON MODIFICATION PATTERNS: Load skills/asking-jev-questions/SKILL.md before editing; keep the question about one named candidate, positive, and one string literal per brief/criterion section.
 KNOWN EDGE CASES: A changed or abandoned plan can align with execution when the final account accurately describes the change and the request does not still require the planned outcome. A plan step is not required merely because an agent proposed it.

@@ -57,7 +57,7 @@ from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
-    JevContinuationGate,
+    JevDoneCheck,
     JevDoneQuestionKey,
     JevExerciseMode,
     JevOutputExtentComparator,
@@ -3589,7 +3589,7 @@ class JevDoneGateDescription:
 
 
 @dataclass(frozen=True, slots=True)
-class JevContinuationGateResult:
+class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
@@ -3611,7 +3611,7 @@ class JevContinuationGateResult:
     enabled check's questions.
     """
 
-    check: JevContinuationGate
+    check: JevDoneCheck
     score: float | None
     passed: bool = True
     answers: Mapping[str, JevAnswer] = field(default_factory=dict)
@@ -3622,8 +3622,8 @@ class JevContinuationGateResult:
 
     def __post_init__(self) -> None:
         # Validates the check and score and freezes the answers so a recorded result cannot be edited.
-        if not isinstance(self.check, JevContinuationGate):
-            raise JevValidation.error("done result check", "a JevContinuationGate member", self.check)
+        if not isinstance(self.check, JevDoneCheck):
+            raise JevValidation.error("done result check", "a JevDoneCheck member", self.check)
         if self.score is not None:
             object.__setattr__(self, "score", JevProbability.require(self.score, field_name="done result score"))
         object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
@@ -3682,7 +3682,7 @@ class JevAgentResponse:
     preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
     `specialist` is the title of the JevSpecialist that ran the task, or None when the main JevAgent ran it.
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
-    `review` records JevReviewer's objections at the latest finish attempt, and `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `continuation_gates` holds the latest result
+    `review` records JevReviewer's objections at the latest finish attempt, and `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
     `continuation_budget` records cumulative additional loop limits granted to faithful-scope continuations.
     `review` records JevReviewer's objections at the latest finish attempt.
@@ -3696,7 +3696,7 @@ class JevAgentResponse:
     specialist: str | None = None
     run_state: JevRunStateRecord | None = None
     handoff: JevHandoffRecord | None = None
-    continuation_gates: dict[JevContinuationGate, JevContinuationGateResult] = field(default_factory=dict)
+    done: dict[JevDoneCheck, JevDoneResult] = field(default_factory=dict)
     continuations: int = 0
     continuation_budget: dict[str, int] = field(default_factory=dict)
     review: JevReviewRecord | None = None
@@ -3945,7 +3945,7 @@ __all__ = [
     "JevDiscoveredItemEvidence",
     "JevDiscoveredItemPayload",
     "JevDoneQuestion",
-    "JevContinuationGateResult",
+    "JevDoneResult",
     "JevExpertDepth",
     "JevExpertDepthDeliverable",
     "JevExpertDepthDeliverablePayload",

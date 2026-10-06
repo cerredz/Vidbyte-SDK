@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/done/required_actions.py
 
 PURPOSE: Defines the fixed one-action recognition question for REQUIRED_ACTIONS, asking whether direct run evidence shows the explicit procedure or action completed under its stated observable condition.
-ROLE IN CODEBASE: JevDoneRegistry registers RequiredActionCompletedQuestion for JevContinuationGate.REQUIRED_ACTIONS; JevRunState places one question per request-derived action in the same request as other enabled checks; the handoff evidence and continuation gap are defined in the sibling agent layer.
+ROLE IN CODEBASE: JevDoneRegistry registers RequiredActionCompletedQuestion for JevDoneCheck.REQUIRED_ACTIONS; JevRunState places one question per request-derived action in the same request as other enabled checks; the handoff evidence and continuation gap are defined in the sibling agent layer.
 ARCHITECTURE NOTE: The question follows skills/asking-jev-questions/SKILL.md. It judges successful completion for one stable action id using only the prepared action, completion condition, and evidence. Explicit dependencies are enforced deterministically from successful trace indices by JevRunState, not reasoned about by Jev.
 COMMON MODIFICATION PATTERNS: Keep the shared DONE_STATE description accurate for every enabled-check combination; define all judgment terms and boundaries in the brief; keep one positive judgment, one verb, and a single literal per section.
 WHAT NOT TO DO IN THIS FILE: 1. Do not infer obligations from best practice; JevRunState extracts only explicit requests. 2. Do not count evidence or enforce action order here; run_state.py owns scoring and deterministic dependencies. 3. Do not include the handoff's missing judgment in the Jev state.

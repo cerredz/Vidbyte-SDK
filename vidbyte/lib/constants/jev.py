@@ -17,6 +17,8 @@ JEV_DEFAULT_MODEL: str = "jev-latest"
 JEV_PREVIEW_MODEL: str = "jev-preview"
 JEV_SYSTEMONE_PATH: str = "/systemone"
 JEV_MODELS_PATH: str = "/models"
+VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/typesafe"
+VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND: str = "vidbyte_managed_credentials"
 
 # Documented vendor limits (https://docs.typesafe.ai/api.md#question-types).
 JEV_MAX_CHOICE_OPTIONS: int = 255
@@ -54,6 +56,11 @@ JEV_RETRY_STATUS_CODES: tuple[int, ...] = (
     JEV_STATUS_RATE_LIMITED,
     *range(JEV_STATUS_SERVER_ERROR_FLOOR, JEV_STATUS_SERVER_ERROR_CEILING),
 )
+VIDBYTE_STATUS_UNAUTHORIZED: int = JEV_STATUS_UNAUTHORIZED
+VIDBYTE_STATUS_PAYMENT_REQUIRED: int = 402
+VIDBYTE_STATUS_FORBIDDEN: int = 403
+VIDBYTE_STATUS_RATE_LIMITED: int = JEV_STATUS_RATE_LIMITED
+VIDBYTE_MANAGED_ACCESS_DENIAL_STATUS_CODES: frozenset[int] = frozenset({VIDBYTE_STATUS_UNAUTHORIZED, VIDBYTE_STATUS_PAYMENT_REQUIRED, VIDBYTE_STATUS_FORBIDDEN, VIDBYTE_STATUS_RATE_LIMITED})
 
 # Noul wire literals: the optional criteria keys and the two outcomes a noul answer expands to.
 JEV_NOUL_TRUE: str = "true"
@@ -159,7 +166,7 @@ JEV_EVENT_LOG_NEXT_ID: int = 2
 JEV_EVENT_LOG_INITIAL_ITERATION: int = 0
 JEV_EVENT_LOG_ITERATION_OFFSET: int = 1
 JEV_CONTINUATION_SEGMENT_INCREMENT: int = 1
-# Default of JevContinuationGateSettings.max_continuations: how many times a failed done check may send the main
+# Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
 JEV_RUN_STATE_CONTEXT_ID: str = "jev:run-state"
@@ -331,7 +338,7 @@ JEV_DONE_OBJECTION_FIELD: str = "objection"
 JEV_DONE_RESOLVED_WHEN_FIELD: str = "resolved_when"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
-# Defaults of the JevRunState and JevHandoff limits in JevContinuationGateSettings: each writes one structured reply,
+# Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
 # so their loops stay short; the handoff reads the main agent's whole run, so its token budget is larger.
 JEV_RUN_STATE_MAX_ITERATIONS: int = 25
 JEV_RUN_STATE_MAX_TOKENS: int = 100_000
