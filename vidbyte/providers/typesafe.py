@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
 from vidbyte.lib.constants.jev import (
+    JEV_IDEMPOTENCY_KEY_HEADER,
+    JEV_MANAGED_RUN_ID_HEADER,
     JEV_MAX_RESPONSE_BYTES,
     JEV_MODELS_PATH,
     JEV_NO_RETRIES,
@@ -39,6 +42,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevContent,
     JevDecisionRequest,
     JevJson,
+    JevManagedRunScope,
     JevModelCard,
     JevProbability,
     JevQuestion,
@@ -58,6 +62,30 @@ from vidbyte.lib.http import HttpResponse, HttpResponseParser, HttpTransport
 from vidbyte.lib.runners.types import DecisionModelResponse
 
 _PROVIDER = ModelProvider.TYPESAFE.value
+
+# @intent the-run-follows-the-task
+# A managed run spans the gate, done checks, continuation, and tool selector, which each build their own
+# runner. A context variable reaches all of them, including asyncio.gather fan-out, without a parameter.
+_MANAGED_RUN: ContextVar[JevManagedRunScope | None] = ContextVar("vidbyte_jev_managed_run", default=None)
+
+
+class TypeSafeManagedRunContext:
+    """The managed run, if any, that decision calls in the current task belong to."""
+
+    @staticmethod
+    def current() -> JevManagedRunScope | None:
+        # Returns the innermost open managed run in this task's context.
+        return _MANAGED_RUN.get()
+
+    @staticmethod
+    def enter(scope: JevManagedRunScope) -> Token[JevManagedRunScope | None]:
+        # Makes scope the active run; the returned token restores the previous one.
+        return _MANAGED_RUN.set(scope)
+
+    @staticmethod
+    def exit(token: Token[JevManagedRunScope | None]) -> None:
+        # Restores whatever run was active before the matching enter.
+        _MANAGED_RUN.reset(token)
 
 
 class _TypeSafePayloadBuilder:
@@ -126,14 +154,26 @@ class _TypeSafeCallBuilder:
         # Keeps the parser that formats the bearer-auth headers.
         self._parser = parser
 
-    def decision(self, config: DecisionModelConfig, request: JevDecisionRequest) -> _TypeSafeHttpCall:
+    def decision(self, config: DecisionModelConfig, request: JevDecisionRequest, *, run_id: str | None = None) -> _TypeSafeHttpCall:
         # Returns the POST /systemone call with the configured timeout and optional retries.
         # @intent decisions-retry-with-an-idempotency-key
-        # A decision has no side effects, so a retried POST cannot duplicate anything; the
-        # per-request idempotency key only satisfies the transport's POST retry guard.
+        # Direct to TypeSafe a decision has no side effects, so the key only satisfies the transport's
+        # POST retry guard. Through Vidbyte's gateway each answer is billed, so the key is also sent:
+        # the gateway replays the answer it already billed instead of paying for a second one.
         retrying = config.retry_count > JEV_NO_RETRIES
+        idempotency_key = uuid.uuid4().hex if retrying else None
         body = _TypeSafeJsonBody.encode(_TypeSafePayloadBuilder.build(config, request))
-        return _TypeSafeHttpCall(method="POST", url=f"{config.resolved_endpoint()}{JEV_SYSTEMONE_PATH}", headers=self._parser.bearer_headers(config.resolved_api_key()), timeout_seconds=config.timeout_seconds, json_body=body, retry_count=config.retry_count, idempotency_key=uuid.uuid4().hex if retrying else None)
+        headers = self._parser.bearer_headers(config.resolved_api_key())
+        if config.managed:
+            if run_id is not None:
+                headers[JEV_MANAGED_RUN_ID_HEADER] = run_id
+            if idempotency_key is not None:
+                headers[JEV_IDEMPOTENCY_KEY_HEADER] = idempotency_key
+        return _TypeSafeHttpCall(method="POST", url=f"{config.resolved_endpoint()}{JEV_SYSTEMONE_PATH}", headers=headers, timeout_seconds=config.timeout_seconds, json_body=body, retry_count=config.retry_count, idempotency_key=idempotency_key)
+
+    def close_run(self, config: DecisionModelConfig, run_id: str) -> _TypeSafeHttpCall:
+        # Returns the gateway's POST /runs/{run_id}/close call; it is sent once, because the reaper is the retry.
+        return _TypeSafeHttpCall(method="POST", url=config.resolved_run_close_url(run_id), headers=self._parser.bearer_headers(config.resolved_api_key()), timeout_seconds=config.timeout_seconds)
 
     def models(self, config: DecisionModelConfig) -> _TypeSafeHttpCall:
         # Returns the GET /models call; GET is idempotent, so retries need no key.
@@ -314,7 +354,11 @@ class TypeSafeProvider:
         resolved: DecisionModelConfig | None = None
         try:
             resolved = self._config_for(config)
-            response = await self._calls.decision(resolved, request).send(transport)
+            scope = TypeSafeManagedRunContext.current() if resolved.managed else None
+            call = self._calls.decision(resolved, request, run_id=None if scope is None else scope.run_id)
+            if scope is not None:
+                scope.used = True
+            response = await call.send(transport)
             parsed = self._parser.parse_json_response(response, provider=_PROVIDER)
             raw_usage = parsed.get("usage")
             usage = raw_usage if isinstance(raw_usage, Mapping) else None
@@ -346,6 +390,22 @@ class TypeSafeProvider:
         except Exception as exc:
             raise _TypeSafeFailures.unexpected(exc, operation="model list", usage=None) from exc
 
+    async def close_run(self, *, run_id: str, transport: HttpTransport, config: DecisionModelConfig | None = None) -> None:
+        # Closes one managed run so the gateway settles its final part-cent now, not at the idle reaper.
+        # @intent one-guarded-close-call
+        # Same failure mapping as run_decision; the caller decides that a failed close never fails a run.
+        resolved: DecisionModelConfig | None = None
+        try:
+            resolved = self._config_for(config)
+            response = await self._calls.close_run(resolved, run_id).send(transport)
+            self._parser.parse_json_response(response, provider=_PROVIDER)
+        except (ProviderResponseError, ProviderConfigurationError, ConfigurationError):
+            raise
+        except ProviderRequestError as exc:
+            raise _TypeSafeFailures.transport_error(exc, operation="run close", config=resolved) from exc
+        except Exception as exc:
+            raise _TypeSafeFailures.unexpected(exc, operation="run close", usage=None) from exc
+
     def _config_for(self, config: DecisionModelConfig | None) -> DecisionModelConfig:
         # Resolves the active config, raising when neither the call nor the adapter supplied one.
         # @intent per-call-config-wins
@@ -356,4 +416,4 @@ class TypeSafeProvider:
         return resolved
 
 
-__all__ = ["TypeSafeProvider"]
+__all__ = ["TypeSafeManagedRunContext", "TypeSafeProvider"]

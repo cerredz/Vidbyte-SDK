@@ -44,6 +44,12 @@ class DecisionModelRunner:
         # themselves, and provider errors propagate unchanged exactly as they do for arun.
         return await self._provider.list_models(transport=self._transport, config=self._config)
 
+    async def aclose_run(self, run_id: str) -> None:
+        # Closes one managed run on Vidbyte's gateway (POST /api/v1/models/runs/{run_id}/close).
+        # @intent run-close-is-a-pass-through
+        # Errors propagate unchanged; JevManagedRun owns the policy that a failed close never fails a run.
+        await self._provider.close_run(run_id=run_id, transport=self._transport, config=self._config)
+
     def model_name(self) -> str:
         # Return the configured model identifier string.
         return self._config.model

@@ -41,6 +41,19 @@ JEV_TIMEOUT_FLOOR_SECONDS: float = 0.0
 JEV_RETRY_BACKOFF_SECONDS: float = 0.5
 JEV_MAX_RESPONSE_BYTES: int = 16_000_000
 
+# Managed mode: Vidbyte's gateway calls TypeSafe for a Vidbyte API key and bills its wallet per run.
+# The env var names and default URL match the Vidbyte CLI; the close route sits beside the gateway.
+JEV_MANAGED_API_KEY_ENV: str = "VIDBYTE_API_KEY"
+JEV_MANAGED_API_URL_ENV: str = "VIDBYTE_API_URL"
+JEV_MANAGED_DEFAULT_API_URL: str = "https://vidbyte-backend.onrender.com"
+JEV_MANAGED_GATEWAY_PATH: str = "/api/v1/models/typesafe"
+JEV_MANAGED_GATEWAY_SUFFIX: str = "/typesafe"
+JEV_MANAGED_RUN_CLOSE_PATH: str = "/runs/{run_id}/close"
+JEV_MANAGED_RUN_ID_HEADER: str = "X-Vidbyte-Run-Id"
+JEV_MANAGED_RUN_ID_PREFIX: str = "jev:"
+JEV_MANAGED_RUN_ID_PATTERN: str = r"^[A-Za-z0-9._:-]{1,128}$"
+JEV_IDEMPOTENCY_KEY_HEADER: str = "Idempotency-Key"
+
 # HTTP statuses the API documents (https://docs.typesafe.ai/api.md#errors).
 JEV_STATUS_REQUEST_TIMEOUT: int = 408
 JEV_STATUS_UNAUTHORIZED: int = 401
@@ -368,6 +381,16 @@ __all__ = [
     "JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS",
     "JEV_FAITHFUL_SCOPE_THRESHOLD",
     "JEV_DEFAULT_MODEL",
+    "JEV_IDEMPOTENCY_KEY_HEADER",
+    "JEV_MANAGED_API_KEY_ENV",
+    "JEV_MANAGED_API_URL_ENV",
+    "JEV_MANAGED_DEFAULT_API_URL",
+    "JEV_MANAGED_GATEWAY_PATH",
+    "JEV_MANAGED_GATEWAY_SUFFIX",
+    "JEV_MANAGED_RUN_CLOSE_PATH",
+    "JEV_MANAGED_RUN_ID_HEADER",
+    "JEV_MANAGED_RUN_ID_PATTERN",
+    "JEV_MANAGED_RUN_ID_PREFIX",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
     "JEV_DONE_ACTION_FIELD",
