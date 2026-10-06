@@ -20,6 +20,7 @@ from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
     JevClarification,
+    JevComputeDecision,
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
@@ -94,6 +95,10 @@ class JevResponse:
         """Record one attempt to refresh the run brief and the verified brief that stands after it."""
         self.state.run_brief_updates.append(update)
         self.state.run_brief = brief
+
+    def compute_decision(self, decision: JevComputeDecision) -> None:
+        """Record what Jev recognized about the run at one compute checkpoint."""
+        self.state.compute_decisions.append(decision)
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

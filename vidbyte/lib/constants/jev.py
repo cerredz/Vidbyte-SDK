@@ -365,10 +365,14 @@ JEV_RUN_BRIEF_WINDOW_MAX_CHARS: int = 80_000
 JEV_RUN_BRIEF_GOAL_MAX_CHARS: int = 8_000
 JEV_RUN_BRIEF_NOTE_MAX_CHARS: int = 500
 JEV_RUN_BRIEF_NOTES_MAX: int = 50
+JEV_RUN_BRIEF_REQUEST_MAX_CHARS: int = 8_000
 JEV_RUN_BRIEF_CLIP_HEAD_SHARE: float = 2 / 3
 # A run event id exactly as JevRunEventLog prints it.
 JEV_EVENT_ID_PREFIX: str = "E"
 JEV_EVENT_ID_PATTERN: str = r"^E[1-9][0-9]{0,6}$"
+
+# Minimum mean P(true) required to select a dynamic-compute option.
+JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD: float = 0.8
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -639,7 +643,9 @@ __all__ = [
     "JEV_RUN_BRIEF_GOAL_MAX_CHARS",
     "JEV_RUN_BRIEF_NOTE_MAX_CHARS",
     "JEV_RUN_BRIEF_NOTES_MAX",
+    "JEV_RUN_BRIEF_REQUEST_MAX_CHARS",
     "JEV_RUN_BRIEF_CLIP_HEAD_SHARE",
     "JEV_EVENT_ID_PREFIX",
     "JEV_EVENT_ID_PATTERN",
+    "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
 ]

@@ -34,6 +34,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES,
     JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES,
     JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN,
+    JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD,
     JEV_EVENT_ID_PATTERN,
     JEV_EVENT_LOG_FIRST_ID,
     JEV_EXPERT_DEPTH_MAX_DETAILS,
@@ -63,8 +64,10 @@ from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
+    JevComputeQuestionKey,
     JevDoneCheck,
     JevDoneQuestionKey,
+    JevDynamicComputeOption,
     JevExerciseMode,
     JevOutputExtentComparator,
     JevOutputExtentUnit,
@@ -3745,6 +3748,7 @@ class JevAgentResponse:
     run_facts: JevRunFacts | None = None
     run_brief: JevRunBrief | None = None
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
+    compute_decisions: list[JevComputeDecision] = field(default_factory=list)
 
     @property
     def needs_clarification(self) -> bool:
@@ -4089,6 +4093,88 @@ class JevRunBriefVerification:
             raise JevValidation.error("run brief verification", "either a verified brief or an error", (self.brief, self.error))
 
 
+@dataclass(frozen=True, slots=True)
+class JevComputeQuestion:
+    """One fixed dynamic-compute evidence question and its true/false descriptions."""
+
+    key: JevComputeQuestionKey
+    instructions: str
+    when_true: str
+    when_false: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, JevComputeQuestionKey):
+            raise JevValidation.error("compute question key", "a JevComputeQuestionKey member", self.key)
+        JevText.require(self.instructions, field_name=f"instructions of compute question {self.key.value!r}")
+        for field_name in ("when_true", "when_false"):
+            JevText.require(getattr(self, field_name), field_name=f"{field_name} of compute question {self.key.value!r}")
+
+    def to_question(self) -> JevQuestion:
+        """Return the named noul question Jev answers against the shared evidence state."""
+        return JevQuestion(
+            name=self.key.value,
+            question_type=JevQuestionType.NOUL,
+            instructions=self.instructions,
+            options=(
+                JevOption(name=JEV_NOUL_TRUE, description=self.when_true),
+                JevOption(name=JEV_NOUL_FALSE, description=self.when_false),
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeOptionResult:
+    """The probability mean and answer evidence for one dynamic-compute option."""
+
+    option: JevDynamicComputeOption
+    score: float | None = None
+    answers: Mapping[JevComputeQuestionKey, JevAnswer] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.option, JevDynamicComputeOption):
+            raise JevValidation.error("compute option result option", "a JevDynamicComputeOption member", self.option)
+        if self.score is not None:
+            object.__setattr__(self, "score", JevProbability.require(self.score, field_name=f"score of option {self.option.value!r}"))
+        if not isinstance(self.answers, Mapping):
+            raise JevValidation.error(f"answers of option {self.option.value!r}", "a mapping from question keys to JevAnswer values", self.answers)
+        for key, answer in self.answers.items():
+            if not isinstance(key, JevComputeQuestionKey) or not isinstance(answer, JevAnswer) or answer.question_name != key.value:
+                raise JevValidation.error(f"answers of option {self.option.value!r}", "question keys mapped to their matching JevAnswer values", self.answers)
+        object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
+
+    def yes(self) -> dict[JevComputeQuestionKey, float]:
+        """Return each answered question's P(true), in insertion order."""
+        return {key: answer.probabilities[JEV_NOUL_TRUE] for key, answer in self.answers.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class JevComputeDecision:
+    """What one mid-run dynamic-compute request recognized after a main-agent iteration."""
+
+    iteration: int
+    results: tuple[JevComputeOptionResult, ...]
+    option: JevDynamicComputeOption | None = None
+    usage: ProviderUsage | None = None
+
+    def __post_init__(self) -> None:
+        JevCount.require(self.iteration, field_name="compute decision iteration")
+        if not isinstance(self.results, tuple) or not all(isinstance(result, JevComputeOptionResult) for result in self.results):
+            raise JevValidation.error("compute decision results", "a tuple of JevComputeOptionResult values", self.results)
+        options = tuple(result.option for result in self.results)
+        expected_order = tuple(option for option in JevDynamicComputeOption if option in options)
+        if len(set(options)) != len(options) or options != expected_order:
+            raise JevValidation.error("compute decision results", "unique results in JevDynamicComputeOption order", options)
+        qualifying = [
+            (result.score, result)
+            for result in self.results
+            if result.score is not None and result.score >= JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD
+        ]
+        best = max(qualifying, key=lambda item: item[0], default=None)
+        expected = None if best is None else best[1].option
+        if self.option is not expected:
+            raise JevValidation.error("compute decision option", f"the highest qualifying option ({expected!r})", self.option)
+
+
 __all__ = [
     "JevCount",
     "JevRunBrief",
@@ -4097,6 +4183,9 @@ __all__ = [
     "JevRunBriefNotePayload",
     "JevRunBriefPayload",
     "JevRunBriefVerification",
+    "JevComputeQuestion",
+    "JevComputeOptionResult",
+    "JevComputeDecision",
     "JevRunBriefWindow",
     "JevRunBriefUpdate",
     "JevRunFacts",

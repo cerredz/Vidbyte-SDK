@@ -51,7 +51,6 @@ from vidbyte.lib.enums.codex import (
 )
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
-from vidbyte.lib.enums.decision_model import DecisionModelMode
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -62,6 +61,7 @@ from vidbyte.lib.enums.cot_events import (
     ReturnableOption,
     Reversibility,
 )
+from vidbyte.lib.enums.decision_model import DecisionModelMode
 from vidbyte.lib.enums.failure import (
     FailureCode,
     FailureDisposition,
@@ -74,17 +74,19 @@ from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
+    JevComputeQuestionKey,
     JevContinuationGate,
     JevDoneCheck,
     JevDoneQuestionKey,
+    JevDynamicComputeOption,
     JevExerciseMode,
     JevOutputExtentComparator,
     JevOutputExtentUnit,
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevProblemCheckItemType,
-    JevRunBriefUpdateStatus,
     JevQuestionType,
+    JevRunBriefUpdateStatus,
     JevScenarioRole,
     JevScopeBreadth,
     JevScopeUnitSource,
@@ -165,9 +167,11 @@ __all__ = [
     "JevBoundaryKind",
     "JevClaimKind",
     "JevCompletionStatus",
+    "JevComputeQuestionKey",
     "JevContinuationGate",
     "JevDoneCheck",
     "JevDoneQuestionKey",
+    "JevDynamicComputeOption",
     "JevExerciseMode",
     "JevOutputExtentComparator",
     "JevOutputExtentUnit",

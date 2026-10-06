@@ -49,6 +49,8 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Structured note-taking compaction: `JevRunBriefKeeper` and its tool-free writer | `vidbyte/agents/jev/brief/` |
 | `JevRunBriefSettings` (the note writer's model, limits, and cadence) | `vidbyte/agents/jev/settings.py` |
 | Mid-run compute checkpoint: `JevComputeController` and `JevComputeSettings` | `vidbyte/agents/jev/compute/`; loop hook `AgentRuntime._after_tool_iteration` in `vidbyte/agents/runtime.py` |
+| Dynamic-compute recognition and the shared `{request, brief, facts, recent}` state | `JevComputeRecognizer` and `JevComputeStates` in `vidbyte/agents/jev/compute/` |
+| Twelve fixed evidence questions per dynamic-compute option and `JevComputeRegistry` | `vidbyte/lib/jev/compute/situations.py` and `vidbyte/lib/jev/compute/compute.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
 | Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |
@@ -56,13 +58,14 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Fixed done questions, one module per check (`multi_part.py`, `claims.py`, `motivating_case.py`) | `vidbyte/lib/jev/done/` |
 | `JevDoneRegistry` (question, threshold, and enabled-check validation) | `vidbyte/lib/jev/done/done.py` |
 | Every JEV record: decision requests, answers, wire bodies, model cards, briefs, criteria, preset results, run-state and handoff sections, and `JevAgentResponse` | `vidbyte/lib/dataclasses/jev.py` |
-| Every JEV enum: question types, preflight presets and keys, done checks and keys, and motivating-case categories and exercise modes | `vidbyte/lib/enums/jev.py` |
-| JEV limits, defaults, wire literals, and preflight and done-check policy values | `vidbyte/lib/constants/jev.py` |
+| Every JEV enum: question types, dynamic-compute options and keys, preflight presets and keys, and done checks and keys | `vidbyte/lib/enums/jev.py` |
+| JEV limits, defaults, wire literals, and dynamic-compute, preflight, and done-check policy values | `vidbyte/lib/constants/jev.py` |
 | `DecisionModelRunner` (runs a decision request, `score_noul`) | `vidbyte/lib/runners/decision.py` |
 | TypeSafe System One provider adapter (wire shape, HTTP) | `vidbyte/providers/typesafe.py` |
 | TypeSafe usage pricing (`ModelProvider.TYPESAFE`) | `vidbyte/agents/pricing/typesafe.py` |
 | Clarification agent prompt family | `vidbyte/prompts/prompts/jev_clarification/`; key in `vidbyte/lib/enums/prompts.py` |
 | House style for writing Jev questions (load it before writing or reviewing one) | `skills/asking-jev-questions/SKILL.md` |
+| Dynamic-compute evidence-question guidance | `skills/asking-jev-dynamic-compute-questions/SKILL.md` |
 | Guide to extending `JevAgent` | `skills/jev-agent/SKILL.md` |
 | Step-by-step guide to adding a continuation done check (load it before adding a `JevDoneCheck`) | `skills/jev-continuation/SKILL.md` |
 | Tests | `tests/test_jev_*.py`; focused scripts `scripts/test-jev-*.py` |
@@ -70,6 +73,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 Where new JEV code goes:
 
 - **A record** goes in `vidbyte/lib/dataclasses/jev.py`, **an enum or enum member** in `vidbyte/lib/enums/jev.py`, and **a constant** in `vidbyte/lib/constants/jev.py`. Never create a `types.py`, `enums.py`, or `constants.py` under `vidbyte/agents/jev/` or `vidbyte/lib/jev/`.
+- **A new dynamic-compute option** adds its enum member and question keys, twelve fixed `JevComputeQuestion` instances in `vidbyte/lib/jev/compute/situations.py`, and one option mapping in `JevComputeRegistry`. Questions share `{request, brief, facts, recent}` and the common mean P(true) threshold; do not add eligibility gates or per-question vetoes. Read `skills/asking-jev-dynamic-compute-questions/SKILL.md` first.
 - **A new fixed-question preset** needs four things:
   - its flag on `JevPreflightPreset` and its keys on `JevPreflightQuestionKey`;
   - its definition in `JevPresets`;
@@ -254,7 +258,7 @@ The low-level HTTP substrate used for making outbound requests and reading their
 
 ##### `vidbyte/lib/jev/`
 
-The JEV agent's capability substrate, placed below the agent layer so the agent, its settings validation, and the gate can all share it without a cycle. It owns the preflight flags a user can enable, the question keys, scores, and vetoes each flag uses, and the fixed preflight questions themselves, one dataclass per question grouped into one module per preset, along with the registry over them. It holds question content and lookup, never the logic that asks Jev or acts on its answers; that stays in the agent layer's gate. Anyone writing or reviewing a question here must first load the question-writing house-style skill named in [JEV File Locations](#jev-file-locations).
+The JEV agent's capability substrate, placed below the agent layer so the agent, its settings validation, and the gate can all share it without a cycle. It owns fixed preflight and done questions and the twelve evidence questions for each dynamic-compute option, along with their registries and code-defined policy. It holds question content and lookup, never the logic that asks Jev or acts on its answers; that stays in the agent layer. Anyone writing or reviewing a dynamic-compute question must first load the focused question-writing skill named in [JEV File Locations](#jev-file-locations).
 
 ##### `vidbyte/lib/models/`
 
