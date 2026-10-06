@@ -52,14 +52,14 @@ class JevSkillsPreload(JevAgentAlignment):
             return JevSkillsPreloadBatch(JevSkillsPreloadResult(JevSkillsPreloadStatus.NO_MATCH))
 
         # Send one item per request so Jev judges each candidate against the same original request.
-        requests = self._candidate_requests(message, candidates)
-        responses = await self._decision_responses(requests)
+        requests = self._preload_jev(message, candidates)
+        responses = await self._load_jev(requests)
         if responses is None:
             return self._unavailable(candidates, "Jev skill relevance selection is unavailable; no skill instructions were added.")
 
         # Do not load or inject any body unless every candidate decision is present and valid.
         usage = self._combined_usage(responses)
-        selected = self._selected_candidates(candidates, responses)
+        selected = self._filter_selected(candidates, responses)
         if selected is None:
             return self._unavailable(
                 candidates,
@@ -69,8 +69,8 @@ class JevSkillsPreload(JevAgentAlignment):
         return self._materialize_selected(selected, usage)
 
     @staticmethod
-    def _candidate_requests(message: str, candidates: Sequence[JevSkillCandidate]) -> tuple[JevDecisionRequest, ...]:
-        """Build one request per candidate with its description, never its full instruction body."""
+    def _preload_jev(message: str, candidates: Sequence[JevSkillCandidate]) -> tuple[JevDecisionRequest, ...]:
+        """Prepare one typed Jev request per candidate using only its name and description."""
         return tuple(
             JevDecisionRequest(
                 state={"request": message, "skill_name": candidate.name, "skill_description": candidate.description},
@@ -79,10 +79,10 @@ class JevSkillsPreload(JevAgentAlignment):
             for candidate in candidates
         )
 
-    async def _decision_responses(
+    async def _load_jev(
         self, requests: Sequence[JevDecisionRequest]
     ) -> tuple[DecisionModelResponse, ...] | None:
-        """Run all candidate checks and reject the batch if any answer is missing or fails."""
+        """Run the prepared Jev requests concurrently and contain request failures for the batch."""
         outcomes = await asyncio.gather(
             *(self._decision_model.arun(request) for request in requests),
             return_exceptions=True,
@@ -96,10 +96,10 @@ class JevSkillsPreload(JevAgentAlignment):
         return responses if len(responses) == len(requests) else None
 
     @staticmethod
-    def _selected_candidates(
+    def _filter_selected(
         candidates: Sequence[JevSkillCandidate], responses: Sequence[DecisionModelResponse]
     ) -> tuple[JevSkillCandidate, ...] | None:
-        """Threshold each named noul answer and return None when any result cannot be scored."""
+        """Keep candidates whose named noul answer meets its threshold; reject unscorable results."""
         selected: list[JevSkillCandidate] = []
         try:
             for candidate, response in zip(candidates, responses, strict=True):

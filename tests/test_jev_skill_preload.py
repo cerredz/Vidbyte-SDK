@@ -119,6 +119,26 @@ class SkillPreloadTests(unittest.TestCase):
         with patch.object(DecisionModelHelper, "arun", ScriptedDecisionHelper.arun):
             return asyncio.run(self.preloader.preload_skills(message, candidates))
 
+    def test_candidate_decisions_run_concurrently(self) -> None:
+        active = 0
+        peak_active = 0
+
+        async def delayed_arun(helper: DecisionModelHelper, request: Any) -> DecisionModelResponse:
+            nonlocal active, peak_active
+            active += 1
+            peak_active = max(peak_active, active)
+            try:
+                await asyncio.sleep(0)
+                return await ScriptedDecisionHelper.arun(helper, request)
+            finally:
+                active -= 1
+
+        with patch.object(DecisionModelHelper, "arun", delayed_arun):
+            batch = asyncio.run(self.preloader.preload_skills("Review source", self.candidates))
+
+        self.assertEqual(peak_active, len(self.candidates))
+        self.assertEqual(batch.result.selected, ("useful",))
+
     def test_evaluates_each_description_then_loads_only_selected_bodies(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             local_path = Path(folder) / "SKILL.md"
