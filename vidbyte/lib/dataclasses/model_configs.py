@@ -30,6 +30,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DEFAULT_MODEL,
     JEV_DEFAULT_RETRY_COUNT,
     JEV_DEFAULT_TIMEOUT_SECONDS,
+    JEV_MANAGED_GATEWAY_SUFFIX,
+    JEV_MANAGED_RUN_CLOSE_PATH,
     JEV_NO_RETRIES,
     JEV_TIMEOUT_FLOOR_SECONDS,
     VIDBYTE_JEV_GATEWAY_ENDPOINT,
@@ -413,6 +415,13 @@ class DecisionModelConfig:
         # @intent explicit-endpoint-wins-over-default
         # Proxies and test servers remain available for direct TypeSafe calls.
         return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
+
+    def resolved_run_close_url(self, run_id: str) -> str:
+        """Return the gateway close URL for one managed Jev run."""
+        if self.mode is not DecisionModelMode.VIDBYTE_MANAGED:
+            raise ConfigurationError("Only a managed DecisionModelConfig has runs to close.")
+        root = self.resolved_endpoint().removesuffix(JEV_MANAGED_GATEWAY_SUFFIX)
+        return f"{root}{JEV_MANAGED_RUN_CLOSE_PATH.format(run_id=run_id)}"
 
     @classmethod
     def vidbyte_managed(cls) -> DecisionModelConfig:

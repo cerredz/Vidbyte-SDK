@@ -4,7 +4,7 @@ PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
-KNOWN EDGE CASES: With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here. With JevRuntimeSettings.compute set, the main agent's run calls the JevComputeController after every tool iteration that continues; a specialist's run does not.
+KNOWN EDGE CASES: With a managed decision config, the whole run is one managed run on Vidbyte's gateway and is closed when arun returns or raises. With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here. With JevRuntimeSettings.compute set, the main agent's run calls the JevComputeController after every tool iteration that continues; a specialist's run does not.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-tool-selector.py.
 """
@@ -29,6 +29,7 @@ from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums.jev import JevPreflightPreset
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev.managed import JevManagedRun
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.tools._internal import with_internal_agent_tools
 
@@ -77,6 +78,23 @@ class JevRuntime(AgentRuntime):
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
+    ) -> AgentResult:
+        """Run the whole Jev run inside one managed run when the decision config is managed."""
+        # @intent one-agent-run-is-one-managed-run
+        # Every Jev call this run makes (gate, specialist, done checks, continuation, tool selector) shares
+        # one X-Vidbyte-Run-Id, and the run is closed when it ends; a direct TypeSafe config opens nothing.
+        async with JevManagedRun(self.runtime_settings.decision):
+            return await self._arun_jev(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+
+    async def _arun_jev(
+        self,
+        message: str,
+        *,
+        handle: RunnerHandle,
+        context: BaseAgentContext,
+        metadata: Mapping[str, Any] | None,
+        options: Mapping[str, Any] | None,
+        trace_context: SpanContext | None,
     ) -> AgentResult:
         """Run the preflight gate, then apply enabled run-local preflights before entering the inherited agent loop."""
         # @intent closed-gate-never-reaches-the-model

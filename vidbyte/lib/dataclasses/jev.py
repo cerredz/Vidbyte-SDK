@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.constants.jev import (
+    JEV_MANAGED_RUN_ID_PATTERN,
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
@@ -3931,6 +3932,17 @@ class JevContinuationEvidence:
                 raise TypeError(f"JevContinuationEvidence.tool_calls[{index}] must be a ToolCallContext")
 
 
+@dataclass(slots=True)
+class JevManagedRunScope:
+    """One managed Jev run: the X-Vidbyte-Run-Id every call in it sends, and whether any call was sent."""
+
+    run_id: str
+    used: bool = False
+
+    def __post_init__(self) -> None:
+        # Rejects an ID the gateway's run-id header pattern would refuse, before any call carries it.
+        if not isinstance(self.run_id, str) or re.fullmatch(JEV_MANAGED_RUN_ID_PATTERN, self.run_id) is None:
+            raise ConfigurationError("JevManagedRunScope.run_id must be 1-128 letters, digits, '.', '_', ':', or '-'.")
 
 # Run brief: a code-owned goal and a bounded sequence of verified notes from numbered run events.
 _EVENT_ID = re.compile(JEV_EVENT_ID_PATTERN)
@@ -4181,6 +4193,7 @@ __all__ = [
     "JevInputTargetEvidencePayload",
     "JevInputTargetPayload",
     "JevJson",
+    "JevManagedRunScope",
     "JevModelCard",
     "JevMotivatingCase",
     "JevMotivatingCaseEvidence",
