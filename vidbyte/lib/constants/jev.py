@@ -43,6 +43,14 @@ JEV_TIMEOUT_FLOOR_SECONDS: float = 0.0
 JEV_RETRY_BACKOFF_SECONDS: float = 0.5
 JEV_MAX_RESPONSE_BYTES: int = 16_000_000
 
+# The managed run-close route is adjacent to the TypeSafe gateway endpoint.
+JEV_MANAGED_GATEWAY_SUFFIX: str = "/typesafe"
+JEV_MANAGED_RUN_CLOSE_PATH: str = "/runs/{run_id}/close"
+JEV_MANAGED_RUN_ID_HEADER: str = "X-Vidbyte-Run-Id"
+JEV_MANAGED_RUN_ID_PREFIX: str = "jev:"
+JEV_MANAGED_RUN_ID_PATTERN: str = r"^[A-Za-z0-9._:-]{1,128}$"
+JEV_IDEMPOTENCY_KEY_HEADER: str = "Idempotency-Key"
+
 # HTTP statuses the API documents (https://docs.typesafe.ai/api.md#errors).
 JEV_STATUS_REQUEST_TIMEOUT: int = 408
 JEV_STATUS_UNAUTHORIZED: int = 401
@@ -357,10 +365,14 @@ JEV_RUN_BRIEF_WINDOW_MAX_CHARS: int = 80_000
 JEV_RUN_BRIEF_GOAL_MAX_CHARS: int = 8_000
 JEV_RUN_BRIEF_NOTE_MAX_CHARS: int = 500
 JEV_RUN_BRIEF_NOTES_MAX: int = 50
+JEV_RUN_BRIEF_REQUEST_MAX_CHARS: int = 8_000
 JEV_RUN_BRIEF_CLIP_HEAD_SHARE: float = 2 / 3
 # A run event id exactly as JevRunEventLog prints it.
 JEV_EVENT_ID_PREFIX: str = "E"
 JEV_EVENT_ID_PATTERN: str = r"^E[1-9][0-9]{0,6}$"
+
+# Minimum mean P(true) required to select a dynamic-compute option.
+JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD: float = 0.8
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -389,6 +401,12 @@ __all__ = [
     "JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS",
     "JEV_FAITHFUL_SCOPE_THRESHOLD",
     "JEV_DEFAULT_MODEL",
+    "JEV_IDEMPOTENCY_KEY_HEADER",
+    "JEV_MANAGED_GATEWAY_SUFFIX",
+    "JEV_MANAGED_RUN_CLOSE_PATH",
+    "JEV_MANAGED_RUN_ID_HEADER",
+    "JEV_MANAGED_RUN_ID_PATTERN",
+    "JEV_MANAGED_RUN_ID_PREFIX",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
     "JEV_DONE_ACTION_FIELD",
@@ -625,7 +643,9 @@ __all__ = [
     "JEV_RUN_BRIEF_GOAL_MAX_CHARS",
     "JEV_RUN_BRIEF_NOTE_MAX_CHARS",
     "JEV_RUN_BRIEF_NOTES_MAX",
+    "JEV_RUN_BRIEF_REQUEST_MAX_CHARS",
     "JEV_RUN_BRIEF_CLIP_HEAD_SHARE",
     "JEV_EVENT_ID_PREFIX",
     "JEV_EVENT_ID_PATTERN",
+    "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
 ]

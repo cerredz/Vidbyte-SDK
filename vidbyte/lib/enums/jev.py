@@ -247,4 +247,53 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+class JevDynamicComputeOption(str, Enum):
+    """A kind of additional agent compute the mid-run checkpoint can select, in tie-break order."""
+
+    FRESH_AGENT = "fresh_agent"
+    FORK_AGENT = "fork_agent"
+    SUBAGENT = "subagent"
+
+
+class JevComputeQuestionKey(str, Enum):
+    """The key of every fixed dynamic-compute evidence question."""
+
+    FRESH_AGENT_ERROR_RATE_RISING = "fresh_agent.error_rate_rising"
+    FRESH_AGENT_SAME_FAILURE_PERSISTS = "fresh_agent.same_failure_persists"
+    FRESH_AGENT_REPEATED_ACTION_NO_INFORMATION = "fresh_agent.repeated_action_no_information"
+    FRESH_AGENT_DRIFT_FROM_USER_GOAL = "fresh_agent.drift_from_user_goal"
+    FRESH_AGENT_USER_CONSTRAINT_OMITTED = "fresh_agent.user_constraint_omitted"
+    FRESH_AGENT_CLAIM_CONTRADICTS_EVIDENCE = "fresh_agent.claim_contradicts_evidence"
+    FRESH_AGENT_DISPROVEN_ASSUMPTION_CONTINUES = "fresh_agent.disproven_assumption_continues"
+    FRESH_AGENT_EARLIER_EVIDENCE_IGNORED = "fresh_agent.earlier_evidence_ignored"
+    FRESH_AGENT_FIX_INTRODUCES_FAILURE = "fresh_agent.fix_introduces_failure"
+    FRESH_AGENT_PLAN_OSCILLATES = "fresh_agent.plan_oscillates"
+    FRESH_AGENT_LOST_CONTINUITY = "fresh_agent.lost_continuity"
+    FRESH_AGENT_BRIEF_SUPPORTS_RESUME = "fresh_agent.brief_supports_resume"
+    FORK_AGENT_DISTINCT_APPROACHES = "fork_agent.distinct_approaches"
+    FORK_AGENT_SAME_VERIFIED_STATE = "fork_agent.same_verified_state"
+    FORK_AGENT_INDEPENDENT_PATHS = "fork_agent.independent_paths"
+    FORK_AGENT_BOUNDED_EXPERIMENTS = "fork_agent.bounded_experiments"
+    FORK_AGENT_COMMON_SUCCESS_CONDITION = "fork_agent.common_success_condition"
+    FORK_AGENT_NO_CLEAR_WINNER = "fork_agent.no_clear_winner"
+    FORK_AGENT_NON_FORECLOSING = "fork_agent.non_foreclosing"
+    FORK_AGENT_ISOLATED_SIDE_EFFECTS = "fork_agent.isolated_side_effects"
+    FORK_AGENT_PARALLEL_EVIDENCE = "fork_agent.parallel_evidence"
+    FORK_AGENT_DIFFERENT_HYPOTHESES = "fork_agent.different_hypotheses"
+    FORK_AGENT_SELECTABLE_RESULT = "fork_agent.selectable_result"
+    FORK_AGENT_REQUEST_ALIGNED_PATHS = "fork_agent.request_aligned_paths"
+    SUBAGENT_BOUNDED_SUBTASK = "subagent.bounded_subtask"
+    SUBAGENT_EXPLICIT_DELIVERABLE = "subagent.explicit_deliverable"
+    SUBAGENT_PACKAGED_INPUTS = "subagent.packaged_inputs"
+    SUBAGENT_OWN_TOOL_INTERACTIONS = "subagent.own_tool_interactions"
+    SUBAGENT_NO_MIDTASK_DECISIONS = "subagent.no_midtask_decisions"
+    SUBAGENT_SEPARATE_FROM_CENTRAL_PATH = "subagent.separate_from_central_path"
+    SUBAGENT_INTEGRATABLE_RESULT = "subagent.integratable_result"
+    SUBAGENT_PARALLEL_PROGRESS = "subagent.parallel_progress"
+    SUBAGENT_FOCUSED_CONTEXT = "subagent.focused_context"
+    SUBAGENT_PARTITIONABLE_ITEMS = "subagent.partitionable_items"
+    SUBAGENT_ISOLATED_WRITES = "subagent.isolated_writes"
+    SUBAGENT_SUBSTANTIVE_WORK = "subagent.substantive_work"
+
+
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

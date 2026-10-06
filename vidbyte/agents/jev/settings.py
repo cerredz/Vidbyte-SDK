@@ -40,11 +40,13 @@ from vidbyte.lib.enums import (
     DecisionModelMode,
     JevContinuationGate,
     JevDoneCheck,
+    JevDynamicComputeOption,
     JevPreflightPreset,
     ModelProvider,
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
+from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -235,15 +237,19 @@ class JevRunBriefSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevComputeSettings:
-    """Validated settings for the optional mid-run compute checkpoint."""
+    """Validated run-brief settings and enabled dynamic-compute options for the mid-run checkpoint."""
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
+    dynamic_compute: tuple[JevDynamicComputeOption | str, ...] = (
+        JevDynamicComputeOption.FRESH_AGENT,
+        JevDynamicComputeOption.FORK_AGENT,
+        JevDynamicComputeOption.SUBAGENT,
+    )
 
     def __post_init__(self) -> None:
-        # @intent compute-uses-supported-brief-settings
-        # Rejecting other objects here keeps the optional checkpoint fully configured before an agent is built.
         if not isinstance(self.brief, JevRunBriefSettings):
             raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
+        object.__setattr__(self, "dynamic_compute", JevComputeRegistry.validate(self.dynamic_compute))
 
 
 @dataclass(frozen=True, slots=True)
