@@ -109,6 +109,7 @@ class JevComputeQuestionTests(unittest.TestCase):
         questions = JevComputeRegistry.questions(OPTIONS)
         self.assertEqual(len(questions), 36)
         self.assertEqual([question.name for question in questions], [key.value for key in flattened])
+        openings: list[str] = []
         for option in OPTIONS:
             keys = JevComputeRegistry.question_keys(option)
             self.assertEqual(len(keys), 12)
@@ -120,14 +121,15 @@ class JevComputeQuestionTests(unittest.TestCase):
                 self.assertEqual([item.name for item in wire_question.options], ["true", "false"])
                 self.assertNotRegex(question.instructions, r"`(?:request|brief|facts|recent)`")
                 sentences = re.split(r"(?<=[.!?])\s+", question.instructions.strip())
-                self.assertGreaterEqual(len(sentences), 10, key.value)
-                self.assertLessEqual(len(sentences), 12, key.value)
+                self.assertEqual(len(sentences), 10, key.value)
                 self.assertEqual(len({sentence.casefold() for sentence in sentences}), len(sentences), key.value)
-                self.assertTrue(all(sentence.endswith((".", "?")) for sentence in sentences), key.value)
-                self.assertEqual(question.instructions.count("?"), 1, key.value)
+                self.assertTrue(all(sentence.endswith(".") for sentence in (*sentences[:3], *sentences[8:])), key.value)
+                self.assertTrue(all(sentence.endswith("?") for sentence in sentences[3:8]), key.value)
+                openings.append(sentences[0].casefold())
                 self.assertLessEqual(max(len(question.when_true), len(question.when_false)), 160, key.value)
                 self.assertNotIn("example", question.when_true.casefold(), key.value)
                 self.assertNotIn("example", question.when_false.casefold(), key.value)
+        self.assertEqual(len(set(openings)), len(openings))
 
     def test_decision_records_and_registry_have_no_gate_or_veto_policy(self) -> None:
         self.assertEqual({field.name for field in fields(JevComputeDecision)}, {"iteration", "results", "option", "usage"})
