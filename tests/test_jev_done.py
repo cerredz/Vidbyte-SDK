@@ -14,7 +14,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
-import os
 import re
 import unittest
 from collections.abc import Mapping
@@ -610,7 +609,7 @@ def _jev(
     **settings: Any,
 ) -> JevAgent:
     continual = JevContinualSettings(checks=done, max_continuations=max_continuations)
-    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig(api_key="test-key"), continual=continual))
+    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig.vidbyte_managed(), continual=continual))
 
 
 def _sentences(text: str) -> int:
@@ -3374,17 +3373,10 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(main.calls), 1)
         self.assertFalse(agent.response.done[JevDoneCheck.MULTI_PART].available)
 
-    async def test_missing_decision_credentials_fail_open(self) -> None:
-        main = ScriptedGenerativeRunner("All done.")
-        agent = bind_test_runner(JevAgent(_settings(), JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,)))), main)
-        assert agent.run_state is not None
-        bind_test_runner(agent.run_state, ScriptedGenerativeRunner(json.dumps(_STATE)))
-        bind_test_runner(agent.run_state.handoff_writer, ScriptedGenerativeRunner(json.dumps(_HANDOFF)))
-        with patch.dict(os.environ, {"TYPESAFE_API_KEY": ""}, clear=False):
-            await agent.arun(_REQUEST)
-
-        self.assertEqual(len(main.calls), 1)
-        self.assertFalse(agent.response.done[JevDoneCheck.MULTI_PART].available)
+    async def test_direct_typesafe_configuration_is_rejected_for_jev(self) -> None:
+        # [Hidden Failure] The JevAgent runtime cannot be switched around managed authorization.
+        with self.assertRaisesRegex(ConfigurationError, "VIDBYTE_MANAGED"):
+            JevRuntimeSettings(decision=DecisionModelConfig(), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,)))
 
     async def test_request_with_no_deliverables_passes_without_asking_jev(self) -> None:
         empty = {**_STATE, "multi_part": {"deliverables": []}}

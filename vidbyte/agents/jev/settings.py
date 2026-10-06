@@ -34,6 +34,7 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import (
+    DecisionModelMode,
     JevContinuationGate,
     JevDoneCheck,
     JevPreflightPreset,
@@ -179,17 +180,19 @@ class JevContinualSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevRuntimeSettings:
-    """Validated Jev decision policy: the TypeSafe model, the preflight flags, the continuation settings, and the tool-selector threshold."""
+    """Validated Jev decision policy: Vidbyte-managed decisions, preflight flags, continuation settings, and the tool-selector threshold."""
 
-    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig.vidbyte_managed, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     continual: JevContinualSettings = field(default_factory=JevContinualSettings)
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
 
     def __post_init__(self) -> None:
-        # Rejects invalid decision policy before JevAgent builds its preflight gate and run state.
-        if not isinstance(self.decision, DecisionModelConfig):
-            raise ConfigurationError("JevRuntimeSettings.decision must be a DecisionModelConfig instance.")
+        # Keeps every JevAgent decision on the Vidbyte-managed path before runtime construction.
+        if type(self.decision) is not DecisionModelConfig:
+            raise ConfigurationError("JevRuntimeSettings.decision must be an exact DecisionModelConfig instance; subclasses are not supported.")
+        if self.decision.mode is not DecisionModelMode.VIDBYTE_MANAGED:
+            raise ConfigurationError("JevRuntimeSettings.decision must use VIDBYTE_MANAGED mode; direct TypeSafe configurations are supported only with standalone DecisionModelRunner.")
         object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
         if not isinstance(self.continual, JevContinualSettings):
             raise ConfigurationError("JevRuntimeSettings.continual must be a JevContinualSettings instance.")

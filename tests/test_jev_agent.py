@@ -31,7 +31,7 @@ from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime, JevRuntim
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.settings import AgentLoopSettings
-from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.config import DecisionModelConfig, DecisionModelMode
 from vidbyte.lib.constants.jev import JEV_DEFAULT_RETRY_COUNT, JEV_DEFAULT_TIMEOUT_SECONDS, JEV_MAX_CHOICE_OPTIONS, JEV_MAX_SCORE_LEVELS
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevOption, JevQuestion
 from vidbyte.lib.enums import AgentRuntimeType, JevQuestionType, ModelProvider
@@ -381,10 +381,11 @@ class JevSettingsTests(unittest.TestCase):
     def test_normalizes_provider_and_redacts_both_keys(self) -> None:
         # [Silent Failure] canonical provider identity is stored and neither credential appears in repr.
         settings = _settings(api_key="generative-secret")
-        rendered = repr(settings) + repr(JevRuntimeSettings(decision=DecisionModelConfig(api_key="decision-secret")))
+        managed_key = "vb_live_" + "a" * 32
+        rendered = repr(settings) + repr(JevRuntimeSettings(decision=DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED, api_key=managed_key)))
         self.assertIs(settings.provider, ModelProvider.OPENAI)
         self.assertNotIn("generative-secret", rendered)
-        self.assertNotIn("decision-secret", rendered)
+        self.assertNotIn(managed_key, rendered)
 
     def test_normalizes_tools_and_retains_valid_nested_objects(self) -> None:
         # [Hidden Assumption] iterable tools become immutable while policy and loop objects preserve identity.

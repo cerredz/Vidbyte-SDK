@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_preflight.py
 
 PURPOSE: Verifies JevAgent's preflight gate and clarity preset deterministically without live model calls.
-ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the specialist Choice question and the specialist hand-off, the JevPresets flags, the JevPreflightRegistry, DecisionModelHelper request and scoring behavior, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
-ARCHITECTURE NOTE: Scripted decision and generative runners replace only the external boundaries while production settings, registry, gate, and runtime wiring stay active.
+ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the specialist Choice question and specialist hand-off, JevPreflightRegistry, DecisionModelRunner.score_noul, JevPreflightGate, JevClarificationAgent and its structured reply, JevAgent.response, and managed credential versus transient-error behavior.
+ARCHITECTURE NOTE: Scripted decision and generative runners replace only external boundaries while production settings, registry, gate, and runtime wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new preset, question, threshold boundary, match case, and availability policy.
-KNOWN EDGE CASES: The TypeSafe credential is cleared explicitly and no test may contact TypeSafe or a generative provider.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+KNOWN EDGE CASES: Missing managed credentials fail closed, transient decision failures remain advisory, and no test may contact Vidbyte, TypeSafe, or a generative provider.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-agent-managed-only-decisions.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_preflight and python scripts/test-jev-preflight.py.
 """
 
@@ -61,7 +61,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevQuestion,
 )
 from vidbyte.lib.enums import JevPreflightQuestionKey, JevQuestionType, ModelProvider
-from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
 from vidbyte.lib.jev.preflight import CLARITY_QUESTIONS, SpecialistQuestion
@@ -516,7 +516,7 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Verify one-call classification, the clarification route, and fail-open behavior through JevAgent."""
 
     def _agent(self, generative: ScriptedGenerativeRunner, clarifier: ScriptedGenerativeRunner | None = None, **overrides: Any) -> JevAgent:
-        overrides.setdefault("decision", DecisionModelConfig(api_key="test-key"))
+        overrides.setdefault("decision", DecisionModelConfig.vidbyte_managed())
         agent = bind_test_runner(_jev(**overrides), generative)
         if agent.preflight.clarification is not None:
             bind_test_runner(agent.preflight.clarification, clarifier or ScriptedGenerativeRunner(json.dumps(_PAYLOAD)))
@@ -645,17 +645,10 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(clarifier.calls[1], "Fix that")
         self.assertEqual(agent.response.input, "Fix that")
 
-    async def test_missing_decision_credentials_fail_open(self) -> None:
-        generative = ScriptedGenerativeRunner("available answer")
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("TYPESAFE_API_KEY", None)
-            agent = self._agent(generative, decision=DecisionModelConfig())
-            reply = await agent.arun("Do the requested work.")
-
-        self.assertEqual(reply.content, "available answer")
-        self.assertFalse(agent.response.needs_clarification)
-        self.assertFalse(agent.response.results[JevPreflightPreset.CLARITY].available)
-        self.assertIsNone(agent.response.usage)
+    def test_direct_typesafe_configuration_is_rejected_for_jev(self) -> None:
+        # [Hidden Failure] Missing Vidbyte credentials cannot be bypassed by changing Jev to direct TypeSafe.
+        with self.assertRaisesRegex(ConfigurationError, "VIDBYTE_MANAGED"):
+            JevRuntimeSettings(decision=DecisionModelConfig())
 
     async def test_missing_answer_fails_open(self) -> None:
         decision = ScriptedDecisionRunner(_unclear(), omit="clarity.scope_parts")
@@ -718,15 +711,16 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(specialist_runner.calls, [])
         self.assertIsNone(agent.response.specialist)
 
-    async def test_missing_decision_credentials_keep_the_main_agent(self) -> None:
-        # [Edge Case] like every preflight outage, no Jev answer fails open to the configured main agent.
+    async def test_missing_managed_decision_credentials_stop_preflight(self) -> None:
+        # [Edge Case] Missing Vidbyte credentials fail closed before the main or specialist agent runs.
         specialist, specialist_runner = _specialist()
         generative = ScriptedGenerativeRunner("main answer")
-        with patch.dict(os.environ, {"TYPESAFE_API_KEY": ""}, clear=False):
-            agent = self._agent(generative, decision=DecisionModelConfig(), agents=(specialist,))
-            reply = await agent.arun("Add a migration that adds an email column to the users table.")
+        agent = self._agent(generative, agents=(specialist,))
+        with patch.dict(os.environ, {"VIDBYTE_API_KEY": ""}, clear=False), self.assertRaises(AgentExecutionError) as caught:
+            await agent.arun("Add a migration that adds an email column to the users table.")
 
-        self.assertEqual(reply.content, "main answer")
+        self.assertEqual(caught.exception.details.get("error_type"), "ConfigurationError")
+        self.assertEqual(generative.calls, [])
         self.assertEqual(specialist_runner.calls, [])
         self.assertIsNone(agent.response.specialist)
 

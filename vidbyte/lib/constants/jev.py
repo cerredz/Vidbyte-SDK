@@ -17,6 +17,8 @@ JEV_DEFAULT_MODEL: str = "jev-latest"
 JEV_PREVIEW_MODEL: str = "jev-preview"
 JEV_SYSTEMONE_PATH: str = "/systemone"
 JEV_MODELS_PATH: str = "/models"
+VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/typesafe"
+VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND: str = "vidbyte_managed_credentials"
 
 # Documented vendor limits (https://docs.typesafe.ai/api.md#question-types).
 JEV_MAX_CHOICE_OPTIONS: int = 255
@@ -54,6 +56,11 @@ JEV_RETRY_STATUS_CODES: tuple[int, ...] = (
     JEV_STATUS_RATE_LIMITED,
     *range(JEV_STATUS_SERVER_ERROR_FLOOR, JEV_STATUS_SERVER_ERROR_CEILING),
 )
+VIDBYTE_STATUS_UNAUTHORIZED: int = JEV_STATUS_UNAUTHORIZED
+VIDBYTE_STATUS_PAYMENT_REQUIRED: int = 402
+VIDBYTE_STATUS_FORBIDDEN: int = 403
+VIDBYTE_STATUS_RATE_LIMITED: int = JEV_STATUS_RATE_LIMITED
+VIDBYTE_MANAGED_ACCESS_DENIAL_STATUS_CODES: frozenset[int] = frozenset({VIDBYTE_STATUS_UNAUTHORIZED, VIDBYTE_STATUS_PAYMENT_REQUIRED, VIDBYTE_STATUS_FORBIDDEN, VIDBYTE_STATUS_RATE_LIMITED})
 
 # Noul wire literals: the optional criteria keys and the two outcomes a noul answer expands to.
 JEV_NOUL_TRUE: str = "true"
