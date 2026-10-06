@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence.
+PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence. It also defines the structured run-brief records: a code-owned goal, bounded event window, and append-only verified notes.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through. Continuation evidence uses the canonical ToolCallContext defined in `vidbyte/lib/dataclasses/tools.py`.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Required sequences hold only explicitly ordered request stages and keep stage ids and order stable; their event-backed evidence belongs on JevHandoffRecord. JevContinuationEvidence preserves the source and response strings and original ToolCallContext objects in typed immutable tuples; empty response strings and tuples are valid. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes requested members, workspace inventory, and unsupported mentions. Completion evidence is one handoff-only whole-task item. PHASE_PROGRESS is omitted when no substantive outcome stage exists; INPUT_SET_COVERAGE is omitted when no explicitly bounded input target exists. An ordered sequence is inactive when the request does not require distinct work in a specific order; ordering alone does not imply that a stage uses the preceding stage's output. Continuation evidence requires a nonblank source but preserves its original text; response strings may be empty, and the response tuple may be empty. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because concrete subclasses redeclare defaulted fields. Pydantic payload descriptions are the instructions generative agents receive; records built from those replies hold validated values, and conversion remains with the agent that requested the reply. Report/action candidates compare an explicit earlier plan with recorded execution, the final account, and request relevance; they do not turn an agent plan into a user requirement. Include a consequential assumption even when later work recovers or makes dependent work irrelevant; Jev judges whether the work was revised or became irrelevant.
-RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, and tests/test_jev_required_sequence.py.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-negative-coverage.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md, docs/design/jev-run-brief.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_required_sequence.py, and tests/test_jev_run_brief.py.
 """
 
 from __future__ import annotations
@@ -33,6 +33,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_GATE_DESCRIPTION_MAX_SENTENCES,
     JEV_DONE_GATE_DESCRIPTION_MIN_SENTENCES,
     JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN,
+    JEV_EVENT_ID_PATTERN,
+    JEV_EVENT_LOG_FIRST_ID,
     JEV_EXPERT_DEPTH_MAX_DETAILS,
     JEV_EXPERT_DEPTH_MIN_DETAILS,
     JEV_MAX_CHOICE_OPTIONS,
@@ -50,6 +52,9 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
     JEV_REVIEW_MAX_OBJECTIONS,
+    JEV_RUN_BRIEF_GOAL_MAX_CHARS,
+    JEV_RUN_BRIEF_NOTE_MAX_CHARS,
+    JEV_RUN_BRIEF_NOTES_MAX,
     JEV_SPECIALIST_NONE,
 )
 from vidbyte.lib.dataclasses.tools import ToolCallContext
@@ -3887,7 +3892,161 @@ class JevContinuationEvidence:
                 raise TypeError(f"JevContinuationEvidence.tool_calls[{index}] must be a ToolCallContext")
 
 
+
+# Run brief: a code-owned goal and a bounded sequence of verified notes from numbered run events.
+_EVENT_ID = re.compile(JEV_EVENT_ID_PATTERN)
+
+
+class JevCount:
+    """Shared validation for the whole-number counts and positions the run-brief records carry."""
+
+    @staticmethod
+    def require(value: object, *, field_name: str, minimum: int = 0) -> int:
+        # Returns an int of at least `minimum`, rejecting bool (an int subclass) and every other type.
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise JevValidation.error(field_name, f"an integer of at least {minimum}", value)
+        return value
+
+
+def _require_bounded_text(value: object, *, field_name: str, maximum: int) -> None:
+    """Require non-blank text no longer than the configured brief cap."""
+    JevText.require(value, field_name=field_name)
+    if isinstance(value, str) and len(value) > maximum:
+        raise JevValidation.error(field_name, f"at most {maximum} characters", value)
+
+
+def _require_brief_entries(values: object, expected: type[object], *, field_name: str, maximum: int, minimum: int = 0) -> None:
+    """Require a tuple of one record type whose length stays within its bounds."""
+    if not isinstance(values, tuple) or not all(isinstance(value, expected) for value in values):
+        raise JevValidation.error(field_name, f"a tuple of {expected.__name__} values", values)
+    if not minimum <= len(values) <= maximum:
+        raise JevValidation.error(field_name, f"between {minimum} and {maximum} entries", f"{len(values)} entries")
+
+
+class JevRunBriefNotePayload(BaseModel):
+    """One high-signal passage copied verbatim from a single numbered run event."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: str = Field(pattern=JEV_EVENT_ID_PATTERN, description="The id of the one fresh run event containing this note, such as E14. Copy the id shown in the event list; never invent an id or cite the user's request event.")
+    text: str = Field(min_length=1, max_length=JEV_RUN_BRIEF_NOTE_MAX_CHARS, description=f"A short, high-signal passage copied verbatim from the cited event, at most {JEV_RUN_BRIEF_NOTE_MAX_CHARS} characters. Capture actions, decisions, failures, or important task tokens from roughly 10–20 events. Do not paraphrase or add interpretation.")
+
+
+class JevRunBriefAppendPayload(BaseModel):
+    """Only the new structured notes to append to the stored run brief."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    notes: list[JevRunBriefNotePayload] = Field(max_length=JEV_RUN_BRIEF_NOTES_MAX, description=f"Only notes newly supported by the fresh events in this update, in event order, at most {JEV_RUN_BRIEF_NOTES_MAX}. Return an empty list when there is nothing new to record.")
+
+
+class JevRunBriefPayload(BaseModel):
+    """The stored run brief: the clipped original request and its bounded, ordered notes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(min_length=1, max_length=JEV_RUN_BRIEF_GOAL_MAX_CHARS, description=f"The code-owned original user request, clipped to {JEV_RUN_BRIEF_GOAL_MAX_CHARS} characters. This is not writer output and does not change during the run.")
+    notes: list[JevRunBriefNotePayload] = Field(max_length=JEV_RUN_BRIEF_NOTES_MAX, description=f"Verified notes in event order, newest at the end, retained from the latest {JEV_RUN_BRIEF_NOTES_MAX} notes. Each note records one high-signal verbatim passage with its event id.")
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefNote:
+    """One short passage from a numbered event, with its source event id."""
+
+    event: str
+    text: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.event, str) or _EVENT_ID.fullmatch(self.event) is None:
+            raise JevValidation.error("run brief note event", "a run event id such as E14", self.event)
+        _require_bounded_text(self.text, field_name=f"run brief note from {self.event}", maximum=JEV_RUN_BRIEF_NOTE_MAX_CHARS)
+
+    def payload(self) -> JevRunBriefNotePayload:
+        """Return the note in the structured payload shape."""
+        return JevRunBriefNotePayload(event=self.event, text=self.text)
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBrief:
+    """The verified brief as of one main-agent iteration and the newest event it has read."""
+
+    goal: str
+    notes: tuple[JevRunBriefNote, ...]
+    iteration: int
+    through_event: int
+
+    def __post_init__(self) -> None:
+        _require_bounded_text(self.goal, field_name="run brief goal", maximum=JEV_RUN_BRIEF_GOAL_MAX_CHARS)
+        JevCount.require(self.iteration, field_name="run brief iteration")
+        JevCount.require(self.through_event, field_name="run brief through_event", minimum=JEV_EVENT_LOG_FIRST_ID)
+        _require_brief_entries(self.notes, JevRunBriefNote, field_name="run brief notes", maximum=JEV_RUN_BRIEF_NOTES_MAX)
+        keys = tuple((note.event, " ".join(note.text.split())) for note in self.notes)
+        if len(set(keys)) != len(keys):
+            raise JevValidation.error("run brief notes", "unique event and passage pairs", "duplicate note")
+
+    def payload(self) -> JevRunBriefPayload:
+        """Return the stored aggregate payload, not the writer's append-only output shape."""
+        return JevRunBriefPayload(goal=self.goal, notes=[note.payload() for note in self.notes])
+
+    def render(self) -> str:
+        """Return the aggregate brief as compact JSON for the next writer update."""
+        return self.payload().model_dump_json()
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefWindow:
+    """A bounded event window plus full text for the events shown, used by verification."""
+
+    first_event: int
+    last_event: int
+    text: str
+    omitted: int = 0
+    full_events: tuple[tuple[int, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        first = JevCount.require(self.first_event, field_name="run brief window first_event", minimum=JEV_EVENT_LOG_FIRST_ID)
+        last = JevCount.require(self.last_event, field_name="run brief window last_event", minimum=first)
+        JevText.require(self.text, field_name=f"run brief window E{first}..E{last}")
+        JevCount.require(self.omitted, field_name="run brief window omitted")
+        if not isinstance(self.full_events, tuple):
+            raise JevValidation.error("run brief window full_events", "a tuple of (event number, text) pairs", self.full_events)
+        previous = 0
+        for index, item in enumerate(self.full_events):
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise JevValidation.error(f"run brief window full_events[{index}]", "an (event number, text) pair", item)
+            number, text = item
+            JevCount.require(number, field_name=f"run brief window full_events[{index}] event", minimum=first)
+            if number > last or number <= previous:
+                raise JevValidation.error(f"run brief window full_events[{index}] event", f"an increasing event number from {first} through {last}", number)
+            JevText.require(text, field_name=f"run brief window full_events[{index}] text")
+            previous = number
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunBriefVerification:
+    """A verified complete brief, or a precise error explaining why a note delta was rejected."""
+
+    brief: JevRunBrief | None
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.brief is not None and not isinstance(self.brief, JevRunBrief):
+            raise JevValidation.error("run brief verification brief", "a JevRunBrief or None", self.brief)
+        if self.error is not None:
+            JevText.require(self.error, field_name="run brief verification error")
+        if (self.brief is None) == (self.error is None):
+            raise JevValidation.error("run brief verification", "either a verified brief or an error", (self.brief, self.error))
+
+
 __all__ = [
+    "JevCount",
+    "JevRunBrief",
+    "JevRunBriefAppendPayload",
+    "JevRunBriefNote",
+    "JevRunBriefNotePayload",
+    "JevRunBriefPayload",
+    "JevRunBriefVerification",
+    "JevRunBriefWindow",
     "JevAgentResponse",
     "JevAnswer",
     "JevAssumptionEvidence",
