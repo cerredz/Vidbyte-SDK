@@ -4,9 +4,9 @@ PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
-KNOWN EDGE CASES: With a managed decision config, the whole run is one managed run on Vidbyte's gateway and is closed when arun returns or raises. With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here.
+KNOWN EDGE CASES: With a managed decision config, the whole run is one managed run on Vidbyte's gateway and is closed when arun returns or raises. With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here. With JevRuntimeSettings.compute set, the main agent's run calls the JevComputeController after every tool iteration that continues; a specialist's run does not.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-tool-selector.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-tool-selector.py.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
+from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
@@ -43,6 +44,7 @@ class JevRuntime(AgentRuntime):
         preflight: JevPreflightGate | None = None,
         run_state: JevRunState | None = None,
         continuation: JevContinuation | None = None,
+        compute: JevComputeController | None = None,
         response: JevResponse | None = None,
         **kwargs: Any,
     ) -> None:
@@ -63,6 +65,7 @@ class JevRuntime(AgentRuntime):
         self.preflight = preflight
         self.run_state = run_state
         self.continuation = continuation
+        self.compute = compute
         self.response = response
         super().__init__(**kwargs)
 
@@ -102,6 +105,8 @@ class JevRuntime(AgentRuntime):
             return self.response.stopped()
         if self.preflight.specialist is not None:
             return self.response.delegated(await self.preflight.specialist.agent.arun(message))
+        if self.compute is not None:
+            self.compute.begin(message)
         if self.run_state is not None:
             await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
             sequence_instructions = self.run_state.agent_instructions()
@@ -193,6 +198,15 @@ class JevRuntime(AgentRuntime):
         if evidence is not None and self.run_state is not None:
             self.run_state.add_continuation_evidence(evidence)
         return True
+
+
+    async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
+        """Hand the mid-run compute checkpoint the live loop state after each tool iteration that continues the run."""
+        # @intent the-runtime-only-forwards-the-checkpoint
+        # Every mid-run compute step lives in JevComputeController, so adding one never adds a branch here; without
+        # compute settings there is no controller and the loop runs exactly as the linear runtime does.
+        if self.compute is not None:
+            await self.compute.checkpoint(state)
 
 
 __all__ = ["JevRuntime"]

@@ -13,7 +13,9 @@ from vidbyte.agents.jev.agent import JevAgent
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
+    JevComputeSettings,
     JevContinualSettings,
+    JevRunBriefSettings,
     JevRuntimeSettings,
 )
 from vidbyte.lib.dataclasses.jev import (
@@ -152,6 +154,7 @@ __all__ = [
     "JevCumulativeObligations",
     "JevCumulativeObligationsEvidence",
     "JevCumulativeUserTurnEvidence",
+    "JevComputeSettings",
     "JevContinualSettings",
     "JevContinuationGate",
     "JevDeliverable",
@@ -221,6 +224,7 @@ __all__ = [
     "JevSequenceStageEvidence",
     "JevSequenceWork",
     "JevRuntime",
+    "JevRunBriefSettings",
     "JevRuntimeSettings",
     "JevScenarioRole",
     "JevScopeBreadth",

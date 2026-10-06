@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/response.py
 
 PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the self-review, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return.
+ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the self-review, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return. JevComputeController writes the run facts and run-brief refreshes of the mid-run compute checkpoint.
 ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
 KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-self-review-done-criteria.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_preflight.py, tests/test_jev_done.py, and scripts/test-jev-preflight.py.
+TESTS: tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-preflight.py.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevHandoffRecord,
     JevPresetResult,
     JevReviewRecord,
+    JevRunBrief,
+    JevRunBriefUpdate,
+    JevRunFacts,
     JevRunStateRecord,
     JevSpecialist,
 )
@@ -82,6 +85,15 @@ class JevResponse:
         """Record the cumulative extra loop budget JevAgent granted to failed faithful-scope continuations."""
         for name, amount in extension.items():
             self.state.continuation_budget[name] = self.state.continuation_budget.get(name, JEV_CONTINUATION_BUDGET_INITIAL) + amount
+
+    def run_facts(self, facts: JevRunFacts | None) -> None:
+        """Record the exact run facts the compute checkpoint read most recently."""
+        self.state.run_facts = facts
+
+    def run_brief(self, update: JevRunBriefUpdate, brief: JevRunBrief | None) -> None:
+        """Record one attempt to refresh the run brief and the verified brief that stands after it."""
+        self.state.run_brief_updates.append(update)
+        self.state.run_brief = brief
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

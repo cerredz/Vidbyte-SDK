@@ -21,7 +21,17 @@ WHAT NOT TO DO IN THIS FILE:
     1. Do not implement enum behavior here; edit the owning sibling module.
     2. Do not import runtime instances or add import-time side effects.
 
-TEST FILES:
+COMMON MODIFICATION PATTERNS:
+    Update the sibling enum and this export list together when changing the public enum surface.
+
+KNOWN EDGE CASES:
+    Removing an obsolete enum requires updating imports and exports in its consumers.
+
+RELATED DOCS:
+    skills/jev-agent/SKILL.md
+
+TESTS:
+    tests/test_jev_agent.py and tests/test_jev_run_brief.py.
     Configuration and runtime tests cover the exported enum namespace.
 """
 
@@ -73,6 +83,7 @@ from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevProblemCheckItemType,
+    JevRunBriefUpdateStatus,
     JevQuestionType,
     JevScenarioRole,
     JevScopeBreadth,
@@ -163,6 +174,7 @@ __all__ = [
     "JevPreflightPreset",
     "JevPreflightQuestionKey",
     "JevProblemCheckItemType",
+    "JevRunBriefUpdateStatus",
     "JevQuestionType",
     "JevScenarioRole",
     "JevScopeBreadth",
