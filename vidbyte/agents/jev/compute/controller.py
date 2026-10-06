@@ -161,22 +161,22 @@ class JevComputeController:
         return JevComputeMove(situation, iteration, JevComputeMoveStatus.COMPLETED, helpers=count, output=message, usage=JevComputeHelpers.combined_usage(results))
 
     async def _delegate(self, iteration: int, brief: JevRunBrief, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> JevComputeMove:
-        # Hands the main agent's next self-contained step to a fresh helper and brings its report back.
-        # @intent a-delegated-step-keeps-the-main-context-clean
-        # The step's reads and tool output stay in the helper and only its report joins the main loop; the budget is
-        # charged once the helper starts, and a step already delegated in this run is recorded as no work.
+        # Gives a fresh helper the original request, available run state, and verified brief, then brings its report back.
+        # @intent a-fresh-helper-gets-only-the-current-jev-context
+        # The budget is charged once the helper starts, and an unchanged context already attempted in this run is no work.
         situation = JevComputeSituation.SELF_CONTAINED_STEP
-        step = self.delegate.subject(brief)
-        if step is None:
+        request = self.keeper.request
+        run_state = "" if self.run_state is None else self.run_state.rendered
+        if self.delegate.already_attempted(request, run_state, brief):
             return JevComputeMove(situation, iteration, JevComputeMoveStatus.NO_WORK)
         blocked = self.budget.blocked(iteration, _DELEGATE_HELPERS)
         if blocked is not None:
             return JevComputeMove(situation, iteration, blocked)
-        result = await self.delegate.run(self.keeper.request, step)
+        result = await self.delegate.run(request, run_state, brief)
         self.budget.spend(iteration, _DELEGATE_HELPERS)
         if result is None:
             return JevComputeMove(situation, iteration, JevComputeMoveStatus.FAILED, helpers=_DELEGATE_HELPERS)
-        self._report(self.delegate.message(step, result.output), (result,), state, messages)
+        self._report(self.delegate.message(result.output), (result,), state, messages)
         return JevComputeMove(situation, iteration, JevComputeMoveStatus.COMPLETED, helpers=_DELEGATE_HELPERS, output=result.output, usage=result.usage)
 
     def _report(self, message: str, results: tuple[JevComputeHelperResult, ...], state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:

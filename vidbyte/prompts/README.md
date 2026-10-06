@@ -65,7 +65,7 @@ prompt text.
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
-| Jev Compute | `jev_compute` | reset_prompt, reset_result, fan_out_prompt, fan_out_result, delegate_prompt, delegate_result | [jev_compute/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute) |
+| Jev Compute | `jev_compute` | reset_prompt, reset_result, fan_out_prompt, fan_out_result, delegate_result | [jev_compute/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute) |
 | Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
 | Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
 | Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
@@ -239,8 +239,10 @@ recognized. `reset_prompt` hands a fresh helper agent the problem the main agent
 retrying, with the approaches that already failed, and asks it to find and fix the cause;
 `reset_result` carries the helper's report back to the main agent. `fan_out_prompt` gives
 each of several helpers one item of work the main agent planned for every item of a group,
-and `fan_out_result` brings all of their reports back. `delegate_prompt` hands a fresh helper the
-main agent's next self-contained step, and `delegate_result` brings its report back.
+and `fan_out_result` brings all of their reports back. `delegate_result` carries the
+report back after a helper receives the original request, available JEV run state, and
+verified mid-run brief as typed context; the helper reuses the main agent's system prompt
+without a delegate instruction prompt.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compute/reset_prompt.md>
 

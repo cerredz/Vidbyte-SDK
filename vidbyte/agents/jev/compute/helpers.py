@@ -1,9 +1,9 @@
 """FILE: vidbyte/agents/jev/compute/helpers.py
 
-PURPOSE: Implements JevComputeHelpers, which builds and runs JevAgent's compute helper agents: separate linear agents with the main agent's model, tools, and permissions, a clean history, and their own loop limits, whose final report and run come back as a JevComputeHelperResult.
+PURPOSE: Implements JevComputeHelpers, which builds and runs JevAgent's compute helper agents: separate linear agents with the main agent's system prompt, model, tools, and permissions, a clean history, and their own loop limits, whose final report and run come back as a JevComputeHelperResult.
 ROLE IN CODEBASE: Every compute move (the reset move today) starts its helpers through `run`; JevComputeController records each result and passes its evidence to the done checks.
 ARCHITECTURE NOTE: A helper is built fresh with BaseAgent rather than forked from the JevAgent: a fork would keep the jev runtime, which JevRuntime refuses without its gate, and would share the main agent's context manager. Helpers run the linear runtime with no compute checkpoint of their own, so a helper can never start helpers. Tools that bind to an agent are cloned, as AgentForker does, so a helper never takes the main agent's bindings.
-COMMON MODIFICATION PATTERNS: Keep helper construction here and each move's prompt and policy in its own module; a move that needs other limits should get them from JevComputeSettings.
+COMMON MODIFICATION PATTERNS: Keep helper construction here and each move's policy in its own module; pass structured helper context through AgentInput and get any move-specific limits from JevComputeSettings.
 KNOWN EDGE CASES: Any SDK failure while a helper runs returns None and is recorded as a failed move; a helper that answers with nothing also returns None. Cancellation is never caught.
 RELATED DOCS: docs/design/jev-compute-reset.md.
 TESTS: tests/test_jev_compute_reset.py.
@@ -49,14 +49,15 @@ class JevComputeHelpers:
             timeout_seconds=settings.timeout_seconds,
         )
 
-    async def run(self, role: str, prompt: str, *, source: str) -> JevComputeHelperResult | None:
-        """Run one new helper on the prompt and return its report and run, or None when it failed or reported nothing."""
+    async def run(self, role: str, prompt: str | AgentInput, *, source: str) -> JevComputeHelperResult | None:
+        """Run one new helper on the prompt or typed input and return its report and run, or None when it failed or reported nothing."""
         # @intent a-failed-helper-never-fails-the-run
         # A helper is extra compute, not part of the main agent's own loop, so an SDK failure or an empty report is
         # recorded as a failed move and the main agent simply continues as it would have without the helper.
         helper = self.build(role)
         try:
-            reply = await helper.arun(AgentInput(prompt=prompt))
+            agent_input = prompt if isinstance(prompt, AgentInput) else AgentInput(prompt=prompt)
+            reply = await helper.arun(agent_input)
         except VidbyteSdkError:
             return None
         output = reply.content.strip()

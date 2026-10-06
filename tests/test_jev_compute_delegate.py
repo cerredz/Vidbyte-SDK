@@ -1,10 +1,10 @@
 """FILE: tests/test_jev_compute_delegate.py
 
-PURPOSE: Verifies the delegate compute move without network calls: which step it hands off, what the helper is told, the message that brings its report back, and the controller's budget, failure, and once-per-step rules.
+PURPOSE: Verifies the delegate compute move without network calls: the request and typed JEV context the helper receives, the report message, and the controller's budget, failure, and duplicate-context rules.
 ROLE IN CODEBASE: Covers vidbyte/agents/jev/compute/delegate.py and the delegate step of JevComputeController.
 ARCHITECTURE NOTE: Scripted runners replace the main agent's model, a patched arun replaces the brief writer, a scripted stand-in replaces Jev's request, and helper runs are patched; the loop, controller, budget, and records run for real.
-COMMON MODIFICATION PATTERNS: Add a case when the delegated step, the helper's input, or the message the main agent reads changes.
-KNOWN EDGE CASES: The helper sees only the request and the step; a step is delegated once per run; a failed helper is charged and adds nothing to the loop.
+COMMON MODIFICATION PATTERNS: Add a case when the helper's typed context, the report message, or the controller's budget behavior changes.
+KNOWN EDGE CASES: The helper reuses the main agent's system prompt; an unchanged context is delegated once per run; a failed helper is charged and adds nothing to the loop.
 RELATED DOCS: docs/design/jev-compute-delegate.md.
 TESTS: python -m pytest tests/test_jev_compute_delegate.py.
 """
@@ -23,8 +23,10 @@ from vidbyte import tool
 from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevComputeSettings, JevRunBriefSettings, JevRuntimeSettings
 from vidbyte.agents.jev.compute.delegate import JevComputeDelegate
 from vidbyte.agents.jev.compute.helpers import JevComputeHelpers
+from vidbyte.context import ContextManager, TextContextItem
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_COMPUTE_DELEGATE_SOURCE, JEV_COMPUTE_HELPER_REPORT_MAX_CHARS
+from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevComputeHelperResult,
@@ -39,7 +41,7 @@ from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.runners.types import DecisionModelResponse
 
 REQUEST = "Add rate limiting to our public API."
-STEP = "Next I'll find out which rate limiting libraries support Redis-backed counters in Python."
+RUN_STATE = '{"goal":"Add rate limiting"}'
 _JEV = "vidbyte.agents.jev.compute.recognizer.DecisionModelHelper"
 Q = JevRunBriefQuote
 
@@ -62,34 +64,39 @@ class JevComputeDelegateTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.helpers = JevComputeHelpers(_settings(), JevComputeSettings())
         self.delegate = JevComputeDelegate(self.helpers)
-        self.brief = JevRunBrief(goal="Add rate limiting", iteration=3, through_event=5, next_steps=(Q("E4", STEP), Q("E4", "Then wire it in.")))
+        self.brief = JevRunBrief(goal="Add rate limiting", iteration=3, through_event=5, current_step=Q("E4", "I am checking Redis-backed rate limiters."))
 
-    async def test_the_helper_gets_only_the_request_and_the_soonest_step(self) -> None:
-        step = self.delegate.subject(self.brief)
-        assert step is not None
+    async def test_the_helper_gets_the_request_run_state_and_full_brief_as_context(self) -> None:
         with patch.object(self.helpers, "run", new=AsyncMock(return_value=_result("redis-rate-limit and limits both do"))) as run:
-            result = await self.delegate.run(REQUEST, step)
+            result = await self.delegate.run(REQUEST, RUN_STATE, self.brief)
         self.assertEqual(result.output, "redis-rate-limit and limits both do")  # type: ignore[union-attr]
-        prompt = run.await_args.args[1]
-        self.assertIn(f"<request>\n{REQUEST}\n</request>", prompt)
-        self.assertIn(f"<step>\n{STEP}\n</step>", prompt)
-        self.assertNotIn("Then wire it in.", prompt)
-        self.assertNotIn('"goal":', prompt)
+        agent_input = run.await_args.args[1]
+        self.assertIsInstance(agent_input, AgentInput)
+        self.assertEqual(agent_input.prompt, REQUEST)
+        manager = agent_input.context_manager
+        self.assertIsInstance(manager, ContextManager)
+        assert manager is not None
+        items = manager.context_items
+        self.assertEqual(
+            items,
+            (
+                TextContextItem(title="JEV run state", content=RUN_STATE, source="jev_run_state"),
+                TextContextItem(title="JEV mid-run brief", content=self.brief.render(), source="jev_run_brief"),
+            ),
+        )
         self.assertEqual(run.await_args.kwargs["source"], JEV_COMPUTE_DELEGATE_SOURCE)
 
-    async def test_a_step_is_delegated_once_per_run_whatever_its_outcome(self) -> None:
-        step = self.delegate.subject(self.brief)
-        assert step is not None
+    async def test_an_unchanged_context_is_delegated_once_per_run_whatever_its_outcome(self) -> None:
         with patch.object(self.helpers, "run", new=AsyncMock(return_value=None)):
-            await self.delegate.run(REQUEST, step)
-        self.assertIsNone(self.delegate.subject(self.brief))
+            await self.delegate.run(REQUEST, RUN_STATE, self.brief)
+        self.assertTrue(self.delegate.already_attempted(REQUEST, RUN_STATE, self.brief))
         self.delegate.begin()
-        self.assertEqual(self.delegate.subject(self.brief), step)
+        self.assertFalse(self.delegate.already_attempted(REQUEST, RUN_STATE, self.brief))
 
-    def test_no_stated_step_gives_no_subject_and_the_report_is_clipped(self) -> None:
-        self.assertIsNone(self.delegate.subject(JevRunBrief(goal="g", iteration=1, through_event=2)))
-        message = self.delegate.message(Q("E4", STEP), "x" * (JEV_COMPUTE_HELPER_REPORT_MAX_CHARS * 2))
-        self.assertIn(f"<step>\n{STEP}\n</step>", message)
+    def test_the_main_agent_reads_a_clipped_report_without_a_step_placeholder(self) -> None:
+        message = self.delegate.message("x" * (JEV_COMPUTE_HELPER_REPORT_MAX_CHARS * 2))
+        self.assertNotIn("<step>", message)
+        self.assertIn("<helper_report>", message)
         self.assertIn("characters left out", message)
 
 
@@ -170,7 +177,7 @@ class JevComputeControllerDelegateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(move.status, move.helpers) for move in agent.response.compute_moves], [(JevComputeMoveStatus.FAILED, 1)])
         self.assertFalse(any(message.get("role") == "user" for call in runner.messages for message in call))
 
-    async def test_the_same_step_recognized_again_finds_no_work_and_a_blocked_move_starts_no_helper(self) -> None:
+    async def test_the_same_context_recognized_again_finds_no_work_and_a_blocked_move_starts_no_helper(self) -> None:
         compute = JevComputeSettings(situations=(JevComputeSituation.SELF_CONTAINED_STEP,), cooldown_iterations=0, brief=JevRunBriefSettings(every_iterations=3, min_gap=3))
         run = AsyncMock(return_value=_result("done"))
         agent, _ = await self._run(compute, run, iterations=7)

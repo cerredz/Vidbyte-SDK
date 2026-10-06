@@ -26,6 +26,7 @@ from vidbyte.agents.jev.compute.helpers import JevComputeHelpers
 from vidbyte.agents.jev.compute.reset import JevComputeReset
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
+from vidbyte.context import ContextManager, TextContextItem
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_COMPUTE_HELPER_REPORT_MAX_CHARS, JEV_COMPUTE_RESET_SOURCE
 from vidbyte.lib.dataclasses.jev import (
@@ -39,6 +40,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunBriefQuote,
     JevRunBriefQuotePayload,
 )
+from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult
 from vidbyte.lib.enums import AgentRuntimeType, JevComputeMoveStatus, JevComputeSituation, JevDoneCheck, JevQuestionType, JevRunBriefOutcome, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
@@ -116,6 +118,7 @@ class JevComputeHelpersTests(unittest.IsolatedAsyncioTestCase):
         helpers = JevComputeHelpers(_settings(tools=(binding,)), JevComputeSettings(helper_max_iterations=7, helper_max_tokens=9_000))
         helper = helpers.build("reset")
         self.assertEqual(helper.name, "fixer-compute-reset")
+        self.assertEqual(helper.system_prompt, "Fix the code.")
         self.assertIs(helper.runtime_type, AgentRuntimeType.LINEAR)
         self.assertEqual((helper.runner_config.model_name, helper.runner_config.api_key), ("gpt-4.1", "main-key"))
         self.assertEqual((helper.agent_loop_settings.max_iterations, helper.agent_loop_settings.max_tokens), (7, 9_000))
@@ -133,6 +136,18 @@ class JevComputeHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.evidence.source, JEV_COMPUTE_RESET_SOURCE)
         self.assertEqual(result.evidence.responses, ("Looking at imports.", reply.content))
         self.assertEqual(result.evidence.tool_calls, (call,))
+
+    async def test_run_preserves_typed_context_input(self) -> None:
+        helpers = JevComputeHelpers(_settings(), JevComputeSettings())
+        agent_input = AgentInput(
+            prompt=REQUEST,
+            context_manager=ContextManager((TextContextItem(title="JEV run state", content='{"goal":"test"}', source="jev_run_state"),)),
+        )
+        reply = SimpleNamespace(content="report", metadata={})
+        with patch("vidbyte.agents.base.BaseAgent.arun", new=AsyncMock(return_value=reply)) as arun:
+            result = await helpers.run("delegate", agent_input, source=JEV_COMPUTE_RESET_SOURCE)
+        self.assertIsNotNone(result)
+        self.assertEqual(arun.await_args.args[0], agent_input)
 
     async def test_an_outage_or_an_empty_report_returns_none(self) -> None:
         helpers = JevComputeHelpers(_settings(), JevComputeSettings())
