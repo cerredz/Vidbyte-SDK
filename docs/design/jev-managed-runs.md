@@ -9,9 +9,9 @@ groups calls into runs, keyed by an `X-Vidbyte-Run-Id` header. It bills whole
 cents as a run's total grows and rounds up the last part-cent when the run is
 closed through `POST /api/v1/models/runs/{run_id}/close`.
 
-The SDK can already reach the gateway, because `DecisionModelConfig.endpoint`
-can point anywhere. It never sends a run ID, though, and never closes a run. As
-a result:
+The SDK already routes Jev decisions through Vidbyte's managed gateway by
+default. Each decision currently lacks a run ID, though, and the SDK never
+closes a run. As a result:
 
 - Every call from one key on one day lands in a single "daily" bucket, so no
   run has its own cost and a charge cannot be traced to a run.
@@ -26,30 +26,21 @@ repeated key. This SDK change sends the key.
 
 ## How it works
 
-1. **Managed mode on `DecisionModelConfig`.** A new `managed: bool = False`
-   field. When it is true:
-   - The key resolves from `api_key`, then from `VIDBYTE_API_KEY` (not
-     `TYPESAFE_API_KEY`).
-   - The endpoint resolves from `endpoint`, then from `VIDBYTE_API_URL` plus
-     `/api/v1/models/typesafe`. The default base is
-     `https://vidbyte-backend.onrender.com`, the same default the CLI uses.
-   - An explicit managed endpoint must end in `/typesafe`. That is how the run
-     close URL is derived: replace `/typesafe` with
-     `/runs/{run_id}/close`.
-
-   With `managed=False`, nothing changes.
+1. **Existing managed mode.** The run wrapper uses
+   `DecisionModelConfig.vidbyte_managed()` and its existing pinned gateway and
+   credential handling. This change adds only the close URL for a scoped run.
 2. **A run scope.** `JevManagedRun(config)` is an async context manager that
    puts a `JevManagedRunScope(run_id="jev:<uuid4 hex>")` into a `ContextVar`
    for the duration of the block. A context variable follows the run into
    `asyncio.gather` fan-out without threading a parameter through the gate,
    done checks, continuation, and tool selector. A nested `JevManagedRun`, for
    example a specialist JevAgent, joins the outer run and does not close it.
-   For a config that is not managed, the scope does nothing.
+   For direct TypeSafe configs, the scope does nothing.
 3. **Headers.** In managed mode, the TypeSafe adapter adds:
    - `X-Vidbyte-Run-Id` from the active scope, and marks the scope as used;
    - `Idempotency-Key` when the call can be retried.
 
-   Direct TypeSafe calls stay byte-for-byte the same.
+   Direct TypeSafe calls receive neither managed header.
 4. **Close.** When the outermost scope exits, it calls
    `DecisionModelRunner.aclose_run(run_id)`, but only if a call was made, since
    the backend has no session for a run that made no calls. The adapter sends
@@ -65,11 +56,11 @@ cycle: `lib/jev` → `runners` → `providers` → `lib/jev`.
 
 ## Files
 
-- `vidbyte/lib/constants/jev.py`: env var names, default API URL, gateway path,
-  header names, run ID prefix.
+- `vidbyte/lib/constants/jev.py`: run-close path, managed run headers, and run
+  ID prefix.
 - `vidbyte/lib/dataclasses/jev.py`: `JevManagedRunScope`.
-- `vidbyte/lib/dataclasses/model_configs.py`: `managed` field, key, endpoint,
-  and close URL resolution.
+- `vidbyte/lib/dataclasses/model_configs.py`: close URL resolution using the
+  existing managed-mode endpoint.
 - `vidbyte/providers/typesafe.py`: the context variable, managed headers,
   `close_run`.
 - `vidbyte/lib/runners/decision.py`: `aclose_run`.
@@ -80,8 +71,6 @@ cycle: `lib/jev` → `runners` → `providers` → `lib/jev`.
 
 ## Risks and open questions
 
-- The default API URL is the Render host, matching the CLI. If a custom domain
-  replaces it, update both.
 - Closing adds one HTTP call at the end of each managed run. It is bounded by
   the config's timeout and sent with no retries.
 - Run IDs are client-generated UUIDs. The backend scopes each run to the key
@@ -89,10 +78,7 @@ cycle: `lib/jev` → `runners` → `providers` → `lib/jev`.
 
 ## Verification
 
-- `python scripts/run_ci.py --stage source` (lint, compile, write-path checks,
-  full pytest) and `--stage package`.
 - New tests cover:
-  - managed key and endpoint resolution, and endpoint validation;
   - a direct call sends no new headers;
   - one run ID across every call in a scope, and different IDs across runs;
   - `Idempotency-Key` on retried managed calls;

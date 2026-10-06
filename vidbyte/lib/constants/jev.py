@@ -17,6 +17,8 @@ JEV_DEFAULT_MODEL: str = "jev-latest"
 JEV_PREVIEW_MODEL: str = "jev-preview"
 JEV_SYSTEMONE_PATH: str = "/systemone"
 JEV_MODELS_PATH: str = "/models"
+VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/typesafe"
+VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND: str = "vidbyte_managed_credentials"
 
 # Documented vendor limits (https://docs.typesafe.ai/api.md#question-types).
 JEV_MAX_CHOICE_OPTIONS: int = 255
@@ -41,12 +43,7 @@ JEV_TIMEOUT_FLOOR_SECONDS: float = 0.0
 JEV_RETRY_BACKOFF_SECONDS: float = 0.5
 JEV_MAX_RESPONSE_BYTES: int = 16_000_000
 
-# Managed mode: Vidbyte's gateway calls TypeSafe for a Vidbyte API key and bills its wallet per run.
-# The env var names and default URL match the Vidbyte CLI; the close route sits beside the gateway.
-JEV_MANAGED_API_KEY_ENV: str = "VIDBYTE_API_KEY"
-JEV_MANAGED_API_URL_ENV: str = "VIDBYTE_API_URL"
-JEV_MANAGED_DEFAULT_API_URL: str = "https://vidbyte-backend.onrender.com"
-JEV_MANAGED_GATEWAY_PATH: str = "/api/v1/models/typesafe"
+# The managed run-close route is adjacent to the TypeSafe gateway endpoint.
 JEV_MANAGED_GATEWAY_SUFFIX: str = "/typesafe"
 JEV_MANAGED_RUN_CLOSE_PATH: str = "/runs/{run_id}/close"
 JEV_MANAGED_RUN_ID_HEADER: str = "X-Vidbyte-Run-Id"
@@ -67,6 +64,11 @@ JEV_RETRY_STATUS_CODES: tuple[int, ...] = (
     JEV_STATUS_RATE_LIMITED,
     *range(JEV_STATUS_SERVER_ERROR_FLOOR, JEV_STATUS_SERVER_ERROR_CEILING),
 )
+VIDBYTE_STATUS_UNAUTHORIZED: int = JEV_STATUS_UNAUTHORIZED
+VIDBYTE_STATUS_PAYMENT_REQUIRED: int = 402
+VIDBYTE_STATUS_FORBIDDEN: int = 403
+VIDBYTE_STATUS_RATE_LIMITED: int = JEV_STATUS_RATE_LIMITED
+VIDBYTE_MANAGED_ACCESS_DENIAL_STATUS_CODES: frozenset[int] = frozenset({VIDBYTE_STATUS_UNAUTHORIZED, VIDBYTE_STATUS_PAYMENT_REQUIRED, VIDBYTE_STATUS_FORBIDDEN, VIDBYTE_STATUS_RATE_LIMITED})
 
 # Noul wire literals: the optional criteria keys and the two outcomes a noul answer expands to.
 JEV_NOUL_TRUE: str = "true"
@@ -382,10 +384,6 @@ __all__ = [
     "JEV_FAITHFUL_SCOPE_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_IDEMPOTENCY_KEY_HEADER",
-    "JEV_MANAGED_API_KEY_ENV",
-    "JEV_MANAGED_API_URL_ENV",
-    "JEV_MANAGED_DEFAULT_API_URL",
-    "JEV_MANAGED_GATEWAY_PATH",
     "JEV_MANAGED_GATEWAY_SUFFIX",
     "JEV_MANAGED_RUN_CLOSE_PATH",
     "JEV_MANAGED_RUN_ID_HEADER",

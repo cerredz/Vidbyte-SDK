@@ -1,7 +1,7 @@
 """FILE: tests/test_jev_managed_runs.py
 
-PURPOSE: Proves managed Jev runs: Vidbyte key and gateway resolution, the run-ID and idempotency headers, run closing, and JevAgent's one-run-per-arun scoping.
-ROLE IN CODEBASE: Covers vidbyte/lib/dataclasses/model_configs.py (managed fields), vidbyte/providers/typesafe.py (headers and close), and vidbyte/lib/jev/managed.py.
+PURPOSE: Proves that a JevAgent run shares one managed gateway run ID and closes it once.
+ROLE IN CODEBASE: Covers vidbyte/providers/typesafe.py (run headers and close) and vidbyte/lib/jev/managed.py.
 ARCHITECTURE NOTE: A scripted transport stands in for the gateway and answers every decision with clear noul answers, so the real adapter, runner, and runtime run unmocked.
 COMMON MODIFICATION PATTERNS: Add a case when the gateway's header or close contract changes.
 KNOWN EDGE CASES: A run that sent no call is not closed; a nested run joins its parent; a failed close is logged, never raised.
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -21,16 +20,17 @@ from unittest.mock import patch
 from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, JevRuntimeSettings
 from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.constants.jev import VIDBYTE_JEV_GATEWAY_ENDPOINT
 from vidbyte.lib.dataclasses.jev import JevDecisionRequest, JevManagedRunScope, JevQuestion
-from vidbyte.lib.enums import JevQuestionType, ModelProvider
+from vidbyte.lib.enums import DecisionModelMode, JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.jev import JevManagedRun
 from vidbyte.lib.runners import DecisionModelRunner, TextModelResponse
 from vidbyte.providers.typesafe import TypeSafeManagedRunContext
 
-GATEWAY = "https://api.example.test/api/v1/models/typesafe"
-VB_KEY = "vb_live_test"
+GATEWAY = VIDBYTE_JEV_GATEWAY_ENDPOINT
+VB_KEY = "vb_live_" + ("x" * 32)
 RUN_HEADER, IDEMPOTENCY_HEADER = "X-Vidbyte-Run-Id", "Idempotency-Key"
 _TRANSPORT_PATH = "vidbyte.lib.runners.decision.HttpTransport"
 
@@ -73,33 +73,16 @@ def _request() -> JevDecisionRequest:
 
 
 def _managed(**overrides: Any) -> DecisionModelConfig:
-    values: dict[str, Any] = {"managed": True, "api_key": VB_KEY, "endpoint": GATEWAY, "retry_count": 0}
+    values: dict[str, Any] = {"mode": DecisionModelMode.VIDBYTE_MANAGED, "api_key": VB_KEY, "retry_count": 0}
     values.update(overrides)
     return DecisionModelConfig(**values)
 
 
 class ManagedConfigTests(unittest.TestCase):
-    """Managed mode resolves the Vidbyte key and gateway, never TypeSafe's."""
+    """Run-ID validation and close-route derivation complement the existing gateway config."""
 
-    def test_managed_mode_reads_vidbyte_env_vars_and_ignores_the_typesafe_key(self) -> None:
-        with patch.dict(os.environ, {"VIDBYTE_API_KEY": "vb_live_env", "TYPESAFE_API_KEY": "ts_key"}, clear=False):
-            os.environ.pop("VIDBYTE_API_URL", None)
-            config = DecisionModelConfig(managed=True)
-            self.assertEqual(config.resolved_api_key(), "vb_live_env")
-            self.assertEqual(config.resolved_endpoint(), "https://vidbyte-backend.onrender.com/api/v1/models/typesafe")
-            with patch.dict(os.environ, {"VIDBYTE_API_URL": "https://staging.example.test/"}):
-                self.assertEqual(config.resolved_endpoint(), "https://staging.example.test/api/v1/models/typesafe")
-
-    def test_missing_vidbyte_key_is_a_configuration_error(self) -> None:
-        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "ts_key"}, clear=False):
-            os.environ.pop("VIDBYTE_API_KEY", None)
-            with self.assertRaises(ConfigurationError):
-                DecisionModelConfig(managed=True).resolved_api_key()
-
-    def test_managed_endpoint_must_be_the_gateway_and_locates_the_close_route(self) -> None:
-        with self.assertRaises(ConfigurationError):
-            DecisionModelConfig(managed=True, endpoint="https://api.example.test/v1")
-        self.assertEqual(_managed().resolved_run_close_url("jev:abc"), "https://api.example.test/api/v1/models/runs/jev:abc/close")
+    def test_managed_mode_locates_the_close_route(self) -> None:
+        self.assertEqual(_managed().resolved_run_close_url("jev:abc"), f"{GATEWAY.removesuffix('/typesafe')}/runs/jev:abc/close")
         with self.assertRaises(ConfigurationError):
             DecisionModelConfig(api_key="ts").resolved_run_close_url("jev:abc")
 
@@ -135,7 +118,8 @@ class ManagedRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ids, [scope.run_id, scope.run_id, second.run_id])
         self.assertNotEqual(scope.run_id, second.run_id)
         self.assertTrue(scope.run_id.startswith("jev:"))
-        self.assertEqual([request["url"] for request in transport.closes()], [f"https://api.example.test/api/v1/models/runs/{run_id}/close" for run_id in (scope.run_id, second.run_id)])
+        close_root = GATEWAY.removesuffix("/typesafe")
+        self.assertEqual([request["url"] for request in transport.closes()], [f"{close_root}/runs/{run_id}/close" for run_id in (scope.run_id, second.run_id)])
         self.assertEqual(transport.closes()[0]["headers"]["authorization"], f"Bearer {VB_KEY}")
         self.assertIsNone(TypeSafeManagedRunContext.current())
 

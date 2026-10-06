@@ -11,6 +11,7 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Mapping
 from contextvars import ContextVar, Token
@@ -36,6 +37,10 @@ from vidbyte.lib.constants.jev import (
     JEV_STATUS_UNAUTHORIZED,
     JEV_STATUS_UNPROCESSABLE,
     JEV_SYSTEMONE_PATH,
+    VIDBYTE_STATUS_FORBIDDEN,
+    VIDBYTE_STATUS_PAYMENT_REQUIRED,
+    VIDBYTE_STATUS_RATE_LIMITED,
+    VIDBYTE_STATUS_UNAUTHORIZED,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
@@ -51,7 +56,7 @@ from vidbyte.lib.dataclasses.jev import (
     TypeSafeWireRequest,
 )
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import JevQuestionType, ModelProvider
+from vidbyte.lib.enums import DecisionModelMode, JevQuestionType, ModelProvider
 from vidbyte.lib.errors import (
     ConfigurationError,
     ProviderConfigurationError,
@@ -164,7 +169,7 @@ class _TypeSafeCallBuilder:
         idempotency_key = uuid.uuid4().hex if retrying else None
         body = _TypeSafeJsonBody.encode(_TypeSafePayloadBuilder.build(config, request))
         headers = self._parser.bearer_headers(config.resolved_api_key())
-        if config.managed:
+        if config.mode is DecisionModelMode.VIDBYTE_MANAGED:
             if run_id is not None:
                 headers[JEV_MANAGED_RUN_ID_HEADER] = run_id
             if idempotency_key is not None:
@@ -195,6 +200,8 @@ class _TypeSafeFailures:
         status = exc.status_code
         timeout = f"{config.timeout_seconds}s" if config is not None else "configured"
         retries = config.retry_count if config is not None else JEV_NO_RETRIES
+        if config is not None and config.mode is DecisionModelMode.VIDBYTE_MANAGED:
+            return _TypeSafeFailures.managed_transport_error(exc, operation=operation, timeout=timeout, retries=retries)
         if status is None:
             reason = f"no response arrived (network failure or the {timeout} timeout elapsed); raise DecisionModelConfig.timeout_seconds or retry_count if this recurs"
         elif status == JEV_STATUS_UNAUTHORIZED:
@@ -212,12 +219,58 @@ class _TypeSafeFailures:
         return ProviderRequestError(f"TypeSafe {operation} request failed: {reason}. Underlying error: {exc.message}", provider=_PROVIDER, status_code=status, response_excerpt=exc.response_excerpt)
 
     @staticmethod
-    def unexpected(exc: Exception, *, operation: str, usage: Mapping[str, Any] | None) -> ProviderResponseError:
+    def managed_transport_error(exc: ProviderRequestError, *, operation: str, timeout: str, retries: int) -> ProviderRequestError:
+        # Maps Vidbyte access and service statuses without copying untrusted response text.
+        # @intent managed-error-output-never-echoes-gateway-body
+        # Gateway bodies could reflect the bearer key, so managed exceptions keep only status and SDK-authored guidance.
+        reason = _TypeSafeFailures.managed_failure_reason(exc.status_code, timeout=timeout, retries=retries)
+        return ProviderRequestError(f"Vidbyte managed Jev {operation} request failed: {reason}.", provider="vidbyte", status_code=exc.status_code)
+
+    @staticmethod
+    def managed_failure_reason(status: int | None, *, timeout: str, retries: int) -> str:
+        # Returns safe, actionable wording for one Vidbyte gateway status.
+        # @intent managed-status-messages-are-credential-safe
+        # Status-only guidance preserves useful repair information without copying an untrusted response message.
+        if status == VIDBYTE_STATUS_UNAUTHORIZED:
+            return "Vidbyte rejected the API key (401); check VIDBYTE_API_KEY and the key lifecycle status"
+        if status == VIDBYTE_STATUS_PAYMENT_REQUIRED:
+            return "Vidbyte requires available API balance (402); add balance to the API key's account"
+        if status == VIDBYTE_STATUS_FORBIDDEN:
+            return "Vidbyte denied models:invoke access (403); update the API key's scopes"
+        if status == VIDBYTE_STATUS_RATE_LIMITED:
+            return f"Vidbyte rate or quota limit was reached (429) after {retries} retries; retry after the limit resets"
+        if status is None:
+            return f"no response arrived (network failure or the {timeout} timeout elapsed); retry when connectivity returns"
+        if status == JEV_STATUS_REQUEST_TIMEOUT:
+            return f"Vidbyte or its upstream timed out the request (408) after {retries} retries"
+        if status >= JEV_STATUS_SERVER_ERROR_FLOOR:
+            return f"Vidbyte or its upstream is temporarily failing ({status}) after {retries} retries"
+        return f"Vidbyte returned HTTP {status}"
+
+    @staticmethod
+    def managed_response_error(exc: ProviderResponseError) -> ProviderResponseError:
+        # Keeps useful response context while removing bodies and any echoed Vidbyte key.
+        # @intent malformed-managed-output-redacts-live-keys
+        # Normalization details can include provider values, so redact live key forms and omit response excerpts.
+        message = re.sub(r"vb_live_[A-Za-z0-9_-]{32,}", "[redacted]", exc.message)
+        error = ProviderResponseError(message, provider="vidbyte", status_code=exc.status_code)
+        usage = exc.details.get("usage")
+        if isinstance(usage, Mapping):
+            error.details["usage"] = dict(usage)
+        return error
+
+    @staticmethod
+    def unexpected(exc: Exception, *, operation: str, usage: Mapping[str, Any] | None, config: DecisionModelConfig | None) -> ProviderResponseError:
         # Wraps an error no specific branch anticipated, keeping any billed usage for the caller.
         # @intent no-bare-exception-escapes-the-provider
         # Callers catch SDK errors to fail open; a stray TypeError from a drifted payload must
         # arrive as a ProviderResponseError, not as an exception type they never expected.
-        error = ProviderResponseError(f"TypeSafe {operation} failed with an unexpected {type(exc).__name__}: {exc}", provider=_PROVIDER)
+        message = str(exc)
+        provider = _PROVIDER
+        if config is not None and config.mode is DecisionModelMode.VIDBYTE_MANAGED:
+            message = re.sub(r"vb_live_[A-Za-z0-9_-]{32,}", "[redacted]", message)
+            provider = "vidbyte"
+        error = ProviderResponseError(f"{provider} {operation} failed with an unexpected {type(exc).__name__}: {message}", provider=provider)
         if usage is not None:
             error.details["usage"] = dict(usage)
         return error
@@ -354,7 +407,7 @@ class TypeSafeProvider:
         resolved: DecisionModelConfig | None = None
         try:
             resolved = self._config_for(config)
-            scope = TypeSafeManagedRunContext.current() if resolved.managed else None
+            scope = TypeSafeManagedRunContext.current() if resolved.mode is DecisionModelMode.VIDBYTE_MANAGED else None
             call = self._calls.decision(resolved, request, run_id=None if scope is None else scope.run_id)
             if scope is not None:
                 scope.used = True
@@ -367,12 +420,22 @@ class TypeSafeProvider:
             if not isinstance(model, str) or not model.strip():
                 raise _TypeSafeAnswerNormalizer(usage).error(f"TypeSafe response has no `model` string naming the version that answered; received {JevValidation.describe(model)}.")
             return DecisionModelResponse(provider=self.provider, model=model, answers=answers, raw=parsed, usage=usage)
-        except (ProviderResponseError, ProviderConfigurationError, ConfigurationError):
+        except ProviderResponseError as exc:
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise _TypeSafeFailures.managed_response_error(exc) from None
+            raise
+        except (ProviderConfigurationError, ConfigurationError):
             raise
         except ProviderRequestError as exc:
-            raise _TypeSafeFailures.transport_error(exc, operation="decision", config=resolved) from exc
+            error = _TypeSafeFailures.transport_error(exc, operation="decision", config=resolved)
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise error from None
+            raise error from exc
         except Exception as exc:
-            raise _TypeSafeFailures.unexpected(exc, operation="decision", usage=usage) from exc
+            error = _TypeSafeFailures.unexpected(exc, operation="decision", usage=usage, config=resolved)
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise error from None
+            raise error from exc
 
     async def list_models(self, *, transport: HttpTransport, config: DecisionModelConfig | None = None) -> tuple[JevModelCard, ...]:
         # GETs the model IDs and aliases the account can send in the request `model` field.
@@ -383,12 +446,22 @@ class TypeSafeProvider:
             resolved = self._config_for(config)
             response = await self._calls.models(resolved).send(transport)
             return _TypeSafeModelListNormalizer.normalize(self._parser.parse_json_response(response, provider=_PROVIDER))
-        except (ProviderResponseError, ProviderConfigurationError, ConfigurationError):
+        except ProviderResponseError as exc:
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise _TypeSafeFailures.managed_response_error(exc) from None
+            raise
+        except (ProviderConfigurationError, ConfigurationError):
             raise
         except ProviderRequestError as exc:
-            raise _TypeSafeFailures.transport_error(exc, operation="model list", config=resolved) from exc
+            error = _TypeSafeFailures.transport_error(exc, operation="model list", config=resolved)
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise error from None
+            raise error from exc
         except Exception as exc:
-            raise _TypeSafeFailures.unexpected(exc, operation="model list", usage=None) from exc
+            error = _TypeSafeFailures.unexpected(exc, operation="model list", usage=None, config=resolved)
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise error from None
+            raise error from exc
 
     async def close_run(self, *, run_id: str, transport: HttpTransport, config: DecisionModelConfig | None = None) -> None:
         # Closes one managed run so the gateway settles its final part-cent now, not at the idle reaper.
@@ -399,12 +472,22 @@ class TypeSafeProvider:
             resolved = self._config_for(config)
             response = await self._calls.close_run(resolved, run_id).send(transport)
             self._parser.parse_json_response(response, provider=_PROVIDER)
-        except (ProviderResponseError, ProviderConfigurationError, ConfigurationError):
+        except ProviderResponseError as exc:
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise _TypeSafeFailures.managed_response_error(exc) from None
+            raise
+        except (ProviderConfigurationError, ConfigurationError):
             raise
         except ProviderRequestError as exc:
-            raise _TypeSafeFailures.transport_error(exc, operation="run close", config=resolved) from exc
+            error = _TypeSafeFailures.transport_error(exc, operation="run close", config=resolved)
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise error from None
+            raise error from exc
         except Exception as exc:
-            raise _TypeSafeFailures.unexpected(exc, operation="run close", usage=None) from exc
+            error = _TypeSafeFailures.unexpected(exc, operation="run close", usage=None, config=resolved)
+            if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+                raise error from None
+            raise error from exc
 
     def _config_for(self, config: DecisionModelConfig | None) -> DecisionModelConfig:
         # Resolves the active config, raising when neither the call nor the adapter supplied one.

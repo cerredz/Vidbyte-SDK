@@ -20,6 +20,7 @@ from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_MANAGED_RUN_ID_PREFIX
 from vidbyte.lib.dataclasses.jev import JevManagedRunScope
 from vidbyte.lib.errors import VidbyteSdkError
+from vidbyte.lib.enums import DecisionModelMode
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.providers.typesafe import TypeSafeManagedRunContext
 
@@ -37,7 +38,7 @@ class JevManagedRun:
 
     async def __aenter__(self) -> JevManagedRunScope | None:
         # Opens a run for a managed config, or joins the run already active in this task.
-        if not self._config.managed:
+        if self._config.mode is not DecisionModelMode.VIDBYTE_MANAGED:
             return None
         active = TypeSafeManagedRunContext.current()
         if active is not None:

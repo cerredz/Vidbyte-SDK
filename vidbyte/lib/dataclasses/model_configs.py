@@ -21,23 +21,23 @@ Similar Files:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Any, Mapping
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from vidbyte.lib.constants.jev import (
     JEV_DEFAULT_MODEL,
     JEV_DEFAULT_RETRY_COUNT,
     JEV_DEFAULT_TIMEOUT_SECONDS,
-    JEV_MANAGED_API_KEY_ENV,
-    JEV_MANAGED_API_URL_ENV,
-    JEV_MANAGED_DEFAULT_API_URL,
-    JEV_MANAGED_GATEWAY_PATH,
     JEV_MANAGED_GATEWAY_SUFFIX,
     JEV_MANAGED_RUN_CLOSE_PATH,
     JEV_NO_RETRIES,
     JEV_TIMEOUT_FLOOR_SECONDS,
+    VIDBYTE_JEV_GATEWAY_ENDPOINT,
+    VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
 )
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import DecisionModelMode, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.registries.models import ProviderModelRegistry
 
@@ -340,46 +340,38 @@ DECISION_SUPPORTED_PROVIDERS: frozenset[ModelProvider] = frozenset({
 
 @dataclass(frozen=True, slots=True)
 class DecisionModelConfig:
-    """Configuration for one calibrated decision model; the API key resolves lazily at validate().
-
-    With ``managed=True`` the calls go through Vidbyte's gateway instead of TypeSafe directly: the key is a
-    Vidbyte API key (``api_key`` or ``VIDBYTE_API_KEY``), the endpoint is ``VIDBYTE_API_URL`` (default
-    https://vidbyte-backend.onrender.com) plus ``/api/v1/models/typesafe``, and the wallet is billed per run.
-    """
+    """Configuration for one decision model using TypeSafe directly or Vidbyte's managed gateway."""
 
     provider: ModelProvider | str = ModelProvider.TYPESAFE
     model: str = JEV_DEFAULT_MODEL
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)
     endpoint: str | None = None
     timeout_seconds: float = JEV_DEFAULT_TIMEOUT_SECONDS
     retry_count: int = JEV_DEFAULT_RETRY_COUNT
-    managed: bool = False
+    mode: DecisionModelMode = DecisionModelMode.TYPESAFE
 
     def __post_init__(self) -> None:
         # Rejects shape errors at construction so a bad config never waits for its first call.
         # @intent decision-config-shape-fails-at-construction
-        # The API key is deliberately not resolved here: a decision tool must be constructable
-        # without a key and fail open at call time, while a wrong timeout or retry count is a
-        # programming error that should surface immediately rather than as a silent skip.
+        # The API key is deliberately not resolved here so disabled Jev features need no credential;
+        # active callers validate it when they build the decision runner and apply their failure policy.
         provider = self.normalized_provider()
         if provider not in DECISION_SUPPORTED_PROVIDERS:
             raise UnsupportedProviderError(
                 f"DecisionModelRunner supports: {', '.join(p.value for p in DECISION_SUPPORTED_PROVIDERS)}.",
                 details={"provider": provider.value},
             )
+        if not isinstance(self.mode, DecisionModelMode):
+            raise ConfigurationError("mode must be a DecisionModelMode value.")
+        if self.mode is DecisionModelMode.VIDBYTE_MANAGED and self.endpoint is not None:
+            if not isinstance(self.endpoint, str) or self.endpoint.strip():
+                raise ConfigurationError("A custom endpoint is not allowed for VIDBYTE_MANAGED decision mode.")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ConfigurationError("model must be non-empty.")
         if not isinstance(self.timeout_seconds, (int, float)) or self.timeout_seconds <= JEV_TIMEOUT_FLOOR_SECONDS:
             raise ConfigurationError("timeout_seconds must be greater than zero.")
         if isinstance(self.retry_count, bool) or not isinstance(self.retry_count, int) or self.retry_count < JEV_NO_RETRIES:
             raise ConfigurationError("retry_count must be a non-negative integer.")
-        if not isinstance(self.managed, bool):
-            raise ConfigurationError("managed must be a bool.")
-        # @intent managed-endpoint-locates-the-close-route
-        # The run-close route sits beside the gateway, so a managed endpoint must end where the
-        # gateway's does; otherwise the close URL could not be derived and every run would leak a part-cent.
-        if self.managed and self.endpoint is not None and not self.endpoint.strip().rstrip("/").endswith(JEV_MANAGED_GATEWAY_SUFFIX):
-            raise ConfigurationError(f"A managed endpoint must be the Vidbyte gateway URL ending in {JEV_MANAGED_GATEWAY_SUFFIX!r}.", details={"endpoint": self.endpoint})
 
     def normalized_provider(self) -> ModelProvider:
         # Convert strings to the canonical provider enum at the SDK boundary.
@@ -396,38 +388,47 @@ class DecisionModelConfig:
         self.resolved_api_key()
 
     def resolved_api_key(self) -> str:
-        # Resolve explicit keys before provider-specific environment variables.
+        # Resolves the selected mode's key source without exposing the credential in errors.
+        # @intent managed-mode-never-falls-back-to-typesafe-key
+        # A managed call must use a Vidbyte live key; only direct mode may resolve TYPESAFE_API_KEY.
+        if self.mode is DecisionModelMode.VIDBYTE_MANAGED:
+            if self.api_key is not None and not isinstance(self.api_key, str):
+                raise ConfigurationError("api_key must be a string in VIDBYTE_MANAGED decision mode.", details={"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
+            explicit_key = self.api_key.strip() if self.api_key is not None else ""
+            key = (explicit_key or os.environ.get("VIDBYTE_API_KEY", "")).strip()
+            if not key:
+                raise ConfigurationError("Missing Vidbyte API key. Pass api_key or set VIDBYTE_API_KEY.", details={"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
+            if re.fullmatch(r"vb_live_[A-Za-z0-9_-]{32,}", key) is None:
+                raise ConfigurationError("The managed Vidbyte API key must be a live key in the vb_live_ format.", details={"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
+            return key
+        # Resolves explicit TypeSafe keys before the provider-specific environment variable.
         # @intent explicit-key-wins-over-environment
-        # An explicit key lets tests and multi-tenant callers override TYPESAFE_API_KEY; a
-        # missing key raises ConfigurationError, which decision tools treat as "disabled".
-        if self.managed:
-            return self._managed_api_key()
+        # Direct mode preserves the existing TypeSafe key resolution for standalone runners.
         return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
 
     def resolved_endpoint(self) -> str:
-        # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
+        # Pins managed credentials to Vidbyte while preserving direct provider endpoint overrides.
+        # @intent managed-key-stays-on-vidbyte-host
+        # Direct TypeSafe proxies remain configurable, but the Vidbyte bearer credential never follows a caller URL.
+        if self.mode is DecisionModelMode.VIDBYTE_MANAGED:
+            return VIDBYTE_JEV_GATEWAY_ENDPOINT
         # @intent explicit-endpoint-wins-over-default
-        # Proxies and test servers replace the public TypeSafe endpoint without code changes.
-        if self.managed:
-            if self.endpoint is not None and self.endpoint.strip():
-                return self.endpoint.strip().rstrip("/")
-            base = (os.environ.get(JEV_MANAGED_API_URL_ENV) or "").strip() or JEV_MANAGED_DEFAULT_API_URL
-            return f"{base.rstrip('/')}{JEV_MANAGED_GATEWAY_PATH}"
+        # Proxies and test servers remain available for direct TypeSafe calls.
         return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
 
     def resolved_run_close_url(self, run_id: str) -> str:
-        # Returns the gateway's close route for one run; only a managed config has one.
-        if not self.managed:
+        """Return the gateway close URL for one managed Jev run."""
+        if self.mode is not DecisionModelMode.VIDBYTE_MANAGED:
             raise ConfigurationError("Only a managed DecisionModelConfig has runs to close.")
         root = self.resolved_endpoint().removesuffix(JEV_MANAGED_GATEWAY_SUFFIX)
         return f"{root}{JEV_MANAGED_RUN_CLOSE_PATH.format(run_id=run_id)}"
 
-    def _managed_api_key(self) -> str:
-        # Resolves the Vidbyte key: an explicit key wins over VIDBYTE_API_KEY; TYPESAFE_API_KEY is never read.
-        for candidate in (self.api_key, os.environ.get(JEV_MANAGED_API_KEY_ENV)):
-            if candidate and candidate.strip():
-                return candidate.strip()
-        raise ConfigurationError(f"Missing Vidbyte API key for managed Jev. Pass api_key or set {JEV_MANAGED_API_KEY_ENV}.")
+    @classmethod
+    def vidbyte_managed(cls) -> DecisionModelConfig:
+        # Builds the pinned Vidbyte gateway configuration used by JevAgent by default.
+        # @intent jev-defaults-to-managed-gateway
+        # Keeping this factory separate leaves standalone DecisionModelConfig defaulted to direct TypeSafe access.
+        return cls(mode=DecisionModelMode.VIDBYTE_MANAGED)
 
 
 __all__ = [
