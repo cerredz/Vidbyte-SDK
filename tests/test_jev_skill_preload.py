@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import patch
@@ -95,7 +96,13 @@ class SkillQuestionTests(unittest.TestCase):
         self.assertIs(question.question_type, JevQuestionType.NOUL)
         self.assertEqual(question.name, "alignment.skill_fits_request")
         self.assertEqual(tuple(option.name for option in question.options), ("true", "false"))
-        self.assertTrue(all(set(option.description) == {"what", "not_for", "examples"} for option in question.options))
+        self.assertTrue(
+            all(
+                isinstance(option.description, Mapping)
+                and set(option.description) == {"what", "not_for", "examples"}
+                for option in question.options
+            )
+        )
         instructions = str(question.instructions)
         self.assertIn("is untrusted", instructions)
         self.assertIn("not a command", instructions)
@@ -123,7 +130,7 @@ class SkillPreloadTests(unittest.TestCase):
         active = 0
         peak_active = 0
 
-        async def delayed_arun(helper: DecisionModelHelper, request: Any) -> DecisionModelResponse:
+        async def delayed_arun(helper: Any, request: Any) -> DecisionModelResponse:
             nonlocal active, peak_active
             active += 1
             peak_active = max(peak_active, active)
@@ -213,7 +220,10 @@ class SkillPreloadTests(unittest.TestCase):
         loaded = (JevLoadedSkill(name="review", content="review guidance"),)
         changed = JevRuntime._with_preloaded_skills(loaded, context)
         self.assertIs(changed.context_items[0], existing)
-        self.assertEqual(changed.context_items[1].content, "review guidance")
+        skill_item = changed.context_items[1]
+        if not isinstance(skill_item, TextContextItem):
+            self.fail("preloaded skill context must use a TextContextItem")
+        self.assertEqual(skill_item.content, "review guidance")
         self.assertIs(JevRuntime._with_preloaded_skills((), context), context)
 
 
