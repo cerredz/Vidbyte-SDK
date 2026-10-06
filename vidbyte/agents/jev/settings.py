@@ -27,7 +27,6 @@ from vidbyte.lib.constants.jev import (
     JEV_RUN_BRIEF_EVERY_ITERATIONS,
     JEV_RUN_BRIEF_MAX_ITERATIONS,
     JEV_RUN_BRIEF_MAX_TOKENS,
-    JEV_RUN_BRIEF_MIN_GAP,
     JEV_RUN_STATE_MAX_ITERATIONS,
     JEV_RUN_STATE_MAX_TOKENS,
     JEV_SPECIALIST_MAX_COUNT,
@@ -195,22 +194,16 @@ class JevRunBriefSettings:
     api_key: str | None = field(default=None, repr=False)
     temperature: float | None = None
     every_iterations: int = JEV_RUN_BRIEF_EVERY_ITERATIONS
-    min_gap: int = JEV_RUN_BRIEF_MIN_GAP
     max_iterations: int = JEV_RUN_BRIEF_MAX_ITERATIONS
     max_tokens: int = JEV_RUN_BRIEF_MAX_TOKENS
 
     def __post_init__(self) -> None:
         self._validate_model()
         self._validate_temperature()
-        for field_name in ("every_iterations", "min_gap", "max_iterations", "max_tokens"):
+        for field_name in ("every_iterations", "max_iterations", "max_tokens"):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ConfigurationError(f"JevRunBriefSettings.{field_name} must be an integer of at least 1.", details={"received": repr(value)})
-        if self.min_gap > self.every_iterations:
-            # @intent the-cadence-has-room-for-early-refreshes
-            # min_gap is the floor between refreshes and every_iterations the ceiling; a floor above the ceiling
-            # would silently turn every early trigger off, so the contradiction is refused instead.
-            raise ConfigurationError("JevRunBriefSettings.min_gap cannot exceed every_iterations.", details={"min_gap": self.min_gap, "every_iterations": self.every_iterations})
 
     def _validate_model(self) -> None:
         # Normalizes the writer's provider and requires a model name with it.

@@ -260,10 +260,10 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 
 #### Jev Run Brief — `jev_run_brief`
 
-The prompts for JevRunBriefWriter, the cheap, tool-free recorder that keeps a JevAgent's
-run brief between its main agent's iterations. Starting from the previous brief, it
-reads the run's newest numbered events and returns the complete updated brief, in
-which every claim is a quote copied exactly from the event it cites.
+The prompts for JevRunBriefWriter, the tool-free recorder that performs structured
+note-taking compaction between a JevAgent's iterations. It reads the previous brief
+and fresh numbered events, then returns only new high-signal notes as verbatim event
+passages with ids. Code verifies and appends those notes to the goal-plus-notes brief.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_brief/system_prompt.md>
 

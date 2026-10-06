@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_run_brief.py
 
-PURPOSE: Verifies the Jev run brief without network calls: its settings, numbered event windows, exact run facts, quote verification, the separate writer agent, and the keeper's cadence and refresh paths.
-ROLE IN CODEBASE: Covers vidbyte/agents/jev/brief/, JevRunBriefSettings, the run-brief records in vidbyte/lib/dataclasses/jev.py, and the jev_run_brief prompt family.
-ARCHITECTURE NOTE: Only the writer's model call is replaced, by patching JevRunBriefWriter.arun; event numbering, facts, verification, records, and cadence run for real.
-COMMON MODIFICATION PATTERNS: Add a case beside the concern it covers when a trigger, cap, verification rule, or writer input changes.
-KNOWN EDGE CASES: Event E1 is the request; main-loop responses and tool calls are numbered from E2 in loop order.
-RELATED DOCS: docs/design/jev-run-brief.md.
+PURPOSE: Tests structured note selection, event-backed verification, append behavior, writer configuration, and keeper cadence.
+ROLE IN CODEBASE: Covers the standalone JEV structured note-taking compaction flow and its prompt/schema contracts.
+ARCHITECTURE NOTE: Model calls are replaced with structured replies; event numbering and note verification run for real.
+COMMON MODIFICATION PATTERNS: Add cases for schema caps, fresh-event verification, retry context, append behavior, and keeper cadence.
+KNOWN EDGE CASES: Empty deltas are valid; clipped prompt events retain their full bodies only for verification.
+RELATED DOCS: skills/jev-agent/SKILL.md and vidbyte/agents/jev/README.md.
 TESTS: python -m pytest tests/test_jev_run_brief.py.
 """
 
@@ -16,355 +16,307 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from vidbyte.agents.jev.brief import (
-    JevRunBriefEvents,
-    JevRunBriefKeeper,
-    JevRunBriefVerifier,
-    JevRunBriefWriter,
-    JevRunFactsReader,
-)
+from vidbyte.agents.jev.brief import JevRunBriefKeeper, JevRunBriefWriter
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRunBriefSettings
 from vidbyte.lib.constants.jev import (
-    JEV_RUN_BRIEF_APPROACHES_MAX,
     JEV_RUN_BRIEF_EVENT_MAX_CHARS,
-    JEV_RUN_BRIEF_EVIDENCE_MAX,
-    JEV_RUN_BRIEF_FAILURES_MAX,
-    JEV_RUN_BRIEF_ITEMS_MAX,
-    JEV_RUN_BRIEF_NEXT_STEPS_MAX,
-    JEV_RUN_BRIEF_QUOTE_MAX_CHARS,
-    JEV_RUN_BRIEF_RENDER_MAX_CHARS,
-    JEV_RUN_BRIEF_TEXT_MAX_CHARS,
+    JEV_RUN_BRIEF_NOTE_MAX_CHARS,
+    JEV_RUN_BRIEF_NOTES_MAX,
     JEV_RUN_BRIEF_WINDOW_MAX_CHARS,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevRunBrief,
-    JevRunBriefApproach,
-    JevRunBriefItem,
-    JevRunBriefPayload,
-    JevRunBriefQuote,
+    JevRunBriefAppendPayload,
+    JevRunBriefNote,
+    JevRunBriefVerification,
     JevRunBriefWindow,
 )
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult
-from vidbyte.lib.enums import JevRunBriefItemStatus, JevRunBriefOutcome, JevRunBriefUpdateStatus, ModelProvider
-from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
-from vidbyte.prompts.catalog import Prompts
-from vidbyte.tools._internal import IS_DONE_TOOL_NAME
 
 REQUEST = "Audit each file under src/api."
 
 
 def _settings(**overrides: Any) -> JevAgentSettings:
-    values: dict[str, Any] = {"name": "main", "system_prompt": "Do the work.", "provider": "openai", "model_name": "gpt-4.1", "api_key": "main-key"}
+    values: dict[str, Any] = {
+        "name": "main",
+        "system_prompt": "Do the work.",
+        "provider": "openai",
+        "model_name": "gpt-4.1",
+        "api_key": "main-key",
+    }
     values.update(overrides)
     return JevAgentSettings(**values)
 
 
-def _call(name: str, arguments: dict[str, Any], *, iteration: int, output: str = "ok", failed: bool = False) -> ToolCallContext:
-    result = ToolResult.error(name, output) if failed else ToolResult.success(name, output)
-    state = ToolCallState.FAILED if failed else ToolCallState.SUCCEEDED
-    return ToolCallContext(tool_name=name, arguments=arguments, state=state, result=result, iteration_count=iteration)
+def _call(name: str, arguments: dict[str, Any], *, iteration: int, output: str = "ok") -> ToolCallContext:
+    result = ToolResult.success(name, output)
+    return ToolCallContext(tool_name=name, arguments=arguments, state=ToolCallState.SUCCEEDED, result=result, iteration_count=iteration)
 
 
 def _run() -> tuple[list[str], list[ToolCallContext]]:
-    # E2..E5: a listing call in iteration 1, then three responses that plan and start the per-file audit.
-    responses = ["I will list the files.", "I will audit each of these files: a.py, b.py.", "Starting with a.py."]
+    responses = ["I will list the files.", "I will audit each of these files: a.py, b.py."]
     calls = [_call("list_files", {"path": "src/api"}, iteration=1, output="a.py\nb.py")]
     return responses, calls
 
 
-def _payload(**overrides: Any) -> JevRunBriefPayload:
-    values: dict[str, Any] = {
-        "goal": "Audit each file under src/api",
-        "goal_evidence": [{"event": "E1", "quote": "Audit each file under src/api."}],
-        "current_step": {"event": "E5", "quote": "Starting with a.py."},
-        "next_steps": [{"event": "E4", "quote": "I will audit each of these files"}],
-        "items": [
-            {"id": "a_py", "name": "a.py", "group": "src/api files", "status": "in_progress", "evidence": [{"event": "E3", "quote": "a.py"}]},
-            {"id": "b_py", "name": "b.py", "group": "src/api files", "status": "pending", "evidence": [{"event": "E3", "quote": "b.py"}]},
-        ],
-        "approaches": [],
-        "open_failures": [],
-    }
-    values.update(overrides)
-    return JevRunBriefPayload.model_validate(values)
+def _delta(*notes: tuple[str, str]) -> JevRunBriefAppendPayload:
+    return JevRunBriefAppendPayload(notes=[{"event": event, "text": text} for event, text in notes])
 
 
-def _reply(payload: object) -> AsyncMock:
-    return AsyncMock(return_value=SimpleNamespace(structured=payload))
+def _reply(payload: object) -> SimpleNamespace:
+    return SimpleNamespace(structured=payload)
 
 
 class JevRunBriefSettingsTests(unittest.TestCase):
-    def test_defaults_reuse_the_main_model_and_hide_the_key(self) -> None:
+    def test_defaults_and_provider_validation(self) -> None:
         settings = JevRunBriefSettings(model_name="cheap-model", api_key="secret")
         self.assertIsNone(settings.provider)
+        self.assertEqual(settings.every_iterations, 10)
         self.assertNotIn("secret", repr(settings))
-
-    def test_provider_is_normalized_and_needs_its_own_model(self) -> None:
         self.assertIs(JevRunBriefSettings(provider="anthropic", model_name="claude-haiku-4-5-20251001").provider, ModelProvider.ANTHROPIC)
         with self.assertRaisesRegex(ConfigurationError, "requires model_name"):
             JevRunBriefSettings(provider="anthropic")
 
-    def test_rejects_typesafe_unknown_providers_and_blank_models(self) -> None:
-        for kwargs in ({"provider": "typesafe", "model_name": "jev"}, {"provider": "nope", "model_name": "x"}, {"model_name": "  "}):
+    def test_rejects_invalid_provider_and_limits(self) -> None:
+        for kwargs in (
+            {"provider": "typesafe", "model_name": "jev"},
+            {"provider": "unknown", "model_name": "x"},
+            {"model_name": "  "},
+            {"every_iterations": 0},
+            {"every_iterations": True},
+            {"max_tokens": 1.5},
+            {"temperature": 2.5},
+        ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ConfigurationError):
                 JevRunBriefSettings(**kwargs)
 
-    def test_rejects_invalid_limits_and_a_floor_above_the_ceiling(self) -> None:
-        for kwargs in ({"every_iterations": 0}, {"min_gap": True}, {"max_tokens": 1.5}, {"temperature": 2.5}, {"min_gap": 6, "every_iterations": 5}):
-            with self.subTest(kwargs=kwargs), self.assertRaises(ConfigurationError):
-                JevRunBriefSettings(**kwargs)
 
+class JevRunBriefSchemaTests(unittest.TestCase):
+    def test_writer_schema_is_only_new_notes_and_aggregate_has_goal_plus_notes(self) -> None:
+        writer_schema = JevRunBriefAppendPayload.model_json_schema()
+        self.assertEqual(set(writer_schema["properties"]), {"notes"})
+        self.assertEqual(writer_schema["properties"]["notes"]["maxItems"], JEV_RUN_BRIEF_NOTES_MAX)
+        note_schema = writer_schema["$defs"]["JevRunBriefNotePayload"]["properties"]
+        self.assertEqual(note_schema["text"]["maxLength"], JEV_RUN_BRIEF_NOTE_MAX_CHARS)
 
-class JevRunBriefEventsTests(unittest.TestCase):
-    def test_numbers_events_like_the_event_log_and_looks_them_up(self) -> None:
-        events = JevRunBriefEvents.from_run(REQUEST, *_run())
-        self.assertEqual(events.last_event, 5)
-        self.assertTrue(events.text("E1").startswith("USER: "))
-        self.assertIn("list_files", events.text("E3") or "")
-        self.assertIsNone(events.text("E9"))
-        self.assertIsNone(events.text("14"))
+        aggregate = JevRunBrief(goal=REQUEST, notes=(), iteration=3, through_event=1).payload()
+        self.assertEqual(set(aggregate.model_dump()), {"goal", "notes"})
+        self.assertEqual(aggregate.goal, REQUEST)
+        self.assertEqual(aggregate.notes, [])
 
-    def test_contains_ignores_whitespace_but_not_words_or_events(self) -> None:
-        events = JevRunBriefEvents.from_run(REQUEST, *_run())
-        self.assertTrue(events.contains("E3", "a.py b.py"))
-        self.assertTrue(events.contains("E4", "audit  each of\nthese files"))
-        self.assertFalse(events.contains("E4", "audit every file"))
-        self.assertFalse(events.contains("E2", "a.py"))
-        self.assertFalse(events.contains("E4", "   "))
-
-    def test_window_shows_only_events_after_the_pointer(self) -> None:
-        events = JevRunBriefEvents.from_run(REQUEST, *_run())
-        window = events.window(after=3)
-        assert window is not None
-        self.assertEqual((window.first_event, window.last_event, window.omitted), (4, 5, 0))
-        self.assertNotIn("E3 ", window.text)
-        self.assertNotIn("USER", events.window(after=1).text)  # type: ignore[union-attr]
-        self.assertIsNone(events.window(after=5))
-
-    def test_long_events_are_clipped_head_and_tail(self) -> None:
-        text = "start " + "x" * (JEV_RUN_BRIEF_EVENT_MAX_CHARS * 2) + " end"
-        clipped = JevRunBriefEvents.clip(text, JEV_RUN_BRIEF_EVENT_MAX_CHARS)
-        self.assertTrue(clipped.startswith("start ") and clipped.endswith(" end"))
-        self.assertIn("characters left out", clipped)
-        self.assertEqual(JevRunBriefEvents.clip("short", 10), "short")
-
-    def test_a_full_window_keeps_the_newest_whole_then_headers_then_counts_the_rest(self) -> None:
-        body = "y" * JEV_RUN_BRIEF_EVENT_MAX_CHARS
-        responses = [f"response {index}\n{body}" for index in range(JEV_RUN_BRIEF_WINDOW_MAX_CHARS // JEV_RUN_BRIEF_EVENT_MAX_CHARS * 4)]
-        window = JevRunBriefEvents.from_run(REQUEST, responses, []).window(after=1)
-        assert window is not None
-        self.assertLessEqual(len(window.text), JEV_RUN_BRIEF_WINDOW_MAX_CHARS)
-        self.assertIn(f"response {len(responses) - 1}\n{body[:100]}", window.text)
-        self.assertIn("rest of this event left out for length", window.text)
-        self.assertGreater(window.omitted, 0)
-        self.assertTrue(window.text.startswith(f"[{window.omitted} earlier new events"))
-        self.assertEqual((window.first_event, window.last_event), (2, len(responses) + 1))
-
-
-class JevRunFactsReaderTests(unittest.TestCase):
-    def test_counts_work_streaks_repeats_and_activity_since_the_last_attempt(self) -> None:
-        calls = [
-            _call("read", {"path": "a"}, iteration=1),
-            _call("test", {"b": 1, "a": 2}, iteration=2, failed=True),
-            _call("test", {"a": 2, "b": 1}, iteration=3, failed=True),
-            _call("test", {"a": 2, "b": 1}, iteration=4, failed=True),
-            _call(IS_DONE_TOOL_NAME, {}, iteration=4),
-        ]
-        facts = JevRunFactsReader.read(["r"] * 4, calls, tokens_used=1_500, since_iteration=2, tokens_at_refresh=1_000)
-        self.assertEqual((facts.iteration, facts.tool_calls, facts.error_streak), (4, 4, 3))
-        self.assertEqual((facts.iterations_since_refresh, facts.errors_since_refresh, facts.repeats_since_refresh), (2, 2, 2))
-        self.assertEqual([(call.tool_name, call.count) for call in facts.repeated_calls], [("test", 3)])
-        self.assertAlmostEqual(facts.token_growth() or 0.0, 0.5)
-        self.assertIn("tokens used: 1500", facts.render())
-
-    def test_a_success_ends_the_streak_and_unknown_tokens_have_no_growth(self) -> None:
-        calls = [_call("test", {}, iteration=1, failed=True), _call("test", {}, iteration=2)]
-        facts = JevRunFactsReader.read(["r", "r"], calls, tokens_used=None, since_iteration=0, tokens_at_refresh=None)
-        self.assertEqual(facts.error_streak, 0)
-        self.assertIsNone(facts.token_growth())
-        self.assertIn("tokens used: unknown", facts.render())
-
-
-class JevRunBriefVerifierTests(unittest.TestCase):
-    def _verify(self, payload: JevRunBriefPayload) -> Any:
-        events = JevRunBriefEvents.from_run(REQUEST, *_run())
-        return JevRunBriefVerifier(events).verify(payload, iteration=3, through_event=5)
-
-    def test_keeps_verbatim_quotes_and_drops_entries_left_without_evidence(self) -> None:
-        payload = _payload(items=[
-            {"id": "a_py", "name": "a.py", "group": "src/api files", "status": "pending", "evidence": [{"event": "E3", "quote": "a.py"}]},
-            {"id": "c_py", "name": "c.py", "group": "src/api files", "status": "pending", "evidence": [{"event": "E3", "quote": "c.py"}]},
-        ])
-        verification = self._verify(payload)
-        self.assertEqual((verification.kept, verification.dropped), (4, 1))
-        self.assertEqual([item.id for item in verification.brief.items], ["a_py"])
-        self.assertEqual(verification.brief.through_event, 5)
-
-    def test_rejects_a_reply_whose_quotes_mostly_fail(self) -> None:
-        wrong = {"event": "E4", "quote": "I will refactor everything"}
-        verification = self._verify(_payload(goal_evidence=[wrong], current_step=wrong, next_steps=[wrong]))
-        self.assertIsNone(verification.brief)
-        self.assertGreater(verification.dropped, verification.kept)
-
-    def test_accepts_a_reply_with_no_quotes_and_rejects_a_blank_goal(self) -> None:
-        empty = {"goal_evidence": [], "current_step": None, "next_steps": [], "items": []}
-        self.assertIsNotNone(self._verify(_payload(**empty)).brief)
-        self.assertIsNone(self._verify(_payload(goal="   ", **empty)).brief)
-
-    def test_trims_to_caps_without_counting_trimmed_entries_against_the_writer(self) -> None:
-        item = {"name": "a.py", "group": "files", "status": "pending", "evidence": [{"event": "E3", "quote": "a.py"}] * (JEV_RUN_BRIEF_EVIDENCE_MAX + 2)}
-        items = [{**item, "id": f"item_{index}"} for index in range(JEV_RUN_BRIEF_ITEMS_MAX + 5)]
-        verification = self._verify(_payload(items=items, goal="g" * (JEV_RUN_BRIEF_TEXT_MAX_CHARS + 50)))
-        self.assertEqual(len(verification.brief.items), JEV_RUN_BRIEF_ITEMS_MAX)
-        self.assertEqual(len(verification.brief.items[0].evidence), JEV_RUN_BRIEF_EVIDENCE_MAX)
-        self.assertEqual(len(verification.brief.goal), JEV_RUN_BRIEF_TEXT_MAX_CHARS)
-        self.assertEqual(verification.dropped, 0)
-
-    def test_cuts_long_quotes_to_the_cap_and_keeps_the_first_of_duplicate_ids(self) -> None:
-        long_response = "Plan: " + "check every endpoint carefully " * 40
-        events = JevRunBriefEvents.from_run(REQUEST, [long_response], [])
-        approach = {"target": "t", "approach": "a", "outcome": "unresolved", "evidence": [{"event": "E2", "quote": "Plan:"}]}
-        payload = _payload(
-            goal_evidence=[], current_step=None, items=[],
-            next_steps=[{"event": "E2", "quote": long_response}],
-            approaches=[{**approach, "id": "same"}, {**approach, "id": "same", "target": "other"}],
-        )
-        brief = JevRunBriefVerifier(events).verify(payload, iteration=1, through_event=2).brief
-        self.assertEqual(len(brief.next_steps[0].quote), JEV_RUN_BRIEF_QUOTE_MAX_CHARS)
-        self.assertEqual([(approach.id, approach.target) for approach in brief.approaches], [("same", "t")])
-
-
-class JevRunBriefRecordTests(unittest.TestCase):
-    def test_a_brief_at_every_cap_renders_within_its_budget(self) -> None:
-        quote = JevRunBriefQuote("E1234567", "q" * JEV_RUN_BRIEF_QUOTE_MAX_CHARS)
-        evidence = (quote,) * JEV_RUN_BRIEF_EVIDENCE_MAX
-        text = "t" * JEV_RUN_BRIEF_TEXT_MAX_CHARS
-        brief = JevRunBrief(
-            goal=text, iteration=10_000, through_event=1_234_567, goal_evidence=evidence, current_step=quote,
-            next_steps=(quote,) * JEV_RUN_BRIEF_NEXT_STEPS_MAX,
-            items=tuple(JevRunBriefItem(f"i{'x' * 60}{index:03d}", text, text, JevRunBriefItemStatus.IN_PROGRESS, evidence) for index in range(JEV_RUN_BRIEF_ITEMS_MAX)),
-            approaches=tuple(JevRunBriefApproach(f"a{'x' * 60}{index:03d}", text, text, JevRunBriefOutcome.UNRESOLVED, evidence) for index in range(JEV_RUN_BRIEF_APPROACHES_MAX)),
-            open_failures=(quote,) * JEV_RUN_BRIEF_FAILURES_MAX,
-        )
-        self.assertLessEqual(len(brief.render()), JEV_RUN_BRIEF_RENDER_MAX_CHARS)
-
-    def test_records_reject_values_outside_their_bounds(self) -> None:
-        quote = JevRunBriefQuote("E2", "text")
-        cases = (
-            lambda: JevRunBriefQuote("e2", "text"),
-            lambda: JevRunBriefQuote("E2", "q" * (JEV_RUN_BRIEF_QUOTE_MAX_CHARS + 1)),
-            lambda: JevRunBriefItem("a", "n", "g", JevRunBriefItemStatus.DONE, ()),
-            lambda: JevRunBrief(goal="g", iteration=1, through_event=2, next_steps=(quote,) * (JEV_RUN_BRIEF_NEXT_STEPS_MAX + 1)),
-            lambda: JevRunBrief(goal="g", iteration=True, through_event=2),
-            lambda: JevRunBriefWindow(first_event=5, last_event=4, text="x"),
-        )
-        for build in cases:
-            with self.assertRaises(ConfigurationError):
-                build()
+    def test_note_record_rejects_text_over_its_cap(self) -> None:
+        with self.assertRaises(ConfigurationError):
+            JevRunBriefNote(event="E2", text="x" * (JEV_RUN_BRIEF_NOTE_MAX_CHARS + 1))
 
 
 class JevRunBriefWriterTests(unittest.IsolatedAsyncioTestCase):
-    def test_uses_the_main_model_and_key_unless_the_brief_names_its_own(self) -> None:
-        same = JevRunBriefWriter(_settings(), JevRunBriefSettings(model_name="gpt-4.1-mini"))
-        self.assertEqual((same.runner_config.model_name, same.runner_config.api_key), ("gpt-4.1-mini", "main-key"))
-        other = JevRunBriefWriter(_settings(), JevRunBriefSettings(provider="anthropic", model_name="claude-haiku-4-5-20251001", api_key="brief-key"))
-        self.assertEqual((str(other.runner_config.provider), other.runner_config.api_key), (str(ModelProvider.ANTHROPIC.value), "brief-key"))
+    def setUp(self) -> None:
+        self.writer = JevRunBriefWriter(_settings(), JevRunBriefSettings())
+
+    def test_uses_main_provider_by_default_and_allows_an_independent_provider(self) -> None:
+        self.assertEqual((self.writer.runner_config.model_name, self.writer.runner_config.api_key), ("gpt-4.1", "main-key"))
+        other = JevRunBriefWriter(
+            _settings(),
+            JevRunBriefSettings(provider="anthropic", model_name="claude-haiku-4-5-20251001", api_key="brief-key"),
+        )
+        self.assertEqual((str(other.runner_config.provider), other.runner_config.api_key), (ModelProvider.ANTHROPIC.value, "brief-key"))
         self.assertEqual(len(other.tools), 0)
 
-    async def test_clears_history_and_reads_the_previous_brief_or_none(self) -> None:
-        writer = JevRunBriefWriter(_settings(), JevRunBriefSettings())
-        window = JevRunBriefWindow(first_event=2, last_event=3, text="E2 ASSISTANT iteration=1: hi\nE3 ASSISTANT iteration=2: bye")
-        previous = JevRunBrief(goal="Earlier goal", iteration=1, through_event=1)
-        writer.history.append("stale")  # type: ignore[arg-type]
-        with patch.object(writer, "arun", new=_reply(_payload())) as arun:
-            self.assertIsInstance(await writer.write(REQUEST, None, window), JevRunBriefPayload)
-            self.assertEqual(writer.history, [])
-            await writer.write(REQUEST, previous, window)
-        first, second = (call.args[0].prompt for call in arun.call_args_list)
-        self.assertIn("<previous_brief>\nnone\n</previous_brief>", first)
-        self.assertIn('"goal":"Earlier goal"', second)
-        self.assertIn('first="E2" last="E3"', second)
-        self.assertNotIn("{", Prompts().get(Prompt.JEV_RUN_BRIEF_UPDATE_PROMPT).format(request="r", previous_brief="p", first_event="E2", last_event="E3", events="e"))
+    def test_window_reuses_event_log_ids_and_keeps_full_fresh_events(self) -> None:
+        responses, calls = _run()
+        window = self.writer.window(REQUEST, responses, calls, after_event=1)
+        self.assertIsNotNone(window)
+        assert window is not None
+        self.assertEqual((window.first_event, window.last_event), (2, 4))
+        self.assertIn("E2 ASSISTANT iteration=1: I will list the files.", window.text)
+        self.assertEqual(window.full_events[1][0], 3)
+        self.assertIn("output=a.py", window.full_events[1][1])
 
-    async def test_an_outage_or_a_reply_without_the_schema_yields_none(self) -> None:
-        writer = JevRunBriefWriter(_settings(), JevRunBriefSettings())
-        window = JevRunBriefWindow(first_event=2, last_event=2, text="E2 x")
-        with patch.object(writer, "arun", new=AsyncMock(side_effect=VidbyteSdkError("down"))):
-            self.assertIsNone(await writer.write(REQUEST, None, window))
-        with patch.object(writer, "arun", new=_reply({"goal": "not a payload"})):
-            self.assertIsNone(await writer.write(REQUEST, None, window))
+        later = self.writer.window(REQUEST, responses, calls, after_event=3)
+        self.assertIsNotNone(later)
+        assert later is not None
+        self.assertEqual((later.first_event, later.last_event), (4, 4))
+        self.assertIsNone(self.writer.window(REQUEST, responses, calls, after_event=4))
+
+    def test_window_clips_each_event_and_bounds_total_input(self) -> None:
+        responses = ["x" * 5_000 for _ in range(25)]
+        window = self.writer.window(REQUEST, responses, [], after_event=1)
+        self.assertIsNotNone(window)
+        assert window is not None
+        self.assertLessEqual(len(window.text), JEV_RUN_BRIEF_WINDOW_MAX_CHARS)
+        self.assertGreater(window.omitted, 0)
+        self.assertLess(len(window.full_events), len(responses))
+        self.assertIn(" [...] ", window.text)
+        self.assertGreater(len(window.full_events[-1][1]), JEV_RUN_BRIEF_EVENT_MAX_CHARS)
+
+    def test_verification_requires_a_verbatim_passage_from_a_fresh_full_event(self) -> None:
+        responses, calls = _run()
+        window = self.writer.window(REQUEST, responses, calls, after_event=1)
+        assert window is not None
+        verified = self.writer.verify(_delta(("E3", "output=a.py\nb.py")), REQUEST, None, window, iteration=2)
+        self.assertIsNotNone(verified.brief)
+        assert verified.brief is not None
+        self.assertEqual(verified.brief.goal, REQUEST)
+        self.assertEqual(verified.brief.notes, (JevRunBriefNote("E3", "output=a.py\nb.py"),))
+        self.assertEqual(verified.brief.through_event, 4)
+
+        bad_event = self.writer.verify(_delta(("E1", "Audit each file")), REQUEST, None, window, iteration=2)
+        self.assertIsNone(bad_event.brief)
+        self.assertIn("not a fresh full event", bad_event.error or "")
+        bad_text = self.writer.verify(_delta(("E2", "I did something else")), REQUEST, None, window, iteration=2)
+        self.assertIsNone(bad_text.brief)
+        self.assertIn("not present in full event E2", bad_text.error or "")
+
+    def test_verification_rejects_duplicates_from_delta_or_previous_brief(self) -> None:
+        responses, calls = _run()
+        window = self.writer.window(REQUEST, responses, calls, after_event=1)
+        assert window is not None
+        repeated = _delta(("E2", "I will list the files."), ("E2", "I will   list the files."))
+        duplicate = self.writer.verify(repeated, REQUEST, None, window, iteration=2)
+        self.assertIsNone(duplicate.brief)
+        self.assertIn("duplicates an existing note", duplicate.error or "")
+
+        previous = JevRunBrief(
+            goal=REQUEST,
+            notes=(JevRunBriefNote("E2", "I will list the files."),),
+            iteration=1,
+            through_event=1,
+        )
+        duplicate = self.writer.verify(_delta(("E2", "I will list the files.")), REQUEST, previous, window, iteration=2)
+        self.assertIsNone(duplicate.brief)
+        self.assertIn("duplicates an existing note", duplicate.error or "")
+
+    def test_append_keeps_only_newest_fifty_notes(self) -> None:
+        responses = ["old response"] * 50 + ["new note at event fifty-two"]
+        window = self.writer.window(REQUEST, responses, [], after_event=51)
+        assert window is not None
+        previous = JevRunBrief(
+            goal=REQUEST,
+            notes=tuple(JevRunBriefNote(f"E{number}", f"old note {number}") for number in range(2, 52)),
+            iteration=10,
+            through_event=51,
+        )
+        result = self.writer.verify(_delta(("E52", "new note at event fifty-two")), REQUEST, previous, window, iteration=11)
+        self.assertIsNotNone(result.brief)
+        assert result.brief is not None
+        self.assertEqual(len(result.brief.notes), JEV_RUN_BRIEF_NOTES_MAX)
+        self.assertEqual(result.brief.notes[0].event, "E3")
+        self.assertEqual(result.brief.notes[-1], JevRunBriefNote("E52", "new note at event fifty-two"))
+
+    def test_empty_delta_is_valid_and_advances_the_event_pointer(self) -> None:
+        previous = JevRunBrief(goal=REQUEST, notes=(JevRunBriefNote("E2", "old evidence"),), iteration=3, through_event=2)
+        window = JevRunBriefWindow(
+            first_event=3,
+            last_event=3,
+            text="E3 ASSISTANT iteration=2: no new note",
+            full_events=((3, "ASSISTANT iteration=2: no new note"),),
+        )
+        result = self.writer.verify(_delta(), REQUEST, previous, window, iteration=4)
+        self.assertIsNotNone(result.brief)
+        assert result.brief is not None
+        self.assertEqual(result.brief.notes, previous.notes)
+        self.assertEqual(result.brief.through_event, 3)
+
+    async def test_invalid_delta_retry_includes_original_events_and_verification_error(self) -> None:
+        responses, calls = _run()
+        window = self.writer.window(REQUEST, responses, calls, after_event=1)
+        assert window is not None
+        invalid = _delta(("E2", "not in the event"))
+        valid = _delta(("E2", "I will list the files."))
+        self.writer.history.append("stale")  # type: ignore[arg-type]
+        with patch.object(self.writer, "arun", new=AsyncMock(side_effect=[_reply(invalid), _reply(valid)])) as arun:
+            result = await self.writer.write(REQUEST, None, window, iteration=len(responses))
+        self.assertIsNotNone(result)
+        assert result is not None and result.brief is not None
+        self.assertEqual(self.writer.history, [])
+        self.assertEqual(arun.await_count, 2)
+        first_prompt = arun.call_args_list[0].args[0].prompt
+        retry_prompt = arun.call_args_list[1].args[0].prompt
+        self.assertIn(window.text, first_prompt)
+        self.assertIn(window.text, retry_prompt)
+        self.assertIn("<verification_error>", retry_prompt)
+        self.assertIn("not present in full event E2", retry_prompt)
+
+    async def test_outage_or_non_append_schema_returns_none(self) -> None:
+        window = self.writer.window(REQUEST, ["one response"], [], after_event=1)
+        assert window is not None
+        with patch.object(self.writer, "arun", new=AsyncMock(side_effect=VidbyteSdkError("down"))):
+            self.assertIsNone(await self.writer.write(REQUEST, None, window, iteration=1))
+        with patch.object(self.writer, "arun", new=AsyncMock(return_value=_reply({"goal": REQUEST}))):
+            self.assertIsNone(await self.writer.write(REQUEST, None, window, iteration=1))
 
 
 class JevRunBriefKeeperTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.keeper = JevRunBriefKeeper(_settings(), JevRunBriefSettings(every_iterations=6, min_gap=2))
+        self.keeper = JevRunBriefKeeper(_settings(), JevRunBriefSettings(every_iterations=6))
         self.keeper.begin(REQUEST)
 
-    def _facts(self, iteration: int, calls: list[ToolCallContext] | None = None, tokens: int | None = None) -> Any:
-        return self.keeper.read_facts(["r"] * iteration, calls or [], tokens_used=tokens)
+    def test_simple_cadence_starts_early_then_waits_for_new_iterations(self) -> None:
+        self.assertFalse(self.keeper.due(2))
+        self.assertTrue(self.keeper.due(3))
+        self.keeper._last_attempt_iteration = 3
+        self.assertFalse(self.keeper.due(8))
+        self.assertTrue(self.keeper.due(9))
 
-    def test_cadence_waits_for_the_opening_plan_then_the_ceiling(self) -> None:
-        self.assertFalse(self.keeper.due(self._facts(2)))
-        self.assertTrue(self.keeper.due(self._facts(3)))
-        self.keeper.brief = JevRunBrief(goal="g", iteration=3, through_event=4)
-        self.keeper._attempted_at = 3
-        self.assertFalse(self.keeper.due(self._facts(4)))
-        self.assertFalse(self.keeper.due(self._facts(8)))
-        self.assertTrue(self.keeper.due(self._facts(9)))
+    async def test_rejection_preserves_brief_and_pointer_until_a_valid_empty_update(self) -> None:
+        initial = JevRunBrief(
+            goal=REQUEST,
+            notes=(JevRunBriefNote("E2", "I will list the files."),),
+            iteration=3,
+            through_event=4,
+        )
+        rejected = JevRunBriefVerification(brief=None, error="Note 1 is not verifiable")
+        advanced = JevRunBrief(goal=REQUEST, notes=initial.notes, iteration=15, through_event=16)
+        with (
+            patch.object(
+                self.keeper.writer,
+                "write",
+                new=AsyncMock(side_effect=[JevRunBriefVerification(brief=initial), rejected, JevRunBriefVerification(brief=advanced)]),
+            ) as write,
+            patch.object(self.keeper.writer, "window", wraps=self.keeper.writer.window) as window,
+        ):
+            first = await self.keeper.refresh_if_due(["r1", "r2", "r3"], [])
+            self.assertIs(first.brief, initial)  # type: ignore[union-attr]
+            self.assertEqual(self.keeper._through_event, 4)
+            self.assertFalse(self.keeper.due(8))
 
-    def test_early_triggers_fire_after_the_floor_only(self) -> None:
-        self.keeper.brief = JevRunBrief(goal="g", iteration=3, through_event=4)
-        self.keeper._attempted_at, self.keeper._tokens_at_attempt = 3, 1_000
-        failing = [_call("test", {"n": index}, iteration=4 + index, failed=True) for index in range(3)]
-        repeated = [_call("read", {"p": "a"}, iteration=4 + index) for index in range(3)]
-        self.assertFalse(self.keeper.due(self._facts(4, failing)))
-        self.assertTrue(self.keeper.due(self._facts(6, failing)))
-        self.assertTrue(self.keeper.due(self._facts(6, repeated)))
-        self.assertTrue(self.keeper.due(self._facts(5, tokens=1_250)))
-        self.assertFalse(self.keeper.due(self._facts(5, tokens=1_200)))
+            failed = await self.keeper.refresh_if_due([f"r{i}" for i in range(9)], [])
+            self.assertIs(failed, rejected)
+            self.assertIs(self.keeper.brief, initial)
+            self.assertEqual(self.keeper._through_event, 4)
+            self.assertFalse(self.keeper.due(14))
 
-    async def test_a_verified_refresh_replaces_the_brief_and_advances_the_pointer(self) -> None:
-        responses, calls = _run()
-        with patch.object(self.keeper.writer, "arun", new=_reply(_payload())) as arun:
-            update = await self.keeper.refresh_if_due(responses, calls, tokens_used=100)
-            self.assertEqual((update.status, update.first_event, update.last_event), (JevRunBriefUpdateStatus.UPDATED, 2, 5))
-            self.assertEqual(self.keeper.brief.through_event, 5)
-            responses += ["Now b.py.", "Both files audited."]
-            await self.keeper.refresh_if_due(responses, calls, tokens_used=200)
-        second_prompt = arun.call_args_list[1].args[0].prompt
-        self.assertIn('first="E6" last="E7"', second_prompt)
-        self.assertIn('"id":"a_py"', second_prompt)
-        self.assertIs(self.keeper.last_update.status, JevRunBriefUpdateStatus.UPDATED)
+            updated = await self.keeper.refresh_if_due([f"r{i}" for i in range(15)], [])
+            self.assertIs(updated.brief, advanced)  # type: ignore[union-attr]
+            self.assertEqual(self.keeper._through_event, 16)
+            self.assertEqual([call.kwargs["after_event"] for call in window.call_args_list], [1, 4, 4])
+            self.assertEqual(write.await_count, 3)
+            self.assertFalse(self.keeper.due(16))
+            self.assertTrue(self.keeper.due(21))
 
-    async def test_an_outage_or_a_rejection_keeps_the_brief_and_rereads_the_same_events(self) -> None:
-        responses, calls = _run()
-        wrong = {"event": "E4", "quote": "invented"}
-        with patch.object(self.keeper.writer, "arun", new=_reply(None)):
-            update = await self.keeper.refresh_if_due(responses, calls, tokens_used=None)
-        self.assertIs(update.status, JevRunBriefUpdateStatus.UNAVAILABLE)
+    async def test_unavailable_writer_preserves_pointer_and_waits_for_the_cadence(self) -> None:
+        window = self.keeper.writer.window(REQUEST, ["a", "b", "c"], [], after_event=1)
+        assert window is not None
+        with patch.object(self.keeper.writer, "write", new=AsyncMock(return_value=None)) as write:
+            result = await self.keeper.refresh_if_due(["a", "b", "c"], [])
+        self.assertIsNone(result)
         self.assertIsNone(self.keeper.brief)
-        responses += ["More work.", "Even more work."]
-        with patch.object(self.keeper.writer, "arun", new=_reply(_payload(goal_evidence=[wrong], current_step=wrong, next_steps=[wrong], items=[]))):
-            update = await self.keeper.refresh_if_due(responses, calls, tokens_used=None)
-        self.assertIs(update.status, JevRunBriefUpdateStatus.REJECTED)
-        self.assertEqual(update.first_event, 2)
-        self.assertIsNone(self.keeper.brief)
+        self.assertEqual(self.keeper._through_event, 1)
+        self.assertFalse(self.keeper.due(8))
+        self.assertTrue(self.keeper.due(9))
+        write.assert_awaited_once()
 
-    async def test_no_due_refresh_or_no_new_events_calls_no_model(self) -> None:
-        with patch.object(self.keeper.writer, "arun", new=_reply(_payload())) as arun:
-            self.assertIsNone(await self.keeper.refresh_if_due(["r"], [], tokens_used=None))
-            self.keeper._through_event = 4
-            self.assertIsNone(await self.keeper.refresh_if_due(["r", "r", "r"], [], tokens_used=None))
-        arun.assert_not_awaited()
-        self.assertEqual(self.keeper._attempted_at, 3)
-
-    def test_begin_forgets_the_previous_run(self) -> None:
-        self.keeper.brief = JevRunBrief(goal="g", iteration=3, through_event=4)
-        self.keeper._attempted_at = 9
-        self.keeper.begin("next request")
+    def test_begin_resets_the_goal_brief_pointer_and_cadence(self) -> None:
+        self.keeper.brief = JevRunBrief(goal=REQUEST, notes=(), iteration=3, through_event=4)
+        self.keeper._through_event = 4
+        self.keeper._last_attempt_iteration = 3
+        self.keeper.begin("new mission")
         self.assertIsNone(self.keeper.brief)
-        self.assertEqual((self.keeper.request, self.keeper._attempted_at), ("next request", 0))
+        self.assertEqual(self.keeper.request, "new mission")
+        self.assertEqual(self.keeper._through_event, 1)
+        self.assertIsNone(self.keeper._last_attempt_iteration)
 
 
 if __name__ == "__main__":

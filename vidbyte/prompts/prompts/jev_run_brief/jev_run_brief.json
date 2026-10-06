@@ -1,6 +1,6 @@
 {
   "name": "Jev Run Brief",
-  "description": "The prompts for JevRunBriefWriter, the cheap, tool-free agent that keeps a JevAgent's run brief between its main agent's iterations. The system prompt makes it a recorder, not an advisor: starting from the previous brief, it reads the run's newest numbered events and returns the complete updated brief, in which every claim is a quote copied exactly from the event it cites so that code can verify it. The update prompt carries the user's request, the previous brief or none, and the new events. Its placeholders are {request}, {previous_brief}, {first_event}, {last_event}, and {events}.",
+  "description": "The prompts for JevRunBriefWriter, the cheap, tool-free agent that performs structured note-taking compaction between a JevAgent's iterations. The writer reads the previous brief and fresh numbered events, then returns only new high-signal notes as verbatim event passages with event ids; code verifies and appends them to the goal-plus-notes aggregate. The update prompt carries the original request, previous brief, and bounded new events. Its placeholders are {request}, {previous_brief}, {first_event}, {last_event}, and {events}.",
   "key": "jev_run_brief",
   "prompts": {
     "system_prompt": {

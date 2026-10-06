@@ -239,29 +239,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-class JevRunBriefItemStatus(str, Enum):
-    """Where one item the main agent works through stands, as the cited run events show it."""
-
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    DONE = "done"
-    FAILED = "failed"
-
-
-class JevRunBriefOutcome(str, Enum):
-    """How one approach the main agent tried turned out, as the cited run events show it."""
-
-    WORKED = "worked"
-    FAILED = "failed"
-    UNRESOLVED = "unresolved"
-
-
-class JevRunBriefUpdateStatus(str, Enum):
-    """What one attempt to refresh the run brief did: replaced it, was rejected by verification, or produced nothing usable."""
-
-    UPDATED = "updated"
-    REJECTED = "rejected"
-    UNAVAILABLE = "unavailable"
-
-
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefItemStatus", "JevRunBriefOutcome", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
