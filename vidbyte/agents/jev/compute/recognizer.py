@@ -1,4 +1,13 @@
-"""Recognize the dynamic-compute options supported by one shared evidence snapshot."""
+"""FILE: vidbyte/agents/jev/compute/recognizer.py
+
+PURPOSE: Ask Jev which enabled dynamic-compute option best fits the main agent's current run evidence.
+ROLE IN CODEBASE: JevComputeController builds one recognizer and calls recognize after every verified run-brief update.
+ARCHITECTURE NOTE: All enabled option questions share one request and one evidence state; code chooses the highest complete mean P(true) above the common threshold.
+COMMON MODIFICATION PATTERNS: Register fixed option questions in vidbyte/lib/jev/compute/ and keep selection policy here.
+KNOWN EDGE CASES: Provider errors and incomplete option answers produce no selection; enum order breaks score ties.
+RELATED DOCS: docs/design/jev-compute-situations.md.
+TESTS: tests/test_jev_compute_situations.py.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +45,8 @@ class JevComputeRecognizer:
         events: JevRunEventLog,
     ) -> JevComputeDecision:
         """Evaluate all enabled options in one request and select the highest qualifying mean P(true)."""
+        # @intent one-request-compares-options-on-the-same-state
+        # Shared questions and state make option means comparable; missing answers cannot qualify an option.
         if not self.dynamic_compute:
             return JevComputeDecision(iteration=iteration, results=(), option=None)
 
@@ -66,12 +77,16 @@ class JevComputeRecognizer:
             }
             results.append(JevComputeOptionResult(option=option, score=None if verdict is None else verdict.score, answers=answers))
 
-        qualifying = [result for result in results if result.score is not None and result.score >= JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD]
-        candidate = max(qualifying, key=lambda result: result.score, default=None)
+        qualifying: list[tuple[float, JevComputeOptionResult]] = []
+        for result in results:
+            score = result.score
+            if score is not None and score >= JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD:
+                qualifying.append((score, result))
+        candidate = max(qualifying, key=lambda item: item[0], default=None)
         return JevComputeDecision(
             iteration=iteration,
             results=tuple(results),
-            option=None if candidate is None else candidate.option,
+            option=None if candidate is None else candidate[1].option,
             usage=usage,
         )
 

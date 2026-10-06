@@ -1,4 +1,13 @@
-"""Own JevAgent's run-brief refresh and dynamic-compute recognition checkpoint."""
+"""FILE: vidbyte/agents/jev/compute/controller.py
+
+PURPOSE: Read exact run facts, refresh the verified run brief, recognize enabled dynamic-compute options, and report checkpoint outcomes.
+ROLE IN CODEBASE: JevAgent builds the controller when compute is enabled; the runtime begins each run and calls checkpoint after tool iterations.
+ARCHITECTURE NOTE: Recognition uses one fresh brief and runs only after a verified refresh. The checkpoint observes and records without changing the main run.
+COMMON MODIFICATION PATTERNS: Keep refresh status reporting and recognition order in checkpoint; send records through JevResponse.
+KNOWN EDGE CASES: Facts are reported at every checkpoint. A rejected or unavailable brief refresh never triggers recognition.
+RELATED DOCS: docs/design/jev-compute-situations.md and docs/design/jev-run-brief.md.
+TESTS: tests/test_jev_compute.py and tests/test_jev_compute_situations.py.
+"""
 
 from __future__ import annotations
 
@@ -26,10 +35,14 @@ class JevComputeController:
 
     def begin(self, request: str) -> None:
         """Start a new run without carrying forward the previous run's brief."""
+        # @intent every-run-starts-without-a-brief
+        # A brief and its event pointer describe one request only; keeper.begin resets both before the next run.
         self.keeper.begin(request)
 
     async def checkpoint(self, state: BaseAgentRuntimeLoopState) -> None:
         """Read and report facts, refresh the brief when due, then recognize only a verified update."""
+        # @intent checkpoint-reports-facts-and-recognizes-only-updated-briefs
+        # Facts are exact at every checkpoint, while recognition uses a brief only after the refresh status confirms it was updated.
         facts = JevRunFactsReader.read(state.iteration_outputs, state.call_contexts, tokens_used=state.tokens_used)
         self.response.run_facts(facts)
         iteration = len(state.iteration_outputs)
