@@ -18,10 +18,14 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import (
+    CODEX_ANSWERING_MODEL_KEY,
+    CODEX_FAILURES_KEY,
+    CODEX_FALLBACK_ATTEMPTS_KEY,
     CODEX_PROVIDER_NAME,
     CODEX_ROOT_FORK_DEPTH,
     CODEX_SUBAGENT_ITEM_TYPES,
     CODEX_SUPPORTED_ITEM_TYPES,
+    CODEX_USAGE_ROLLUP_KEY,
 )
 from vidbyte.lib.dataclasses.codex import (
     CodexItem,
@@ -155,12 +159,24 @@ class CodexResultTranslator:
                 or CODEX_ROOT_FORK_DEPTH
             ),
         )
-        metadata = {
+        metadata: dict[str, Any] = {
             **lineage,
             **dict(request.input_metadata),
             "provider": CODEX_PROVIDER_NAME,
             "provider_item_count": len(result.items),
         }
+        # An absent rollup means no accounting ran, which is not the same fact as a
+        # rollup that recorded zero calls; omit the key rather than publishing None.
+        if request.usage_rollup is not None:
+            metadata[CODEX_USAGE_ROLLUP_KEY] = request.usage_rollup
+        # Each key is omitted when empty, so a caller can tell "no failures" from
+        # "one recovered failure", and a first-attempt answer from a fallback answer.
+        if request.failures:
+            metadata[CODEX_FAILURES_KEY] = request.failures
+        if request.fallback_attempts:
+            metadata[CODEX_FALLBACK_ATTEMPTS_KEY] = request.fallback_attempts
+        if request.answering_model:
+            metadata[CODEX_ANSWERING_MODEL_KEY] = request.answering_model
         return AgentMessage(
             sender=agent.name,
             recipient=request.recipient,

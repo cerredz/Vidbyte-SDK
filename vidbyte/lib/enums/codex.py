@@ -79,6 +79,14 @@ class CodexThreadStartSource(str, Enum):
     CLEAR = "clear"
 
 
+class CodexFailureClass(str, Enum):
+    """Whether a Codex failure can be survived, and by what kind of retry."""
+
+    MODEL_RETRYABLE = "model_retryable"
+    TRANSIENT = "transient"
+    TERMINAL = "terminal"
+
+
 class CodexInputType(str, Enum):
     """Input variants accepted by a Codex turn."""
 
@@ -99,6 +107,7 @@ class CodexContextAnchor(StrEnum):
 
 
 __all__ = [
+    "CodexFailureClass",
     "CodexApprovalMode",
     "CodexContextAnchor",
     "CodexInputType",

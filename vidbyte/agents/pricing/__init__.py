@@ -28,6 +28,7 @@ from vidbyte.agents.pricing.compatible import (
     XAIUsage,
 )
 from vidbyte.agents.pricing.openrouter import OpenRouterUsage
+from vidbyte.agents.pricing.typesafe import JevUsage
 from vidbyte.agents.pricing.records import OperationUsageRecord, UsageRecord, UsageRollup
 from vidbyte.agents.pricing.tracker import UsageTracker
 
@@ -37,6 +38,7 @@ __all__ = [
     "DeepSeekUsage",
     "GLMUsage",
     "GeminiUsage",
+    "JevUsage",
     "MiniMaxUsage",
     "OpenAIUsage",
     "OpenRouterUsage",

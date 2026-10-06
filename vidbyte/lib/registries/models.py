@@ -67,6 +67,7 @@ class ProviderModelRegistry:
         ModelProvider.OPENROUTER: "openrouter/auto",
         ModelProvider.ELEVENLABS: "eleven_multilingual_v2",
         ModelProvider.PLAYAI: "PlayDialog",
+        ModelProvider.TYPESAFE: "jev-latest",
     }
 
     API_KEY_ENV_VARS: ClassVar[dict[ModelProvider, str]] = {
@@ -83,6 +84,7 @@ class ProviderModelRegistry:
         ModelProvider.OPENROUTER: "OPENROUTER_API_KEY",
         ModelProvider.ELEVENLABS: "ELEVENLABS_API_KEY",
         ModelProvider.PLAYAI: "PLAYAI_API_KEY",
+        ModelProvider.TYPESAFE: "TYPESAFE_API_KEY",
     }
 
     DEFAULT_ENDPOINTS: ClassVar[dict[ModelProvider, str]] = {
@@ -99,6 +101,7 @@ class ProviderModelRegistry:
         ModelProvider.OPENROUTER: "https://openrouter.ai/api/v1",
         ModelProvider.ELEVENLABS: "https://api.elevenlabs.io/v1",
         ModelProvider.PLAYAI: "https://api.play.ai/api/v1",
+        ModelProvider.TYPESAFE: "https://api.typesafe.ai/v1",
     }
 
     MODEL_ALIASES: ClassVar[dict[ModelProvider, dict[str, str]]] = {

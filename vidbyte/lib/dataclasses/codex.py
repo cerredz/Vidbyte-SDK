@@ -11,6 +11,7 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -18,13 +19,17 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, JsonValue
 
 from vidbyte.lib.constants.codex import (
+    CODEX_FIRST_ATTEMPT,
+    CODEX_PRIMARY_CHAIN_INDEX,
     CODEX_RESERVED_SUBAGENT_NAMES,
     CODEX_ROOT_FORK_DEPTH,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
+from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
+    CodexFailureClass,
     CodexInputType,
     CodexPersonality,
     CodexReasoningEffort,
@@ -36,8 +41,14 @@ from vidbyte.lib.enums.codex import (
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.codex.tools import CodexToolBridge
+    from vidbyte.agents.pricing.records import UsageRollup
+    from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
+    from vidbyte.lib.dataclasses.failure import Failure
+    from vidbyte.middleware.base import AgentMiddleware
+    from vidbyte.tools.adapters import ToolInput
 
 
 def _require_text(owner: str, field_name: str, value: str) -> None:
@@ -54,9 +65,23 @@ def _optional_text(owner: str, field_name: str, value: str) -> None:
         )
 
 
+def _require_non_negative_int(owner: str, field_name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigurationError(
+            f"{owner} {field_name} must be a non-negative integer."
+        )
+
+
 def _require_bool(owner: str, field_name: str, value: object) -> None:
     if not isinstance(value, bool):
         raise ConfigurationError(f"{owner} {field_name} must be a boolean.")
+
+
+def _is_tool_shaped(value: object) -> bool:
+    # A BaseTool exposes a spec() declaration and an execute() coroutine.
+    return callable(getattr(value, "spec", None)) and callable(
+        getattr(value, "execute", None)
+    )
 
 
 def _is_json_value(value: object) -> bool:
@@ -310,8 +335,15 @@ class CodexHarnessAgentSettings:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     thread_id: str = ""
     context_placements: tuple[CodexContextPlacement, ...] = ()
+    middleware: tuple[AgentMiddleware, ...] = ()
+    fallback: AgentFallbackSettings | None = None
+    tools: tuple[ToolInput, ...] = ()
+    tool_permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
 
     def __post_init__(self) -> None:
+        # @intent validate-every-declared-capability-at-construction
+        # A fallback chain that cannot be resolved must fail when it is declared,
+        # not at the first failure it was configured to survive.
         CodexContextSource(self.context_manager, self.context_placements)
         _require_text("Codex harness agent", "name", self.name)
         _require_text("Codex harness agent", "system_prompt", self.system_prompt)
@@ -335,6 +367,41 @@ class CodexHarnessAgentSettings:
         ):
             raise ConfigurationError(
                 "Codex harness agent context_manager must be a ContextManager."
+            )
+        # Duck-typed because vidbyte.lib may not import the orchestration-tier
+        # AgentMiddleware; the hook-support check runs in the Codex translator.
+        if not isinstance(self.middleware, tuple) or any(
+            not callable(getattr(value, "before_run", None))
+            or not isinstance(getattr(value, "middleware_name", None), str)
+            for value in self.middleware
+        ):
+            raise ConfigurationError(
+                "Codex harness agent middleware must be a tuple of AgentMiddleware."
+            )
+        # Duck-typed for the same reason: AgentFallbackSettings is orchestration-tier,
+        # and the chain itself is resolved by the fallback coordinator.
+        if self.fallback is not None and not callable(
+            getattr(self.fallback, "to_fallback", None)
+        ):
+            raise ConfigurationError(
+                "Codex harness agent fallback must be AgentFallbackSettings."
+            )
+        self._validate_tools()
+
+    def _validate_tools(self) -> None:
+        # @intent reject-non-tool-declarations-at-construction
+        # Duck-typed because vidbyte.lib may not import BaseTool; names and
+        # duplicates are resolved by the Codex tool translator, and the
+        # permission policy must be the same allow-list the direct runtime uses.
+        if not isinstance(self.tools, tuple) or any(
+            not callable(value) and not _is_tool_shaped(value) for value in self.tools
+        ):
+            raise ConfigurationError(
+                "Codex harness agent tools must be a tuple of BaseTool instances or @tool functions."
+            )
+        if not isinstance(self.tool_permission_policy, PermissionPolicy):
+            raise ConfigurationError(
+                "Codex harness agent tool_permission_policy must be a PermissionPolicy."
             )
 
 
@@ -521,6 +588,7 @@ class CodexRenderedContext:
     before_input: tuple[CodexTextInput, ...] = ()
     after_input: tuple[CodexTextInput, ...] = ()
     insertions: tuple[CodexContextInsertion, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,10 +603,15 @@ class CodexContextTranslationRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexAgentTranslation:
-    """Constructor-time translation of Vidbyte agent settings."""
+    """Constructor-time translation of Vidbyte agent settings.
+
+    ``tools`` is None when the agent declares no tools; the bridge is an
+    orchestration-tier object this module cannot construct as an empty default.
+    """
 
     settings: CodexHarnessAgentSettings
     output_schema: Mapping[str, Any]
+    tools: CodexToolBridge | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -704,24 +777,311 @@ class CodexRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexMiddlewareRequest:
+    """One turn-boundary observation offered to Vidbyte middleware.
+
+    Fields describing an inner loop are deliberately absent: Codex owns its
+    model/tool iterations, so this record carries only what is observable.
+    """
+
+    agent_name: str
+    prompt: str
+    elapsed_seconds: float = 0.0
+    error: BaseException | None = None
+
+    def __post_init__(self) -> None:
+        _require_text("Codex middleware request", "agent_name", self.agent_name)
+        if not isinstance(self.prompt, str):
+            raise ConfigurationError(
+                "Codex middleware request prompt must be a string."
+            )
+        if isinstance(self.elapsed_seconds, bool) or not isinstance(
+            self.elapsed_seconds, (int, float)
+        ):
+            raise ConfigurationError(
+                "Codex middleware request elapsed_seconds must be a number."
+            )
+        if self.elapsed_seconds < 0:
+            raise ConfigurationError(
+                "Codex middleware request elapsed_seconds must not be negative."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexUsageResponse:
+    """Presents one Codex turn to UsageTracker in the shape it duck-types.
+
+    ``model`` may be empty: Codex resolves the model itself when neither the
+    turn nor the thread names one, and inventing a name would misprice the run.
+    """
+
+    provider: str
+    model: str
+    usage: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        # @intent validate-before-the-tracker-duck-types-it
+        # UsageTracker reads these three attributes without checking them, so a
+        # malformed shim would reach the pricing parser as silently wrong data.
+        _require_text("Codex usage response", "provider", self.provider)
+        _optional_text("Codex usage response", "model", self.model)
+        if not isinstance(self.usage, Mapping) or any(
+            not isinstance(key, str) or not key for key in self.usage
+        ):
+            raise ConfigurationError(
+                "Codex usage response usage must map non-empty string names to values."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexUsageTranslationRequest:
+    """One completed turn offered to Vidbyte's shared usage accounting.
+
+    ``tracker`` stays loosely typed because ``vidbyte.lib`` may not import the
+    orchestration-tier ``UsageTracker``; only its ``record_call`` is exercised.
+    """
+
+    result: CodexRunResult
+    settings: CodexAgentSettings
+    tracker: object
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.result, CodexRunResult):
+            raise ConfigurationError(
+                "Codex usage translation result must be CodexRunResult."
+            )
+        if not isinstance(self.settings, CodexAgentSettings):
+            raise ConfigurationError(
+                "Codex usage translation settings must be CodexAgentSettings."
+            )
+        if not callable(getattr(self.tracker, "record_call", None)):
+            raise ConfigurationError(
+                "Codex usage translation tracker must expose record_call()."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexFailureRecord:
+    """One canonical failure plus the retry class that decides what may follow it."""
+
+    failure: Failure
+    failure_class: CodexFailureClass
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.failure_class, CodexFailureClass):
+            raise ConfigurationError(
+                "Codex failure record failure_class must be CodexFailureClass."
+            )
+        if not hasattr(self.failure, "code") or not hasattr(self.failure, "phase"):
+            raise ConfigurationError("Codex failure record failure must be a Failure.")
+
+
+@dataclass(frozen=True, slots=True)
+class CodexFailureTranslationRequest:
+    """One classified adapter error offered to the shared failure vocabulary."""
+
+    error: Any
+    attempt: int = CODEX_FIRST_ATTEMPT
+    chain_index: int = CODEX_PRIMARY_CHAIN_INDEX
+
+    def __post_init__(self) -> None:
+        # @intent only-classify-what-carries-a-code
+        # A non-CodexAgentError has no failure_code, and inventing a classification
+        # for an arbitrary exception is exactly what this vocabulary must not do.
+        if not isinstance(getattr(self.error, "failure_code", None), str):
+            raise ConfigurationError(
+                "Codex failure translation requires a CodexAgentError with a failure_code."
+            )
+        for name in ("attempt", "chain_index"):
+            _require_non_negative_int(
+                "Codex failure translation", name, getattr(self, name)
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexFallbackAttempt:
+    """One credential-free record of a model this turn actually tried."""
+
+    index: int
+    provider: str
+    model: str
+    failure_code: str = ""
+
+    def __post_init__(self) -> None:
+        _require_non_negative_int("Codex fallback attempt", "index", self.index)
+        _require_text("Codex fallback attempt", "provider", self.provider)
+        _require_text("Codex fallback attempt", "model", self.model)
+        _optional_text("Codex fallback attempt", "failure_code", self.failure_code)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexFallbackDecision:
+    """The state one fallback decision reads: the classified failure and where we are."""
+
+    record: CodexFailureRecord
+    error: Any
+    index: int
+
+    def __post_init__(self) -> None:
+        # @intent no-decision-without-a-classification
+        # A decision built from an unclassified record would let the coordinator
+        # advance the chain on a failure nothing has judged retryable.
+        if not isinstance(self.record, CodexFailureRecord):
+            raise ConfigurationError(
+                "Codex fallback decision record must be CodexFailureRecord."
+            )
+        if not isinstance(self.error, BaseException):
+            raise ConfigurationError(
+                "Codex fallback decision error must be an exception instance."
+            )
+        _require_non_negative_int("Codex fallback decision", "index", self.index)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexTurnOutcome:
+    """One completed turn plus which models were tried to get it."""
+
+    result: CodexRunResult
+    attempts: tuple[CodexFallbackAttempt, ...] = ()
+    answering_model: str = ""
+
+    def __post_init__(self) -> None:
+        # @intent one-outcome-carries-its-whole-attempt-history
+        # The attempts tuple is what lets a caller tell a first-attempt answer from
+        # a recovered one, so it is validated here rather than trusted downstream.
+        if not isinstance(self.result, CodexRunResult):
+            raise ConfigurationError(
+                "Codex turn outcome result must be CodexRunResult."
+            )
+        if not isinstance(self.attempts, tuple) or any(
+            not isinstance(value, CodexFallbackAttempt) for value in self.attempts
+        ):
+            raise ConfigurationError(
+                "Codex turn outcome attempts must contain CodexFallbackAttempt values."
+            )
+        _optional_text("Codex turn outcome", "answering_model", self.answering_model)
+
+
+@dataclass(frozen=True, slots=True)
 class CodexResultTranslationRequest:
-    """Complete input required to build one Vidbyte AgentMessage."""
+    """Complete input required to build one Vidbyte AgentMessage.
+
+    ``usage_rollup`` is absent when no accounting ran, which is deliberately
+    distinct from a rollup that recorded zero calls.
+    """
 
     result: CodexRunResult
     agent: CodexHarnessAgentSettings
     input_metadata: Mapping[str, Any]
     recipient: str
+    failures: tuple[Failure, ...] = ()
+    fallback_attempts: tuple[CodexFallbackAttempt, ...] = ()
+    answering_model: str = ""
+    usage_rollup: UsageRollup | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CodexTransportRunRequest:
-    """Complete input to one transport run operation."""
+    """Complete input to one transport run operation.
+
+    ``tools`` is None when the agent declares no tools, which leaves the SDK
+    connection's request path and server-request handler untouched.
+    """
 
     thread_id: str
     system_prompt: str
     prompt: CodexPrompt
     settings: CodexAgentSettings
     output_schema: Mapping[str, Any]
+    tools: CodexToolBridge | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolAttachRequest:
+    """One live Codex connection a tool bridge attaches to for a single run.
+
+    ``client`` stays loosely typed because ``vidbyte.lib`` may not import the
+    optional openai-codex extra; the bridge resolves its private sync client
+    and raises ``codex.sdk_unavailable`` when the pinned shape has moved.
+    """
+
+    client: object
+    loop: asyncio.AbstractEventLoop
+
+    def __post_init__(self) -> None:
+        # @intent attach-only-to-a-live-loop
+        # Every tool coroutine of the run is scheduled onto this loop from the SDK
+        # reader thread, so a closed loop would fail each call instead of the attach.
+        if self.client is None:
+            raise ConfigurationError(
+                "Codex tool attach request client must be an open AsyncCodex connection."
+            )
+        if not isinstance(self.loop, asyncio.AbstractEventLoop) or self.loop.is_closed():
+            raise ConfigurationError(
+                "Codex tool attach request loop must be an open asyncio event loop."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolCallRequest:
+    """One ``item/tool/call`` server request, field for field as Codex sends it.
+
+    Mirrors the app-server's ``DynamicToolCallParams``. ``namespace`` keeps its
+    None because the protocol field is nullable; Vidbyte registers only
+    un-namespaced function tools, so Codex leaves it unset in practice.
+    """
+
+    thread_id: str
+    turn_id: str
+    call_id: str
+    tool: str
+    arguments: Mapping[str, Any]
+    namespace: str | None = None
+
+    def __post_init__(self) -> None:
+        # @intent reject-malformed-tool-calls-before-execution
+        # A call missing a protocol field or carrying non-object arguments is
+        # answered as a failed call rather than guessed into a tool invocation.
+        for field_name in ("thread_id", "turn_id", "call_id", "tool"):
+            _require_text("Codex tool call", field_name, getattr(self, field_name))
+        if not isinstance(self.arguments, Mapping) or any(
+            not isinstance(key, str) for key in self.arguments
+        ):
+            raise ConfigurationError("Codex tool call arguments must be a JSON object.")
+        if self.namespace is not None:
+            _require_text("Codex tool call", "namespace", self.namespace)
+
+    @classmethod
+    def from_params(cls, params: Mapping[str, Any] | None) -> CodexToolCallRequest:
+        """Read one request from the app-server's camelCase wire params."""
+        wire = params or {}
+        arguments = wire.get("arguments")
+        return cls(
+            thread_id=wire.get("threadId", ""),
+            turn_id=wire.get("turnId", ""),
+            call_id=wire.get("callId", ""),
+            tool=wire.get("tool", ""),
+            # A tool that declares no parameters may be called with null arguments.
+            arguments={} if arguments is None else arguments,
+            namespace=wire.get("namespace"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolCallResponse:
+    """One ``item/tool/call`` answer: the fields of the app-server's ``DynamicToolCallResponse``.
+
+    ``text`` becomes the response's single ``inputText`` content item; the Codex
+    tool handler owns the camelCase wire encoding.
+    """
+
+    success: bool
+    text: str
+
+    def __post_init__(self) -> None:
+        _require_bool("Codex tool call response", "success", self.success)
+        if not isinstance(self.text, str):
+            raise ConfigurationError("Codex tool call response text must be a string.")
 
 
 @dataclass(frozen=True, slots=True)

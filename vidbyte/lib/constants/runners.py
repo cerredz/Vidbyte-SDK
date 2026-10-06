@@ -37,6 +37,8 @@ RUNNER_TYPE_IMAGE = "image"
 RUNNER_TYPE_VIDEO = "video"
 RUNNER_TYPE_AUDIO = "audio"
 RUNNER_TYPE_EMBEDDING = "embedding"
+# Decision models (TypeSafe Jev) answer structured questions and cannot drive an agent loop.
+RUNNER_TYPE_DECISION = "decision"
 
 MODEL_PROVIDER_RUNNER_TYPE_MAP: dict[str, str] = {
     "openai/gpt-4": RUNNER_TYPE_TEXT,
@@ -163,6 +165,7 @@ MODEL_PROVIDER_RUNNER_TYPE_MAP: dict[str, str] = {
     "gemini/gemini-embedding-2-preview": RUNNER_TYPE_EMBEDDING,
     "gemini/text-embedding-004": RUNNER_TYPE_EMBEDDING,
     "gemini/embedding-001": RUNNER_TYPE_EMBEDDING,
+    "typesafe/jev-latest": RUNNER_TYPE_DECISION,
 }
 
 MODEL_RUNNER_TYPE_MAP: dict[str, str] = {
@@ -294,6 +297,7 @@ MODEL_RUNNER_TYPE_MAP: dict[str, str] = {
     "eleven_turbo_v2": RUNNER_TYPE_AUDIO,
     "playdialog": RUNNER_TYPE_AUDIO,
     "playdialogmultilingual": RUNNER_TYPE_AUDIO,
+    "jev-latest": RUNNER_TYPE_DECISION,
     "speech-2.8-hd": RUNNER_TYPE_AUDIO,
     "speech-2.8-turbo": RUNNER_TYPE_AUDIO,
     "speech-2.6-hd": RUNNER_TYPE_AUDIO,
@@ -322,6 +326,7 @@ PROVIDER_DEFAULT_RUNNER_TYPE_MAP: dict[str, str] = {
     "openrouter": RUNNER_TYPE_TEXT,
     "elevenlabs": RUNNER_TYPE_AUDIO,
     "playai": RUNNER_TYPE_AUDIO,
+    "typesafe": RUNNER_TYPE_DECISION,
 }
 
 MODEL_PREFIX_RUNNER_TYPE_MAP: dict[str, str] = {
@@ -349,6 +354,7 @@ MODEL_PREFIX_RUNNER_TYPE_MAP: dict[str, str] = {
     "gpt-4o-transcribe": RUNNER_TYPE_AUDIO,
     "eleven_": RUNNER_TYPE_AUDIO,
     "playdialog": RUNNER_TYPE_AUDIO,
+    "jev-": RUNNER_TYPE_DECISION,
     "speech-": RUNNER_TYPE_AUDIO,
     "text-embedding": RUNNER_TYPE_EMBEDDING,
     "embedding-": RUNNER_TYPE_EMBEDDING,

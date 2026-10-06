@@ -3,23 +3,44 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import Any
 
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
+from vidbyte.agents.codex.failures import CodexFailureLedger, CodexFailureTranslator
+from vidbyte.agents.codex.fallback import CodexFallbackCoordinator
 from vidbyte.agents.codex.fork import CodexFork
+from vidbyte.agents.codex.metrics import CodexMetricsTranslator
+from vidbyte.agents.codex.middleware import CodexMiddlewareRunner
 from vidbyte.agents.codex.result import CodexResultTranslator
 from vidbyte.agents.codex.transport import CodexTransport
+from vidbyte.agents.pricing.records import UsageRollup
+from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.agents.types import AgentMessage
+from vidbyte.lib.constants.codex import (
+    CODEX_FIRST_ATTEMPT,
+    CODEX_MIDDLEWARE_METADATA_KEY,
+    CODEX_PRIMARY_CHAIN_INDEX,
+)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentInput,
     CodexContextTranslationRequest,
+    CodexFailureTranslationRequest,
+    CodexFallbackAttempt,
+    CodexFallbackDecision,
     CodexForkRequest,
     CodexForkSettings,
     CodexHarnessAgentSettings,
+    CodexMiddlewareRequest,
     CodexResultTranslationRequest,
     CodexRunInput,
     CodexTransportRunRequest,
+    CodexTurnOutcome,
+    CodexUsageTranslationRequest,
 )
+from vidbyte.lib.dataclasses.failure import Failure
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
 
@@ -52,7 +73,11 @@ class CodexHarnessAgent:
         self.last_reply: AgentMessage | None = None
         self._transport = CodexTransport()
         self._results = CodexResultTranslator()
+        self._usage = UsageTracker()
+        self._failures = CodexFailureLedger()
+        self._fallback = CodexFallbackCoordinator.build(self.settings)
         self._forks = CodexFork(self._transport)
+        self._middleware = CodexMiddlewareRunner(self.settings.middleware)
 
     @property
     def name(self) -> str:
@@ -83,7 +108,13 @@ class CodexHarnessAgent:
                 operation="translate_context",
                 error_type=type(exc).__name__,
             ) from exc
-        result = await self._transport.run(
+        self._usage.reset()
+        self._failures.reset()
+        boundary = CodexMiddlewareRequest(
+            agent_name=self.settings.name, prompt=translated.user_prompt
+        )
+        before_metadata = await self._middleware.before_run(boundary)
+        outcome = await self._run_turn(
             CodexTransportRunRequest(
                 thread_id=self.thread_id,
                 system_prompt="\n\n".join(
@@ -97,17 +128,33 @@ class CodexHarnessAgent:
                 prompt=translated,
                 settings=self.settings.codex,
                 output_schema=self._translation.output_schema,
+                tools=self._translation.tools,
+            ),
+            boundary,
+        )
+        result = outcome.result
+        self.thread_id = result.thread_id
+        CodexMetricsTranslator.record_usage(
+            CodexUsageTranslationRequest(
+                result=result,
+                settings=self.settings.codex,
+                tracker=self._usage,
             )
         )
-        self.thread_id = result.thread_id
         reply = self._results.translate(
             CodexResultTranslationRequest(
                 result=result,
                 agent=self.settings,
                 input_metadata=translated.metadata,
                 recipient=translated.recipient,
+                usage_rollup=self._usage.rollup(),
+                failures=self._failures.failures,
+                fallback_attempts=outcome.attempts,
+                answering_model=outcome.answering_model,
             )
         )
+        after_metadata = await self._middleware.after_run(boundary)
+        reply = self._with_middleware_metadata(reply, before_metadata, after_metadata)
         self.history.append(reply)
         self.last_prompt = translated.user_prompt
         self.last_reply = reply
@@ -127,6 +174,37 @@ class CodexHarnessAgent:
             operation="run_sync_guard",
         )
 
+    def _with_middleware_metadata(
+        self,
+        reply: AgentMessage,
+        before_metadata: Mapping[str, Any],
+        after_metadata: Mapping[str, Any],
+    ) -> AgentMessage:
+        # AgentMessage is frozen, so publish middleware output as a replacement
+        # rather than mutating the message the result translator already validated.
+        if not self._middleware.enabled:
+            return reply
+        metadata = {
+            **dict(reply.metadata),
+            **dict(before_metadata),
+            **dict(after_metadata),
+        }
+        pipeline_metadata = self._middleware.metadata()
+        if pipeline_metadata:
+            metadata[CODEX_MIDDLEWARE_METADATA_KEY] = pipeline_metadata
+        return replace(reply, metadata=metadata)
+
+    def get_usage(self) -> UsageRollup:
+        """Return the token-usage rollup for the current or most recent turn."""
+        return self._usage.rollup()
+
+    def get_cost_usd(self) -> float | None:
+        """Return the estimated USD cost of the most recent turn, or None when unpriced."""
+        # @intent estimate-not-invoice
+        # Codex may bill against subscription credits, so this is a local pricing-table
+        # estimate; UsageRollup.cost_complete says whether every call was priced.
+        return self.get_usage().cost_usd
+
     def _translate_input(self, request: CodexAgentInput) -> CodexRunInput:
         # @intent reject-input-before-any-native-work
         # Convert a generic Vidbyte call shape into one native request before any
@@ -141,6 +219,59 @@ class CodexHarnessAgent:
                 operation="translate_input",
                 error_type=type(exc).__name__,
             ) from exc
+
+    async def _run_turn(
+        self, request: CodexTransportRunRequest, boundary: CodexMiddlewareRequest
+    ) -> CodexTurnOutcome:
+        """Run the turn, falling back to the next chain model while a failure allows it."""
+        # @intent one-attempt-per-model-never-mid-turn
+        # Each attempt is a whole new native turn on the same thread that overrides
+        # only turn.model. A switch is decided only after a turn has ended, because an
+        # in-flight turn may already have edited files and its outcome is unknown.
+        attempts: list[CodexFallbackAttempt] = []
+        index = CODEX_PRIMARY_CHAIN_INDEX
+        while True:
+            settings = self._fallback.settings_for(request.settings, index)
+            try:
+                result = await self._transport.run(replace(request, settings=settings))
+            # Cancellation is not a model error, so it propagates without running
+            # caller code during unwinding; only Exception reaches on_model_error.
+            except Exception as exc:
+                await self._middleware.on_model_error(replace(boundary, error=exc))
+                if not isinstance(exc, CodexAgentError):
+                    raise
+                # Recorded before the routing decision, so a recovered turn still
+                # reports what it survived rather than discarding it on success.
+                record = self._failures.record(
+                    CodexFailureTranslator.translate(
+                        CodexFailureTranslationRequest(
+                            error=exc,
+                            attempt=len(attempts) + CODEX_FIRST_ATTEMPT,
+                            chain_index=index,
+                        )
+                    )
+                )
+                if self._fallback.enabled:
+                    attempts.append(self._fallback.attempt(index, exc.failure_code))
+                next_index = self._fallback.next_index(
+                    CodexFallbackDecision(record=record, error=exc, index=index)
+                )
+                if next_index is None:
+                    raise
+                index = next_index
+                continue
+            if self._fallback.enabled:
+                attempts.append(self._fallback.attempt(index))
+            return CodexTurnOutcome(
+                result=result,
+                attempts=tuple(attempts),
+                answering_model=self._fallback.model_name(index),
+            )
+
+    @property
+    def failures(self) -> tuple[Failure, ...]:
+        """Return canonical failure records observed during the current or most recent turn."""
+        return self._failures.failures
 
     async def afork(
         self, settings: CodexForkSettings = _DEFAULT_FORK_SETTINGS

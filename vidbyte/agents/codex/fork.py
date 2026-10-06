@@ -115,6 +115,10 @@ class CodexFork:
             context_placements=parent.context_placements
             if settings.context_placements is None
             else settings.context_placements,
+            # A native fork inherits the parent's dynamic tool definitions, so the
+            # child must be able to execute every tool its model can call.
+            tools=parent.tools,
+            tool_permission_policy=parent.tool_permission_policy,
         )
         if settings.clear_context_manager:
             child_settings = replace(child_settings, context_manager=None, context_placements=())
