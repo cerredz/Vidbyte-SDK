@@ -1,15 +1,17 @@
 """FILE: vidbyte/agents/jev/response.py
 
 PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the self-review, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return. JevComputeController writes the run facts and run-brief refreshes of the mid-run compute checkpoint.
+ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the self-review, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return, handing it the run's settled JevUsageReport. JevComputeController writes the run facts and run-brief refreshes of the mid-run compute checkpoint.
 ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
-KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
+KNOWN EDGE CASES: The run's usage is attached only when a run returns; a run that fails closed on usage raises instead. start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-self-review-done-criteria.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-preflight.py.
 """
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.constants.jev import (
@@ -29,6 +31,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunFacts,
     JevRunStateRecord,
     JevSpecialist,
+    JevUsageReport,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
@@ -50,7 +53,7 @@ class JevResponse:
 
     def preflight_usage(self, usage: JevUsage | None) -> None:
         """Record the usage of the one preflight Jev call, or None when TypeSafe reported none."""
-        self.state.usage = usage
+        self.state.preflight_usage = usage
 
     def needs_clarification(self, clarification: JevClarification) -> None:
         """Record the questions the user must answer; their rendered text becomes the run's output."""
@@ -95,19 +98,29 @@ class JevResponse:
         self.state.run_brief_updates.append(update)
         self.state.run_brief = brief
 
-    def delegated(self, reply: AgentMessage) -> AgentResult:
-        """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""
+    def delegated(self, reply: AgentMessage, usage: JevUsageReport) -> AgentResult:
+        """Record the chosen specialist's reply and the run's usage, and return the reply as this run's result with the specialist's own metadata."""
         self.state.output = reply.content
-        return AgentResult(output=reply.content, strategy_name=str(reply.metadata.get("strategy", "direct")), metadata=reply.metadata, structured=reply.structured)
+        result = AgentResult(output=reply.content, strategy_name=str(reply.metadata.get("strategy", "direct")), metadata=reply.metadata, structured=reply.structured)
+        return self._with_usage(result, usage)
 
-    def stopped(self) -> AgentResult:
-        """Return the result of a run the preflight gate stopped, carrying the clarification as its structured value."""
-        return AgentResult(output=self.state.output or "", strategy_name=JEV_PREFLIGHT_STRATEGY_NAME, structured=self.state.clarification)
+    def stopped(self, usage: JevUsageReport) -> AgentResult:
+        """Record the run's usage and return the result of a run the preflight gate stopped, carrying the clarification as its structured value."""
+        result = AgentResult(output=self.state.output or "", strategy_name=JEV_PREFLIGHT_STRATEGY_NAME, structured=self.state.clarification)
+        return self._with_usage(result, usage)
 
-    def finished(self, result: AgentResult) -> AgentResult:
-        """Record the generative agent's output and return its result unchanged."""
+    def finished(self, result: AgentResult, usage: JevUsageReport) -> AgentResult:
+        """Record the generative agent's output and the run's usage, and return its result with the run total as its usage rollup."""
         self.state.output = result.output
-        return result
+        return self._with_usage(result, usage)
+
+    def _with_usage(self, result: AgentResult, usage: JevUsageReport) -> AgentResult:
+        # Stores the run's usage and makes the result's usage_rollup the same run total.
+        # @intent one-usage-total-per-run
+        # get_usage(), result metadata, and JevAgent.response.usage must agree; a delegated specialist's own
+        # usage_rollup or the main loop's pre-done-check snapshot would otherwise disagree with the run total.
+        self.state.usage = usage
+        return replace(result, metadata={**dict(result.metadata), "usage_rollup": usage.total})
 
 
 __all__ = ["JevResponse"]

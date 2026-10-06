@@ -75,7 +75,7 @@ class ScriptedGenerativeRunner:
     def __init__(self, *responses: object) -> None:
         self.calls: list[dict[str, Any]] = []
         self.responses = list(responses) or [
-            TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="done", raw={})
+            TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="done", raw={}, usage={"input_tokens": 100, "output_tokens": 20})
         ]
 
     def run(self, prompt: str, **kwargs: Any) -> object:
@@ -90,6 +90,9 @@ class RawResponse:
     def __init__(self, raw: dict[str, Any]) -> None:
         self.text = ""
         self.raw = raw
+        self.provider = ModelProvider.OPENAI
+        self.model = "gpt-5.4-mini"
+        self.usage = {"input_tokens": 100, "output_tokens": 20}
 
 
 def _answer(name: str, probability: float) -> JevAnswer:

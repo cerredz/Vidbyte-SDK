@@ -3680,6 +3680,21 @@ class JevClarification:
 
 
 @dataclass(frozen=True, slots=True)
+class JevUsageReport:
+    """One JevAgent run's usage, read from the agent's one usage ledger and priced from the SDK pricebook.
+
+    `total` counts every model call the run made: the main agent's loop, every Jev decision call, and every helper,
+    fresh-continuation, and specialist agent the run spawned, including calls a provider billed before they failed.
+    `generative` and `decision` split the same calls by model kind, so their token counts and costs add up to the
+    model-call part of `total`; priced search and fetch operations appear only in `total`.
+    """
+
+    total: UsageRollup
+    generative: UsageRollup
+    decision: UsageRollup
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunFacts:
     """Exact run counts captured by code at a mid-run checkpoint."""
 
@@ -3717,8 +3732,9 @@ class JevAgentResponse:
     """Everything JevAgent's opinionated features produced for its most recent run, read as `JevAgent.response`.
 
     JevResponse is the only writer: it resets this record at the start of each run and fills it as the
-    preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
-    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
+    preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the whole run's
+    JevUsageReport (set when the run returns), `preflight_usage` is the one preflight Jev call's usage,
+    `clarification` is set only when the gate stopped the run to ask the user, and
     `specialist` is the title of the JevSpecialist that ran the task, or None when the main JevAgent ran it.
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
     `review` records JevReviewer's objections at the latest finish attempt, and `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
@@ -3733,7 +3749,8 @@ class JevAgentResponse:
     output: str | None = None
     results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
     clarification: JevClarification | None = None
-    usage: ProviderUsage | None = None
+    usage: JevUsageReport | None = None
+    preflight_usage: ProviderUsage | None = None
     specialist: str | None = None
     run_state: JevRunStateRecord | None = None
     handoff: JevHandoffRecord | None = None
@@ -4293,6 +4310,7 @@ __all__ = [
     "JevTargetOutcomeItemPayload",
     "JevTargetOutcomePayload",
     "JevText",
+    "JevUsageReport",
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",

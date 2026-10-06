@@ -89,7 +89,7 @@ class ScriptedGenerativeRunner:
     """Small runner that records every prompt and system prompt it receives, or raises when told to."""
 
     def __init__(self, text: str = "completed", *, error: Exception | None = None) -> None:
-        self.response = TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text=text, raw={})
+        self.response = TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text=text, raw={}, usage={"input_tokens": 100, "output_tokens": 20})
         self.error = error
         self.calls: list[str] = []
         self.systems: list[str] = []
@@ -560,7 +560,7 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         result = response.results[JevPreflightPreset.CLARITY]
         self.assertFalse(result.passed)
         self.assertAlmostEqual(result.score, (0.1 + 0.3 + 0.6 * (len(_CLARITY_KEYS) - 2)) / len(_CLARITY_KEYS))
-        self.assertEqual((response.usage.input_tokens, response.usage.output_tokens), (120, 18))
+        self.assertEqual((response.preflight_usage.input_tokens, response.preflight_usage.output_tokens), (120, 18))
 
     async def test_feature_data_is_on_the_agent_response_not_in_metadata(self) -> None:
         # [PR #445 review 4108892263] opinionated feature data lives on JevAgent.response.

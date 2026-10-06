@@ -80,9 +80,12 @@ class RawResponse:
     """OpenAI-shaped raw response wrapper for scripted tool calls."""
 
     def __init__(self, raw: dict[str, Any]) -> None:
-        # Exposes the two response attributes consumed by BaseAgent.
+        # Exposes the response attributes consumed by BaseAgent and its usage ledger.
         self.text = ""
         self.raw = raw
+        self.provider = ModelProvider.OPENAI
+        self.model = "gpt-5.4-mini"
+        self.usage = {"input_tokens": 100, "output_tokens": 20}
 
 
 def _settings(**overrides: Any) -> JevAgentSettings:
@@ -448,7 +451,7 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_tool_response_uses_ordinary_final_path(self) -> None:
         # [Edge Case] a plain generative response completes without invoking Jev.
-        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="ordinary answer", raw={}))
+        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="ordinary answer", raw={}, usage={"input_tokens": 100, "output_tokens": 20}))
         agent = bind_test_runner(JevAgent(_settings()), runner)
         reply = await agent.arun("question")
         self.assertEqual(reply.content, "ordinary answer")

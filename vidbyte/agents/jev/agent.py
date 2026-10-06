@@ -4,7 +4,7 @@ PURPOSE: Exposes the narrow JevAgent facade backed by JevRuntime, JevAgentSettin
 ROLE IN CODEBASE: Maps the immutable JevAgentSettings into established BaseAgent state, fixes the runtime to AgentRuntimeType.JEV (which RuntimeRegistry resolves to JevRuntime), and builds the JevPreflightGate, the JevRunState that runs the enabled done checks, the JevDoneContinuation that sends the main agent back to work when one fails, and the JevResponse writer that each run-local JevRuntime receives as parameters. With JevRuntimeSettings.compute set, it also builds the JevComputeController that runs the mid-run compute checkpoint.
 ARCHITECTURE NOTE: JevAgent is opinionated by design; callers cannot replace its runtime or pass arbitrary BaseAgent customization kwargs. Every fixed-question preset and threshold is fixed here at construction in the gate, and every done check in JevRunState; the runtime still reads JevRuntimeSettings only for the tool selector, which keeps its own path. A JevSpecialist the gate chooses runs its own agent instead of this one.
 COMMON MODIFICATION PATTERNS: Build a new feature's run-time object here from JevAgentSettings and pass it through _runtime_extension_kwargs; report its outcome through JevResponse so it appears on `response`.
-KNOWN EDGE CASES: Jev's TypeSafe model is not the reply-generating model; settings validation prevents that provider mix-up. `response` describes only the most recent run and is replaced when the next run starts.
+KNOWN EDGE CASES: Jev's TypeSafe model is not the reply-generating model; settings validation prevents that provider mix-up. A specialist must reply through BaseAgent.generate_reply, the hook that adds its usage to this agent's run total, so any other agent is rejected at construction. `response` describes only the most recent run and is replaced when the next run starts.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-agent-scaffold.py.
 """
@@ -38,6 +38,7 @@ class JevAgent(BaseAgent):
         runtime_settings = JevRuntimeSettings() if runtime_settings is None else runtime_settings
         if not isinstance(runtime_settings, JevRuntimeSettings):
             raise ConfigurationError("JevAgent runtime_settings must be a JevRuntimeSettings instance.")
+        self._require_metered_specialists(settings)
         self.settings = settings
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
@@ -81,6 +82,20 @@ class JevAgent(BaseAgent):
     def response(self) -> JevAgentResponse:
         """Return everything JevAgent's opinionated features produced for the most recent run."""
         return self._response.state
+
+    @staticmethod
+    def _require_metered_specialists(settings: JevAgentSettings) -> None:
+        # Rejects any specialist whose usage could not reach this agent's run total.
+        # @intent specialist-usage-must-be-metered
+        # JevAgent fails closed on usage, and a specialist's spend reaches the run ledger only through
+        # BaseAgent.generate_reply; an agent that replaces that method, or is not a BaseAgent, would spend unseen.
+        for specialist in settings.agents:
+            agent = specialist.agent
+            if not isinstance(agent, BaseAgent) or type(agent).generate_reply is not BaseAgent.generate_reply:
+                raise ConfigurationError(
+                    f"JevAgent specialist {specialist.title!r} must be a BaseAgent that replies through BaseAgent.generate_reply, so its usage counts toward the run total.",
+                    details={"specialist": specialist.title, "agent_type": type(agent).__name__},
+                )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
         # Passes the runtime settings, the gate, the done checks, the continuation, the compute controller, and the response writer built at construction to each run-local JevRuntime.

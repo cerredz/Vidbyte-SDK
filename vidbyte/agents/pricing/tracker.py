@@ -10,14 +10,17 @@ Architecture:
       calls (token axis) and priced search/fetch operations (operation axis) —
       priced via ModelPricingRegistry and OperationPricingRegistry.
 Key Functions:
-    - record_call: Parses, prices, and stores one model call.
+    - record_call: Parses, prices, and stores one model call of a given UsageKind.
+    - record_billed_failure: Prices and stores the usage a provider billed for a failed call.
     - record_operation: Prices and stores one search/fetch operation.
-    - rollup: Folds both ledgers into an immutable UsageRollup.
+    - rollup: Folds both ledgers into an immutable UsageRollup, optionally for one UsageKind.
     - reset: Clears both ledgers at the start of a new run.
     - _cache_hit_rate: Aggregates a run's cache hit rate, weighted by prompt size.
     - _sum_int_or_none: Int-narrowed sibling of _sum_or_none for strictly-int fields.
 Relations:
-    Created by BaseAgent, consumed by AgentRuntime; token pricing from
+    Created by BaseAgent, consumed by AgentRuntime; satisfies the UsageLedger
+    Protocol in vidbyte/lib/usage_ledger.py, so JevAgent runs use it as their
+    one run ledger (docs/design/jev-run-usage-ledger.md); token pricing from
     vidbyte/lib/registries/pricing.py, operation pricing from
     vidbyte/lib/registries/operation_pricing.py.
 Similar Files:
@@ -36,6 +39,7 @@ from vidbyte.agents.pricing.records import (
     UsageRollup,
 )
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums.usage import UsageKind
 from vidbyte.lib.registries.operation_pricing import (
     OperationPricing,
     OperationPricingRegistry,
@@ -56,6 +60,7 @@ class UsageTracker:
         self._records: list[UsageRecord] = []
         self._operations: list[OperationUsageRecord] = []
         self._recording_corrupted = False
+        self._unaccounted_calls = 0
 
     def mark_recording_corrupted(self) -> None:
         # Flags that a real usage record was lost to an internal metering error, not a legitimate skip.
@@ -66,26 +71,39 @@ class UsageTracker:
         # Returns whether any call this run swallowed an exception while recording usage.
         return self._recording_corrupted
 
-    def record_call(self, response: object) -> UsageRecord | None:
+    def record_call(self, response: object, *, kind: UsageKind = UsageKind.GENERATIVE) -> UsageRecord | None:
         # Parses, prices, and stores one model call; returns None when unusable.
         # The duck-typed response.provider is coerced to a ModelProvider once here,
         # so the pricing registry and parser downstream take only the strict enum.
         provider = _as_provider(getattr(response, "provider", None))
-        model = getattr(response, "model", "")
-        payload = getattr(response, "usage", None)
+        return self._record(provider, getattr(response, "model", ""), getattr(response, "usage", None), kind=kind, failed=False)
+
+    def record_billed_failure(self, provider: ModelProvider, model: str, usage: Mapping[str, object], *, kind: UsageKind) -> UsageRecord | None:
+        # Prices and stores the usage a provider billed for a call that then failed, marked failed=True.
+        return self._record(_as_provider(provider), model, usage, kind=kind, failed=True)
+
+    def _record(self, provider: ModelProvider | None, model: object, payload: object, *, kind: UsageKind, failed: bool) -> UsageRecord | None:
+        # Parses and prices one call from the pricebook, then stores it; a call that leaves no record is counted.
+        # @intent every-call-is-recorded-or-counted
+        # A call with no parseable usage or an unknown provider is counted as unaccounted rather than dropped, and a
+        # parse or pricing error marks the ledger corrupted, so a fail-closed owner can see every gap in its ledger.
         try:
             usage = _parse_usage(provider, payload)
+            if usage is None or provider is None:
+                self._unaccounted_calls += 1
+                return None
+            cost = usage.cost_usd(self._pricing.resolve(provider, str(model)))
         except Exception:
             self.mark_recording_corrupted()
-            return None
-        if usage is None or provider is None:
             return None
         record = UsageRecord(
             call_index=len(self._records) + 1,
             provider=provider.value,
             model=str(model),
             usage=usage,
-            cost_usd=usage.cost_usd(self._pricing.resolve(provider, str(model))),
+            cost_usd=cost,
+            kind=kind,
+            failed=failed,
         )
         self._records.append(record)
         return record
@@ -123,6 +141,8 @@ class UsageTracker:
                 model=record.model,
                 usage=record.usage,
                 cost_usd=record.cost_usd,
+                kind=record.kind,
+                failed=record.failed,
             )
             for offset, record in enumerate(rollup.calls, start=1)
         )
@@ -137,15 +157,17 @@ class UsageTracker:
             )
             for offset, record in enumerate(rollup.operations, start=1)
         )
+        self._unaccounted_calls += rollup.unaccounted_call_count
         if rollup.recording_integrity is UsageRecordingIntegrity.CORRUPTED:
             self.mark_recording_corrupted()
 
-    def rollup(self) -> UsageRollup:
+    def rollup(self, kind: UsageKind | None = None) -> UsageRollup:
         # Folds both ledgers into an immutable None-aware rollup whose cost spans
         # the token and operation axes and whose cost_complete requires every
-        # recorded item on both axes to be priced.
-        records = tuple(self._records)
-        operations = tuple(self._operations)
+        # recorded item on both axes to be priced. With a kind, only that kind's
+        # model calls are folded and operations are left to the unfiltered total.
+        records = tuple(record for record in self._records if kind is None or record.kind is kind)
+        operations = tuple(self._operations) if kind is None else ()
         token_costs = [record.cost_usd for record in records]
         operation_costs = [operation.cost_usd for operation in operations]
         return UsageRollup(
@@ -163,6 +185,7 @@ class UsageTracker:
             recording_integrity=(
                 UsageRecordingIntegrity.CORRUPTED if self._recording_corrupted else UsageRecordingIntegrity.INTACT
             ),
+            unaccounted_call_count=self._unaccounted_calls,
         )
 
     def reset(self) -> None:
@@ -170,6 +193,7 @@ class UsageTracker:
         self._records.clear()
         self._operations.clear()
         self._recording_corrupted = False
+        self._unaccounted_calls = 0
 
     @property
     def records(self) -> tuple[UsageRecord, ...]:

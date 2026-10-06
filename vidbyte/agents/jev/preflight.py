@@ -40,6 +40,7 @@ class JevPreflightTools(JevPreflight):
         self._decision = decision
         self._threshold = threshold
         self.usage: JevUsage | None = None
+        self.model: str | None = None
         self.available: bool | None = None
 
     async def run(self, message: str, tools: Tools) -> Tools:
@@ -53,6 +54,7 @@ class JevPreflightTools(JevPreflight):
                 JevDecisionRequest(state=message, questions=questions)
             )
             self.usage = JevUsage.from_usage_payload(response.usage or {})
+            self.model = response.model
             selected_names = self.filter_tools(tools, response.answers)
         except VidbyteSdkError as exc:
             if JevDecisionFailurePolicy.should_fail_closed(exc, self._decision):

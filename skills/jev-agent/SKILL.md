@@ -96,7 +96,7 @@ REQUIRED_SEQUENCE is a request-derived check. It is enabled with `JevContinualSe
 3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer. Write every question with `skills/asking-jev-questions/SKILL.md`: Jev matches state against definitions you supply; it does not reason, count, forecast, or generate.
 4. Define fail-open or fail-closed behavior for missing credentials, timeouts, malformed answers, and unsupported configurations. Never let an exception silently choose policy.
 5. Implement orchestration in `JevPreflightGate` and the steps under `vidbyte/agents/jev/gate/`, never as preset checks in `JevRuntime`; keep provider wire shapes in `vidbyte/providers/typesafe.py` and reusable validated records in `vidbyte/lib/`.
-6. Keep generative usage/speed tracking agent-owned. Make decision usage visible without mixing token fields or double counting.
+6. Never meter usage by hand. Every Jev call goes through `DecisionModelRunner`, and every helper agent is a `BaseAgent`, so both land in the JevAgent's one usage ledger automatically (`docs/design/jev-run-usage-ledger.md`). Do not sum per-feature usage records into a total, and remember that any call the pricebook cannot price fails the run closed.
 7. Add tests for the disabled path, each enabled outcome, boundary thresholds, provider failure, the ordinary model/tool loop, and any context/schema/tool-catalog changes.
 8. Update this skill and the design documentation when the public philosophy or package boundary changes.
 

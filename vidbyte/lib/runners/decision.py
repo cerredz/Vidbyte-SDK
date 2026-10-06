@@ -11,10 +11,15 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-je
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.jev import JevDecisionRequest, JevModelCard
+from vidbyte.lib.enums.usage import UsageKind
+from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.http import HttpTransport
 from vidbyte.lib.runners.types import DecisionModelResponse
+from vidbyte.lib.usage_ledger import active_usage_ledger
 from vidbyte.providers import ModelProviders
 
 
@@ -32,10 +37,23 @@ class DecisionModelRunner:
         self._provider = ModelProviders.decision(self._config)
 
     async def arun(self, request: JevDecisionRequest) -> DecisionModelResponse:
-        # Sends one decision request and returns its normalized answers and usage.
+        # Sends one decision request, records its usage in the run's active ledger, and returns its normalized answers and usage.
         # @intent runner-is-a-pass-through
         # Provider errors propagate unchanged so the caller owns the fail-open policy.
-        return await self._provider.run_decision(request=request, transport=self._transport, config=self._config)
+        # @intent every-jev-call-reaches-the-run-ledger
+        # Every Jev call, from DecisionModelHelper or a direct runner caller, passes through here, so this is the one
+        # place a decision call is metered; a failed call that TypeSafe still billed is recorded before it propagates.
+        ledger = active_usage_ledger()
+        try:
+            response = await self._provider.run_decision(request=request, transport=self._transport, config=self._config)
+        except VidbyteSdkError as exc:
+            billed = exc.details.get("usage")
+            if ledger is not None and isinstance(billed, Mapping):
+                ledger.record_billed_failure(self._provider.provider, self._config.model, billed, kind=UsageKind.DECISION)
+            raise
+        if ledger is not None:
+            ledger.record_call(response, kind=UsageKind.DECISION)
+        return response
 
     async def alist_models(self) -> tuple[JevModelCard, ...]:
         # Returns the model IDs and aliases (GET /v1/models) this account can pass as DecisionModelConfig.model.
