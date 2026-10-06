@@ -17,11 +17,10 @@ from collections.abc import Mapping, Sequence
 from vidbyte.agents.jev.decision_failures import JevDecisionFailurePolicy
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.config import DecisionModelConfig
-from vidbyte.lib.constants.jev import JEV_NOUL_TRUE
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevQuestion
 from vidbyte.lib.enums.jev import JevQuestionType
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
-from vidbyte.lib.runners.decision import DecisionModelRunner
+from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.tools.catalog import Tools
 
 
@@ -50,7 +49,7 @@ class JevPreflightTools(JevPreflight):
             return tools
         questions = self.build_tool_questions(tools)
         try:
-            response = await DecisionModelRunner(self._decision).arun(
+            response = await DecisionModelHelper(self._decision).arun(
                 JevDecisionRequest(state=message, questions=questions)
             )
             self.usage = JevUsage.from_usage_payload(response.usage or {})
@@ -87,10 +86,14 @@ class JevPreflightTools(JevPreflight):
         selected: list[str] = []
         for index, tool in enumerate(tools):
             answer = answers.get(f"tool_selector.{index}")
-            probability = None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
-            if probability is None:
+            passes = DecisionModelHelper.noul_passes(
+                None if answer is None else {f"tool_selector.{index}": answer},
+                f"tool_selector.{index}",
+                self._threshold,
+            )
+            if passes is None:
                 raise ConfigurationError(f"Missing true probability for tool {tool.name!r}.")
-            if probability >= self._threshold:
+            if passes:
                 selected.append(tool.name)
         return tuple(selected)
 

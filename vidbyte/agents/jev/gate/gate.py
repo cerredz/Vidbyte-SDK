@@ -2,7 +2,7 @@
 
 PURPOSE: Implements JevPreflightGate, the gate in front of JevAgent's generative agent: it combines every enabled fixed-question preset's questions and the specialist question into one Jev request, then one match statement acts on the answers and decides whether the generative agent runs, and which specialist runs instead of it.
 ROLE IN CODEBASE: JevAgent builds one JevPreflightGate from its settings at construction and passes it to JevRuntime, which calls pass_() before the inherited linear loop, stops the run when it returns False, and hands the run to `specialist` when the gate chose one.
-ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets), and DecisionModelRunner.score_noul turns answers into a pass or fail; this class owns asking, failing open, the action each preset triggers (JevClarificationAgent), and choosing the JevSpecialist, and it reports every outcome through JevResponse. The tool selector is not a gate case: it keeps its own path in vidbyte/agents/jev/preflight.py.
+ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets), and DecisionModelHelper handles request execution and answer scoring; this class owns failing open, the action each preset triggers (JevClarificationAgent), and choosing the JevSpecialist, and it reports every outcome through JevResponse. The tool selector is not a gate case: it keeps its own path in vidbyte/agents/jev/preflight.py.
 COMMON MODIFICATION PATTERNS: Add a fixed-question preset by adding its definition to JevPresets and one commented case to the match in pass_(); never add preset checks to JevRuntime.
 KNOWN EDGE CASES: No enabled fixed-question preset and no specialist makes no Jev call; direct TypeSafe credential failures and transient managed failures mark every preset unavailable, while managed credential/access denials propagate; a missing answer marks only its own preset unavailable. Every unavailable preset fails open, and an unavailable or `none` specialist answer leaves the main JevAgent on the run.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
@@ -32,7 +32,7 @@ from vidbyte.lib.dataclasses.jev import (
 from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
-from vidbyte.lib.runners.decision import DecisionModelRunner
+from vidbyte.lib.jev.decision import DecisionModelHelper
 
 
 class JevPreflightGate:
@@ -103,7 +103,7 @@ class JevPreflightGate:
             request = self.combine(message)
             if request is None:
                 return {}
-            decision = await DecisionModelRunner(self.decision).arun(request)
+            decision = await DecisionModelHelper(self.decision).arun(request)
         except VidbyteSdkError as exc:
             if JevDecisionFailurePolicy.should_fail_closed(exc, self.decision):
                 raise
@@ -113,11 +113,11 @@ class JevPreflightGate:
 
     @staticmethod
     def _score(preset: JevPreflightPreset, answers: Mapping[str, JevAnswer] | None) -> JevPresetResult:
-        # Scores one fixed-question preset through DecisionModelRunner.score_noul against the preset's threshold and veto.
+        # Scores one fixed-question preset through DecisionModelHelper against the preset's threshold and veto.
         # @intent a-missing-answer-fails-open
         # Any missing or non-noul answer makes only this preset unavailable, and an unavailable preset never fails.
         definition = JevPresets.definition(preset)
-        verdict = DecisionModelRunner.score_noul(answers, tuple(key.value for key in definition.question_keys), definition.threshold, definition.veto)
+        verdict = DecisionModelHelper.score_noul(answers, tuple(key.value for key in definition.question_keys), definition.threshold, definition.veto)
         if verdict is None:
             return JevPresetResult(preset=preset, score=None, available=False)
         evidence = {JevPreflightQuestionKey(name): answer for name, answer in verdict.answers.items()}

@@ -49,9 +49,11 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
 | Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |
 | `JevPreflightRegistry` | `vidbyte/lib/jev/preflight/preflight.py` |
-| Every JEV record: decision requests, answers, wire bodies, model cards, briefs, criteria, preset results, `JevAgentResponse` | `vidbyte/lib/dataclasses/jev.py` |
-| Every JEV enum: `JevQuestionType`, `JevPreflightPreset`, `JevPreflightQuestionKey` | `vidbyte/lib/enums/jev.py` |
-| JEV limits, defaults, wire literals, and preflight policy values | `vidbyte/lib/constants/jev.py` |
+| Fixed done questions, one module per check (`multi_part.py`, `claims.py`, `motivating_case.py`) | `vidbyte/lib/jev/done/` |
+| `JevDoneRegistry` (question, threshold, and enabled-check validation) | `vidbyte/lib/jev/done/done.py` |
+| Every JEV record: decision requests, answers, wire bodies, model cards, briefs, criteria, preset results, run-state and handoff sections, and `JevAgentResponse` | `vidbyte/lib/dataclasses/jev.py` |
+| Every JEV enum: question types, preflight presets and keys, done checks and keys, and motivating-case categories and exercise modes | `vidbyte/lib/enums/jev.py` |
+| JEV limits, defaults, wire literals, and preflight and done-check policy values | `vidbyte/lib/constants/jev.py` |
 | `DecisionModelRunner` (runs a decision request, `score_noul`) | `vidbyte/lib/runners/decision.py` |
 | TypeSafe System One provider adapter (wire shape, HTTP) | `vidbyte/providers/typesafe.py` |
 | TypeSafe usage pricing (`ModelProvider.TYPESAFE`) | `vidbyte/agents/pricing/typesafe.py` |

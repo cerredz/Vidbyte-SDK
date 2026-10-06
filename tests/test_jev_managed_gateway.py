@@ -222,7 +222,7 @@ class JevFailurePolicyTests(unittest.IsolatedAsyncioTestCase):
         runtime = JevRuntimeSettings(decision=DecisionModelConfig.vidbyte_managed(), preflight=(JevPreflightPreset.CLARITY,))
         gate = JevPreflightGate(settings, runtime, JevResponse())
         for error, denied in ((ProviderRequestError("denied", provider="vidbyte", status_code=403), True), (ProviderRequestError("busy", provider="vidbyte", status_code=503), False)):
-            with self.subTest(error=error.status_code), patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", side_effect=error):
+            with self.subTest(error=error.status_code), patch("vidbyte.agents.jev.gate.gate.DecisionModelHelper", side_effect=error):
                 if denied:
                     with self.assertRaises(ProviderRequestError):
                         await gate._ask("A request")
@@ -239,7 +239,7 @@ class JevFailurePolicyTests(unittest.IsolatedAsyncioTestCase):
         catalog = Tools((lookup,))
         selector = JevPreflightTools(DecisionModelConfig.vidbyte_managed(), 0.2)
         for error, denied in ((ProviderRequestError("denied", provider="vidbyte", status_code=402), True), (ProviderRequestError("busy", provider="vidbyte", status_code=503), False)):
-            with self.subTest(error=error.status_code), patch("vidbyte.agents.jev.preflight.DecisionModelRunner", side_effect=error):
+            with self.subTest(error=error.status_code), patch("vidbyte.agents.jev.preflight.DecisionModelHelper", side_effect=error):
                 if denied:
                     with self.assertRaises(ProviderRequestError):
                         await selector.run("Find a record", catalog)
@@ -250,7 +250,7 @@ class JevFailurePolicyTests(unittest.IsolatedAsyncioTestCase):
         # [Hidden Failure] A done check cannot mark a denied managed decision as merely unavailable.
         fake_state = SimpleNamespace(decision=DecisionModelConfig.vidbyte_managed(), combine=lambda _: decision_request())
         for error, denied in ((ProviderRequestError("denied", provider="vidbyte", status_code=401), True), (ProviderRequestError("busy", provider="vidbyte", status_code=503), False)):
-            with self.subTest(error=error.status_code), patch("vidbyte.agents.jev.done.run_state.DecisionModelRunner", side_effect=error):
+            with self.subTest(error=error.status_code), patch("vidbyte.agents.jev.done.run_state.DecisionModelHelper", side_effect=error):
                 if denied:
                     with self.assertRaises(ProviderRequestError):
                         await JevRunState._ask(fake_state, object())  # type: ignore[arg-type]
