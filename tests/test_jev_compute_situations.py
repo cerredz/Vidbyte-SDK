@@ -102,12 +102,12 @@ def _helper(scripted: ScriptedJev) -> type:
 
 class JevComputeQuestionTests(unittest.TestCase):
     def test_registry_has_twelve_plain_questions_per_option(self) -> None:
-        self.assertEqual(OPTIONS, (JevDynamicComputeOption.FRESH_AGENT, JevDynamicComputeOption.FORK_AGENT, JevDynamicComputeOption.SUBAGENT))
+        self.assertEqual(OPTIONS, (JevDynamicComputeOption.FRESH_AGENT, JevDynamicComputeOption.FORK_AGENT, JevDynamicComputeOption.SUBAGENT, JevDynamicComputeOption.CLONE))
         flattened = tuple(key for option in OPTIONS for key in JevComputeRegistry.question_keys(option))
-        self.assertEqual(len(flattened), 36)
-        self.assertEqual(len(set(flattened)), 36)
+        self.assertEqual(len(flattened), 48)
+        self.assertEqual(len(set(flattened)), 48)
         questions = JevComputeRegistry.questions(OPTIONS)
-        self.assertEqual(len(questions), 36)
+        self.assertEqual(len(questions), 48)
         self.assertEqual([question.name for question in questions], [key.value for key in flattened])
         openings: list[str] = []
         for option in OPTIONS:
@@ -139,7 +139,7 @@ class JevComputeQuestionTests(unittest.TestCase):
         self.assertFalse(hasattr(JevComputeRegistry, "definition"))
 
     def test_settings_default_normalize_and_allow_disabling(self) -> None:
-        self.assertEqual(JevComputeSettings().dynamic_compute, OPTIONS)
+        self.assertEqual(JevComputeSettings().dynamic_compute, OPTIONS[:3])
         normalized = JevComputeSettings(dynamic_compute=("subagent", JevDynamicComputeOption.FRESH_AGENT, "fresh_agent")).dynamic_compute
         self.assertEqual(normalized, (JevDynamicComputeOption.FRESH_AGENT, JevDynamicComputeOption.SUBAGENT))
         self.assertEqual(JevComputeSettings(dynamic_compute=()).dynamic_compute, ())
@@ -189,6 +189,7 @@ class JevComputeRecognitionTests(unittest.IsolatedAsyncioTestCase):
             OPTIONS[0]: [0.99, *([0.72] * 11)],
             OPTIONS[1]: [*([0.91] * 6), *([0.83] * 6)],
             OPTIONS[2]: [0.82] * 12,
+            OPTIONS[3]: [0.81] * 12,
         }
         probabilities = {key.value: score for option in OPTIONS for key, score in zip(keys[option], scores[option])}
         means = {option: sum(scores[option]) / len(scores[option]) for option in OPTIONS}
@@ -251,7 +252,7 @@ class ScriptedRunner:
 
 
 def _call(name: str, arguments: dict[str, Any], call_id: str) -> SimpleNamespace:
-    return SimpleNamespace(text="", raw={"output": [{"type": "function_call", "name": name, "arguments": json.dumps(arguments), "call_id": call_id}]})
+    return SimpleNamespace(text="", raw={"output": [{"type": "function_call", "name": name, "arguments": json.dumps(arguments), "call_id": call_id}]}, provider=ModelProvider.OPENAI, model="gpt-5.4-mini", usage={"input_tokens": 100, "output_tokens": 20})
 
 
 class JevComputeCheckpointRecognitionTests(unittest.IsolatedAsyncioTestCase):

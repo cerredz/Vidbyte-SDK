@@ -3747,6 +3747,7 @@ class JevAgentResponse:
     `review` records JevReviewer's objections at the latest finish attempt.
     With mid-run compute enabled, `run_facts` holds the exact run facts read at the latest checkpoint,
     `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
+    `clone` holds the run's one CLONE launch, or None when Jev never selected CLONE.
     """
 
     input: str = ""
@@ -3766,6 +3767,7 @@ class JevAgentResponse:
     run_brief: JevRunBrief | None = None
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
     compute_decisions: list[JevComputeDecision] = field(default_factory=list)
+    clone: JevCloneResult | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -4192,7 +4194,21 @@ class JevComputeDecision:
             raise JevValidation.error("compute decision option", f"the highest qualifying option ({expected!r})", self.option)
 
 
+@dataclass(frozen=True, slots=True)
+class JevCloneResult:
+    """The one CLONE launch of a run: the checkpoint iteration and every clone reply that came back, in launch order."""
+
+    iteration: int
+    outputs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        JevCount.require(self.iteration, field_name="clone iteration")
+        if not isinstance(self.outputs, tuple) or not all(isinstance(output, str) and output.strip() for output in self.outputs):
+            raise JevValidation.error("clone outputs", "a tuple of non-empty strings", self.outputs)
+
+
 __all__ = [
+    "JevCloneResult",
     "JevCount",
     "JevRunBrief",
     "JevRunBriefAppendPayload",

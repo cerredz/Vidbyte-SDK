@@ -44,10 +44,13 @@ class ScriptedRunner:
 
 
 class RawResponse:
-    """OpenAI-shaped raw response carrying one scripted function call."""
+    """OpenAI-shaped raw response carrying one scripted function call and the usage the run ledger prices."""
 
     def __init__(self, name: str, arguments: dict[str, Any], call_id: str) -> None:
         self.text = ""
+        self.provider = ModelProvider.OPENAI
+        self.model = "gpt-5.4-mini"
+        self.usage = {"input_tokens": 100, "output_tokens": 20}
         self.raw = {"output": [{"type": "function_call", "name": name, "arguments": json.dumps(arguments), "call_id": call_id}]}
 
 
@@ -97,7 +100,7 @@ class JevComputeHookTests(unittest.IsolatedAsyncioTestCase):
         agent = bind_test_runner(JevAgent(_settings(), _compute()), _lookups_then_done(("alpha", "beta", "gamma")))
         seen: list[tuple[int, int]] = []
 
-        async def record(state: Any) -> None:
+        async def record(state: Any, messages: Any) -> None:
             # The loop state is one mutable object, so read it at call time rather than after the run.
             seen.append((state.iteration_count, len(state.call_contexts)))
 
@@ -107,7 +110,7 @@ class JevComputeHookTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, [(1, 1), (2, 2), (3, 3)])
 
     async def test_a_plain_final_answer_runs_no_checkpoint(self) -> None:
-        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="direct answer", raw={}))
+        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="direct answer", raw={}, usage={"input_tokens": 100, "output_tokens": 20}))
         agent = bind_test_runner(JevAgent(_settings(), _compute()), runner)
         with patch.object(JevComputeController, "checkpoint", new=AsyncMock()) as checkpoint:
             await agent.arun(REQUEST)

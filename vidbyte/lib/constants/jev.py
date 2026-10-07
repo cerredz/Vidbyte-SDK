@@ -374,6 +374,10 @@ JEV_EVENT_ID_PATTERN: str = r"^E[1-9][0-9]{0,6}$"
 # Minimum mean P(true) required to select a dynamic-compute option.
 JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD: float = 0.8
 
+# How many copies of the main agent one CLONE launch runs: the default and the inclusive maximum.
+JEV_COMPUTE_CLONES_DEFAULT: int = 2
+JEV_COMPUTE_CLONES_MAX: int = 4
+
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
@@ -648,4 +652,6 @@ __all__ = [
     "JEV_EVENT_ID_PREFIX",
     "JEV_EVENT_ID_PATTERN",
     "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
+    "JEV_COMPUTE_CLONES_DEFAULT",
+    "JEV_COMPUTE_CLONES_MAX",
 ]

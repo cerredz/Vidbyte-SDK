@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_COMPUTE_CLONES_DEFAULT,
+    JEV_COMPUTE_CLONES_MAX,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_TOKENS,
@@ -237,7 +239,11 @@ class JevRunBriefSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevComputeSettings:
-    """Validated run-brief settings and enabled dynamic-compute options for the mid-run checkpoint."""
+    """Validated run-brief settings, enabled dynamic-compute options, and the clone count for the mid-run checkpoint.
+
+    CLONE is opt-in because it is the one option that launches agents: add it to `dynamic_compute`, and `clones`
+    sets how many copies of the main agent its one launch per run starts.
+    """
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
     dynamic_compute: tuple[JevDynamicComputeOption | str, ...] = (
@@ -245,11 +251,14 @@ class JevComputeSettings:
         JevDynamicComputeOption.FORK_AGENT,
         JevDynamicComputeOption.SUBAGENT,
     )
+    clones: int = JEV_COMPUTE_CLONES_DEFAULT
 
     def __post_init__(self) -> None:
         if not isinstance(self.brief, JevRunBriefSettings):
             raise ConfigurationError("JevComputeSettings.brief must be a JevRunBriefSettings instance.")
         object.__setattr__(self, "dynamic_compute", JevComputeRegistry.validate(self.dynamic_compute))
+        if isinstance(self.clones, bool) or not isinstance(self.clones, int) or not 1 <= self.clones <= JEV_COMPUTE_CLONES_MAX:
+            raise ConfigurationError(f"JevComputeSettings.clones must be an integer from 1 through {JEV_COMPUTE_CLONES_MAX}.")
 
 
 @dataclass(frozen=True, slots=True)

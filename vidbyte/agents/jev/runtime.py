@@ -216,7 +216,7 @@ class JevRuntime(AgentRuntime):
         # Every mid-run compute step lives in JevComputeController, so adding one never adds a branch here; without
         # compute settings there is no controller and the loop runs exactly as the linear runtime does.
         if self.compute is not None:
-            await self.compute.checkpoint(state)
+            await self.compute.checkpoint(state, messages)
             self.usage.require_accounted()
 
 
