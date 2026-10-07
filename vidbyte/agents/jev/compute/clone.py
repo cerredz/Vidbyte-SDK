@@ -26,6 +26,8 @@ class JevCloneAgent(BaseAgent):
     """One copy of the main JevAgent that attempts the remaining work from the verified run brief."""
 
     def __init__(self, settings: JevAgentSettings, index: int) -> None:
+        # @intent clones-inherit-main-agent-permissions
+        # A parallel attempt must not gain tools or privileges the caller denied to the main agent.
         super().__init__(
             name=f"{settings.name}-clone-{index}",
             system_prompt=settings.system_prompt,

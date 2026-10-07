@@ -4,7 +4,7 @@ PURPOSE: Proves a JevAgent run records every generative and decision call, from 
 ROLE IN CODEBASE: Covers vidbyte/lib/usage_ledger.py, the DecisionModelRunner and BaseAgent.generate_reply hooks, UsageTracker's kind/failure/unaccounted bookkeeping, and JevUsageAccount.
 ARCHITECTURE NOTE: Decision calls are faked at TypeSafeProvider.run_decision, below DecisionModelRunner, so the real recording hook runs; generative calls use offline runners bound to each agent.
 COMMON MODIFICATION PATTERNS: A new model call site in JevAgent gets one test here proving its usage reaches response.usage.total.
-KNOWN EDGE CASES: Generative fakes report a pricebook model (gpt-5.4-mini); an unpriced or usage-free fake is how the fail-closed paths are exercised.
+KNOWN EDGE CASES: JevAgent requires a managed decision config, while standalone DecisionModelRunner permits direct TypeSafe. Generative fakes report a pricebook model (gpt-5.4-mini); an unpriced or usage-free fake is how the fail-closed paths are exercised.
 RELATED DOCS: docs/design/jev-run-usage-ledger.md.
 TESTS: This file.
 """
@@ -23,7 +23,7 @@ from vidbyte.agents.pricing import UsageTracker
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_SPECIALIST_NONE
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevQuestion
-from vidbyte.lib.enums import JevQuestionType, ModelProvider, UsageAccountingFailure, UsageKind
+from vidbyte.lib.enums import DecisionModelMode, JevQuestionType, ModelProvider, UsageAccountingFailure, UsageKind
 from vidbyte.lib.errors import ConfigurationError, ProviderResponseError, UsageAccountingError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.decision import DecisionModelRunner
@@ -75,7 +75,7 @@ def _decision(yes: float = _CLEAR, *, choice: str = JEV_SPECIALIST_NONE, usage: 
 
 def _agent(generative: ScriptedGenerativeRunner, *, preflight: tuple[JevPreflightPreset, ...] = (JevPreflightPreset.CLARITY,), agents: tuple[JevSpecialist, ...] = ()) -> JevAgent:
     settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="openai", model_name=_PRICED_MODEL, agents=agents)
-    runtime = JevRuntimeSettings(preflight=preflight, decision=DecisionModelConfig(api_key="test-key"))
+    runtime = JevRuntimeSettings(preflight=preflight, decision=DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED, api_key="vb_live_" + "x" * 32))
     agent = bind_test_runner(JevAgent(settings, runtime), generative)
     if agent.preflight.clarification is not None:
         bind_test_runner(agent.preflight.clarification, ScriptedGenerativeRunner(_CLARIFICATION, usage=_usage(50, 10)))
