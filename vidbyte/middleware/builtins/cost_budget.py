@@ -17,19 +17,15 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
+from vidbyte.middleware.builtins.limit_validation import positive_real
 
 
 class CostBudgetMiddleware(AgentMiddleware):
     """Abort a run when estimated token cost reaches the configured USD ceiling."""
 
     def __init__(self, *, max_spend_usd: float, cost_per_million_tokens: float) -> None:
-        # Validates that both financial parameters are positive non-zero values.
-        if max_spend_usd <= 0:
-            raise ValueError("max_spend_usd must be greater than zero.")
-        if cost_per_million_tokens <= 0:
-            raise ValueError("cost_per_million_tokens must be greater than zero.")
-        self.max_spend_usd = max_spend_usd
-        self.cost_per_million_tokens = cost_per_million_tokens
+        self.max_spend_usd = positive_real(max_spend_usd, "max_spend_usd")
+        self.cost_per_million_tokens = positive_real(cost_per_million_tokens, "cost_per_million_tokens")
         self._accumulated_tokens: int = 0
         self._last_tokens_seen: int | None = None
         self._estimated_spend_usd: float = 0.0
