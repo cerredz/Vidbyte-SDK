@@ -4,7 +4,7 @@ PURPOSE: Proves that a JevAgent run shares one managed gateway run ID and closes
 ROLE IN CODEBASE: Covers vidbyte/providers/typesafe.py (run headers and close) and vidbyte/lib/jev/managed.py.
 ARCHITECTURE NOTE: A scripted transport stands in for the gateway and answers every decision with clear noul answers, so the real adapter, runner, and runtime run unmocked.
 COMMON MODIFICATION PATTERNS: Add a case when the gateway's header or close contract changes.
-KNOWN EDGE CASES: A run that sent no call is not closed; a nested run joins its parent; a failed close is logged, never raised.
+KNOWN EDGE CASES: A run that sent no call is not closed; a nested run joins its parent; a failed close is logged, never raised. JevAgent requires its generative fake to report priced usage, unlike standalone DecisionModelRunner tests.
 RELATED DOCS: docs/design/jev-managed-runs.md.
 TESTS: Run this module with pytest.
 """
@@ -65,7 +65,7 @@ class ScriptedGenerativeRunner:
     """Generative runner that answers every prompt with fixed text."""
 
     def run(self, prompt: str, system: str = "", **kwargs: Any) -> TextModelResponse:
-        return TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="done", raw={})
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="done", raw={}, usage={"input_tokens": 10, "output_tokens": 1})
 
 
 def _request() -> JevDecisionRequest:
@@ -161,7 +161,7 @@ class JevAgentManagedRunTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_each_agent_run_is_one_closed_managed_run(self) -> None:
         transport = GatewayTransport()
-        settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini")
+        settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="openai", model_name="gpt-5.4-mini")
         agent = bind_test_runner(JevAgent(settings, JevRuntimeSettings(decision=_managed(), preflight=(JevPreflightPreset.CLARITY,))), ScriptedGenerativeRunner())
         with patch(_TRANSPORT_PATH, new=transport):
             await agent.arun("Add a login page to the web app.")
