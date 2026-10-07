@@ -7,6 +7,7 @@ FUNCTION INVENTORY: test_integer_limits_reject_non_integer_values tests all coun
 COMMON MODIFICATION PATTERNS: Add an invalid value when a new public count or timeout field is introduced; assert the named ConfigurationError and the valid runtime value.
 WHAT NOT TO DO IN THIS FILE: 1. Do not implement validation here; vidbyte/agents/settings/loop.py owns it. 2. Do not call live providers; tests/agent_test_support.py owns offline agent fixtures.
 KNOWN EDGE CASES: bool inherits int, NaN is not ordered, and a string throws TypeError before comparison.
+RELATED DOCS: tests/features/sdk_loop_settings/FEATURE.md defines the public validation contract for these probes.
 TESTS: This module; full source gate via scripts/run_ci.py.
 """
 
