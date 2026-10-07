@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, ClassVar, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.constants.jev import (
-    JEV_MANAGED_RUN_ID_PATTERN,
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
@@ -39,6 +38,7 @@ from vidbyte.lib.constants.jev import (
     JEV_EVENT_LOG_FIRST_ID,
     JEV_EXPERT_DEPTH_MAX_DETAILS,
     JEV_EXPERT_DEPTH_MIN_DETAILS,
+    JEV_MANAGED_RUN_ID_PATTERN,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
     JEV_MAX_QUESTIONS,

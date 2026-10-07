@@ -432,10 +432,10 @@ class TypeSafeProvider:
                 raise error from None
             raise error from exc
         except Exception as exc:
-            error = _TypeSafeFailures.unexpected(exc, operation="decision", usage=usage, config=resolved)
+            failure = _TypeSafeFailures.unexpected(exc, operation="decision", usage=usage, config=resolved)
             if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
-                raise error from None
-            raise error from exc
+                raise failure from None
+            raise failure from exc
 
     async def list_models(self, *, transport: HttpTransport, config: DecisionModelConfig | None = None) -> tuple[JevModelCard, ...]:
         # GETs the model IDs and aliases the account can send in the request `model` field.
@@ -458,10 +458,10 @@ class TypeSafeProvider:
                 raise error from None
             raise error from exc
         except Exception as exc:
-            error = _TypeSafeFailures.unexpected(exc, operation="model list", usage=None, config=resolved)
+            failure = _TypeSafeFailures.unexpected(exc, operation="model list", usage=None, config=resolved)
             if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
-                raise error from None
-            raise error from exc
+                raise failure from None
+            raise failure from exc
 
     async def close_run(self, *, run_id: str, transport: HttpTransport, config: DecisionModelConfig | None = None) -> None:
         # Closes one managed run so the gateway settles its final part-cent now, not at the idle reaper.
@@ -484,10 +484,10 @@ class TypeSafeProvider:
                 raise error from None
             raise error from exc
         except Exception as exc:
-            error = _TypeSafeFailures.unexpected(exc, operation="run close", usage=None, config=resolved)
+            failure = _TypeSafeFailures.unexpected(exc, operation="run close", usage=None, config=resolved)
             if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
-                raise error from None
-            raise error from exc
+                raise failure from None
+            raise failure from exc
 
     def _config_for(self, config: DecisionModelConfig | None) -> DecisionModelConfig:
         # Resolves the active config, raising when neither the call nor the adapter supplied one.
