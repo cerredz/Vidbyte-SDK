@@ -75,6 +75,8 @@ CONCURRENCY MODEL:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -520,6 +522,21 @@ class AgentRuntime:
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
+            else:
+                # Fall back to parsed calls only when the raw provider response cannot be echoed.
+                # This covers Responses API turns without duplicating assistant messages on other providers.
+                echoable_calls = tuple(call for call in tool_calls if call.tool_name != IS_DONE_TOOL_NAME)
+                if echoable_calls:
+                    messages.append(
+                        dict(
+                            ToolsFormatter.format_parsed_assistant_tool_calls(
+                                echoable_calls,
+                                last_assistant_output,
+                                state.provider,
+                                max_arg_chars=self.algorithm.max_tool_result_chars,
+                            )
+                        )
+                    )
             contract_rejected = False
             finish_attempt_continued = False
             for call in tool_calls:
@@ -1077,6 +1094,8 @@ class AgentRuntime:
             tool_name=call.tool_name,
             tool_input=tool_input,
             arguments=tool_input,
+            arguments_text=_trace_text(tool_input),
+            arguments_fingerprint=_args_fingerprint(tool_input),
             call_id=call.call_id,
             provider=provider,
             metadata=_safe_trace_mapping(call.metadata),
@@ -1102,13 +1121,17 @@ class AgentRuntime:
                     )
             self._record_operation_usage(tool, call, result)
             succeeded = result.status.value == "success"
+            state = ToolCallState.SUCCEEDED if succeeded else ToolCallState.FAILED
             if not succeeded:
                 error_type = str(dict(result.metadata).get("error_type") or dict(result.metadata).get("error") or "ToolExecutionError")
-            self._tracer.end_span(tool_span, output=result.output)
+            close_metadata = {"state": state.value}
+            if succeeded:
+                close_metadata["output_fingerprint"] = _output_fingerprint(result.output)
+            self._tracer.end_span(tool_span, output=result.output, metadata=close_metadata)
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
             error_type = type(exc).__name__
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
         except PermissionDeniedError as exc:
             permission = exc.details.get("permission", "")
             result = ToolResult.error(
@@ -1118,7 +1141,7 @@ class AgentRuntime:
             )
             state = ToolCallState.DENIED
             error_type = type(exc).__name__
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
         except ToolExecutionError as exc:
             error_code = str(exc.details.get("error", "execution_error"))
             error_type = exc.details.get("error_type", type(exc).__name__)
@@ -1128,7 +1151,7 @@ class AgentRuntime:
                 metadata={"error": error_code, "error_type": error_type},
             )
             timed_out = error_code == "timeout"
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
         except Exception as exc:
             result = ToolResult.error(
                 call.tool_name,
@@ -1136,9 +1159,9 @@ class AgentRuntime:
                 metadata={"error": "execution_error", "error_type": type(exc).__name__},
             )
             error_type = type(exc).__name__
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
         except BaseException as exc:
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
             raise
 
         if succeeded:
@@ -1931,6 +1954,17 @@ def _trace_text(value: object, *, max_chars: int = 12000) -> str:
     if len(text) <= max_chars:
         return text
     return f"{text[:max_chars]}...[truncated]"
+
+
+def _args_fingerprint(arguments: Mapping[str, Any]) -> str:
+    """Return a stable fingerprint for one sanitized argument mapping."""
+    blob = json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def _output_fingerprint(output: str) -> str:
+    """Return a stable fingerprint for a tool output."""
+    return hashlib.sha256(str(output).encode("utf-8")).hexdigest()[:12]
 
 
 def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:

@@ -18,7 +18,7 @@ Relations:
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
@@ -232,6 +232,80 @@ class ToolsFormatter:
         if provider == "gemini":
             return ToolsFormatter._assistant_turn_gemini(raw_payload)
         return ToolsFormatter._assistant_turn_openai(raw_payload)
+
+    @staticmethod
+    def format_parsed_assistant_tool_calls(
+        calls: Sequence[ToolCall],
+        text: str,
+        provider_or_model: str,
+        max_arg_chars: int | None = None,
+    ) -> Mapping[str, Any]:
+        """Serialize parsed tool calls when a provider's raw response has no assistant-turn formatter."""
+        provider = ToolsFormatter.provider_from_model(provider_or_model)
+        if provider == "anthropic":
+            return ToolsFormatter._assistant_tool_calls_anthropic(calls, text, max_arg_chars)
+        if provider == "gemini":
+            return ToolsFormatter._assistant_tool_calls_gemini(calls, text, max_arg_chars)
+        return ToolsFormatter._assistant_tool_calls_openai(calls, text, max_arg_chars)
+
+    @staticmethod
+    def _assistant_tool_calls_openai(calls: Sequence[ToolCall], text: str, max_arg_chars: int | None) -> dict[str, Any]:
+        """Build an OpenAI-compatible assistant turn from normalized calls."""
+        tool_calls = [
+            {
+                "id": call.call_id or call.tool_name,
+                "type": "function",
+                "function": {
+                    "name": call.tool_name,
+                    "arguments": json.dumps(ToolsFormatter._cap_arguments(call.arguments, max_arg_chars), default=str),
+                },
+            }
+            for call in calls
+        ]
+        return {"role": "assistant", "content": text or None, "tool_calls": tool_calls}
+
+    @staticmethod
+    def _assistant_tool_calls_anthropic(calls: Sequence[ToolCall], text: str, max_arg_chars: int | None) -> dict[str, Any]:
+        """Build an Anthropic assistant turn from normalized calls."""
+        content: list[dict[str, Any]] = []
+        if text:
+            content.append({"type": "text", "text": text})
+        content.extend(
+            {
+                "type": "tool_use",
+                "id": call.call_id or call.tool_name,
+                "name": call.tool_name,
+                "input": ToolsFormatter._cap_arguments(call.arguments, max_arg_chars),
+            }
+            for call in calls
+        )
+        return {"role": "assistant", "content": content}
+
+    @staticmethod
+    def _assistant_tool_calls_gemini(calls: Sequence[ToolCall], text: str, max_arg_chars: int | None) -> dict[str, Any]:
+        """Build a Gemini model turn from normalized calls."""
+        parts: list[dict[str, Any]] = []
+        if text:
+            parts.append({"text": text})
+        parts.extend(
+            {"functionCall": {"name": call.tool_name, "args": ToolsFormatter._cap_arguments(call.arguments, max_arg_chars)}}
+            for call in calls
+        )
+        return {"role": "model", "parts": parts}
+
+    @staticmethod
+    def _cap_arguments(arguments: Mapping[str, Any], max_arg_chars: int | None) -> dict[str, Any]:
+        """Truncate oversized string values in echoed calls while retaining all argument keys."""
+        if max_arg_chars is None:
+            return dict(arguments)
+        return {key: ToolsFormatter._cap_value(value, max_arg_chars) for key, value in arguments.items()}
+
+    @staticmethod
+    def _cap_value(value: Any, max_arg_chars: int) -> Any:
+        """Bound a string argument value without changing non-string values."""
+        if isinstance(value, str) and len(value) > max_arg_chars:
+            return f"{value[:max_arg_chars]}...[truncated]"
+        return value
 
     @staticmethod
     def _assistant_turn_openai(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
