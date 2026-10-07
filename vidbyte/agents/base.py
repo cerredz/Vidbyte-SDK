@@ -12,6 +12,9 @@ Architecture:
     - Owns one UsageTracker (cost) and one AgentSpeedTracker (latency) for its
       lifetime, both reset at the top of every generate_reply() and threaded
       into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
+    - Inside a metered run (an active vidbyte.lib.usage_ledger ledger, opened by
+      JevRuntime), a nested agent records into its own tracker and merges that
+      run's usage into the active ledger when it finishes.
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -43,9 +46,10 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError, UsageAccountingError
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
+from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
@@ -587,7 +591,32 @@ class BaseAgent(McpAttachableMixin):
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
 
-    async def generate_reply(
+    async def generate_reply(self, message: str | AgentInput, **options: Any) -> AgentMessage:
+        """Run one reply (options as _generate_reply takes them); inside a metered run, also merge this run's usage into the run's active ledger."""
+        # @intent nested-agent-usage-reaches-the-run-ledger
+        # Helper agents, specialists, and fresh agents a JevAgent spawns are ordinary BaseAgents; each records into
+        # its own tracker (so its own get_usage() stays its own) and hands that run's rollup to the parent ledger
+        # exactly once, in `finally`, so usage spent before a failure is still counted.
+        parent = active_usage_ledger()
+        if parent is None or parent is self._usage_tracker:
+            return await self._generate_reply(message, **options)
+        with usage_ledger_scope(self._usage_tracker):
+            try:
+                return await self._generate_reply(message, **options)
+            finally:
+                self._merge_usage_into(parent)
+
+    def _merge_usage_into(self, parent: UsageLedger) -> None:
+        # Merges this run's usage into the parent ledger, flagging the parent corrupted if the merge cannot happen.
+        if not isinstance(parent, UsageTracker):
+            parent.mark_recording_corrupted()
+            return
+        try:
+            parent.merge(self.get_usage())
+        except Exception:
+            parent.mark_recording_corrupted()
+
+    async def _generate_reply(
         self,
         message: str | AgentInput,
         *,
@@ -643,11 +672,11 @@ class BaseAgent(McpAttachableMixin):
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
             self._speed_tracker.record_run_end()
         except Exception as exc:
-            self._notify_session_exception(exc)
-            if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, error=exc)
-            self._speed_tracker.record_run_end()
-            self._active_prompt = ""
+            self._close_failed_reply(exc, trace_ctx)
+            if isinstance(exc, UsageAccountingError):
+                # @intent usage-accounting-error-reaches-the-user
+                # A run that failed closed on usage must tell the user so, not surface as a generic reply failure.
+                raise
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
                 details={"agent": self.name, "error_type": type(exc).__name__},
@@ -655,11 +684,7 @@ class BaseAgent(McpAttachableMixin):
         except BaseException as exc:
             # Catches CancelledError and other BaseException subclasses that bypass
             # the Exception handler, ensuring the root trace is always finalized.
-            self._notify_session_exception(exc)
-            if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, error=exc)
-            self._speed_tracker.record_run_end()
-            self._active_prompt = ""
+            self._close_failed_reply(exc, trace_ctx)
             raise
         self._active_prompt = ""
         metadata: dict[str, Any] = {
@@ -692,6 +717,14 @@ class BaseAgent(McpAttachableMixin):
             await self._drain_queued_prompts(metadata)
         self._assert_schema_satisfied(result)
         return reply
+
+    def _close_failed_reply(self, exc: BaseException, trace_ctx: Any) -> None:
+        # Notifies the session, finalizes the root trace and speed run, and clears the active prompt for a failed reply.
+        self._notify_session_exception(exc)
+        if trace_ctx is not None:
+            self._tracer.end_trace(trace_ctx, error=exc)
+        self._speed_tracker.record_run_end()
+        self._active_prompt = ""
 
     def _assert_schema_satisfied(self, result: AgentResult) -> None:
         # Fails loudly when a declared schema produced no instance, rather than returning a silent None.

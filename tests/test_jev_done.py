@@ -545,7 +545,7 @@ class ScriptedGenerativeRunner:
     """Small runner that records every prompt, system prompt, and message list it receives, or raises when told to."""
 
     def __init__(self, text: str = "completed", *, error: Exception | None = None) -> None:
-        self.response = TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text=text, raw={})
+        self.response = TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text=text, raw={}, usage={"input_tokens": 100, "output_tokens": 20})
         self.error = error
         self.calls: list[str] = []
         self.systems: list[str] = []

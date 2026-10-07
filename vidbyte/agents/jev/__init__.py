@@ -110,6 +110,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeEvidence,
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeItem,
+    JevUsageReport,
 )
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
@@ -241,4 +242,5 @@ __all__ = [
     "JevTargetOutcomeEvidence",
     "JevTargetOutcomeEvidenceItem",
     "JevTargetOutcomeItem",
+    "JevUsageReport",
 ]

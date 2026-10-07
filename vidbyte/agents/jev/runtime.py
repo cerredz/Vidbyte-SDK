@@ -2,7 +2,7 @@
 
 PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state with supplied prior user turns, applies the tool selector, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
-ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
+ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally. It wraps the whole run in JevUsageAccount.scope(), so every generative and decision call from this agent and every agent it spawns lands in this agent's one usage ledger, checks that ledger at each phase boundary, and fails the run closed when any usage cannot be recorded or priced.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
 KNOWN EDGE CASES: With a managed decision config, the whole run is one managed run on Vidbyte's gateway and is closed when arun returns or raises. With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here. With JevRuntimeSettings.compute set, the main agent's run calls the JevComputeController after every tool iteration that continues; a specialist's run does not.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
@@ -22,6 +22,7 @@ from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevRuntimeSettings
+from vidbyte.agents.jev.usage import JevUsageAccount
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.context import BaseAgentContext
@@ -68,6 +69,7 @@ class JevRuntime(AgentRuntime):
         self.compute = compute
         self.response = response
         super().__init__(**kwargs)
+        self.usage = JevUsageAccount(self.usage_tracker, self.agent_name)
 
     async def arun(
         self,
@@ -79,48 +81,53 @@ class JevRuntime(AgentRuntime):
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
     ) -> AgentResult:
-        """Run the whole Jev run inside one managed run when the decision config is managed."""
+        """Run one managed gateway scope with this JevAgent's usage ledger active for every phase."""
         # @intent one-agent-run-is-one-managed-run
-        # Every Jev call this run makes (gate, specialist, done checks, continuation, tool selector) shares
-        # one X-Vidbyte-Run-Id, and the run is closed when it ends; a direct TypeSafe config opens nothing.
+        # Every Jev call shares one X-Vidbyte-Run-Id, while every generative and decision call is added to this
+        # agent's ledger. The nested contexts restore independently, and the gateway closes after accounting settles.
         async with JevManagedRun(self.runtime_settings.decision):
-            return await self._arun_jev(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+            with self.usage.scope():
+                return await self._arun_metered(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
 
-    async def _arun_jev(
+    async def _arun_metered(
         self,
         message: str,
         *,
         handle: RunnerHandle,
         context: BaseAgentContext,
-        metadata: Mapping[str, Any] | None,
-        options: Mapping[str, Any] | None,
-        trace_context: SpanContext | None,
+        metadata: Mapping[str, Any] | None = None,
+        options: Mapping[str, Any] | None = None,
+        trace_context: SpanContext | None = None,
     ) -> AgentResult:
-        """Run the preflight gate, then apply enabled run-local preflights before entering the inherited agent loop."""
+        # Runs every phase with the ledger open, checking it before each phase that spends more.
         # @intent closed-gate-never-reaches-the-model
         # A closed gate returns without invoking the generative runner, so an unclear request is answered
         # with questions before any generative tokens are spent.
         self.response.start(message)
         if not await self.preflight.pass_(message):
-            return self.response.stopped()
+            return self.response.stopped(self.usage.settle())
+        self.usage.require_accounted()
         if self.preflight.specialist is not None:
-            return self.response.delegated(await self.preflight.specialist.agent.arun(message))
+            reply = await self.preflight.specialist.agent.arun(message)
+            return self.response.delegated(reply, self.usage.settle())
         if self.compute is not None:
             self.compute.begin(message)
         if self.run_state is not None:
             await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
+            self.usage.require_accounted()
             sequence_instructions = self.run_state.agent_instructions()
             if sequence_instructions:
                 context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
         if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
-            return self.response.finished(await super().arun(
+            result = await super().arun(
                 message,
                 handle=handle,
                 context=context,
                 metadata=metadata,
                 options=options,
                 trace_context=trace_context,
-            ))
+            )
+            return self.response.finished(result, self.usage.settle())
 
         candidate_tool_count = len(self.user_tools)
         selector = JevPreflightTools(
@@ -128,6 +135,7 @@ class JevRuntime(AgentRuntime):
             self.runtime_settings.tool_selector_threshold,
         )
         self.user_tools = await selector.run(message, self.user_tools)
+        self.usage.require_accounted()
         self.tools = with_internal_agent_tools(self.user_tools)
         context = replace(context, tools=self.tools.specs())
         run_options = dict(options or {})
@@ -147,6 +155,7 @@ class JevRuntime(AgentRuntime):
         }
         if selector.usage is not None:
             selector_metadata["usage"] = {
+                "model": selector.model,
                 "input_tokens": selector.usage.input_tokens,
                 "output_tokens": selector.usage.output_tokens,
             }
@@ -156,7 +165,7 @@ class JevRuntime(AgentRuntime):
                 **dict(result.metadata),
                 "jev_tool_selector": selector_metadata,
             },
-        ))
+        ), self.usage.settle())
 
     @staticmethod
     def _prior_user_turns(history: Sequence[object]) -> tuple[str, ...]:
@@ -178,6 +187,7 @@ class JevRuntime(AgentRuntime):
         # continue and every message it sends lives in a JevContinuation subclass, never in this runtime.
         if self.continuation is None or not await self.continuation.should_continue(result.output, state.iteration_outputs, state.call_contexts):
             return False
+        self.usage.require_accounted()
         extra_iterations, extra_tokens, extra_tool_calls = self.continuation.budget_extension()
         limits: dict[str, int] = {}
         granted: dict[str, int] = {}
@@ -207,6 +217,7 @@ class JevRuntime(AgentRuntime):
         # compute settings there is no controller and the loop runs exactly as the linear runtime does.
         if self.compute is not None:
             await self.compute.checkpoint(state)
+            self.usage.require_accounted()
 
 
 __all__ = ["JevRuntime"]
