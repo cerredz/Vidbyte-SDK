@@ -12,7 +12,8 @@ Architecture:
 Key Functions:
     - record_call: Parses, prices, and stores one model call of a given UsageKind.
     - record_billed_failure: Prices and stores the usage a provider billed for a failed call.
-    - record_operation: Prices and stores one search/fetch operation.
+    - record_operation: Prices and stores one search/fetch operation only with
+      positive integer units and a finite cost.
     - rollup: Folds both ledgers into an immutable UsageRollup, optionally for one UsageKind.
     - reset: Clears both ledgers at the start of a new run.
     - _cache_hit_rate: Aggregates a run's cache hit rate, weighted by prompt size.
@@ -29,6 +30,7 @@ Similar Files:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
@@ -112,7 +114,9 @@ class UsageTracker:
         # Prices and stores one search/fetch operation; returns None when unusable.
         # A provider-reported cost, when present, wins over the built-in table math,
         # mirroring how the token axis prefers a marketplace-reported call cost.
-        if not _is_billable_key(operation, provider) or not isinstance(units, int) or isinstance(units, bool):
+        # @intent invalid-operation-units-never-enter-the-ledger
+        # An impossible count would otherwise appear as a real, zero-cost operation in a complete rollup.
+        if not _is_billable_key(operation, provider) or not isinstance(units, int) or isinstance(units, bool) or units <= 0:
             return None
         cost = _reported_or_table_cost(reported_cost_usd, self._operation_pricing.resolve(operation, provider, mode), units)
         record = OperationUsageRecord(
@@ -237,7 +241,7 @@ def _is_billable_key(operation: str, provider: str) -> bool:
 def _reported_or_table_cost(reported_cost_usd: float | None, pricing: OperationPricing | None, units: int) -> float | None:
     # Prefers a valid non-negative provider-reported cost, else falls back to the
     # tariff's own math; returns None when neither can price the operation.
-    if isinstance(reported_cost_usd, (int, float)) and not isinstance(reported_cost_usd, bool) and reported_cost_usd >= 0:
+    if isinstance(reported_cost_usd, (int, float)) and not isinstance(reported_cost_usd, bool) and math.isfinite(reported_cost_usd) and reported_cost_usd >= 0:
         return float(reported_cost_usd)
     if pricing is None:
         return None
