@@ -83,6 +83,9 @@ class JevUsageAccount:
     @staticmethod
     def unpriced(rollup: UsageRollup) -> list[str]:
         """Name each model and operation the pricebook could not price, once each, in sorted order."""
+        # @intent unpriced-means-missing-from-the-pricebook
+        # A None cost is the one signal that the SDK pricebook has no rate for that call; naming the provider and
+        # model (never raw usage) tells the user exactly which pricebook entry is missing.
         calls = {f"{record.provider}:{record.model}" for record in rollup.calls if record.cost_usd is None}
         operations = {f"{record.provider}:{record.operation}:{record.mode}" for record in rollup.operations if record.cost_usd is None}
         return sorted(calls | operations)
