@@ -14,7 +14,6 @@ from __future__ import annotations
 from vidbyte.lib.dataclasses.jev import JevComputeQuestion
 from vidbyte.lib.enums.jev import JevComputeQuestionKey
 
-
 FRESH_AGENT_QUESTIONS = (
     JevComputeQuestion(
         key=JevComputeQuestionKey.FRESH_AGENT_ERROR_RATE_RISING,

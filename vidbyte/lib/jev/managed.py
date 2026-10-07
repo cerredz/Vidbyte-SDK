@@ -19,8 +19,8 @@ from types import TracebackType
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_MANAGED_RUN_ID_PREFIX
 from vidbyte.lib.dataclasses.jev import JevManagedRunScope
-from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.enums import DecisionModelMode
+from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.providers.typesafe import TypeSafeManagedRunContext
 
