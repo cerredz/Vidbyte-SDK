@@ -1,0 +1,15 @@
+{
+  "name": "Jev Clone",
+  "description": "Instructions for JevAgent's CLONE dynamic-compute option: the prompt each clone receives, and the message that returns the clones' results to the main agent.",
+  "key": "jev_clone",
+  "prompts": {
+    "clone_prompt": {
+      "path": "clone_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clone/clone_prompt.md"
+    },
+    "results_prompt": {
+      "path": "results_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clone/results_prompt.md"
+    }
+  }
+}

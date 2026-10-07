@@ -149,7 +149,7 @@ Enable strict self-review with `JevDoneCheck.SELF_REVIEW`. Before the handoff at
 
 ## Capability design example
 
-`JevComputeSettings.dynamic_compute` exposes `FRESH_AGENT`, `FORK_AGENT`, and `SUBAGENT`. All three are enabled by default; an empty tuple leaves note-brief updates on and skips recognition. After each verified brief update, the recognizer asks one request containing twelve questions per enabled option. Each option uses the same `{request, brief, facts, recent}` state and common mean P(true) threshold. These questions describe observable run evidence; they do not ask Jev whether launching another agent would help. Record the selected option and request usage for evaluation. No option launches compute in this checkpoint.
+`JevComputeSettings.dynamic_compute` exposes `FRESH_AGENT`, `FORK_AGENT`, `SUBAGENT`, and `CLONE`. The first three are enabled by default and `CLONE` is opt-in; an empty tuple leaves note-brief updates on and skips recognition. After each verified brief update, the recognizer asks one request containing twelve questions per enabled option. Each option uses the same `{request, brief, facts, recent}` state and common mean P(true) threshold. These questions describe observable run evidence; they do not ask Jev whether launching another agent would help. Record the selected option and request usage for evaluation. Only `CLONE` launches compute: on its first selection in a run, `JevCloneAgent` runs `JevComputeSettings.clones` copies of the main agent from the verified brief, `JevAgent.response.clone` records their replies, and one user message hands them back to the main loop.
 
 ## Verification
 

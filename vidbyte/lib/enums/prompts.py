@@ -74,6 +74,8 @@ class Prompt(str, Enum):
     JEV_RUN_STATE_REQUIRED_SEQUENCE_AGENT = "jev_run_state.required_sequence_agent"
     INDEPENDENT_CRITIC_REVIEW_PROMPT = "independent_critic.review_prompt"
     JEV_CLARIFICATION_SYSTEM_PROMPT = "jev_clarification.system_prompt"
+    JEV_CLONE_PROMPT = "jev_clone.clone_prompt"
+    JEV_CLONE_RESULTS_PROMPT = "jev_clone.results_prompt"
     JEV_CONTINUATION_CONTINUE_PROMPT = "jev_continuation.continue_prompt"
     JEV_FRESH_CONTINUATION_PROMPT = "jev_fresh_continuation.fresh_prompt"
     JEV_HANDOFF_SYSTEM_PROMPT = "jev_handoff.system_prompt"

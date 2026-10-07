@@ -18,6 +18,7 @@ from vidbyte.lib.dataclasses.jev import JevComputeQuestion, JevQuestion
 from vidbyte.lib.enums.jev import JevComputeQuestionKey, JevDynamicComputeOption
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.compute.situations import (
+    CLONE_QUESTIONS,
     FORK_AGENT_QUESTIONS,
     FRESH_AGENT_QUESTIONS,
     SUBAGENT_QUESTIONS,
@@ -32,6 +33,7 @@ class JevComputeRegistry:
             JevDynamicComputeOption.FRESH_AGENT: FRESH_AGENT_QUESTIONS,
             JevDynamicComputeOption.FORK_AGENT: FORK_AGENT_QUESTIONS,
             JevDynamicComputeOption.SUBAGENT: SUBAGENT_QUESTIONS,
+            JevDynamicComputeOption.CLONE: CLONE_QUESTIONS,
         }
     )
     _questions_by_key: Mapping[JevComputeQuestionKey, JevComputeQuestion] = MappingProxyType(

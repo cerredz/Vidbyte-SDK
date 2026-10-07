@@ -50,6 +50,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | `JevRunBriefSettings` (the note writer's model, limits, and cadence) | `vidbyte/agents/jev/settings.py` |
 | Mid-run compute checkpoint: `JevComputeController` and `JevComputeSettings` | `vidbyte/agents/jev/compute/`; loop hook `AgentRuntime._after_tool_iteration` in `vidbyte/agents/runtime.py` |
 | Dynamic-compute recognition and the shared `{request, brief, facts, recent}` state | `JevComputeRecognizer` and `JevComputeStates` in `vidbyte/agents/jev/compute/` |
+| The CLONE launch: `JevCloneAgent` runs copies of the main agent from the verified brief | `vidbyte/agents/jev/compute/clone.py`; prompts in `vidbyte/prompts/prompts/jev_clone/` |
 | Twelve fixed evidence questions per dynamic-compute option and `JevComputeRegistry` | `vidbyte/lib/jev/compute/situations.py` and `vidbyte/lib/jev/compute/compute.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |

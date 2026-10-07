@@ -253,6 +253,7 @@ class JevDynamicComputeOption(str, Enum):
     FRESH_AGENT = "fresh_agent"
     FORK_AGENT = "fork_agent"
     SUBAGENT = "subagent"
+    CLONE = "clone"
 
 
 class JevComputeQuestionKey(str, Enum):
@@ -294,6 +295,18 @@ class JevComputeQuestionKey(str, Enum):
     SUBAGENT_PARTITIONABLE_ITEMS = "subagent.partitionable_items"
     SUBAGENT_ISOLATED_WRITES = "subagent.isolated_writes"
     SUBAGENT_SUBSTANTIVE_WORK = "subagent.substantive_work"
+    CLONE_OUTCOME_VARIES = "clone.outcome_varies"
+    CLONE_INCIDENTAL_FAILURE = "clone.incidental_failure"
+    CLONE_SETTLED_APPROACH = "clone.settled_approach"
+    CLONE_CHECKABLE_RESULT = "clone.checkable_result"
+    CLONE_RESTATABLE_WORK = "clone.restatable_work"
+    CLONE_ISOLATED_ATTEMPTS = "clone.isolated_attempts"
+    CLONE_INDEPENDENT_ATTEMPTS = "clone.independent_attempts"
+    CLONE_BOUNDED_REMAINING_UNIT = "clone.bounded_remaining_unit"
+    CLONE_NO_PENDING_USER_DECISION = "clone.no_pending_user_decision"
+    CLONE_COMPARABLE_OUTPUTS = "clone.comparable_outputs"
+    CLONE_AFFORDABLE_ATTEMPT = "clone.affordable_attempt"
+    CLONE_GOAL_DEPENDS_ON_STEP = "clone.goal_depends_on_step"
 
 
 __all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

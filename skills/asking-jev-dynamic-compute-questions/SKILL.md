@@ -1,11 +1,11 @@
 ---
 name: asking-jev-dynamic-compute-questions
-description: Write or review fixed Jev evidence questions for Vidbyte's dynamic-compute options. Use for FRESH_AGENT, FORK_AGENT, or SUBAGENT prompts in the Jev compute checkpoint.
+description: Write or review fixed Jev evidence questions for Vidbyte's dynamic-compute options. Use for FRESH_AGENT, FORK_AGENT, SUBAGENT, or CLONE prompts in the Jev compute checkpoint.
 ---
 
 # Asking Jev dynamic-compute questions
 
-Use this skill for the fixed evidence questions in `vidbyte/lib/jev/compute/situations.py`. It applies specifically to `FRESH_AGENT`, `FORK_AGENT`, and `SUBAGENT`. It replaces the general Jev question-writing guidance for these questions; do not load the older `asking-jev-questions` skill for this feature.
+Use this skill for the fixed evidence questions in `vidbyte/lib/jev/compute/situations.py`. It applies specifically to `FRESH_AGENT`, `FORK_AGENT`, `SUBAGENT`, and `CLONE`. It replaces the general Jev question-writing guidance for these questions; do not load the older `asking-jev-questions` skill for this feature.
 
 ## Research evidence
 
@@ -17,7 +17,7 @@ These sources inform which option strengths to investigate; none validates this 
 
 ## Question-writing rules
 
-First ask what the option is good at, then derive questions about evidence that its strength is needed in this run. This is the owner's intended reasoning, not a request for Jev to recommend an action. A fresh agent gets a clean context: as a context window grows, accuracy may degrade, failures may become more frequent, the agent may remain stuck on the same error, or its actions may drift from the original goal. Ask separately about those visible failure modes. A fork explores genuinely different approaches to one unresolved goal, so ask about the approaches, their independence, and whether their results can be compared. A subagent completes bounded work for the main agent, so ask about a distinct work unit, the inputs it needs, and a result the main agent can use. Each answer supplies one small piece of evidence; the average across the option's questions is the signal used by the selection policy.
+First ask what the option is good at, then derive questions about evidence that its strength is needed in this run. This is the owner's intended reasoning, not a request for Jev to recommend an action. A fresh agent gets a clean context: as a context window grows, accuracy may degrade, failures may become more frequent, the agent may remain stuck on the same error, or its actions may drift from the original goal. Ask separately about those visible failure modes. A fork explores genuinely different approaches to one unresolved goal, so ask about the approaches, their independence, and whether their results can be compared. A subagent completes bounded work for the main agent, so ask about a distinct work unit, the inputs it needs, and a result the main agent can use. A clone repeats the same approach in parallel copies and bets on variance between attempts, so ask about outcomes that vary between tries, a settled approach, a checkable and comparable result, and attempts that cannot collide. Each answer supplies one small piece of evidence; the average across the option's questions is the signal used by the selection policy.
 
 The PR review gives the method in the owner's terms: first consider the option's "actual advantages and strengths"; make each question look for "a different type of evidence"; and make each answer contribute "a small piece of information" about whether the option fits. For a fresh agent, the owner named increasing errors or failure rate toward the end of the run, being stuck on the same failure or error, and drifting or diverging from the original goal as separate examples. Apply that same strengths-to-evidence reasoning to forks and subagents. These examples identify signals to test; they are not scenario details to paste into every prompt.
 
