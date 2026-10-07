@@ -7,7 +7,8 @@ Purpose:
     Consolidates loop budget and behavioral constraints into a single validated class,
     replacing scattered flat kwargs with a structured developer-facing abstraction.
 Architecture:
-    - AgentLoopSettings: Plain class with __init__-level validation.
+    - AgentLoopSettings: Plain class with __init__-level validation, rejecting
+      non-integral budgets and non-finite timeouts before runtime conversion.
     - to_runtime_config(): Converts to the internal AgentRuntimeConfig contract.
 Relations:
     Imported by vidbyte.agents.base. Exported from vidbyte.agents.settings.
@@ -18,6 +19,7 @@ Similar Files:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
@@ -96,19 +98,21 @@ class AgentLoopSettings:
         self._validate_output_contracts()
 
     def _validate_positive_int_fields(self) -> None:
-        # Each integer field must be strictly positive when provided.
+        # @intent invalid-budgets-never-disable-loop-guards
+        # A boolean or fractional limit can silently change how many iterations or tool calls are permitted.
         for field_name in _POSITIVE_INT_FIELDS:
             value = getattr(self, field_name)
-            if value is not None and value <= 0:
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ConfigurationError(
-                    f"AgentLoopSettings.{field_name} must be greater than zero when provided, got {value}."
+                    f"AgentLoopSettings.{field_name} must be a positive integer when provided, got {value!r}."
                 )
 
     def _validate_timeout_seconds(self) -> None:
-        # timeout_seconds must be a positive float when provided.
-        if self.timeout_seconds is not None and self.timeout_seconds <= 0.0:
+        # Non-finite values can bypass time-budget comparisons inside a running agent.
+        value = self.timeout_seconds
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0):
             raise ConfigurationError(
-                f"AgentLoopSettings.timeout_seconds must be greater than zero when provided, got {self.timeout_seconds}."
+                f"AgentLoopSettings.timeout_seconds must be a finite positive number when provided, got {value!r}."
             )
 
     def _validate_compaction_pair(self) -> None:
