@@ -30,8 +30,13 @@ from vidbyte import (
     Trace,
     TraceProfile,
 )
+from tests.agent_test_support import bind_test_runner
+from vidbyte.agents.pricing import UsageTracker
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMessage, AgentMetadata
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
+from vidbyte.lib.runners import TextModelResponse
+from vidbyte.lib.usage_ledger import usage_ledger_scope
 from vidbyte.tools.types import ToolCall, ToolStatus
 
 _TEMPLATE = "REQUEST:\n{request}\n\nCANDIDATES:\n{candidates}"
@@ -85,6 +90,18 @@ class BlankAgent:
 
     async def generate_reply(self, message: str, **_: object) -> AgentMessage:
         return AgentMessage(sender=self.name, recipient="agg", content="   ")
+
+
+class UsageRunner:
+    """Offline text runner whose every response reports priced usage."""
+
+    def run(self, prompt: str, system: str = "", **_: object) -> TextModelResponse:
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="answer", raw={}, usage={"input_tokens": 10, "output_tokens": 2})
+
+
+def _metered_agent(name: str) -> BaseAgent:
+    # Builds a real BaseAgent bound to the offline usage-reporting runner.
+    return bind_test_runner(BaseAgent(name=name, system_prompt="s", provider="openai", model_name="gpt-5.4-mini"), UsageRunner())
 
 
 class EchoAggregator:
@@ -279,6 +296,19 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall("aggregate_tool", {}))
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertIn("SYNTH::", result.output)
+
+    async def test_usage_rolls_up_children_per_run_and_into_outer_ledger_once(self) -> None:
+        # [Silent Failure] Proposer and aggregator calls reach the AggregateAgent's own usage, reset per run, and reach an outer ledger once.
+        agent = self._agent(proposers=[_metered_agent("a"), _metered_agent("b"), _metered_agent("c")], aggregator=_metered_agent("synth"))
+        for _ in range(2):
+            await agent.generate_reply("q")
+            self.assertEqual(agent.get_usage().model_call_count, 4)
+            self.assertEqual(agent.get_usage().input_tokens, 40)
+            self.assertIsNotNone(agent.get_cost_usd())
+        outer = UsageTracker()
+        with usage_ledger_scope(outer):
+            await agent.generate_reply("q")
+        self.assertEqual(outer.rollup().model_call_count, 4)
 
     def test_builds_distinct_child_agents_with_same_provider(self) -> None:
         # [Silent Failure] Two same-provider proposers get distinct labels.
