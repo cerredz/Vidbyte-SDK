@@ -3,7 +3,7 @@
 PURPOSE: Probe the public AgentLoopSettings boundary for invalid budgets and timeouts before an agent starts; do not emulate a model provider here.
 ROLE IN CODEBASE: Calls vidbyte.agents.settings.AgentLoopSettings and reads the resulting AgentRuntimeConfig; complements tests/test_agent_settings_validation.py.
 ARCHITECTURE NOTE: Tests bind no runner and make no network calls, so a failure identifies configuration rather than model behavior.
-FUNCTION INVENTORY: test_integer_limits_reject_non_integer_values tests all count fields; test_timeout_rejects_non_finite_or_invalid_values tests timeouts; test_valid_limits_reach_runtime_config tests conversion. Run this file with pytest.
+FUNCTION INVENTORY: test_integer_limits_reject_non_integer_values tests all count fields; test_timeout_rejects_non_finite_or_invalid_values tests loop timeouts; test_tool_timeout_rejects_non_finite_values tests tool-call timeouts; test_valid_limits_reach_runtime_config tests conversion. Run this file with pytest.
 COMMON MODIFICATION PATTERNS: Add an invalid value when a new public count or timeout field is introduced; assert the named ConfigurationError and the valid runtime value.
 WHAT NOT TO DO IN THIS FILE: 1. Do not implement validation here; vidbyte/agents/settings/loop.py owns it. 2. Do not call live providers; tests/agent_test_support.py owns offline agent fixtures.
 KNOWN EDGE CASES: bool inherits int, NaN is not ordered, and a string throws TypeError before comparison.
@@ -17,7 +17,7 @@ import math
 
 import pytest
 
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.settings import AgentLoopSettings, ToolSettings
 from vidbyte.lib.errors import ConfigurationError
 
 INTEGER_FIELDS = (
@@ -38,6 +38,12 @@ def test_integer_limits_reject_non_integer_values(field: str, value: object) -> 
 def test_timeout_rejects_non_finite_or_invalid_values(value: object) -> None:
     with pytest.raises(ConfigurationError, match="timeout_seconds"):
         AgentLoopSettings(timeout_seconds=value)
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, 10**400])
+def test_tool_timeout_rejects_non_finite_values(value: float | int) -> None:
+    with pytest.raises(ConfigurationError, match="tool_timeout_seconds"):
+        ToolSettings(tool_timeout_seconds=value)
 
 
 def test_valid_limits_reach_runtime_config() -> None:

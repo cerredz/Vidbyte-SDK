@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Iterable, Mapping, Sequence
 
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult
@@ -281,14 +282,17 @@ class ToolSettings:
 
     @staticmethod
     def _normalize_timeout(value: object) -> float | None:
-        # Accepts positive int/float timeout seconds and rejects non-numeric or non-positive values.
+        # An infinite or NaN timeout would silently disable tool-call deadlines.
         if value is None:
             return None
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ConfigurationError("ToolSettings.tool_timeout_seconds must be a number.")
-        timeout = float(value)
-        if timeout <= 0:
-            raise ConfigurationError("ToolSettings.tool_timeout_seconds must be greater than zero when provided.")
+        try:
+            timeout = float(value)
+        except OverflowError:
+            timeout = math.inf
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ConfigurationError("ToolSettings.tool_timeout_seconds must be finite and greater than zero.")
         return timeout
 
     def __repr__(self) -> str:
