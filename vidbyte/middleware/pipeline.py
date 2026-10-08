@@ -17,6 +17,7 @@ Relations:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -131,6 +132,7 @@ class MiddlewarePipeline:
 
             if decision.action is MiddlewareAction.CONTINUE:
                 aggregate = self._merge_continue_decisions(aggregate, decision)
+                ctx = self._apply_transform(ctx, decision.transform)
                 continue
 
             if decision.action is not MiddlewareAction.CONTINUE:
@@ -142,6 +144,23 @@ class MiddlewarePipeline:
             if decision.action is not MiddlewareAction.CONTINUE:
                 return decision
         return aggregate
+
+    def _apply_transform(self, ctx: MiddlewareContext, transform: MiddlewareTransform | None) -> MiddlewareContext:
+        """Return the context the next middleware sees, so stacked transforms compose instead of overwrite."""
+        # @intent compose-stacked-transforms
+        # Each middleware must transform the previous middleware's output, not the
+        # original context; otherwise the "later wins" merge silently drops earlier
+        # compactions. Only hook-local context changes; the runtime keeps the raw result.
+        if transform is None:
+            return ctx
+        changes: dict[str, Any] = {}
+        if transform.provider_messages is not None:
+            changes["provider_messages"] = transform.provider_messages
+        if transform.system is not None:
+            changes["system"] = transform.system
+        if transform.model_visible_tool_result is not None:
+            changes["tool_result"] = transform.model_visible_tool_result
+        return dataclasses.replace(ctx, **changes) if changes else ctx
 
     def _merge_continue_decisions(self, current: MiddlewareDecision, next_decision: MiddlewareDecision) -> MiddlewareDecision:
         """Merge continue-decision metadata and transforms in middleware order."""

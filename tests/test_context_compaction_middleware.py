@@ -116,6 +116,27 @@ class MiddlewareTransformTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.transform.metadata["a"], 1)
         self.assertEqual(decision.transform.metadata["b"], 2)
 
+    async def test_pipeline_composes_stacked_compaction_transforms(self) -> None:
+        # Verifies each stacked middleware transforms the previous one's output, so no earlier effect is lost.
+        messages = (
+            {"role": "user", "content": "start"},
+            {"role": "tool", "tool_call_id": "a", "content": "old output"},
+            {"role": "assistant", "content": "mid"},
+            {"role": "tool", "tool_call_id": "b", "content": "new output"},
+        )
+        history = MiddlewarePipeline((MessageHistoryCompactionMiddleware.keep_last(2), MessageHistoryCompactionMiddleware.clear_tool_results_except()))
+        decision = await history.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=messages))
+        self.assertEqual([message["content"] for message in decision.transform.provider_messages], ["mid", "[tool result cleared by compaction]"])
+
+        raw = ToolResult.success("lookup", "\x1b[31mred\x1b[0m " + "word " * 50)
+        tools = MiddlewarePipeline((ToolResultCompactionMiddleware.scrub_bloat(), ToolResultCompactionMiddleware.truncate(max_chars=20)))
+        decision = await tools.after_tool_call(MiddlewareContext(hook=MiddlewareHook.AFTER_TOOL_CALL, agent_name="worker", tool_call=ToolCall("lookup"), tool_result=raw))
+        visible = decision.transform.model_visible_tool_result
+        self.assertTrue(visible.output.startswith("red word"))
+        self.assertNotIn("\x1b", visible.output)
+        self.assertIn("[tool output compacted]", visible.output)
+        self.assertEqual(visible.status, raw.status)
+
     async def test_transform_on_abort_is_rejected(self) -> None:
         # Verifies transforms cannot be attached to non-continue decisions.
         with self.assertRaises(ValueError):
