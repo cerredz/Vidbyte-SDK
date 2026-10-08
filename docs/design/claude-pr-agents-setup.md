@@ -67,5 +67,5 @@ steps:
 ## Verification
 
 - `python scripts/run_ci.py` in a fresh Python 3.11 venv, with the dev extra installed from this worktree, exits 0.
-- `action.yml` parses as YAML and declares `name`, `description`, and `runs.using: composite`. `ci-settings.json` parses as JSON.
+- `action.yml` parses as YAML and declares `name`, `description`, and `runs.using: composite`. `ci-settings.json` validates against the published Claude Code settings schema.
 - `ci.yml` is dispatched on this branch, the way branches here are verified while automatic triggers are disabled. The required checks `Source / Python 3.11`, `Source / Python 3.12`, and `Package` must pass.

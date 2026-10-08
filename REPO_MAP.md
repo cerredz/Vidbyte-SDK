@@ -4,11 +4,19 @@
 
 ## File Index
 
-**Root files:** `README.md` — the Layer Guide table is the authority on what each `vidbyte/` subpackage is for. `llms.txt` — the full agent-readable documentation bundle, code-heavy where this Map is code-free. `pyproject.toml` — packaging, the `[dev]` extra, and dependency pins. `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE`, `.gitignore`.
+**Root files:** `README.md` — the Layer Guide table is the authority on what each `vidbyte/` subpackage is for. `llms.txt` — the full agent-readable documentation bundle, code-heavy where this Map is code-free. `pyproject.toml` — packaging, the `[dev]` extra, and dependency pins. `CLAUDE.md` — a one-line import of `AGENTS.md`, so every Claude Code session, including a fresh install in hosted automation, loads the same rules. `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE`, `.gitignore`.
+
+### `.claude/`
+
+Configuration for the Claude Code agents that work on pull requests in hosted automation, kept apart from both the installable package and the verification gate. It defines how those agents behave when no person is watching, starting with which actions they may take without asking, because an unattended run has nobody to approve a request and denies anything not granted in advance. Interactive sessions on a developer's own machine do not load it, so nothing granted here widens what a local session may do. None of it ships to users, and none of it changes what passing means for a contribution; it only bounds what an automated agent may touch while it works on one.
 
 ### `.github/`
 
 GitHub-hosted repository configuration that governs contribution and automation, entirely separate from the installable package itself. It holds the structured intake contributors fill in when reporting a problem or proposing a feature, alongside the automated checks that run against every proposed change and the process that publishes new releases. None of it ships to end users; it only shapes how the repository is used, reviewed, and verified on GitHub. Because these checks run on every change with no exceptions, altering this configuration changes what every contribution is measured against.
+
+#### `.github/actions/`
+
+Reusable setup steps that hosted automation shares, so every job that needs the repository's development toolchain installs it the same way. It exists for the Claude Code agents that change pull requests, which have to run the repository's own verification gate before they commit, and it installs the package exactly as the verification workflows do, so an agent works in the same environment the required checks measure. It verifies nothing by itself and is not part of what passing means for a contribution. Keeping the install in one place means a toolchain change is made once rather than in every job that depends on it.
 
 #### `.github/ISSUE_TEMPLATE/`
 
