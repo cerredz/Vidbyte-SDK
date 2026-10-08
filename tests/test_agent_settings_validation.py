@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from vidbyte.agents.settings import AgentFallbackSettings
 from vidbyte.config import YamlLoader
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.config import AgentSettings, ToolDefinition
@@ -11,6 +12,17 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
 
 BASE = {"name": "researcher", "system_prompt": "You are a helpful research agent."}
+
+
+class FallbackEnabledValidationTests(unittest.TestCase):
+    def test_rejects_truthy_and_falsey_non_boolean_enabled_values(self) -> None:
+        for value in ("false", "true", 0, 1, None):
+            with self.subTest(value=value), self.assertRaisesRegex(ConfigurationError, "enabled"):
+                AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=value)
+
+    def test_accepts_boolean_enabled_values(self) -> None:
+        self.assertFalse(AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=False).enabled)
+        self.assertTrue(AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=True).enabled)
 
 
 def build(**overrides: object) -> AgentSettings:
