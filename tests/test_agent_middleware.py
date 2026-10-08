@@ -4,7 +4,9 @@ import unittest
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, BaseAgent, ToolErrorPolicy
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.agents.fallback import AgentFallback
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, FallbackModel
+from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware import AgentMiddleware
@@ -270,6 +272,36 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(len(runner.calls), 2)
         self.assertEqual(result.metadata["middleware"]["events"][0]["action"], "retry")
+
+    async def test_exhausted_model_retry_advances_the_fallback_chain(self) -> None:
+        unavailable = ProviderRequestError("503 Service Unavailable", provider="deepseek", status_code=503)
+        primary = FakeRunner([unavailable, unavailable, unavailable])
+        backup = FakeRunner(
+            [FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "from flash"}'}]})]
+        )
+
+        class _FakeChain(AgentFallback):
+            def build_runner(self, index: int) -> object:
+                return backup
+
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            middleware=(ModelRetryMiddleware(max_attempts=3, sleep_seconds=0),),
+            fallback=_FakeChain([FallbackModel("deepseek", "deepseek-v4-pro"), FallbackModel("deepseek", "deepseek-v4-flash")]),
+        )
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=primary, provider="deepseek", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=self._context(runtime),
+        )
+
+        self.assertEqual(result.output, "from flash")
+        self.assertEqual((len(primary.calls), len(backup.calls)), (3, 1))
+        self.assertTrue(result.metadata["fallback"]["used"])
 
     async def test_tool_error_policy_retries_idempotent_transient_tool_error(self) -> None:
         flaky = FlakyTool(permission=ToolPermission.READ)
