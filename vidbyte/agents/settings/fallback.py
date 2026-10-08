@@ -8,7 +8,8 @@ Purpose:
     accepting bare model names, provider-prefixed names, or explicit FallbackModel
     entries, and converting them into the internal AgentFallback contract.
 Architecture:
-    - AgentFallbackSettings: Plain class with __init__-level validation.
+    - AgentFallbackSettings: Plain class with __init__-level validation,
+      including a strict boolean enabled switch so false-like strings cannot enable fallback.
     - resolved_models(): Normalizes every entry against the agent's primary model.
     - to_fallback(): Converts to the internal AgentFallback contract.
 Relations:
@@ -31,6 +32,14 @@ if TYPE_CHECKING:
     from vidbyte.agents.fallback import AgentFallback
 
 
+def _require_boolean_enabled(value: bool) -> bool:
+    # @intent fallback-enabled-is-not-truthiness
+    # A string such as "false" would otherwise enable a fallback chain at run time.
+    if not isinstance(value, bool):
+        raise ConfigurationError("AgentFallbackSettings.enabled must be a boolean.")
+    return value
+
+
 class AgentFallbackSettings:
     """Validated configuration object for an agent's ordered model fallback chain."""
 
@@ -38,7 +47,7 @@ class AgentFallbackSettings:
         # Stores the declared chain and error filter as instance attributes, then validates them immediately.
         self.models = tuple(models)
         self.fallback_on = fallback_on
-        self.enabled = enabled
+        self.enabled = _require_boolean_enabled(enabled)
         self._validate()
 
     def _validate(self) -> None:
