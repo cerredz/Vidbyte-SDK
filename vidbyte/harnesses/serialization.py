@@ -21,8 +21,9 @@ ARCHITECTURE NOTE:
 PUBLIC API INVENTORY:
     HarnessSecretPolicy.is_secret_key() identifies credential-like mapping keys.
     HarnessRedactor.redact() projects captured values into safe scrubbed data;
-    safe() is a back-compatible alias; safe_error_message() redacts common
-    credential assignments and bounds persisted failure text.
+    safe() is a back-compatible alias; string values have common credential
+    assignments redacted; safe_error_message() applies the same scrub and bounds
+    persisted failure text.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not read or write files; sinks own I/O.
@@ -39,8 +40,7 @@ RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
 
 TESTS:
-    Exercised by repository tests and inline redaction smoke checks; no new test
-    file was added under the approved no-tests workflow.
+    tests/test_harness_redaction.py covers free-text credential redaction.
 """
 
 from __future__ import annotations
@@ -109,13 +109,19 @@ class HarnessRedactor:
             message = str(error)
         except Exception:
             message = ""
-        redacted = self._ERROR_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=<redacted>", message)
+        redacted = self._scrub_text(message)
         fallback = f"{type(error).__name__} raised without a message." if not redacted.strip() else redacted
         return fallback[:max_chars]
 
+    def _scrub_text(self, text: str) -> str:
+        # Replaces common credential assignments in free text with a redaction marker.
+        return self._ERROR_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=<redacted>", text)
+
     def _safe(self, value: Any, active: set[int]) -> Any:
         # Dispatches one value to a stable primitive, collection, or object projection.
-        if value is None or isinstance(value, (str, int, bool)):
+        if isinstance(value, str):
+            return self._scrub_text(value)
+        if value is None or isinstance(value, (int, bool)):
             return value
         if isinstance(value, float):
             return value if math.isfinite(value) else {"__dropped__": "non_finite_float"}
