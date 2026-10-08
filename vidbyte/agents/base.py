@@ -665,6 +665,7 @@ class BaseAgent(McpAttachableMixin):
                 runner_type=runner_type,
                 trace_context=trace_ctx,
                 runtime_metadata={**self.metadata, **dict(input_metadata), **trace_metadata},
+                input_context_manager=input_context_manager,
                 **options,
             )
             self._record_agent_stop(trace_ctx, result)
@@ -942,6 +943,7 @@ class BaseAgent(McpAttachableMixin):
         runner_type: str = RUNNER_TYPE_TEXT,
         trace_context: object | None = None,
         runtime_metadata: Mapping[str, Any] | None = None,
+        input_context_manager: ContextManager | None = None,
         **options: Any,
     ) -> AgentResult:
         if runner is None:
@@ -956,7 +958,10 @@ class BaseAgent(McpAttachableMixin):
             extract_text=self._runner_output_text,
             extract_metadata=self._runner_output_metadata,
         )
-        result = await self._runtime().arun(
+        runtime = self._runtime()
+        # Per-call managed primitives render for this run only; the agent's own manager stays unchanged.
+        runtime.input_context_manager = input_context_manager
+        result = await runtime.arun(
             message,
             handle=handle,
             context=context,

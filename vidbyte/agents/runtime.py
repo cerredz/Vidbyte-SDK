@@ -193,6 +193,8 @@ class AgentRuntime:
         self._tracer: TracerBase = tracer or NullTracer()
         self.middleware = MiddlewarePipeline((*tuple(middleware), *self._context_window_admission_middleware()))
         self.context_manager = context_manager
+        # Run-scoped, read-only per-call manager (AgentInput.context_manager); rendered, never upserted into.
+        self.input_context_manager: ContextManager | None = None
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
@@ -1389,18 +1391,22 @@ class AgentRuntime:
     def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """Assemble placed context-window conversation messages around runtime messages."""
         # Preserves existing runtime messages while adding explicit conversation placements.
-        if self.context_manager is None:
-            return tuple(messages)
-        top = self.context_manager.render_conversation_messages(ContextWindowPlacement.TOP_OF_CONVERSATION)
-        end = self.context_manager.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)
+        managers = self._render_context_managers()
+        top = tuple(m for manager in managers for m in manager.render_conversation_messages(ContextWindowPlacement.TOP_OF_CONVERSATION))
+        end = tuple(m for manager in managers for m in manager.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION))
         return (*top, *tuple(messages), *end)
+
+    def _render_context_managers(self) -> tuple[ContextManager, ...]:
+        """Return the agent manager, then this run's input manager, whose primitives render this call."""
+        managers = (self.context_manager, self.input_context_manager)
+        return tuple(m for i, m in enumerate(managers) if m is not None and all(m is not prev for prev in managers[:i]))
 
     def _build_system_string(self, context: BaseAgentContext, *, loop_settings_block: str = "") -> str:
         """Assemble the system string with fixed header, loop settings, primitives zone, and body in order."""
         # loop_settings_block is placed directly after the fixed system-prompt header so the agent
         # always sees its live loop budgets (current usage / configured limit) near the top of context.
         fixed = context.build_context_fixed()
-        primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
+        primitives_zone = "\n\n".join(zone for zone in (m.render_primitives_zone() for m in self._render_context_managers()) if zone)
         body = context.build_context_body()
         parts = [p for p in (fixed, loop_settings_block, primitives_zone, body) if p]
         self._record_context_build_span(system_chars=len(fixed), primitive_chars=len(primitives_zone), body_chars=len(body))
