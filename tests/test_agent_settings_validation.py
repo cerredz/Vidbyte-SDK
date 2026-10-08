@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentFallbackSettings
 from vidbyte.config import YamlLoader
 from vidbyte.lib.dataclasses.agents import AgentMetadata
@@ -196,6 +197,23 @@ class LoopValidationTests(unittest.TestCase):
             build(loop={"tool_settings": {"max_calls": -1}})
 
         self.assertEqual(ctx.exception.details["field"], "agent.loop.tool_settings")
+
+    def test_builds_the_output_contract_a_document_names_by_type(self) -> None:
+        settings = build(loop={"output_contracts": [{"type": "MinToolCalls", "minimum": 1}, {"type": "MinToolCallsById", "tool_name": "search", "minimum": 2}]})
+
+        first, second = settings.loop.output_contracts
+        self.assertIsInstance(first, MinToolCalls)
+        self.assertEqual(first.minimum, 1)
+        self.assertIsInstance(second, MinToolCallsById)
+        self.assertEqual((second.tool_name, second.minimum), ("search", 2))
+
+    def test_rejects_an_output_contract_without_a_concrete_type(self) -> None:
+        for entry in ({"minimum": 1}, {"type": "OutputContract", "minimum": 1}, {"type": "SchemaConformance"}, {"type": "Nope"}):
+            with self.subTest(entry=entry), self.assertRaises(ConfigurationError) as ctx:
+                build(loop={"output_contracts": [entry]})
+
+            self.assertEqual(ctx.exception.details["field"], "agent.loop.output_contracts[0].type")
+            self.assertIn("MinToolCalls", str(ctx.exception))
 
 
 class DefinitionValidationTests(unittest.TestCase):
