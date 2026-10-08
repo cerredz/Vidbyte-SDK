@@ -5,7 +5,10 @@ from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
 from vidbyte import Agent, tool
+from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentRuntime
+from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.runners import TextModelRunner
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
 
 
@@ -315,31 +318,62 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(function_result_idx, "no function result found for Gemini")
         self.assertLess(model_idx, function_result_idx, "model turn must precede function result")
 
-    async def test_responses_api_skips_assistant_turn_insertion(self) -> None:
-        # Responses API (output list) — no assistant turn should be inserted since the
-        # format_assistant_tool_calls returns None for this shape.
+    async def test_responses_api_next_request_pairs_function_calls_with_outputs(self) -> None:
+        # Regression: after a Responses function_call turn the next /responses input must echo each
+        # function_call (no item id) before its function_call_output, and never send role "tool".
         @tool
         def read(path: str) -> str:
             """Read a file."""
             return "content"
 
+        @tool
+        def boom(path: str) -> str:
+            """Always fails."""
+            raise RuntimeError("disk gone")
+
         runner = ToolCallingRunner(
             [
                 FakeResponse(
                     "",
-                    {"output": [{"type": "function_call", "name": "read", "arguments": '{"path": "f.py"}', "call_id": "fc_1"}]},
+                    {
+                        "output": [
+                            {"type": "function_call", "id": "fc_a", "call_id": "call_1", "name": "read", "arguments": '{"path": "f.py"}'},
+                            {"type": "function_call", "id": "fc_b", "call_id": "call_2", "name": "boom", "arguments": '{"path": "g.py"}'},
+                        ]
+                    },
                 ),
                 FakeResponse(
                     "",
-                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "fc_2"}]},
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "call_3"}]},
                 ),
             ]
         )
-        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read, boom])
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             reply = await agent.arun("task")
-        # The run must still complete successfully — just without an assistant turn in messages.
         self.assertEqual(reply.content, "done")
+
+        second = runner.calls[1]
+        transport = FakeTransport({"output_text": "ok"})
+        openai_runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        await openai_runner.arun(second["prompt"], messages=second["kwargs"]["messages"])
+        wire_input = transport.requests[0]["json_body"]["input"]
+
+        self.assertFalse([item for item in wire_input if item.get("role") == "tool"])
+        calls = [item for item in wire_input if item.get("type") == "function_call"]
+        self.assertEqual(
+            calls,
+            [
+                {"type": "function_call", "call_id": "call_1", "name": "read", "arguments": '{"path": "f.py"}'},
+                {"type": "function_call", "call_id": "call_2", "name": "boom", "arguments": '{"path": "g.py"}'},
+            ],
+        )
+        outputs = {item["call_id"]: index for index, item in enumerate(wire_input) if item.get("type") == "function_call_output"}
+        self.assertEqual(set(outputs), {"call_1", "call_2"})
+        for call in calls:
+            self.assertLess(wire_input.index(call), outputs[call["call_id"]])
+        self.assertEqual(wire_input[outputs["call_1"]]["output"], "content")
+        self.assertIn("[tool_error", wire_input[outputs["call_2"]]["output"])
 
     async def test_no_assistant_turn_for_text_only_response(self) -> None:
         # Text-only final response: no tool calls, so no assistant tool-call message should be inserted.

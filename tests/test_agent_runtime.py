@@ -341,7 +341,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             context=context,
         )
 
-        visible_tool_message = runner.calls[1]["kwargs"]["messages"][0]
+        visible_tool_message = runner.calls[1]["kwargs"]["messages"][-1]
         self.assertNotIn("raw secret result", visible_tool_message["content"])
         self.assertIn("Raw tool output was withheld", visible_tool_message["content"])
         raw_context = result.metadata["tool_calls"][0]
