@@ -25,3 +25,4 @@ It is not a home for middleware policy implementations, provider fixtures, or Je
 ## Logs
 
 - 2026-10-07 - Boolean and fractional loop budgets passed validation, strings escaped as TypeError, and NaN timeouts passed - probe the constructor before testing runtime limits.
+- 2026-10-07 - Nested ToolSettings also accepted NaN and infinite per-tool timeouts; test both loop and tool-call limits.
