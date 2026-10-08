@@ -30,6 +30,8 @@ from vidbyte.sessions.errors import SessionSerializationError, SessionVersionErr
 _SECRET_TOKENS = ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")
 _TRACE_WHITELIST = ("trace", "trace_metadata")
 _USAGE_WHITELIST = ("tokens_used", "tool_call_count")
+# Agent budget settings whose names contain "TOKEN" but never hold credentials.
+_SETTINGS_WHITELIST = ("max_tokens", "compaction_trigger_tokens", "compaction_target_tokens", "cost_per_million_tokens")
 
 
 class SessionSerializer:
@@ -212,7 +214,7 @@ class SessionSerializer:
     def _is_secret_key(key: str) -> bool:
         # Decide whether a metadata key looks like a credential to strip.
         upper = key.upper()
-        if upper in (token.upper() for token in (*_TRACE_WHITELIST, *_USAGE_WHITELIST)):
+        if upper in (token.upper() for token in (*_TRACE_WHITELIST, *_USAGE_WHITELIST, *_SETTINGS_WHITELIST)):
             return False
         return any(token in upper for token in _SECRET_TOKENS)
 
