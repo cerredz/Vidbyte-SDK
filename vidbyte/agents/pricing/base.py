@@ -13,6 +13,8 @@ Key Functions:
     - total_prompt_tokens: Prompt-size denominator for cache_hit_rate; defaults to
       input_tokens, overridden by additive-bucket providers (Anthropic).
     - cache_hit_rate: Fraction of a call's prompt tokens served from cache.
+    - coerce_int: Reads non-negative provider token counters; negative counts
+      fail recording rather than becoming an apparently priced model call.
 Relations:
     Subclassed by the provider modules in this package; a provider's subclass is
     resolved from ModelProvider.usage_class and consumed by UsageTracker.
@@ -88,10 +90,13 @@ class ProviderUsage(ABC):
 
     @staticmethod
     def coerce_int(value: Any) -> int | None:
-        # Coerces one payload value to int, rejecting bools and non-numerics.
+        # @intent negative-tokens-never-price-as-valid-usage
+        # A negative primary or nested count can make an otherwise complete run cost negative.
         if isinstance(value, bool):
             return None
         if isinstance(value, int):
+            if value < 0:
+                raise ValueError("Provider usage token counts must be non-negative.")
             return value
         return None
 
