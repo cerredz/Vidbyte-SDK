@@ -6,7 +6,7 @@ SDK callers configure iteration, tool-call, context, and timeout limits before r
 
 ## Contract
 
-Optional count limits are positive integers (never booleans); loop and tool-call timeouts are finite positive numbers. Invalid input raises an SDK `ConfigurationError` naming the field. Valid settings preserve their exact values in the runtime configuration.
+Optional loop count limits are positive integers (never booleans); retry counts may also be zero where supported. Loop and tool-call timeouts are finite positive numbers, and retry backoff is finite with its documented minimum. Invalid input raises an SDK `ConfigurationError` naming the field. Valid settings preserve their exact values in the runtime configuration.
 
 ## Actors / Callers
 
@@ -42,7 +42,7 @@ The first bug-hunt pass found the above four failure mechanisms in the public co
 
 ## Test Suite Map
 
-`test_contract.py` covers every integer field, valid conversion, malformed types and both loop and tool-call timeout boundaries. Run with `python -m pytest -q tests/features/sdk_loop_settings`.
+`test_contract.py` covers every integer field, valid conversion, malformed types, loop and tool-call timeout boundaries, and nested tool retry settings. Run with `python -m pytest -q tests/features/sdk_loop_settings`.
 
 ## Omitted Testing Strategies
 
