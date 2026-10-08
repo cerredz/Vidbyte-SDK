@@ -560,7 +560,8 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
-                    # Answer the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, "finish attempt not accepted yet; continue with the next message", metadata={"error": "finish_not_accepted"}), state.provider, MiddlewareDecision.continue_())
                     self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                     if await self._continue_finish_attempt(final, state, messages):
                         finish_attempt_continued = True

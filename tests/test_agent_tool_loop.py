@@ -432,13 +432,56 @@ class RejectedFinishSiblingCallTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.content, "done")
         self.assertEqual(searched, ["b", "c"], "the call after the rejected isDone must not run")
-        second_call_messages = runner.calls[1]["kwargs"]["messages"]
-        assistant_idx = next(i for i, m in enumerate(second_call_messages) if isinstance(m.get("tool_calls"), list))
-        expected_ids = [call["id"] for call in second_call_messages[assistant_idx]["tool_calls"]]
-        following = second_call_messages[assistant_idx + 1 : assistant_idx + 1 + len(expected_ids)]
-        self.assertEqual([m.get("role") for m in following], ["tool"] * len(expected_ids))
-        self.assertEqual([m.get("tool_call_id") for m in following], expected_ids)
+        following = self._assert_tool_calls_answered(runner.calls[1]["kwargs"]["messages"])
         self.assertIn("not executed", following[1]["content"])
+
+    async def test_continued_finish_answers_is_done_and_skipped_calls_before_continuation(self) -> None:
+        searched: list[str] = []
+
+        @tool
+        def search(q: str) -> str:
+            """Search."""
+            searched.append(q)
+            return "hit"
+
+        continued: list[bool] = []
+
+        async def continue_once(runtime: AgentRuntime, result: object, state: object, messages: list[dict]) -> bool:
+            if continued:
+                return False
+            continued.append(True)
+            messages.append({"role": "user", "content": "Done check failed; keep working."})
+            return True
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "isDone", '{"final_answer": "early"}'), ("call_2", "search", '{"q": "a"}')),
+                _chat_tool_turn(("call_3", "isDone", '{"final_answer": "done"}')),
+            ]
+        )
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}), patch.object(AgentRuntime, "_continue_finish_attempt", continue_once):
+            result = await agent.arun("task")
+
+        self.assertEqual(result.content, "done")
+        self.assertEqual(searched, [], "the call after the continued isDone must not run")
+        second_call_messages = runner.calls[1]["kwargs"]["messages"]
+        following = self._assert_tool_calls_answered(second_call_messages)
+        self.assertIn("not accepted", following[0]["content"])
+        self.assertIn("not executed", following[1]["content"])
+        self.assertEqual(second_call_messages[second_call_messages.index(following[-1]) + 1]["role"], "user")
+
+    def _assert_tool_calls_answered(self, messages: list[dict]) -> list[dict]:
+        """Assert every assistant tool_call id is answered by the contiguous tool messages that follow it; return them."""
+        assistant_indices = [i for i, m in enumerate(messages) if isinstance(m.get("tool_calls"), list)]
+        self.assertTrue(assistant_indices, "no assistant tool-call message found in messages")
+        following: list[dict] = []
+        for idx in assistant_indices:
+            expected_ids = [call["id"] for call in messages[idx]["tool_calls"]]
+            following = messages[idx + 1 : idx + 1 + len(expected_ids)]
+            self.assertEqual([m.get("role") for m in following], ["tool"] * len(expected_ids))
+            self.assertEqual([m.get("tool_call_id") for m in following], expected_ids)
+        return following
 
 if __name__ == "__main__":
     unittest.main()
