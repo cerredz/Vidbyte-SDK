@@ -1546,13 +1546,15 @@ class AgentRuntime:
         return context_record, result
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
-        # Applies ToolSettings before local execution: hard budgets first, then deny-class rules.
-        settings = self.config.tool_settings
-        if settings is None or tool_is_internal:
+        # Applies the total tool-call budget, then ToolSettings hard budgets and deny-class rules, before local execution.
+        if tool_is_internal:
             return None
+        settings = self.config.tool_settings
         budget_stop = self._tool_settings_budget_stop(settings, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
         if budget_stop is not None:
             return budget_stop
+        if settings is None:
+            return None
         hard_budget = settings.budget_stop(tool_name=call.tool_name, arguments=dict(call.arguments), call_contexts=call_contexts, iteration_count=iteration_count)
         if hard_budget is not None:
             reason, meta = hard_budget
@@ -1562,9 +1564,11 @@ class AgentRuntime:
             return None
         return self._apply_tool_denial(settings, call, provider, messages, call_contexts, denial, iteration_count=iteration_count, tokens_used=tokens_used)
 
-    def _tool_settings_budget_stop(self, settings: ToolSettings, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
+    def _tool_settings_budget_stop(self, settings: ToolSettings | None, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
         # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
-        if settings.max_calls is None or len(call_contexts) < settings.max_calls:
+        # The budget is ToolSettings.max_calls or AgentRuntimeConfig.max_tool_calls (AgentLoopSettings.max_tool_calls), whichever is lower.
+        limits = [limit for limit in (self.config.max_tool_calls, settings.max_calls if settings is not None else None) if limit is not None]
+        if not limits or len(call_contexts) < min(limits):
             return None
         return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
