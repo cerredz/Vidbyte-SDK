@@ -522,7 +522,7 @@ class AgentRuntime:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
             finish_attempt_continued = False
-            for call in tool_calls:
+            for call_index, call in enumerate(tool_calls):
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
                     return await self._finish_result(processed, state)
@@ -549,6 +549,7 @@ class AgentRuntime:
                         if unmet:
                             rejections += 1
                             self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), state.provider, MiddlewareDecision.continue_())
+                            self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                             contract_rejected = True
                             break
                     final = self._final_result(
@@ -559,6 +560,8 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
+                    # Answer the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                     if await self._continue_finish_attempt(final, state, messages):
                         finish_attempt_continued = True
                         break
@@ -1616,6 +1619,16 @@ class AgentRuntime:
                 continue
             counts[ctx.tool_name] = counts.get(ctx.tool_name, 0) + 1
         return counts
+
+    def _answer_skipped_tool_calls(self, messages: list[dict[str, Any]], skipped: Sequence[ToolCall], provider: str) -> None:
+        """Give every call left unprocessed after a turned-down isDone a tool result, so the assistant turn's ids are all answered."""
+        # @intent answer-every-tool-call-id
+        # The assistant turn already lists every tool_call id; chat and Anthropic APIs reject (HTTP 400) any id
+        # without a following tool result. Skipped calls are answered, never executed, and must precede any
+        # continuation message so the tool results stay contiguous after the assistant turn.
+        for call in skipped:
+            reason = "tool call not executed: the isDone finish attempt in this turn was turned down; call it again if it is still needed"
+            self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, reason, metadata={"error": "not_executed"}), provider, MiddlewareDecision.continue_())
 
     def _append_tool_result_message(
         self,

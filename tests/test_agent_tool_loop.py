@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
 from vidbyte import Agent, tool
-from vidbyte.agents import AgentRuntime
+from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinToolCalls
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
 
 
@@ -402,6 +402,43 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
         # First round produced exactly one assistant turn in the accumulated history.
         self.assertEqual(len(assistant_turns), 1, "expected exactly one assistant tool-call turn in accumulated messages")
 
+
+
+def _chat_tool_turn(*calls: tuple[str, str, str]) -> FakeResponse:
+    tool_calls = [{"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}} for call_id, name, arguments in calls]
+    return FakeResponse("", {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": tool_calls}}]})
+
+
+class RejectedFinishSiblingCallTests(unittest.IsolatedAsyncioTestCase):
+    async def test_calls_after_rejected_is_done_still_get_tool_results(self) -> None:
+        searched: list[str] = []
+
+        @tool
+        def search(q: str) -> str:
+            """Search."""
+            searched.append(q)
+            return "hit"
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "isDone", '{"final_answer": "early"}'), ("call_2", "search", '{"q": "a"}')),
+                _chat_tool_turn(("call_3", "search", '{"q": "b"}'), ("call_4", "search", '{"q": "c"}')),
+                _chat_tool_turn(("call_5", "isDone", '{"final_answer": "done"}')),
+            ]
+        )
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search], agent_loop_settings=AgentLoopSettings(output_contracts=[MinToolCalls(2)]))
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            result = await agent.arun("task")
+
+        self.assertEqual(result.content, "done")
+        self.assertEqual(searched, ["b", "c"], "the call after the rejected isDone must not run")
+        second_call_messages = runner.calls[1]["kwargs"]["messages"]
+        assistant_idx = next(i for i, m in enumerate(second_call_messages) if isinstance(m.get("tool_calls"), list))
+        expected_ids = [call["id"] for call in second_call_messages[assistant_idx]["tool_calls"]]
+        following = second_call_messages[assistant_idx + 1 : assistant_idx + 1 + len(expected_ids)]
+        self.assertEqual([m.get("role") for m in following], ["tool"] * len(expected_ids))
+        self.assertEqual([m.get("tool_call_id") for m in following], expected_ids)
+        self.assertIn("not executed", following[1]["content"])
 
 if __name__ == "__main__":
     unittest.main()
