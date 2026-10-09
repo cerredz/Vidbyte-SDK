@@ -54,7 +54,7 @@ docs: record review notes on asserts and line ranges               Claude-Review
 | Comment         | resolver        | preventer                       | readme-notes    |
 |-----------------|-----------------|---------------------------------|-----------------|
 | client.py:41    | changed 1a2b3c4 | changed 5d6e7f8, guard verified | changed 9a0b1c2 |
-| client.py:77    | changed 1a2b3c4 | no change (covered by 5d6e7f8)  | changed 9a0b1c2 |
+| client.py:77    | changed 1a2b3c4 | no change                       | changed 9a0b1c2 |
 | read_text.py:18 | changed 1a2b3c4 | changed 3c4d5e6, guard verified | changed 9a0b1c2 |
 ```
 
@@ -151,5 +151,12 @@ saved as `.github/prompts/review-agents/40-docs-updater.md`.
 - `python scripts/run_ci.py` in a fresh Python 3.11 virtualenv with the dev extra installed from this worktree, which runs `tests/test_review_agents.py` with the rest of the suite and A009 with the rest of the lint rules.
 - `python scripts/review_agents/run.py check --agents-dir .github/prompts/review-agents`.
 - `actionlint` on the new workflow, and the Semgrep static policy.
-- `ci.yml` and `static-policy.yml` dispatched on this branch.
+- `ci.yml`, `static-policy.yml`, and `actionlint.yml` dispatched on this branch.
 - A live run on a throwaway draft pull request based on this branch, with three planted mistakes: two instances of one problem in one file and one independent problem in another. Its review has three inline comments, one of them "Same problem here.", and a summary that mentions `@claude`. The `pull_request_review` event runs the workflow from the pull request's merge ref, so this works before the workflow reaches `main`. The run must show two groups in the resolver's summary, fixes for all three comments, each guard verified or covered, notes without links, and a summary comment that matches the pushed commits.
+- The first live run passed all of these. The mistakes were two `assert` argument checks in `vidbyte/tools/filesystem/tree.py` and an off-by-one slice in `vidbyte/tools/filesystem/read_lines.py`.
+  - The resolver made two groups and fixed all three comments in one commit. Along the way it also cleared an A007 regression that the planted bounds had caused.
+  - The first preventer added S063, which selects Ruff's S101 with a baseline of 15, and the bite check verified it.
+  - The second preventer reported that S063 already covers its comment, and confirmed this by reverting the resolver's fix itself.
+  - The third preventer added a regression test that covers every line window, and the bite check verified it.
+  - The notes writer added two link-free notes to `vidbyte/tools/README.md`.
+  - The summary comment matched the four pushed commits.
