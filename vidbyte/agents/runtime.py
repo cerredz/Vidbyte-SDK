@@ -664,6 +664,11 @@ class AgentRuntime:
                     retry_ordinal += AGENT_SPEED_FIRST_INDEX
                     continue
                 if decision.action is MiddlewareAction.ABORT_RUN:
+                    # A spent retry budget hands the error to _arun_once's fallback switch when a next model exists.
+                    # Only _arun_once sets the chain index, so external callers keep the abort result.
+                    chain_index = state.run_state.get("_speed_fallback_index")
+                    if self.fallback is not None and chain_index is not None and self.fallback.advance(exc, int(chain_index)) is not None:
+                        raise
                     return (
                         self._middleware_abort_result(
                             decision,
