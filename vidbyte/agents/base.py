@@ -56,7 +56,7 @@ from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSea
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
-from vidbyte.tools.types import ToolCallContext, ToolSpec
+from vidbyte.tools.types import ToolCallContext, ToolPermission, ToolSpec
 
 if TYPE_CHECKING:
     from vidbyte.agents.contract import AgentLoopSettingsOutputContract
@@ -436,6 +436,7 @@ class BaseAgent(McpAttachableMixin):
             context_summary=self._export_context_summary(),
             trace_option=self._export_trace_option(),
             output_schema=self._export_output_schema(),
+            permission_policy=tuple(sorted(permission.value for permission in self.permission_policy.allowed)),
         )
 
     @classmethod
@@ -465,6 +466,7 @@ class BaseAgent(McpAttachableMixin):
             tracer=tracer,
             trace=trace,
             output_schema=output_schema,
+            permission_policy=cls._restore_permission_policy(state),
         )
         child.history = [serializer.message_from_dict(item) for item in state.history]
         cls._record_resume_tool_mismatch(child, state.tool_names)
@@ -605,6 +607,15 @@ class BaseAgent(McpAttachableMixin):
             if (floor := BaseAgent._builtin_floor(str(entry.get("type")))) is not None
         )
         return AgentLoopSettings(**{key: value for key, value in values.items() if value is not None})
+
+    @staticmethod
+    def _restore_permission_policy(state: RunState) -> PermissionPolicy | None:
+        # @intent restored-agent-keeps-its-permission-policy
+        # Rebuild exactly the exported tool-permission allow-list so a resumed agent is neither widened nor narrowed;
+        # checkpoints written before the field existed carry None and fall back to the constructor default.
+        if state.permission_policy is None:
+            return None
+        return PermissionPolicy(allowed=frozenset(ToolPermission(value) for value in state.permission_policy))
 
     @staticmethod
     def _restore_trace_option(state: RunState) -> TraceOption | None:
