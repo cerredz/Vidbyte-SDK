@@ -88,67 +88,78 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
     async def test_canary_injected_on_after_tool_call_when_roll_passes(self) -> None:
         # [Edge Case] With inject_probability=1.0, every tool call generates a canary.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("scrape_web"),
             tool_result=ToolResult.success("scrape_web", "page content"),
         )
         await mw.after_tool_call(ctx)
-        self.assertEqual(len(mw._canaries), 1)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 1)
 
     async def test_canary_not_injected_on_low_probability_roll(self) -> None:
         # [Edge Case] With inject_probability far below the first roll, no canary stored.
         mw = CanaryTripwireMiddleware(inject_probability=0.001, random_seed=99)
+        run_state: dict = {}
         ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("scrape_web"),
             tool_result=ToolResult.success("scrape_web", "data"),
         )
         await mw.after_tool_call(ctx)
-        self.assertEqual(len(mw._canaries), 0)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 0)
 
     async def test_canary_skipped_for_internal_tools(self) -> None:
         # [Hidden Assumption] Internal tools never generate canaries.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("isDone"),
             tool_result=ToolResult.success("isDone", "done"),
             tool_is_internal=True,
         )
         await mw.after_tool_call(ctx)
-        self.assertEqual(len(mw._canaries), 0)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 0)
 
     async def test_canary_skipped_when_tool_result_is_none(self) -> None:
         # [Hidden Assumption] No canary when tool_result is None.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("lookup"),
             tool_result=None,
         )
         await mw.after_tool_call(ctx)
-        self.assertEqual(len(mw._canaries), 0)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 0)
 
     async def test_leaked_canary_aborts_after_model_response(self) -> None:
         # [Edge Case] Model output containing a canary triggers abort.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         tool_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("scrape_web"),
             tool_result=ToolResult.success("scrape_web", "page content"),
         )
         await mw.after_tool_call(tool_ctx)
-        canary = list(mw._canaries.keys())[0]
+        canary = list(run_state.get(CanaryTripwireMiddleware, {}).keys())[0]
 
         model_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_MODEL_RESPONSE,
             agent_name="worker",
+            run_state=run_state,
             model_response=FakeModelResponse(f"Here is the data: {canary} done."),
         )
         decision = await mw.after_model_response(model_ctx)
@@ -160,9 +171,11 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_abort_when_canary_not_in_model_output(self) -> None:
         # [Silent Failure] Model output without canary should continue.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         tool_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("scrape_web"),
             tool_result=ToolResult.success("scrape_web", "page content"),
         )
@@ -171,6 +184,7 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
         model_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_MODEL_RESPONSE,
             agent_name="worker",
+            run_state=run_state,
             model_response=FakeModelResponse("Clean output with no secrets."),
         )
         decision = await mw.after_model_response(model_ctx)
@@ -179,36 +193,41 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
     async def test_before_run_clears_canaries(self) -> None:
         # [Hidden Failure] Canaries from a previous run must not leak into the next.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         tool_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("scrape_web"),
             tool_result=ToolResult.success("scrape_web", "data"),
         )
         await mw.after_tool_call(tool_ctx)
-        self.assertEqual(len(mw._canaries), 1)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 1)
 
-        run_ctx = MiddlewareContext(hook=MiddlewareHook.BEFORE_RUN, agent_name="worker")
+        run_ctx = MiddlewareContext(hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", run_state=run_state)
         await mw.before_run(run_ctx)
-        self.assertEqual(len(mw._canaries), 0)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 0)
 
     async def test_multiple_canaries_first_match_aborts(self) -> None:
         # [Edge Case] Multiple canaries — first match triggers abort with correct source.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         for tool_name in ("tool_a", "tool_b", "tool_c"):
             ctx = MiddlewareContext(
                 hook=MiddlewareHook.AFTER_TOOL_CALL,
                 agent_name="worker",
+                run_state=run_state,
                 tool_call=ToolCall(tool_name),
                 tool_result=ToolResult.success(tool_name, f"output_{tool_name}"),
             )
             await mw.after_tool_call(ctx)
-        self.assertEqual(len(mw._canaries), 3)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 3)
 
-        target_canary = list(mw._canaries.keys())[1]
+        target_canary = list(run_state.get(CanaryTripwireMiddleware, {}).keys())[1]
         model_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_MODEL_RESPONSE,
             agent_name="worker",
+            run_state=run_state,
             model_response=FakeModelResponse(f"Leaked: {target_canary}"),
         )
         decision = await mw.after_model_response(model_ctx)
@@ -218,18 +237,21 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_response_without_text_attribute(self) -> None:
         # [Hidden Assumption] Fallback to str() when .text is absent.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         tool_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("scrape_web"),
             tool_result=ToolResult.success("scrape_web", "data"),
         )
         await mw.after_tool_call(tool_ctx)
-        canary = list(mw._canaries.keys())[0]
+        canary = list(run_state.get(CanaryTripwireMiddleware, {}).keys())[0]
 
         model_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_MODEL_RESPONSE,
             agent_name="worker",
+            run_state=run_state,
             model_response=NoTextResponse(f"output with {canary}"),
         )
         decision = await mw.after_model_response(model_ctx)
@@ -247,9 +269,11 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_model_output_continues(self) -> None:
         # [Silent Failure] Empty model output should not trigger abort.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=42)
+        run_state: dict = {}
         tool_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("scrape_web"),
             tool_result=ToolResult.success("scrape_web", "data"),
         )
@@ -258,6 +282,7 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
         model_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_MODEL_RESPONSE,
             agent_name="worker",
+            run_state=run_state,
             model_response=FakeModelResponse(""),
         )
         decision = await mw.after_model_response(model_ctx)
@@ -266,28 +291,32 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
     async def test_inject_probability_exactly_one(self) -> None:
         # [Edge Case] probability=1.0 always injects.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7)
+        run_state: dict = {}
         for i in range(5):
             ctx = MiddlewareContext(
                 hook=MiddlewareHook.AFTER_TOOL_CALL,
                 agent_name="worker",
+                run_state=run_state,
                 tool_call=ToolCall(f"tool_{i}"),
                 tool_result=ToolResult.success(f"tool_{i}", "out"),
             )
             await mw.after_tool_call(ctx)
-        self.assertEqual(len(mw._canaries), 5)
+        self.assertEqual(len(run_state.get(CanaryTripwireMiddleware, {})), 5)
 
     async def test_canary_appended_to_model_visible_tool_result_only(self) -> None:
         # [Silent Failure] The canary must reach the model through a transform, not stay ledger-only.
         mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7)
+        run_state: dict = {}
         raw = ToolResult.success("lookup", "internal document", metadata={"source": "kb"})
         ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
+            run_state=run_state,
             tool_call=ToolCall("lookup"),
             tool_result=raw,
         )
         decision = await mw.after_tool_call(ctx)
-        canary = list(mw._canaries.keys())[0]
+        canary = list(run_state.get(CanaryTripwireMiddleware, {}).keys())[0]
         visible = decision.transform.model_visible_tool_result
         self.assertIn("VIDBYTE-CANARY-", visible.output)
         self.assertEqual(visible.output, f"internal document\n{canary}")
@@ -744,7 +773,7 @@ class PipelineIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         decision = await pipeline.after_tool_call(ctx)
         self.assertEqual(decision.action.value, "continue")
-        self.assertEqual(len(mw._canaries), 1)
+        self.assertEqual(len(ctx.run_state[CanaryTripwireMiddleware]), 1)
 
     async def test_honeypot_before_tool_policy_order(self) -> None:
         # Verify honeypot fires before other middleware when ordered first.
