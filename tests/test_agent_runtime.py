@@ -966,6 +966,12 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(result.content, "ANSWER")
         self.assertEqual(runner.calls, 1)
 
+    def test_actor_default_actor_set_runs_for_each_topology(self) -> None:
+        # [Regression] The default actor list imported the removed CoderActor class.
+        for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            with self.subTest(topology=topology):
+                result, _ = self._run(ActorRuntime(topology=topology))
+                self.assertEqual(result.content, "ANSWER")
 
 if __name__ == "__main__":
     unittest.main()
