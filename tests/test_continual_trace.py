@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unittest
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,22 @@ class _ProgressModel(BaseModel):
     goal: str = Field(description="The goal.")
     steps: list[str] = Field(default_factory=list, description="Ordered steps taken.")
     done: bool = Field(default=False, description="Whether the work is complete.")
+
+
+class _Owner(BaseModel):
+    name: str = Field(description="Owner name.")
+
+
+class _OptionalTraceModel(BaseModel):
+    """Trace whose fields are all optional, as trace fields start at None."""
+
+    summary: str | None = Field(None, description="One-line summary.")
+    confidence: float | None = Field(None, description="Confidence 0-1.")
+    blockers: list[str] | None = Field(None, description="Open blockers.")
+    owner: Optional[_Owner] = Field(None, description="Current owner.")  # noqa: UP045
+    pages: Union[int, None] = Field(None, description="Pages sent.")  # noqa: UP007
+    reviewers: list[_Owner | None] | None = Field(None, description="Reviewers.")
+    ref: int | str | None = Field(None, description="Ticket id or slug.")
 
 
 def _progress_schema() -> TraceSchema:
@@ -66,6 +83,19 @@ class TraceOptionTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             TraceSchema.from_model(NoDesc)
+
+    def test_from_model_unwraps_optional_annotations(self) -> None:  # [Silent Failure]
+        fields = TraceSchema.from_model(_OptionalTraceModel).fields
+        self.assertEqual(fields["summary"].type, TraceFieldType.STRING)
+        self.assertEqual(fields["confidence"].type, TraceFieldType.NUMBER)
+        self.assertEqual(fields["blockers"].type, TraceFieldType.ARRAY)
+        self.assertEqual(fields["owner"].type, TraceFieldType.OBJECT)
+        self.assertEqual(fields["owner"].fields["name"].type, TraceFieldType.STRING)
+        self.assertEqual(fields["pages"].type, TraceFieldType.INTEGER)
+        self.assertEqual(fields["reviewers"].items.fields["name"].type, TraceFieldType.STRING)
+
+    def test_from_model_multi_type_union_stays_string(self) -> None:  # [Hidden Assumption]
+        self.assertEqual(TraceSchema.from_model(_OptionalTraceModel).fields["ref"].type, TraceFieldType.STRING)
 
     def test_initial_artifact_keys_all_none(self) -> None:  # [Edge Case]
         artifact = _progress_schema().initial_artifact()
@@ -118,6 +148,16 @@ class UpdateTraceToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("output shape mismatch", result.output)
         self.assertEqual(tool.current_trace()["steps"], None)
+
+    async def test_accepts_values_matching_optional_model(self) -> None:  # [Silent Failure]
+        tool = UpdateTraceTool(TraceSchema.from_model(_OptionalTraceModel))
+        result = await tool.execute(_call({"confidence": 0.8, "blockers": ["x"], "owner": {"name": "a"}}))
+        self.assertNotEqual(result.status.value, "error", result.output)
+        await tool.execute(_call({"blockers": ["y"]}))
+        trace = tool.current_trace()
+        self.assertEqual(trace["confidence"], 0.8)
+        self.assertEqual(trace["blockers"], ["x", "y"])
+        self.assertEqual(trace["owner"], {"name": "a"})
 
     async def test_non_object_trace_returns_error(self) -> None:  # [Edge Case]
         tool = UpdateTraceTool(_progress_schema())
