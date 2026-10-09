@@ -37,6 +37,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.usage_ledger import usage_ledger_scope
+from vidbyte.sessions import InMemorySessionStore, Session
 from vidbyte.tools.types import ToolCall, ToolStatus
 
 _TEMPLATE = "REQUEST:\n{request}\n\nCANDIDATES:\n{candidates}"
@@ -96,7 +97,7 @@ class UsageRunner:
     """Offline text runner whose every response reports priced usage."""
 
     def run(self, prompt: str, system: str = "", **_: object) -> TextModelResponse:
-        return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="answer", raw={}, usage={"input_tokens": 10, "output_tokens": 2})
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="answer", raw={}, usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12})
 
 
 def _metered_agent(name: str) -> BaseAgent:
@@ -309,6 +310,19 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         with usage_ledger_scope(outer):
             await agent.generate_reply("q")
         self.assertEqual(outer.rollup().model_call_count, 4)
+
+    async def test_persisted_agent_checkpoints_each_successful_turn(self) -> None:
+        # [Silent Failure] A Session-bound AggregateAgent checkpoints every turn with its proposer and aggregator tokens.
+        agent = self._agent(proposers=[_metered_agent("a"), _metered_agent("b")], aggregator=_metered_agent("synth"))
+        store = InMemorySessionStore()
+        session = agent.persist(store=store)
+        for _ in range(2):
+            await session.arun("q")
+        usage = session.usage()
+        self.assertEqual(usage.turns, 2)
+        self.assertEqual(usage.tokens, 2 * 3 * 12)
+        resumed = Session.resume(store, session.id)
+        self.assertEqual([message.content for message in resumed.agent.history], [message.content for message in agent.history])
 
     def test_builds_distinct_child_agents_with_same_provider(self) -> None:
         # [Silent Failure] Two same-provider proposers get distinct labels.
