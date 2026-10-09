@@ -160,6 +160,7 @@ Nested folders:
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C013 | jev-decision-helper-only | Agents ask and score Jev only through DecisionModelHelper, one request per decision |
+| C014 | jev-done-check-parity | Every JevDoneCheck has its question module, keys, registry entries, handoff section, and handlers |
 
 ## Adding a rule
 
