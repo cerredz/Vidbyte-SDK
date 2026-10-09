@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from vidbyte import Agent, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
-from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinToolCalls
+from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -564,3 +564,25 @@ class ContractUnsatisfiedStructuredOutputTests(unittest.IsolatedAsyncioTestCase)
                 await self._agent(runner).arun("task")
 
         self.assertEqual(ctx.exception.stop_reason, "contract_unsatisfied")
+
+
+class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
+    async def test_floor_equal_to_per_tool_cap_is_met_even_when_denials_abort(self) -> None:
+        # A per-tool cap only denies the call after the cap, so the floor is met without ever reaching the abort path.
+        searched: list[str] = []
+
+        @tool
+        def web_search(q: str) -> str:
+            """Search the web."""
+            searched.append(q)
+            return "hit"
+
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "web_search", '{"q": "a"}')), _chat_tool_turn(("call_2", "web_search", '{"q": "b"}')), _text_turn("answer")])
+        settings = AgentLoopSettings(tool_settings=ToolSettings(max_calls_per_tool={"web_search": 2}, on_deny="abort"), output_contracts=(MinToolCallsById("web_search", 2),), max_iterations=6)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[web_search], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertEqual(reply.content, "answer")
+        self.assertEqual(searched, ["a", "b"])

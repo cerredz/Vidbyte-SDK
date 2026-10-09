@@ -142,7 +142,7 @@ class AgentLoopSettings:
             raise ConfigurationError("AgentLoopSettings.max_tool_calls and ToolSettings.max_calls must match when both are provided.")
 
     def _validate_output_contracts(self) -> None:
-        # Rejects any effort floor whose minimum meets or exceeds its paired ceiling (an unreachable floor).
+        # Rejects any effort floor its paired ceiling makes unreachable.
         for contract in self._output_contracts:
             self._validate_contract_ceiling(contract)
             self._validate_tool_calls_by_id_ceiling(contract)
@@ -173,11 +173,15 @@ class AgentLoopSettings:
         if self.tool_settings is None:
             return
         limit = self.tool_settings.max_calls_per_tool.get(contract.tool_name)
-        if limit is not None and contract.minimum >= limit:
+        # @intent per-tool-floor-may-equal-cap
+        # Unlike the global ceilings, a per-tool cap never stops the run: it only denies call limit + 1.
+        # The agent can run the tool exactly `limit` times and then finish, so minimum == limit is reachable
+        # (under on_deny="abort" too, since no denied call is needed). Only minimum > limit is unreachable.
+        if limit is not None and contract.minimum > limit:
             raise ConfigurationError(
                 f"{contract.name}(tool_name={contract.tool_name!r}, minimum={contract.minimum}) conflicts with "
                 f"ToolSettings.max_calls_per_tool[{contract.tool_name!r}]={limit}: the floor is unreachable "
-                "(require minimum < max_calls_per_tool)."
+                "(require minimum <= max_calls_per_tool)."
             )
 
     def to_runtime_config(self) -> "AgentRuntimeConfig":

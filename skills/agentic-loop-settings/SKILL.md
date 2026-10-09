@@ -173,7 +173,7 @@ These parameters are accepted and validated on `AgentLoopSettings` at constructi
 | `tool_settings` is not a `ToolSettings` instance | `tool_settings must be a ToolSettings instance when provided` |
 | `max_tool_calls` and `ToolSettings.max_calls` both set and differ | must match when both are provided |
 | Effort floor `minimum >=` paired ceiling (when ceiling set) | floor is unreachable (require minimum < ceiling) |
-| `MinToolCallsById` minimum `>=` `ToolSettings.max_calls_per_tool[name]` when set | floor is unreachable for that tool |
+| `MinToolCallsById` minimum `>` `ToolSettings.max_calls_per_tool[name]` when set (equal is allowed: a per-tool cap denies later calls but does not stop the run) | floor is unreachable (require minimum <= max_calls_per_tool) |
 | Both `agent_loop_settings=` and flat params passed to `BaseAgent` | `Pass either agent_loop_settings= or individual loop params (...), not both.` |
 
 ---
