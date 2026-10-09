@@ -925,11 +925,16 @@ class BaseAgent(McpAttachableMixin):
         self._draining_queued_prompts = True
         self.last_queued_replies = []
         completed = 0
+        # Each drained run resets the usage tracker, so keep every run's usage to restore after the drain.
+        run_usage = [self._usage_tracker.rollup()]
         try:
             # Pop-one loop so prompts queued by drained runs join the same bounded drain.
             while self._queued_prompts and completed < self.agent_loop_settings.max_queued_prompts:
                 prompt = self._queued_prompts.pop(0)
-                reply = await self.generate_reply(prompt)
+                try:
+                    reply = await self.generate_reply(prompt)
+                finally:
+                    run_usage.append(self._usage_tracker.rollup())
                 self.last_queued_replies.append(reply)
                 completed += 1
             if self._queued_prompts:
@@ -943,6 +948,11 @@ class BaseAgent(McpAttachableMixin):
             self._queued_prompts.clear()
         finally:
             self._draining_queued_prompts = False
+            # @intent queued-prompt-drain-keeps-every-run-usage
+            # One arun() call owns the primary run and every drained run, so its usage covers all of them.
+            self._usage_tracker.reset()
+            for rollup in run_usage:
+                self._usage_tracker.merge(rollup)
             if completed:
                 metadata["queued_prompt_runs"] = completed
 
