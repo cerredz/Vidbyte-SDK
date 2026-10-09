@@ -12,6 +12,7 @@ TESTS: Covered by tests/test_agent_speed.py, tests/test_agent_runtime.py, and sc
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 from typing import Any
 
 from vidbyte.lib.constants.speed import (
@@ -449,7 +450,7 @@ class StreamSpeedRecord:
     @property
     def inter_chunk_gaps_ms(self) -> tuple[float, ...]:
         """Return elapsed milliseconds between each pair of observed chunks."""
-        return tuple((right - left) * _MILLISECONDS_PER_SECOND for left, right in zip(self.chunk_timestamps, self.chunk_timestamps[1:], strict=True))
+        return tuple((right - left) * _MILLISECONDS_PER_SECOND for left, right in pairwise(self.chunk_timestamps))
 
     @property
     def chunk_rate_per_second(self) -> float | None:
