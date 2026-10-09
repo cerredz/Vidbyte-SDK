@@ -77,3 +77,24 @@ class PatchToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.status.value, "error")
         self.assertIn("Ambiguous", result.output)
+
+    async def test_single_block_patch_preserves_lf_line_endings(self) -> None:
+        """Patching one block leaves every other LF line ending byte-for-byte unchanged."""
+        self.file.write_bytes(b"def f():\n    x = 1\n    return 2\n\nprint(f())\n")
+        result = await PatchTool(self.root).execute(
+            ToolCall("patch_file", {"file_path": "demo.py", "search_block": "return 2", "replace_block": "return 3"})
+        )
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(self.file.read_bytes(), b"def f():\n    x = 1\n    return 3\n\nprint(f())\n")
+
+    async def test_single_block_patch_preserves_crlf_line_endings(self) -> None:
+        """A multi-line LF search block still matches a CRLF file, and the file stays CRLF."""
+        self.file.write_bytes(b"def f():\r\n    x = 1\r\n    return 2\r\n\r\nprint(f())\r\n")
+        result = await PatchTool(self.root).execute(
+            ToolCall(
+                "patch_file",
+                {"file_path": "demo.py", "search_block": "    x = 1\n    return 2\n", "replace_block": "    x = 1\n    return 3\n"},
+            )
+        )
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(self.file.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")

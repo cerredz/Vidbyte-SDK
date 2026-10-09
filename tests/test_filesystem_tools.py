@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from vidbyte.tools.catalog import Tools
@@ -185,6 +186,25 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(result.status, ToolStatus.SUCCESS)
             read = run(ReadTextTool(config).execute(ToolCall("read_text", {"path": "f.txt"})))
             self.assertEqual(read.output, "hello there")
+
+    def test_replace_text_preserves_lf_line_endings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.py"
+            target.write_bytes(b"def f():\n    x = 1\n    return 2\n\nprint(f())\n")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.py", "search": "return 2", "replacement": "return 3"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            self.assertEqual(target.read_bytes(), b"def f():\n    x = 1\n    return 3\n\nprint(f())\n")
+
+    def test_replace_text_preserves_crlf_line_endings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.py"
+            target.write_bytes(b"def f():\r\n    x = 1\r\n    return 2\r\n\r\nprint(f())\r\n")
+            call = ToolCall("replace_text", {"path": "f.py", "search": "    x = 1\n    return 2\n", "replacement": "    x = 1\n    return 3\n"})
+            result = run(ReplaceTextTool(config).execute(call))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            self.assertEqual(target.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
 
     def test_tree_returns_newline_joined_tree_entries(self) -> None:
         with TemporaryDirectory() as tmp:
