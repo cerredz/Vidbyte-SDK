@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+
+# Smallest accepted recursion depth; negative depths have no meaning for a tree listing.
+_MIN_MAX_DEPTH = 0
+# Smallest accepted entry cap; a tree listing must be allowed to return at least one entry.
+_MIN_MAX_ENTRIES = 1
 
 
 class TreeTool(FileSystemTool):
@@ -27,8 +33,10 @@ class TreeTool(FileSystemTool):
         max_depth = int(call.arguments.get("max_depth", 3))
         max_entries = int(call.arguments.get("max_entries", 200))
         try:
-            assert max_depth >= 0, "TreeTool max_depth must be at least 0."
-            assert max_entries >= 1, "TreeTool max_entries must be at least 1."
+            if max_depth < _MIN_MAX_DEPTH:
+                raise ToolExecutionError(f"TreeTool max_depth must be at least {_MIN_MAX_DEPTH}.")
+            if max_entries < _MIN_MAX_ENTRIES:
+                raise ToolExecutionError(f"TreeTool max_entries must be at least {_MIN_MAX_ENTRIES}.")
             target = self._path(path)
             FileSystemPermissions.require_existing_directory(target)
             root = self._config.resolved_root()

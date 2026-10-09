@@ -36,7 +36,7 @@ class ReadLinesTool(FileSystemTool):
             target = self._path(path)
             FileSystemPermissions.require_existing_file(target)
             lines = self.backend.read_text(target, encoding=self._config.encoding).splitlines()
-            selected = lines[start - 1 : end - 1] if end is not None else lines[start - 1 :]
+            selected = lines[start - 1 : end]
             return ToolResult.success(self.name, "\n".join(selected), metadata={"path": str(target), "start": start, "end": end})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))
