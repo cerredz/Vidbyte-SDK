@@ -50,6 +50,8 @@ _UNARY_OPERATORS: dict[type[ast.unaryop], Callable[[Any], object]] = {
 class SafePrintExpression:
     """Evaluates one `print` argument through a whitelist of literal and arithmetic AST nodes."""
 
+    BOUND_NAME = "simulated runtime"
+
     # @intent no-eval-on-model-text
     # Model text, including prompt-injected tool output, reaches this tool. Emptying
     # `__builtins__` around `eval` is not a sandbox because attribute traversal stays
@@ -86,23 +88,23 @@ class SafePrintExpression:
         if type(value) not in (int, float):
             raise ToolExecutionError("unary signs apply to numbers only")
 
-    @staticmethod
-    def _require_operands(op: ast.operator, left: object, right: object) -> None:
+    @classmethod
+    def _require_operands(cls, op: ast.operator, left: object, right: object) -> None:
         """Allow string concatenation and numeric arithmetic with a bounded exponent."""
         if isinstance(op, ast.Add) and type(left) is str and type(right) is str:
             return
         if not isinstance(left, (int, float)) or not isinstance(right, (int, float)):
             raise ToolExecutionError("arithmetic applies to numbers only")
         if isinstance(op, ast.Pow) and abs(right) > MAX_PRINT_EXPONENT:
-            raise ToolExecutionError("exponent exceeds the simulated runtime bound")
+            raise ToolExecutionError(f"exponent exceeds the {cls.BOUND_NAME} bound")
         if isinstance(op, ast.Pow) and isinstance(left, int) and abs(left).bit_length() * abs(right) > MAX_PRINT_INT_BITS:
-            raise ToolExecutionError("power result exceeds the simulated runtime bound")
+            raise ToolExecutionError(f"power result exceeds the {cls.BOUND_NAME} bound")
 
-    @staticmethod
-    def _bounded(value: object) -> object:
+    @classmethod
+    def _bounded(cls, value: object) -> object:
         """Reject integer results too large to render cheaply."""
         if type(value) is int and value.bit_length() > MAX_PRINT_INT_BITS:
-            raise ToolExecutionError("integer result exceeds the simulated runtime bound")
+            raise ToolExecutionError(f"integer result exceeds the {cls.BOUND_NAME} bound")
         return value
 
 
