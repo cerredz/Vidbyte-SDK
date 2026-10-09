@@ -371,6 +371,29 @@ class SystemPromptFileContainmentTests(unittest.TestCase):
 
             self.assertIn("stay inside the configuration file's directory", str(ctx.exception))
 
+    def test_inline_prompts_ending_in_a_filename_stay_inline_text(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            documents = {
+                "sentence.yaml": ("name: writer\nsystem_prompt: You are a writer. Save your notes to notes.md\n", "You are a writer. Save your notes to notes.md"),
+                "block.yaml": ("name: writer\nsystem_prompt: |\n  You are a writer.\n  Always attach summary.txt\n", "You are a writer.\nAlways attach summary.txt"),
+            }
+            for name, (text, expected) in documents.items():
+                (root / name).write_text(text, encoding="utf-8")
+
+                self.assertEqual(YamlLoader().load_agent(root / name).system_prompt, expected)
+
+    def test_unreadable_prompt_file_raises_configuration_error(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "agent.yaml").write_text("name: researcher\nsystem_prompt: ./missing.md\n", encoding="utf-8")
+
+            with self.assertRaises(ConfigurationError) as ctx:
+                YamlLoader().load_agent(root / "agent.yaml")
+
+            self.assertIsInstance(ctx.exception.__cause__, OSError)
+            self.assertEqual(ctx.exception.details["field"], "agent.system_prompt")
+
 
 class ExpectedStructureTests(unittest.TestCase):
     def test_documents_every_allowed_field(self) -> None:
