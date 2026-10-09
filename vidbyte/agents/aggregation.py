@@ -211,6 +211,8 @@ class AggregateAgent(BaseAgent):
         self._proposer_tools = tools
         self._proposer_middleware = tuple(middleware)
         self._proposer_temperature = temperature
+        # Decide once which provider the explicit key belongs to, before any child is built with it.
+        self._key_owner = self._resolve_key_owner()
         labeled_proposers = self._build_proposers()
         aggregator_agent = self._build_aggregator()
         template = self._config.synthesis_prompt_template or Prompts().get(Prompt.MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT)
@@ -326,18 +328,25 @@ class AggregateAgent(BaseAgent):
             tracer=self._tracer,
         )
 
+    def _resolve_key_owner(self) -> str | None:
+        # @intent aggregate-key-never-crosses-providers
+        # The explicit key belongs to this agent's own provider. Without one, it belongs to the single
+        # provider that every spec-built proposer and aggregator names; if they name several, it stays
+        # unattributed (None) and no named child sends it. Prebuilt child agents do not count.
+        host = self._proposer_provider_defaults[0]
+        specs = (self._coerce_spec(item) for item in (*self._proposer_inputs, self._aggregator_input) if item is not None)
+        names = [host] if host is not None else [spec.provider for spec in specs if spec is not None]
+        owners = {(name.value if isinstance(name, ModelProvider) else str(name)).strip().lower() for name in names}
+        return owners.pop() if len(owners) == 1 else None
+
     def _child_api_key(self, child_provider: ModelProvider | str | None) -> str | None:
         # @intent aggregate-key-never-crosses-providers
-        # The explicit key belongs to this agent's own provider. Sending it to a child on another
-        # vendor leaks the secret and fails auth; None lets that provider read its own env key.
-        # A key given without a provider cannot be attributed, so only a child naming no provider keeps it.
-        host, child = (
-            (value.value if isinstance(value, ModelProvider) else str(value)).strip().lower() if value is not None else None
-            for value in (self._proposer_provider_defaults[0], child_provider)
-        )
-        if child is not None and child != host:
-            return None
-        return self._proposer_api_key
+        # Sending the key to a child on a provider other than its owner leaks the secret and fails auth;
+        # None lets that provider read its own env key. A child naming no provider keeps the key.
+        if child_provider is None:
+            return self._proposer_api_key
+        child = (child_provider.value if isinstance(child_provider, ModelProvider) else str(child_provider)).strip().lower()
+        return self._proposer_api_key if child == self._key_owner else None
 
     def _resolve_aggregator_spec(self) -> ProposerSpec:
         # Returns the explicit aggregator spec, or falls back to the host provider/model, erroring if neither resolves.
