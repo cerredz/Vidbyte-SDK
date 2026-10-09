@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
 
 if TYPE_CHECKING:
@@ -198,7 +199,7 @@ class BaseContext:
         if self.memory:
             parts.append(f"Memory summary:\n{self.memory}")
         if self.history:
-            parts.append("History:\n" + "\n".join(str(item) for item in self.history))
+            parts.append("History:\n" + "\n".join(_format_history_item(item) for item in self.history))
         if self.metadata:
             parts.append(f"Run metadata:\n{self.metadata}")
         if self.budget:
@@ -245,6 +246,13 @@ class BaseAgentContext(BaseContext):
 
 # Backward-compat alias — callers that imported StrategyContext can use BaseContext directly.
 StrategyContext = BaseContext
+
+
+def _format_history_item(item: object) -> str:
+    """Render one history entry as conversation text; agent messages drop their metadata."""
+    if isinstance(item, AgentMessage):
+        return f"{item.sender} -> {item.recipient}: {item.content}"
+    return str(item)
 
 
 def _format_context_tool(tool: object) -> str:
