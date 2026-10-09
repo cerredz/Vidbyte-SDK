@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import unittest
 
 from tests.agent_test_support import build_test_agent
@@ -267,6 +269,52 @@ class ContextGetterBindingTests(unittest.TestCase):
         _, history = child_tool._context_getter()  # type: ignore[misc]
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].content, "ping")
+
+
+class _DelegatingRunner:
+    """Calls the child tool, yielding so concurrent runs interleave, then finishes once tool results are present."""
+
+    async def arun(self, message: str, **kwargs: object) -> object:
+        await asyncio.sleep(0.01)
+        if kwargs.get("messages"):
+            return _FakeResponse("done")
+        return _ToolCallResponse("child")
+
+
+class _ToolCallResponse(_FakeResponse):
+    def __init__(self, tool_name: str) -> None:
+        super().__init__("")
+        self.raw = {"output": [{"type": "function_call", "name": tool_name, "arguments": "{}", "call_id": "fc_child"}]}
+
+
+class _RecordingRunner:
+    """Records the <current_request> each delegation receives and echoes it back."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def arun(self, message: str, **kwargs: object) -> _FakeResponse:
+        match = re.search(r"<current_request>\s*(.*?)\s*</current_request>", message, re.S)
+        request = match.group(1) if match else ""
+        self.seen.append(request)
+        return _FakeResponse(f"seen:{request}")
+
+
+class ConcurrentRunContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_runs_forward_their_own_prompt_to_agent_tool(self) -> None:
+        recorder = _RecordingRunner()
+        child = build_test_agent(
+            name="child",
+            system_prompt="child system",
+            runner=recorder,
+            agent_metadata=AgentMetadata(name="child", description="A test agent.", use_cases="Testing."),
+        )
+        parent = build_test_agent(name="parent", system_prompt="parent system", runner=_DelegatingRunner(), tools=(child.as_tool(),))
+
+        await asyncio.gather(parent.arun("ALICE request"), parent.arun("BOB request"))
+
+        self.assertCountEqual(recorder.seen, ["ALICE request", "BOB request"])
+        self.assertEqual(parent._active_prompt, "")
 
 
 if __name__ == "__main__":
