@@ -184,59 +184,87 @@ class TestTokenBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
 
 
 class TestCostBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # One run_state dict per test models one agent run sharing state across hooks.
+        self.run_state: dict = {}
+
+    def _run_ctx(self, **kwargs) -> MiddlewareContext:
+        return _ctx(run_state=self.run_state, **kwargs)
+
     async def test_aborts_after_spend_exceeded(self) -> None:
         # [Silent Failure] Accumulating past max_spend must abort before next iteration.
         mw = CostBudgetMiddleware(max_spend_usd=0.001, cost_per_million_tokens=1.0)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         # 1500 tokens at $1 / M = $0.0015 > $0.001
-        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=1500))
-        decision = await mw.before_iteration(_ctx(tokens_used=1500))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=1500))
+        decision = await mw.before_iteration(self._run_ctx(tokens_used=1500))
         self.assertEqual(decision.action, MiddlewareAction.ABORT_RUN)
         self.assertEqual(decision.reason, "cost_budget_exceeded")
 
     async def test_continues_below_spend(self) -> None:
         # [Hidden Assumption] Partial spend must not abort.
         mw = CostBudgetMiddleware(max_spend_usd=1.0, cost_per_million_tokens=1.0)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=100))
-        decision = await mw.before_iteration(_ctx(tokens_used=100))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=100))
+        decision = await mw.before_iteration(self._run_ctx(tokens_used=100))
         self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
 
     async def test_resets_state_on_before_run(self) -> None:
         # [Hidden Failure] Second run on same instance must start fresh.
         mw = CostBudgetMiddleware(max_spend_usd=0.001, cost_per_million_tokens=1.0)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=2000))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=2000))
         # Reset
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        decision = await mw.before_iteration(_ctx(tokens_used=2000))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        decision = await mw.before_iteration(self._run_ctx(tokens_used=2000))
         self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
 
     async def test_skips_none_tokens(self) -> None:
         # [Edge Case] Provider not reporting tokens must never trigger cost abort.
         mw = CostBudgetMiddleware(max_spend_usd=0.0001, cost_per_million_tokens=1.0)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=None))
-        decision = await mw.before_iteration(_ctx(tokens_used=None))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=None))
+        decision = await mw.before_iteration(self._run_ctx(tokens_used=None))
         self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
 
     async def test_handles_token_count_decrease(self) -> None:
         # [Hidden Failure] Backwards token count must not produce negative delta.
         mw = CostBudgetMiddleware(max_spend_usd=1.0, cost_per_million_tokens=1.0)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=500))
-        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=100))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=500))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=100))
         # Spend should only reflect the first 500 tokens.
         self.assertAlmostEqual(mw._estimated_spend_usd, 500 / 1_000_000 * 1.0)
 
     async def test_metadata_contains_spend_values(self) -> None:
         # [Silent Failure] Abort metadata must surface financial figures for debugging.
         mw = CostBudgetMiddleware(max_spend_usd=0.001, cost_per_million_tokens=1.0)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=2000))
-        decision = await mw.before_iteration(_ctx(tokens_used=2000))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=2000))
+        decision = await mw.before_iteration(self._run_ctx(tokens_used=2000))
         self.assertIn("max_spend_usd", decision.metadata)
         self.assertIn("estimated_spend_usd", decision.metadata)
+
+    async def test_nested_run_does_not_reset_parent_spend(self) -> None:
+        # [Silent Failure] A forked child run shares this instance; its before_run must not zero the parent's spend.
+        mw = CostBudgetMiddleware(max_spend_usd=0.002, cost_per_million_tokens=1.0)
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=2000))
+        child_state: dict = {}
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=child_state))
+        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=100, run_state=child_state))
+        decision = await mw.before_iteration(self._run_ctx(tokens_used=2000))
+        self.assertEqual(decision.action, MiddlewareAction.ABORT_RUN)
+        self.assertAlmostEqual(decision.metadata["estimated_spend_usd"], 0.002)
+        self.assertAlmostEqual(mw.estimated_spend_usd_for(self.run_state), 0.002)
+        self.assertAlmostEqual(mw.estimated_spend_usd_for(child_state), 0.0001)
+
+    async def test_estimated_spend_property_mirrors_latest_update(self) -> None:
+        # [Hidden Assumption] The public property still reports the most recent run's estimate.
+        mw = CostBudgetMiddleware(max_spend_usd=1.0, cost_per_million_tokens=2.0)
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=1000))
+        self.assertAlmostEqual(mw.estimated_spend_usd, 0.002)
 
     def test_raises_on_zero_spend(self) -> None:
         # [Edge Case] Zero budget is not meaningful.
@@ -255,13 +283,20 @@ class TestCostBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
 
 
 class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # One run_state dict per test models one agent run sharing state across hooks.
+        self.run_state: dict = {}
+
+    def _run_ctx(self, **kwargs) -> MiddlewareContext:
+        return _ctx(run_state=self.run_state, **kwargs)
+
     def _ctx_error(self, error: BaseException | None = None) -> MiddlewareContext:
-        return _ctx(hook=MiddlewareHook.ON_MODEL_ERROR, error=error)
+        return self._run_ctx(hook=MiddlewareHook.ON_MODEL_ERROR, error=error)
 
     async def test_retries_up_to_max_then_aborts(self) -> None:
         # [Edge Case] Three attempts: two retries then abort on the third error.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=3, base_seconds=0.001, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d1 = await mw.on_model_error(self._ctx_error(RuntimeError("e")))
         d2 = await mw.on_model_error(self._ctx_error(RuntimeError("e")))
         d3 = await mw.on_model_error(self._ctx_error(RuntimeError("e")))
@@ -272,7 +307,7 @@ class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_delay_is_exponential(self) -> None:
         # [Silent Failure] Delays must grow as base * 2^(attempt-1).
         mw = ExponentialBackoffRetryMiddleware(max_attempts=5, base_seconds=1.0, cap_seconds=100.0, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d1 = await mw.on_model_error(self._ctx_error(RuntimeError()))  # attempt 1 → 1.0s
         d2 = await mw.on_model_error(self._ctx_error(RuntimeError()))  # attempt 2 → 2.0s
         d3 = await mw.on_model_error(self._ctx_error(RuntimeError()))  # attempt 3 → 4.0s
@@ -283,7 +318,7 @@ class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_jitter_reduces_delay(self) -> None:
         # [Hidden Assumption] Jitter must not produce a delay equal to or exceeding the cap.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=5, base_seconds=1.0, cap_seconds=100.0, jitter=True)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(RuntimeError()))
         self.assertLess(d.sleep_seconds, 1.0)
         self.assertGreaterEqual(d.sleep_seconds, 0.0)
@@ -291,14 +326,14 @@ class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_no_jitter_gives_exact_delay(self) -> None:
         # [Silent Failure] Without jitter the delay must be deterministic.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=3, base_seconds=2.0, cap_seconds=100.0, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(RuntimeError()))
         self.assertAlmostEqual(d.sleep_seconds, 2.0)
 
     async def test_delay_capped_at_cap_seconds(self) -> None:
         # [Edge Case] Very large attempt number must not exceed cap_seconds.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=100, base_seconds=1.0, cap_seconds=5.0, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         for _ in range(10):
             d = await mw.on_model_error(self._ctx_error(RuntimeError()))
             if d.action == MiddlewareAction.RETRY:
@@ -307,14 +342,14 @@ class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_max_attempts_one_aborts_immediately(self) -> None:
         # [Edge Case] max_attempts=1 means the first error always aborts.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=1, base_seconds=1.0, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(RuntimeError()))
         self.assertEqual(d.action, MiddlewareAction.ABORT_RUN)
 
     async def test_retry_on_filters_error_type(self) -> None:
         # [Hidden Assumption] Non-matching error type must abort immediately without retry.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=5, retry_on=(ValueError,), jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(RuntimeError("not a ValueError")))
         self.assertEqual(d.action, MiddlewareAction.ABORT_RUN)
         self.assertEqual(d.reason, "model_error_not_retryable")
@@ -322,35 +357,49 @@ class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_retry_on_none_retries_all_types(self) -> None:
         # [Hidden Assumption] retry_on=None must retry any error type.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=3, retry_on=None, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(TypeError("any")))
         self.assertEqual(d.action, MiddlewareAction.RETRY)
 
     async def test_retry_on_empty_tuple_aborts_all(self) -> None:
         # [Edge Case] Empty retry_on tuple means nothing is retryable.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=5, retry_on=(), jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(ValueError()))
         self.assertEqual(d.action, MiddlewareAction.ABORT_RUN)
 
     async def test_resets_on_before_run(self) -> None:
         # [Hidden Failure] Attempt counter must reset between runs.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=2, base_seconds=0.001, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         await mw.on_model_error(self._ctx_error(RuntimeError()))
         await mw.on_model_error(self._ctx_error(RuntimeError()))
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(RuntimeError()))
         self.assertEqual(d.action, MiddlewareAction.RETRY)
 
     async def test_metadata_contains_attempt_and_delay(self) -> None:
         # [Silent Failure] Retry decision metadata must include attempt and delay for observability.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=5, base_seconds=1.0, jitter=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         d = await mw.on_model_error(self._ctx_error(RuntimeError()))
         self.assertIn("attempt", d.metadata)
         self.assertIn("delay_seconds", d.metadata)
         self.assertIn("error_type", d.metadata)
+
+    async def test_nested_run_does_not_reset_parent_attempts(self) -> None:
+        # [Silent Failure] A nested run's before_run must not reset the parent's attempt counter.
+        mw = ExponentialBackoffRetryMiddleware(max_attempts=2, base_seconds=0.001, jitter=False)
+        await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        first = await mw.on_model_error(self._ctx_error(RuntimeError()))
+        child_state: dict = {}
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=child_state))
+        second = await mw.on_model_error(self._ctx_error(RuntimeError()))
+        child = await mw.on_model_error(_ctx(hook=MiddlewareHook.ON_MODEL_ERROR, error=RuntimeError(), run_state=child_state))
+        self.assertEqual(first.action, MiddlewareAction.RETRY)
+        self.assertEqual(second.action, MiddlewareAction.ABORT_RUN)
+        self.assertEqual(second.reason, "model_retry_exhausted")
+        self.assertEqual(child.action, MiddlewareAction.RETRY)
 
     def test_raises_on_invalid_cap(self) -> None:
         # [Edge Case] cap_seconds below base_seconds is incoherent.

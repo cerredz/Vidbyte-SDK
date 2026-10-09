@@ -481,7 +481,7 @@ class AgentRuntime:
                     )
                     return await self._finish_result(token_stop, state)
                 if self.output_contract.active():
-                    counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=last_assistant_output, compaction_count=compaction_count)
+                    counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=last_assistant_output, compaction_count=compaction_count, run_state=state.run_state)
                     self._publish_contract_evaluations(state.run_state, counters)
                     unmet = self.output_contract.unmet(counters)
                     if unmet and self.output_contract.exhausted(rejections):
@@ -540,7 +540,7 @@ class AgentRuntime:
                         )
                         return await self._finish_result(abort_result, state)
                     if self.output_contract.active():
-                        counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=result.output, compaction_count=compaction_count)
+                        counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=result.output, compaction_count=compaction_count, run_state=state.run_state)
                         self._publish_contract_evaluations(state.run_state, counters)
                         unmet = self.output_contract.unmet(counters)
                         if unmet and self.output_contract.exhausted(rejections):
@@ -1815,7 +1815,7 @@ class AgentRuntime:
             "usage_rollup": self.usage_tracker.rollup(),
         }
 
-    def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, final_output: str | None = None, compaction_count: int = 0) -> dict[str, Any]:
+    def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, final_output: str | None = None, compaction_count: int = 0, run_state: Mapping[Any, Any] | None = None) -> dict[str, Any]:
         # Packages the live runtime counters into the dict output contracts read by key.
         # Internal tools (e.g. isDone) are excluded so effort floors count only real work.
         final_text = final_output or ""
@@ -1832,7 +1832,7 @@ class AgentRuntime:
             "final_output": final_text,
             "final_output_chars": len(final_text),
             "final_output_tokens": self._approx_output_tokens(final_text),
-            "cost_spent_usd": self._cost_spent_usd(tokens_used),
+            "cost_spent_usd": self._cost_spent_usd(run_state),
             "compaction_count": compaction_count,
         }
 
@@ -1860,14 +1860,13 @@ class AgentRuntime:
         # Estimates tokens deterministically as ceil(chars/4), matching compaction heuristics.
         return max(1, math.ceil(len(text) / 4)) if text else 0
 
-    def _cost_spent_usd(self, tokens_used: int | None) -> float:
-        # Returns estimated USD spend from CostBudgetMiddleware when attached, else 0.0.
-        del tokens_used
+    def _cost_spent_usd(self, run_state: Mapping[Any, Any] | None) -> float:
+        # Returns this run's estimated USD spend from CostBudgetMiddleware when attached, else 0.0.
         from vidbyte.middleware.builtins.cost_budget import CostBudgetMiddleware
 
         for middleware in self.middleware.middleware:
             if isinstance(middleware, CostBudgetMiddleware):
-                return float(middleware.estimated_spend_usd)
+                return middleware.estimated_spend_usd_for(run_state or {})
         return 0.0
 
     def _compaction_event_delta(self, decision: MiddlewareDecision) -> int:
