@@ -162,6 +162,7 @@ Nested folders:
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C009 | default-model-priced | Every token-priced provider default resolves to a pricebook rate |
 | C010 | pricebook-vintage-bump | Changed rates move their pricebook vintage and refresh the lock |
+| C011 | agent-owned-usage-and-sync-twins | Model usage reaches the agent's tracker; entry classes pair run() with arun() |
 
 ## Adding a rule
 

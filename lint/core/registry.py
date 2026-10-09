@@ -33,6 +33,7 @@ RULE_MODULES = (
     "lint.rules.c005_cost_arithmetic_site_parity",
     "lint.rules.c009_default_model_priced",
     "lint.rules.c010_pricebook_vintage_bump",
+    "lint.rules.c011_agent_owned_usage_and_sync_twins",
     "lint.rules.s001_python_correctness_foundation",
     "lint.rules.s002_exception_cause_chaining",
     "lint.rules.s003_strict_zip",
