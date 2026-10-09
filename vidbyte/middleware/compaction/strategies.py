@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from vidbyte.lib.dataclasses.context import ContextMessage, ProgressLog
 from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, Summarizer, TokenCounter
+from vidbyte.middleware.compaction.call_signature import tool_call_signature
 
 
 _ANSI_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -289,16 +290,19 @@ class DeduplicateToolCallsCompaction(BaseCompaction):
     """Removes duplicate tool-call/result pairs while keeping the first occurrence."""
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        seen_call_content: set[str] = set()
+        seen_signatures: set[str] = set()
         remove_indexes: set[int] = set()
         for index, message in enumerate(messages):
-            if message.kind == "tool_call":
-                if message.content in seen_call_content:
-                    remove_indexes.add(index)
-                    if index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
-                        remove_indexes.add(index + 1)
-                else:
-                    seen_call_content.add(message.content)
+            # Key each call on its tool names and arguments, not its per-call id, so repeated calls match.
+            signature = tool_call_signature(message)
+            if signature is None:
+                continue
+            if signature in seen_signatures:
+                remove_indexes.add(index)
+                if index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
+                    remove_indexes.add(index + 1)
+            else:
+                seen_signatures.add(signature)
         return tuple(m for i, m in enumerate(messages) if i not in remove_indexes)
 
 
