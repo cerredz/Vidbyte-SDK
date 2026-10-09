@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.tools.base import _ToolWrapper
 from vidbyte.tools.catalog import Tools
 
 if TYPE_CHECKING:
@@ -106,9 +107,13 @@ class AgentForker:
         dropped = {str(name) for name in settings.drop_tools}
         return tuple(tool for tool in child_items if agent._tool_name(tool) not in dropped)
 
-    @staticmethod
-    def _clone_tool(tool: object) -> object:
+    @classmethod
+    def _clone_tool(cls, tool: object) -> object:
         # Clones SDK tools that carry mutable agent bindings, preserving custom tools by identity.
+        if isinstance(tool, _ToolWrapper):
+            # A customize() or with_activity() view clones the tool it wraps and keeps the same view over the copy.
+            inner = cls._clone_tool(tool.wrapped_tool)
+            return tool if inner is tool.wrapped_tool else tool._rewrap(inner)
         clone = getattr(tool, "clone_for_fork", None)
         if callable(clone):
             return clone()

@@ -92,6 +92,11 @@ class _ToolWrapper(BaseTool, ABC):
         # Return the implementation whose runtime behavior the wrapper preserves.
         raise NotImplementedError
 
+    @abstractmethod
+    def _rewrap(self, tool: BaseTool) -> BaseTool:
+        # Return the same kind of view, with the same model-facing changes, around another tool.
+        raise NotImplementedError
+
 
 class _CustomizedTool(_ToolWrapper):
     """Private wrapper that changes model-facing descriptions only."""
@@ -105,6 +110,10 @@ class _CustomizedTool(_ToolWrapper):
     def wrapped_tool(self) -> BaseTool:
         """Return the original tool whose runtime behavior this view preserves."""
         return self._tool
+
+    def _rewrap(self, tool: BaseTool) -> BaseTool:
+        # Reuses the validated customization around another copy of the same tool, such as a fork clone.
+        return _CustomizedTool(tool, self._customization)
 
     def spec(self) -> ToolSpec:
         """Return a fresh model-facing spec with validated descriptions replaced."""
