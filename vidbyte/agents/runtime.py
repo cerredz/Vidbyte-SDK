@@ -77,7 +77,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -1547,6 +1547,11 @@ class AgentRuntime:
                 break
             if after_decision.sleep_seconds:
                 await self.middleware.sleep(after_decision.sleep_seconds)
+        if after_decision.action is not MiddlewareAction.ABORT_RUN and call.tool_name != IS_DONE_TOOL_NAME:
+            # Show the model its view of the result, and remember that view on the record
+            # so later runs replay what the model saw rather than the raw, unprotected output.
+            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision)
+            context_record = self._with_model_visible_result(context_record, result, visible_result)
         state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
@@ -1555,12 +1560,17 @@ class AgentRuntime:
                 tokens_used=state.tokens_used,
                 contexts=state.call_contexts,
             )
-        if call.tool_name != IS_DONE_TOOL_NAME:
-            self._append_tool_result_message(messages, call, result, state.provider, after_decision)
         failure_stop = self._enforce_tool_settings_after_failure(context_record, tool_is_internal, state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used)
         if failure_stop is not None:
             return failure_stop
         return context_record, result
+
+    @staticmethod
+    def _with_model_visible_result(context_record: ToolCallContext, result: ToolResult, visible_result: ToolResult) -> ToolCallContext:
+        # Attaches the model-visible view only when it differs from the raw result, which the record keeps.
+        if visible_result is result:
+            return context_record
+        return replace(context_record, model_visible_result=visible_result)
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
         # Applies the total tool-call budget, then ToolSettings hard budgets and deny-class rules, before local execution.
@@ -1657,13 +1667,15 @@ class AgentRuntime:
         decision: MiddlewareDecision,
         *,
         truncate: bool = True,
-    ) -> None:
+    ) -> ToolResult:
+        # Returns the model-visible result it appended so callers can record what the model saw.
         visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
         # Provider-specific result formatting remains the single place that
         # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
         # chat messages represent tool failures.
         formatted = ToolsFormatter.format_tool_result(call, visible_result, provider)
         messages.append(dict(formatted))
+        return visible_result
 
     def _model_visible_tool_result(
         self,
