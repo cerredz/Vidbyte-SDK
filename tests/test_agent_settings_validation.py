@@ -7,8 +7,9 @@ from pathlib import Path
 from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentFallbackSettings
 from vidbyte.config import YamlLoader
-from vidbyte.lib.dataclasses.agents import AgentMetadata
+from vidbyte.lib.dataclasses.agents import AgentMetadata, FallbackModel
 from vidbyte.lib.dataclasses.config import AgentSettings, ToolDefinition
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
 
@@ -25,6 +26,35 @@ class FallbackEnabledValidationTests(unittest.TestCase):
         self.assertFalse(AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=False).enabled)
         self.assertTrue(AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=True).enabled)
 
+
+
+class FallbackApiKeyInheritanceTests(unittest.TestCase):
+    PRIMARY = FallbackModel(provider="openai", model="gpt-x", api_key="sk-openai", temperature=0.3)
+
+    def resolve(self, *entries: str | FallbackModel, primary: FallbackModel | None = None) -> tuple[FallbackModel, ...]:
+        # Resolves the declared entries against the primary and drops the primary itself from the result.
+        return AgentFallbackSettings(models=entries).resolved_models(primary=primary or self.PRIMARY)[1:]
+
+    def test_same_provider_entries_inherit_the_agent_key(self) -> None:
+        bare, prefixed = self.resolve("gpt-y", "openai/gpt-y")
+        self.assertEqual((bare.provider, bare.api_key), ("openai", "sk-openai"))
+        self.assertEqual((prefixed.provider, prefixed.api_key), ("openai", "sk-openai"))
+
+    def test_other_provider_prefix_does_not_receive_the_agent_key(self) -> None:
+        (entry,) = self.resolve("anthropic/claude-z")
+        self.assertEqual((entry.provider, entry.model, entry.api_key, entry.temperature), ("anthropic", "claude-z", None, 0.3))
+
+    def test_enum_or_cased_primary_provider_still_counts_as_same_provider(self) -> None:
+        for provider in (ModelProvider.OPENAI, "OpenAI"):
+            with self.subTest(provider=provider):
+                primary = FallbackModel(provider=provider, model="gpt-x", api_key="sk-openai")
+                same, other = self.resolve("openai/gpt-y", "gemini/gemini-z", primary=primary)
+                self.assertEqual(same.api_key, "sk-openai")
+                self.assertIsNone(other.api_key)
+
+    def test_explicit_fallback_model_keeps_its_own_key(self) -> None:
+        explicit = FallbackModel(provider="anthropic", model="claude-z", api_key="sk-ant")
+        self.assertEqual(self.resolve(explicit), (explicit,))
 
 def build(**overrides: object) -> AgentSettings:
     # Builds one agent settings object from the minimal valid document plus the overrides under test.
