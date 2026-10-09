@@ -186,7 +186,6 @@ class BaseActorRuntime(ABC):
             if actor_classes is None:
                 from vidbyte.agents.runtimes.actor.actor import (
                     PlannerActor,
-                    CoderActor,
                     ReviewerActor,
                     GeneratorActor,
                     CriticActor,
@@ -194,7 +193,6 @@ class BaseActorRuntime(ABC):
                 )
                 actor_classes = [
                     PlannerActor,
-                    CoderActor,
                     ReviewerActor,
                     GeneratorActor,
                     CriticActor,
