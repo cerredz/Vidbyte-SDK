@@ -12,7 +12,7 @@ This PR adds three static, Ruff-independent AST rules to the SDK lint suite. Tog
 - **C007 `strict-bool-switches`** (catalog C008). A bool switch on a `*Settings`/`*Config`/`*Configuration`/`*Policy`/`*Options` class must be checked with `isinstance(value, bool)` during construction. Otherwise `"false"` turns the switch on.
 - **C008 `shared-validator-owner`** (catalog C009). A primitive validator (positive int, finite number, bool, timeout, limit, temperature) defined outside `vidbyte/lib/dataclasses/validation.py` is a drifting copy. The finding names the shared validator to use and every other copy.
 
-The rules only read source; they never import `vidbyte`. Existing debt is frozen at its measured count: C006 = 104, C007 = 15, C008 = 52. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real bugs the rules surface are listed under "Product findings for follow-up".
+The rules only read source; they never import `vidbyte`. Existing debt is frozen at its measured count: C006 = 104, C007 = 15, C008 = 45. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real bugs the rules surface are listed under "Product findings for follow-up".
 
 ## Flow chart
 
@@ -153,21 +153,28 @@ The plan assigns `C006` to `finite-numeric-guards`. The catalog listed C006 as "
   - AGENTS.md Placement Rules, which say every new dataclass is defined in `vidbyte/lib/dataclasses/<domain>.py`.
 - **Canonical home.** No shared validator module exists today. `vidbyte/middleware/builtins/limit_validation.py` is middleware-scoped, and `vidbyte/agents/multi/validation.py` and `vidbyte/workflows/validation.py` are domain guards. The diagnostic therefore names `vidbyte/lib/dataclasses/validation.py`, the placement AGENTS.md prescribes for a validated dataclass in the "validation" domain. This PR does not create or move product code.
 - **Name grammar.**
-  - A verb (`require`, `validate`, `validated`, `ensure`, `normalize`, `coerce`, `check`, `resolve`, `is`), optionally followed by `strict_` or `optional_`, then a run of primitive tokens matched on whole underscore-separated words (`positive`, `non_negative`, `finite`, `bool`, `int`, `number`/`float`/`real`, `timeout`, `limit`, `budget`, `temperature`, `probability`).
+  - A verb (`require`, `validate`, `validated`, `ensure`, `normalize`, `coerce`, `check`, `resolve`, `is`), optionally followed by `strict_` or `optional_`, then words of which the primitive ones form the family, in order. Primitive words are matched on whole underscore-separated words: `positive`, `at_least_one` (read as positive), `non_negative`, `finite`, `bool`, `int`, `number`/`float`/`real`, `timeout`, `latency`, `limit`, `budget`, `temperature`, `probability`.
+  - A primitive word may follow other words, so `_validate_retry_budget` (`vidbyte/agents/multi/transfer.py:129`) reads as a budget. The first version required the primitive right after the verb and missed it, along with `_require_at_least_one` (`vidbyte/lib/dataclasses/speed.py:42`) and `_validate_latency` (`vidbyte/sessions/usage.py:49`). Widening the grammar adds exactly those three findings on `main`. Names whose subject is a count, seconds, or characters (`_validate_count`, `_validate_max_seconds`) still do not match, because those words also name non-primitive checks; that is a known limit.
   - Or a noun form such as `positive_int`, `positive_real`, `finite_real`, or `strict_bool`.
   - Matching whole words means `_validate_interval` is not read as "int".
 - **Body.**
   - The function must raise or return, and must itself run `isinstance` against `bool`/`int`/`float`/`Real`/`Number`, or `isfinite`/`isnan`/`isinf`, or an ordered comparison on an input.
   - Delegating wrappers are not reported.
   - Lenient parsers are not reported either. A parser has `if isinstance(x, ...): return None`, as `ProviderUsage.coerce_int` does; it reads untrusted payloads and is not a config validator.
-- **Grouping.** Each copy maps to the shared validator that replaces it: `PositiveInt`, `PositiveFinite`, `NonNegativeInt`, `NonNegativeFinite`, `FiniteNumber`, `StrictBool`, `StrictInt`, `BoundedInt`, `Temperature`, or `Probability`. An untyped `positive`/`non_negative` name takes int or finite from its parameter annotations. Every finding lists the other copies in its group, up to 10, then "and N more".
+  - Bool predicates are not reported. A predicate never raises, and every `return` gives a comparison, a `not`, `True`/`False`, a call to `isinstance`/`issubclass`/`callable`/`hasattr`/`isfinite`/`isnan`/`isinf`/`all`/`any`/`bool`, or an `and`/`or` of those. Callers branch on the answer, so it is not a validator. On `main` this removes `_is_integer_index` and `_is_boolean_flag` (`vidbyte/lib/dataclasses/jev.py:3813`, `:3818`) and `ToolErrorPolicy._finite_real` (`vidbyte/agents/settings/tool_error.py:127`). The validators that call `_finite_real` and raise, `ToolErrorPolicy._require_non_negative` and `_require_positive_if_present`, remain findings.
+- **Tool-call arguments are out of scope.** The arguments of a tool call are JSON the model writes, so their normalizers accept `"5"` for an integer on purpose and are not config validators. A function is a tool-argument normalizer when either of these holds:
+  1. A parameter is annotated with `ToolParameter`, the model-facing declaration of one tool argument (`vidbyte/lib/dataclasses/tools.py:66`). This covers `ReasoningTraceTool._normalize_number`, `_normalize_integer`, and `_normalize_boolean` (`vidbyte/tools/builtins/reasoning/_base.py:190`, `:221`, `:230`), which `_normalize_value(declaration, value)` dispatches per declared type.
+  2. It is a `coerce_`/`resolve_`/`normalize_` method of a class that subclasses `BaseTool` (`vidbyte/tools/base.py:27`), directly or through other classes, and the class's own `__init__`/`__post_init__` never calls it. This covers `ForkConversationTool._resolve_temperature`, `_resolve_bool`, `_coerce_positive_int`, and `_coerce_positive_float` (`vidbyte/tools/builtins/fork/fork.py:257`, `:500`, `:517`, `:528`). `execute(args)` feeds them `args.get(...)` values (lines 138-148, 232, 289-293, 339-340).
+
+  A tool method that the constructor calls validates developer configuration and stays in scope, as does a `validate_`/`require_` method on a tool. Together these remove 7 findings on `main`.
+- **Grouping.** Each copy maps to the shared validator that replaces it: `PositiveInt`, `PositiveFinite`, `NonNegativeInt`, `NonNegativeFinite`, `FiniteNumber`, `StrictBool`, `StrictInt`, `BoundedInt`, `Temperature`, or `Probability`. An untyped `positive`/`non_negative` name takes int or finite from its parameter annotations. A `budget` takes its sign from its own check: `value < 0` (or `0 > value`) means `NonNegative`, and anything else means `Positive`. A `latency` maps to `NonNegativeFinite`. Every finding lists the other copies in its group, up to 10, then "and N more".
 
 ## Files changed
 
 - `lint/rules/c006_finite_numeric_guards.py`, `lint/rules/c007_strict_bool_switches.py`, `lint/rules/c008_shared_validator_owner.py`: the new rules.
 - `lint/rules/c006_source_index.py`: C006's read-only source indexes (literals, module constants, and engine-built records), split out to keep the rule module small.
 - `lint/core/registry.py`: three appended `RULE_MODULES` entries.
-- `lint/baseline.json`: the keys C006 = 104, C007 = 15, C008 = 52, each seeded with `--update-baseline --rule <ID>`.
+- `lint/baseline.json`: the keys C006 = 104, C007 = 15, C008 = 45, each seeded with `--update-baseline --rule <ID>`.
 - `lint/README.md`: three C-series catalogue rows. The Responsibilities line now describes the C-series without a fixed count.
 - `lint/rules/README.md`: four File Index lines (the three rules and C006's source index).
 - `docs/design/lint-sdk-settings-validation.md`: this document.
@@ -180,15 +187,17 @@ The SDK lint design (`docs/design/sdk-agent-facing-lint-suite.md`, "No new featu
 - **C006 can under-report but never over-report.** A guard the evaluator cannot decide (an unknown helper call, an attribute constant from another module, a cross-field comparison with no proven outcome) never produces a finding. A value checked by a helper outside the delegate grammar may be missed.
 - **C007 trusts hand-offs.** Passing a switch to another `*Settings`/`*Config` constructor counts as proof, and that class is checked by C007 on its own.
 - **C007 leaves bools outside configuration classes alone.** Outside the five suffixes, 32 plain constructors take an unchecked bool parameter (middleware, graders, tools), and 137 record dataclasses declare unchecked bool fields. They are out of scope here. The open question is whether component constructors should get the same rule.
-- **C008 grammar risk.** A runtime enforcement method named like `check_budget(self)` would match if it range-checks `self` state. None exists on `main`. The fixtures prove `_enforce_budget` and `_validate_interval` do not match.
+- **C008 grammar risk.** A primitive word may follow other words, so a runtime enforcement method named like `_check_token_budget(self)` would match if it range-checks `self` state. None exists on `main`: the wider grammar added exactly three findings, and each is called from a constructor (`AgentTransfer.__post_init__`, the `speed.py` record validators, and `SessionUsageBuilder.__init__`). The fixtures prove `_enforce_budget`, `_require_at_least`, and `_validate_interval` do not match.
+- **C008 and C006 scope differ on purpose.** C006 leaves `SessionUsageBuilder._validate_latency` out because only the engine supplies its value. C008 still reports it, because C008 is about a duplicated check that drifts, whoever calls it.
+- **C008 tool boundary.** The exemption trusts the class name `BaseTool` and the annotation `ToolParameter`. A tool's `coerce_`/`resolve_` method that validated developer configuration without being called from the constructor would be missed. None exists on `main`: every exempted method reads `args`.
 - **C008 versus C002.** C002 groups `isinstance(<name>, bool)` identities, and C008 groups validator definitions; both can name the same `_require_bool` copies. The C007 repair recommends a sweep with the generic local name `value`, which C002 deliberately ignores, so fixing a C007 finding never creates a C002 finding.
 - **C001 overlap.** `_require_boolean_enabled` (`fallback.py:35`) is already C001 debt and is also a C008 copy. Consolidating it into `StrictBool` resolves both.
 - **Report truncation.** The text report prints the first 20 findings of a rule in path order. When a regression lands later in that order, the verdict line reports it (for example `C006 REGRESSED: 105 finding(s), allowance 104.`), but its diagnostic appears only with `--all`. This is existing lint-core behavior, and this PR does not change it.
 
 ## Verification plan
 
-- Run `python lint/run.py --rule C006|C007|C008 --format json` on the tree and classify every finding by hand: 104, 15, and 52 findings, all true positives.
+- Run `python lint/run.py --rule C006|C007|C008 --format json` on the tree and classify every finding by hand: 104, 15, and 45 findings, all true positives.
 - Run a scratch fixture self-test per rule. Correct code must give 0 findings, each problem kind must give exactly the expected findings, and every diagnostic must render all six fields with numbered steps, real example paths, at least two will-not-work entries including the baseline, and no empty-list prose.
-- Run scratch mutation tests: 39 mutants for C006, 19 for C007, and 17 for C008, each of which must make the self-test fail.
+- Run scratch mutation tests: 39 mutants for C006, 19 for C007, and 42 for C008, each of which must make the self-test fail.
 - Simulate an agent regression for each rule in a real file, confirm REGRESSED and a readable message, then revert.
 - Run the full gate: `python -m pip install -e ".[dev]"` into the lane venv, then `python scripts/run_ci.py`.

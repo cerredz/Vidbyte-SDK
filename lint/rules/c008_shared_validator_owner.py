@@ -2,11 +2,11 @@
 
 PURPOSE: Detect primitive validators (positive int, finite number, strict bool, timeout, limit, temperature) defined outside the one shared validator module.
 ROLE IN CODEBASE: Enforces C008 so each primitive check has one owner instead of drifting copies in every package.
-ARCHITECTURE NOTE: Static AST. A definition is a primitive validator when its name says so and its own body performs the check; delegating wrappers, lenient parsers, and the canonical module are not reported. Copies are grouped by the shared validator that should replace them.
-FUNCTION INVENTORY: ValidatorNameGrammar parses names; InlineCheckDetector inspects bodies; SharedValidatorCatalog names the replacement; PrimitiveValidatorAnalyzer coordinates; SharedValidatorOwnerRule reports.
+ARCHITECTURE NOTE: Static AST. A definition is a primitive validator when its name says so and its own body performs the check; delegating wrappers, lenient parsers, bool predicates, tool-call argument normalizers, and the canonical module are not reported. Copies are grouped by the shared validator that should replace them.
+FUNCTION INVENTORY: ValidatorNameGrammar parses names; InlineCheckDetector inspects bodies; ToolArgumentBoundary spots tool-call argument normalizers; SharedValidatorCatalog names the replacement; PrimitiveValidatorAnalyzer coordinates; SharedValidatorOwnerRule reports.
 COMMON MODIFICATION PATTERNS: Add a primitive token or verb to the grammar together with its shared validator name, then rerun C008 and its scratch fixtures.
 WHAT NOT TO DO: Do not import SDK modules, create the shared module from the rule, or exempt a package-private copy because it is strict.
-KNOWN EDGE CASES: vidbyte/lib/dataclasses/validation.py does not exist yet; the diagnostic names it as the canonical home. Class validators whose method is a bare verb (JevCount.require) do not match the grammar. A parser that returns None for a wrong type is a lenient reader, not a validator.
+KNOWN EDGE CASES: vidbyte/lib/dataclasses/validation.py does not exist yet; the diagnostic names it as the canonical home. Class validators whose method is a bare verb (JevCount.require) do not match the grammar. A parser that returns None for a wrong type is a lenient reader, not a validator. Tool-call arguments are model-written JSON, so their normalizers accept "5" on purpose and are not config validators.
 RELATED DOCS: docs/design/lint-sdk-settings-validation.md; AGENTS.md (Placement Rules: dataclasses go in vidbyte/lib/dataclasses/)
 TESTS: python lint/run.py --rule C008; fixture and mutation results are recorded in the S1 pull request body.
 """
@@ -24,16 +24,26 @@ from lint.core.registry import Rule
 CANONICAL_MODULE = "vidbyte/lib/dataclasses/validation.py"
 _VERBS = frozenset({"require", "validate", "validated", "ensure", "normalize", "coerce", "check", "resolve", "is"})
 _QUALIFIERS = frozenset({"strict", "optional"})
-_PRIMITIVES = {"positive": "positive", "non_negative": "non_negative", "nonnegative": "non_negative", "finite": "finite", "bool": "bool", "boolean": "bool", "int": "int", "integer": "int", "number": "number", "numeric": "number", "float": "number", "real": "number", "timeout": "timeout", "limit": "limit", "budget": "budget", "temperature": "temperature", "probability": "probability"}
+_PRIMITIVES = {"positive": "positive", "at_least_one": "positive", "non_negative": "non_negative", "nonnegative": "non_negative", "finite": "finite", "bool": "bool", "boolean": "bool", "int": "int", "integer": "int", "number": "number", "numeric": "number", "float": "number", "real": "number", "timeout": "timeout", "latency": "latency", "limit": "limit", "budget": "budget", "temperature": "temperature", "probability": "probability"}
 _NOUN_LEADS = frozenset({"positive", "non_negative", "nonnegative", "finite", "strict"})
 _NOUN_TAILS = frozenset({"int", "integer", "float", "real", "number", "numeric", "bool", "boolean"})
 _TYPE_NAMES = frozenset({"bool", "int", "float", "Real", "Number"})
 _FINITE_CALLS = frozenset({"isfinite", "isnan", "isinf"})
 _REAL_ANNOTATION = re.compile(r"\b(float|Real|Number)\b")
 _ORDERED = (ast.Lt, ast.LtE, ast.Gt, ast.GtE)
-_SHARED_NAMES = {"bool": "StrictBool", "int": "StrictInt", "positive_int": "PositiveInt", "budget": "PositiveInt", "non_negative_int": "NonNegativeInt", "positive_number": "PositiveFinite", "positive_finite": "PositiveFinite", "positive_finite_number": "PositiveFinite", "timeout": "PositiveFinite", "non_negative_number": "NonNegativeFinite", "non_negative_finite": "NonNegativeFinite", "number": "FiniteNumber", "finite": "FiniteNumber", "finite_number": "FiniteNumber", "limit": "BoundedInt", "temperature": "Temperature", "probability": "Probability"}
+_SHARED_NAMES = {"bool": "StrictBool", "int": "StrictInt", "positive_int": "PositiveInt", "non_negative_int": "NonNegativeInt", "positive_number": "PositiveFinite", "positive_finite": "PositiveFinite", "positive_finite_number": "PositiveFinite", "timeout": "PositiveFinite", "latency": "NonNegativeFinite", "non_negative_number": "NonNegativeFinite", "non_negative_finite": "NonNegativeFinite", "number": "FiniteNumber", "finite": "FiniteNumber", "finite_number": "FiniteNumber", "limit": "BoundedInt", "temperature": "Temperature", "probability": "Probability"}
 _UNTYPED_FAMILIES = frozenset({"positive", "non_negative"})
 _SHOWN_SITES = 10
+_TOOL_BASE = "BaseTool"
+_TOOL_PARAMETER = "ToolParameter"
+_ARGUMENT_VERBS = frozenset({"coerce", "resolve", "normalize"})
+_CONSTRUCTORS = frozenset({"__init__", "__post_init__"})
+_BOOLEAN_CALLS = frozenset({"isinstance", "issubclass", "callable", "hasattr", "isfinite", "isnan", "isinf", "all", "any", "bool"})
+
+
+def _is_zero(node: ast.expr) -> bool:
+    # The literal 0 or 0.0 (not False).
+    return isinstance(node, ast.Constant) and not isinstance(node.value, bool) and isinstance(node.value, (int, float)) and node.value == 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,34 +85,31 @@ class ValidatorNameGrammar:
 
     @staticmethod
     def words(name: str) -> list[str]:
-        # Splits on underscores and re-joins non_negative so it reads as one primitive word.
+        # Splits on underscores and re-joins non_negative and at_least_one so each reads as one primitive word.
         joined: list[str] = []
         for word in (item for item in name.lower().split("_") if item):
             if joined and joined[-1] == "non" and word == "negative":
                 joined[-1] = "non_negative"
+            elif joined[-2:] == ["at", "least"] and word == "one":
+                joined[-2:] = ["at_least_one"]
             else:
                 joined.append(word)
         return joined
 
     @staticmethod
     def _primitive_run(words: list[str]) -> str:
-        # The family is the leading run of primitive words after optional qualifiers such as strict_ or optional_.
+        # The family is every primitive word after optional qualifiers, in order, so `_validate_retry_budget` reads as budget.
         while words and words[0] in _QUALIFIERS:
             words = words[1:]
-        run: list[str] = []
-        for word in words:
-            if word not in _PRIMITIVES:
-                break
-            run.append(_PRIMITIVES[word])
-        return "_".join(dict.fromkeys(run))
+        return "_".join(dict.fromkeys(_PRIMITIVES[word] for word in words if word in _PRIMITIVES))
 
 
 class InlineCheckDetector:
     """Finds the primitive check a function body performs itself, ignoring nested functions."""
 
     def inline_check(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-        # Returns the first isinstance/isfinite/ordered-comparison check on an input, or '' for a wrapper or lenient parser.
-        if not self._rejects_or_answers(function):
+        # Returns the first isinstance/isfinite/ordered-comparison check on an input, or '' for a wrapper, lenient parser, or bool predicate.
+        if not self._rejects_or_answers(function) or self._predicate(function):
             return ""
         inputs = self._inputs(function)
         if self._lenient(function, inputs):
@@ -130,6 +137,24 @@ class InlineCheckDetector:
     def _rejects_or_answers(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         # A validator raises on bad input or returns a verdict or value; a function that does neither is not one.
         return any(isinstance(node, (ast.Raise, ast.Return)) for node in self.body_nodes(function))
+
+    def _predicate(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        # `_is_integer_index(value) -> bool` answers a question and never raises; callers branch on it, so it is not a validator.
+        nodes = self.body_nodes(function)
+        returns = [node for node in nodes if isinstance(node, ast.Return)]
+        return bool(returns) and not any(isinstance(node, ast.Raise) for node in nodes) and all(node.value is not None and self._boolean(node.value) for node in returns)
+
+    @classmethod
+    def _boolean(cls, node: ast.expr) -> bool:
+        # A comparison, `not`, a bool constant, a bool-returning builtin call, or an and/or of those.
+        if isinstance(node, ast.BoolOp):
+            return all(cls._boolean(value) for value in node.values)
+        if isinstance(node, ast.Call):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else (node.func.id if isinstance(node.func, ast.Name) else "")
+            return name in _BOOLEAN_CALLS
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, bool)
+        return isinstance(node, ast.Compare) or (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not))
 
     def _lenient(self, function: ast.FunctionDef | ast.AsyncFunctionDef, inputs: set[str]) -> bool:
         # `if isinstance(value, bool): return None` reads untrusted data leniently; it is a parser, not a validator.
@@ -177,16 +202,73 @@ class InlineCheckDetector:
         return any(isinstance(op, _ORDERED) and (self._reads_input(left, inputs) or self._reads_input(right, inputs)) for op, left, right in zip(node.ops, operands[:-1], operands[1:], strict=True))
 
 
+class ToolArgumentBoundary:
+    """Recognizes normalizers of model-written tool-call arguments, which accept JSON such as "5" on purpose and are not config validators.
+
+    A function qualifies when a parameter is annotated with ToolParameter (vidbyte/lib/dataclasses/tools.py, the model-facing declaration of one
+    tool argument), or when it is a coerce_/resolve_/normalize_ method of a BaseTool subclass (vidbyte/tools/base.py) that the class's own
+    __init__/__post_init__ never calls. A method the constructor calls validates developer configuration and stays in scope.
+    """
+
+    def __init__(self, catalog: SourceCatalog) -> None:
+        # Maps each class name under vidbyte/ to its base names, then closes over BaseTool's transitive subclasses.
+        bases: dict[str, set[str]] = {}
+        for source in catalog.python_files():
+            for node in ast.walk(source.tree) if source.tree is not None else ():
+                if isinstance(node, ast.ClassDef):
+                    bases.setdefault(node.name, set()).update(self._name(item) for item in node.bases)
+        tools = {_TOOL_BASE}
+        grew = True
+        while grew:
+            added = {name for name, parents in bases.items() if name not in tools and parents & tools}
+            tools |= added
+            grew = bool(added)
+        self._tools = frozenset(tools)
+
+    def exempt(self, owner: ast.ClassDef | None, function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        # True for a ToolParameter-typed normalizer or a tool method that only the tool-call path can reach.
+        annotations = [item.annotation for item in [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs] if item.annotation is not None]
+        if any(re.search(rf"\b{_TOOL_PARAMETER}\b", ast.unparse(item)) for item in annotations):
+            return True
+        verb = ValidatorNameGrammar.words(function.name)[:1]
+        if owner is None or owner.name not in self._tools or not verb or verb[0] not in _ARGUMENT_VERBS:
+            return False
+        return not any(self._calls(item, function.name) for item in owner.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name in _CONSTRUCTORS)
+
+    @staticmethod
+    def _calls(constructor: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
+        # True when the constructor calls the method as `self.name(...)` or `Class.name(...)`; a bare `name(...)` is a module function.
+        return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == name for node in ast.walk(constructor))
+
+    @staticmethod
+    def _name(node: ast.expr) -> str:
+        # The class name a base expression refers to: `BaseTool`, `tools.BaseTool`, or `Generic[...]`'s `Generic`.
+        node = node.value if isinstance(node, ast.Subscript) else node
+        return node.attr if isinstance(node, ast.Attribute) else (node.id if isinstance(node, ast.Name) else "")
+
+
 class SharedValidatorCatalog:
     """Names the shared validator in vidbyte/lib/dataclasses/validation.py that replaces one family of copies."""
 
     @staticmethod
     def shared_name(family: str, function: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-        # An untyped family (positive, non_negative) takes int or finite-number from the parameter annotations.
+        # A budget's sign comes from its own check; an untyped family (positive, non_negative) then takes int or finite-number from the annotations.
+        if family == "budget":
+            family = SharedValidatorCatalog._budget_sign(function)
         if family in _UNTYPED_FAMILIES:
             annotations = " ".join(ast.unparse(item.annotation) for item in [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs] if item.annotation is not None)
             family = f"{family}_number" if _REAL_ANNOTATION.search(annotations) else f"{family}_int"
         return _SHARED_NAMES.get(family, "".join(part.capitalize() for part in family.split("_")))
+
+    @staticmethod
+    def _budget_sign(function: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+        # A budget that rejects only negatives (`value < 0`, `0 > value`) is non-negative; one that rejects zero is positive.
+        for node in InlineCheckDetector.body_nodes(function):
+            if isinstance(node, ast.Compare) and len(node.ops) == 1:
+                left, right = node.left, node.comparators[0]
+                if (isinstance(node.ops[0], ast.Lt) and _is_zero(right) and not _is_zero(left)) or (isinstance(node.ops[0], ast.Gt) and _is_zero(left) and not _is_zero(right)):
+                    return "non_negative"
+        return "positive"
 
 
 class PrimitiveValidatorAnalyzer:
@@ -196,23 +278,24 @@ class PrimitiveValidatorAnalyzer:
         # Read each production module once, keep validator-named definitions that check inline, and skip the canonical home.
         grammar = ValidatorNameGrammar()
         detector = InlineCheckDetector()
+        boundary = ToolArgumentBoundary(catalog)
         found: list[PrimitiveValidator] = []
         for source in catalog.python_files():
             if source.tree is None or source.rel == CANONICAL_MODULE:
                 continue
             for owner, function in self._definitions(source.tree):
                 family = grammar.family(function.name)
-                check = detector.inline_check(function) if family else ""
+                check = detector.inline_check(function) if family and not boundary.exempt(owner, function) else ""
                 if check:
-                    found.append(PrimitiveValidator(source=source, function=function, owner=owner, family=family, shared=SharedValidatorCatalog.shared_name(family, function), check=check))
+                    found.append(PrimitiveValidator(source=source, function=function, owner=owner.name if owner else "", family=family, shared=SharedValidatorCatalog.shared_name(family, function), check=check))
         return found
 
     @staticmethod
-    def _definitions(tree: ast.Module) -> list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
-        # Pairs every function with its enclosing class name ('' for module-level and nested functions).
-        methods = [(node.name, item) for node in ast.walk(tree) if isinstance(node, ast.ClassDef) for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    def _definitions(tree: ast.Module) -> list[tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef]]:
+        # Pairs every function with its enclosing class (None for module-level and nested functions).
+        methods = [(node, item) for node in ast.walk(tree) if isinstance(node, ast.ClassDef) for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))]
         claimed = {id(function) for _, function in methods}
-        return [*methods, *(("", node) for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) not in claimed)]
+        return [*methods, *((None, node) for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) not in claimed)]
 
 
 class SharedValidatorOwnerRule(Rule):
