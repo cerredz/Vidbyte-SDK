@@ -31,6 +31,7 @@ RULE_MODULES = (
     "lint.rules.c003_no_dynamic_import_from_data",
     "lint.rules.c004_operation_pricing_rate_floor",
     "lint.rules.c005_cost_arithmetic_site_parity",
+    "lint.rules.c013_jev_decision_helper_only",
     "lint.rules.s001_python_correctness_foundation",
     "lint.rules.s002_exception_cause_chaining",
     "lint.rules.s003_strict_zip",

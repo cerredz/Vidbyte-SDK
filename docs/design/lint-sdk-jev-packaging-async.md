@@ -98,13 +98,18 @@ WHERE
   failed = tuple(key for key in ranked if yes[key] < JEV_NOUL_YES_THRESHOLD)
 
 WHAT HAPPENED
-  vidbyte/agents/jev/gate/clarification.py:87 in JevClarificationAgent.gaps compares the Jev answer
-  value `yes[key]` with `JEV_NOUL_YES_THRESHOLD` inline (`yes[key] < JEV_NOUL_YES_THRESHOLD`).
-  `yes` holds the P(true) values returned by `result.yes()`.
+  vidbyte/agents/jev/gate/clarification.py:87 in JevClarificationAgent.gaps decides a Jev answer
+  inline: it compares the answer-derived value `yes[key]` with `JEV_NOUL_YES_THRESHOLD`
+  (`yes[key] < JEV_NOUL_YES_THRESHOLD`). `yes` is derived from `result.yes()` (line 85), which
+  carries Jev answer probabilities or a score_noul score.
 
 HOW TO FIX
-  1. Replace the comparison with `DecisionModelHelper.noul_passes(answers, name, JEV_NOUL_YES_THRESHOLD)` ...
-  2. If no DecisionModelHelper method expresses this rule ..., add a static method to DecisionModelHelper ...
+  1. For one noul answer, replace the comparison with
+     `DecisionModelHelper.noul_passes(answers, name, JEV_NOUL_YES_THRESHOLD)` and act on its three
+     results: True, False, or None when the answer is missing or not noul.
+  2. For several noul answers that decide together, call `DecisionModelHelper.score_noul(...)` ...
+  3. When the rule is not a mean P(true) over noul answers ..., add one static method to
+     DecisionModelHelper in vidbyte/lib/jev/decision.py ... and call it here.
   ...
 ```
 
@@ -125,14 +130,14 @@ The implementation plan pre-assigns C013–C015, S063, and S064 to this PR. S1 o
 ### C013 jev-decision-helper-only
 
 - **Standard.**
-  - PR #477 comment 4130386075 (on `vidbyte/agents/jev/continuation/done.py`): "Any logic for thresholds, returning true or false for questions, translating jev model requests to an answer, etc, should be handled by this new file [`DecisionModelHelper`] and should be the universal/canonical way". PR #459 comment 4110233707 asked for the same move earlier.
+  - PR #477 comment 4130386075 (on `vidbyte/agents/jev/continuation/done.py`): "Any logic for thresholds, returning true or false for questions, translating jev model requests to an answer, etc, should be handled by this new file [`DecisionModelHelper`] and should be the universarl/canonicaly way" (quoted verbatim). PR #459 comment 4110233707 asked for the same move earlier.
   - Field guide `jev-capability-layout.md`: "route shared request execution and answer scoring through `vidbyte/lib/jev/decision.py`'s `DecisionModelHelper`" (:5), "Turn noul answers into pass or fail with `DecisionModelHelper`, never with inline mean-versus-threshold math" (:15), "`rg "DecisionModelRunner" vidbyte/agents/jev` finds no direct runner usage" (:111).
   - One request per finish attempt, never one per item: PR #470 comment 4117808663, PR #513 comment 4191544290, PR #456 comment 4108989808, and `jev-capability-layout.md:100-105`.
 - **Re-verification on `main`.** The catalog measured (a) = 0, (b) unmeasured, (c) = 0. On `9a923e82` (a) and (c) are still 0, but (b) has 9 real sites in `vidbyte/agents/jev/`, all added after #477 landed. They compare `probabilities[JEV_NOUL_TRUE]`, a `result.yes()` value, or a score that `score_noul` already turned into `passed`, against a threshold in the caller.
 - **Scope.** `vidbyte/agents/**`, the agents layer. `vidbyte/lib/jev/managed.py` legitimately uses `DecisionModelRunner.aclose_run`; it is the lib layer and out of scope.
 - **Kinds.**
   - `direct-runner`: an `import`/`from ... import` of `DecisionModelRunner` or `vidbyte.lib.runners.decision`, a `DecisionModelRunner(...)` call, a `.run_decision(...)` call, or a `ModelProviders.decision(...)` call. Strings and docstrings are ignored.
-  - `inline-threshold`: an ordered comparison (`<`, `<=`, `>`, `>=`) whose one side is derived from a Jev answer and whose other side is not. A value is answer-derived when it reads `.probabilities`, calls `score_noul(...)`, or calls a projection method that lib Jev records define over `.probabilities` (`yes()`, learned from `vidbyte/lib/dataclasses/jev.py`). Derivation flows through assignments, loop and comprehension targets, subscripts, `.get`, arithmetic, `min`/`max`, `append`/`extend`, constructor arguments, attributes stored on `self`, and same-class methods that return derived values. Comparing two derived values (an argmax such as `every >= named`) is not threshold math and is not reported.
+  - `inline-threshold`: an ordered comparison (`<`, `<=`, `>`, `>=`) whose one side is derived from a Jev answer and whose other side is not. A value is answer-derived when it reads `.probabilities`, calls `score_noul(...)`, or calls a projection method that lib Jev records define over `.probabilities` (`yes()`, learned from `vidbyte/lib/dataclasses/jev.py`). Derivation flows through assignments, loop and comprehension targets (scoped to their comprehension), subscripts, methods called on a derived value (`.get`, `.items()`), arithmetic, value functions (`min`, `max`, `sum`, `sorted`, ...), `append`/`extend`, attributes stored on `self`, and same-class methods that return derived values. It is field-sensitive for records: `JevComputeOptionResult(option=option, score=verdict.score)` makes `result.score` derived but not `result.option`, so a record that merely carries one answer field does not taint everything read from it. Other calls (`len`, `noul_passes`, unknown functions) return clean values. Comparing two derived values (an argmax such as `every >= named`) is not threshold math and is not reported.
   - `per-item-request`: an awaited `DecisionModelHelper` request inside a `for`/`while` body or a comprehension. The request is `DecisionModelHelper(...).arun(...)`, `.arun(...)` on a name or `self` attribute bound to a `DecisionModelHelper`, or a call to a same-class method that sends one (learned to a fixpoint). Creating coroutines without awaiting them in the loop, such as a generator handed to `asyncio.gather`, is concurrent fan-out over independent candidates, which `jev-capability-layout.md:156-161` (PR #517 comment 4199735123) sanctions, so it is not reported.
 - **Why the composite scorers are findings.** `JevRunState._self_review` (`max(P(resolved), 1 - P(in_scope)) < threshold`), `_guaranteed_next_actions` (`min(...) >= threshold`), and `_review_scope_breadth` (a Choice probability sum against `JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD`) have no `DecisionModelHelper` method today. #477 asks for exactly that: the threshold rule moves into a helper method, and the caller passes its inputs. The diagnostic says so.
 
