@@ -160,6 +160,7 @@ Nested folders:
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C006 | finite-numeric-guards | Numeric range checks reject bool, NaN, and infinities first |
+| C007 | strict-bool-switches | Configuration bool switches are real bools, never truthiness |
 
 ## Adding a rule
 

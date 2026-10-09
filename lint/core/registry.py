@@ -32,6 +32,7 @@ RULE_MODULES = (
     "lint.rules.c004_operation_pricing_rate_floor",
     "lint.rules.c005_cost_arithmetic_site_parity",
     "lint.rules.c006_finite_numeric_guards",
+    "lint.rules.c007_strict_bool_switches",
     "lint.rules.s001_python_correctness_foundation",
     "lint.rules.s002_exception_cause_chaining",
     "lint.rules.s003_strict_zip",
