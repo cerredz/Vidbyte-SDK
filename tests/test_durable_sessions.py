@@ -735,6 +735,22 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SessionError):
             session.rewind(to="foreign")
 
+    async def test_fork_at_own_checkpoint_branches(self) -> None:  # [Edge Case]
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        first = session.head
+        await session.arun("two")
+        branch = session.fork(at=first)
+        self.assertEqual(store.get_meta(branch.id).parent_session_id, session.id)
+
+    def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
+        store = InMemorySessionStore()
+        store.put(_checkpoint("other", "foreign"))
+        session = Session(FakeAgent(), store=store)
+        with self.assertRaises(SessionError):
+            session.fork(at="foreign")
+
     async def test_edit_transforms_history_into_new_checkpoint(self) -> None:  # [Silent Failure]
         store = InMemorySessionStore()
         session = Session(FakeAgent(), store=store)
@@ -933,6 +949,17 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": "source-name"}))
         self.assertEqual(result.status.value, "success")
         self.assertEqual(store.get_meta(result.output).parent_session_id, source.id)
+
+    async def test_fork_tool_rejects_checkpoint_from_other_session(self) -> None:  # [Hidden Assumption]
+        store = InMemorySessionStore()
+        store.put(_checkpoint("secret-session", "foreign"))
+        source = Session(FakeAgent(), store=store)
+        await source.arun("one")
+        sessions_before = len(store.list_sessions())
+        tool = ForkTool(store, scope=SessionScope.sessions([source.id]))
+        result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": source.id, "checkpoint_id": "foreign"}))
+        self.assertEqual(result.status.value, "error")
+        self.assertEqual(len(store.list_sessions()), sessions_before)
 
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
