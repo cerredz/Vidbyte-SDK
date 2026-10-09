@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ReflexionContextItem, TrajectoryCheckpointContextItem
+from vidbyte.tools.builtins.cot_events import BacktrackTool
+from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
 from vidbyte.tools.types import ToolCall, ToolStatus
@@ -193,7 +196,7 @@ class TrajectoryCheckpointToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(manager.get_by_id("trajectory_checkpoint:1"))
         self.assertIsNotNone(manager.get_by_id("trajectory_checkpoint:2"))
 
-    async def test_frozen_primitive_returns_error(self) -> None:
+    async def test_frozen_note_on_taken_id_is_kept(self) -> None:
         from vidbyte.context.primitives import TrajectoryCheckpointContextItem
         tool, manager = self._tool()
         frozen = TrajectoryCheckpointContextItem(
@@ -210,6 +213,16 @@ class TrajectoryCheckpointToolTests(unittest.IsolatedAsyncioTestCase):
         manager.upsert(frozen)
         call = self._call(reasoning_summary="new", trajectory="t2", output="o2")
         result = await tool.execute(call)
+        # The taken id is skipped, so the frozen note survives and the new note lands beside it.
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertIs(manager.get_by_id("trajectory_checkpoint:1"), frozen)
+        self.assertEqual(manager.get_by_id("trajectory_checkpoint:2").reasoning_summary, "new")
+
+    async def test_rejected_upsert_returns_error(self) -> None:
+        tool, _ = self._tool()
+        call = self._call(reasoning_summary="r", trajectory="t", output="o")
+        with mock.patch.object(ContextManager, "upsert", side_effect=ValueError("rejected")):
+            result = await tool.execute(call)
         self.assertEqual(result.status, ToolStatus.ERROR)
 
     def test_spec_name_is_trajectory_checkpoint(self) -> None:
@@ -284,7 +297,7 @@ class ReflexionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(manager.get_by_id("reflexion:1"))
         self.assertIsNotNone(manager.get_by_id("reflexion:2"))
 
-    async def test_frozen_primitive_returns_error(self) -> None:
+    async def test_frozen_note_on_taken_id_is_kept(self) -> None:
         from vidbyte.context.primitives import ReflexionContextItem
         tool, manager = self._tool()
         frozen = ReflexionContextItem(
@@ -296,6 +309,16 @@ class ReflexionToolTests(unittest.IsolatedAsyncioTestCase):
         manager.upsert(frozen)
         call = self._call(critique="new critique", correction_plan="new plan")
         result = await tool.execute(call)
+        # The taken id is skipped, so the frozen note survives and the new note lands beside it.
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertIs(manager.get_by_id("reflexion:1"), frozen)
+        self.assertEqual(manager.get_by_id("reflexion:2").critique, "new critique")
+
+    async def test_rejected_upsert_returns_error(self) -> None:
+        tool, _ = self._tool()
+        call = self._call(critique="c", correction_plan="p")
+        with mock.patch.object(ContextManager, "upsert", side_effect=ValueError("rejected")):
+            result = await tool.execute(call)
         self.assertEqual(result.status, ToolStatus.ERROR)
 
     def test_spec_name_is_reflexion(self) -> None:
@@ -318,6 +341,73 @@ class ReflexionToolTests(unittest.IsolatedAsyncioTestCase):
         rendered = manager.render_primitives_zone()
         self.assertIn("reflexion:1", rendered)
         self.assertIn("Reflexion Note", rendered)
+
+
+# ---------------------------------------------------------------------------
+# Note tools sharing one ContextManager
+# ---------------------------------------------------------------------------
+
+
+class SharedManagerNoteIdTests(unittest.IsolatedAsyncioTestCase):
+    """Two instances of one note tool on a shared manager must never overwrite each other."""
+
+    async def _run_twice(self, factory, tool_name: str, first: dict, second: dict) -> ContextManager:
+        manager = ContextManager()
+        first_result = await factory(manager).execute(ToolCall(tool_name=tool_name, arguments=first))
+        second_result = await factory(manager).execute(ToolCall(tool_name=tool_name, arguments=second))
+        self.assertEqual(first_result.status, ToolStatus.SUCCESS, first_result.output)
+        self.assertEqual(second_result.status, ToolStatus.SUCCESS, second_result.output)
+        return manager
+
+    async def test_reflexion_keeps_both_notes(self) -> None:
+        manager = await self._run_twice(
+            ReflexionTool,
+            "reflexion",
+            {"critique": "first critique", "correction_plan": "p"},
+            {"critique": "second critique", "correction_plan": "p"},
+        )
+        self.assertEqual(manager.get_by_id("reflexion:1").critique, "first critique")
+        self.assertEqual(manager.get_by_id("reflexion:2").critique, "second critique")
+
+    async def test_trajectory_checkpoint_keeps_both_notes_and_syncs_index(self) -> None:
+        manager = await self._run_twice(
+            TrajectoryCheckpointTool,
+            "trajectory_checkpoint",
+            {"reasoning_summary": "first", "trajectory": "t", "output": "o"},
+            {"reasoning_summary": "second", "trajectory": "t", "output": "o"},
+        )
+        first = manager.get_by_id("trajectory_checkpoint:1")
+        second = manager.get_by_id("trajectory_checkpoint:2")
+        self.assertEqual((first.reasoning_summary, first.checkpoint_index), ("first", 1))
+        self.assertEqual((second.reasoning_summary, second.checkpoint_index), ("second", 2))
+
+    async def test_cot_event_tool_keeps_both_notes(self) -> None:
+        args = {
+            "reason": "r",
+            "evidence": "e",
+            "attempted_result": "a",
+            "replacement_plan": "p",
+            "loop_guard": "g",
+        }
+        manager = await self._run_twice(
+            BacktrackTool,
+            "backtrack",
+            {**args, "abandoning": "first path"},
+            {**args, "abandoning": "second path"},
+        )
+        self.assertEqual(manager.get_by_id("backtrack:1").abandoning, "first path")
+        self.assertEqual(manager.get_by_id("backtrack:2").abandoning, "second path")
+
+    async def test_single_step_reasoning_tool_keeps_both_notes(self) -> None:
+        args = {"premises": ["p"], "inference_rule": "modus ponens", "soundness_caveat": "c"}
+        manager = await self._run_twice(
+            DeduceTool,
+            "deduce",
+            {**args, "conclusion": "first"},
+            {**args, "conclusion": "second"},
+        )
+        self.assertEqual(manager.get_by_id("deduce:1").conclusion, "first")
+        self.assertEqual(manager.get_by_id("deduce:2").conclusion, "second")
 
 
 if __name__ == "__main__":

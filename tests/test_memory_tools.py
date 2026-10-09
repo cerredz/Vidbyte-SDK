@@ -242,6 +242,33 @@ class Mem0SearchTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall("mem0_search_memory", {}))
         self.assertEqual(result.status, ToolStatus.ERROR)
 
+    async def test_search_bare_list_response_succeeds_with_count(self) -> None:
+        """[Regression] a bare-list body is read as the results, not crashed on."""
+        hits = [{"id": "m1", "memory": "likes cats"}, {"id": "m2", "memory": "lives in Oslo"}]
+        transport = MockTransport(200, hits)
+        tool = _inject_transport(Mem0SearchMemoryTool("mem0key"), transport)
+        result = await tool.execute(ToolCall("mem0_search_memory", {"query": "cats", "user_id": "u1"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.metadata["count"], 2)
+        self.assertIn("likes cats", result.output)
+
+    async def test_search_results_dict_response_still_succeeds(self) -> None:
+        """[Regression] the {"results": [...]} body keeps working."""
+        hits = [{"id": "m1", "memory": "likes cats"}, {"id": "m2", "memory": "lives in Oslo"}]
+        transport = MockTransport(200, {"results": hits})
+        tool = _inject_transport(Mem0SearchMemoryTool("mem0key"), transport)
+        result = await tool.execute(ToolCall("mem0_search_memory", {"query": "cats", "user_id": "u1"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.metadata["count"], 2)
+
+    async def test_search_dict_without_results_key_yields_empty(self) -> None:
+        """[Edge Case] a dict with no results key still yields no results."""
+        transport = MockTransport(200, {"other": "value"})
+        tool = _inject_transport(Mem0SearchMemoryTool("mem0key"), transport)
+        result = await tool.execute(ToolCall("mem0_search_memory", {"query": "cats"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.metadata["count"], 0)
+
 
 class Mem0GetTests(unittest.IsolatedAsyncioTestCase):
 
@@ -345,6 +372,25 @@ class ZepSearchTests(unittest.IsolatedAsyncioTestCase):
         tool = ZepSearchMemoryTool("zepkey")
         result = await tool.execute(ToolCall("zep_search_memory", {"session_id": "s"}))
         self.assertEqual(result.status, ToolStatus.ERROR)
+
+    async def test_search_bare_list_response_succeeds_with_count(self) -> None:
+        """[Regression] a bare-list body is read as the results, not crashed on."""
+        hits = [{"message": {"content": "likes cats"}}, {"message": {"content": "lives in Oslo"}}]
+        transport = MockTransport(200, hits)
+        tool = _inject_transport(ZepSearchMemoryTool("zepkey"), transport)
+        result = await tool.execute(ToolCall("zep_search_memory", {"session_id": "s", "text": "cats"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.metadata["count"], 2)
+        self.assertIn("likes cats", result.output)
+
+    async def test_search_results_dict_response_still_succeeds(self) -> None:
+        """[Regression] the {"results": [...]} body keeps working."""
+        hits = [{"message": {"content": "likes cats"}}, {"message": {"content": "lives in Oslo"}}]
+        transport = MockTransport(200, {"results": hits})
+        tool = _inject_transport(ZepSearchMemoryTool("zepkey"), transport)
+        result = await tool.execute(ToolCall("zep_search_memory", {"session_id": "s", "text": "cats"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.metadata["count"], 2)
 
 
 class ZepDeleteTests(unittest.IsolatedAsyncioTestCase):
