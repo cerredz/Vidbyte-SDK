@@ -50,6 +50,39 @@ class FakeSummarizer:
         return f"summarized {len(messages)} messages"
 
 
+def _sequential_tool_history() -> tuple[dict, ...]:
+    # Returns an OpenAI-chat tool loop of four sequential single tool calls.
+    history: list[dict] = [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}]
+    for index in range(1, 5):
+        history.append({"role": "assistant", "content": None, "tool_calls": [{"id": f"c{index}", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]})
+        history.append({"role": "tool", "tool_call_id": f"c{index}", "content": f"r{index}"})
+    return tuple(history)
+
+
+def _parallel_tool_history() -> tuple[dict, ...]:
+    # Returns an OpenAI-chat tool loop whose turns issue parallel calls.
+    def call(*ids: str) -> dict:
+        return {"role": "assistant", "content": None, "tool_calls": [{"id": i, "type": "function", "function": {"name": "lookup", "arguments": "{}"}} for i in ids]}
+
+    def result(call_id: str) -> dict:
+        return {"role": "tool", "tool_call_id": call_id, "content": call_id}
+
+    return ({"role": "system", "content": "sys"}, {"role": "user", "content": "go"}, call("c1", "c2"), result("c1"), result("c2"), call("c3", "c4", "c5"), result("c3"), result("c4"), result("c5"), call("c6"), result("c6"))
+
+
+def _assert_valid_tool_transcript(test: unittest.TestCase, messages: tuple[dict, ...]) -> None:
+    # Asserts every tool reply follows its call turn and every issued tool_call id is answered.
+    pending: set[str] = set()
+    for message in messages:
+        if message["role"] == "tool":
+            test.assertIn(message["tool_call_id"], pending, f"orphaned tool result: {message}")
+            pending.discard(str(message["tool_call_id"]))
+            continue
+        test.assertEqual(pending, set(), f"unanswered tool_call ids before {message}")
+        pending = {str(call["id"]) for call in message.get("tool_calls") or ()}
+    test.assertEqual(pending, set(), "unanswered tool_call ids at end of transcript")
+
+
 class TransformMiddleware(AgentMiddleware):
     def __init__(self, transform: MiddlewareTransform) -> None:
         # Stores the transform returned from before-model-call hooks.
@@ -103,6 +136,26 @@ class ContextCompactionEngineTests(unittest.IsolatedAsyncioTestCase):
         messages, _ = await engine.compact_messages((ContextMessage("user", "a"), ContextMessage("assistant", "b")), mode=CompactionMode.SUMMARIZE_OLDEST_N, options={"n": 1})
         self.assertEqual(messages[0].kind, "summary")
         self.assertEqual(messages[0].content, "summarized 1 messages")
+
+    async def test_summary_modes_never_split_tool_call_groups(self) -> None:
+        # [Hidden Failure] Summary splits keep whole call/result groups so providers never see orphaned tool results.
+        engine = ContextCompactionEngine(summarizer=FakeSummarizer())
+        cases = ((CompactionMode.SUMMARIZE_RANGE, "keep_last"), (CompactionMode.SUMMARIZE_OLDEST_N, "n"))
+        for history in (_sequential_tool_history(), _parallel_tool_history()):
+            for mode, option in cases:
+                for value in range(1, 5):
+                    with self.subTest(mode=mode, option=value, size=len(history)):
+                        after, _ = await engine.compact_provider_messages(history, mode=mode, options={option: value})
+                        _assert_valid_tool_transcript(self, after)
+                        self.assertEqual(after[0]["role"], "system")
+                        self.assertTrue(any(str(m.get("content") or "").startswith("summarized") for m in after if m["role"] != "tool"))
+
+    async def test_summarize_range_keeps_at_least_keep_last_whole_messages(self) -> None:
+        # Verifies keep_last rounds up to the newest whole group rather than splitting it.
+        engine = ContextCompactionEngine(summarizer=FakeSummarizer())
+        after, _ = await engine.compact_provider_messages(_sequential_tool_history(), mode=CompactionMode.SUMMARIZE_RANGE, options={"keep_last": 3})
+        self.assertEqual([m.get("tool_call_id") for m in after if m["role"] == "tool"], ["c3", "c4"])
+        self.assertEqual(after[1]["content"], "summarized 5 messages")
 
 
 class MiddlewareTransformTests(unittest.IsolatedAsyncioTestCase):

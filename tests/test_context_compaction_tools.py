@@ -169,7 +169,7 @@ class ContextCompactionToolTests(unittest.IsolatedAsyncioTestCase):
         messages = state.messages()
         self.assertEqual(messages[0].role, "system")
         self.assertEqual(messages[1].kind, "summary")
-        self.assertIn("summarized 2", messages[1].content)
+        self.assertIn("summarized 3", messages[1].content)  # n=2 rounds up to keep the tool call/result pair whole
         self.assertEqual(messages[-1].content, "answer")
 
     async def test_summarize_by_topic_blocks(self) -> None:

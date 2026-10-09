@@ -303,7 +303,10 @@ class DeduplicateToolCallsCompaction(BaseCompaction):
 
 
 class SummarizeRangeCompaction(BaseCompaction):
-    """Summarizes middle history while preserving system and recent messages."""
+    """Summarizes middle history while preserving system and recent messages.
+
+    keep_last is rounded up to whole provider groups so a tool call and its results are never split.
+    """
 
     def __init__(self, summarizer: Summarizer, keep_last: int = 3) -> None:
         if summarizer is None:
@@ -314,8 +317,14 @@ class SummarizeRangeCompaction(BaseCompaction):
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
         system = tuple(m for m in messages if m.role == "system")
         non_system = tuple(m for m in messages if m.role != "system")
-        recent = non_system[-self.keep_last:] if self.keep_last else ()
-        middle = non_system[:-self.keep_last] if self.keep_last else non_system
+        # @intent never-split-a-tool-call-from-its-results
+        groups = _provider_groups(non_system)
+        split, kept = len(groups), 0
+        while split and kept < self.keep_last:
+            split -= 1
+            kept += len(groups[split])
+        middle = tuple(m for group in groups[:split] for m in group)
+        recent = tuple(m for group in groups[split:] for m in group)
         if not middle:
             return tuple(messages)
         summary_text = await self.summarizer.summarize(middle)
@@ -325,11 +334,14 @@ class SummarizeRangeCompaction(BaseCompaction):
             kind="summary",
             metadata={"compaction": CompactionMode.SUMMARIZE_RANGE.value},
         )
-        return system + (summary,) + tuple(recent)
+        return system + (summary,) + recent
 
 
 class SummarizeOldestNCompaction(BaseCompaction):
-    """Summarizes the oldest n non-system messages and keeps the rest verbatim."""
+    """Summarizes the oldest n non-system messages and keeps the rest verbatim.
+
+    n is rounded up to whole provider groups so a tool call and its results are never split.
+    """
 
     def __init__(self, summarizer: Summarizer, n: int = 5) -> None:
         if summarizer is None:
@@ -340,8 +352,14 @@ class SummarizeOldestNCompaction(BaseCompaction):
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
         system = tuple(m for m in messages if m.role == "system")
         non_system = tuple(m for m in messages if m.role != "system")
-        to_summarize = non_system[:self.n]
-        rest = non_system[self.n:]
+        # @intent never-split-a-tool-call-from-its-results
+        groups = _provider_groups(non_system)
+        split, covered = 0, 0
+        while split < len(groups) and covered < self.n:
+            covered += len(groups[split])
+            split += 1
+        to_summarize = tuple(m for group in groups[:split] for m in group)
+        rest = tuple(m for group in groups[split:] for m in group)
         if not to_summarize:
             return tuple(messages)
         summary_text = await self.summarizer.summarize(to_summarize)
