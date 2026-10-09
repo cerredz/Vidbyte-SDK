@@ -304,6 +304,34 @@ class TokenRateLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.action.value, "sleep")
         self.assertEqual(decision.reason, "token_rate_limit")
 
+    async def test_new_window_counts_only_tokens_since_last_observation(self) -> None:
+        # [Silent Failure] tokens_used is cumulative; a fresh window must not be
+        # charged the whole run's history once the lifetime total exceeds max_tokens.
+        clock_val = [0.0]
+
+        def clock() -> float:
+            return clock_val[0]
+
+        mw = TokenRateLimitMiddleware(max_tokens=1000, per_seconds=60, clock=clock)
+        run_state: dict = {}
+        await mw.before_run(_make_ctx(MiddlewareHook.BEFORE_RUN, run_state))
+
+        for cumulative in (400, 800, 1200, 1600, 2000, 2400):
+            clock_val[0] += 61
+            decision = await mw.before_iteration(
+                _make_ctx(MiddlewareHook.BEFORE_ITERATION, run_state, tokens_used=cumulative)
+            )
+            self.assertEqual(decision.action.value, "continue",
+                             f"throttled at cumulative tokens_used={cumulative}")
+
+        # A window that genuinely exceeds the budget still sleeps.
+        clock_val[0] += 61
+        decision = await mw.before_iteration(
+            _make_ctx(MiddlewareHook.BEFORE_ITERATION, run_state, tokens_used=3500)
+        )
+        self.assertEqual(decision.action.value, "sleep")
+        self.assertEqual(decision.reason, "token_rate_limit")
+
     async def test_before_iteration_without_before_run_initializes_lazily(self) -> None:
         # [Hidden Assumption] Tests that call before_iteration without before_run still work.
         mw = TokenRateLimitMiddleware(max_tokens=100, per_seconds=10)

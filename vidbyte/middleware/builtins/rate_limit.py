@@ -61,8 +61,9 @@ class TokenRateLimitMiddleware(AgentMiddleware):
         now = self.clock()
         if now - state.window_started >= self.per_seconds:
             state.window_started = now
+            # Keep last_tokens_seen: tokens_used is cumulative, so the new window
+            # must count only tokens spent since the previous observation.
             state.window_tokens = 0
-            state.last_tokens_seen = None
 
         previous = state.last_tokens_seen or 0
         delta = max(0, ctx.tokens_used - previous)
