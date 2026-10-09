@@ -346,6 +346,33 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await subset.agrade(EvalCase(prompt="t", expected={"a": {"b": 2}}), '{"a": {"b": 2, "c": 3}}')).passed)
         self.assertFalse((await subset.agrade(EvalCase(prompt="t", expected=[1, 3]), "[1, 2]")).passed)
 
+    async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
+        # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
+        # @intent json-bool-is-not-number
+        mismatches = [
+            (True, 1),
+            (False, 0),
+            ({"approved": True, "count": 1}, {"approved": 1, "count": 1}),
+            ({"approved": False}, {"approved": 0}),
+            ({"flags": [True, False]}, {"flags": [1, 0]}),
+            ({"outer": {"inner": [{"ok": True}]}}, {"outer": {"inner": [{"ok": 1}]}}),
+            ({"count": 1}, {"count": True}),
+        ]
+        matches = [
+            ({"total": 1}, {"total": 1.0}),
+            ({"approved": True, "flags": [True, False]}, {"approved": True, "flags": [True, False]}),
+            ({"nested": {"ok": False, "n": [2]}}, {"nested": {"ok": False, "n": [2.0]}}),
+        ]
+        for grader in (JSONExactMatchGrader(), JSONSubsetGrader()):
+            for expected, actual in mismatches:
+                with self.subTest(grader=grader.name, expected=expected, actual=actual):
+                    result = await grader.agrade(EvalCase(prompt="x", expected=json.dumps(expected)), json.dumps(actual))
+                    self.assertFalse(result.passed)
+            for expected, actual in matches:
+                with self.subTest(grader=grader.name, expected=expected, actual=actual):
+                    result = await grader.agrade(EvalCase(prompt="x", expected=json.dumps(expected)), json.dumps(actual))
+                    self.assertTrue(result.passed)
+
     async def test_template_registry_and_custom_templates(self) -> None:
         # Tests template registry resolution, validation, and custom template support.
         registry = EvalTemplateRegistry()
