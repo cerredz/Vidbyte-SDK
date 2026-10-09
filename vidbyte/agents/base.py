@@ -974,7 +974,12 @@ class BaseAgent(McpAttachableMixin):
         """Produce a structured handoff document describing this agent's most recent run."""
         from vidbyte.agents.handoff import HandoffAgent
         resolved = spec or self._handoff_spec or MinimalHandoff()
-        generator = by or HandoffAgent.from_source_agent(self, resolved)
+        # A ready HandoffAgent is used as-is unless the caller explicitly asked for a different spec.
+        if isinstance(by, HandoffAgent) and (spec is None or spec is by.spec):
+            generator = by
+        else:
+            # Otherwise build a generator for the requested spec on the given agent's model and runner, or on this agent's own.
+            generator = HandoffAgent.from_source_agent(by or self, resolved)
         return await generator.generate_handoff(HandoffAgent.render_source_run(self))
 
     def record_handoff(self, handoff: Handoff) -> None:
