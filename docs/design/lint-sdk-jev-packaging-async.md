@@ -60,7 +60,7 @@ flowchart TD
     G1 -->|result discarded, no # @intent, not a drain of tasks it cancelled| F63c[Finding: results-discarded]
 
     S064 --> R1[for/while loops with retry vocabulary that sleep, directly or through an in-module helper]
-    R1 --> R2{Clock-derived comparison in the loop, or loop under asyncio.timeout / wait_for, or function reached only from such a scope?}
+    R1 --> R2{Clock-derived comparison in the loop, or a checker helper, or loop under asyncio.timeout, or function reached from a timeout block or wait_for?}
     R2 -->|no| F64[Finding: retry-without-deadline]
     R2 -->|yes| OK64[No finding]
 
@@ -245,7 +245,7 @@ The SDK lint design (`docs/design/sdk-agent-facing-lint-suite.md`, "No new featu
 - **C014 reads handler maps.** If a dispatcher moves back to `match` statements, the reader fails closed (ERRORED) instead of reporting zero. The rule must then be updated in the same edit.
 - **C015 emulates setuptools by hand.** If `build_py` changes its globbing, the emulation must follow. The scratch check compares the rule with a real wheel build and should be repeated when `setuptools` is bumped. Matching is case-sensitive like the Linux builders, so a Windows-only build could ship a differently-cased file that the rule calls unshipped.
 - **S063 needs the results to stay in the module.** Results returned from a public function with no in-module caller are reported as unclassified, because the callers cannot be seen. An `# @intent` comment is the escape hatch when handing exceptions to callers is the API. The flow over-approximates on purpose: an extra binding can only add a test and hide a finding, so a false positive needs a flow the rule does not model, such as results classified by another module's helper.
-- **S064 trusts any enclosing deadline path.** `StateMachine.arun` applies its `asyncio.timeout` only when `settings.timeout_seconds` is set. When it is not set, the user has opted out of a deadline, so the loop is treated as bounded by the caller's choice. A deadline enforced from another module is not seen. The repair is then to pass the deadline in explicitly, which is better engineering anyway.
+- **S064 trusts any enclosing deadline path.** `StateMachine.arun` applies its `asyncio.timeout` only when `settings.timeout_seconds` is set. When it is not set, the user has opted out of a deadline, so the loop is treated as bounded by the caller's choice. More generally, a function reached from a timeout block on any one in-module path counts as bounded. A deadline enforced from another module is not seen. The repair is then to pass the deadline in explicitly, which is better engineering anyway.
 - **Report truncation.** The text report prints the first 20 findings of a rule. Every rule here has fewer than 20, so a regression always shows its full diagnostic.
 
 ## Verification plan
