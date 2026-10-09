@@ -336,6 +336,48 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(labels), 2)
         self.assertEqual(len(set(labels)), 2)
 
+    def test_explicit_key_never_reaches_a_proposer_on_another_provider(self) -> None:
+        # [Hidden Failure] The host vendor's secret must not be sent to a different vendor's proposer.
+        agent = AggregateAgent(
+            name="panel",
+            system_prompt="Answer.",
+            provider=ModelProvider.DEEPSEEK,
+            model_name="deepseek-v4-flash",
+            api_key="sk-deepseek-SECRET",
+            proposers=[("deepseek", "deepseek-v4-flash"), ("openai", "gpt-5.4-mini"), ProposerSpec(" DeepSeek ", "deepseek-v4-pro")],
+        )
+        keys = {label: child.runner_config.api_key for label, child in agent._engine._proposers}
+        self.assertEqual(keys["openai:gpt-5.4-mini"], None)
+        self.assertEqual(keys["deepseek:deepseek-v4-flash"], "sk-deepseek-SECRET")
+        self.assertEqual(keys[" DeepSeek :deepseek-v4-pro"], "sk-deepseek-SECRET")
+        self.assertEqual(agent._engine._aggregator.runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_explicit_key_never_reaches_an_aggregator_on_another_provider(self) -> None:
+        # [Hidden Failure] An explicit aggregator on another vendor resolves its own credential.
+        agent = AggregateAgent(
+            name="panel",
+            system_prompt="Answer.",
+            provider="deepseek",
+            model_name="deepseek-v4-flash",
+            api_key="sk-deepseek-SECRET",
+            proposers=[("deepseek", "deepseek-v4-flash")],
+            aggregator=("openai", "gpt-5.4-mini"),
+        )
+        self.assertIsNone(agent._engine._aggregator.runner_config.api_key)
+        self.assertEqual(agent._engine._proposers[0][1].runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_unattributed_key_is_not_sent_to_any_named_provider(self) -> None:
+        # [Hidden Assumption] A key given without a provider cannot be matched to a vendor, so no child sends it.
+        agent = AggregateAgent(
+            name="panel",
+            system_prompt="Answer.",
+            api_key="sk-unknown-SECRET",
+            proposers=[("deepseek", "deepseek-v4-flash"), ("openai", "gpt-5.4-mini")],
+            aggregator=("openai", "gpt-5.4-mini"),
+        )
+        self.assertEqual([child.runner_config.api_key for _, child in agent._engine._proposers], [None, None])
+        self.assertIsNone(agent._engine._aggregator.runner_config.api_key)
+
 
 # ---------------------------------------------------------------------------
 # BaseAgent aggregation removal
