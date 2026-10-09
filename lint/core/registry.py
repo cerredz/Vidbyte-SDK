@@ -95,6 +95,7 @@ RULE_MODULES = (
     "lint.rules.s061_bounded_safe_path",
     "lint.rules.s062_no_implicit_string_concatenation",
     "lint.rules.s063_gather_exceptions_classified",
+    "lint.rules.s064_retry_overall_deadline",
 )
 
 

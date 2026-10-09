@@ -212,13 +212,14 @@ The implementation plan pre-assigns C013–C015, S063, and S064 to this PR. S1 o
 - **Re-verification on `main`.** The catalog's detection (loops in `vidbyte/middleware/builtins/*retry*`) finds nothing: both retry middlewares are decision hooks with no loop. The loops that actually sleep and retry are in `AgentRuntime._invoke_with_middleware` (model retries), `AgentRuntime._process_tool_call` (tool retries), `HttpTransport.request`, `SyncHttpTransport.request`, and `_WorkflowRun._execute_attempts`. The workflow loop already runs under `StateMachine.arun`'s `asyncio.timeout(settings.timeout_seconds)`. The other four have no cumulative bound: the agent run checks `timeout_seconds` only between iterations, and the transports apply `timeout_seconds` per attempt.
 - **Detection.** A `for`/`while` loop is a backoff retry loop when both of these hold:
   - its AST names retry vocabulary (`retry`, `retries`, `attempt`, `backoff`);
-  - it sleeps, either through a `sleep(...)` call (`asyncio.sleep`, `time.sleep`, `self.middleware.sleep`, ...) or through a same-class or module helper that sleeps, learned to a fixpoint.
+  - it sleeps at its own level (not only inside a nested loop), either through an awaited `*.sleep(...)` call (`asyncio.sleep`, `self.middleware.sleep`, ...), `time.sleep(...)` under any alias, a `sleep` imported from `time`/`asyncio`/`anyio`/`trio`, or through an in-module helper that sleeps outside any loop of its own (learned to a fixpoint). A returned factory such as `MiddlewareDecision.sleep(...)` is not a sleep, and an outer loop is not reported for the retry loop nested inside it.
 
   A polling loop with no retry vocabulary, such as the actor broker's quiescence monitor, is not one.
 - **Compliance.** Any one of these suffices:
-  - an ordered comparison inside the loop (its test or body) with a clock-derived value: `time.monotonic()`, `perf_counter()`, `time()`, `loop.time()`, `*.clock()`, or `*.now()`, or a name assigned from one, such as `deadline = time.monotonic() + budget`;
-  - the loop sits inside an `async with asyncio.timeout(...)` / `timeout_at(...)` block;
-  - its function is reached, through in-module calls, from a call inside such a block or from an `asyncio.wait_for(...)` argument. This covers `StateMachine.arun -> _WorkflowRun.execute -> ... -> _execute_attempts`.
+  - an ordered comparison inside the loop (its test or body) with a clock-derived value: `time.monotonic()`, `perf_counter()`, `time()`, `loop.time()`, `*.clock()`, or `*.now()`; a local or `self` attribute assigned from one, such as `deadline = time.monotonic() + budget`; or a name or attribute that says `deadline` or `elapsed` (`ctx.elapsed_seconds`);
+  - a call from the loop to an in-module function that makes such a comparison, or calls one that does (to a fixpoint), such as a `_check_deadline()` helper;
+  - the loop sits inside an `async with asyncio.timeout(...)` / `timeout_at(...)` block of its own function (anyio and trio spellings too), including a name assigned from one (`deadline = asyncio.timeout(t)`, then `async with deadline:`);
+  - its function is reached, through in-module calls, from a call inside such a block or from an `asyncio.wait_for(...)` argument whose timeout is not `None`. This covers `StateMachine.arun -> _WorkflowRun.execute -> ... -> _execute_attempts`.
 - **One kind:** `retry-without-deadline`.
 
 ## Files changed
