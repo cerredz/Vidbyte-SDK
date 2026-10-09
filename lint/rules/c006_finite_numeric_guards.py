@@ -3,10 +3,10 @@
 PURPOSE: Detect construction-time numeric range guards that still accept True, NaN, or an infinity.
 ROLE IN CODEBASE: Enforces C006 so settings, config, and record validation cannot silently disable a budget, limit, or timeout.
 ARCHITECTURE NOTE: Static AST only. Each range-checked value is re-evaluated with four probe values (True, NaN, +inf, -inf) through every guard that reads it, so the rule proves what slips through instead of pattern-matching fix text.
-FUNCTION INVENTORY: ValidationSiteFinder lists sites; SubjectIndex resolves values; GuardCollector finds guards; ProbeEvaluator evaluates one guard; ProbeJudge decides acceptance; FiniteNumericGuardAnalyzer coordinates; FiniteNumericGuardsRule reports.
+FUNCTION INVENTORY: ValidationSiteFinder lists sites; EngineRecordIndex names engine-built records; SubjectIndex resolves values; GuardCollector finds guards; ProbeEvaluator evaluates one guard; ProbeJudge decides acceptance; FiniteNumericGuardAnalyzer coordinates; FiniteNumericGuardsRule reports.
 COMMON MODIFICATION PATTERNS: Add a probe, a subject shape, or a validator name together with its diagnostic wording, then rerun C006 and its scratch fixtures.
-WHAT NOT TO DO: Do not import SDK modules, flag runtime accessors, or report a probe the evaluator cannot prove passes every guard.
-KNOWN EDGE CASES: Unknown sub-expressions never prove acceptance. A value handed to a validator helper is judged inside that helper. Other inputs in a cross-field guard are assumed valid (finite, or None when optional).
+WHAT NOT TO DO: Do not import SDK modules, flag runtime accessors, report a probe the evaluator cannot prove passes every guard, or exempt a class that any test, script, or example names.
+KNOWN EDGE CASES: Unknown sub-expressions never prove acceptance. A value handed to a validator helper is judged inside that helper. Other inputs in a cross-field guard are assumed valid (finite, or None when optional). Engine-built records (built only inside vidbyte/, never named outside it) carry engine measurements, so their guards are not judged.
 RELATED DOCS: docs/design/lint-sdk-settings-validation.md; tests/features/sdk_loop_settings/FEATURE.md; tests/features/sdk_middleware_limits/FEATURE.md
 TESTS: python lint/run.py --rule C006; fixture and mutation results are recorded in the S1 pull request body.
 """
@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from lint.core.diagnostic import Diagnostic, Finding
 from lint.core.discovery import SourceCatalog, SourceFile
 from lint.core.registry import Rule
+from lint.rules.c006_source_index import ConstantResolver, EngineRecordIndex, LiteralReader, ModuleConstants
 
 _CONSTRUCTORS = frozenset({"__init__", "__post_init__"})
 _VALIDATOR_NAME = re.compile(r"^_?(validate|validated|require|ensure|normalize|coerce|check)(_|$)")
@@ -38,7 +39,6 @@ _REJECTED = object()
 _FINITE = object()
 _LOCAL_DEPTH = 4
 _GUARD_TEXT_LIMIT = 160
-_IMPORT_DEPTH = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +97,7 @@ class Acceptance:
     line: int
     guard: str
     accepted: tuple[str, ...]
+    optional: bool
 
     def __post_init__(self) -> None:
         # An acceptance without an accepted probe would render an empty claim.
@@ -126,118 +127,41 @@ class ValidationSiteFinder:
         return [*methods, *loose]
 
 
-class LiteralReader:
-    """Reads the literal values a guard may compare against, without executing anything."""
-
-    @staticmethod
-    def number(node: ast.AST) -> float | int | None:
-        # Reads numeric literals, negated literals, float("inf"/"nan"), and math.inf/math.nan.
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
-            return node.value
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)) and isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)) and not isinstance(node.operand.value, bool):
-            return -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "float" and len(node.args) == 1 and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-            text = node.args[0].value.strip().lower()
-            return float(text) if text in {"inf", "+inf", "-inf", "infinity", "+infinity", "-infinity", "nan"} else None
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "math" and node.attr in {"inf", "nan"}:
-            return math.inf if node.attr == "inf" else math.nan
-        return None
-
-    @staticmethod
-    def strings(node: ast.AST) -> tuple[str, ...]:
-        # Returns the strings of a literal tuple/list of string constants, else an empty tuple.
-        if isinstance(node, (ast.Tuple, ast.List)) and node.elts and all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in node.elts):
-            return tuple(item.value for item in node.elts if isinstance(item, ast.Constant) and isinstance(item.value, str))
-        return ()
-
-    @staticmethod
-    def name(node: ast.AST) -> str:
-        # Returns the final identifier of a Name or Attribute, else an empty string.
-        return node.attr if isinstance(node, ast.Attribute) else (node.id if isinstance(node, ast.Name) else "")
-
-
-@dataclass(frozen=True, slots=True)
-class ModuleConstants:
-    """Module-level literals the rule may read: string tuples for field sweeps and numbers for bounds."""
-
-    field_tuples: dict[str, tuple[str, ...]]
-    numbers: dict[str, float | int]
-
-    @classmethod
-    def read(cls, tree: ast.Module) -> ModuleConstants:
-        # One pass over top-level assignments; nothing is imported or executed.
-        field_tuples: dict[str, tuple[str, ...]] = {}
-        numbers: dict[str, float | int] = {}
-        for node in tree.body:
-            target = node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else (node.target if isinstance(node, ast.AnnAssign) else None)
-            value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
-            if isinstance(target, ast.Name) and value is not None:
-                number = LiteralReader.number(value)
-                if LiteralReader.strings(value):
-                    field_tuples[target.id] = LiteralReader.strings(value)
-                elif number is not None:
-                    numbers[target.id] = number
-        return cls(field_tuples=field_tuples, numbers=numbers)
-
-    def merged(self, imported: ModuleConstants) -> ModuleConstants:
-        # A module's own literals shadow the names it imports.
-        return ModuleConstants(field_tuples={**imported.field_tuples, **self.field_tuples}, numbers={**imported.numbers, **self.numbers})
-
-
-class ConstantResolver:
-    """Resolves the literal constants a module imports from another tracked SDK module, following re-exports."""
-
-    def __init__(self, sources: tuple[SourceFile, ...]) -> None:
-        # Index every parsed production module by dotted name, so an import resolves without executing anything.
-        self._trees = {self.dotted(source.rel): source.tree for source in sources if source.tree is not None}
-        self._cache: dict[tuple[str, int], ModuleConstants] = {}
-
-    @staticmethod
-    def dotted(rel: str) -> str:
-        # vidbyte/lib/constants/jev.py -> vidbyte.lib.constants.jev; a package __init__ is the package itself.
-        parts = rel.removesuffix(".py").split("/")
-        return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
-
-    def constants(self, module: str, depth: int = _IMPORT_DEPTH) -> ModuleConstants:
-        # Own literals plus absolute `from vidbyte... import NAME` literals, re-exports followed at most depth hops.
-        if (module, depth) in self._cache:
-            return self._cache[(module, depth)]
-        tree = self._trees.get(module)
-        own = ModuleConstants.read(tree) if tree is not None else ModuleConstants(field_tuples={}, numbers={})
-        imported = ModuleConstants(field_tuples={}, numbers={})
-        for node in tree.body if tree is not None and depth > 0 else ():
-            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module in self._trees:
-                found = self.constants(node.module, depth - 1)
-                imported.field_tuples.update({alias.asname or alias.name: found.field_tuples[alias.name] for alias in node.names if alias.name in found.field_tuples})
-                imported.numbers.update({alias.asname or alias.name: found.numbers[alias.name] for alias in node.names if alias.name in found.numbers})
-        self._cache[(module, depth)] = own.merged(imported)
-        return self._cache[(module, depth)]
-
-
 class SubjectIndex:
     """Resolves the expressions in one validation site to the numeric subjects they read."""
 
-    def __init__(self, site: ValidationSite, constants: ModuleConstants) -> None:
+    def __init__(self, site: ValidationSite, constants: ModuleConstants, records: EngineRecordIndex) -> None:
         # Build every lookup table once so guard evaluation is a dictionary read.
         self.site = site
         self.constants = constants
         self._params = self._parameter_table(site.function)
         self._fields, self._stores = self._field_table(site.owner)
-        self._sweeps, self._spans = self._sweep_table(site.function, constants)
+        self._attrs, self._attr_owners = self._attribute_table(self._params, records)
+        self._pair_spans: dict[str, tuple[str, int, int]] = {}
         self._aliases: dict[str, list[tuple[int, tuple[str, str]]]] = {}
+        self._sweeps, self._spans = self._sweep_table(site.function, constants)
+        pairs, self._pair_spans = self._pair_table(site.function)
+        self._sweeps.update(pairs)
         self._aliases = self._alias_table(site.function)
 
     def resolve(self, node: ast.AST) -> tuple[str, str] | None:
-        # Returns (subject key, cast) for a parameter, self field, field sweep, local alias, or float()/int() of one.
+        # Returns (subject key, cast) for a parameter, self field, parameter field, sweep, local alias, or float()/int() of one.
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"float", "int"} and len(node.args) == 1 and not node.keywords:
             inner = self.resolve(node.args[0])
             return (inner[0], node.func.id) if inner is not None else None
         if isinstance(node, ast.Name):
-            return self._alias_at(node) or ((f"param:{node.id}", "") if node.id in self._params else None)
+            return self._pair_at(node) or self._alias_at(node) or ((f"param:{node.id}", "") if node.id in self._params else None)
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "self":
             return (f"self:{node.attr}", "") if node.attr in self._fields else None
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and f"{node.value.id}.{node.attr}" in self._attrs:
+            return (f"attr:{node.value.id}.{node.attr}", "")
         sweep = self._sweep_key(node)
         return (sweep, "") if sweep else None
+
+    def attribute_owner(self, key: str) -> str:
+        # The class whose field a `param.field` subject reads, or '' for every other subject.
+        family, _, name = key.partition(":")
+        return self._attr_owners.get(name, "") if family == "attr" else ""
 
     def mentions(self, node: ast.AST, keys: frozenset[str]) -> bool:
         # True when any sub-expression of node reads one of the subject's keys.
@@ -260,23 +184,37 @@ class SubjectIndex:
     def optional(self, key: str) -> bool:
         # A value annotated with None, or defaulting to None, may legitimately be None.
         family, _, name = key.partition(":")
-        annotation, none_default = (self._params if family == "param" else self._fields).get(name, ("", False))
+        if family == "sweep":
+            return any(self.optional(member) for member in self._sweeps[name])
+        annotation, none_default = self._entry(key)
         return none_default or "None" in annotation or "Optional" in annotation
 
     def subject(self, key: str, guards: list[ast.If], casts: set[str]) -> NumericSubject | None:
         # Builds the typed subject; a loose annotation takes its kind from an isinstance check or a float()/int() cast.
         family, _, name = key.partition(":")
         if family == "sweep":
-            fields = self._sweeps[name]
-            annotations = tuple(self._fields.get(item, ("", False))[0] for item in fields)
+            members = self._sweeps[name]
+            annotations = tuple(self._entry(member)[0] for member in members)
             kinds = {self.kind_of(text) for text in annotations}
             kind = _REAL if _REAL in kinds else (_INT if kinds == {_INT} else None)
-            return NumericSubject(key=key, display=f"self.{{{', '.join(fields)}}}", kind=kind, annotation=" / ".join(sorted(set(annotations)))) if kind else None
-        annotation = (self._params if family == "param" else self._fields)[name][0]
+            fields = [member.partition(":")[2] for member in members]
+            display = f"self.{{{', '.join(fields)}}}" if all(member.startswith("self:") for member in members) else f"{{{', '.join(self._display(member) for member in members)}}}"
+            return NumericSubject(key=key, display=display, kind=kind, annotation=" / ".join(sorted(set(annotations)))) if kind else None
+        annotation = self._entry(key)[0]
         cast = {"int": _INT, "float": _REAL}.get(next(iter(casts))) if len(casts) == 1 else None
         kind = self.kind_of(annotation) or self._inferred_kind(key, guards) or cast
-        display = name if family == "param" else f"self.{name}"
-        return NumericSubject(key=key, display=display, kind=kind, annotation=annotation or "unannotated") if kind else None
+        return NumericSubject(key=key, display=self._display(key), kind=kind, annotation=annotation or "unannotated") if kind else None
+
+    def _entry(self, key: str) -> tuple[str, bool]:
+        # (annotation text, defaults to None) for a parameter, a self field, or a parameter's field.
+        family, _, name = key.partition(":")
+        return {"param": self._params, "attr": self._attrs}.get(family, self._fields).get(name, ("", False))
+
+    @staticmethod
+    def _display(key: str) -> str:
+        # How the value reads in source: `limit`, `self.limit`, or `config.limit`.
+        family, _, name = key.partition(":")
+        return f"self.{name}" if family == "self" else name
 
     @staticmethod
     def kind_of(annotation: str) -> str | None:
@@ -304,6 +242,11 @@ class SubjectIndex:
         # Uses the nearest assignment at or before this line, so a reused local name follows each loop.
         candidates = [resolved for line, resolved in self._aliases.get(node.id, []) if line <= getattr(node, "lineno", 0)]
         return candidates[-1] if candidates else None
+
+    def _pair_at(self, node: ast.Name) -> tuple[str, str] | None:
+        # Inside `for label, value in (("a", self.a), ...)`, the value variable is that loop's sweep.
+        loops = [line for line, (variable, start, end) in self._pair_spans.items() if variable == node.id and start <= getattr(node, "lineno", 0) <= end]
+        return (f"sweep:{loops[-1]}", "") if loops else None
 
     def _sweep_key(self, node: ast.AST) -> str | None:
         # Matches getattr(self, name) inside `for name in (<field names>)` and keys it by the innermost such loop.
@@ -341,16 +284,62 @@ class SubjectIndex:
 
     @staticmethod
     def _sweep_table(function: ast.FunctionDef | ast.AsyncFunctionDef, constants: ModuleConstants) -> tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, int, int]]]:
-        # Maps each `for name in <field names>` loop (keyed by its line) to its field names and its line span.
+        # Maps each `for name in <field names>` loop (keyed by its line) to the self fields it sweeps and its line span.
         sweeps: dict[str, tuple[str, ...]] = {}
         spans: dict[str, tuple[str, int, int]] = {}
         for node in ast.walk(function):
             if isinstance(node, ast.For) and isinstance(node.target, ast.Name):
                 names = LiteralReader.strings(node.iter) or (constants.field_tuples.get(node.iter.id, ()) if isinstance(node.iter, ast.Name) else ())
                 if names:
-                    sweeps[str(node.lineno)] = names
+                    sweeps[str(node.lineno)] = tuple(f"self:{name}" for name in names)
                     spans[str(node.lineno)] = (node.target.id, node.lineno, node.end_lineno or node.lineno)
         return sweeps, spans
+
+    def _pair_table(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, int, int]]]:
+        # Maps each `for label, value in (("a", self.a), ("b", b))` loop to the fields or parameters its value walks over.
+        sweeps: dict[str, tuple[str, ...]] = {}
+        spans: dict[str, tuple[str, int, int]] = {}
+        for node in ast.walk(function):
+            if not (isinstance(node, ast.For) and isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2 and isinstance(node.target.elts[1], ast.Name) and isinstance(node.iter, (ast.Tuple, ast.List)) and node.iter.elts):
+                continue
+            pairs = [item.elts[1] for item in node.iter.elts if isinstance(item, (ast.Tuple, ast.List)) and len(item.elts) == 2 and isinstance(item.elts[0], ast.Constant) and isinstance(item.elts[0].value, str)]
+            members = [self.resolve(value) for value in pairs]
+            keys = tuple(member[0] for member in members if member is not None and not member[1] and member[0].partition(":")[0] in {"self", "param"})
+            if len(keys) == len(node.iter.elts):
+                sweeps[str(node.lineno)] = keys
+                spans[str(node.lineno)] = (node.target.elts[1].id, node.lineno, node.end_lineno or node.lineno)
+        return sweeps, spans
+
+    @staticmethod
+    def _attribute_table(params: dict[str, tuple[str, bool]], records: EngineRecordIndex) -> tuple[dict[str, tuple[str, bool]], dict[str, str]]:
+        # Maps `param.field` to the field's annotation when the parameter is typed as one SDK class that leaves that field unchecked.
+        attrs: dict[str, tuple[str, bool]] = {}
+        owners: dict[str, str] = {}
+        for param, (annotation, _) in params.items():
+            names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", annotation)) - _ANNOTATION_NOISE
+            owner = records.definition(next(iter(names))) if len(names) == 1 else None
+            if owner is None:
+                continue
+            fields, _ = SubjectIndex._field_table(owner)
+            checked = SubjectIndex._self_checked(owner)
+            for field, entry in fields.items():
+                if field not in checked:
+                    attrs[f"{param}.{field}"] = entry
+                    owners[f"{param}.{field}"] = owner.name
+        return attrs, owners
+
+    @staticmethod
+    def _self_checked(owner: ast.ClassDef) -> set[str]:
+        # Fields a class reads in its own constructor or validators are judged at that class, never through a parameter.
+        methods = [item for item in owner.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and (item.name in _CONSTRUCTORS or _VALIDATOR_NAME.match(item.name))]
+        read = {node.attr for method in methods for node in ast.walk(method) if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "self" and isinstance(node.ctx, ast.Load)}
+        init = next((item for item in methods if item.name == "__init__"), None)
+        if init is None:
+            return read
+        _, stores = SubjectIndex._field_table(owner)
+        stored = {id(node.value) for node in ast.walk(init) if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name)}
+        params_read = {node.id for node in ast.walk(init) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and id(node) not in stored}
+        return read | {field for param, field in stores.items() if param in params_read}
 
     def _alias_table(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, list[tuple[int, tuple[str, str]]]]:
         # Follows `value = self.field`, `value = float(param)`, and `value = getattr(self, name)` back to the subject.
@@ -619,21 +608,29 @@ class FiniteNumericGuardAnalyzer:
         # Visit every production module once; a module's sites are judged together so class fields share guards.
         sources = catalog.python_files()
         resolver = ConstantResolver(sources)
+        # Tests, scripts, and examples are read too: a class any of them names is one callers construct.
+        records = EngineRecordIndex(catalog.all_python_files())
         acceptances: list[Acceptance] = []
         for source in sources:
             if source.tree is not None:
-                acceptances.extend(self._module(source, resolver.constants(resolver.dotted(source.rel))))
+                acceptances.extend(self._module(source, source.tree, resolver.constants(resolver.dotted(source.rel)), records))
         return acceptances
 
-    def _module(self, source: SourceFile, constants: ModuleConstants) -> list[Acceptance]:
+    def _module(self, source: SourceFile, tree: ast.Module, constants: ModuleConstants, records: EngineRecordIndex) -> list[Acceptance]:
         # Index each site, then judge every range-checked value once per class (fields) or per function (parameters).
         collector = GuardCollector()
-        indexed = [(site, SubjectIndex(site, constants), collector.raise_guards(site.function)) for site in ValidationSiteFinder().find(source)]
+        indexed = [(site, SubjectIndex(site, constants, records), collector.raise_guards(site.function)) for site in ValidationSiteFinder().find(source)]
+        # Engine-built records hold the engine's own counters and timings, so their sites are not judged.
+        engine_sites = {id(site) for site, _, _ in indexed if (records.engine_built(site.owner.name) if site.owner is not None else records.engine_helper(tree, site.function.name))}
         acceptances: list[Acceptance] = []
         seen: set[tuple[int, str]] = set()
         for site, index, guards in indexed:
             for guard in guards:
                 for key in collector.range_keys(index, guard):
+                    # A `config.limit` subject belongs to the config's class, wherever it is read.
+                    owner = index.attribute_owner(key)
+                    if records.engine_built(owner) if owner else id(site) in engine_sites:
+                        continue
                     canonical = index.canonical(key)
                     scope = id(site.owner) if canonical.startswith("self:") and site.owner is not None else id(site.function)
                     if (scope, canonical) not in seen:
@@ -658,7 +655,7 @@ class FiniteNumericGuardAnalyzer:
             return []
         accepted = judge.accepted(pool)
         operand = next((ast.unparse(node) for node in ast.walk(trigger.test) if isinstance(node, ast.expr) and index.resolve(node) == (key, "")), subject.display)
-        return [Acceptance(site=site, subject=subject, operand=operand, line=trigger.lineno, guard=ast.unparse(trigger.test), accepted=accepted)] if accepted else []
+        return [Acceptance(site=site, subject=subject, operand=operand, line=trigger.lineno, guard=ast.unparse(trigger.test), accepted=accepted, optional=index.optional(key))] if accepted else []
 
 
 class FiniteNumericGuardsRule(Rule):
@@ -690,7 +687,7 @@ class FiniteNumericGuardsRule(Rule):
     def _finding(acceptance: Acceptance) -> Finding:
         # Stores every fact the diagnostic quotes, so explain() never re-reads source.
         site = acceptance.site
-        return Finding(rule_id=FiniteNumericGuardsRule.id, rel_path=site.source.rel, line=acceptance.line, source_line=site.source.line_at(acceptance.line), symbol=site.symbol(), extra={"subject": acceptance.subject.display, "operand": acceptance.operand, "annotation": acceptance.subject.annotation, "kind": acceptance.subject.kind, "guard": acceptance.guard if len(acceptance.guard) <= _GUARD_TEXT_LIMIT else f"{acceptance.guard[:_GUARD_TEXT_LIMIT]}...", "accepted": ", ".join(acceptance.accepted)})
+        return Finding(rule_id=FiniteNumericGuardsRule.id, rel_path=site.source.rel, line=acceptance.line, source_line=site.source.line_at(acceptance.line), symbol=site.symbol(), extra={"subject": acceptance.subject.display, "operand": acceptance.operand, "annotation": acceptance.subject.annotation, "kind": acceptance.subject.kind, "guard": acceptance.guard if len(acceptance.guard) <= _GUARD_TEXT_LIMIT else f"{acceptance.guard[:_GUARD_TEXT_LIMIT]}...", "accepted": ", ".join(acceptance.accepted), "optional": "yes" if acceptance.optional else "no"})
 
     @staticmethod
     def _listing(labels: list[str]) -> str:
@@ -716,7 +713,7 @@ class FiniteNumericGuardsRule(Rule):
         # Gives the exact type-first condition for int or real values, then the shared-validator and test steps.
         extra = finding.extra
         value = extra["operand"]
-        label = extra["subject"].removeprefix("self.").strip("{}").split(", ")[0]
+        label = extra["subject"].removeprefix("self.").strip("{}").split(", ")[0].rpartition(".")[2]
         if extra["kind"] == _INT:
             condition = f"isinstance({value}, bool) or not isinstance({value}, int) or <the existing range test>"
             outcome = "This rejects True, fractions, NaN, and both infinities, and keeps every valid integer."
@@ -725,8 +722,10 @@ class FiniteNumericGuardsRule(Rule):
             condition = f"isinstance({value}, bool) or not isinstance({value}, (int, float)) or not math.isfinite({value}) or <the existing range test>"
             outcome = "This rejects True, strings, NaN, and both infinities, and keeps every valid finite number. Add `import math` if the module lacks it."
             expected = "a finite number"
+        # An optional value keeps None valid, so the strict test applies only when a value is present.
+        guarded = f"{value} is not None and ({condition})" if extra.get("optional") == "yes" else condition
         return "\n".join((
-            f"1. In `{finding.symbol}` ({finding.location()}), put the type check in the same condition as the range check, ahead of it, so it cannot be skipped: `if {condition}: raise ...`. {outcome}",
+            f"1. In `{finding.symbol}` ({finding.location()}), put the type check in the same condition as the range check, ahead of it, so it cannot be skipped: `if {guarded}: raise ...`. {outcome}",
             f"2. Keep the existing error type and range, and make the message name the field and both requirements, for example \"{label} must be {expected} within the allowed range\".",
             "3. If this check repeats a primitive that exists elsewhere (C008 lists the copies), call the shared validator in vidbyte/lib/dataclasses/validation.py instead of writing the condition inline; until that module exists, vidbyte/middleware/builtins/limit_validation.py shows the strict shape.",
             "4. Add True, float('nan'), and float('inf') to the feature's contract test (for example tests/features/sdk_loop_settings/test_contract.py or tests/features/sdk_middleware_limits/test_middleware_limit_contract.py) and assert each one raises.",
