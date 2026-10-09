@@ -161,6 +161,26 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         rewritten = ContextCompactionEngine()._replace_provider_content(dict(message), "short")
         self.assertEqual(rewritten["content"], [{"type": "text", "text": "short"}, {"type": "tool_use", "id": "t1", "name": "f", "input": {}}])
 
+    async def test_deduplicate_tool_calls_ignores_openai_call_ids(self) -> None:
+        # [Silent Failure] Identical calls with different ids collapse to the first pair; different arguments survive.
+        def call(call_id: str, query: str) -> dict[str, object]:
+            return {"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "lookup", "arguments": f'{{"q": "{query}"}}'}}]}
+        history = ({"role": "system", "content": "sys"}, {"role": "user", "content": "go"}, call("c1", "q1"), {"role": "tool", "tool_call_id": "c1", "content": "fact"}, call("c2", "q1"), {"role": "tool", "tool_call_id": "c2", "content": "fact"}, call("c3", "q3"), {"role": "tool", "tool_call_id": "c3", "content": "other"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), [history[0], history[1], history[2], history[3], history[6], history[7]])
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_deduplicate_tool_calls_ignores_anthropic_tool_use_ids(self) -> None:
+        # [Silent Failure] Anthropic tool_use blocks dedupe on name and input, not on their unique block ids.
+        def call(call_id: str, query: str) -> dict[str, object]:
+            return {"role": "assistant", "content": [{"type": "tool_use", "id": call_id, "name": "lookup", "input": {"q": query}}]}
+
+        def result(call_id: str) -> dict[str, object]:
+            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": "fact"}]}
+        history = ({"role": "user", "content": "go"}, call("t1", "q1"), result("t1"), call("t2", "q1"), result("t2"), call("t3", "q3"), result("t3"))
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), [history[0], history[1], history[2], history[5], history[6]])
+
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
         messages = (msg("user", "a"), msg("assistant", "b"))
