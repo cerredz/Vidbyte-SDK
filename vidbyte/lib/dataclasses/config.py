@@ -683,6 +683,14 @@ class AgentSettings(_ConfigValidation):
             raise cls._error("'agent.max_tool_rounds' conflicts with 'agent.loop.max_iterations'; set one, or give both the same value.", "agent.max_tool_rounds", actual_value=rounds, loop_max_iterations=loop.max_iterations)
         merged = copy.copy(loop)
         merged.max_iterations = rounds
+        # @intent yaml-max-tool-rounds-validates-floors
+        # The loop checks its floors against its ceilings only when it is built, so the copy is checked again
+        # with the new cap; otherwise a floor the cap makes unreachable would load under this spelling but be
+        # rejected under 'agent.loop.max_iterations'. The check only reads fields, so running it twice is safe.
+        try:
+            merged._validate()
+        except ConfigurationError as error:
+            raise cls._error(f"'agent.max_tool_rounds' is invalid: {error}", "agent.max_tool_rounds", actual_value=rounds) from error
         return merged
 
     @classmethod

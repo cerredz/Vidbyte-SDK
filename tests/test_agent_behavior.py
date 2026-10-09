@@ -29,8 +29,10 @@ from vidbyte.evals import Behavior, ContainsGrader, EvalCase, EvalRunner, EvalSu
 from vidbyte.evals.behavior.efficiency import EfficiencyBehavior
 from vidbyte.evals.behavior.output import OutputBehavior
 from vidbyte.evals.behavior.tool import ToolBehavior
+from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
+from vidbyte.lib.runners import TextModelResponse
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -108,6 +110,18 @@ class MockAgent(BaseAgent):
         reply = AgentMessage(sender="mock", recipient="orchestrator", content=self._reply_content, metadata=dict(self._reply_metadata))
         self.last_reply = reply
         return reply
+
+
+class HandoffOnPromptRunner:
+    """Runner that records a handoff on the bound agent whenever the prompt says "handoff"."""
+
+    def __init__(self) -> None:
+        self.agent: BaseAgent | None = None
+
+    def run(self, prompt: str, **_: object) -> TextModelResponse:
+        if "handoff" in prompt and self.agent is not None:
+            self.agent.record_handoff(Handoff(sections={"summary": prompt}))
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Final answer: OK", raw={})
 
 
 class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
@@ -393,6 +407,19 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.handoff.handoff_occurred())
         self.assertFalse(b.handoff.handoff_is_filled())
         self.assertEqual(b.handoff.handoff_count(), 0)
+
+    async def test_handoff_predicates_cover_only_the_latest_run(self) -> None:
+        # [Hidden Failure] a handoff from an earlier run must not be reported for a later run without one.
+        runner = HandoffOnPromptRunner()
+        agent = build_test_agent(name="t", system_prompt="t", runner=runner)
+        runner.agent = agent
+        await agent.arun("please handoff")
+        self.assertTrue(agent.behavior.handoff.handoff_occurred())
+        self.assertEqual(agent.behavior.handoff.handoff_count(), 1)
+        await agent.arun("plain answer")
+        self.assertFalse(agent.behavior.handoff.handoff_occurred())
+        self.assertEqual(agent.behavior.handoff.handoff_count(), 0)
+        self.assertEqual(len(agent.handoffs), 1)
 
     # --- OutputBehavior Category F ---
 

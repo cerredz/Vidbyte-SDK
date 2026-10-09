@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -8,7 +9,7 @@ from pydantic import BaseModel
 
 from vidbyte import Agent, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
-from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinToolCalls
+from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -564,3 +565,60 @@ class ContractUnsatisfiedStructuredOutputTests(unittest.IsolatedAsyncioTestCase)
                 await self._agent(runner).arun("task")
 
         self.assertEqual(ctx.exception.stop_reason, "contract_unsatisfied")
+
+
+class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
+    async def test_floor_equal_to_per_tool_cap_is_met_even_when_denials_abort(self) -> None:
+        # A per-tool cap only denies the call after the cap, so the floor is met without ever reaching the abort path.
+        searched: list[str] = []
+
+        @tool
+        def web_search(q: str) -> str:
+            """Search the web."""
+            searched.append(q)
+            return "hit"
+
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "web_search", '{"q": "a"}')), _chat_tool_turn(("call_2", "web_search", '{"q": "b"}')), _text_turn("answer")])
+        settings = AgentLoopSettings(tool_settings=ToolSettings(max_calls_per_tool={"web_search": 2}, on_deny="abort"), output_contracts=(MinToolCallsById("web_search", 2),), max_iterations=6)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[web_search], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertEqual(reply.content, "answer")
+        self.assertEqual(searched, ["a", "b"])
+
+
+class IterationFloorAtMaxIterationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_floor_equal_to_max_iterations_is_met_in_the_last_iteration(self) -> None:
+        # The budget is checked before an iteration and the floor after its model call, so iteration 3 of 3 can finish.
+        runner = ToolCallingRunner([_text_turn(f"answer {i}") for i in range(1, 4)])
+        settings = AgentLoopSettings(max_iterations=3, output_contracts=(MinIterations(3),))
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertEqual(reply.content, "answer 3")
+        self.assertEqual(len(runner.calls), 3)
+
+
+class IsDoneObjectFinalAnswerTests(unittest.IsolatedAsyncioTestCase):
+    # Models often send isDone's final_answer as a JSON object rather than a JSON-encoded string.
+    async def test_object_final_answer_parses_against_output_schema_on_first_call(self) -> None:
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": {"summary": "café"}}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, output_schema=_Report)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(reply.structured, _Report(summary="café"))
+        self.assertEqual(len(runner.calls), 1, "a valid object answer must not be rejected and retried")
+
+    async def test_object_final_answer_without_schema_is_json_content(self) -> None:
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": {"severity": "high", "owners": ["dba"]}}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(json.loads(reply.content), {"severity": "high", "owners": ["dba"]})

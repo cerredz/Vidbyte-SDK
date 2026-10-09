@@ -30,6 +30,7 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
@@ -210,6 +211,8 @@ class AggregateAgent(BaseAgent):
         self._proposer_tools = tools
         self._proposer_middleware = tuple(middleware)
         self._proposer_temperature = temperature
+        # Decide once which provider the explicit key belongs to, before any child is built with it.
+        self._key_owner = self._resolve_key_owner()
         labeled_proposers = self._build_proposers()
         aggregator_agent = self._build_aggregator()
         template = self._config.synthesis_prompt_template or Prompts().get(Prompt.MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT)
@@ -226,23 +229,29 @@ class AggregateAgent(BaseAgent):
         try:
             with usage_ledger_scope(self._usage_tracker):
                 result = await self._engine.aggregate(prompt)
+            # Report the merged proposer and aggregator tokens the way a BaseAgent reply does, so a
+            # Session's usage rollup counts this turn and its tokens.
             reply = AgentMessage(
                 sender=self.name,
                 recipient=str(options.get("recipient", "orchestrator")),
                 content=result.content,
-                metadata=dict(result.metadata),
+                metadata={**result.metadata, "tokens_used": self._usage_tracker.rollup().total_tokens},
             )
             self.history.append(reply)
             self.last_prompt = prompt
             self.last_reply = reply
             self._tracer.end_trace(trace_ctx, output=result.content)
-            return reply
         except BaseException as exc:
             # AggregateAgent overrides generate_reply entirely and does not go through
             # BaseAgent's own try/except, so it must notify the Session boundary itself.
             self._notify_session_exception(exc)
             self._tracer.end_trace(trace_ctx, error=exc)
             raise
+        else:
+            # For the same reason, checkpoint the completed turn into a bound Session here; it runs
+            # outside the try so a persistence error can never re-end the trace as a failure.
+            self._notify_session(reply)
+            return reply
         finally:
             self._active_prompt = ""
             if parent is not None and parent is not self._usage_tracker:
@@ -297,7 +306,7 @@ class AggregateAgent(BaseAgent):
             system_prompt=spec.system_prompt or self.system_prompt,
             provider=spec.provider,
             model_name=spec.model,
-            api_key=self._proposer_api_key,
+            api_key=self._child_api_key(spec.provider),
             tools=self._proposer_tools,
             middleware=self._proposer_middleware,
             temperature=self._proposer_temperature,
@@ -315,9 +324,29 @@ class AggregateAgent(BaseAgent):
             system_prompt=system_prompt,
             provider=spec.provider,
             model_name=spec.model,
-            api_key=self._proposer_api_key,
+            api_key=self._child_api_key(spec.provider),
             tracer=self._tracer,
         )
+
+    def _resolve_key_owner(self) -> str | None:
+        # @intent aggregate-key-never-crosses-providers
+        # The explicit key belongs to this agent's own provider. Without one, it belongs to the single
+        # provider that every spec-built proposer and aggregator names; if they name several, it stays
+        # unattributed (None) and no named child sends it. Prebuilt child agents do not count.
+        host = self._proposer_provider_defaults[0]
+        specs = (self._coerce_spec(item) for item in (*self._proposer_inputs, self._aggregator_input) if item is not None)
+        names = [host] if host is not None else [spec.provider for spec in specs if spec is not None]
+        owners = {(name.value if isinstance(name, ModelProvider) else str(name)).strip().lower() for name in names}
+        return owners.pop() if len(owners) == 1 else None
+
+    def _child_api_key(self, child_provider: ModelProvider | str | None) -> str | None:
+        # @intent aggregate-key-never-crosses-providers
+        # Sending the key to a child on a provider other than its owner leaks the secret and fails auth;
+        # None lets that provider read its own env key. A child naming no provider keeps the key.
+        if child_provider is None:
+            return self._proposer_api_key
+        child = (child_provider.value if isinstance(child_provider, ModelProvider) else str(child_provider)).strip().lower()
+        return self._proposer_api_key if child == self._key_owner else None
 
     def _resolve_aggregator_spec(self) -> ProposerSpec:
         # Returns the explicit aggregator spec, or falls back to the host provider/model, erroring if neither resolves.

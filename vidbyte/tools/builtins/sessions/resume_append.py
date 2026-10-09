@@ -62,6 +62,10 @@ class ResumeAppendTool(_SessionBuiltinTool):
         session = self._require_bound(_TOOL_NAME)
         if session is None:
             return ToolResult.error(_TOOL_NAME, "No active session is bound to this tool.")
+        # @intent resume-checkpoint-stays-in-scope
+        # Refuse a checkpoint from another session so a permitted session id cannot smuggle in an out-of-scope transcript.
+        if checkpoint_id is not None and self._store.get(checkpoint_id).session_id != resolved_session_id:
+            return ToolResult.error(_TOOL_NAME, f"Checkpoint {checkpoint_id} does not belong to session {resolved_session_id}.")
         target = checkpoint_id or self._target_head_id(resolved_session_id)
         if target is None:
             return ToolResult.error(_TOOL_NAME, f"Unknown or empty session: {session_id}.")
