@@ -21,6 +21,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c003_no_dynamic_import_from_data.py` -- fixed import targets.
 - `c004_operation_pricing_rate_floor.py` -- operation pricebook magnitude floor.
 - `c005_cost_arithmetic_site_parity.py` -- reviewed cost-arithmetic locations.
+- `c006_finite_numeric_guards.py` -- bool/NaN/infinity-safe numeric range checks.
 - `s001_python_correctness_foundation.py` -- Pyflakes/syntax correctness.
 - `s002_exception_cause_chaining.py` -- explicit translated causes.
 - `s003_strict_zip.py` -- explicit zip length behavior.

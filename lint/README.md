@@ -9,8 +9,8 @@ repair, local precedent, rejected shortcuts, and focused verification command.
 
 - Run pinned Ruff once and expose the independently baselined analyzer policies,
   including 37 Ruff policies.
-- Enforce five SDK domain-contract policies (C001-C005) over the same source
-  catalogue.
+- Enforce the SDK domain-contract policies (the C-series table below) over the
+  same source catalogue.
 - Run pinned mypy once and ratchet every package type-contract error.
 - Scan transport, registry, export, boundary-error, pricing, cancellation,
   documentation, and helper-ownership contracts without importing the SDK.
@@ -159,6 +159,7 @@ Nested folders:
 | C003 | no-dynamic-import-from-data | Runtime data cannot choose imported modules |
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
+| C006 | finite-numeric-guards | Numeric range checks reject bool, NaN, and infinities first |
 
 ## Adding a rule
 
