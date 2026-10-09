@@ -19,17 +19,21 @@ from __future__ import annotations
 
 import unittest
 
+from vidbyte.agents import AgentRuntime
+from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareContext,
     MiddlewareHook,
 )
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware.builtins import (
     CanaryTripwireMiddleware,
     ConfusedDeputyGuardMiddleware,
     HoneypotToolMiddleware,
 )
 from vidbyte.middleware.pipeline import MiddlewarePipeline
-from vidbyte.tools import ToolCall, ToolResult
+from vidbyte.tools import ToolCall, ToolResult, Tools, tool
+from vidbyte.tools.security import PermissionPolicy
 
 
 class FakeModelResponse:
@@ -43,6 +47,36 @@ class NoTextResponse:
 
     def __str__(self) -> str:
         return self.value
+
+
+class EchoRunner:
+    def __init__(self, *, echo: bool) -> None:
+        # Calls the lookup tool first, then either echoes the tool output it saw or answers plainly.
+        self.echo = echo
+        self.called_tool = False
+        self.seen_tool_output = ""
+
+
+async def invoke_echo_runner(runner: EchoRunner, prompt: str, **kwargs: object) -> FakeModelResponse:
+    # Returns a lookup tool call on the first turn and a plain-text answer on the second.
+    del prompt
+    if not runner.called_tool:
+        runner.called_tool = True
+        response = FakeModelResponse("")
+        response.raw = {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]}
+        return response
+    runner.seen_tool_output = str(kwargs["messages"][-1]["content"])
+    return FakeModelResponse(runner.seen_tool_output if runner.echo else "Summary: nothing sensitive.")
+
+
+def echo_runner_text(response: object) -> str:
+    # Extracts text from fake echo-runner responses.
+    return str(getattr(response, "text", response))
+
+
+def echo_runner_metadata(response: object) -> dict:
+    # Exposes the raw tool-call payload so the runtime can parse function calls.
+    return {"raw": getattr(response, "raw", {})}
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +275,71 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
             )
             await mw.after_tool_call(ctx)
         self.assertEqual(len(mw._canaries), 5)
+
+    async def test_canary_appended_to_model_visible_tool_result_only(self) -> None:
+        # [Silent Failure] The canary must reach the model through a transform, not stay ledger-only.
+        mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7)
+        raw = ToolResult.success("lookup", "internal document", metadata={"source": "kb"})
+        ctx = MiddlewareContext(
+            hook=MiddlewareHook.AFTER_TOOL_CALL,
+            agent_name="worker",
+            tool_call=ToolCall("lookup"),
+            tool_result=raw,
+        )
+        decision = await mw.after_tool_call(ctx)
+        canary = list(mw._canaries.keys())[0]
+        visible = decision.transform.model_visible_tool_result
+        self.assertIn("VIDBYTE-CANARY-", visible.output)
+        self.assertEqual(visible.output, f"internal document\n{canary}")
+        self.assertEqual(visible.status, raw.status)
+        self.assertEqual(dict(visible.metadata), {"source": "kb"})
+        self.assertEqual(raw.output, "internal document")
+
+    async def test_no_transform_when_roll_fails(self) -> None:
+        # [Edge Case] Without injection the tool result passes through untransformed.
+        mw = CanaryTripwireMiddleware(inject_probability=0.001, random_seed=99)
+        ctx = MiddlewareContext(
+            hook=MiddlewareHook.AFTER_TOOL_CALL,
+            agent_name="worker",
+            tool_call=ToolCall("lookup"),
+            tool_result=ToolResult.success("lookup", "data"),
+        )
+        decision = await mw.after_tool_call(ctx)
+        self.assertIsNone(decision.transform)
+
+
+class CanaryTripwireRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def _runtime(self) -> AgentRuntime:
+        # Builds a runtime with one lookup tool guarded by an always-injecting canary tripwire.
+        @tool
+        def lookup() -> str:
+            # Returns an internal document the model should not repeat verbatim.
+            return "internal document"
+
+        middleware = (CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7),)
+        return AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), middleware=middleware)
+
+    async def _run(self, runner: EchoRunner):
+        # Runs the agent once against the given fake model.
+        runtime = self._runtime()
+        context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        handle = RunnerHandle(runner=runner, provider="openai", invoke=invoke_echo_runner, extract_text=echo_runner_text, extract_metadata=echo_runner_metadata)
+        return await runtime.arun("task", handle=handle, context=context)
+
+    async def test_model_echoing_tool_output_aborts_with_canary_leaked(self) -> None:
+        # [Silent Failure] A model that repeats the tool output it saw leaks the canary and is stopped.
+        runner = EchoRunner(echo=True)
+        result = await self._run(runner)
+        self.assertIn("VIDBYTE-CANARY-", runner.seen_tool_output)
+        self.assertEqual(result.metadata["stop_reason"], "middleware_abort")
+        self.assertEqual(result.metadata["middleware_abort_reason"], "canary_leaked")
+        self.assertEqual(result.metadata["tool_calls"][0].result.output, "internal document")
+
+    async def test_model_not_echoing_tool_output_finishes_normally(self) -> None:
+        # [Edge Case] A model that does not repeat the canary finishes without an abort.
+        runner = EchoRunner(echo=False)
+        result = await self._run(runner)
+        self.assertNotEqual(result.metadata["stop_reason"], "middleware_abort")
 
 
 # ---------------------------------------------------------------------------

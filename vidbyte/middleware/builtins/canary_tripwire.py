@@ -6,8 +6,8 @@ Purpose:
     Lets developers detect prompt-injection-driven exfiltration attacks where
     adversarial content in tool results drives the model to reproduce internal content.
 Architecture:
-    - CanaryTripwireMiddleware: Probabilistically tracks canary tokens alongside tool
-      results and scans model output for leaked canaries.
+    - CanaryTripwireMiddleware: Probabilistically appends canary tokens to the
+      model-visible copy of tool results and scans model output for leaked canaries.
 Relations:
     Used through vidbyte.middleware.builtins and AgentRuntime middleware hooks.
 """
@@ -16,7 +16,12 @@ from __future__ import annotations
 
 import random
 
-from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
+from vidbyte.lib.dataclasses.middleware import (
+    MiddlewareContext,
+    MiddlewareDecision,
+    MiddlewareTransform,
+)
+from vidbyte.lib.dataclasses.tools import ToolResult
 from vidbyte.middleware.base import AgentMiddleware
 
 
@@ -40,14 +45,18 @@ class CanaryTripwireMiddleware(AgentMiddleware):
         return MiddlewareDecision.continue_()
 
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        # Probabilistically generates a canary token and records it in the internal ledger.
+        # Probabilistically injects a canary into the model-visible tool result and records it.
         if ctx.tool_is_internal or ctx.tool_result is None:
             return MiddlewareDecision.continue_()
-        if self._rng.random() < self._inject_probability:
-            canary = self._generate_canary()
-            tool_name = ctx.tool_call.tool_name if ctx.tool_call else "unknown"
-            self._canaries[canary] = tool_name
-        return MiddlewareDecision.continue_()
+        if self._rng.random() >= self._inject_probability:
+            return MiddlewareDecision.continue_()
+        # Remember the canary so a later model response that repeats it can be caught.
+        canary = self._generate_canary()
+        tool_name = ctx.tool_call.tool_name if ctx.tool_call else "unknown"
+        self._canaries[canary] = tool_name
+        # Show the model a copy with the canary appended; the raw tool result stays untouched.
+        visible = self._with_canary(ctx.tool_result, canary)
+        return MiddlewareDecision.continue_(transform=MiddlewareTransform(model_visible_tool_result=visible))
 
     async def after_model_response(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Scans model output for leaked canary strings and aborts if found.
@@ -62,6 +71,11 @@ class CanaryTripwireMiddleware(AgentMiddleware):
         # Builds a unique canary string from the configured prefix and 8 random hex bytes.
         hex_chars = "".join(f"{self._rng.randint(0, 255):02x}" for _ in range(8))
         return f"{self._watermark_prefix}{hex_chars}"
+
+    @staticmethod
+    def _with_canary(result: ToolResult, canary: str) -> ToolResult:
+        # Returns a copy of the tool result whose output ends with the canary on its own line.
+        return ToolResult(tool_name=result.tool_name, status=result.status, output=f"{result.output}\n{canary}", metadata=dict(result.metadata))
 
     def _scan_for_leaked_canaries(self, text: str) -> MiddlewareDecision:
         # Returns abort if any active canary appears in the given text.
