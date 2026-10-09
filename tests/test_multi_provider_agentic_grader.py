@@ -13,6 +13,7 @@ Key Functions / Test Cases:
     - test_single_provider_configured: Validates single active provider fallback.
     - test_empty_or_blank_responses_all_providers: Assures error handling when all endpoints are dead.
     - test_grader_filler_parsing: Assures meta-grader verbatim output matching works correctly.
+    - test_select_winner_prefers_faithful_match: Assures the grader's exact choice is not overridden by substring candidates.
 Relations:
     Validates MultiProviderAgenticGraderAlgorithm and MultiProviderAgenticGraderRuntimeAlgorithm within the test framework.
 Similar Files:
@@ -364,6 +365,21 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         resolved = ProviderModelRegistry.resolve_active(provider_models=explicit_map, options=None)
         self.assertEqual(resolved, explicit_map)
 
+
+    def test_select_winner_prefers_faithful_match(self) -> None:
+        # [Logic] The grader's exact choice wins over a candidate whose text is a substring of it, in any dict order.
+        selector = MultiProviderAgenticGraderRuntimeAlgorithm(MagicMock(), MultiProviderAgenticGraderAlgorithm())
+        handle = RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {})
+        long_answer = "The answer is 42, because 6 x 7 = 42."
+        for candidates in ({"deepseek": "42", "anthropic": long_answer}, {"anthropic": long_answer, "deepseek": "42"}):
+            self.assertEqual(selector._select_winner(candidates, FakeResponse(long_answer), handle), (long_answer, "anthropic"))
+        # The longest candidate quoted inside grader filler is the most specific match.
+        quoted = FakeResponse(f"Best answer: {long_answer}")
+        self.assertEqual(selector._select_winner({"deepseek": "42", "anthropic": long_answer}, quoted, handle), (long_answer, "anthropic"))
+        # Empty candidates never win, and the shortest candidate containing the grader output is preferred.
+        self.assertEqual(selector._select_winner({"openai": "", "deepseek": "42 is it", "anthropic": long_answer}, FakeResponse("42"), handle), ("42 is it", "deepseek"))
+        # With no match at all, the grader's own text is returned.
+        self.assertEqual(selector._select_winner({"openai": "  ", "deepseek": "7"}, FakeResponse("unrelated"), handle), ("unrelated", "grader_raw"))
 
 if __name__ == "__main__":
     unittest.main()

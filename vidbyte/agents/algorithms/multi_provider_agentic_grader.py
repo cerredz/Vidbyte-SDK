@@ -142,9 +142,18 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
     def _select_winner(self, candidates: dict[str, str], raw_result: Any, handle: RunnerHandle) -> tuple[str, str]:
         # Matches the grader's output against candidate texts and returns the selected output and provider name.
         grader_output = handle.extract_text(raw_result).strip()
-        for p_name, text in candidates.items():
-            if text.strip() in grader_output or grader_output in text.strip():
-                return text, p_name
+        # Empty candidates are skipped because an empty string is contained in any grader output.
+        stripped = {p_name: text.strip() for p_name, text in candidates.items() if text.strip()}
+        # A candidate the grader repeated exactly is its choice, even if another candidate's text appears inside it.
+        exact = [p_name for p_name, text in stripped.items() if text == grader_output]
+        # Otherwise the longest candidate quoted in the grader's output is the most specific match.
+        contained = sorted((p_name for p_name, text in stripped.items() if text in grader_output), key=lambda p_name: -len(stripped[p_name]))
+        # Otherwise the shortest candidate that contains the grader's output is the closest match.
+        containing = sorted((p_name for p_name, text in stripped.items() if grader_output in text), key=lambda p_name: len(stripped[p_name]))
+        ranked = exact + contained + containing
+        if ranked:
+            return candidates[ranked[0]], ranked[0]
+        # No candidate matches, so the grader's own text is returned as the answer.
         return grader_output, "grader_raw"
 
     def _build_result_metadata(self, metadata: Mapping[str, Any] | None, active_models: dict[str, str], selected_provider: str, candidates: dict[str, str], total_tokens: int, call_contexts: list[Any]) -> dict[str, Any]:
