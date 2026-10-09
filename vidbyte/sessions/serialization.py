@@ -111,7 +111,7 @@ class SessionSerializer:
             "content": message.content,
             "message_type": message.message_type,
             "metadata": self._scrub_metadata(message.metadata),
-            "structured": self._safe(message.structured),
+            "structured": self._safe(message.structured, scrub_keys=False),
         }
 
     def message_from_dict(self, data: Mapping[str, Any]) -> AgentMessage:
@@ -126,7 +126,8 @@ class SessionSerializer:
         )
 
     def _run_state_to_dict(self, state: RunState) -> dict[str, Any]:
-        # Render a RunState to a JSON-safe dict, scrubbing runner options.
+        # Render a RunState to a JSON-safe dict, scrubbing credential-like keys from free-form data.
+        # SDK settings structures keep every key: their keys are names a resumed agent needs back.
         return {
             "schema_version": state.schema_version,
             "agent_name": state.agent_name,
@@ -144,11 +145,11 @@ class SessionSerializer:
             "tool_names": list(state.tool_names),
             "history": [dict(item) for item in state.history],
             "run_id": state.run_id,
-            "loop_settings": self._safe(state.loop_settings),
+            "loop_settings": self._safe(state.loop_settings, scrub_keys=False),
             "aggregate_plan": self._safe(state.aggregate_plan),
             "context_summary": self._safe(state.context_summary),
-            "trace_option": self._safe(state.trace_option),
-            "output_schema": self._safe(state.output_schema),
+            "trace_option": self._safe(state.trace_option, scrub_keys=False),
+            "output_schema": self._safe(state.output_schema, scrub_keys=False),
             "permission_policy": None if state.permission_policy is None else list(state.permission_policy),
         }
 
@@ -189,20 +190,24 @@ class SessionSerializer:
             scrubbed[key_text] = self._safe(value)
         return scrubbed
 
-    def _safe(self, value: Any) -> Any:
+    def _safe(self, value: Any, *, scrub_keys: bool = True) -> Any:
         # Recursively coerce a value into JSON-safe form, marking non-serializable leaves.
+        # @intent settings-names-are-not-secrets
+        # scrub_keys=False keeps every key for SDK-shaped data whose keys are names (schema
+        # properties, tool names, trace fields, structured-reply fields), not credentials;
+        # dropping them corrupts resumed agents. Free-form data keeps the default key filter.
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, Mapping):
-            return {str(k): self._safe(v) for k, v in value.items() if not self._is_secret_key(str(k))}
+            return {str(k): self._safe(v, scrub_keys=scrub_keys) for k, v in value.items() if not (scrub_keys and self._is_secret_key(str(k)))}
         if isinstance(value, (list, tuple)):
-            return [self._safe(item) for item in value]
-        dumped = self._dumped_model(value)
+            return [self._safe(item, scrub_keys=scrub_keys) for item in value]
+        dumped = self._dumped_model(value, scrub_keys=scrub_keys)
         if dumped is not None:
             return dumped
         return {"__dropped__": type(value).__name__}
 
-    def _dumped_model(self, value: Any) -> dict[str, Any] | None:
+    def _dumped_model(self, value: Any, *, scrub_keys: bool = True) -> dict[str, Any] | None:
         # Renders a validated structured-output instance as plain JSON data, or None if it is not one.
         try:
             from pydantic import BaseModel
@@ -210,7 +215,7 @@ class SessionSerializer:
             return None
         if not isinstance(value, BaseModel):
             return None
-        return {str(k): self._safe(v) for k, v in value.model_dump(mode="json").items()}
+        return {str(k): self._safe(v, scrub_keys=scrub_keys) for k, v in value.model_dump(mode="json").items()}
 
     @staticmethod
     def _is_secret_key(key: str) -> bool:

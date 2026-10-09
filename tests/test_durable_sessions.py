@@ -244,6 +244,45 @@ class SerializerTests(unittest.TestCase):
             self.s.checkpoint_from_dict({"schema_version": SESSION_SCHEMA_VERSION})
 
 
+class SettingsNamesSurviveCheckpointTests(unittest.TestCase):
+    """Names inside SDK settings structures look like secrets but must survive a checkpoint."""
+
+    SCHEMA = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "author": {"type": "string"}, "token_count": {"type": "integer"}},
+        "required": ["title", "author"],
+    }
+
+    def _round_trip(self, agent: Agent) -> Agent:
+        # Mirror Session persist/resume: export, serialize to JSON text, parse, restore.
+        serializer = SessionSerializer()
+        text = json.dumps(serializer._run_state_to_dict(agent.export_state()))
+        return Agent.restore(serializer._run_state_from_dict(json.loads(text)))
+
+    def test_round_trip_keeps_schema_tool_cap_and_trace_field_names(self) -> None:  # [Silent Failure]
+        settings = AgentLoopSettings(tool_settings=ToolSettings(max_calls_per_tool={"check_auth_status": 2}))
+        trace_option = TraceOption.continual({"token_estimate": TraceField(description="Estimated tokens", type="integer")})
+        agent = Agent(name="w", system_prompt="s", provider="openai", model_name="gpt-4.1", output_schema=self.SCHEMA, agent_loop_settings=settings, trace_option=trace_option)
+        restored = self._round_trip(agent)
+        self.assertEqual(restored.output_schema, self.SCHEMA)
+        self.assertEqual(dict(restored.agent_loop_settings.tool_settings.max_calls_per_tool), {"check_auth_status": 2})
+        self.assertIn("token_estimate", restored._trace_option.schema.fields)
+
+    def test_round_trip_keeps_structured_reply_keys(self) -> None:  # [Silent Failure]
+        agent = Agent(name="w", system_prompt="s", provider="openai", model_name="gpt-4.1")
+        structured = {"title": "T", "author": "Ana", "token_count": 3}
+        agent.history.append(AgentMessage(sender="w", recipient="o", content=json.dumps(structured), metadata={}, structured=structured))
+        restored = self._round_trip(agent)
+        self.assertEqual(restored.history[0].structured, structured)
+
+    def test_metadata_api_key_is_still_dropped(self) -> None:  # [Hidden Assumption]
+        agent = Agent(name="w", system_prompt="s", provider="openai", model_name="gpt-4.1", metadata={"api_key": "sk-live", "keep": 1})
+        payload = SessionSerializer()._run_state_to_dict(agent.export_state())
+        self.assertNotIn("api_key", payload["metadata"])
+        self.assertEqual(payload["metadata"]["keep"], 1)
+        self.assertNotIn("sk-live", json.dumps(payload))
+
+
 # ---------------------------------------------------------------------------
 # Agent state seam
 # ---------------------------------------------------------------------------
