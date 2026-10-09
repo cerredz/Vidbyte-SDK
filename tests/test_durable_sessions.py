@@ -49,7 +49,7 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, SessionTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -1088,6 +1088,46 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": source.id, "checkpoint_id": "foreign"}))
         self.assertEqual(result.status.value, "error")
         self.assertEqual(len(store.list_sessions()), sessions_before)
+
+    async def _resume_fixture(self, tool_cls: type) -> tuple:
+        # Build a permitted public session, an out-of-scope HR session, and a bound session the tool writes into.
+        store = InMemorySessionStore()
+        public = Session(FakeAgent(), store=store)
+        await public.arun("public notes")
+        hr = Session(FakeAgent(), store=store)
+        await hr.arun("SECRET: Alice salary 250k.")
+        bound = Session(FakeAgent(), store=store)
+        await bound.arun("mine")
+        tool = tool_cls(store, scope=SessionScope.sessions([public.id]))
+        tool.bind_session(bound)
+        return store, public, hr, bound, tool
+
+    async def test_resume_tools_reject_checkpoint_from_out_of_scope_session(self) -> None:  # [Hidden Assumption]
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                store, public, hr, bound, tool = await self._resume_fixture(tool_cls)
+                history_before = list(bound.agent.history)
+                foreign = store.head(hr.id).id
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": foreign}))
+                self.assertEqual(result.status.value, "error")
+                self.assertIn("does not belong", result.output)
+                self.assertEqual(bound.agent.history, history_before)
+
+    async def test_resume_tools_unknown_checkpoint_is_error_not_raised(self) -> None:  # [Edge Case]
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                _store, public, _hr, _bound, tool = await self._resume_fixture(tool_cls)
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": "missing"}))
+                self.assertEqual(result.status.value, "error")
+
+    async def test_resume_tools_accept_checkpoint_from_permitted_session(self) -> None:  # [Silent Failure]
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                store, public, _hr, bound, tool = await self._resume_fixture(tool_cls)
+                own = store.head(public.id).id
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": own}))
+                self.assertEqual(result.status.value, "success")
+                self.assertTrue(any("public notes" in str(message.content) for message in bound.agent.history))
 
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
