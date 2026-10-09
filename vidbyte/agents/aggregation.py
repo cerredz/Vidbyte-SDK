@@ -30,6 +30,7 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
@@ -303,7 +304,7 @@ class AggregateAgent(BaseAgent):
             system_prompt=spec.system_prompt or self.system_prompt,
             provider=spec.provider,
             model_name=spec.model,
-            api_key=self._proposer_api_key,
+            api_key=self._child_api_key(spec.provider),
             tools=self._proposer_tools,
             middleware=self._proposer_middleware,
             temperature=self._proposer_temperature,
@@ -321,9 +322,22 @@ class AggregateAgent(BaseAgent):
             system_prompt=system_prompt,
             provider=spec.provider,
             model_name=spec.model,
-            api_key=self._proposer_api_key,
+            api_key=self._child_api_key(spec.provider),
             tracer=self._tracer,
         )
+
+    def _child_api_key(self, child_provider: ModelProvider | str | None) -> str | None:
+        # @intent aggregate-key-never-crosses-providers
+        # The explicit key belongs to this agent's own provider. Sending it to a child on another
+        # vendor leaks the secret and fails auth; None lets that provider read its own env key.
+        # A key given without a provider cannot be attributed, so only a child naming no provider keeps it.
+        host, child = (
+            (value.value if isinstance(value, ModelProvider) else str(value)).strip().lower() if value is not None else None
+            for value in (self._proposer_provider_defaults[0], child_provider)
+        )
+        if child is not None and child != host:
+            return None
+        return self._proposer_api_key
 
     def _resolve_aggregator_spec(self) -> ProposerSpec:
         # Returns the explicit aggregator spec, or falls back to the host provider/model, erroring if neither resolves.
