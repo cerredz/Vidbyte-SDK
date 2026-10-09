@@ -5,7 +5,7 @@ from typing import Any, Mapping
 from vidbyte.lib.config import AudioModelConfig
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.http import HttpTransport
+from vidbyte.lib.http import SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse
 from vidbyte.providers import ModelProviders
 
@@ -13,12 +13,12 @@ from vidbyte.providers import ModelProviders
 class AudioModelRunner:
     """Semantic runner for text-to-speech and speech-to-text models."""
 
-    def __init__(self, config: AudioModelConfig | None = None, *, provider: ModelProvider | str | None = None, model: str | None = None, transport: HttpTransport | None = None, **config_options: Any) -> None:
+    def __init__(self, config: AudioModelConfig | None = None, *, provider: ModelProvider | str | None = None, model: str | None = None, transport: SyncHttpTransport | None = None, **config_options: Any) -> None:
         # Coerce config from kwargs if not supplied directly, then validate and build provider.
         config = self._coerce_config(config, provider=provider, model=model, config_options=config_options)
         config.validate()
         self._config = config
-        self._transport = transport or HttpTransport()
+        self._transport = transport or SyncHttpTransport()
         self._provider = ModelProviders.audio(config)
 
     def text_to_speech(self, text: str) -> AudioModelResponse:
