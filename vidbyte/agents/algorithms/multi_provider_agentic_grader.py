@@ -134,6 +134,9 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             metadata={**dict(metadata or {}), "context_window_algorithm": "multi_provider_agentic_grader", "grader_stage": "grade"},
             trace_context=trace_context,
         )
+        # The grader call is billed like a loop call, so it lands in the run's usage ledger.
+        if not isinstance(raw_result, AgentResult):
+            self.runtime.usage_tracker.record_call(raw_result)
         return raw_result
 
     def _select_winner(self, candidates: dict[str, str], raw_result: Any, handle: RunnerHandle) -> tuple[str, str]:
