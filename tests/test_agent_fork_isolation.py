@@ -4,6 +4,8 @@ import unittest
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from pydantic import BaseModel
+
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentLoopSettings, AgentMessage, BaseAgent, MinToolCalls, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.agents import AgentMetadata
@@ -15,8 +17,15 @@ from vidbyte.sessions import InMemorySessionStore
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool
 from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 from vidbyte.tools.builtins.sessions import CheckpointTool
-from vidbyte.tools.types import ToolCall
+from vidbyte.tools.base import _ToolWrapper, _unwrap_tool
+from vidbyte.tools.types import ToolActivity, ToolCall, ToolStatus
 from vidbyte.trace.continual import ActionTrace
+
+
+class _QueueActivity(BaseModel):
+    """Activity annotation used to wrap a bound builtin in a with_activity() view."""
+
+    reason: str
 
 
 class DoneRunner:
@@ -198,6 +207,37 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         await parent_tool.execute(_call("run_prompts_sequentially", prompts=["parent next"]))
         await child_tool.execute(_call("run_prompts_sequentially", prompts=["child next"]))
 
+        self.assertEqual(parent._queued_prompts, ["parent next"])
+        self.assertEqual(child._queued_prompts, ["child next"])
+
+    async def test_customized_run_prompts_sequentially_is_bound(self) -> None:
+        # @intent wrapped-builtin-binds-to-owner
+        # A customize() view must not hide the wrapped builtin from the owning agent's binding.
+        wrapped = RunPromptsSequentiallyTool().customize(description="Queue follow-up prompts (localized).")
+        agent = self._agent(tools=[wrapped])
+
+        result = await wrapped.execute(_call("run_prompts_sequentially", prompts=["next"]))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(agent._queued_prompts, ["next"])
+
+    async def test_fork_clones_customized_bound_tool(self) -> None:
+        # @intent fork-clones-wrapped-builtin
+        # A fork must clone the tool inside a customize()/with_activity() view and bind the copy to the child.
+        description = "Queue follow-up prompts (localized)."
+        parent_tool = RunPromptsSequentiallyTool().customize(description=description).with_activity(
+            ToolActivity(schema=_QueueActivity, description="Why you are queuing.")
+        )
+        parent = self._agent(tools=[parent_tool])
+        child = parent.fork(AgentForkSettings(name="child"))
+        child_tool = _tool_of_type(child, _ToolWrapper)
+
+        self.assertIsNot(child_tool, parent_tool)
+        self.assertIsNot(_unwrap_tool(child_tool), _unwrap_tool(parent_tool))
+        self.assertEqual(child_tool.spec().description, description)
+        self.assertEqual(child_tool.spec().activity, parent_tool.spec().activity)
+        await _unwrap_tool(parent_tool).execute(_call("run_prompts_sequentially", prompts=["parent next"]))
+        await _unwrap_tool(child_tool).execute(_call("run_prompts_sequentially", prompts=["child next"]))
         self.assertEqual(parent._queued_prompts, ["parent next"])
         self.assertEqual(child._queued_prompts, ["child next"])
 

@@ -162,6 +162,10 @@ class _ActivityBoundTool(_ToolWrapper):
         """Return the tool this binding delegates every contract to."""
         return self._tool
 
+    def _rewrap(self, tool: BaseTool) -> BaseTool:
+        # Reuses the same activity declaration around another copy of the same tool, such as a fork clone.
+        return _ActivityBoundTool(tool, self._activity)
+
     def spec(self) -> ToolSpec:
         """Return the wrapped spec with the activity declaration attached."""
         return replace(self._tool.spec(), activity=self._activity)
