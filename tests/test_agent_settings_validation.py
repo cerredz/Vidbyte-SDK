@@ -338,7 +338,27 @@ class AgentKwargsTests(unittest.TestCase):
 
         for key in ("max_tool_rounds", "output_schema", "agent_metadata", "trace_option", "context_items"):
             self.assertIn(key, kwargs)
-        self.assertEqual(kwargs["max_tool_rounds"], 4)
+        self.assertEqual(kwargs["agent_loop_settings"].max_iterations, 4)
+        self.assertIsNone(kwargs["max_tool_rounds"])
+
+    def test_builds_an_agent_from_a_document_with_max_tool_rounds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent.yaml"
+            path.write_text("type: base\nname: support\nsystem_prompt: Help.\nprovider: deepseek\nmodel_name: deepseek-v4-flash\nmax_tool_rounds: 3\n", encoding="utf-8")
+            loader = YamlLoader()
+            settings = loader.load_agent(path)
+            first, second = loader.build_agent(settings), loader.build_agent(settings)
+
+        for agent in (first, second):
+            self.assertEqual(agent.agent_loop_settings.max_iterations, 3)
+            self.assertEqual(agent.max_tool_rounds, 3)
+
+    def test_rejects_max_tool_rounds_that_conflicts_with_the_loop(self) -> None:
+        self.assertEqual(build(max_tool_rounds=5, loop={"max_iterations": 5}).loop.max_iterations, 5)
+        with self.assertRaises(ConfigurationError) as ctx:
+            build(max_tool_rounds=5, loop={"max_iterations": 7})
+
+        self.assertEqual(ctx.exception.details["field"], "agent.max_tool_rounds")
 
     def test_does_not_alias_the_caller_output_schema(self) -> None:
         schema = {"type": "object", "properties": {}}
