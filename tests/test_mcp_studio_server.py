@@ -16,8 +16,11 @@ Relations:
 
 from __future__ import annotations
 
+import io
 import json
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import BaseAgent
@@ -25,6 +28,7 @@ from vidbyte.mcp_server import McpStudioServer
 from vidbyte.mcp_server.server import (
     JSONRPC_METHOD_NOT_FOUND,
 )
+from vidbyte.mcp_server.server import core as server_core
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 
@@ -214,6 +218,65 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(server._shutdown)
         await server.close()
         self.assertTrue(server._shutdown)
+
+    async def test_run_reads_stdin_in_thread_on_windows(self) -> None:
+        request = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}},
+        }
+        stdin = io.BytesIO(b"\n" + json.dumps(request).encode("utf-8") + b"\n")
+        stdout = io.BytesIO()
+        fake_sys = SimpleNamespace(
+            platform="win32",
+            stdin=SimpleNamespace(buffer=stdin),
+            stdout=SimpleNamespace(buffer=stdout),
+        )
+        with mock.patch.object(server_core, "sys", fake_sys):
+            server = McpStudioServer()
+            self.assertIsInstance(await server._connect_stdin(), server_core._ThreadLineReader)
+            await server.run()
+        lines = stdout.getvalue().decode("utf-8").splitlines()
+        self.assertEqual(len(lines), 1)
+        response = json.loads(lines[0])
+        self.assertEqual(response["id"], 7)
+        self.assertEqual(response["result"]["serverInfo"]["name"], "vidbyte-sdk-studio")
+
+    async def test_ping_returns_empty_result(self) -> None:
+        response = await self._dispatch(McpStudioServer(), "ping", request_id=9)
+        self.assertEqual(response, {"jsonrpc": "2.0", "id": 9, "result": {}})
+
+    async def test_builtin_prompts_are_exposed(self) -> None:
+        server = McpStudioServer()
+        listed = await self._dispatch(server, "tools/call", {"name": "studio.prompts.list", "arguments": {}})
+        families = json.loads(listed["result"]["content"][0]["text"])
+        self.assertTrue(families.get("strategy"))
+        key = families["strategy"][0]
+        fetched = await self._dispatch(server, "tools/call", {"name": "studio.prompts.get", "arguments": {"name": key}})
+        content = json.loads(fetched["result"]["content"][0]["text"])
+        self.assertTrue(content["found"])
+        self.assertTrue(content["content"])
+
+    async def test_caller_prompt_content_overrides_builtin(self) -> None:
+        key = next(iter(McpStudioServer()._tool_registry._prompt_content))
+        server = McpStudioServer(prompt_content={key: "caller text"})
+        response = await self._dispatch(server, "prompts/get", {"name": key})
+        self.assertIn("caller text", json.dumps(response))
+
+    async def test_studio_tools_advertise_their_arguments(self) -> None:
+        response = await self._dispatch(McpStudioServer(), "tools/list")
+        schemas = {tool["name"]: tool["inputSchema"] for tool in response["result"]["tools"]}
+        expected = {
+            "studio.agents.list": ({"filter_name"}, []),
+            "studio.agents.run": ({"agent_name", "prompt"}, ["agent_name", "prompt"]),
+            "studio.strategies.run": ({"strategy_name", "prompt"}, ["strategy_name"]),
+            "studio.prompts.list": ({"family"}, []),
+            "studio.prompts.get": ({"name"}, ["name"]),
+        }
+        for name, (properties, required) in expected.items():
+            self.assertEqual(set(schemas[name]["properties"]), properties, name)
+            self.assertEqual(schemas[name].get("required", []), required, name)
 
 
 if __name__ == "__main__":

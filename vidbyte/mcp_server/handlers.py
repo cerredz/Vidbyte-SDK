@@ -24,7 +24,7 @@ from vidbyte.agents.types import AgentCard
 from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class StudioToolRegistry:
@@ -90,7 +90,9 @@ class StudioAgentsListTool(BaseTool):
         return ToolSpec(
             name="studio.agents.list",
             description="List all registered agents and their capabilities.",
-            parameters=(),
+            parameters=(
+                ToolParameter("filter_name", "string", "Only list agents whose name contains this text.", required=False),
+            ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
         )
@@ -120,7 +122,10 @@ class StudioAgentsRunTool(BaseTool):
         return ToolSpec(
             name="studio.agents.run",
             description="Run a named agent with a prompt and return its response.",
-            parameters=(),
+            parameters=(
+                ToolParameter("agent_name", "string", "Name of the agent to run."),
+                ToolParameter("prompt", "string", "Input message for the agent."),
+            ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
         )
@@ -183,7 +188,10 @@ class StudioStrategiesRunTool(BaseTool):
         return ToolSpec(
             name="studio.strategies.run",
             description="Run a named strategy with a prompt (placeholder).",
-            parameters=(),
+            parameters=(
+                ToolParameter("strategy_name", "string", "Name of the strategy to run."),
+                ToolParameter("prompt", "string", "Input text for the strategy.", required=False),
+            ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
         )
@@ -209,7 +217,9 @@ class StudioPromptsListTool(BaseTool):
         return ToolSpec(
             name="studio.prompts.list",
             description="List available prompt templates grouped by family.",
-            parameters=(),
+            parameters=(
+                ToolParameter("family", "string", "Only list prompts in this family.", required=False),
+            ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
         )
@@ -232,7 +242,9 @@ class StudioPromptsGetTool(BaseTool):
         return ToolSpec(
             name="studio.prompts.get",
             description="Get the content of a named prompt template.",
-            parameters=(),
+            parameters=(
+                ToolParameter("name", "string", "Key of the prompt to fetch."),
+            ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
         )
