@@ -11,7 +11,10 @@ from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
+from vidbyte.sessions import InMemorySessionStore
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+from vidbyte.tools.builtins.sessions import CheckpointTool
 from vidbyte.tools.types import ToolCall
 from vidbyte.trace.continual import ActionTrace
 
@@ -182,6 +185,40 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(child_prompt, "child prompt")
         self.assertEqual(parent_history[0].content, "parent history")
         self.assertEqual(child_history[0].content, "child history")
+
+    async def test_fork_clones_run_prompts_sequentially_binding(self) -> None:
+        # @intent fork-keeps-parent-prompt-queue
+        # The parent's run_prompts_sequentially tool must keep queuing on the parent after a fork.
+        parent_tool = RunPromptsSequentiallyTool()
+        parent = self._agent(tools=[parent_tool])
+        child = parent.fork(AgentForkSettings(name="child"))
+        child_tool = _tool_of_type(child, RunPromptsSequentiallyTool)
+
+        self.assertIsNot(parent_tool, child_tool)
+        await parent_tool.execute(_call("run_prompts_sequentially", prompts=["parent next"]))
+        await child_tool.execute(_call("run_prompts_sequentially", prompts=["child next"]))
+
+        self.assertEqual(parent._queued_prompts, ["parent next"])
+        self.assertEqual(child._queued_prompts, ["child next"])
+
+    async def test_fork_clones_session_tool_binding_and_scope(self) -> None:
+        # @intent fork-keeps-parent-session-tool-binding
+        # After fork + child.persist(), the parent's session tool must stay on the parent's session and scope.
+        store = InMemorySessionStore()
+        parent_tool = CheckpointTool(store)
+        parent = self._agent(tools=[parent_tool])
+        parent_session = parent.persist(store=store)
+        child = parent.fork(AgentForkSettings(name="child"))
+        child_session = child.persist(store=store)
+        child_tool = _tool_of_type(child, CheckpointTool)
+
+        self.assertIsNot(parent_tool, child_tool)
+        self.assertIsNot(parent_tool._scope, child_tool._scope)
+        self.assertIs(parent_tool._session, parent_session)
+        self.assertIs(child_tool._session, child_session)
+        self.assertFalse(parent_tool._scope.permits(child_session.id))
+        result = await parent_tool.execute(_call("checkpoint", label="parent"))
+        self.assertEqual(store.get(result.output.strip()).session_id, parent_session.id)
 
     def test_fork_preserves_pending_mcp_configs(self) -> None:
         # Lazy MCP configs should be copied to child pending configs without live handles.
