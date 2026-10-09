@@ -71,9 +71,10 @@ class ContextCompactionEngine:
         for message in messages:
             raw = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
             raw = raw if isinstance(raw, Mapping) else {}
-            blocks = [b for b in (raw.get("content") if isinstance(raw.get("content"), list) else ()) if isinstance(b, Mapping)]
-            parts = raw.get("parts") if isinstance(raw.get("parts"), list) else ()
-            calls = raw.get("tool_calls") if isinstance(raw.get("tool_calls"), list) else []
+            content, raw_parts, raw_calls = raw.get("content"), raw.get("parts"), raw.get("tool_calls")
+            blocks = [b for b in content if isinstance(b, Mapping)] if isinstance(content, list) else []
+            parts = raw_parts if isinstance(raw_parts, list) else []
+            calls = raw_calls if isinstance(raw_calls, list) else []
             if message.kind == "tool_result":
                 role, ids = "result", ([raw.get("tool_call_id")] if "tool_call_id" in raw else [b.get("tool_use_id") for b in blocks if b.get("type") == "tool_result"])
             elif calls or any(b.get("type") == "tool_use" for b in blocks) or any(isinstance(p, Mapping) and ("functionCall" in p or "function_call" in p) for p in parts):
@@ -89,9 +90,10 @@ class ContextCompactionEngine:
         call_at: int | None = None
         wanted: frozenset[str] | None = None
         answered: set[str] = set()
-        for message, (role, ids) in [*zip(messages, tags), (None, (None, None))]:
+        steps: list[tuple[ContextMessage | None, tuple[str | None, frozenset[str] | None]]] = [*zip(messages, tags, strict=True), (None, (None, None))]
+        for message, (role, ids) in steps:
             if role == "result":
-                if call_at is not None and (wanted is None or ids is None or ids <= wanted - answered):
+                if message is not None and call_at is not None and (wanted is None or ids is None or ids <= wanted - answered):
                     kept.append(message)
                     answered |= ids or set()
                 continue
