@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import json
 from collections.abc import Callable
@@ -150,7 +151,17 @@ def _stringify_output(value: object) -> str:
     if isinstance(value, str):
         return value
     try:
-        return json.dumps(value, default=str, sort_keys=True)
+        return json.dumps(value, default=_json_default, sort_keys=True)
     except TypeError:
         return str(value)
+
+
+def _json_default(value: object) -> object:
+    # @intent tool-model-output-is-json
+    # Models and dataclass instances become JSON objects so output_schema validation sees fields, not a repr string.
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return dataclasses.asdict(value)
+    return str(value)
 
