@@ -17,7 +17,29 @@ from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.lib.registries.tools import ToolRegistry
-from vidbyte.tools.types import ToolCall, ToolStatus
+from vidbyte.tools import BaseTool, ToolParameter, Tools, ToolSpec
+from vidbyte.tools.types import ToolCall, ToolResult, ToolStatus
+
+
+class RecordingSearchTool(BaseTool):
+    """Small tool that records the arguments it executes with."""
+
+    def __init__(self) -> None:
+        self.received: list[dict] = []
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="search_orders",
+            description="Search orders.",
+            parameters=(
+                ToolParameter("query", "string", "Search text."),
+                ToolParameter("filters", "object", "Optional filters.", required=False),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.received.append(dict(call.arguments))
+        return ToolResult.success(self.name, "ok")
 
 
 class TestTools(unittest.IsolatedAsyncioTestCase):
@@ -101,6 +123,20 @@ class TestTools(unittest.IsolatedAsyncioTestCase):
         res_malformed = await self.executor.execute(malformed_args_block)
         self.assertEqual(res_malformed.status, ToolStatus.ERROR)
         self.assertIn("Missing required parameters", res_malformed.output)
+
+    async def test_tool_executor_parser_keeps_nested_action_input(self) -> None:
+        """Nested JSON objects and trailing text after Action Input parse intact."""
+        tool = RecordingSearchTool()
+        executor = ToolExecutor(Tools([tool]))
+        text_block = 'Thought: need data\nAction: search_orders\nAction Input: {"query": "late {}", "filters": {"region": "EMEA", "days": 7}}\nObservation: pending'
+
+        res = await executor.execute(text_block)
+
+        self.assertEqual(res.status, ToolStatus.SUCCESS)
+        self.assertEqual(
+            tool.received,
+            [{"query": "late {}", "filters": {"region": "EMEA", "days": 7}}],
+        )
 
 
 class TestCodeExecutionSafeEval(unittest.IsolatedAsyncioTestCase):
