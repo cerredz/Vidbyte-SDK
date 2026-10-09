@@ -47,8 +47,10 @@ from vidbyte.evals import (
     MultipleChoiceTemplate,
     NumericAnswerTemplate,
     NumericMatchGrader,
+    PredicateGrader,
     RegexMatchGrader,
     RubricGrader,
+    RunProbe,
     SafeCustomerSupportTemplate,
     ShortAnswerFactTemplate,
     StructuredJsonTemplate,
@@ -248,6 +250,48 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
             AllOfGrader([])
         with self.assertRaises(ValueError):
             WeightedGrader([(ContainsGrader(), 0.0)])
+
+    async def test_composite_graders_forward_probe_to_predicate_children(self) -> None:
+        # Tests that all-of, any-of, weighted, and nested composites hand the run probe to behavior children.
+        # @intent composite-graders-forward-run-probe
+        case = EvalCase(prompt="t", expected="Paris")
+        probe = RunProbe(tool_calls=())
+        saw_probe = PredicateGrader(lambda p: p is probe, name="saw_probe")
+
+        res_all = await AllOfGrader([ContainsGrader(), saw_probe]).agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_all.passed)
+        self.assertEqual(res_all.score, 1.0)
+
+        res_any = await AnyOfGrader([saw_probe]).agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_any.passed)
+        self.assertEqual(res_any.score, 1.0)
+
+        weighted = WeightedGrader([(ContainsGrader(), 1.0), (saw_probe, 1.0)])
+        res_weighted = await weighted.agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_weighted.passed)
+        self.assertEqual(res_weighted.score, 1.0)
+
+        nested = AllOfGrader([ContainsGrader(), AnyOfGrader([WeightedGrader([(saw_probe, 1.0)], threshold=1.0)])])
+        res_nested = await nested.agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_nested.passed)
+        self.assertEqual(res_nested.score, 1.0)
+
+    async def test_composite_graders_without_probe_are_unchanged(self) -> None:
+        # Tests that plain agrade still grades text children and leaves behavior children failing for lack of a probe.
+        # @intent composite-agrade-without-probe-unchanged
+        case = EvalCase(prompt="t", expected="Paris")
+        needs_probe = PredicateGrader(lambda p: True, name="needs_probe")
+
+        res_all = await AllOfGrader([ContainsGrader(), needs_probe]).agrade(case, "Paris")
+        self.assertFalse(res_all.passed)
+        self.assertAlmostEqual(res_all.score, 0.5)
+
+        res_weighted = await WeightedGrader([(ContainsGrader(), 1.0), (needs_probe, 1.0)]).agrade(case, "Paris")
+        self.assertAlmostEqual(res_weighted.score, 0.5)
+
+        res_any = await AnyOfGrader([ExactMatchGrader(), ContainsGrader()]).agrade_with_probe(case, "The answer is Paris.", None)
+        self.assertTrue(res_any.passed)
+        self.assertEqual(res_any.score, 1.0)
 
     async def test_supporting_deterministic_graders(self) -> None:
         # Tests deterministic graders used by prebuilt template bundles.
