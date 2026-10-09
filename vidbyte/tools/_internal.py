@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
@@ -29,7 +32,12 @@ class IsDoneTool(BaseTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        output = str(call.arguments.get("final_answer") or call.arguments.get("answer") or "Done.")
+        # Read the final answer, accepting the older "answer" alias, and fall back to "Done." when neither is given.
+        answer = call.arguments.get("final_answer") or call.arguments.get("answer") or "Done."
+        # @intent isdone-structured-answer-stays-json
+        # Models often send a structured answer as a JSON object or array instead of an encoded string;
+        # keep it as JSON text (not a Python repr) so output-schema parsing and callers can read it.
+        output = json.dumps(answer, ensure_ascii=False) if isinstance(answer, (Mapping, list)) else str(answer)
         return ToolResult.success(IS_DONE_TOOL_NAME, output, metadata={"done": True})
 
 
