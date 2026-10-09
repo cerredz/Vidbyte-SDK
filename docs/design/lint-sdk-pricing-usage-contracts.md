@@ -15,7 +15,7 @@ This PR adds four static AST rules to the SDK lint suite. None of them depends o
   - every public entry class that defines `async def arun` must also offer a synchronous `run()` with the same parameters.
 - **C012 `provider-model-registry-validation`** (catalog C033). A provider or model field on a configuration record must be checked against `ModelProvider` / `ProviderModelRegistry` when the record is built. A provider field that is already validated must be typed `ModelProvider`, not bare `str`.
 
-The rules only read source; they never import `vidbyte`. Existing debt is frozen at its measured count: C009 = 1, C010 = 0, C011 = 2, C012 = 28. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real gaps the rules surface are listed under "Product findings for follow-up" in the PR body.
+The rules only read source; they never import `vidbyte`. Existing debt is frozen at its measured count: C009 = 1, C010 = 0, C011 = 2, C012 = 24. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real gaps the rules surface are listed under "Product findings for follow-up" in the PR body.
 
 ## Flow chart
 
@@ -54,8 +54,10 @@ flowchart TD
 
     C012 --> R1[Owners: *Settings/*Config/*Configuration/*Spec/*Descriptor/*Options + records they embed]
     R1 --> R2[provider / *_provider and model / model_name / models / *_model fields]
-    R2 --> R3{Proof in any method: ModelProvider x, registry validate call, catalog membership, hand-off to a validating helper or config class}
-    R3 -->|no proof| F12[Finding: unvalidated-provider / unvalidated-model]
+    R2 --> X12{Exact exempt field? Codex vocabulary or custom-endpoint adapter model}
+    X12 -->|yes| OK12x[No finding]
+    X12 -->|no| R3{Proof reached from __init__/__post_init__/validator: ModelProvider x, registry validate call, catalog membership, hand-off}
+    R3 -->|no proof, or only in a lazily called method| F12[Finding: unvalidated-provider / unvalidated-model]
     R3 -->|provider proven but typed bare str| F12b[Finding: string-typed-provider]
     R3 -->|proven, typed ModelProvider or a ModelProvider-or-str union left to C028| OK12[No finding]
 
@@ -231,7 +233,7 @@ The implementation plan pre-assigns C009–C012 to this PR, and S1 owns C006–C
   - Records those owners embed, through a class-body annotation or an `__init__` parameter annotation, for example `FallbackModel` inside `AgentFallbackSettings`. An embedded record is a dataclass or a plain class with no public methods, and `type[...]` annotations do not embed.
   - Pydantic, Enum, TypedDict, Protocol, and NamedTuple classes are skipped.
 - **Fields.** Provider fields are `provider` and `*_provider`. Model fields are `model`, `model_name`, `models`, `*_model`, and `*_model_name`. Both dataclass fields and plain `__init__` parameters count.
-- **Proofs** (any method of the owner counts, because `__post_init__` often delegates to `_validate_*` helpers):
+- **Proofs** (in a method that runs at construction; see Reachability):
   - `ModelProvider(x)`;
   - a `ProviderModelRegistry` validating call (`validate_provider`, `validate_model`, `validate_provider_model_pair`, `normalize_model`, `resolve_api_key`, ...);
   - a membership test against a registry catalog (`known_models()`, `models_for_provider()`, ...);
@@ -239,10 +241,29 @@ The implementation plan pre-assigns C009–C012 to this PR, and S1 owns C006–C
   - `getattr(self, name)` sweeps over field tuples, `x = self.f` aliases, import aliases, and pydantic validators are followed.
 
   A non-empty check is not a proof, and neither is a bare `isinstance` branch.
+- **Reachability.** A proof counts only in a method that runs when the record is built.
+  - The roots are `__init__`, `__post_init__`, and pydantic validators (`field_validator`, `validator`, `model_validator`, `root_validator`).
+  - From the roots, the rule follows same-class calls through `self.`, `cls.`, or the owner's own name, and reads of same-class `@property` / `@cached_property` members, transitively. `__post_init__` therefore still counts when it delegates to `_validate_*` helpers.
+  - A method construction never reaches does not count, because a bad record then exists until a caller happens to run it. Examples are a public `validate()`, a `normalized_provider()` that only `resolved_api_key()` calls, a `build()` hand-off, or a bound method stored as a callback.
+  - That method's name goes into the diagnostic, with the one-line fix of calling it from `__post_init__`.
+  - The repair's home is a `_validate`/`validate` that construction already runs, else the existing `__post_init__`/`__init__`. Otherwise the diagnostic says to add a new one. A `validate()` that nothing calls at construction is never named as the home.
 - **Typing.** A field typed exactly `ModelProvider` is trusted to its type. A proven provider annotated `str` or `str | None` is reported as `string-typed-provider`, with the repair "coerce, then type it `ModelProvider`". A proven `ModelProvider | str` field is left to C028 `enum-str-union-fields`, which owns union typing.
-- **Precise exemption.** `_EXEMPT_FIELDS` lists exactly four Codex fields: `CodexThreadSettings.model_provider` and `.model`, `CodexTurnSettings.model`, and `CodexSubagentSettings.default_model`. Their vocabulary is the user's Codex config `model_providers` table, custom providers included, and `vidbyte/agents/codex/metrics.py` records nothing for a custom provider. Every other field in `codex.py` is still checked, and the fixtures prove it.
-- **What is deliberately out of scope**, from an inventory of all 121 provider-named `str` parameters and fields:
-  - 35 method parameters of non-configuration classes;
+- **Precise exemptions.** `_EXEMPT_FIELDS` names exact `(module, class, field)` triples, each with its cited resolution path. Nothing is exempted by module or by class.
+  - **Codex CLI vocabulary (7 fields).**
+    - `CodexThreadSettings.model_provider` and `.model`, `CodexTurnSettings.model`, and `CodexSubagentSettings.default_model`. Their vocabulary is the user's Codex config `model_providers` table, custom providers included, and `vidbyte/agents/codex/metrics.py` records nothing for a custom provider.
+    - `AgentFallbackSettings.models` (`vidbyte/agents/settings/fallback.py`), and `FallbackModel.provider` and `.model` (`vidbyte/lib/dataclasses/agents.py`). The Codex harness reuses the fallback chain: `CodexFallbackCoordinator.build` (`vidbyte/agents/codex/fallback.py:58`) calls `settings.fallback.to_fallback(primary=...)`. The primary is `FallbackModel(provider=codex.thread.model_provider or CODEX_USAGE_PROVIDER, ...)` (`:122-123`), which may be a custom Codex provider, and a bare chain entry inherits that provider in `AgentFallbackSettings._resolve_entry`. On the plain-agent path a bare entry's provider is also unknown until `resolved_models(primary=...)` runs, so the settings cannot check it when they are built.
+  - **Custom-endpoint request adapters (6 fields).** `TextModelConfig`, `ImageModelConfig`, `VideoModelConfig`, `AudioModelConfig`, `EmbeddingModelConfig`, and `DecisionModelConfig` `.model` in `vidbyte/lib/dataclasses/model_configs.py`.
+    - Each `resolved_endpoint()` prefers a caller endpoint "for tests, proxies, and compatible APIs" (`model_configs.py:89`, `:158`, `:206`, `:271`, `:322`). `ProviderModelRegistry.resolve_endpoint` returns it verbatim (`models.py:164-168`).
+    - Direct TypeSafe mode keeps "Direct TypeSafe proxies" configurable (`model_configs.py:412-416`; `docs/design/jev-managed-gateway-credentials.md:324`, "a compatible custom endpoint").
+    - No runner validates the model either: `vidbyte/lib/runners/*` call only `config.validate()`, which checks shape and resolves the API key.
+    - A registry check here would reject the proxy and self-hosted models the adapters exist to reach. The agent-facing records that feed these adapters (`AgentDescriptor`, `AgentSettings`, YAML config) still validate their model names.
+  - **How the adapter exemption and reachability interact.** The exemption covers the `model` field only, and the exempt field is never judged. The sibling `provider` fields are not exempt, because even a custom endpoint is reached through a `ModelProvider` adapter: `resolve_endpoint(self.normalized_provider(), self.endpoint)`, and `normalized_provider()` raises for any non-enum value. A construction-time provider check therefore rejects nothing legitimate.
+    - The provider fields are judged under the reachability rule. `DecisionModelConfig.__post_init__` calls `normalized_provider()`, so its provider is proven.
+    - The other five configs call `normalized_provider()` only from `validate()` / `resolved_*()`, so their providers are reported as `unvalidated-provider`, and the diagnostic names `normalized_provider` as the unreached check.
+    - The fixtures prove both directions: an exempt model is not reported while its provider is, and the same class name in another module is not exempt.
+  - Every other field in these modules is still checked.
+- **What is deliberately out of scope**, from an inventory of all 123 provider-named `str` parameters and fields:
+  - 36 method parameters of non-configuration classes;
   - 20 at the provider and runner adapter boundary (`vidbyte/providers/`, `vidbyte/lib/runners/`);
   - 19 in the registry and pricebook adapters themselves;
   - 15 non-configuration records;
@@ -259,7 +280,7 @@ The implementation plan pre-assigns C009–C012 to this PR, and S1 owns C006–C
   - `lint/rules/c012_provider_model_registry_validation.py`.
 - `lint/pricebook_vintage_lock.json`: C010's lock. It was bootstrapped with `--refresh-lock` on this tree (model 2026-07-30, 41 entries; operation 2026-08-08, 73 entries).
 - `lint/core/registry.py`: four appended `RULE_MODULES` entries.
-- `lint/baseline.json`: C009 = 1, C010 = 0, C011 = 2, C012 = 28, each seeded with `--update-baseline --rule <ID>`.
+- `lint/baseline.json`: C009 = 1, C010 = 0, C011 = 2, C012 = 24, each seeded with `--update-baseline --rule <ID>`.
 - `lint/README.md`: four C-series catalogue rows, a File Index line for the lock, and a count-free Responsibilities line (the same wording as S1).
 - `lint/rules/README.md`: four File Index lines.
 - `docs/design/lint-sdk-pricing-usage-contracts.md`: this document.
@@ -273,16 +294,18 @@ The SDK lint design (`docs/design/sdk-agent-facing-lint-suite.md`, "No new featu
 - **The C010 lock freezes today's state.** The model vintage already misidentifies the TypeSafe rates added after 2026-07-30 (PR #438). The lock records the tree as it is, and the fix (re-verify and move `PRICING_AS_OF`) is listed as a product finding, not made here.
 - **C011 can under-report.** Model calls through receivers outside the handle/runner name grammar, and calls splatting `**kwargs` into a tracked runtime, are not judged. The eval graders (`vidbyte/evals/graders/llm_judge.py:78`, `rubric.py:88`) call runners directly with no usage recording, outside the agent and middleware scope. They are listed as a product observation. Whether evals should be agent-owned is an open question.
 - **C011 masking.** One count covers both families; see "Why one ID".
-- **C012 trusts hand-offs.** Passing a field to another configuration class or a validating helper counts as proof, and that class is judged on its own.
+- **C012 trusts hand-offs.** Passing a field to another configuration class or a validating helper counts as proof when construction reaches the hand-off, and that class is judged on its own.
+- **C012 reachability is intra-class.** Calls through `self.`, `cls.`, or the owner's name, and property reads, are followed. An inherited `__post_init__` and dynamic dispatch (`getattr(self, name)()`) are not. A proof that is reached only that way is reported, and the diagnostic names the method holding it, so the repair stays one line. None of the 24 findings on `main` is of that kind.
+- **C012 exemptions are data.** Each `_EXEMPT_FIELDS` entry is one field with its cited resolution path. If the Codex harness stops reusing `AgentFallbackSettings`, or the model configs stop accepting custom endpoints, the matching entries should be removed in the same change.
 - **C012 versus S014 and C028.** S014 checks enum-registry-runner parity, so C012's verify command runs both. A `ModelProvider | str` field is C028's to type.
-- **Report truncation.** The text report prints the first 20 findings of a rule in path order. C012 has 28, so a regression late in path order shows its verdict line (`C012 REGRESSED: 29 finding(s), allowance 28.`), but its diagnostic appears only with `--all`. This is existing lint-core behavior, and this PR does not change it.
+- **Report truncation.** The text report prints the first 20 findings of a rule in path order. C012 has 24, so a regression late in path order shows its verdict line (`C012 REGRESSED: 25 finding(s), allowance 24.`), but its diagnostic appears only with `--all`. This is existing lint-core behavior, and this PR does not change it.
 
 ## Verification plan
 
-- Run `python lint/run.py --rule C009|C010|C011|C012 --format json` on the tree and classify every finding by hand: 1, 0, 2, and 28 findings, all true positives.
+- Run `python lint/run.py --rule C009|C010|C011|C012 --format json` on the tree and classify every finding by hand: 1, 0, 2, and 24 findings, all true positives. Classify every finding the C012 reachability and exemption change added or removed.
 - For C010, prove the zero-finding rule on a real file: change one `gpt-5.6-sol` rate, confirm REGRESSED, move the vintage and confirm `lock-not-refreshed`, refresh and confirm CLEAN, then revert both files.
 - Run a scratch fixture self-test per rule. Correct code must give 0 findings, each kind must give exactly the expected findings, and every diagnostic must render all six fields with numbered steps, at least two will-not-work entries including the baseline, and no empty-list prose.
-- Run scratch mutation tests: 9 mutants for C009, 7 for C010, 11 for C011, and 11 for C012, each of which must make the self-test fail.
+- Run scratch mutation tests: 9 mutants for C009, 7 for C010, 11 for C011, and 25 for C012, each of which must make the self-test fail.
 - Simulate an agent regression for each rule in a real file, confirm REGRESSED and a readable message, then revert.
 - Run `ruff check --config lint/ruff.toml` and `mypy --strict` on the four modules.
 - Run the full gate: `python -m pip install -e ".[dev]"` into the lane venv, then `python scripts/run_ci.py`.
