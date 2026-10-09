@@ -929,6 +929,100 @@ class TracerBaseContractTests(unittest.TestCase):
         self.assertIsInstance(tracer.spans_ended[0]["error"], asyncio.CancelledError)
 
 
+# ---------------------------------------------------------------------------
+# Phoenix error span status
+# ---------------------------------------------------------------------------
+
+class FakeOtelSpan:
+    """Stands in for an OpenTelemetry span and records status changes."""
+
+    def __init__(self) -> None:
+        self.statuses: list[Any] = []
+        self.exceptions: list[BaseException] = []
+        self.ended = False
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        pass
+
+    def record_exception(self, error: BaseException) -> None:
+        self.exceptions.append(error)
+
+    def set_status(self, status: Any) -> None:
+        self.statuses.append(status)
+
+    def end(self) -> None:
+        self.ended = True
+
+
+class PhoenixErrorStatusTests(unittest.TestCase):
+    def _tracer(self) -> Any:
+        # Builds a PhoenixTracer without OpenTelemetry installed, using a fake trace module.
+        from vidbyte.providers.tracing.phoenix import PhoenixTracer
+        tracer = PhoenixTracer.__new__(PhoenixTracer)
+        tracer._trace_module = types.SimpleNamespace(
+            Status=lambda code, description=None: (code, description),
+            StatusCode=types.SimpleNamespace(ERROR="ERROR"),
+        )
+        return tracer
+
+    def test_end_span_with_error_sets_error_status(self) -> None:
+        # [Silent Failure] A failed provider call must not look successful in Phoenix.
+        from vidbyte.providers.tracing.phoenix import PhoenixSpanContext
+        span = FakeOtelSpan()
+        self._tracer().end_span(PhoenixSpanContext(span=span), error=RuntimeError("HTTP 400"))
+        self.assertEqual(span.statuses, [("ERROR", "HTTP 400")])
+        self.assertEqual(len(span.exceptions), 1)
+        self.assertTrue(span.ended)
+
+    def test_end_trace_with_error_sets_error_status(self) -> None:
+        # [Silent Failure] A failed agent run must not look successful in Phoenix.
+        from vidbyte.providers.tracing.phoenix import PhoenixSpanContext
+        span = FakeOtelSpan()
+        self._tracer().end_trace(PhoenixSpanContext(span=span), error=RuntimeError("run failed"))
+        self.assertEqual(span.statuses, [("ERROR", "run failed")])
+        self.assertTrue(span.ended)
+
+    def test_end_span_with_output_leaves_status_unset(self) -> None:
+        # [Edge Case] Successful spans keep the default UNSET status.
+        from vidbyte.providers.tracing.phoenix import PhoenixSpanContext
+        span = FakeOtelSpan()
+        self._tracer().end_span(PhoenixSpanContext(span=span), output="ok")
+        self.assertEqual(span.statuses, [])
+        self.assertTrue(span.ended)
+
+
+def _otel_sdk_available() -> bool:
+    try:
+        import opentelemetry.exporter.otlp.proto.http.trace_exporter  # noqa: F401
+        import opentelemetry.sdk.trace.export.in_memory_span_exporter  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@unittest.skipUnless(_otel_sdk_available(), "opentelemetry-sdk is not installed")
+class PhoenixErrorStatusOtelTests(unittest.TestCase):
+    def test_real_spans_record_error_status(self) -> None:
+        # [Silent Failure] With the real OpenTelemetry SDK, failed spans finish with status ERROR.
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+        from opentelemetry.trace import StatusCode
+        from vidbyte.providers.tracing.phoenix import PhoenixTracer
+        exporter = InMemorySpanExporter()
+        target = "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter"
+        with patch(target, return_value=exporter):
+            tracer = PhoenixTracer()
+        root = tracer.start_trace("agent.run")
+        tracer.end_span(tracer.start_span("llm.call", parent=root), error=RuntimeError("HTTP 400"))
+        tracer.end_span(tracer.start_span("llm.ok", parent=root), output="fine")
+        tracer.end_trace(root, error=RuntimeError("run failed"))
+        statuses = {span.name: span.status for span in exporter.get_finished_spans()}
+        self.assertEqual(statuses["llm.call"].status_code, StatusCode.ERROR)
+        self.assertEqual(statuses["llm.call"].description, "HTTP 400")
+        self.assertEqual(statuses["agent.run"].status_code, StatusCode.ERROR)
+        self.assertEqual(statuses["agent.run"].description, "run failed")
+        self.assertEqual(statuses["llm.ok"].status_code, StatusCode.UNSET)
+
+
 if __name__ == "__main__":
     unittest.main()
 
