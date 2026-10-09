@@ -240,6 +240,17 @@ class CreateHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("handoff:2", listing.output)
         self.assertIn("(handoff)", listing.output)
 
+    async def test_new_handoff_never_overwrites_one_already_in_the_registry(self) -> None:
+        manager = ContextManager()
+        alpha = build_test_agent(name="alpha", system_prompt="Work.", runner=FakeRunner(), context_manager=manager, tools=[CreateHandoffTool()])
+        beta = build_test_agent(name="beta", system_prompt="Work.", runner=FakeRunner(), context_manager=manager, tools=[CreateHandoffTool()])
+        await alpha.tools._get("create_handoff").execute(_call(title="alpha handoff", sections={"S": "a"}))
+        result = await beta.tools._get("create_handoff").execute(_call(title="beta handoff", sections={"S": "b"}))
+
+        self.assertEqual(result.metadata["primitive_id"], "handoff:2")
+        self.assertEqual(manager.get_by_id("handoff:1").title, "alpha handoff")
+        self.assertEqual(manager.get_by_id("handoff:2").title, "beta handoff")
+
 
 if __name__ == "__main__":
     unittest.main()
