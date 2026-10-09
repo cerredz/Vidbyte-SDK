@@ -322,5 +322,58 @@ class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(reply.metadata["trace_metadata"]["error_count"], 1)
 
 
+# ---------------------------------------------------------------------------
+# Regression: the trace agent sees the current run's conversation
+# ---------------------------------------------------------------------------
+USER_PROMPT = "BRANCH: investigate the alternative"
+TOOL_OUTPUT = "lookup-result-7f3a"
+
+
+class _DistinctLookup(_Lookup):
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult.success("lookup", TOOL_OUTPUT)
+
+
+class _PromptCapturingRunner(ScriptedRunner):
+    """Records the first prompt of every trace update (the one carrying <main_context_window>)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trace_prompts: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        if "<trace_schema>" in prompt and "messages" not in kwargs:
+            self.trace_prompts.append(prompt)
+        return super().run(prompt, **kwargs)
+
+
+class ContinualTraceSeesRunConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def _trace_prompts(self, every_n: int) -> list[str]:
+        runner = _PromptCapturingRunner()
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work.",
+            runner=runner,
+            tools=[_DistinctLookup()],
+            trace_option=TraceOption.continual(ActionTrace, every_n_iterations=every_n, max_trace_iterations=1),
+        )
+        reply = await agent.arun(USER_PROMPT)
+        self.assertEqual(reply.content, "done")
+        return runner.trace_prompts
+
+    async def test_after_iteration_update_sees_prompt_and_tool_result(self) -> None:  # [Silent Failure]
+        prompts = await self._trace_prompts(every_n=1)
+        first = prompts[0]
+        self.assertIn('"iteration_count": 1', first)
+        self.assertIn(USER_PROMPT, first)
+        self.assertIn(TOOL_OUTPUT, first)
+        self.assertIn("Provider messages:", first)
+
+    async def test_after_run_only_update_sees_prompt_and_tool_result(self) -> None:  # [Silent Failure]
+        prompts = await self._trace_prompts(every_n=5)
+        self.assertEqual(len(prompts), 1)
+        self.assertIn(USER_PROMPT, prompts[0])
+        self.assertIn(TOOL_OUTPUT, prompts[0])
+
 if __name__ == "__main__":
     unittest.main()
