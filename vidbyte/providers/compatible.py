@@ -132,23 +132,8 @@ class DeepSeekProvider(OpenAICompatibleProvider):
     provider = ModelProvider.DEEPSEEK
 
     def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
-        # DeepSeek may return tool_calls even when no tools are configured,
-        # and may wrap JSON in markdown code fences.
-        # Always prefer text content; strip markdown wrappers.
-        choices = parsed.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
-        first = choices[0]
-        message = first.get("message") if isinstance(first, dict) else None
-        content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(content, str) and content.strip():
-            import re
-            return re.sub(r'\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z', r'\1', content.strip(), flags=re.DOTALL)
-        if not isinstance(content, str):
-            raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
-        return content
-
-    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        # DeepSeek may hallucinate tool calls and wrap JSON in markdown fences, so prefer text
+        # content, fall back to the first call's arguments, and strip any fence.
         import re
 
         choices = parsed.get("choices")
@@ -166,6 +151,11 @@ class DeepSeekProvider(OpenAICompatibleProvider):
         else:
             text = content if isinstance(content, str) else ""
         if not text or not text.strip():
+            # @intent tool-calls-need-no-text
+            # A real tool-call turn (e.g. a zero-parameter tool with arguments "") carries no text,
+            # and the base provider returns "" for it; only a reply with neither text nor calls is invalid.
+            if has_tool_calls:
+                return ""
             raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
         text = text.strip()
         text = re.sub(r"^```(?:json)?\s*\n?", "", text)
