@@ -242,7 +242,7 @@ class ConfusedDeputyGuardMiddleware(AgentMiddleware):
 - If `ctx.message` is empty (e.g., system-only invocation), the guard still works — it detects tool-result → tool-arg flow regardless of user message content.
 - Non-string argument values (ints, bools, nested dicts) are skipped entirely.
 - Very short tool results (< `min_argument_length` chars) can still match against long arguments.
-- If the user's own message legitimately repeats tool output, this is by definition not a confused deputy — the user message came first. However, the middleware only checks tool results against arguments, not the user message against arguments, so this scenario is not falsely flagged.
+- If the user's own message legitimately repeats tool output, this is by definition not a confused deputy — the user message came first. The middleware also measures each flagged argument's longest verbatim overlap with the user message and skips it when that overlap is at least as long as the overlap with tool output, so this scenario is not falsely flagged.
 
 ---
 
