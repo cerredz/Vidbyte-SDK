@@ -119,6 +119,29 @@ class EchoRunner:
         return _Resp(_fc("isDone", '{"final_answer": "answer-%d"}' % self.calls, "c%d" % self.calls))
 
 
+class FetchThenDoneRunner:
+    """Scripted runner that fetches one source per run, then finishes; records every prompt it sees."""
+
+    def __init__(self, sources: list[str]) -> None:
+        self.calls = 0
+        self.sources = sources
+        self.prompts: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        self.calls += 1
+        self.prompts.append(f"{prompt} {kwargs}")
+        if self.calls % 2:
+            source = self.sources[(self.calls - 1) // 2]
+            return _Resp(_fc("fetch", '{"source": "%s"}' % source, "f%d" % self.calls))
+        return _Resp(_fc("isDone", '{"final_answer": "done-%d"}' % self.calls, "d%d" % self.calls))
+
+
+@tool
+def fetch(source: str) -> str:
+    """Fetch a source by name."""
+    return f"SOURCE-{source}-CONTENT"
+
+
 class SessionBindingProbe:
     """Tool-like probe that records the session passed through bind_session()."""
 
@@ -734,6 +757,46 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         session = Session(FakeAgent(), store=store)
         with self.assertRaises(SessionError):
             session.rewind(to="foreign")
+
+    async def test_rewind_drops_tool_outputs_of_abandoned_turns(self) -> None:  # [Silent Failure]
+        # A rewound branch must not see tool outputs from turns after the rewind point.
+        runner = FetchThenDoneRunner(["A", "B", "C"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=InMemorySessionStore())
+        await session.arun("fetch A")
+        first = session.head
+        await session.arun("fetch B")
+        self.assertIn("SOURCE-B-CONTENT", str(agent._tool_call_contexts))
+        session.rewind(to=first)
+        self.assertEqual(agent._tool_call_contexts, [])
+        turn_three_start = len(runner.prompts)
+        await session.arun("fetch C")
+        self.assertNotIn("SOURCE-B-CONTENT", " ".join(runner.prompts[turn_three_start:]))
+        self.assertEqual([c.arguments.get("source") for c in agent._tool_call_contexts if c.tool_name == "fetch"], ["C"])
+
+    async def test_adopt_drops_own_pre_adopt_tool_outputs(self) -> None:  # [Silent Failure]
+        # Adopting another checkpoint replaces history, so the agent's prior tool outputs must go too.
+        store = InMemorySessionStore()
+        donor = Session(FakeAgent(name="donor"), store=store)
+        await donor.arun("donor work")
+        runner = FetchThenDoneRunner(["OWN", "NEXT"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=store)
+        await session.arun("fetch own")
+        self.assertIn("SOURCE-OWN-CONTENT", str(agent._tool_call_contexts))
+        session.adopt(donor.head)
+        self.assertEqual(agent._tool_call_contexts, [])
+        next_start = len(runner.prompts)
+        await session.arun("fetch next")
+        self.assertNotIn("SOURCE-OWN-CONTENT", " ".join(runner.prompts[next_start:]))
+
+    def test_rewind_tolerates_agent_without_tool_memory(self) -> None:  # [Hidden Assumption]
+        # Compatible agents without tool-call memory still rewind cleanly.
+        agent = FakeAgent()
+        session = Session(agent, store=InMemorySessionStore())
+        first = session.checkpoint()
+        session.rewind(to=first)
+        self.assertFalse(hasattr(agent, "_tool_call_contexts"))
 
     async def test_fork_at_own_checkpoint_branches(self) -> None:  # [Edge Case]
         store = InMemorySessionStore()
