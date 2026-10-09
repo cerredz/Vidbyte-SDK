@@ -116,7 +116,7 @@ class FunctionTool(BaseTool):
 
 def _build_args_model(func: Callable[..., Any], tool_name: str) -> type[BaseModel]:
     signature = inspect.signature(func)
-    hints = get_type_hints(func)
+    hints = get_type_hints(func, include_extras=True)
     fields: dict[str, tuple[Any, Any]] = {}
 
     for name, parameter in signature.parameters.items():
