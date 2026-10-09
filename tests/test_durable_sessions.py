@@ -289,6 +289,16 @@ class SettingsNamesSurviveCheckpointTests(unittest.TestCase):
         restored = serializer.checkpoint_from_dict(json.loads(json.dumps(serializer.checkpoint_to_dict(checkpoint))))
         self.assertEqual(restored.trace_artifact, artifact)
 
+    def test_checkpoint_trace_artifact_drops_exact_credential_names(self) -> None:  # [Hidden Assumption]
+        artifact = {"api_key": "sk-live", "client_secret": "cs-live", "token_estimate": 1200, "auth_flow": "oauth device code", "summary": "billed run"}
+        checkpoint = replace(_checkpoint("se", "c1"), trace_artifact=artifact)
+        serializer = SessionSerializer()
+        payload = serializer.checkpoint_to_dict(checkpoint)
+        restored = serializer.checkpoint_from_dict(json.loads(json.dumps(payload)))
+        self.assertEqual(restored.trace_artifact, {"token_estimate": 1200, "auth_flow": "oauth device code", "summary": "billed run"})
+        self.assertNotIn("sk-live", json.dumps(payload))
+        self.assertNotIn("cs-live", json.dumps(payload))
+
     def test_checkpoint_trace_events_still_drop_api_key(self) -> None:  # [Hidden Assumption]
         events = ({"event": "llm_call", "api_key": "sk-live", "token_estimate": 5},)
         checkpoint = replace(_checkpoint("se", "c1"), trace_events=events)
@@ -543,9 +553,9 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
 
     def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
         # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
-        # The trace artifact keeps its keys: they are the declared trace field names.
+        # The trace artifact drops exact credential names but keeps declared field names like token_estimate.
         store = InMemorySessionStore()
-        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"token_estimate": 7, "ok": 1}, trace_events=({"api_key": "secret", "ok": 1},))
+        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"api_key": "secret", "token_estimate": 7, "ok": 1}, trace_events=({"api_key": "secret", "ok": 1},))
         meta = SessionMeta(session_id="se", head_id="c1", parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
         store.ingest(meta, [checkpoint])
 

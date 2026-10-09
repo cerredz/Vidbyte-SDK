@@ -102,6 +102,10 @@ only appear if the developer declared it, or as an undeclared subfield of a
 declared OBJECT field. The harness export still applies its own key and value
 redaction.
 
+Follow-up: `docs/design/trace-artifact-precise-secret-keys.md` closes this
+risk. The trace artifact now drops exact credential names such as `api_key`
+while keeping field names such as `token_estimate` and `auth_flow`.
+
 ## Verification
 
 A checkpoint whose `trace_artifact` has keys `token_estimate`, `auth_flow`,

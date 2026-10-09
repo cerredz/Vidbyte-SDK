@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.types import AgentMessage
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.sessions.contracts import (
     SESSION_SCHEMA_VERSION,
     Checkpoint,
@@ -39,9 +40,10 @@ class SessionSerializer:
 
     def checkpoint_to_dict(self, checkpoint: Checkpoint) -> dict[str, Any]:
         # Render a full checkpoint (with schema version envelope) to a JSON-safe dict.
-        # @intent settings-names-are-not-secrets
-        # The trace artifact keeps every key: its keys are the trace field names the developer declared.
-        # Trace summary and free-form tracer events still drop credential-like keys.
+        # @intent trace-artifact-precise-secret-keys
+        # The trace artifact's keys are the trace field names the developer declared, so it drops only
+        # exact credential names (api_key, access_token, *_secret) and keeps token_estimate or auth_flow.
+        # Trace summary and free-form tracer events still drop any key containing a credential word.
         return {
             "schema_version": SESSION_SCHEMA_VERSION,
             "checkpoint": {
@@ -53,7 +55,7 @@ class SessionSerializer:
                 "label": checkpoint.label,
                 "status": checkpoint.status.value,
                 "run_state": self._run_state_to_dict(checkpoint.run_state),
-                "trace_artifact": self._safe(checkpoint.trace_artifact, scrub_keys=False),
+                "trace_artifact": self._safe(checkpoint.trace_artifact, precise_keys=True),
                 "trace_summary": self._safe(checkpoint.trace_summary),
                 "trace_events": self._safe(list(checkpoint.trace_events)) if checkpoint.trace_events is not None else None,
             },
@@ -193,24 +195,26 @@ class SessionSerializer:
             scrubbed[key_text] = self._safe(value)
         return scrubbed
 
-    def _safe(self, value: Any, *, scrub_keys: bool = True) -> Any:
+    def _safe(self, value: Any, *, scrub_keys: bool = True, precise_keys: bool = False) -> Any:
         # Recursively coerce a value into JSON-safe form, marking non-serializable leaves.
         # @intent settings-names-are-not-secrets
         # scrub_keys=False keeps every key for SDK-shaped data whose keys are names (schema
-        # properties, tool names, trace fields and trace artifacts, structured-reply fields), not credentials;
+        # properties, tool names, trace fields, structured-reply fields), not credentials;
         # dropping them corrupts resumed agents. Free-form data keeps the default key filter.
+        # precise_keys=True drops only exact credential names, for trace artifacts whose keys are field names.
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, Mapping):
-            return {str(k): self._safe(v, scrub_keys=scrub_keys) for k, v in value.items() if not (scrub_keys and self._is_secret_key(str(k)))}
+            is_secret = CredentialKeyPolicy.is_secret_key if precise_keys else self._is_secret_key
+            return {str(k): self._safe(v, scrub_keys=scrub_keys, precise_keys=precise_keys) for k, v in value.items() if not (scrub_keys and is_secret(str(k)))}
         if isinstance(value, (list, tuple)):
-            return [self._safe(item, scrub_keys=scrub_keys) for item in value]
-        dumped = self._dumped_model(value, scrub_keys=scrub_keys)
+            return [self._safe(item, scrub_keys=scrub_keys, precise_keys=precise_keys) for item in value]
+        dumped = self._dumped_model(value, scrub_keys=scrub_keys, precise_keys=precise_keys)
         if dumped is not None:
             return dumped
         return {"__dropped__": type(value).__name__}
 
-    def _dumped_model(self, value: Any, *, scrub_keys: bool = True) -> dict[str, Any] | None:
+    def _dumped_model(self, value: Any, *, scrub_keys: bool = True, precise_keys: bool = False) -> dict[str, Any] | None:
         # Renders a validated structured-output instance as plain JSON data, or None if it is not one.
         try:
             from pydantic import BaseModel
@@ -218,7 +222,7 @@ class SessionSerializer:
             return None
         if not isinstance(value, BaseModel):
             return None
-        return {str(k): self._safe(v, scrub_keys=scrub_keys) for k, v in value.model_dump(mode="json").items()}
+        return {str(k): self._safe(v, scrub_keys=scrub_keys, precise_keys=precise_keys) for k, v in value.model_dump(mode="json").items()}
 
     @staticmethod
     def _is_secret_key(key: str) -> bool:
