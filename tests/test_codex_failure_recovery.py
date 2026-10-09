@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from dataclasses import replace
 
 from vidbyte.agents.codex.agent import CodexHarnessAgent
 from vidbyte.agents.codex.failures import CodexFailureLedger, CodexFailureTranslator
@@ -90,6 +91,8 @@ from vidbyte.middleware.base import AgentMiddleware
 FINAL_RESPONSE = "codex reply"
 PRIMARY_MODEL = "gpt-5-codex"
 BACKUP_MODEL = "gpt-5-codex-mini"
+PRICED_PRIMARY_MODEL = "gpt-5.6-sol"
+PRICED_BACKUP_MODEL = "gpt-5.6-luna"
 
 
 def _run_result() -> CodexRunResult:
@@ -140,13 +143,14 @@ class _ScriptedTransport:
     def __init__(self, failures: list[BaseException] | None = None) -> None:
         self.failures = list(failures or [])
         self.requests: list[CodexTransportRunRequest] = []
+        self.result = _run_result()
 
     async def run(self, request: CodexTransportRunRequest) -> CodexRunResult:
         # Records each attempt's request so the per-attempt model override is visible.
         self.requests.append(request)
         if self.failures:
             raise self.failures.pop(0)
-        return _run_result()
+        return self.result
 
 
 class _ErrorObserver(AgentMiddleware):
@@ -679,6 +683,42 @@ class AgentAttemptLoopTests(unittest.IsolatedAsyncioTestCase):
         await agent.arun(CodexRunInput.text("two"))
 
         self.assertEqual(agent.failures, ())
+
+    async def test_a_recovered_turn_records_usage_under_the_answering_model(
+        self,
+    ) -> None:
+        # The primary fails and the backup answers, so usage must be filed and
+        # priced as the backup, matching the answering_model metadata.
+        usage = CodexUsage(
+            input_tokens=120,
+            cached_input_tokens=20,
+            output_tokens=30,
+            reasoning_output_tokens=5,
+            total_tokens=150,
+        )
+        reported = replace(
+            _run_result(), usage=usage, last_usage=usage, usage_available=True
+        )
+        agent, transport = _build_agent(
+            failures=[_error()],
+            fallback=AgentFallbackSettings(
+                models=[PRICED_BACKUP_MODEL], fallback_on=(CodexAgentError,)
+            ),
+            codex=_codex_settings(turn_model="", thread_model=PRICED_PRIMARY_MODEL),
+        )
+        transport.result = reported
+        direct, direct_transport = _build_agent(
+            codex=_codex_settings(turn_model="", thread_model=PRICED_BACKUP_MODEL)
+        )
+        direct_transport.result = reported
+
+        reply = await agent.arun(CodexRunInput.text("go"))
+        await direct.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(reply.metadata[CODEX_ANSWERING_MODEL_KEY], PRICED_BACKUP_MODEL)
+        self.assertEqual(agent.get_usage().calls[0].model, PRICED_BACKUP_MODEL)
+        self.assertIsNotNone(direct.get_cost_usd())
+        self.assertEqual(agent.get_cost_usd(), direct.get_cost_usd())
 
 
 if __name__ == "__main__":
