@@ -394,6 +394,17 @@ class AgentSpeedTrackerBaseAgentIntegrationTests(unittest.IsolatedAsyncioTestCas
         stats = agent.get_speed_stats()
         self.assertIsNotNone(stats.run_stats.total_duration_ms)
 
+    async def test_measure_stream_with_chunks_rolls_up_inter_chunk_gaps(self) -> None:
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work carefully.",
+            runner=_FinalAnswerRunner(),
+        )
+        self.assertEqual(list(agent.measure_stream(iter(["a", "b", "c"]))), ["a", "b", "c"])
+        stream_stats = agent.get_speed_stats().stream_stats
+        self.assertEqual(stream_stats.chunk_count, 3)
+        self.assertIsNotNone(stream_stats.inter_chunk_gap_ms_mean)
+
 
 if __name__ == "__main__":
     unittest.main()
