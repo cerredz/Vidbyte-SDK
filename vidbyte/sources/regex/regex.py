@@ -48,7 +48,7 @@ class LlmsTxtRegex:
     """Regex helpers for the llms.txt grammar."""
 
     LINK_BULLET: ClassVar[re.Pattern[str]] = re.compile(
-        r"^\s*-\s*\[(?P<text>[^\]]+)\]\((?P<url>[^)]*)\)\s*(?::\s*(?P<note>.*))?$"
+        r"^\s*-\s*\[(?P<text>[^\]]+)\]\((?P<url>[^)]*)\)\s*(?:[:\-\u2013\u2014]\s*(?P<note>.*))?$"
     )
     LINK_BULLET_PREFIX: ClassVar[re.Pattern[str]] = re.compile(r"^\s*-\s*\[")
 
@@ -69,7 +69,7 @@ class LlmsTxtRegex:
 
     @staticmethod
     def parse_link_bullet(line: str) -> tuple[str, str, str | None] | None:
-        # Parses "- [text](url): note" into (text, url, note), or None when not a link bullet.
+        # Parses "- [text](url): note" (or a -, en-dash, or em-dash separator) into (text, url, note).
         match = LlmsTxtRegex.LINK_BULLET.match(line)
         if match is None:
             return None
