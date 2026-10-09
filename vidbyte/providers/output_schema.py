@@ -92,17 +92,19 @@ class OutputSchemaFormatter:
         return match.group(1) if match else text
 
     def _annotate_node(self, node: dict[str, Any]) -> None:
-        # Rewrites one schema node's own constraints, then recurses into properties, items, and defs.
+        # Rewrites one schema node's own constraints, then recurses into properties, items, defs,
+        # and anyOf/oneOf/allOf branches (Pydantic emits Optional[X] as anyOf [X, null]).
         self._fold_constraints(node)
+        children: list[Any] = [node.get("items")]
         for key in ("properties", "$defs", "definitions"):
-            children = node.get(key)
-            if isinstance(children, dict):
-                for child in children.values():
-                    if isinstance(child, dict):
-                        self._annotate_node(child)
-        items = node.get("items")
-        if isinstance(items, dict):
-            self._annotate_node(items)
+            if isinstance(node.get(key), dict):
+                children.extend(node[key].values())
+        for key in ("anyOf", "oneOf", "allOf"):
+            if isinstance(node.get(key), list):
+                children.extend(node[key])
+        for child in children:
+            if isinstance(child, dict):
+                self._annotate_node(child)
 
     def _fold_constraints(self, node: dict[str, Any]) -> None:
         # Moves this node's unenforceable constraint keys into its description, in declaration order.
