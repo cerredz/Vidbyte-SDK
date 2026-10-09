@@ -390,6 +390,21 @@ class AgentKwargsTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.details["field"], "agent.max_tool_rounds")
 
+    def test_max_tool_rounds_rejects_a_floor_it_makes_unreachable(self) -> None:
+        # @intent yaml-max-tool-rounds-validates-floors
+        floor = [{"type": "MinIterations", "minimum": 5}]
+        with self.assertRaises(ConfigurationError) as nested:
+            build(loop={"max_iterations": 3, "output_contracts": floor})
+        with self.assertRaises(ConfigurationError) as top_level:
+            build(max_tool_rounds=3, loop={"output_contracts": floor})
+
+        self.assertEqual(nested.exception.details["field"], "agent.loop")
+        self.assertEqual(top_level.exception.details["field"], "agent.max_tool_rounds")
+        self.assertIn("MinIterations(minimum=5) conflicts with AgentLoopSettings.max_iterations=3", str(top_level.exception))
+        reachable = build(max_tool_rounds=2, loop={"output_contracts": [{"type": "MinToolCalls", "minimum": 1}], "tool_settings": {"max_calls": 2}})
+        self.assertEqual(reachable.loop.max_iterations, 2)
+        self.assertEqual(build(max_tool_rounds=5, loop={"output_contracts": floor}).loop.max_iterations, 5)
+
     def test_does_not_alias_the_caller_output_schema(self) -> None:
         schema = {"type": "object", "properties": {}}
         settings = build(output_schema=schema)
