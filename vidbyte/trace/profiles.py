@@ -102,7 +102,9 @@ class TraceProfile:
 
     def allows(self, spec: SpanSpec) -> bool:
         # Returns whether a semantic span is enabled by component and detail threshold.
-        setting = dict(self.components).get(spec.component, "default")
+        # @intent unlisted-components-follow-profile-detail
+        # A component the profile does not list uses the profile's own detail threshold.
+        setting = dict(self.components).get(spec.component, True)
         if setting is False or setting == "off":
             return False
         if setting is True:
