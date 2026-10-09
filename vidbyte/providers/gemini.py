@@ -57,7 +57,8 @@ class GeminiProvider:
         # Gemini supports alternating user/model turns through the contents array.
         history = [self._gemini_turn(message) for message in config.messages]
         history.insert(self._prompt_index(history), {"role": "user", "parts": [{"text": prompt}]})
-        return history
+        # Answers to one parallel function-call turn must travel together in a single user turn.
+        return self._merge_function_responses(history)
 
     def _prompt_index(self, history: list[Mapping[str, Any]]) -> int:
         # The runtime appends this run's tool exchange to whatever history it was handed, but
@@ -71,6 +72,26 @@ class GeminiProvider:
                 continue
             return len(history) if index and history[index - 1].get("role") == "user" else index
         return len(history)
+
+    def _merge_function_responses(self, history: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        # @intent boundary: the runtime formats each tool result as its own user turn, but when
+        # the model makes several calls in one turn Gemini demands every answer in the single
+        # content that follows it: "the number of function response parts is equal to the number
+        # of function call parts of the function call turn". Fold back-to-back response-only
+        # user turns into one, keeping call order. Text turns are never merged.
+        merged: list[Mapping[str, Any]] = []
+        for turn in history:
+            if merged and self._is_function_response_turn(turn) and self._is_function_response_turn(merged[-1]):
+                merged[-1] = {**merged[-1], "parts": [*merged[-1]["parts"], *turn["parts"]]}
+                continue
+            merged.append(turn)
+        return merged
+
+    @staticmethod
+    def _is_function_response_turn(turn: Mapping[str, Any]) -> bool:
+        # A user turn made only of functionResponse parts, the shape ToolsFormatter emits.
+        parts = turn.get("parts") or ()
+        return turn.get("role") == "user" and bool(parts) and all(isinstance(part, Mapping) and "functionResponse" in part for part in parts)
 
     @staticmethod
     def _has_part(turn: Mapping[str, Any], key: str) -> bool:
