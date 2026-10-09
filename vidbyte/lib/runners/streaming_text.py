@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.http import HttpTransport
+from vidbyte.lib.http import SyncHttpTransport
 from vidbyte.providers import ModelProviders
 
 
@@ -19,13 +19,13 @@ class StreamingTextModelRunner:
         ModelProvider.ANTHROPIC,
     })
 
-    def __init__(self, config: TextModelConfig | None = None, *, provider: ModelProvider | str | None = None, model: str | None = None, transport: HttpTransport | None = None, **config_options: Any) -> None:
+    def __init__(self, config: TextModelConfig | None = None, *, provider: ModelProvider | str | None = None, model: str | None = None, transport: SyncHttpTransport | None = None, **config_options: Any) -> None:
         # Coerce config, validate provider supports streaming, then build the adapter.
         config = self._coerce_config(config, provider=provider, model=model, config_options=config_options)
         config.validate()
         self._validate_streaming_provider(config.normalized_provider())
         self._config = config
-        self._transport = transport or HttpTransport()
+        self._transport = transport or SyncHttpTransport()
         self._provider = ModelProviders.streaming_text(config)
 
     def stream(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = ()) -> Iterator[str]:

@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
-from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
 
 
@@ -51,7 +51,7 @@ class OpenAIProvider:
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return self._video_job_from_response(parsed, model=config.model)
 
-    def run_tts(self, *, text: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+    def run_tts(self, *, text: str, transport: SyncHttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
         # POST to /audio/speech and return raw audio bytes from the binary response.
         config = self._audio_config_for(config)
         payload: dict[str, Any] = {"model": config.model, "input": text, "voice": config.voice or "alloy", "response_format": config.response_format or "mp3"}
@@ -64,7 +64,7 @@ class OpenAIProvider:
             raise ProviderResponseError("OpenAI TTS returned empty audio bytes.", provider=self.provider.value)
         return AudioModelResponse(provider=self.provider, model=config.model, audio_bytes=response.raw_bytes, transcript=None, raw={})
 
-    def run_stt(self, *, audio: bytes, format: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+    def run_stt(self, *, audio: bytes, format: str, transport: SyncHttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
         # Upload audio via multipart to /audio/transcriptions and extract the transcript string.
         config = self._audio_config_for(config)
         fields: dict[str, str] = {"model": config.model}
@@ -77,7 +77,7 @@ class OpenAIProvider:
             raise ProviderResponseError("OpenAI STT response did not include a text field.", provider=self.provider.value, response_excerpt=str(parsed))
         return AudioModelResponse(provider=self.provider, model=config.model, audio_bytes=None, transcript=transcript, raw=parsed)
 
-    def run_embedding(self, *, texts: list[str], transport: HttpTransport, config: EmbeddingModelConfig | None = None) -> EmbeddingResponse:
+    def run_embedding(self, *, texts: list[str], transport: SyncHttpTransport, config: EmbeddingModelConfig | None = None) -> EmbeddingResponse:
         # POST to /embeddings and return one float vector per input text, sorted by index.
         config = self._embedding_config_for(config)
         payload: dict[str, Any] = {"model": config.model, "input": texts}
@@ -90,7 +90,7 @@ class OpenAIProvider:
         embeddings = self._extract_embeddings(parsed, expected_count=len(texts))
         return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=embeddings, raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
 
-    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
+    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: SyncHttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
         # POST to /responses with stream=True and yield text deltas from SSE events.
         config = self._text_config_for(config)
         payload = self._create_text_payload(config, prompt, system, metadata)

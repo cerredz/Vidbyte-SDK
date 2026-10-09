@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from vidbyte.agents import BaseAgent
 from vidbyte.lib.errors import McpConnectionError
+from vidbyte.lib.http.transport import HttpResponse, SyncHttpTransport
 from vidbyte.tools import ToolCall, ToolStatus
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.mcp.search import SmitheryRegistryClient, SmitheryServerResult
@@ -147,6 +148,20 @@ class SearchMcpServersToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         parsed = json.loads(result.output)
         self.assertEqual(parsed, [])
+
+    async def test_default_client_searches_through_the_sync_transport(self) -> None:
+        """[Regression] The default-constructed tool returns parsed servers, not an un-awaited coroutine error."""
+        sent: list[str] = []
+
+        def fake_send(self: SyncHttpTransport, *, method: str, url: str, **kwargs: Any) -> HttpResponse:
+            sent.append(url)
+            return HttpResponse(status_code=200, body=_smithery_body([_make_server_entry("@acme/files")]), headers={})
+
+        with patch.object(SyncHttpTransport, "_send_once", fake_send):
+            result = await SearchMcpServersTool().execute(ToolCall("search_mcp_servers", {"query": "filesystem"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(json.loads(result.output)[0]["name"], "@acme/files")
 
     async def test_blank_query_returns_error_before_http_call(self) -> None:
         """[Hidden Assumption] Empty query must return error immediately without making HTTP request."""
