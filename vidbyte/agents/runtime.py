@@ -486,7 +486,7 @@ class AgentRuntime:
                     unmet = self.output_contract.unmet(counters)
                     if unmet and self.output_contract.exhausted(rejections):
                         return await self._finish_result(
-                            self._stopped_result(last_assistant_output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts),
+                            self._final_result(output=last_assistant_output or "", runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED),
                             state,
                         )
                     if unmet:
@@ -545,7 +545,7 @@ class AgentRuntime:
                         unmet = self.output_contract.unmet(counters)
                         if unmet and self.output_contract.exhausted(rejections):
                             return await self._finish_result(
-                                self._stopped_result(result.output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts),
+                                self._final_result(output=result.output or "", runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED),
                                 state,
                             )
                         if unmet:

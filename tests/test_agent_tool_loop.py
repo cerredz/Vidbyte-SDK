@@ -4,7 +4,9 @@ import unittest
 from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
-from vidbyte import Agent, tool
+from pydantic import BaseModel
+
+from vidbyte import Agent, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinToolCalls
 from vidbyte.lib.config import ModelProvider, TextModelConfig
@@ -519,3 +521,46 @@ class RejectedFinishSiblingCallTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _Report(BaseModel):
+    summary: str
+
+
+def _text_turn(text: str) -> FakeResponse:
+    return FakeResponse(text, {"choices": [{"message": {"role": "assistant", "content": text}}]})
+
+
+class ContractUnsatisfiedStructuredOutputTests(unittest.IsolatedAsyncioTestCase):
+    def _agent(self, runner: ToolCallingRunner) -> object:
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "hit"
+
+        settings = AgentLoopSettings(output_contracts=(MinToolCalls(2),), max_contract_rejections=1)
+        return build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], output_schema=_Report, agent_loop_settings=settings)
+
+    async def test_schema_valid_answer_with_unmet_floor_keeps_structured(self) -> None:
+        runner = ToolCallingRunner([_text_turn('{"summary": "early"}') for _ in range(4)])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await self._agent(runner).arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
+        self.assertEqual(reply.structured, _Report(summary="early"))
+
+    async def test_schema_valid_is_done_with_unmet_floor_keeps_structured(self) -> None:
+        runner = ToolCallingRunner([_chat_tool_turn((f"call_{i}", "isDone", '{"final_answer": "{\\"summary\\": \\"early\\"}"}')) for i in range(4)])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await self._agent(runner).arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
+        self.assertEqual(reply.structured, _Report(summary="early"))
+
+    async def test_schema_invalid_answer_with_exhausted_budget_still_raises(self) -> None:
+        runner = ToolCallingRunner([_text_turn("not json") for _ in range(4)])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            with self.assertRaises(OutputSchemaViolationError) as ctx:
+                await self._agent(runner).arun("task")
+
+        self.assertEqual(ctx.exception.stop_reason, "contract_unsatisfied")
