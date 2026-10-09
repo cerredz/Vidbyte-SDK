@@ -38,7 +38,7 @@ Python's `bool` is an `int`; positive floats compare greater than zero; strings 
 
 ## Historical Regressions
 
-The first bug-hunt pass found the above four failure mechanisms in the public constructor.
+The first bug-hunt pass found the above four failure mechanisms in the public constructor. A later pass found that a `MinToolCalls` or `MinSuccessfulToolCalls` floor at or above a tool-call budget given only as `ToolSettings.max_calls` was accepted, although the run stops at that budget; the floor < ceiling check now reads that budget too.
 
 ## Test Suite Map
 
