@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from typing import Any
 
 from tests.agent_test_support import build_test_agent
@@ -108,6 +109,27 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["forked_from"], "parent-run")
         self.assertEqual(result.metadata["fork_depth"], 1)
         self.assertEqual(result.metadata["name"], "child")
+
+    async def test_model_chosen_provider_swap_does_not_pass_parent_api_key(self) -> None:
+        # A model-requested provider swap must not carry the parent's vendor key to the new provider.
+        tool = ForkConversationTool()
+        agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+        children: list[BaseAgent] = []
+        real_fork = agent.fork
+
+        def fork_with_fake_runner(settings: AgentForkSettings) -> BaseAgent:
+            # Fork for real, then bind the offline runner so the child can answer without a provider.
+            child = real_fork(settings)
+            child._runner_cache.update(agent._runner_cache)
+            children.append(child)
+            return child
+
+        with patch.object(agent, "fork", side_effect=fork_with_fake_runner):
+            result = await tool.execute(_call(prompt="solve it", provider="openai"))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(children[0].runner_config.provider, "openai")
+        self.assertIsNone(children[0].runner_config.api_key)
 
     async def test_history_last_n_and_tool_names_translate_to_fork_kwargs(self) -> None:
         # The tool should slice history and resolve tool_names before calling parent.fork().

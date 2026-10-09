@@ -423,7 +423,7 @@ class ForkConversationTool(BaseTool):
                 },
                 "context_algorithm": {"type": "string", "enum": list(_CONTEXT_ALGORITHM_PRESETS), "description": "Direct ContextWindow preset override for the child. Prefer context_window.algorithm when grouping context edits."},
                 "model": {"type": "string", "description": "Optional model_name override. The value must appear in the developer-configured allowed_models list."},
-                "provider": {"type": "string", "enum": [provider.value for provider in ModelProvider], "description": "Optional Vidbyte ModelProvider override. API keys and credentials are still inherited and are never model-controlled."},
+                "provider": {"type": "string", "enum": [provider.value for provider in ModelProvider], "description": "Optional Vidbyte ModelProvider override. Credentials are never model-controlled: the parent's API key is inherited only on the same provider, and a different provider uses its own configured key."},
                 "temperature": {"type": "number", "minimum": 0, "maximum": 2, "description": "Optional child runner temperature override."},
                 "runtime": {"type": "string", "enum": [runtime.value for runtime in AgentRuntimeType], "description": "Optional AgentRuntimeType override, such as linear, mcts_search, actor_model_p2p, or actor_model_broadcast."},
                 "actor_runtime": {
