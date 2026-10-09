@@ -21,6 +21,7 @@ from vidbyte import (
     Failure,
     FailureCode,
     FailureDisposition,
+    FailureMetadataNormalizer,
     FailureMiddleware,
     FailurePhase,
     FailureRaisedError,
@@ -308,8 +309,28 @@ class FailureNormalizationTests(unittest.TestCase):
         codes = {failure.code for failure in router.capture_reply(reply)}
         self.assertIn(FailureCode.TOOL_TIMEOUT, codes)
 
+    def test_contract_stop_yields_one_routable_failure(self) -> None:  # [Hidden Failure]
+        # @intent one-stop-one-routable-failure
+        # Verify a contract stop keeps only the specific output_contract record, not a runtime twin.
+        reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "contract_unsatisfied", "contract_evaluations": ({"name": "MinToolCalls", "satisfied": False},)})
+        failures = FailureMetadataNormalizer.from_reply(reply)
+        self.assertEqual([(item.code, item.source, item.status) for item in failures], [(FailureCode.CONTRACT_UNSATISFIED, "output_contract", FailureStatus.EXHAUSTED)])
+
+    def test_tool_budget_stop_yields_one_routable_failure(self) -> None:  # [Hidden Failure]
+        # Verify a tool-settings budget stop keeps only the tool_settings record.
+        reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "max_identical_calls", "tool_settings_budget": "max_identical_calls"})
+        failures = FailureMetadataNormalizer.from_reply(reply)
+        self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.TOOL_IDENTICAL_CALL_LIMIT, "tool_settings")])
+
 
 class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_contract_stop_runs_bound_handler_once(self) -> None:  # [Hidden Failure]
+        # Verify one contract stop routes to its bound recovery handler exactly once.
+        session = Session(_FakeAgent(metadata={"stop_reason": "contract_unsatisfied", "contract_evaluations": ({"name": "MinToolCalls", "satisfied": False},)}))
+        session.failures.on(FailureCode.CONTRACT_UNSATISFIED, StopRecovery(reason="contract exhausted"))
+        await session.arun("work")
+        self.assertEqual(len(session.failures.recovery_attempts), 1)
+
     async def test_session_exposes_stable_router_and_records_stop_reason(self) -> None:  # [Hidden Assumption]
         # Verify Session owns one router and captures completed reply metadata.
         agent = _FakeAgent(metadata={"stop_reason": "max_iterations"})
