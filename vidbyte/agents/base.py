@@ -815,6 +815,9 @@ class BaseAgent(McpAttachableMixin):
             self._tracer.end_trace(trace_ctx, error=exc)
         self._speed_tracker.record_run_end()
         self._active_prompt = ""
+        # @intent failed-run-leaves-no-queued-prompts
+        # Follow-ups queued by a failed or cancelled run must not run after the next, unrelated request.
+        self._queued_prompts.clear()
 
     def _assert_schema_satisfied(self, result: AgentResult) -> None:
         # Fails loudly when a declared schema produced no instance, rather than returning a silent None.
