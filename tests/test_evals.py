@@ -520,6 +520,55 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_strict = await grader_strict.agrade(case, "Verbose correct answer.")
         self.assertFalse(res_strict.passed)
 
+    async def test_llm_judge_string_verdicts_fail_closed(self) -> None:
+        # A string verdict must be read by its meaning, never by Python truthiness ("false" is not a pass).
+        case = EvalCase(prompt="2+2?", expected="4")
+        expectations = (
+            ('{"score": 0.1, "passed": "false", "reason": "wrong"}', False),
+            ('{"score": 0.9, "passed": "true", "reason": "right"}', True),
+            ('{"score": 0.9, "passed": " TRUE ", "reason": "right"}', True),
+            ('{"score": 0.9, "passed": "yes", "reason": "ambiguous"}', False),
+            ('{"score": 0.9, "passed": 1, "reason": "number"}', False),
+            ('{"score": 0.9, "reason": "missing verdict"}', False),
+            ('{"score": 0.9, "passed": false, "reason": "bool false"}', False),
+        )
+        for reply, expected_passed in expectations:
+            res = await LLMJudgeGrader(judge_runner=MockRunner(reply)).agrade(case, "answer")
+            self.assertIs(res.passed, expected_passed, reply)
+
+    async def test_judge_graders_ignore_trailing_prose_with_braces(self) -> None:
+        # A valid verdict followed by prose containing braces, or wrapped in a fenced block, must still parse.
+        case = EvalCase(prompt="2+2?", expected="4")
+        judge_reply = '{"score": 1.0, "passed": true, "reason": "exact"}\nNote: format {ok}.'
+        res = await LLMJudgeGrader(judge_runner=MockRunner(judge_reply)).agrade(case, "4")
+        self.assertTrue(res.passed)
+        self.assertEqual(res.score, 1.0)
+        self.assertEqual(res.reason, "exact")
+
+        fenced = 'Verdict:\n```json\n{"score": 0.2, "passed": false, "reason": "off"}\n```\nSee {notes}.'
+        res_fenced = await LLMJudgeGrader(judge_runner=MockRunner(fenced)).agrade(case, "5")
+        self.assertFalse(res_fenced.passed)
+        self.assertEqual(res_fenced.score, 0.2)
+        self.assertEqual(res_fenced.reason, "off")
+
+        rubric_reply = '{"scores": {"accuracy": 0.9}, "reasons": {"accuracy": "good"}}\nKeys used: {accuracy}.'
+        rubric_grader = RubricGrader(judge_runner=MockRunner(rubric_reply), rubric={"accuracy": 1.0}, threshold=0.7)
+        res_rubric = await rubric_grader.agrade(case, "4")
+        self.assertTrue(res_rubric.passed)
+        self.assertAlmostEqual(res_rubric.score, 0.9)
+
+        rubric_fenced = '```json\n{"scores": {"accuracy": 0.8}, "reasons": {"accuracy": "ok"}}\n```'
+        res_rubric_fenced = await RubricGrader(judge_runner=MockRunner(rubric_fenced), rubric={"accuracy": 1.0}).agrade(case, "4")
+        self.assertTrue(res_rubric_fenced.passed)
+        self.assertAlmostEqual(res_rubric_fenced.score, 0.8)
+
+        # Genuinely missing or broken JSON still reports the existing failure reasons.
+        res_missing = await RubricGrader(judge_runner=MockRunner("no json here"), rubric={"accuracy": 1.0}).agrade(case, "4")
+        self.assertIn("Failed to find JSON block", res_missing.reason)
+        res_broken = await LLMJudgeGrader(judge_runner=MockRunner('{"score": 1.0, "passed": tru')).agrade(case, "4")
+        self.assertFalse(res_broken.passed)
+        self.assertIn("Failed to parse judge JSON", res_broken.reason)
+
     async def test_agent_judge_does_not_carry_verdicts_across_cases(self) -> None:
         # Grading several cases with one BaseAgent judge must not grow its history or leak earlier verdicts.
         verdicts = [json.dumps({"score": 1.0, "passed": True, "reason": f"verdict-{i}"}) for i in range(3)]
