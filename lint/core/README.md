@@ -20,6 +20,7 @@ SDK architecture policy beyond analyzer transport and baseline integrity.
 - `diagnostic.py` -- immutable finding/diagnostic contracts.
 - `discovery.py` -- tracked package/repository-wide source and README catalogues.
 - `mypy.py` -- cached pinned mypy subprocess adapter.
+- `public_api_contract.py` -- SDK public-API contract schema, canonical rendering, and static `__all__` derivation.
 - `registry.py` -- rule interface and S001-S021 catalogue.
 - `report.py` -- text/JSON result rendering.
 - `ruff.py` -- cached pinned Ruff subprocess adapter.
