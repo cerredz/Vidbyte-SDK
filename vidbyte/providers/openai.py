@@ -9,6 +9,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
 class OpenAIProvider:
@@ -220,9 +221,11 @@ class OpenAIProvider:
             payload["tool_choice"] = config.tool_choice
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # Wraps the resolved JSON schema in the Responses API's strict text.format envelope.
+        # Wraps the resolved JSON schema, rewritten into strict mode's dialect, in the Responses API's
+        # strict text.format envelope.
         if config.response_format is not None:
-            payload["text"] = {"format": {"type": "json_schema", "name": "agent_output", "schema": dict(config.response_format), "strict": True}}
+            schema = OutputSchemaFormatter().strict(config.response_format)
+            payload["text"] = {"format": {"type": "json_schema", "name": "agent_output", "schema": schema, "strict": True}}
 
     def _attach_metadata(self, payload: dict[str, Any], config: TextModelConfig, metadata: Mapping[str, object] | None) -> None:
         # Merge runner-call metadata with static config metadata.

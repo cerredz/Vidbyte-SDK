@@ -8,6 +8,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.runners.types import EmbeddingResponse, TextModelResponse
+from vidbyte.lib.tools.formatter import ToolsFormatter
 
 
 class GeminiProvider:
@@ -132,7 +133,10 @@ class GeminiProvider:
             generation_config["maxOutputTokens"] = config.max_output_tokens
         if config.response_format is not None:
             generation_config["responseMimeType"] = "application/json"
-            generation_config["responseSchema"] = dict(config.response_format)
+            # @intent response-schema-speaks-gemini-openapi-subset
+            # responseSchema is Gemini's OpenAPI subset, so $defs/$ref from any nested model or Enum
+            # fail the whole request; reuse the reducer tool declarations already go through.
+            generation_config["responseSchema"] = ToolsFormatter._gemini_schema(config.response_format)
         if config.thinking_config is not None:
             generation_config["thinkingConfig"] = dict(config.thinking_config)
         if generation_config:
