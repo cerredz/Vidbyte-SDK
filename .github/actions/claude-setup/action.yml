@@ -2,7 +2,7 @@
 # repository's gate on a runner. It mirrors the install steps in ci.yml so an agent sees
 # the same environment the required checks do, and it verifies nothing by itself.
 name: Claude agent toolchain
-description: Install Python 3.11 and the SDK's dev extra so Claude agents can run scripts/run_ci.py.
+description: Install Python 3.11, the SDK's dev extra, and Semgrep so Claude agents can run scripts/run_ci.py and the static policy.
 
 runs:
   using: composite
@@ -16,3 +16,9 @@ runs:
     - name: Install development dependencies
       shell: bash
       run: python -m pip install -e ".[dev]"
+
+    # The same pin static-policy.yml uses. pipx gives Semgrep an environment of its own, so
+    # its dependencies never change the versions the SDK's tests run against.
+    - name: Install Semgrep
+      shell: bash
+      run: pipx install semgrep==1.170.1

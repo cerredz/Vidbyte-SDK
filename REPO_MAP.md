@@ -8,7 +8,7 @@
 
 ### `.claude/`
 
-Configuration for the Claude Code agents that work on pull requests in hosted automation, kept apart from both the installable package and the verification gate. It defines how those agents behave when no person is watching, starting with which actions they may take without asking, because an unattended run has nobody to approve a request and denies anything not granted in advance. Interactive sessions on a developer's own machine do not load it, so nothing granted here widens what a local session may do. None of it ships to users, and none of it changes what passing means for a contribution; it only bounds what an automated agent may touch while it works on one.
+Configuration for the Claude Code agents that work on pull requests in hosted automation, kept apart from both the installable package and the verification gate. It defines how those agents behave when no person is watching, starting with which actions they may take without asking, because an unattended run has nobody to approve a request and denies anything not granted in advance. It also forbids every `git push`, because the workflows that run these agents push only after their own gate has passed. Interactive sessions on a developer's own machine do not load it, so nothing granted here widens what a local session may do. None of it ships to users, and none of it changes what passing means for a contribution; it only bounds what an automated agent may touch while it works on one.
 
 ### `.github/`
 
@@ -16,15 +16,19 @@ GitHub-hosted repository configuration that governs contribution and automation,
 
 #### `.github/actions/`
 
-Reusable setup steps that hosted automation shares, so every job that needs the repository's development toolchain installs it the same way. It exists for the Claude Code agents that change pull requests, which have to run the repository's own verification gate before they commit, and it installs the package exactly as the verification workflows do, so an agent works in the same environment the required checks measure. It verifies nothing by itself and is not part of what passing means for a contribution. Keeping the install in one place means a toolchain change is made once rather than in every job that depends on it.
+Reusable setup steps that hosted automation shares, so every job that needs the repository's development toolchain installs it the same way. It exists for the Claude Code agents that change pull requests, which have to run the repository's own verification gate before they commit, and it installs the package exactly as the verification workflows do, plus Semgrep at the static policy's pin, so an agent works in the same environment the required checks measure. It verifies nothing by itself and is not part of what passing means for a contribution. Keeping the install in one place means a toolchain change is made once rather than in every job that depends on it.
 
 #### `.github/ISSUE_TEMPLATE/`
 
 Structured forms that contributors fill in when opening a bug report or requesting a feature, rather than starting from a blank text box. They exist so incoming reports arrive with the reproduction detail and environment context that triage actually needs. This is a presentation concern specific to how the repository is used on GitHub, with no bearing on how the package itself behaves at runtime. It is a small, rarely-changed corner of the repository, useful mainly as a reminder that intake quality is a deliberate choice rather than an accident.
 
+#### `.github/prompts/`
+
+The Markdown instructions that workflows hand to coding agents, so no Python file contains a sentence addressed to a model. Every `NN-name.md` file in `review-agents/` is one review agent that runs, in number order, on each review that mentions `@claude`: `10-resolver.md` groups the review's comments and fixes them in one run, `20-preventer.md` adds a deterministic guard per comment, and `30-readme-notes.md` runs once, last, writing what each comment taught into the closing `## Notes for agents` section of the README of the folder it points into. Adding a review agent means adding one file there, whose frontmatter sets its scope. Every review prompt must have a title, Goal, Objective, Instructions, Constraints, and Output, and its first instruction must send the agent to `AGENTS.md`; `tests/test_review_agents.py` fails otherwise.
+
 #### `.github/workflows/`
 
-The automated checks and release process that run in hosted infrastructure rather than on a contributor's own machine. Every proposed change is verified across multiple versions of the language runtime, checked against a separate static-analysis policy layer, and, on release, published to the public package index. None of these checks are scoped to particular paths, so even a documentation-only change exercises the full verification and policy surface. This is the authoritative definition of what "passing" means for the repository, and it is worth reading before assuming a local check alone is sufficient.
+The automated checks and release process that run in hosted infrastructure rather than on a contributor's own machine. Every proposed change is verified across multiple versions of the language runtime, checked against a separate static-analysis policy layer, and, on release, published to the public package index. None of these checks are scoped to particular paths, so even a documentation-only change exercises the full verification and policy surface. This is the authoritative definition of what "passing" means for the repository, and it is worth reading before assuming a local check alone is sufficient. One workflow here is not a check: when a submitted review mentions `@claude`, `claude-review-agents.yml` plans tasks from the review's comments, runs each review agent as its own Claude Code session one matrix leg at a time, and lets `scripts/review_agents/` gate, commit, and push each change and post one summary comment.
 
 ### `.semgrep/`
 
@@ -46,7 +50,7 @@ One design document per feature, each walking through the problem being solved, 
 
 ### `scripts/`
 
-The project's local verification entry points, kept outside the installable package so none of them ship to end users. The primary one reproduces the full gate that automated checks run remotely, so a contributor can catch a failure before it ever reaches review. Alongside it sit many smaller, narrowly scoped verification scripts, each written next to the design document for the behavior it proves and useful for fast iteration on one subsystem at a time. One script also enforces a structural rule about where a particular kind of shared state may be written, keeping that invariant mechanical rather than advisory. None of the narrow scripts substitutes for running the full local gate before treating a change as complete.
+The project's local verification entry points, kept outside the installable package so none of them ship to end users. The primary one reproduces the full gate that automated checks run remotely, so a contributor can catch a failure before it ever reaches review. Alongside it sit many smaller, narrowly scoped verification scripts, each written next to the design document for the behavior it proves and useful for fast iteration on one subsystem at a time. One script also enforces a structural rule about where a particular kind of shared state may be written, keeping that invariant mechanical rather than advisory. None of the narrow scripts substitutes for running the full local gate before treating a change as complete. One folder here serves a workflow rather than the gate: `review_agents/` is the package `claude-review-agents.yml` calls between its agent steps, and `tests/test_review_agents.py` is its offline spec.
 
 ### `skills/`
 
