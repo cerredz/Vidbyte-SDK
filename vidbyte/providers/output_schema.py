@@ -7,7 +7,8 @@ Purpose:
     format, so this class only resolves a schema, annotates the constraints a tier cannot enforce,
     and validates whatever text came back.
 Architecture:
-    - OutputSchemaFormatter: Resolves schemas, annotates unenforceable constraints, validates output.
+    - OutputSchemaFormatter: Resolves schemas, annotates unenforceable constraints, rewrites a
+      schema into OpenAI's strict dialect, and validates output.
 Relations:
     Used by vidbyte.agents.runtime when BaseAgent.output_schema or ToolSpec.output_schema is set,
     and by vidbyte.agents.contracts.schema.SchemaConformance to evaluate the final output.
@@ -68,6 +69,16 @@ class OutputSchemaFormatter:
         self._annotate_node(annotated)
         return annotated
 
+    def strict(self, schema: Mapping[str, Any]) -> dict[str, Any]:
+        # Rewrites a schema into the dialect OpenAI's strict Structured Outputs mode accepts.
+        # @intent strict-mode-closes-every-object
+        # Strict mode rejects the whole request with 400 invalid_json_schema unless every object sets
+        # additionalProperties:false and lists every property in required; Pydantic emits neither.
+        # Optional fields stay expressible because Pydantic already types them as anyOf [X, null].
+        strict = copy.deepcopy(dict(schema))
+        self._strict_node(strict)
+        return strict
+
     def validate(self, output: str, schema: type | Mapping[str, Any]) -> tuple[Any, str | None]:
         # Parse output as JSON and validate against the schema; returns (parsed, error_message).
         try:
@@ -95,6 +106,23 @@ class OutputSchemaFormatter:
         # Rewrites one schema node's own constraints, then recurses into properties, items, defs,
         # and anyOf/oneOf/allOf branches (Pydantic emits Optional[X] as anyOf [X, null]).
         self._fold_constraints(node)
+        for child in self._child_nodes(node):
+            self._annotate_node(child)
+
+    def _strict_node(self, node: dict[str, Any]) -> None:
+        # Closes one object node and requires all its properties, then recurses like _annotate_node.
+        # A node that already declares additionalProperties keeps the caller's explicit choice; an
+        # explicitly closed node (extra="forbid") still needs every property listed in required.
+        if isinstance(node.get("properties"), dict):
+            node.setdefault("additionalProperties", False)
+            if node["additionalProperties"] is False:
+                node["required"] = list(node["properties"])
+        for child in self._child_nodes(node):
+            self._strict_node(child)
+
+    @staticmethod
+    def _child_nodes(node: Mapping[str, Any]) -> list[dict[str, Any]]:
+        # Lists a node's direct subschemas: items, properties, defs, and anyOf/oneOf/allOf branches.
         children: list[Any] = [node.get("items")]
         for key in ("properties", "$defs", "definitions"):
             if isinstance(node.get(key), dict):
@@ -102,9 +130,7 @@ class OutputSchemaFormatter:
         for key in ("anyOf", "oneOf", "allOf"):
             if isinstance(node.get(key), list):
                 children.extend(node[key])
-        for child in children:
-            if isinstance(child, dict):
-                self._annotate_node(child)
+        return [child for child in children if isinstance(child, dict)]
 
     def _fold_constraints(self, node: dict[str, Any]) -> None:
         # Moves this node's unenforceable constraint keys into its description, in declaration order.
