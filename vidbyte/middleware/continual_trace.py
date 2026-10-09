@@ -142,13 +142,17 @@ class ContinualTraceMiddleware(AgentMiddleware):
         return summary
 
     def _render_context_window(self, ctx: MiddlewareContext) -> str:
-        # Renders a read-only snapshot of the main agent context plus provider messages.
+        # Renders a read-only snapshot of the main agent context plus the run's user prompt and provider messages.
         sections: list[str] = []
         if ctx.agent_context is not None:
             try:
                 sections.append(ctx.agent_context.build_context())
             except Exception:
                 sections.append("")
+        # @intent after-hooks-see-run-conversation
+        # The run's user prompt reaches the runner separately, never in provider messages, so render it here.
+        if ctx.message:
+            sections.append("User prompt:\n" + ctx.message)
         messages = self._provider_messages(ctx)
         if messages:
             sections.append("Provider messages:\n" + json.dumps(messages, indent=2, sort_keys=True, default=str))
