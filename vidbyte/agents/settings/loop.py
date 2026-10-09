@@ -152,10 +152,15 @@ class AgentLoopSettings:
         if not contract.ceiling_key:
             return
         ceiling = getattr(self, contract.ceiling_key, None)
+        source = f"AgentLoopSettings.{contract.ceiling_key}"
+        # The tool-call budget may be given only as ToolSettings.max_calls, which the runtime enforces the same way.
+        if ceiling is None and contract.ceiling_key == "max_tool_calls" and self.tool_settings is not None:
+            ceiling = self.tool_settings.max_calls
+            source = "ToolSettings.max_calls"
         if ceiling is not None and contract.minimum >= ceiling:
             raise ConfigurationError(
                 f"{contract.name}(minimum={contract.minimum}) conflicts with "
-                f"AgentLoopSettings.{contract.ceiling_key}={ceiling}: the floor is unreachable "
+                f"{source}={ceiling}: the floor is unreachable "
                 "(require minimum < ceiling)."
             )
 
