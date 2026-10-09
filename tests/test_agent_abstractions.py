@@ -5,6 +5,7 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import time
 import unittest
 
 from vidbyte.client import VidbyteSDK
@@ -100,6 +101,44 @@ class TestTools(unittest.IsolatedAsyncioTestCase):
         res_malformed = await self.executor.execute(malformed_args_block)
         self.assertEqual(res_malformed.status, ToolStatus.ERROR)
         self.assertIn("Missing required parameters", res_malformed.output)
+
+
+class TestCodeExecutionSafeEval(unittest.IsolatedAsyncioTestCase):
+    """Verifies the simulated print runtime evaluates only whitelisted literal arithmetic."""
+
+    async def _run(self, code: str) -> str:
+        result = await CodeExecutionTool().execute(ToolCall("code_execution", {"code": code}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        return result.output
+
+    async def test_arithmetic_and_string_prints_still_evaluate(self) -> None:
+        self.assertEqual(await self._run("print((2 + 3) * 4 - 10 // 3 % 2)"), "19")
+        self.assertEqual(await self._run("print(-2 ** 3)"), "-8")
+        self.assertEqual(await self._run("print(7 / 2)"), "3.5")
+        self.assertEqual(await self._run("print('plain text')"), "plain text")
+        self.assertEqual(await self._run("print('ab' + 'cd')"), "abcd")
+
+    async def test_attribute_access_is_echoed_not_evaluated(self) -> None:
+        self.assertEqual(await self._run("print((1).real)"), "(1).real")
+
+    async def test_call_expression_is_echoed_not_evaluated(self) -> None:
+        self.assertEqual(await self._run("print(abs(-3))"), "abs(-3)")
+        self.assertEqual(await self._run("print(len('abc'))"), "len('abc')")
+
+    async def test_names_and_string_repetition_are_not_evaluated(self) -> None:
+        self.assertEqual(await self._run("print(x + 1)"), "x + 1")
+        self.assertEqual(await self._run("print('a' * 3)"), "'a' * 3")
+
+    async def test_huge_exponent_is_rejected_quickly(self) -> None:
+        started = time.perf_counter()
+        self.assertEqual(await self._run("print(9 ** 9 ** 9)"), "9 ** 9 ** 9")
+        self.assertEqual(await self._run("print(10 ** 100000)"), "10 ** 100000")
+        self.assertLess(time.perf_counter() - started, 1.0)
+
+    async def test_blocked_fragment_returns_tool_error(self) -> None:
+        result = await CodeExecutionTool().execute(ToolCall("code_execution", {"code": "import os"}))
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("forbidden", result.output)
 
 
 class TestPrompts(unittest.TestCase):
