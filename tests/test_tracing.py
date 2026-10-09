@@ -633,6 +633,85 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
             with self.assertRaises(TracerConfigurationError):
                 tracer.end_trace(context, output="ok")
 
+    def _flushing_client_with_rejected_updates(self, flushes: list[int]) -> type[Any]:
+        # Builds a client double that, like langsmith.Client, flushes quietly but rejects every run update.
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                pass
+
+            def update_run(self, *args: Any, **kwargs: Any) -> None:
+                raise RuntimeError("422 rejected lsv2_pt_secret")
+
+            def flush(self) -> None:
+                flushes.append(1)
+
+        return Client
+
+    def test_langsmith_nonstrict_flush_keeps_update_error_after_end_trace(self) -> None:
+        # [Silent Failure] A successful flush must not erase the update_run error from the same end_trace.
+        flushes: list[int] = []
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(self._flushing_client_with_rejected_updates(flushes))}):
+            tracer = LangSmithTracer(api_key="test-key")
+            context = tracer.start_trace("agent.run")
+            tracer.end_trace(context, output="ok")
+        self.assertEqual(flushes, [1])
+        self.assertIsNotNone(tracer.last_error)
+        self.assertIn("lsv2_[REDACTED]", str(tracer.last_error))
+        self.assertNotIn("lsv2_pt_secret", str(tracer.last_error))
+
+    def test_langsmith_nonstrict_flush_keeps_update_error_after_end_span(self) -> None:
+        # [Silent Failure] A successful flush must not erase the update_run error from the same end_span.
+        flushes: list[int] = []
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(self._flushing_client_with_rejected_updates(flushes))}):
+            tracer = LangSmithTracer(api_key="test-key")
+            root = tracer.start_trace("agent.run")
+            span = tracer.start_span("tool.search", parent=root)
+            tracer.end_span(span, output="ok")
+        self.assertEqual(flushes, [1])
+        self.assertIsNotNone(tracer.last_error)
+        self.assertIn("lsv2_[REDACTED]", str(tracer.last_error))
+        self.assertNotIn("lsv2_pt_secret", str(tracer.last_error))
+
+    def test_langsmith_strict_update_failure_raises_with_flushing_client(self) -> None:
+        # [Hidden Failure] Strict mode must still raise on update failure when the client can flush.
+        flushes: list[int] = []
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(self._flushing_client_with_rejected_updates(flushes))}):
+            tracer = LangSmithTracer(api_key="test-key", strict=True)
+            context = tracer.start_trace("agent.run")
+            with self.assertRaises(TracerConfigurationError) as cm:
+                tracer.end_trace(context, output="ok")
+        self.assertIn("lsv2_[REDACTED]", str(cm.exception))
+        self.assertNotIn("lsv2_pt_secret", str(cm.exception))
+
+    def test_langsmith_nonstrict_flush_failure_records_last_error(self) -> None:
+        # [Silent Failure] A failing flush is itself still recorded as the last delivery error.
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                pass
+
+            def update_run(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def flush(self) -> None:
+                raise RuntimeError("flush failed xai-secret")
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            tracer = LangSmithTracer(api_key="test-key")
+            context = tracer.start_trace("agent.run")
+            tracer.end_trace(context, output="ok")
+        self.assertIsNotNone(tracer.last_error)
+        self.assertIn("xai-[REDACTED]", str(tracer.last_error))
+
     def test_langsmith_update_uses_datetime_end_time(self) -> None:
         # [Hidden Assumption] LangSmith update_run expects a datetime-like end_time.
         captured: list[Any] = []
