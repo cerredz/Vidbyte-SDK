@@ -235,6 +235,22 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(result.status, ToolStatus.SUCCESS)
             self.assertEqual(result.output, "b\nc")
 
+    def test_read_lines_end_is_inclusive_for_every_window(self) -> None:
+        # Regression for https://github.com/cerredz/Vidbyte-SDK/pull/633#discussion_r4233644423:
+        # the spec documents `end` as inclusive, so every window must include line `end` itself.
+        lines = ["one", "two", "three", "four", "five"]
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "\n".join(lines)})))
+            tool = ReadLinesTool(config)
+            for start in range(1, len(lines) + 3):
+                for end in range(start, len(lines) + 3):
+                    expected = "\n".join(line for number, line in enumerate(lines, start=1) if start <= number <= end)
+                    with self.subTest(start=start, end=end):
+                        result = run(tool.execute(ToolCall("read_lines", {"path": "f.txt", "start": start, "end": end})))
+                        self.assertEqual(result.status, ToolStatus.SUCCESS)
+                        self.assertEqual(result.output, expected)
+
     def test_read_lines_returns_empty_output_when_start_beyond_eof(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
