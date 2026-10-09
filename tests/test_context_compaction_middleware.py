@@ -158,6 +158,37 @@ class ContextCompactionEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after[1]["content"], "summarized 5 messages")
 
 
+    async def test_selection_strategies_never_emit_broken_tool_pairing(self) -> None:
+        # [Hidden Failure] Message-selecting strategies must not leave orphaned tool results or unanswered tool_call ids.
+        engine = ContextCompactionEngine()
+        cases = [(CompactionMode.KEEP_LAST_N_MESSAGES, {"n": n}) for n in range(1, 8)]
+        cases += [(CompactionMode.TRIM_TO_TOKEN_BUDGET, {"max_tokens": t}) for t in range(1, 40, 3)]
+        cases += [(CompactionMode.REMOVE_LAST_N_TOOL_CALLS, {"n": n}) for n in range(1, 5)]
+        for history in (_sequential_tool_history(), _parallel_tool_history()):
+            for mode, options in cases:
+                with self.subTest(mode=mode, options=options, size=len(history)):
+                    after, stats = await engine.compact_provider_messages(history, mode=mode, options=options)
+                    _assert_valid_tool_transcript(self, after)
+                    self.assertEqual(stats.after_count, len(after))
+
+    async def test_message_history_middleware_repairs_keep_last_tool_pairing(self) -> None:
+        # Verifies the middleware hands the provider a valid transcript when keep_last cuts through a parallel call turn.
+        middleware = MessageHistoryCompactionMiddleware.keep_last(3)
+        decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=_parallel_tool_history()))
+        _assert_valid_tool_transcript(self, decision.transform.provider_messages)
+        self.assertEqual([m.get("tool_call_id") for m in decision.transform.provider_messages], [None, None, "c6"])
+
+    async def test_tool_pairing_repair_leaves_valid_transcripts_unchanged(self) -> None:
+        # Verifies the repair keeps every message of already-valid OpenAI, Anthropic, and Gemini tool transcripts.
+        anthropic = ({"role": "user", "content": "go"}, {"role": "assistant", "content": [{"type": "text", "text": "x"}, {"type": "tool_use", "id": "t1", "name": "lookup", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "r1"}]}, {"role": "assistant", "content": "done", "tool_calls": None})
+        gemini = ({"role": "user", "parts": [{"text": "go"}]}, {"role": "model", "parts": [{"functionCall": {"name": "lookup", "args": {}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": "r1"}}}]})
+        engine = ContextCompactionEngine()
+        for history in (_sequential_tool_history(), _parallel_tool_history(), anthropic, gemini):
+            with self.subTest(size=len(history)):
+                after, _ = await engine.compact_provider_messages(history, mode=CompactionMode.KEEP_LAST_N_MESSAGES, options={"n": 100})
+                self.assertEqual([(m["role"], m.get("tool_call_id")) for m in after], [(m["role"], m.get("tool_call_id")) for m in history])
+
+
 class MiddlewareTransformTests(unittest.IsolatedAsyncioTestCase):
     async def test_pipeline_aggregates_transforms_with_later_values_winning(self) -> None:
         # Verifies pipeline transform merging preserves metadata and lets later values override.
@@ -173,8 +204,9 @@ class MiddlewareTransformTests(unittest.IsolatedAsyncioTestCase):
         # Verifies each stacked middleware transforms the previous one's output, so no earlier effect is lost.
         messages = (
             {"role": "user", "content": "start"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "a", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]},
             {"role": "tool", "tool_call_id": "a", "content": "old output"},
-            {"role": "assistant", "content": "mid"},
+            {"role": "assistant", "content": "mid", "tool_calls": [{"id": "b", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]},
             {"role": "tool", "tool_call_id": "b", "content": "new output"},
         )
         history = MiddlewarePipeline((MessageHistoryCompactionMiddleware.keep_last(2), MessageHistoryCompactionMiddleware.clear_tool_results_except()))
