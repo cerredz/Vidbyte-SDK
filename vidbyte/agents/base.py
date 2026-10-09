@@ -833,9 +833,11 @@ class BaseAgent(McpAttachableMixin):
                 self._queued_prompts.clear()
                 raise
         self._notify_session(reply)
+        # @intent failed-run-leaves-no-queued-prompts
+        # A run that fails its schema raises before the drain, so its queued follow-ups never run.
+        self._assert_schema_satisfied(result)
         if self._queued_prompts and not self._draining_queued_prompts:
             await self._drain_queued_prompts(metadata)
-        self._assert_schema_satisfied(result)
         return reply
 
     def _close_failed_reply(self, exc: BaseException, trace_ctx: Any) -> None:
