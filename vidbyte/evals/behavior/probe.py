@@ -7,7 +7,7 @@ Purpose:
     handoff, and trace artifact into a single immutable dataclass that behavior predicates read from.
 Architecture:
     - RunProbe: frozen, slotted dataclass built from agent.last_reply.metadata and
-      the agent's post-run fields (last_handoff, handoffs, last_trace).
+      the agent's post-run fields (last_trace, and the handoffs recorded during that run).
     - from_agent: robust constructor reading a BaseAgent after a run.
     - from_reply: standalone constructor from an AgentMessage with optional agent.
 Relations:
@@ -65,6 +65,9 @@ class RunProbe:
         md = dict(reply.metadata) if reply.metadata else {}
         # Keep only the developer's own tool calls so verdicts ignore how the runtime finished the run.
         tool_calls, tool_call_states, tool_call_count = cls._developer_tool_view(md)
+        # @intent run-probe-handoffs-are-per-run
+        # The agent's handoff list grows across runs, so keep only the ones recorded since the probed run began.
+        run_handoffs = tuple(agent.handoffs[getattr(agent, "_run_handoff_start", 0):])
         return cls(
             tool_calls=tool_calls,
             tool_call_states=tool_call_states,
@@ -74,8 +77,8 @@ class RunProbe:
             tokens_used=md.get("tokens_used"),
             output=str(reply.content),
             structured=md.get("structured"),
-            handoff=agent.last_handoff,
-            handoffs=tuple(agent.handoffs),
+            handoff=agent.last_handoff if run_handoffs else None,
+            handoffs=run_handoffs,
             trace_artifact=agent.last_trace,
         )
 

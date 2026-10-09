@@ -237,6 +237,9 @@ class BaseAgent(McpAttachableMixin):
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
         self.handoffs: list[Handoff] = []
+        # @intent run-probe-handoffs-are-per-run
+        # Index into the cumulative handoffs list where the latest run began, so run probes see only that run's handoffs.
+        self._run_handoff_start: int = 0
         self._trace_option: TraceOption | None = trace_option
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
@@ -762,6 +765,8 @@ class BaseAgent(McpAttachableMixin):
             self._speed_tracker.reset()
             self._speed_tracker.record_run_start()
             self._behavior_view = None
+            # Remember where this run's handoffs begin; the list itself stays cumulative for forks and handoff tools.
+            self._run_handoff_start = len(self.handoffs)
             runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
                 "agent.run",
