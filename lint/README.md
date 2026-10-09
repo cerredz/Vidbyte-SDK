@@ -162,6 +162,7 @@ Nested folders:
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C016 | public-api-contract-current | contracts/sdk-public-api.json equals the generator's output for vidbyte.__all__ and the pyproject version |
 | C017 | platform-route-contract | SDK requests to Vidbyte hosts use a contract route, an accepted method, and an admitted credential |
+| C018 | canonical-api-host | Vidbyte API URLs in vidbyte/ string literals use an origin the platform contract lists as live |
 
 ## Adding a rule
 

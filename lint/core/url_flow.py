@@ -3,7 +3,7 @@
 PURPOSE: Finds every call in vidbyte/ that receives a `url` argument, traces its URL, HTTP method, and headers, and reports the requests whose origin is a Vidbyte host; also lists every Vidbyte API URL literal in production code and which traced requests each one reaches.
 ROLE IN CODEBASE: Shared by rule C017 (platform-route-contract), which checks each traced request against the vendored platform contract, and rule C018 (canonical-api-host), which lists the requests a non-live host literal would carry. It evaluates expressions with lint/core/string_flow.py over the source model in lint/core/python_index.py, and lint/core/platform_contract.py decides which origins are Vidbyte's.
 ARCHITECTURE NOTE: A request call whose callee passes its own `url` parameter to another request call is traced at that inner call instead, so a helper's request is judged once, with the method and headers the helper really sends. When a request's URL, method, or headers depend on the enclosing function's parameters (other than a hole that fills one whole path segment), the call is re-evaluated once per traced caller, up to MAX_CALLER_HOPS levels, and the finding is anchored at the outermost caller that supplied the URL.
-FUNCTION INVENTORY: TracedRequest, UrlLiteral, UrlFlowTrace (requests_using, unreached) records; UrlFlowTracer.trace.
+FUNCTION INVENTORY: TracedRequest, UrlLiteral, UrlFlowTrace (requests_using, unreached) records; UrlFlowTracer.trace; trace_catalog (one cached trace per catalogue and contract, shared by C017 and C018).
 COMMON MODIFICATION PATTERNS: A new request-call convention (another argument name for the URL, method, or headers) changes URL_PARAM, METHOD_PARAM, or HEADERS_PARAM handling here, with a C017 scratch fixture.
 WHAT NOT TO DO: Do not import vidbyte, contact the network, or drop a request because tracing it is expensive; raise TraceLimitExceeded instead.
 KNOWN EDGE CASES: A URL built through an untyped receiver, getattr, a lambda, or a container lookup is a hole, so its literal then reaches no traced request and UrlFlowTrace.unreached reports it. Docstrings and bare string statements are not URL literals.
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import re
+import weakref
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
@@ -28,6 +29,7 @@ MAX_CONTEXTS = 256
 URL_PARAM = "url"
 METHOD_PARAM = "method"
 HEADERS_PARAM = "headers"
+_TRACES: weakref.WeakKeyDictionary[SourceCatalog, tuple[str, UrlFlowTrace]] = weakref.WeakKeyDictionary()
 _URL_IN_TEXT = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>`)\]]+")
 
 
@@ -83,6 +85,16 @@ class UrlFlowTrace:
     def unreached(self) -> tuple[UrlLiteral, ...]:
         # Whole-value URL literals that no traced request is built from: the trace cannot prove what they call.
         return tuple(literal for literal in self.literals if literal.whole and not self.requests_using(literal))
+
+
+def trace_catalog(catalog: SourceCatalog, hosts: VidbyteHosts) -> UrlFlowTrace:
+    # One trace per catalogue and contract text, so C017 and C018 in the same lint run trace the SDK once.
+    cached = _TRACES.get(catalog)
+    if cached is not None and cached[0] == hosts.contract.text:
+        return cached[1]
+    trace = UrlFlowTracer(catalog, hosts).trace()
+    _TRACES[catalog] = (hosts.contract.text, trace)
+    return trace
 
 
 class UrlFlowTracer:

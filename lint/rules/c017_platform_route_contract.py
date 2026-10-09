@@ -20,7 +20,7 @@ from lint.core.discovery import SourceCatalog
 from lint.core.platform_contract import PLATFORM_CONTRACT_REL, REFRESH_DOC_REL, PlatformContract, PlatformContractLoader, PlatformRoute, RouteMatcher, VidbyteHosts
 from lint.core.registry import Rule
 from lint.core.string_flow import API_KEY, NO_CREDENTIAL, UNKNOWN_CREDENTIAL
-from lint.core.url_flow import TracedRequest, UrlFlowTrace, UrlFlowTracer, UrlLiteral
+from lint.core.url_flow import TracedRequest, UrlFlowTrace, UrlLiteral, trace_catalog
 
 _UNKNOWN_ROUTE = "unknown-route"
 _PATH_UNRESOLVED = "path-unresolved"
@@ -102,7 +102,7 @@ class PlatformRouteContractRule(Rule):
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Load the contract (raising when it is unusable), trace the requests, and judge each one.
         contract = PlatformContractLoader.load(catalog)
-        trace = UrlFlowTracer(catalog, VidbyteHosts(contract)).trace()
+        trace = trace_catalog(catalog, VidbyteHosts(contract))
         judge = RouteJudge(contract)
         findings = [finding for request in trace.requests if (finding := self._request_finding(contract, judge, request)) is not None]
         findings.extend(self._untraced_finding(literal, trace) for literal in trace.unreached())

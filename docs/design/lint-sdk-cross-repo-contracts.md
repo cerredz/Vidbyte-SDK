@@ -85,16 +85,26 @@ WHERE
   VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/typesafe"
 
 WHAT HAPPENED
-  vidbyte/lib/constants/jev.py:20 `VIDBYTE_JEV_GATEWAY_ENDPOINT` hardcodes the Vidbyte API host
-  https://api.vidbyte.pro, which lint/contracts/vidbyte-platform-contract.json lists with status
-  `planned`, not `live`. Requests built from it: POST /api/v1/models/typesafe/systemone
-  (vidbyte/providers/typesafe.py:177), POST /api/v1/models/runs/{run_id}/close (:181),
-  GET /api/v1/models/typesafe/models (:188).
+  vidbyte/lib/constants/jev.py:20 `VIDBYTE_JEV_GATEWAY_ENDPOINT` hardcodes the Vidbyte API URL
+  https://api.vidbyte.pro/api/v1/models/typesafe, whose origin https://api.vidbyte.pro is listed in
+  lint/contracts/vidbyte-platform-contract.json with status `planned`, not `live`
+  (lint/contracts/vidbyte-platform-contract.json:208), so it does not serve traffic. Requests built
+  from it: POST /api/v1/models/typesafe/systemone (vidbyte/providers/typesafe.py:177); POST
+  /api/v1/models/runs/{run_id}/close (vidbyte/providers/typesafe.py:181); GET
+  /api/v1/models/typesafe/models (vidbyte/providers/typesafe.py:188). They include the contract's
+  managed model routes (models.*), so managed JEV calls cannot reach the platform: each request
+  above fails with a DNS or connection error before the Vidbyte gateway sees it.
 
 HOW TO FIX
-  1. Change the origin of VIDBYTE_JEV_GATEWAY_ENDPOINT to the live host the contract lists,
+  1. Change the origin of `VIDBYTE_JEV_GATEWAY_ENDPOINT` to the live host the contract lists,
      https://vidbyte-backend.onrender.com, and keep the path /api/v1/models/typesafe.
-  2. If the host must be configurable, ...
+  2. If the host must be configurable, add a base-URL setting whose default is
+     https://vidbyte-backend.onrender.com and reject any override that is not one of the
+     contract's live hosts. That keeps `@intent managed-key-stays-on-vidbyte-host`
+     (vidbyte/lib/dataclasses/model_configs.py:411) true: ...
+  3. Update the tests that pin the old origin in the same change:
+     tests/test_jev_managed_gateway.py:120, ...:121, ...:154, ...:163.
+  4. Run `python lint/run.py --rule C018` and `python lint/run.py --rule C017`, ...
 ```
 
 ## Rule IDs
@@ -203,9 +213,11 @@ The implementation plan pre-assigns C016–C020 to this PR. S1 owns C006–C008,
 - **Scope.** C018 scans every non-docstring string literal under `vidbyte/`, f-string parts included, for a Vidbyte API URL. It uses C017's definition of a Vidbyte host, and the URL must also name an API surface: a contract origin, an `api.` host, an onrender host, or a `/api/` path. A website link such as `https://vidbyte.ai` is not an API host, so it is out of scope. Today there is one such literal.
 - **Kinds.**
   - `planned-host`: the origin is listed, but its status is not `live`.
-  - `unlisted-host`: the origin is not listed, which includes `http://`.
+  - `unlisted-host`: the origin is not listed. Hosts compare case-insensitively, but the scheme and port must match the listed origin, so `http://` or `:8443` on the live host is unlisted.
 
-  The diagnostic lists the requests C017's tracer builds from the literal. When those include the contract's `models.*` routes, it states that managed JEV calls cannot reach the platform. It also lists the tests that pin the host.
+  A URL inside a longer string, such as an error message, counts. Bare string statements and comments do not.
+
+  The diagnostic lists the requests C017's tracer builds from the literal. Both rules call `trace_catalog`, so one lint run traces the SDK once. When those requests include the contract's `models.*` routes, the diagnostic states that managed JEV calls cannot reach the platform. It lists the lines under `tests/` and `scripts/` that spell the host, because they must change in the same commit. It cites the `@intent managed-key-stays-on-vidbyte-host` comment wherever it is found under `vidbyte/`. Its second correct example is the flagged line with the live origin in place of the old one.
 - **Repair.** Use the live host from the contract. If a configurable base URL is wanted instead, its default must be the live host, and any override must be validated against the contract's live hosts. That keeps `@intent managed-key-stays-on-vidbyte-host` (`model_configs.py:410-412`): the `vb_live_` bearer key must never follow a caller-chosen URL.
 
 ### C019 platform-error-code-contract

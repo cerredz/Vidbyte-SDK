@@ -33,6 +33,7 @@ RULE_MODULES = (
     "lint.rules.c005_cost_arithmetic_site_parity",
     "lint.rules.c016_public_api_contract_current",
     "lint.rules.c017_platform_route_contract",
+    "lint.rules.c018_canonical_api_host",
     "lint.rules.s001_python_correctness_foundation",
     "lint.rules.s002_exception_cause_chaining",
     "lint.rules.s003_strict_zip",
