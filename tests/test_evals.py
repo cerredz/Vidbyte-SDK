@@ -22,7 +22,7 @@ import unittest
 from datetime import datetime
 from typing import Any
 
-from tests.agent_test_support import bind_test_runner
+from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.agents.base import BaseAgent
 from vidbyte.evals import (
@@ -109,6 +109,25 @@ class MockAgent(BaseAgent):
         class Reply:
             content = f"processed:{prompt}"
             metadata = {"mock": True}
+        return Reply()
+
+
+class VerdictJudgeRunner:
+    """Offline judge model that returns a distinct verdict per call and records each system prompt."""
+
+    def __init__(self, verdicts: list[str]) -> None:
+        # Stores the verdict payloads to hand out in order and an empty system prompt log.
+        self.verdicts = list(verdicts)
+        self.systems: list[str] = []
+
+    def run(self, prompt: str, *, system: str | None = None, **_: object) -> object:
+        # Records the system prompt and finishes the agent loop with the next verdict.
+        self.systems.append(system or "")
+        arguments = json.dumps({"final_answer": self.verdicts[len(self.systems) - 1]})
+
+        class Reply:
+            text = ""
+            raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": arguments}]}
         return Reply()
 
 
@@ -500,6 +519,25 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         grader_strict = RubricGrader(judge_runner=runner, rubric=rubric, threshold=0.8)
         res_strict = await grader_strict.agrade(case, "Verbose correct answer.")
         self.assertFalse(res_strict.passed)
+
+    async def test_agent_judge_does_not_carry_verdicts_across_cases(self) -> None:
+        # Grading several cases with one BaseAgent judge must not grow its history or leak earlier verdicts.
+        verdicts = [json.dumps({"score": 1.0, "passed": True, "reason": f"verdict-{i}"}) for i in range(3)]
+        rubric_verdicts = [json.dumps({"scores": {"accuracy": 1.0}, "reasons": {"accuracy": f"verdict-{i}"}}) for i in range(3)]
+        for verdict_list, make_grader in (
+            (verdicts, lambda judge: LLMJudgeGrader(judge_runner=judge)),
+            (rubric_verdicts, lambda judge: RubricGrader(judge_runner=judge, rubric={"accuracy": 1.0})),
+        ):
+            model = VerdictJudgeRunner(verdict_list)
+            judge = build_test_agent(name="judge", system_prompt="You judge.", runner=model)
+            grader = make_grader(judge)
+            for i in range(3):
+                result = await grader.agrade(EvalCase(prompt=f"case {i}", expected="ok"), "ok")
+                self.assertTrue(result.passed)
+            self.assertEqual(judge.history, [])
+            self.assertEqual(len(model.systems), 3)
+            for i, system in enumerate(model.systems):
+                self.assertFalse(any(f"verdict-{j}" in system for j in range(i)), f"judgment {i} saw an earlier verdict")
 
     async def test_eval_suite(self) -> None:
         # Tests EvalSuite loading, tagging, and tag filtering features.
