@@ -19,10 +19,11 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
     def read_binary(self, path: Path) -> bytes:
         return path.read_bytes()
 
-    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool) -> None:
+    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding=encoding)
+        with path.open("w", encoding=encoding, newline=newline) as handle:
+            handle.write(content)
 
     def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool) -> None:
         if create_parents:

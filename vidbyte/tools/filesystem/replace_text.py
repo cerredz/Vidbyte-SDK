@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from vidbyte.lib.errors import ToolExecutionError
-from vidbyte.lib.tools.filesystem import FileSystemPermissions
+from vidbyte.lib.tools.filesystem import FileSystemPermissions, LineEndings
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -34,6 +34,8 @@ class ReplaceTextTool(FileSystemTool):
             target = self._path(path)
             FileSystemPermissions.require_existing_file(target)
             content = self.backend.read_text(target, encoding=self._config.encoding)
+            # Remember the file's own line endings so the edit does not rewrite every line.
+            newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding))
             count = content.count(search)
             if count != 1:
                 raise ToolExecutionError(
@@ -41,7 +43,7 @@ class ReplaceTextTool(FileSystemTool):
                     details={"matches": count, "path": str(target)},
                 )
             updated = content.replace(search, replacement, 1)
-            self.backend.write_text(target, updated, encoding=self._config.encoding, create_parents=False)
+            self.backend.write_text(target, updated, encoding=self._config.encoding, create_parents=False, newline=newline)
             return ToolResult.success(self.name, str(target), metadata={"path": str(target), "replacements": 1})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))
