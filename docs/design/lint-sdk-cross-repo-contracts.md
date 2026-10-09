@@ -265,12 +265,14 @@ The implementation plan pre-assigns C016–C020 to this PR. S1 owns C006–C008,
   - two redaction regexes, at `providers/typesafe.py:255` and `:271`.
 
   The tests build keys with `"vb_live_"` too, but tests are out of scope.
-- **Owner.** The owner is a module-level `str` constant in `vidbyte/lib/constants/` whose name ends in `API_KEY_PREFIX`. The recommended form is `VIDBYTE_API_KEY_PREFIX` in `constants/jev.py`, beside `VIDBYTE_JEV_GATEWAY_ENDPOINT`.
+- **Owner.** The owner is a module-level `str` constant in `vidbyte/lib/constants/` whose name ends in `API_KEY_PREFIX`. Assignments inside module-level `if`, `try`, and `with` blocks count; class attributes do not. When there are several, the first by path and line is the owner. The recommended form is `VIDBYTE_API_KEY_PREFIX` in `constants/jev.py`, beside `VIDBYTE_JEV_GATEWAY_ENDPOINT`.
 - **Kinds.**
-  - `inline-prefix`: a non-docstring literal outside the owner contains the contract prefix, or the owner's value.
-  - `foreign-prefix`: a literal spells a different `vb_<word>_` prefix.
-  - `owner-mismatch`: the owner's value is not the contract's `api_key_prefix`.
+  - `inline-prefix`: a non-docstring literal outside the owner, f-string parts included, contains the contract prefix or the owner's value. A message that names the `vb_live_` format is a copy too, because it must change with the prefix.
+  - `foreign-prefix`: a literal spells a different `vb_<word>_` prefix in key shape: at the end of the literal, before a regex token, or before at least 16 key characters. An identifier-like string such as `vb_cache_dir` is not a key prefix.
+  - `owner-mismatch`: the owner's value is not the contract's `api_key_prefix`, or is not a string literal C020 can read.
   - `duplicate-owner`: a second owner constant exists.
+
+  Every diagnostic lists all inline copies, because they must move onto the constant in one change, and cites `@intent malformed-managed-output-redacts-live-keys` wherever it is found under `vidbyte/`.
 - **Why it matters.** The format check and the two redaction regexes must track the platform's key format. If the prefix drifts, managed mode rejects every valid key. The redaction would also stop matching, so error text could carry a live key, which is the case `@intent malformed-managed-output-redacts-live-keys` exists to prevent.
 
 ## Files changed
