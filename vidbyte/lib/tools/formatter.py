@@ -235,9 +235,9 @@ class ToolsFormatter:
 
     @staticmethod
     def _assistant_turn_openai(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
-        """Return the assistant message from an OpenAI chat-completions payload, or None for Responses API."""
+        """Return the chat-shaped assistant tool-call message from an OpenAI chat-completions or Responses payload."""
         if isinstance(raw_payload.get("output"), list):
-            return None
+            return ToolsFormatter._assistant_turn_openai_responses(raw_payload["output"])
         choices = raw_payload.get("choices")
         if not isinstance(choices, list) or not choices:
             return None
@@ -245,6 +245,35 @@ class ToolsFormatter:
         if isinstance(message, Mapping) and isinstance(message.get("tool_calls"), list):
             return dict(message)
         return None
+
+    @staticmethod
+    def _assistant_turn_openai_responses(output: list[Any]) -> Mapping[str, Any] | None:
+        # The transcript stays chat-shaped so fallback can carry it across OpenAI-compatible
+        # providers; OpenAIProvider translates it back into Responses input items.
+        items = [item for item in output if isinstance(item, Mapping)]
+        tool_calls = [
+            {
+                "id": str(item.get("call_id") or item.get("id") or item.get("name", "")),
+                "type": "function",
+                "function": {"name": str(item.get("name", "")), "arguments": ToolsFormatter._arguments_json(item.get("arguments"))},
+            }
+            for item in items
+            if item.get("type") in {"function_call", "tool_call"} and item.get("name")
+        ]
+        if not tool_calls:
+            return None
+        texts = [
+            str(part.get("text", ""))
+            for item in items
+            if item.get("type") == "message" and isinstance(item.get("content"), list)
+            for part in item["content"]
+            if isinstance(part, Mapping) and part.get("type") == "output_text"
+        ]
+        return {"role": "assistant", "content": "".join(texts) or None, "tool_calls": tool_calls}
+
+    @staticmethod
+    def _arguments_json(arguments: object) -> str:
+        return arguments if isinstance(arguments, str) else json.dumps(arguments if arguments is not None else {})
 
     @staticmethod
     def _assistant_turn_anthropic(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -319,8 +348,6 @@ class ToolsFormatter:
                 call.tool_name,
                 ToolsFormatter._gemini_error_response(error_parts),
             )
-        if ToolsFormatter._is_openai_responses_call(call):
-            return ToolsFormatter._format_openai_responses_tool_result(call_id, envelope)
         return ToolsFormatter._format_openai_tool_result(call, call_id, envelope)
 
     @staticmethod
@@ -355,10 +382,6 @@ class ToolsFormatter:
                 }
             ],
         }
-
-    @staticmethod
-    def _format_openai_responses_tool_result(call_id: str, output: str) -> Mapping[str, Any]:
-        return {"type": "function_call_output", "call_id": call_id, "output": output}
 
     @staticmethod
     def _format_openai_tool_result(call: ToolCall, call_id: str, content: str) -> Mapping[str, Any]:
@@ -466,11 +489,6 @@ class ToolsFormatter:
         if not text:
             return None
         return text[:max_chars]
-
-    @staticmethod
-    def _is_openai_responses_call(call: ToolCall) -> bool:
-        # Detects tool calls parsed from the OpenAI Responses API output shape.
-        return str(dict(call.metadata or {}).get("provider_shape", "")).lower() == "openai_responses"
 
     @staticmethod
     def parse_openai_tool_call(raw_call: Mapping[str, Any]) -> ToolCall:

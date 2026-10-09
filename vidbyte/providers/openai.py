@@ -176,8 +176,26 @@ class OpenAIProvider:
     def _create_input(self, config: TextModelConfig, prompt: str) -> str | list[Mapping[str, Any]]:
         # Preserve multi-turn Responses inputs when callers provide message history.
         if config.messages:
-            return [dict(message) for message in config.messages] + [{"role": "user", "content": prompt}]
+            items = [item for message in config.messages for item in self._responses_items(message)]
+            return items + [{"role": "user", "content": prompt}]
         return prompt
+
+    @staticmethod
+    def _responses_items(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+        # The agent transcript is chat-shaped; Responses wants function_call/function_call_output items.
+        # Item ids (fc_...) are never echoed: without their reasoning items reasoning models reject them.
+        if "type" in message:
+            return [dict(message)]
+        if message.get("role") == "tool":
+            return [{"type": "function_call_output", "call_id": message.get("tool_call_id"), "output": message.get("content")}]
+        tool_calls = message.get("tool_calls")
+        if message.get("role") != "assistant" or not isinstance(tool_calls, list):
+            return [dict(message)]
+        items: list[dict[str, Any]] = [{"role": "assistant", "content": message["content"]}] if message.get("content") else []
+        for call in tool_calls:
+            function = call.get("function") or {}
+            items.append({"type": "function_call", "call_id": call.get("id"), "name": function.get("name"), "arguments": function.get("arguments") or "{}"})
+        return items
 
     def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
         # Responses API uses instructions for system/developer guidance.
