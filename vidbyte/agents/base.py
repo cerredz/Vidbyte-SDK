@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import inspect
 from enum import Enum
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -226,7 +227,10 @@ class BaseAgent(McpAttachableMixin):
         self.output_schema = output_schema
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
-        self._active_prompt: str = ""
+        # @intent concurrent-runs-keep-their-own-prompt
+        # Each run (asyncio Task) sees only its own prompt, so concurrent runs on one agent
+        # never forward another user's request to an as_tool() specialist.
+        self._active_prompt_var: contextvars.ContextVar[str] = contextvars.ContextVar(f"vidbyte_active_prompt_{id(self)}", default="")
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
         self.handoffs: list[Handoff] = []
@@ -338,6 +342,15 @@ class BaseAgent(McpAttachableMixin):
         if self._behavior_view is None:
             self._behavior_view = Behavior(self)
         return self._behavior_view
+
+    @property
+    def _active_prompt(self) -> str:
+        # The prompt of the run executing in the current task; empty outside a run.
+        return self._active_prompt_var.get()
+
+    @_active_prompt.setter
+    def _active_prompt(self, value: str) -> None:
+        self._active_prompt_var.set(value)
 
     @property
     def session(self) -> Session | None:
