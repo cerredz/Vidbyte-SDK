@@ -161,6 +161,7 @@ Nested folders:
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C006 | finite-numeric-guards | Numeric range checks reject bool, NaN, and infinities first |
 | C007 | strict-bool-switches | Configuration bool switches are real bools, never truthiness |
+| C008 | shared-validator-owner | Primitive validators live in one shared module |
 
 ## Adding a rule
 
