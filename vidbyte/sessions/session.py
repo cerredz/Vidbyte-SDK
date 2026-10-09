@@ -186,6 +186,8 @@ class Session:
         checkpoint_id = at or self._head_id
         if checkpoint_id is None:
             raise SessionError("Cannot fork a session with no checkpoints.", details={"session_id": self._session_id})
+        if at is not None and self._store.get(at).session_id != self._session_id:
+            raise SessionError("Cannot fork from a checkpoint from another session.", details={"checkpoint_id": at})
         return self.fork_from(self._store, checkpoint_id, tools=tools or (), middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags)
 
     def batch_fork(self, count: int, *, at: str | None = None, tools: Sequence[object] | None = None, middleware: Sequence[object] | None = None) -> list[ForkOutcome]:

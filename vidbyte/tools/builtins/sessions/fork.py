@@ -69,6 +69,8 @@ class ForkTool(_SessionBuiltinTool):
 
     def _fork_other(self, session_id: str, checkpoint_id: str | None) -> ToolResult:
         # Fork another session's checkpoint (or its head) into a new session via Session.fork_from.
+        if checkpoint_id is not None and self._store.get(checkpoint_id).session_id != session_id:
+            return ToolResult.error(_TOOL_NAME, f"Checkpoint {checkpoint_id} does not belong to session {session_id}.")
         source_id = checkpoint_id or self._target_head_id(session_id)
         if source_id is None:
             return ToolResult.error(_TOOL_NAME, f"Unknown or empty session: {session_id}.")
