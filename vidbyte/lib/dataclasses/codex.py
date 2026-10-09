@@ -939,9 +939,14 @@ class CodexFallbackDecision:
 
 @dataclass(frozen=True, slots=True)
 class CodexTurnOutcome:
-    """One completed turn plus which models were tried to get it."""
+    """One completed turn plus which models were tried to get it.
+
+    ``settings`` are the provider settings the answering attempt actually ran
+    with, so usage is filed under the model that answered, not the primary.
+    """
 
     result: CodexRunResult
+    settings: CodexAgentSettings
     attempts: tuple[CodexFallbackAttempt, ...] = ()
     answering_model: str = ""
 
@@ -952,6 +957,10 @@ class CodexTurnOutcome:
         if not isinstance(self.result, CodexRunResult):
             raise ConfigurationError(
                 "Codex turn outcome result must be CodexRunResult."
+            )
+        if not isinstance(self.settings, CodexAgentSettings):
+            raise ConfigurationError(
+                "Codex turn outcome settings must be CodexAgentSettings."
             )
         if not isinstance(self.attempts, tuple) or any(
             not isinstance(value, CodexFallbackAttempt) for value in self.attempts

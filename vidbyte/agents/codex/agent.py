@@ -134,10 +134,12 @@ class CodexHarnessAgent:
         )
         result = outcome.result
         self.thread_id = result.thread_id
+        # File usage under the settings the answering attempt ran with, so a turn a
+        # fallback model answered is counted and priced as that model, not the primary.
         CodexMetricsTranslator.record_usage(
             CodexUsageTranslationRequest(
                 result=result,
-                settings=self.settings.codex,
+                settings=outcome.settings,
                 tracker=self._usage,
             )
         )
@@ -264,6 +266,7 @@ class CodexHarnessAgent:
                 attempts.append(self._fallback.attempt(index))
             return CodexTurnOutcome(
                 result=result,
+                settings=settings,
                 attempts=tuple(attempts),
                 answering_model=self._fallback.model_name(index),
             )
