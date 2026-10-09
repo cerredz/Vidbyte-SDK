@@ -8,6 +8,8 @@ Purpose:
 Architecture:
     - CanaryTripwireMiddleware: Probabilistically appends canary tokens to the
       model-visible copy of tool results and scans model output for leaked canaries.
+      The canary ledger lives in ctx.run_state because one instance is shared by
+      forked and sibling runs.
 Relations:
     Used through vidbyte.middleware.builtins and AgentRuntime middleware hooks.
 """
@@ -29,19 +31,17 @@ class CanaryTripwireMiddleware(AgentMiddleware):
     """Detect data exfiltration by tracking canary tokens in tool results."""
 
     def __init__(self, *, watermark_prefix: str = "VIDBYTE-CANARY-", inject_probability: float = 0.3, abort_reason: str = "canary_leaked", random_seed: int | None = None) -> None:
-        # Configures canary generation parameters and initializes the internal canary ledger.
+        # Configures canary generation parameters; each run keeps its own ledger in run_state.
         if inject_probability <= 0.0 or inject_probability > 1.0:
             raise ValueError("inject_probability must be in (0.0, 1.0].")
         self._watermark_prefix = watermark_prefix
         self._inject_probability = inject_probability
         self._abort_reason = abort_reason
         self._rng = random.Random(random_seed)
-        self._canaries: dict[str, str] = {}
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        # Clears canary ledger at the start of each run to prevent cross-run leakage.
-        del ctx
-        self._canaries.clear()
+        # Starts a fresh canary ledger for this run without touching other runs sharing the instance.
+        ctx.run_state[self.__class__] = {}
         return MiddlewareDecision.continue_()
 
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
@@ -53,19 +53,24 @@ class CanaryTripwireMiddleware(AgentMiddleware):
         # Remember the canary so a later model response that repeats it can be caught.
         canary = self._generate_canary()
         tool_name = ctx.tool_call.tool_name if ctx.tool_call else "unknown"
-        self._canaries[canary] = tool_name
+        self._canaries_for(ctx)[canary] = tool_name
         # Show the model a copy with the canary appended; the raw tool result stays untouched.
         visible = self._with_canary(ctx.tool_result, canary)
         return MiddlewareDecision.continue_(transform=MiddlewareTransform(model_visible_tool_result=visible))
 
     async def after_model_response(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Scans model output for leaked canary strings and aborts if found.
-        if not self._canaries:
+        canaries = ctx.run_state.get(self.__class__)
+        if not canaries:
             return MiddlewareDecision.continue_()
         text = self._extract_model_text(ctx.model_response)
         if not text:
             return MiddlewareDecision.continue_()
-        return self._scan_for_leaked_canaries(text)
+        return self._scan_for_leaked_canaries(text, canaries)
+
+    def _canaries_for(self, ctx: MiddlewareContext) -> dict[str, str]:
+        # Returns this run's canary ledger, lazily creating it for direct hook tests.
+        return ctx.run_state.setdefault(self.__class__, {})
 
     def _generate_canary(self) -> str:
         # Builds a unique canary string from the configured prefix and 8 random hex bytes.
@@ -77,9 +82,9 @@ class CanaryTripwireMiddleware(AgentMiddleware):
         # Returns a copy of the tool result whose output ends with the canary on its own line.
         return ToolResult(tool_name=result.tool_name, status=result.status, output=f"{result.output}\n{canary}", metadata=dict(result.metadata))
 
-    def _scan_for_leaked_canaries(self, text: str) -> MiddlewareDecision:
-        # Returns abort if any active canary appears in the given text.
-        for canary, tool_name in self._canaries.items():
+    def _scan_for_leaked_canaries(self, text: str, canaries: dict[str, str]) -> MiddlewareDecision:
+        # Returns abort if any of this run's canaries appears in the given text.
+        for canary, tool_name in canaries.items():
             if canary in text:
                 return MiddlewareDecision.abort(
                     self._abort_reason,
