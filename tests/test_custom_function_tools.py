@@ -1,20 +1,35 @@
 from __future__ import annotations
 
 import functools
+import json
 import unittest
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
 from vidbyte import tool, vidbyte_tool
+from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.tools import ToolParameter
-from vidbyte.tools import ToolCall, ToolRegistry, ToolStatus
+from vidbyte.tools import FunctionTool, ToolCall, ToolRegistry, Tools, ToolStatus
+from vidbyte.tools.security import PermissionPolicy
 
 
 class Passenger(BaseModel):
     name: str
     age: int
+
+
+class Quote(BaseModel):
+    sku: str
+    price: float
+
+
+@dataclass
+class QuoteRecord:
+    sku: str
+    price: float
 
 
 def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -204,6 +219,56 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         defaulted = await book_stay.execute(ToolCall("book_stay", {"city": "Oslo"}))
         self.assertEqual(defaulted.output, "Oslo:1")
         self.assertEqual(calls, [("Rome", 3), ("Oslo", 1)])
+
+
+class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
+    # @intent tool-model-output-is-json
+    # A tool returning a model or dataclass must hand the model a JSON object, not the object's repr string.
+
+    async def _run(self, func: Callable[..., Any], output_schema: type | None = Quote) -> Any:
+        runtime = AgentRuntime(agent_name="rt-agent", system_prompt="sys", tools=Tools().add(FunctionTool(func, output_schema=output_schema)), permission_policy=PermissionPolicy())
+        _, result = await runtime.execute_tool_call(ToolCall(func.__name__, {}), provider="openai")
+        return result
+
+    async def test_model_instance_passes_its_output_schema(self) -> None:
+        def quote() -> Quote:
+            return Quote(sku="A1", price=9.5)
+
+        result = await self._run(quote)
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(json.loads(result.output), {"price": 9.5, "sku": "A1"})
+
+    async def test_dataclass_instance_passes_its_output_schema(self) -> None:
+        def quote() -> QuoteRecord:
+            return QuoteRecord(sku="A1", price=9.5)
+
+        result = await self._run(quote)
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(json.loads(result.output), {"price": 9.5, "sku": "A1"})
+
+    async def test_nested_models_and_dataclasses_serialize_as_objects(self) -> None:
+        @tool
+        def quotes() -> dict[str, Any]:
+            """List quotes."""
+            return {"items": [Quote(sku="A1", price=9.5), QuoteRecord(sku="B2", price=1.0)], "kind": QuoteRecord}
+
+        result = await quotes.execute(ToolCall("quotes", {}))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        payload = json.loads(result.output)
+        self.assertEqual(payload["items"], [{"price": 9.5, "sku": "A1"}, {"price": 1.0, "sku": "B2"}])
+        self.assertEqual(payload["kind"], str(QuoteRecord))
+
+    async def test_wrong_shape_still_fails_its_output_schema(self) -> None:
+        def quote() -> Passenger:
+            return Passenger(name="Al", age=30)
+
+        result = await self._run(quote)
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertEqual(result.metadata["error"], "output_schema_violation")
 
 
 if __name__ == "__main__":
