@@ -509,7 +509,11 @@ class AgentRuntime:
                 )
                 if state.inner_context_window_algorithm is not None:
                     messages.append(self._assistant_message(last_assistant_output))
-                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
+                # @intent after-hooks-see-final-reply
+                # Observers like the continual trace must see how the run ended, but a continuation below must keep
+                # sending the model the same messages as before, so the after-hooks get a copy with the reply added.
+                finished_messages = messages if state.inner_context_window_algorithm is not None else [*messages, self._assistant_message(last_assistant_output)]
+                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=finished_messages))
                 if state.inner_context_window_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
                     continue
                 if decision.action is not MiddlewareAction.CONTINUE:
@@ -523,6 +527,8 @@ class AgentRuntime:
                     if state.inner_context_window_algorithm is None:
                         messages.append(self._assistant_message(last_assistant_output))
                     continue
+                # The run ends here, so the end-of-run hooks read the conversation including the final reply.
+                state.messages = finished_messages
                 return await self._finish_result(final, state)
 
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
