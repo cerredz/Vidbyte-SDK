@@ -65,6 +65,7 @@ have been reviewed. Analyzer failures are never recorded as zero.
 - `__init__.py` -- marks the repository-local lint package.
 - `run.py` -- stable CLI and application orchestration.
 - `baseline.json` -- sorted per-rule debt ceilings.
+- `pricebook_vintage_lock.json` -- C010's record of the rates each pricebook vintage stands for; written only by `python -m lint.rules.c010_pricebook_vintage_bump --refresh-lock`.
 - `mypy.ini` -- pinned staged package type-check policy.
 - `ruff.toml` -- explicit Ruff policy and repository-owned banned APIs.
 
@@ -160,6 +161,7 @@ Nested folders:
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C009 | default-model-priced | Every token-priced provider default resolves to a pricebook rate |
+| C010 | pricebook-vintage-bump | Changed rates move their pricebook vintage and refresh the lock |
 
 ## Adding a rule
 
