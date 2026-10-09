@@ -802,7 +802,13 @@ class BaseAgent(McpAttachableMixin):
             trace_artifact = metadata.get("trace")
             self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
         if self._handoff_spec is not None:
-            await self._run_auto_handoff(metadata)
+            try:
+                await self._run_auto_handoff(metadata)
+            except BaseException:
+                # @intent failed-run-leaves-no-queued-prompts
+                # A cancelled handoff skips the drain, so its queued follow-ups must not wait for the next request.
+                self._queued_prompts.clear()
+                raise
         self._notify_session(reply)
         if self._queued_prompts and not self._draining_queued_prompts:
             await self._drain_queued_prompts(metadata)

@@ -4,8 +4,8 @@ PURPOSE: Regression tests that queued prompts drained after the primary run keep
 ROLE IN CODEBASE: Guards BaseAgent._drain_queued_prompts, whose drained generate_reply calls reset the usage tracker and once left get_usage() reporting only the last drained run, and BaseAgent._close_failed_reply, which once left queued prompts for the next unrelated run.
 ARCHITECTURE NOTE: Offline scripted runners; the usage tests report a priced model's token usage, the cleanup tests drive the real run_prompts_sequentially tool through function-call responses.
 COMMON MODIFICATION PATTERNS: Add a case here when the drain gains a new exit path that could drop a run's usage or leave prompts queued.
-KNOWN EDGE CASES: A drained run that fails before its model call records nothing, so only the runs before it are counted.
-RELATED DOCS: docs/design/queued-drain-keeps-usage.md, docs/design/queued-prompts-cleared-on-failure.md.
+KNOWN EDGE CASES: A drained run that fails before its model call records nothing, so only the runs before it are counted. A cancellation during the automatic handoff, after the primary run succeeded, must also clear the queue.
+RELATED DOCS: docs/design/queued-drain-keeps-usage.md, docs/design/queued-prompts-cleared-on-failure.md, docs/design/queued-prompts-cleared-on-handoff-cancel.md.
 TESTS: python -m pytest tests/test_queued_prompt_usage.py.
 """
 
@@ -19,6 +19,7 @@ from typing import Any
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents.pricing import UsageTracker
+from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.runners import TextModelResponse
@@ -170,6 +171,23 @@ class QueuedPromptFailureCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("queued_prompt_error", reply.metadata)
         self.assertEqual(agent._queued_prompts, [])
         await self._assert_next_run_is_clean(agent, runner)
+
+    async def test_cancelled_auto_handoff_clears_queue(self) -> None:
+        # The primary run succeeds, then the caller's timeout cancels the automatic handoff before the drain starts.
+        runner = StepRunner([_queue_followups, _finish, None])
+        agent = build_test_agent(
+            runner=runner, name="queued", system_prompt="Answer briefly.", tools=[RunPromptsSequentiallyTool()], handoff=MinimalHandoff()
+        )
+        with self.assertRaises(TimeoutError):
+            await asyncio.wait_for(agent.arun("ship v3"), timeout=0.2)
+        self.assertEqual(agent._queued_prompts, [])
+        calls_before = len(runner.prompts)
+        reply = await agent.arun("hello")
+        self.assertNotIn("queued_prompt_runs", reply.metadata)
+        # A drained follow-up would reach the model as its own task prompt; only "hello" and its handoff may.
+        self.assertEqual(runner.prompts[calls_before], "hello")
+        self.assertFalse(any(prompt.startswith("FOLLOWUP") for prompt in runner.prompts[calls_before:]))
+        self.assertEqual(agent._queued_prompts, [])
 
 
 if __name__ == "__main__":
