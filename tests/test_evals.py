@@ -346,6 +346,32 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await subset.agrade(EvalCase(prompt="t", expected={"a": {"b": 2}}), '{"a": {"b": 2, "c": 3}}')).passed)
         self.assertFalse((await subset.agrade(EvalCase(prompt="t", expected=[1, 3]), "[1, 2]")).passed)
 
+    async def test_choice_grader_counts_nested_label_once(self) -> None:
+        # Tests that an exact longer label wins over a shorter label nested inside it.
+        # @intent nested-label-counts-once
+        spam = ChoiceMatchGrader(["spam", "not spam"])
+        self.assertEqual(spam._extract_matches("not spam"), ["not spam"])
+        self.assertTrue((await spam.agrade(EvalCase(prompt="t", expected="not spam"), "not spam")).passed)
+        self.assertFalse((await spam.agrade(EvalCase(prompt="t", expected="spam"), "not spam")).passed)
+        self.assertTrue((await spam.agrade(EvalCase(prompt="t", expected="spam"), "spam")).passed)
+        self.assertFalse((await spam.agrade(EvalCase(prompt="t", expected="spam"), "spam or not spam?")).passed)
+        billing = ChoiceMatchGrader(["billing", "billing dispute", "refund"])
+        self.assertTrue((await billing.agrade(EvalCase(prompt="t", expected="billing dispute"), "billing dispute")).passed)
+        self.assertFalse((await billing.agrade(EvalCase(prompt="t", expected="refund"), "billing dispute or refund")).passed)
+
+    async def test_numeric_grader_reads_grouped_thousands(self) -> None:
+        # Tests that comma-grouped thousands parse as one number while ungrouped commas do not.
+        # @intent grouped-thousands-parse-as-one-number
+        numeric = NumericMatchGrader()
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=1250), "1,250")).passed)
+        self.assertEqual(numeric._parse_number("1,000,000.5"), 1000000.5)
+        self.assertEqual(numeric._parse_number("Total: -12,345.6 units"), -12345.6)
+        self.assertEqual(numeric._parse_number("1,2"), 1.0)
+        self.assertEqual(numeric._parse_number("1,2345"), 1.0)
+        self.assertEqual(numeric._parse_number("+3.5"), 3.5)
+        self.assertEqual(numeric._parse_number(".5"), 0.5)
+        self.assertEqual(numeric._parse_number("12345"), 12345.0)
+
     async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
         # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
         # @intent json-bool-is-not-number
