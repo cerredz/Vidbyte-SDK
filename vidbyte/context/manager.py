@@ -59,6 +59,16 @@ class ContextManager:
         self.context_items = tuple(self.context_items)
         self.metadata = dict(self.metadata)
 
+    def copy(self) -> "ContextManager":
+        """Return an independent manager with the same items, metadata, registry, placements, and id counters."""
+        # @intent fork-isolates-context-manager
+        # Registry items are shared safely: primitives are frozen and every write replaces the entry.
+        clone = dataclasses.replace(self)
+        clone._registry = dict(self._registry)
+        clone._placements = dict(self._placements)
+        clone._id_counters = dict(self._id_counters)
+        return clone
+
     def upsert(self, item: ContextItem, *, placement: ContextWindowPlacement = ContextWindowPlacement.END_OF_CONTEXT) -> "ContextManager":
         """Add or replace a managed primitive in the registry by its primitive_id."""
         # Stores an addressable primitive and its render placement.

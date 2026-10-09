@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import unittest
 from typing import Any
@@ -9,12 +10,14 @@ from pydantic import BaseModel
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentLoopSettings, AgentMessage, BaseAgent, MinToolCalls, ToolErrorPolicy, ToolSettings
+from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools.agent_tool import AgentTool
+from vidbyte.tools.builtins.context_primitives import context_window_tools
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.sessions import InMemorySessionStore
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool
@@ -39,6 +42,23 @@ class DoneRunner:
         class _Resp:
             text = ""
             raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "reply:{prompt}"}}'}]}
+        return _Resp()
+
+
+class ScriptedToolRunner:
+    """Offline runner that replays one scripted list of tool calls per model turn."""
+
+    def __init__(self, turns: list[list[tuple[str, dict[str, object]]]]) -> None:
+        # Stores the remaining turns; parent and forked child consume the same script in order.
+        self.turns = list(turns)
+
+    async def arun(self, prompt: str, **_: object) -> object:
+        # Emits the next scripted function calls as a Responses-style payload.
+        calls = self.turns.pop(0)
+
+        class _Resp:
+            text = ""
+            raw = {"output": [{"type": "function_call", "name": name, "arguments": json.dumps(args), "call_id": f"fc_{index}"} for index, (name, args) in enumerate(calls)]}
         return _Resp()
 
 
@@ -243,6 +263,43 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         await _unwrap_tool(child_tool).execute(_call("run_prompts_sequentially", prompts=["child next"]))
         self.assertEqual(parent._queued_prompts, ["parent next"])
         self.assertEqual(child._queued_prompts, ["child next"])
+
+    async def test_fork_isolates_context_manager_and_rebinds_context_tools(self) -> None:
+        # @intent fork-isolates-context-manager
+        # A child run that edits primitives through its tools must change only its own copy of the context window.
+        done = ("isDone", {"final_answer": "done"})
+        runner = ScriptedToolRunner([
+            [("context_create_text", {"primitive_id": "notes", "content": "parent notes"})],
+            [done],
+            [("context_remove", {"primitive_id": "notes"})],
+            [("context_create_text", {"primitive_id": "scratch", "content": "child scratch"})],
+            [done],
+        ])
+        manager = ContextManager()
+        parent = build_test_agent(name="parent", system_prompt="Work.", runner=runner, tools=list(context_window_tools(manager)), context_manager=manager)
+        await parent.arun("parent task")
+        child = parent.fork(AgentForkSettings(name="child"))
+
+        self.assertIsNot(child.context_manager, parent.context_manager)
+        self.assertEqual([pid for pid, _ in child.context_manager.registry_items()], ["notes"])
+        await child.arun("child task")
+
+        self.assertEqual(runner.turns, [])
+        self.assertEqual([pid for pid, _ in parent.context_manager.registry_items()], ["notes"])
+        self.assertEqual([pid for pid, _ in child.context_manager.registry_items()], ["scratch"])
+
+    def test_fork_context_manager_override_is_used_as_is_by_context_tools(self) -> None:
+        # @intent fork-rebinds-context-tools
+        # An explicit child manager is not copied, and parent-bound context tools write to it instead of the parent.
+        manager = ContextManager()
+        override = ContextManager()
+        parent = self._agent(tools=list(context_window_tools(manager)))
+        parent.context_manager = manager
+        child = parent.fork(AgentForkSettings(name="child", context_manager=override))
+
+        self.assertIs(child.context_manager, override)
+        self.assertTrue(all(tool._manager is override for tool in child._agent_tool_items))
+        self.assertTrue(all(tool._manager is manager for tool in parent._agent_tool_items))
 
     async def test_fork_clones_session_tool_binding_and_scope(self) -> None:
         # @intent fork-keeps-parent-session-tool-binding
