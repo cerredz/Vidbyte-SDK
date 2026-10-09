@@ -161,6 +161,20 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         probe = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"tool_calls": calls})))
         self.assertEqual(probe.tool_call_states, ("succeeded", "failed"))
 
+    def test_probe_excludes_internal_finish_tool(self) -> None:
+        # [Hidden Assumption] the runtime's internal isDone call is plumbing, not a developer tool call.
+        done = ToolCallContext(tool_name="isDone", arguments={}, state=ToolCallState.SUCCEEDED, metadata={"internal": True})
+        md = {"tool_calls": (make_call("lookup"), done), "tool_call_states": ("succeeded", "succeeded"), "tool_call_count": 2}
+        probe = RunProbe.from_reply(make_reply(metadata=md))
+        b = behavior_from_probe(probe)
+        self.assertTrue(b.tool.called_only_tools(["lookup"]))
+        self.assertEqual(b.tool.called_tool_names(), ("lookup",))
+        self.assertEqual(b.stop.total_tool_calls(), 1)
+        self.assertEqual(probe.tool_call_states, ("succeeded",))
+        only_done = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"tool_calls": (done,), "tool_call_count": 1})))
+        self.assertTrue(behavior_from_probe(only_done).tool.called_no_tools())
+        self.assertEqual(only_done.tool_call_count, 0)
+
     def test_probe_from_agent_structured(self) -> None:
         # [Hidden Assumption] from_agent copies metadata["structured"] into probe.structured.
         structured = {"answer": "yes"}
