@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import copy
 import dataclasses
 import inspect
 from enum import Enum
@@ -497,7 +498,7 @@ class BaseAgent(McpAttachableMixin):
             metadata=dict(state.metadata),
             tracer=tracer,
             trace=trace,
-            output_schema=output_schema,
+            output_schema=cls._restore_output_schema(state, output_schema),
             permission_policy=cls._restore_permission_policy(state),
         )
         child.history = [serializer.message_from_dict(item) for item in state.history]
@@ -648,6 +649,18 @@ class BaseAgent(McpAttachableMixin):
         if state.permission_policy is None:
             return None
         return PermissionPolicy(allowed=frozenset(ToolPermission(value) for value in state.permission_policy))
+
+    @staticmethod
+    def _restore_output_schema(state: RunState, supplied: object | None) -> object | None:
+        # @intent restored-agent-keeps-its-mapping-output-schema
+        # A caller-supplied schema always wins; otherwise rebuild a checkpointed JSON-Schema mapping so a resumed
+        # agent keeps its structured-output guarantee. A type marker cannot be rebuilt and must be re-supplied.
+        if supplied is not None:
+            return supplied
+        marker = state.output_schema or {}
+        if marker.get("kind") != "mapping" or not isinstance(marker.get("schema"), Mapping):
+            return None
+        return copy.deepcopy(dict(marker["schema"]))
 
     @staticmethod
     def _restore_trace_option(state: RunState) -> TraceOption | None:
