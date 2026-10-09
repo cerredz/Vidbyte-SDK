@@ -137,6 +137,7 @@ Nested folders:
 | S060 | typed-public-seam-mappings | Public seams name their mapping shape instead of dict[str, Any] |
 | S061 | bounded-safe-path | File/archive I/O on a dynamic path is resolved and contained |
 | S062 | no-implicit-string-concatenation | Each string, including model-facing text, is one literal rather than adjacent literals |
+| S063 | no-assert-in-package-code | SDK validation uses explicit raises that survive python -O, never assert |
 
 ### Agent-native rules
 

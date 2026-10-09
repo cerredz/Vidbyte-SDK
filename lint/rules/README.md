@@ -81,6 +81,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s060_typed_public_seam_mappings.py` -- named mapping shapes at public seams.
 - `s061_bounded_safe_path.py` -- resolved, contained file/archive I/O paths.
 - `s062_no_implicit_string_concatenation.py` -- one literal per string, never adjacent literals.
+- `s063_no_assert_in_package_code.py` -- explicit raises instead of assert in package code.
 - `a001_agent_readable_file_headers.py` -- structured SDK source headers.
 - `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
 - `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
@@ -102,3 +103,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
   already own).
 - 2026-09-25: Added S062 no-implicit-string-concatenation from PR #456 review comment 4108971007.
 - 2026-10-09: Added A009 readme-size-limit for the @claude review workflow's folder README notes.
+- 2026-10-09: Added S063 no-assert-in-package-code from PR #633 review comment 4233644411.

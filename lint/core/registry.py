@@ -92,6 +92,7 @@ RULE_MODULES = (
     "lint.rules.s060_typed_public_seam_mappings",
     "lint.rules.s061_bounded_safe_path",
     "lint.rules.s062_no_implicit_string_concatenation",
+    "lint.rules.s063_no_assert_in_package_code",
 )
 
 
