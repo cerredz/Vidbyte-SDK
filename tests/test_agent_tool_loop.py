@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from vidbyte import Agent, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
-from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinToolCalls, MinToolCallsById, ToolSettings
+from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -586,3 +586,17 @@ class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["stop_reason"], "final_response")
         self.assertEqual(reply.content, "answer")
         self.assertEqual(searched, ["a", "b"])
+
+
+class IterationFloorAtMaxIterationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_floor_equal_to_max_iterations_is_met_in_the_last_iteration(self) -> None:
+        # The budget is checked before an iteration and the floor after its model call, so iteration 3 of 3 can finish.
+        runner = ToolCallingRunner([_text_turn(f"answer {i}") for i in range(1, 4)])
+        settings = AgentLoopSettings(max_iterations=3, output_contracts=(MinIterations(3),))
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertEqual(reply.content, "answer 3")
+        self.assertEqual(len(runner.calls), 3)

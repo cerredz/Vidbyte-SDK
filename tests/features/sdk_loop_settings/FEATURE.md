@@ -38,7 +38,7 @@ Python's `bool` is an `int`; positive floats compare greater than zero; strings 
 
 ## Historical Regressions
 
-The first bug-hunt pass found the above four failure mechanisms in the public constructor. A later pass found that a `MinToolCalls` or `MinSuccessfulToolCalls` floor at or above a tool-call budget given only as `ToolSettings.max_calls` was accepted, although the run stops at that budget; the floor < ceiling check now reads that budget too. Another pass found that a `MinToolCallsById` floor equal to its `ToolSettings.max_calls_per_tool` cap was rejected as unreachable, although a per-tool cap only denies the next call and never stops the run; only a floor above the cap is now rejected.
+The first bug-hunt pass found the above four failure mechanisms in the public constructor. A later pass found that a `MinToolCalls` or `MinSuccessfulToolCalls` floor at or above a tool-call budget given only as `ToolSettings.max_calls` was accepted, although the run stops at that budget; the floor < ceiling check now reads that budget too. Another pass found that a `MinToolCallsById` floor equal to its `ToolSettings.max_calls_per_tool` cap was rejected as unreachable, although a per-tool cap only denies the next call and never stops the run; only a floor above the cap is now rejected. A further pass found that a `MinIterations` floor equal to `max_iterations` was rejected as unreachable, although the iteration budget is checked before an iteration starts and the floor after that iteration's model call, so the model can finish in the last allowed iteration; only a floor above `max_iterations` is now rejected.
 
 ## Test Suite Map
 

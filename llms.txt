@@ -706,7 +706,7 @@ The `OutputContract` base validates a positive `minimum`. Built-in floors are:
 | `MinCostSpent` | Middleware cost estimate, or its optional tokens-based fallback |
 
 When a floor has a paired ceiling, its minimum must be strictly less than the
-configured ceiling. `MinToolCallsById` is also checked against
+configured ceiling, except `MinIterations`, which may equal `max_iterations`. `MinToolCallsById` is also checked against
 `ToolSettings.max_calls_per_tool` when supplied.
 
 #### Handoffs and agent-loop settings
