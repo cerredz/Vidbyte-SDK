@@ -63,14 +63,12 @@ class RunProbe:
     def _from_reply_and_agent(cls, reply: AgentMessage, agent: BaseAgent) -> RunProbe:
         # Extracts metadata from reply and handoff/trace fields from the agent.
         md = dict(reply.metadata) if reply.metadata else {}
-        tool_calls = tuple(md.get("tool_calls", ()))
-        tool_call_states = tuple(md.get("tool_call_states", ()))
-        if not tool_call_states and tool_calls:
-            tool_call_states = tuple(c.state.value for c in tool_calls)
+        # Keep only the developer's own tool calls so verdicts ignore how the runtime finished the run.
+        tool_calls, tool_call_states, tool_call_count = cls._developer_tool_view(md)
         return cls(
             tool_calls=tool_calls,
             tool_call_states=tool_call_states,
-            tool_call_count=int(md.get("tool_call_count", len(tool_calls))),
+            tool_call_count=tool_call_count,
             stop_reason=str(md.get("stop_reason", "final_response")),
             iteration_count=int(md.get("iteration_count", 0)),
             tokens_used=md.get("tokens_used"),
@@ -85,20 +83,34 @@ class RunProbe:
     def _from_reply_only(cls, reply: AgentMessage) -> RunProbe:
         # Extracts metadata from reply without agent-level handoff/trace fields.
         md = dict(reply.metadata) if reply.metadata else {}
-        tool_calls = tuple(md.get("tool_calls", ()))
-        tool_call_states = tuple(md.get("tool_call_states", ()))
-        if not tool_call_states and tool_calls:
-            tool_call_states = tuple(c.state.value for c in tool_calls)
+        # Keep only the developer's own tool calls so verdicts ignore how the runtime finished the run.
+        tool_calls, tool_call_states, tool_call_count = cls._developer_tool_view(md)
         return cls(
             tool_calls=tool_calls,
             tool_call_states=tool_call_states,
-            tool_call_count=int(md.get("tool_call_count", len(tool_calls))),
+            tool_call_count=tool_call_count,
             stop_reason=str(md.get("stop_reason", "final_response")),
             iteration_count=int(md.get("iteration_count", 0)),
             tokens_used=md.get("tokens_used"),
             output=str(reply.content),
             structured=md.get("structured"),
         )
+
+    @staticmethod
+    def _developer_tool_view(md: Mapping[str, Any]) -> tuple[tuple[Any, ...], tuple[str, ...], int]:
+        # @intent evals-judge-developer-tool-calls
+        # Evals judge developer-facing work, so contexts the runtime stamped internal (the isDone finish tool,
+        # specs marked internal) are dropped, mirroring the output-contract counters; run metadata stays untouched.
+        all_calls = tuple(md.get("tool_calls", ()))
+        keep = [i for i, call in enumerate(all_calls) if not (getattr(call, "metadata", None) or {}).get("internal")]
+        tool_calls = tuple(all_calls[i] for i in keep)
+        tool_call_states = tuple(md.get("tool_call_states", ()))
+        if len(tool_call_states) == len(all_calls):
+            tool_call_states = tuple(tool_call_states[i] for i in keep)
+        if not tool_call_states and tool_calls:
+            tool_call_states = tuple(c.state.value for c in tool_calls)
+        dropped = len(all_calls) - len(tool_calls)
+        return tool_calls, tool_call_states, int(md.get("tool_call_count", len(all_calls))) - dropped
 
 
 __all__ = ["RunProbe"]
