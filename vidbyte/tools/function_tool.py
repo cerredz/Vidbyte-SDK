@@ -67,6 +67,9 @@ class FunctionTool(BaseTool):
                 value = await self.func(**kwargs)
             else:
                 value = await asyncio.to_thread(self.func, **kwargs)
+                # A sync wrapper around an async function hands back a coroutine; finish it here so its work happens.
+                if inspect.isawaitable(value):
+                    value = await value
         except Exception as exc:
             return ToolResult.failure(self.name, str(exc), metadata={"error_type": exc.__class__.__name__})
 
