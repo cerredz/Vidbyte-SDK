@@ -330,6 +330,44 @@ class FileStoreTests(unittest.TestCase):
         self.assertLessEqual(len(remaining), 2)
 
 
+class PruneHeadChainTests(unittest.IsolatedAsyncioTestCase):
+    def _stores(self):
+        return [("memory", InMemorySessionStore()), ("file", FileSessionStore(tempfile.mkdtemp()))]
+
+    async def test_prune_after_rewind_keeps_head_ancestors(self) -> None:  # [Silent Failure]
+        # Abandoned-branch checkpoints are pruned before the head's live ancestors.
+        for name, store in self._stores():
+            with self.subTest(store=name):
+                session = Session(FakeAgent(), store=store)
+                ids = []
+                for message in ("outline", "draft v1", "draft v2 bad", "draft v3 bad"):
+                    await session.arun(message)
+                    ids.append(session.head)
+                session.rewind(to=ids[1])
+                await session.arun("draft v2 good")
+                ids.append(session.head)
+                store.prune(session.id, keep=4)
+                self.assertEqual([c.id for c in store.history(session.id)], [ids[0], ids[1], ids[3], ids[4]])
+                store.prune(session.id, keep=3)
+                self.assertEqual([c.id for c in store.history(session.id)], [ids[0], ids[1], ids[4]])
+                self.assertEqual(store.get(store.head(session.id).parent_id).id, ids[1])
+                store.prune(session.id, keep=2)
+                self.assertEqual([c.id for c in store.history(session.id)], [ids[1], ids[4]])
+                session.rewind(to=ids[1])
+                self.assertEqual(session.head, ids[1])
+
+    async def test_prune_linear_history_keeps_newest(self) -> None:  # [Edge Case]
+        for name, store in self._stores():
+            with self.subTest(store=name):
+                session = Session(FakeAgent(), store=store)
+                ids = []
+                for i in range(5):
+                    await session.arun(f"turn {i}")
+                    ids.append(session.head)
+                store.prune(session.id, keep=3)
+                self.assertEqual([c.id for c in store.history(session.id)], ids[2:])
+
+
 # ---------------------------------------------------------------------------
 # Portable bundles
 # ---------------------------------------------------------------------------
