@@ -204,6 +204,27 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await engine.compact_provider_messages(history, mode=CompactionMode.REMOVE_ALL_TOOL_CALLS)
         self.assertEqual(list(after), [history[0], history[3]])
 
+    async def test_partly_answered_gemini_parallel_call_turn_is_dropped(self) -> None:
+        # [Hidden Failure] Gemini parts carry no ids, so a 3-call turn left with 1 response is dropped with it instead of sent and rejected.
+        call = {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"i": i}}} for i in (1, 2, 3)]}
+        responses = [{"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": f"out{i}"}}}]} for i in (1, 2, 3)]
+        history = ({"role": "user", "parts": [{"text": "audit"}]}, call, *responses)
+        for mode, options in ((CompactionMode.REMOVE_LAST_N_TOOL_CALLS, {"n": 2}), (CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, {"start": 2, "end": 3})):
+            with self.subTest(mode=mode.value):
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=mode, options=options)
+                self.assertEqual(list(after), [history[0]])
+
+    async def test_fully_answered_gemini_parallel_call_turn_is_kept(self) -> None:
+        # [Silent Failure] A Gemini call turn whose every functionCall part has a response survives, in separate or merged response turns.
+        call = {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"i": i}}} for i in (1, 2)]}
+        separate = tuple({"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": f"out{i}"}}}]} for i in (1, 2))
+        merged = ({"role": "user", "parts": [p for m in separate for p in m["parts"]]},)
+        for name, results in (("separate", separate), ("merged", merged)):
+            with self.subTest(responses=name):
+                history = ({"role": "user", "parts": [{"text": "audit"}]}, call, *results, {"role": "model", "parts": [{"text": "done"}]})
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.KEEP_LAST_N_MESSAGES, options={"n": 10})
+                self.assertEqual(list(after), list(history))
+
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
         messages = (msg("user", "a"), msg("assistant", "b"))
