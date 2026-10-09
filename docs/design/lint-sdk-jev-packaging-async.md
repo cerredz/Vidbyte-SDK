@@ -11,10 +11,10 @@ This PR adds five static rules to the SDK lint suite. None of them depends on Ru
 - **C013 `jev-decision-helper-only`** (catalog C014). Agents-layer code asks Jev through `DecisionModelHelper`: no direct `DecisionModelRunner` or provider decision call, no inline comparison of a Jev answer probability or score against a threshold, and no Jev request awaited once per item inside a loop.
 - **C014 `jev-done-check-parity`** (catalog C017). Every `JevDoneCheck` member has all the parts the done-check pipeline dispatches on: its question module and question keys, its `JevDoneRegistry` question, threshold, and description, its `JevHandoff._SECTIONS` entry, and its handler in `JevRunState._section`, `JevRunState._judge`, and `JevDoneContinuation._explain`. A done-question module with no member is also reported.
 - **C015 `package-data-coverage`** (catalog C022). Every tracked non-Python runtime asset under `vidbyte/` is shipped by a `[tool.setuptools.package-data]` pattern, no folder README is shipped, and every pattern ships something.
-- **S063 `gather-exceptions-classified`** (catalog S082, VR-001). The results of `asyncio.gather(..., return_exceptions=True)` are classified with `isinstance(result, BaseException)` wherever they are used, so a cancelled child's `CancelledError` is never treated as a value. A result that is discarded instead must carry an `# @intent` comment.
+- **S063 `gather-exceptions-classified`** (catalog S082, VR-001). The results of `asyncio.gather(..., return_exceptions=True)` are classified with `isinstance(result, BaseException)` wherever they are used, so a cancelled child's `CancelledError` is never treated as a value. A result that is discarded instead must carry an `# @intent` comment, unless the function is draining tasks it cancelled itself.
 - **S064 `retry-overall-deadline`** (catalog S083, VR-018). A retry loop that sleeps between attempts stops at a cumulative deadline, either by comparing a clock reading inside the loop or by running under an enclosing `asyncio.timeout` / `asyncio.wait_for`.
 
-The rules only read source. Existing debt is frozen at its measured count: C013 = 9, C014 = 0, C015 = 3, S063 = 5, S064 = 4. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real gaps the rules surface are listed under "Product findings for follow-up" in the PR body.
+The rules only read source. Existing debt is frozen at its measured count: C013 = 9, C014 = 0, C015 = 3, S063 = 4, S064 = 4. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real gaps the rules surface are listed under "Product findings for follow-up" in the PR body.
 
 ## Flow chart
 
@@ -54,10 +54,10 @@ flowchart TD
     S063 --> G1[asyncio.gather calls with return_exceptions not False]
     G1 --> G2[Follow the results: locals, returns to in-module callers, arguments into in-module callees]
     G2 --> G3{isinstance on an element covers BaseException?}
-    G3 -->|yes, or # @intent above the gather| OK63[No finding]
+    G3 -->|yes, a positive success-type check, or # @intent above the gather| OK63[No finding]
     G3 -->|only Exception| F63a[Finding: cancellation-unclassified]
     G3 -->|no classification| F63b[Finding: results-unclassified]
-    G1 -->|result discarded, no # @intent| F63c[Finding: results-discarded]
+    G1 -->|result discarded, no # @intent, not a drain of tasks it cancelled| F63c[Finding: results-discarded]
 
     S064 --> R1[for/while loops with retry vocabulary that sleep, directly or through an in-module helper]
     R1 --> R2{Clock-derived comparison in the loop, or loop under asyncio.timeout / wait_for, or function reached only from such a scope?}
@@ -189,17 +189,19 @@ The implementation plan pre-assigns C013–C015, S063, and S064 to this PR. S1 o
 - **Re-verification on `main`.** The catalog counted 4 call sites, with 3 compliant. There are 7 `return_exceptions=True` sites now:
   - `multi/cleanup.py:57` and `aggregation.py:88` classify with `BaseException`;
   - `multi_provider_agentic_grader.py:76` (through `_collect_candidates`) and `mixins.py:100` classify with `Exception` only;
-  - `mixins.py:115`, `mixins.py:218`, and `tools/mcp/transport.py:319` discard the results with no stated intent.
+  - `mixins.py:115` and `mixins.py:218` discard the results with no stated intent;
+  - `tools/mcp/transport.py:319` discards them too, but `McpStdioTransport._stop_reader_tasks` first cancels exactly the reader tasks it gathers, so the drained results are the cancellations it asked for. `lint-rule-catalog-expansion.md:519` calls this site "intentional cancellation suppression", and the rule exempts that cancel-and-drain shape. The measured count is therefore 4, not 5.
 - **Detection.** A `gather(...)` call (`asyncio.gather` or an imported `gather`) whose `return_exceptions` keyword is not the literal `False`. The rule follows its results:
-  - through local assignments, unpacking, `list()`/`tuple()`, comprehensions, `zip`/`enumerate`, and slices;
+  - through local assignments, unpacking (starred targets included), `list()`/`tuple()`/`sorted()`, comprehensions, `zip`/`enumerate`/`dict()` with tuple positions kept, `.items()`/`.values()`, subscripts and slices, `append`/`extend` into another container, and `self` attributes;
   - into in-module callees when passed as an argument (the matching parameter carries the results);
-  - out through `return` to every in-module caller (`self.m(...)`, a module function, or `var.m(...)` with `var` bound to a module class).
-  It then looks for `isinstance(element, ...)` on a loop or comprehension target, a subscript, or an unpacked name drawn from the results, in any function the results reach.
+  - out through `return` to every in-module caller (`self.m(...)`, `cls.m(...)`, `Class.m(...)`, a module function, a module class constructor, or `var.m(...)` with `var = Class(...)` in the same function; methods resolve through in-module base classes).
+
+  It then reads every `isinstance(x, ...)` test and `match` class pattern whose subject is one result, in any function the results reach. A test is cancellation-aware when it names `BaseException` or `CancelledError`, or positively checks a type that is not an exception (`isinstance(res, AgentResult)` treats everything else as a failure). Module-level tuple constants, `A | B` unions, and in-module exception subclasses are resolved. A test only against `Exception` or narrower is not cancellation-aware.
 - **Kinds.**
   - `cancellation-unclassified`: elements are classified, but only against `Exception` (or narrower), so `CancelledError` results become values.
   - `results-unclassified`: the results are used, or escape the module, with no classification.
-  - `results-discarded`: the awaited gather is an expression statement, so every child error is dropped.
-- **Exemption.** An `# @intent <slug>` comment (the A002 marker) on the gather's lines or in the comment block directly above its statement declares the suppression intentional.
+  - `results-discarded`: the gather (awaited directly or through `wait_for`/`shield`) is an expression statement, so every child error is dropped. A cancel-and-drain is exempt: every gathered argument is a task the same function cancelled earlier (`for t in tasks: t.cancel()` before `gather(*tasks)`, or `x.cancel()` before `gather(x)`).
+- **Exemption.** An `# @intent <slug>` comment (the A002 marker) on the lines from the statement's start to the gather's end, or in the comment block directly above the statement, declares the suppression intentional. An empty `# @intent` does not count.
 
 ### S064 retry-overall-deadline
 
@@ -228,7 +230,7 @@ The implementation plan pre-assigns C013–C015, S063, and S064 to this PR. S1 o
   - `lint/rules/s063_gather_exceptions_classified.py`;
   - `lint/rules/s064_retry_overall_deadline.py`.
 - `lint/core/registry.py`: five appended `RULE_MODULES` entries.
-- `lint/baseline.json`: C013 = 9, C014 = 0, C015 = 3, S063 = 5, S064 = 4, each seeded with `--update-baseline --rule <ID>`.
+- `lint/baseline.json`: C013 = 9, C014 = 0, C015 = 3, S063 = 4, S064 = 4, each seeded with `--update-baseline --rule <ID>`.
 - `lint/README.md`: three C-series rows and two S-series rows, plus the count-free Responsibilities line that S1 and S2 also use.
 - `lint/rules/README.md`: five File Index lines.
 - `docs/design/lint-sdk-jev-packaging-async.md`: this document.
@@ -241,13 +243,13 @@ The SDK lint design (`docs/design/sdk-agent-facing-lint-suite.md`, "No new featu
 - **C013 sanctions gather fan-out.** Concurrent per-candidate requests pass, because the field guide sanctions them for independent candidates (PR #517). Wrapping questions that share one state in `gather` would also pass. That is a review question, not a static one.
 - **C014 reads handler maps.** If a dispatcher moves back to `match` statements, the reader fails closed (ERRORED) instead of reporting zero. The rule must then be updated in the same edit.
 - **C015 emulates setuptools by hand.** If `build_py` changes its globbing, the emulation must follow. The scratch check compares the rule with a real wheel build and should be repeated when `setuptools` is bumped. Matching is case-sensitive like the Linux builders, so a Windows-only build could ship a differently-cased file that the rule calls unshipped.
-- **S063 needs the results to stay in the module.** Results returned from a public function with no in-module caller are reported as unclassified, because the callers cannot be seen. An `# @intent` comment is the escape hatch when handing exceptions to callers is the API.
+- **S063 needs the results to stay in the module.** Results returned from a public function with no in-module caller are reported as unclassified, because the callers cannot be seen. An `# @intent` comment is the escape hatch when handing exceptions to callers is the API. The flow over-approximates on purpose: an extra binding can only add a test and hide a finding, so a false positive needs a flow the rule does not model, such as results classified by another module's helper.
 - **S064 trusts any enclosing deadline path.** `StateMachine.arun` applies its `asyncio.timeout` only when `settings.timeout_seconds` is set. When it is not set, the user has opted out of a deadline, so the loop is treated as bounded by the caller's choice. A deadline enforced from another module is not seen. The repair is then to pass the deadline in explicitly, which is better engineering anyway.
 - **Report truncation.** The text report prints the first 20 findings of a rule. Every rule here has fewer than 20, so a regression always shows its full diagnostic.
 
 ## Verification plan
 
-- Run `python lint/run.py --rule <ID> --format json` for each rule and classify every finding by hand: 9, 0, 3, 5, and 4 findings, all true positives.
+- Run `python lint/run.py --rule <ID> --format json` for each rule and classify every finding by hand: 9, 0, 3, 4, and 4 findings, all true positives.
 - Prove the zero-finding C014 on real files: remove one part of one real check (a handler, a registry entry, a section), confirm REGRESSED, then revert.
 - Run a scratch fixture self-test per rule. Correct code must give 0 findings, each kind must give exactly the expected findings, and every diagnostic must render all six fields with numbered steps, at least two will-not-work entries including the baseline, and no empty-list prose.
 - Run at least 3 scratch mutants per rule (silence the judge, drop each sub-check, break name or path resolution). Each must make the self-test fail.

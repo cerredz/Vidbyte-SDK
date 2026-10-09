@@ -84,6 +84,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s060_typed_public_seam_mappings.py` -- named mapping shapes at public seams.
 - `s061_bounded_safe_path.py` -- resolved, contained file/archive I/O paths.
 - `s062_no_implicit_string_concatenation.py` -- one literal per string, never adjacent literals.
+- `s063_gather_exceptions_classified.py` -- gather(return_exceptions=True) results classified against BaseException.
 - `a001_agent_readable_file_headers.py` -- structured SDK source headers.
 - `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
 - `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
