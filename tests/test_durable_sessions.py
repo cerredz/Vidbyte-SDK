@@ -282,6 +282,20 @@ class SettingsNamesSurviveCheckpointTests(unittest.TestCase):
         self.assertEqual(payload["metadata"]["keep"], 1)
         self.assertNotIn("sk-live", json.dumps(payload))
 
+    def test_checkpoint_keeps_trace_artifact_field_names(self) -> None:  # [Silent Failure]
+        artifact = {"token_estimate": 1200, "auth_flow": "oauth device code", "summary": "billed run"}
+        checkpoint = replace(_checkpoint("se", "c1"), trace_artifact=artifact)
+        serializer = SessionSerializer()
+        restored = serializer.checkpoint_from_dict(json.loads(json.dumps(serializer.checkpoint_to_dict(checkpoint))))
+        self.assertEqual(restored.trace_artifact, artifact)
+
+    def test_checkpoint_trace_events_still_drop_api_key(self) -> None:  # [Hidden Assumption]
+        events = ({"event": "llm_call", "api_key": "sk-live", "token_estimate": 5},)
+        checkpoint = replace(_checkpoint("se", "c1"), trace_events=events)
+        payload = SessionSerializer().checkpoint_to_dict(checkpoint)
+        self.assertEqual(payload["checkpoint"]["trace_events"], [{"event": "llm_call"}])
+        self.assertNotIn("sk-live", json.dumps(payload))
+
 
 # ---------------------------------------------------------------------------
 # Agent state seam
@@ -529,15 +543,17 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
 
     def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
         # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
+        # The trace artifact keeps its keys: they are the declared trace field names.
         store = InMemorySessionStore()
-        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"api_key": "secret", "ok": 1})
+        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"token_estimate": 7, "ok": 1}, trace_events=({"api_key": "secret", "ok": 1},))
         meta = SessionMeta(session_id="se", head_id="c1", parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
         store.ingest(meta, [checkpoint])
 
         with zipfile.ZipFile(BytesIO(SessionBundleExporter(store).export("se")), mode="r") as archive:
             checkpoint_payload = json.loads(archive.read("checkpoints/00000003-c1.json").decode("utf-8"))
 
-        self.assertEqual(checkpoint_payload["checkpoint"]["trace_artifact"], {"ok": 1})
+        self.assertEqual(checkpoint_payload["checkpoint"]["trace_events"], [{"ok": 1}])
+        self.assertEqual(checkpoint_payload["checkpoint"]["trace_artifact"], {"token_estimate": 7, "ok": 1})
 
     def test_ingest_preserves_supplied_seq_parent_and_head_verbatim(self) -> None:  # [Silent Failure]
         # Verify ingest writes the exact supplied DAG fields without seq/head mutation.
