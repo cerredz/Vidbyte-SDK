@@ -5,8 +5,19 @@ PURPOSE:
     the agent's tool PermissionPolicy instead of falling back to the default.
 ROLE IN CODEBASE:
     Covers the RunState.permission_policy field, its SessionSerializer round trip,
-    and the pre-field checkpoint fallback described in
-    docs/design/restore-permission-policy.md.
+    and the pre-field checkpoint fallback.
+ARCHITECTURE NOTE:
+    Uses offline scripted runners bound through tests.agent_test_support, so no
+    provider network call is made.
+COMMON MODIFICATION PATTERNS:
+    Add a case here when another plain-data agent setting joins RunState.
+KNOWN EDGE CASES:
+    An empty policy is a real deny-all policy; a missing field means an older
+    checkpoint and restores the default policy.
+RELATED DOCS:
+    docs/design/restore-permission-policy.md
+TESTS:
+    python -m pytest -q tests/test_restore_permission_policy.py
 """
 
 from __future__ import annotations
