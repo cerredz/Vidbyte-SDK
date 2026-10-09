@@ -170,6 +170,8 @@ class BaseAgentRuntimeLoopState:
     model_call_count: int = 0
     tokens_used: int | None = None
     model_response: object | None = None
+    # The run's live provider conversation (the same list the loop appends to), so after_run sees it.
+    messages: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def tool_call_count(self) -> int:
@@ -301,6 +303,9 @@ class AgentRuntime:
             await self._run_inner_context_window_hook(state, message=message, provider=state.provider)
         tool_schemas = self._resolve_tool_schemas(state.provider)
         messages = self._extract_initial_messages(run_options)
+        # @intent after-hooks-see-run-conversation
+        # Keep the live conversation on the loop state so the end-of-run hooks can show it to observers like the continual trace.
+        state.messages = messages
         rejections = 0
         compaction_count = 0
         last_assistant_output: str | None = None
@@ -413,6 +418,7 @@ class AgentRuntime:
                     raise
                 handle, state.provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
+                state.messages = messages
                 fallback_index = transition.index
                 # A non-None transition proves self.fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
@@ -503,7 +509,7 @@ class AgentRuntime:
                 )
                 if state.inner_context_window_algorithm is not None:
                     messages.append(self._assistant_message(last_assistant_output))
-                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
                 if state.inner_context_window_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
                     continue
                 if decision.action is not MiddlewareAction.CONTINUE:
@@ -530,7 +536,7 @@ class AgentRuntime:
                     return await self._finish_result(processed, state)
                 _, result = processed
                 if call.tool_name == IS_DONE_TOOL_NAME:
-                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
                     if decision.action is not MiddlewareAction.CONTINUE:
                         abort_result = self._middleware_abort_result(
                             decision,
@@ -573,7 +579,7 @@ class AgentRuntime:
             if finish_attempt_continued or contract_rejected:
                 continue
 
-            decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+            decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
             if decision.action is not MiddlewareAction.CONTINUE:
                 result = self._middleware_abort_result(
                     decision,
@@ -787,6 +793,7 @@ class AgentRuntime:
                 MiddlewareHook.AFTER_RUN,
                 state,
                 tool_call_count=int(dict(result.metadata).get("tool_call_count", 0)),
+                provider_messages=state.messages,
             )
         )
         if decision.action is MiddlewareAction.ABORT_RUN:
@@ -1001,7 +1008,8 @@ class AgentRuntime:
             model_response=model_response if model_response is not None else state.model_response,
             model_usage=model_usage,
             error=error,
-            provider_messages=tuple(provider_messages),
+            # Copy each message so middleware reads a snapshot and can never edit the run's live conversation.
+            provider_messages=tuple(dict(message) for message in provider_messages),
             system=system,
             tool_is_internal=tool_is_internal,
             metadata=dict(metadata if metadata is not None else state.metadata),
