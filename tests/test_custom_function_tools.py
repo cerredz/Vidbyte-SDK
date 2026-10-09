@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic import BaseModel
+
 from vidbyte import tool, vidbyte_tool
+from vidbyte.lib.dataclasses.tools import ToolParameter
 from vidbyte.tools import ToolCall, ToolRegistry, ToolStatus
+
+
+class Passenger(BaseModel):
+    name: str
+    age: int
 
 
 class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
@@ -88,6 +96,40 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
 
         result = await registry.get("raw").execute(ToolCall("raw", {"value": 2}))  # type: ignore[union-attr]
         self.assertEqual(result.output, "3")
+
+    async def test_nested_model_and_dataclass_arguments_keep_their_types(self) -> None:
+        received: dict[str, object] = {}
+
+        @vidbyte_tool
+        def book(
+            nights: int,
+            status: ToolStatus,
+            passenger: Passenger | None = None,
+            parameter: ToolParameter | None = None,
+        ) -> str:
+            """Book a trip."""
+            received.update(nights=nights, status=status, passenger=passenger, parameter=parameter)
+            return f"{passenger.name}:{parameter.name}" if passenger and parameter else "none"
+
+        result = await book.execute(
+            ToolCall(
+                "book",
+                {
+                    "nights": "4",
+                    "status": "success",
+                    "passenger": {"name": "Al", "age": 30},
+                    "parameter": {"name": "city", "type": "string", "description": "Destination"},
+                },
+            )
+        )
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.output, "Al:city")
+        self.assertEqual(received["nights"], 4)
+        self.assertIs(received["status"], ToolStatus.SUCCESS)
+        self.assertEqual(received["passenger"], Passenger(name="Al", age=30))
+        self.assertIsInstance(received["parameter"], ToolParameter)
+        self.assertEqual(received["parameter"].name, "city")  # type: ignore[union-attr]
 
 
 if __name__ == "__main__":

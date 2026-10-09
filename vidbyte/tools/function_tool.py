@@ -60,7 +60,8 @@ class FunctionTool(BaseTool):
         except ValidationError as exc:
             return ToolResult.failure(self.name, _validation_message(exc), metadata={"error_type": "validation"})
 
-        kwargs = model.model_dump(mode="python")
+        # Read validated attributes directly: model_dump would turn nested models and dataclasses back into dicts.
+        kwargs = {name: getattr(model, name) for name in type(model).model_fields}
         try:
             if inspect.iscoroutinefunction(self.func):
                 value = await self.func(**kwargs)
