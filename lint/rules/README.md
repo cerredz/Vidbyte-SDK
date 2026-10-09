@@ -24,6 +24,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c016_public_api_contract_current.py` -- committed SDK public-API contract matches its generator.
 - `c017_platform_route_contract.py` -- SDK requests to Vidbyte hosts match a platform-contract route, method, and access class.
 - `c018_canonical_api_host.py` -- Vidbyte API URLs in SDK code use an origin the platform contract lists as live.
+- `c019_platform_error_code_contract.py` -- platform-family or near-miss error codes in SDK decision positions are exported by the platform contract.
 - `s001_python_correctness_foundation.py` -- Pyflakes/syntax correctness.
 - `s002_exception_cause_chaining.py` -- explicit translated causes.
 - `s003_strict_zip.py` -- explicit zip length behavior.

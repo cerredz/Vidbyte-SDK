@@ -233,10 +233,12 @@ The implementation plan pre-assigns C016–C020 to this PR. S1 owns C006–C008,
   C019 is therefore a tripwire with 0 sites. It exists so that the first SDK code that handles a gateway code, which the idempotency follow-up below would add, is checked against the contract.
 - **What counts as a platform code.**
   - **Position.** The literal sits where code branches on or maps a value:
-    - an operand of `==`, `!=`, `in`, or `not in`, including the elements of a tuple, list, set, or frozenset;
-    - a `match` case value;
+    - an operand of `==`, `!=`, `in`, or `not in`, including the elements of a tuple, list, or set literal, or of a `frozenset`, `set`, `tuple`, or `list` call on one;
+    - a `match` case value, including `|` alternatives and mapping-pattern values;
     - a dict-literal key or value;
-    - a module-level or class-level constant, including enum members.
+    - a module-level or class-level constant (nested classes and `if`/`try`/`with` blocks included), including enum members.
+
+    A literal anywhere else (a call argument, a `return` value, an f-string part, a docstring) is not a decision position, so it is not judged.
   - **Shape.** The whole literal is flat snake_case with at least three tokens.
   - **Attribution.** The literal is attributed to the platform when either of these holds:
     - it starts with a platform family, meaning a two-or-more-token prefix shared by at least two contract codes. These are derived from the contract at run time, and today they are `api_billing_`, `api_billing_reservation_`, `model_gateway_`, `model_gateway_idempotency_`, `personal_workspace_`, and `runtime_admission_`;
@@ -246,8 +248,10 @@ The implementation plan pre-assigns C016–C020 to this PR. S1 owns C006–C008,
   - `near-miss`: probably a typo of the closest contract code.
 - **How SDK-internal codes are told apart.**
   - Exact contract codes never produce a finding.
-  - Generic two-token codes (`not_found`, `validation_failed`, `internal_error`, ...) are excluded from attribution, because SDK tokens collide with them, as shown above.
-  - A family prefix or a near miss is the evidence that a literal names the platform's vocabulary.
+  - Generic two-token codes (`not_found`, `validation_failed`, `internal_error`, ...) are below the three-token shape, so they are never attributed. SDK tokens collide with them, as shown above.
+  - A family prefix or a near miss is the evidence that a literal names the platform's vocabulary. A one-token prefix such as `research_` or `usage_` is not a family, because SDK identifiers start with common words too.
+  - Measured on `main`: 589 literals sit in decision positions under `vidbyte/`. None is an exact contract code, none starts with a family, and the closest to any contract code is `stdin_write_failed` (`tools/mcp/transport.py:237`), at a ratio of 0.79 to `billing_write_failed`, below the 0.9 cutoff.
+- **Kind precedence.** A literal that is both a family member and a near miss is reported as `near-miss`, because the typo fix is the likelier repair. The diagnostic names the closest exported code, with its contract line, and cites a dotted `FailureCode` member found in `vidbyte/` as the SDK's own vocabulary.
 
 ### C020 api-key-prefix-contract
 
