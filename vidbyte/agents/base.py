@@ -26,13 +26,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+from enum import Enum
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.contracts import floors as contract_floors
+from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -43,7 +45,7 @@ from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.dataclasses.trace import TraceOption
+from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError, UsageAccountingError
@@ -453,6 +455,8 @@ class BaseAgent(McpAttachableMixin):
             temperature=state.temperature,
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
+            timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
+            trace_option=cls._restore_trace_option(state),
             description=state.description,
             capabilities=tuple(state.capabilities),
             agent_metadata=agent_metadata,
@@ -474,6 +478,7 @@ class BaseAgent(McpAttachableMixin):
             "max_tool_calls": self.runtime_config.max_tool_calls,
             "compaction_trigger_tokens": self.runtime_config.compaction_trigger_tokens,
             "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
+            "runner_timeout_seconds": self.runner_config.timeout_seconds,
         }
         if isinstance(self.runtime_config_obj, ActorRuntime):
             config.update(
@@ -504,7 +509,46 @@ class BaseAgent(McpAttachableMixin):
         values = {name: getattr(self.agent_loop_settings, name, None) for name in fields}
         if isinstance(values.get("allowed_tools"), tuple):
             values["allowed_tools"] = list(values["allowed_tools"])
+        settings = self.agent_loop_settings
+        values["tool_settings"] = self._export_settings_object(getattr(settings, "tool_settings", None))
+        values["tool_error_policy"] = self._export_settings_object(getattr(settings, "tool_error_policy", None))
+        values["output_contracts"] = self._export_output_contracts(getattr(settings, "output_contracts", ())) or None
+        values["max_contract_rejections"] = getattr(settings, "max_contract_rejections", None)
         return {key: value for key, value in values.items() if value is not None}
+
+    @staticmethod
+    def _export_settings_object(settings: ToolSettings | ToolErrorPolicy | None) -> dict[str, Any] | None:
+        # Constructor kwargs as JSON-safe data so a resumed agent keeps its tool deny-list, caps, and retry policy.
+        if settings is None:
+            return None
+        names = [name for name in inspect.signature(type(settings)).parameters if hasattr(settings, name)]
+        data = {name: getattr(settings, name) for name in names}
+        for key, value in data.items():
+            if isinstance(value, (set, frozenset)):
+                data[key] = sorted(value)
+            elif isinstance(value, Mapping):
+                data[key] = dict(value)
+            elif isinstance(value, Enum):
+                data[key] = value.value
+        return data
+
+    @staticmethod
+    def _export_output_contracts(contracts: Iterable[object]) -> list[dict[str, Any]]:
+        # Built-in floors only; custom contracts carry arbitrary state, so callers must re-supply them.
+        exported: list[dict[str, Any]] = []
+        for contract in contracts:
+            if BaseAgent._builtin_floor(type(contract).__name__) is not type(contract):
+                continue
+            entry = {"type": type(contract).__name__, "minimum": getattr(contract, "minimum")}
+            entry.update({key: getattr(contract, key) for key in ("tool_name", "cost_per_million_tokens") if hasattr(contract, key)})
+            exported.append(entry)
+        return exported
+
+    @staticmethod
+    def _builtin_floor(name: str) -> type | None:
+        # Resolve a contract class name to a floor defined in vidbyte.agents.contracts.floors, else None.
+        floor = getattr(contract_floors, name, None)
+        return floor if isinstance(floor, type) and floor.__module__ == contract_floors.__name__ else None
 
     def _export_context_summary(self) -> dict[str, Any]:
         # Record resumable context metadata without serializing live context objects.
@@ -524,7 +568,7 @@ class BaseAgent(McpAttachableMixin):
             "schema_name": option.schema.name,
             "schema_description": option.schema.description,
             "schema_fields": {
-                name: {"description": field.description, "type": field.type.value}
+                name: field.model_dump(mode="json", exclude_none=True)
                 for name, field in option.schema.fields.items()
             },
             "every_n_iterations": option.every_n_iterations,
@@ -553,7 +597,24 @@ class BaseAgent(McpAttachableMixin):
             }
         if values.get("allowed_tools") is not None:
             values["allowed_tools"] = tuple(values["allowed_tools"])
+        values["tool_settings"] = ToolSettings(**values["tool_settings"]) if values.get("tool_settings") else None
+        values["tool_error_policy"] = ToolErrorPolicy(**values["tool_error_policy"]) if values.get("tool_error_policy") else None
+        values["output_contracts"] = tuple(
+            floor(**{key: value for key, value in entry.items() if key != "type"})
+            for entry in values.get("output_contracts") or ()
+            if (floor := BaseAgent._builtin_floor(str(entry.get("type")))) is not None
+        )
         return AgentLoopSettings(**{key: value for key, value in values.items() if value is not None})
+
+    @staticmethod
+    def _restore_trace_option(state: RunState) -> TraceOption | None:
+        # Rebuild the continual trace option from its exported primitives; older checkpoints carry none.
+        data = dict(state.trace_option or {})
+        if not data.get("schema_name"):
+            return None
+        fields = {name: TraceField.model_validate(spec) for name, spec in (data.get("schema_fields") or {}).items()}
+        schema = TraceSchema(name=data["schema_name"], fields=fields, description=data.get("schema_description", ""))
+        return TraceOption(mode=data.get("mode", "continual"), schema=schema, every_n_iterations=int(data.get("every_n_iterations", 5)), max_trace_iterations=int(data.get("max_trace_iterations", 3)))
 
     @staticmethod
     def _restore_runtime(state: RunState) -> AgentRuntimeType | str | ActorRuntime:

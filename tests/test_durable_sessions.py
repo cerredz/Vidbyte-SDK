@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import tempfile
@@ -12,6 +13,10 @@ from unittest import mock
 
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte import Agent
+from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
+from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
+from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
+from vidbyte.tools import tool
 from vidbyte.agents.types import AgentMessage
 from vidbyte.sessions.contracts import (
     SESSION_SCHEMA_VERSION,
@@ -809,6 +814,72 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             resumed = Session.resume(store, session_id)
             bind_test_runner(resumed.agent, EchoRunner())
             self.assertEqual(len(resumed.agent.history), 1)
+
+
+class RefundThenDoneRunner:
+    """Scripted runner that asks for the denied refund tool, then finishes."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, prompt: str, **_kwargs: object) -> _Resp:
+        self.calls += 1
+        if self.calls % 2:
+            return _Resp(_fc("issue_refund", '{"order_id": "o-1"}', "r%d" % self.calls))
+        return _Resp(_fc("isDone", '{"final_answer": "done"}', "d%d" % self.calls))
+
+
+def _guardrail_values(settings: AgentLoopSettings) -> tuple:
+    # Compare nested guardrail settings by value; they do not define __eq__.
+    contracts = [(type(c).__name__, vars(c)) for c in settings.output_contracts]
+    return (vars(settings.tool_settings), vars(settings.tool_error_policy), contracts, settings.max_contract_rejections, settings.max_tokens)
+
+
+class ResumeGuardrailTests(unittest.IsolatedAsyncioTestCase):
+    async def test_file_store_resume_keeps_loop_guardrails_trace_and_timeout(self) -> None:  # [Silent Failure]
+        executed: list[str] = []
+
+        @tool
+        def issue_refund(order_id: str) -> str:
+            """Refund an order."""
+            executed.append(order_id)
+            return "refunded"
+
+        settings = AgentLoopSettings(
+            max_iterations=6,
+            max_tokens=5000,
+            max_contract_rejections=2,
+            output_contracts=[MinToolCalls(1), MinToolCallsById("issue_refund", 1), MinCostSpent(0.5, cost_per_million_tokens=2.0)],
+            tool_settings=ToolSettings(denied_tools={"issue_refund"}, max_calls_per_tool={"lookup": 2}),
+            tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=1, retry_on=["timeout"], on_unrecoverable="abort_run"),
+        )
+        trace_option = TraceOption.continual({"goal": TraceField(description="Current goal", type="object", fields={"step": TraceField(description="Step")})}, every_n_iterations=2)
+        with tempfile.TemporaryDirectory() as root:
+            store = FileSessionStore(root)
+            agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner(), tools=[issue_refund], agent_loop_settings=settings, timeout_seconds=12.5, trace_option=trace_option)
+            session = Session(agent, store=store)
+            session.checkpoint()
+            resumed = Session.resume(store, session.id, tools=[issue_refund])
+
+        restored = resumed.agent
+        self.assertEqual(_guardrail_values(restored.agent_loop_settings), _guardrail_values(settings))
+        self.assertEqual(restored.runner_config.timeout_seconds, 12.5)
+        self.assertEqual(restored._trace_option, trace_option)
+        runner = RefundThenDoneRunner()
+        bind_test_runner(restored, runner)
+        with contextlib.suppress(VidbyteSdkError):
+            await restored.arun("refund order o-1")
+        self.assertGreaterEqual(runner.calls, 1)
+        self.assertEqual(executed, [])
+
+    def test_old_checkpoint_without_guardrail_keys_still_restores(self) -> None:  # [Edge Case]
+        state = replace(_run_state(), runtime_config={"max_iterations": 4}, loop_settings={"max_iterations": 4}, trace_option={})
+        restored = Agent.restore(state)
+        self.assertEqual(restored.agent_loop_settings.max_iterations, 4)
+        self.assertIsNone(restored.agent_loop_settings.tool_settings)
+        self.assertEqual(restored.agent_loop_settings.output_contracts, ())
+        self.assertIsNone(restored.runner_config.timeout_seconds)
+        self.assertIsNone(restored._trace_option)
 
 
 # ---------------------------------------------------------------------------
