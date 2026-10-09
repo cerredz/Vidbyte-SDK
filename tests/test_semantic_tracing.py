@@ -13,7 +13,7 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.trace.providers import GenericProviderTranslator, LangSmithProviderTranslator
 from vidbyte.trace.registry import TraceComponentRegistry
-from vidbyte.trace.schema import SpanKind, SpanSpec, TraceDetail
+from vidbyte.trace.schema import SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
 
 
 class RecordingTracer(TracerBase):
@@ -177,6 +177,36 @@ class TraceControllerTests(unittest.TestCase):
         llm_event = next(event for event in inner.events if event.get("name") == "llm.call")
         self.assertIs(llm_event["parent"], external_parent)
 
+    def test_suppressed_explicit_parent_resolves_to_nearest_live_ancestor(self) -> None:
+        # Verifies a profile-filtered explicit parent is never handed to the backend as a span parent.
+        inner = RecordingTracer()
+        tracer = Trace.profile(inner, TraceProfile.default())
+        root = tracer.start_trace("agent.run")
+        iteration = tracer.start_span("runtime.iteration", parent=root)
+        sibling = tracer.start_span("llm.call", parent=root)
+        child = tracer.start_span("tool.call", parent=iteration)
+        tracer.end_span(child, output="ok")
+        tracer.end_span(sibling, output="ok")
+        tracer.end_span(iteration, output="hidden")
+        tracer.end_trace(root, output="done")
+        self.assertTrue(iteration.suppressed)  # type: ignore[attr-defined]
+        tool_event = next(event for event in inner.events if event.get("name") == "tool.call")
+        self.assertIs(tool_event["parent"], root.provider_context)
+        self.assertNotIsInstance(tool_event["parent"], SemanticSpanContext)
+
+    def test_live_explicit_parent_is_used_directly(self) -> None:
+        # Verifies a live semantic explicit parent still maps to its own provider context.
+        inner = RecordingTracer()
+        tracer = Trace.profile(inner, TraceProfile.default())
+        root = tracer.start_trace("agent.run")
+        llm = tracer.start_span("llm.call", parent=root)
+        parser = tracer.start_span("parser.tool_calls", parent=llm)
+        tracer.end_span(parser, output="ok")
+        tracer.end_span(llm, output="ok")
+        tracer.end_trace(root, output="done")
+        parser_event = next(event for event in inner.events if event.get("name") == "parser.tool_calls")
+        self.assertIs(parser_event["parent"], llm.provider_context)
+
     def test_contextvars_isolate_concurrent_traces(self) -> None:
         # Verifies two async traces do not cross parent stacks.
         async def run_one(label: str) -> SpanContext:
@@ -253,6 +283,19 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("parser.tool_calls", names)
         self.assertIn("agent.stop", names)
         self.assertNotIn("runtime.iteration", names)
+
+    async def test_agent_default_profile_attaches_spans_to_backend_contexts(self) -> None:
+        # Verifies runtime spans parented under a suppressed iteration still attach to contexts the backend created.
+        inner = RecordingTracer()
+        tracer = Trace.profile(inner, TraceProfile.default())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner(), trace=tracer)
+        await agent.generate_reply("hello")
+        created = [event["context"] for event in inner.events if event["type"].startswith("start")]
+        spans = [event for event in inner.events if event["type"] == "start_span"]
+        self.assertIn("llm.call", [event["name"] for event in spans])
+        self.assertIn("tool.call", [event["name"] for event in spans])
+        for event in spans:
+            self.assertTrue(any(event["parent"] is context for context in created), event["name"])
 
     async def test_agent_verbose_profile_records_runtime_and_context_spans(self) -> None:
         # Verifies verbose profile adds runtime and context-window spans.

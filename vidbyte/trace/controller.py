@@ -138,12 +138,15 @@ class TraceController(TracerBase):
 
     def _provider_parent(self, explicit: SpanContext | None, policy: ParentPolicy) -> SpanContext | None:
         # Resolves the provider parent from explicit context or context-local stack.
-        if explicit is not None:
+        suppressed_parent = isinstance(explicit, SemanticSpanContext) and explicit.provider_context is None
+        if explicit is not None and not suppressed_parent:
             return self._unwrap_provider_context(explicit)
-        if policy is ParentPolicy.ROOT:
+        if explicit is None and policy is ParentPolicy.ROOT:
             return None
+        # A suppressed explicit parent never reached the backend, so stand in its nearest live ancestor below it on the stack.
         stack = _SPAN_STACK.get()
-        for context in reversed(stack):
+        cut = next((index for index in range(len(stack) - 1, -1, -1) if stack[index] is explicit), len(stack))
+        for context in reversed(stack[:cut]):
             if not context.suppressed and context.provider_context is not None:
                 return context.provider_context
         return None
