@@ -33,6 +33,7 @@ from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
+from vidbyte.lib.usage_ledger import active_usage_ledger, usage_ledger_scope
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.prompts import Prompts
 from vidbyte.tools.catalog import Tools
@@ -219,8 +220,12 @@ class AggregateAgent(BaseAgent):
         prompt = self._coerce_prompt(message)
         self._active_prompt = prompt
         trace_ctx = self._tracer.start_trace("agent.run", agent_name=self.name, strategy="aggregate", prompt=self._safe_trace_value(prompt), system_prompt=self._safe_trace_value(self.system_prompt), metadata=self._safe_trace_value(self.metadata))
+        # Every proposer/aggregator child run merges into this agent's tracker; this run's rollup reaches an outer ledger once.
+        parent = active_usage_ledger()
+        self._usage_tracker.reset()
         try:
-            result = await self._engine.aggregate(prompt)
+            with usage_ledger_scope(self._usage_tracker):
+                result = await self._engine.aggregate(prompt)
             reply = AgentMessage(
                 sender=self.name,
                 recipient=str(options.get("recipient", "orchestrator")),
@@ -240,6 +245,8 @@ class AggregateAgent(BaseAgent):
             raise
         finally:
             self._active_prompt = ""
+            if parent is not None and parent is not self._usage_tracker:
+                self._merge_usage_into(parent)
 
     def fork(self, settings: AgentForkSettings | None = None) -> AggregateAgent:
         # Rebuilds an equivalent AggregateAgent so as_tool() and delegation keep aggregating.
