@@ -295,7 +295,18 @@ class ForkConversationTool(BaseTool):
         parent_limit = self._agent.agent_loop_settings.max_iterations
         if requested is not None and parent_limit is not None and requested > parent_limit:
             raise ValueError(f"max_iterations cannot exceed the parent cap of {parent_limit}.")
-        return AgentLoopSettings(**values)
+        return AgentLoopSettings(**values, **self._inherited_guardrails())
+
+    def _inherited_guardrails(self) -> dict[str, Any]:
+        # Carries the parent's non-overridable guardrails so loop overrides cannot drop denied tools or contracts.
+        parent = self._agent.agent_loop_settings
+        return {
+            "tool_settings": parent.tool_settings,
+            "tool_error_policy": parent.tool_error_policy,
+            "output_contracts": parent.output_contracts,
+            "max_contract_rejections": parent.max_contract_rejections,
+            "max_queued_prompts": parent.max_queued_prompts,
+        }
 
     def _resolve_allowed_tools(self, raw_allowed_tools: Any) -> tuple[str, ...]:
         # Validates the optional runtime allowed_tools gate against the selectable tool catalog.
