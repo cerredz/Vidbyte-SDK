@@ -1,20 +1,12 @@
-"""Context Protocol Header
+"""FILE: tests/test_algorithm_side_call_usage.py
 
-Description:
-    Regression tests that model calls made by context-window algorithms reach the run's usage ledger.
-Purpose:
-    Guards against reflection and inner-loop explorer calls being billed by the provider but missing
-    from `AgentRuntime.usage_tracker`, which understated `get_usage()` and `get_cost_usd()`.
-Architecture:
-    - UsageResponse & FakeRunner: offline responses that carry provider, model, and token usage.
-    - AlgorithmSideCallUsageTests: runs reflexion and problem-space search and compares the recorded
-      model call count with the number of runner invocations.
-Relations:
-    Tests `vidbyte/agents/runtime.py`, `vidbyte/agents/algorithms/reflexion.py`, and the inner-loop
-    runner path used by `vidbyte/context/algorithms/problem_space_search.py`.
-Similar Files:
-    - `tests/test_reflexion_algorithm.py`
-    - `tests/test_problem_space_search_algorithm.py`
+PURPOSE: Regression tests that model calls made by context-window algorithms reach the run's usage ledger.
+ROLE IN CODEBASE: Guards AgentRuntime.usage_tracker against missing reflection and inner-loop explorer calls, which understated get_usage() and get_cost_usd().
+ARCHITECTURE NOTE: Offline fake runner whose responses carry provider, model, and token usage; each test compares recorded model calls with runner invocations.
+COMMON MODIFICATION PATTERNS: Add a case here when a new algorithm makes its own model call outside the main loop.
+KNOWN EDGE CASES: Middleware AgentResult aborts are not provider responses and are never recorded.
+RELATED DOCS: docs/design/algorithm-side-call-usage.md.
+TESTS: python -m pytest tests/test_algorithm_side_call_usage.py.
 """
 
 from __future__ import annotations
