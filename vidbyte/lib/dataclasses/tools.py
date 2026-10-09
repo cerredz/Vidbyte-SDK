@@ -312,6 +312,9 @@ class ToolCallContext:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     iteration_count: int | None = None
     activity: ToolCallActivity | None = None
+    # What the model was shown instead of `result` (truncated, redacted, or a primitive
+    # reference); None when the model saw `result` itself. `result` always stays raw.
+    model_visible_result: ToolResult | None = None
 
     @property
     def name(self) -> str:
