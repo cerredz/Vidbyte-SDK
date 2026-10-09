@@ -134,3 +134,10 @@ Tools are attached to [`agents`](../agents/README.md), governed by
 [`middleware`](../middleware/README.md), exposed through
 [`mcp_server`](../mcp_server/README.md), and formatted for
 [`providers`](../providers/README.md).
+
+## Notes for agents
+
+Mistakes that review caught in this folder, oldest first. Read them before you change anything here.
+
+- **Check tool arguments with `if ...: raise ToolExecutionError(...)`, never `assert`.** A filesystem tool bounded its depth and entry-count arguments with `assert`, which Python strips under `-O`, so the checks silently vanished from optimized runs; raise `ToolExecutionError` inside the tool's `try` block, as the other filesystem tools do, so the model gets an error result naming the argument and its limit. `python lint/run.py --rule S063` now fails on a new `assert` anywhere in the package.
+- **Treat a line range as inclusive at both ends when the tool spec says so.** `ReadLinesTool` documents `end` as an inclusive 1-based line number, and changing its slice to `lines[start - 1 : end - 1]` silently dropped the last requested line, so `start=2, end=3` returned only line 2; the slice `lines[start - 1 : end]` is already correct and also reads to the end of the file when `end` is `None`. Before touching index arithmetic in a tool, read the parameter descriptions in its `ToolSpec`, because the model relies on them, and run `python -m pytest tests/test_filesystem_tools.py`, which checks every read window.
