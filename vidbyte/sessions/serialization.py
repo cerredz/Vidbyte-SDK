@@ -39,6 +39,9 @@ class SessionSerializer:
 
     def checkpoint_to_dict(self, checkpoint: Checkpoint) -> dict[str, Any]:
         # Render a full checkpoint (with schema version envelope) to a JSON-safe dict.
+        # @intent settings-names-are-not-secrets
+        # The trace artifact keeps every key: its keys are the trace field names the developer declared.
+        # Trace summary and free-form tracer events still drop credential-like keys.
         return {
             "schema_version": SESSION_SCHEMA_VERSION,
             "checkpoint": {
@@ -50,7 +53,7 @@ class SessionSerializer:
                 "label": checkpoint.label,
                 "status": checkpoint.status.value,
                 "run_state": self._run_state_to_dict(checkpoint.run_state),
-                "trace_artifact": self._safe(checkpoint.trace_artifact),
+                "trace_artifact": self._safe(checkpoint.trace_artifact, scrub_keys=False),
                 "trace_summary": self._safe(checkpoint.trace_summary),
                 "trace_events": self._safe(list(checkpoint.trace_events)) if checkpoint.trace_events is not None else None,
             },
@@ -194,7 +197,7 @@ class SessionSerializer:
         # Recursively coerce a value into JSON-safe form, marking non-serializable leaves.
         # @intent settings-names-are-not-secrets
         # scrub_keys=False keeps every key for SDK-shaped data whose keys are names (schema
-        # properties, tool names, trace fields, structured-reply fields), not credentials;
+        # properties, tool names, trace fields and trace artifacts, structured-reply fields), not credentials;
         # dropping them corrupts resumed agents. Free-form data keeps the default key filter.
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
