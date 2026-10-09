@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import dataclasses
 import inspect
 from enum import Enum
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -1143,9 +1144,11 @@ class BaseAgent(McpAttachableMixin):
         return result
 
     def _record_tool_contexts(self, result: AgentResult) -> None:
+        # Later runs replay these records to the model, so keep the view the model was
+        # shown (truncated, redacted, or a primitive reference), never the raw output.
         contexts = result.metadata.get("tool_calls", ())
         self._tool_call_contexts.extend(
-            context
+            context if context.model_visible_result is None else dataclasses.replace(context, result=context.model_visible_result)
             for context in tuple(contexts)
             if isinstance(context, ToolCallContext)
         )
