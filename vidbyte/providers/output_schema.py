@@ -27,7 +27,7 @@ from typing import Any
 from vidbyte.lib.errors import ConfigurationError
 
 # Leading/trailing markdown fence around a JSON body, which several providers emit despite the schema.
-_FENCED_JSON = re.compile(r"\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z", re.DOTALL)
+_FENCED_JSON = re.compile(r"\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z", re.DOTALL | re.IGNORECASE)
 
 # JSON Schema constraint keys that no provider grammar reliably enforces, mapped to readable clauses.
 _UNENFORCEABLE: Mapping[str, str] = {

@@ -3,7 +3,7 @@
 PURPOSE: Regression tests for OutputSchemaFormatter constraint annotation.
 ROLE IN CODEBASE: Keeps unenforceable constraints out of native wire schemas at every depth.
 ARCHITECTURE NOTE: Resolves a Pydantic model, annotates it, and inspects the resulting dict.
-FUNCTION INVENTORY: OutputSchemaAnnotateTests covers anyOf branches emitted for Optional fields.
+FUNCTION INVENTORY: OutputSchemaAnnotateTests covers anyOf branches emitted for Optional fields; OutputSchemaFencedValidateTests covers fence-tag case.
 COMMON MODIFICATION PATTERNS: Add a model per new schema shape that annotate() must traverse.
 WHAT NOT TO DO: Do not assert exact description wording; assert keys left the schema.
 KNOWN EDGE CASES: Pydantic emits Optional[X] and X | None as anyOf [X, null].
@@ -41,6 +41,23 @@ class OutputSchemaAnnotateTests(unittest.TestCase):
             self.assertNotIn(f'"{key}"', json.dumps(annotated))
         self.assertIn("Must be", notes["description"])
         self.assertIn("Must be", discount["description"])
+
+
+class Total(BaseModel):
+    total: int
+
+
+class OutputSchemaFencedValidateTests(unittest.TestCase):
+    """Verify validate() strips a JSON fence whatever the case of its language tag."""
+
+    def test_json_fence_tag_is_case_insensitive(self) -> None:
+        """A ```JSON or ```Json fence parses the same as ```json instead of failing as invalid JSON."""
+        formatter = OutputSchemaFormatter()
+        for tag in ("json", "JSON", "Json", ""):
+            with self.subTest(tag=tag):
+                parsed, error = formatter.validate(f'```{tag}\n{{"total": 4}}\n```', Total)
+                self.assertIsNone(error)
+                self.assertEqual(parsed.total, 4)
 
 
 if __name__ == "__main__":
