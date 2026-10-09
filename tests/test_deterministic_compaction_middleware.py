@@ -18,6 +18,32 @@ def msg(role: str, content: str, kind: str = "message", **metadata: object) -> C
     return ContextMessage(role=role, content=content, kind=kind, metadata=metadata)
 
 
+def _parallel_tool_history() -> tuple[dict[str, object], ...]:
+    # Returns an OpenAI-chat history whose first tool turn issues two parallel calls.
+    return (
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "read files"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}, {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "a"},
+        {"role": "tool", "tool_call_id": "c2", "content": "b"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c3", "content": "c"},
+    )
+
+
+def _assert_valid_tool_transcript(test: unittest.TestCase, messages: Sequence[dict[str, object]]) -> None:
+    # Asserts every tool reply follows its call turn and every issued tool_call id is answered.
+    pending: set[str] = set()
+    for message in messages:
+        if message["role"] == "tool":
+            test.assertIn(message["tool_call_id"], pending, f"orphaned tool result: {message}")
+            pending.discard(str(message["tool_call_id"]))
+            continue
+        test.assertEqual(pending, set(), f"unanswered tool_call ids before {message}")
+        pending = {str(call["id"]) for call in message.get("tool_calls") or ()}
+    test.assertEqual(pending, set(), "unanswered tool_call ids at end of transcript")
+
+
 class MemoryState:
     """In-memory context state for legacy compaction tool tests."""
 
@@ -84,6 +110,21 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         provider = ({"role": "assistant", "content": "old", "unknown": True}, {"role": "assistant", "content": "new"})
         after, _ = await ContextCompactionEngine().compact_provider_messages(provider, mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, options={"max_messages": 1})
         self.assertEqual(after[0]["content"], "new")
+
+    async def test_trim_with_provider_boundaries_keeps_parallel_turn_whole_by_count(self) -> None:
+        # [Hidden Failure] Keeping a later result of a parallel turn pulls in its call and every sibling result.
+        after, _ = await ContextCompactionEngine().compact_provider_messages(_parallel_tool_history(), mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, options={"max_messages": 2})
+        _assert_valid_tool_transcript(self, after)
+        after, _ = await ContextCompactionEngine().compact_provider_messages(_parallel_tool_history(), mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, options={"max_messages": 3})
+        _assert_valid_tool_transcript(self, after)
+        self.assertEqual([m.get("tool_call_id") for m in after if m["role"] == "tool"], ["c1", "c2", "c3"])
+
+    async def test_trim_with_provider_boundaries_token_budget_never_splits_parallel_turn(self) -> None:
+        # [Silent Failure] Token trimming drops whole call/result groups instead of individual records.
+        for budget in range(0, 12):
+            after, _ = await ContextCompactionEngine().compact_provider_messages(_parallel_tool_history(), mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, options={"max_tokens": budget, "token_counter": lambda text: 1})
+            _assert_valid_tool_transcript(self, after)
+            self.assertEqual(after[0]["role"], "system")
 
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
