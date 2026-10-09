@@ -9,10 +9,10 @@
 This PR adds three static, Ruff-independent AST rules to the SDK lint suite. Together they cover the bug class that took seven consecutive merged fixes (#523–#529): settings and records that accept values the SDK contract says must fail.
 
 - **C006 `finite-numeric-guards`** (catalog C007). A numeric range check in a constructor, `__post_init__`, or validator helper must reject `True`, NaN, and both infinities. The rule proves which of those values actually pass every guard on the value.
-- **C007 `strict-bool-switches`** (catalog C008). A bool switch on a `*Settings`/`*Config`/`*Configuration`/`*Policy`/`*Options` class must be checked with `isinstance(value, bool)` during construction. Otherwise `"false"` turns the switch on.
+- **C007 `strict-bool-switches`** (catalog C008). A bool switch on a `*Settings`/`*Config`/`*Configuration`/`*Policy`/`*Options` class, or on a class in a `config.py`/`configs.py`/`settings.py` module whose constructor raises `ConfigurationError`, must be checked with `isinstance(value, bool)` during construction. Otherwise `"false"` turns the switch on.
 - **C008 `shared-validator-owner`** (catalog C009). A primitive validator (positive int, finite number, bool, timeout, limit, temperature) defined outside `vidbyte/lib/dataclasses/validation.py` is a drifting copy. The finding names the shared validator to use and every other copy.
 
-The rules only read source; they never import `vidbyte`. Existing debt is frozen at its measured count: C006 = 104, C007 = 15, C008 = 45. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real bugs the rules surface are listed under "Product findings for follow-up".
+The rules only read source; they never import `vidbyte`. Existing debt is frozen at its measured count: C006 = 104, C007 = 16, C008 = 45. Any new violation makes `python lint/run.py` fail with a complete agent-facing diagnostic. This PR changes no product code. The real bugs the rules surface are listed under "Product findings for follow-up".
 
 ## Flow chart
 
@@ -30,7 +30,7 @@ flowchart TD
     S4 -->|a probe provably passes every guard| F6[Finding: value, guard, accepted probes]
     S4 -->|rejected, unknown, or delegated to a validator| OK6[No finding]
 
-    C007 --> T1[Configuration classes by name suffix, minus BaseModel/Enum/typing shells]
+    C007 --> T1[Configuration classes by name suffix or config module + ConfigurationError, minus BaseModel/Enum/typing shells]
     T1 --> T2[bool fields of dataclasses and used bool __init__ parameters]
     T2 --> T3{Proof in any method: isinstance x bool, type x is bool, bool validator, hand-off to another config class}
     T3 -->|no proof| F7[Finding: switch, sibling switches, home method, error type]
@@ -128,7 +128,11 @@ The plan assigns `C006` to `finite-numeric-guards`. The catalog listed C006 as "
 ### C007 strict-bool-switches
 
 - **Standard.** The #529 fix (`@intent fallback-enabled-is-not-truthiness`, `vidbyte/agents/settings/fallback.py:35-40`) and AGENTS.md section 4.
-- **Owners.** Classes whose name ends in `Settings`, `Config`, `Configuration`, `Policy`, or `Options`. Subclasses of `BaseModel`, the Enum family, `TypedDict`, `Protocol`, and `NamedTuple` are skipped, because pydantic parses `"false"` and the others hold no runtime value.
+- **Owners.**
+  - Classes whose name ends in `Settings`, `Config`, `Configuration`, `Policy`, or `Options`.
+  - Top-level classes of a module named `config.py`, `configs.py`, or `settings.py` whose own `__init__` or `__post_init__` raises `ConfigurationError`. Both signals say the class holds configuration even though its name does not. On `main` this adds one owner and one finding: `ActorRuntime.dynamic_actors` (`vidbyte/agents/runtimes/configs.py:50`), stored as given at line 69. The module docstring calls it a configuration class, and its constructor already raises `ConfigurationError` for `max_loop`. The fork tool checks the same switch with `_resolve_bool` (`fork.py:339`), but a caller constructing `ActorRuntime(dynamic_actors="false")` directly is not checked. The two signals keep out the other classes in those modules: `CodexVidbyteTranslator`, `HarnessConfigLoader`, the `*Definition` records, and `LinearRuntime`/`MctsSearchRuntime` (whose constructors raise nothing).
+
+  Subclasses of `BaseModel`, the Enum family, `TypedDict`, `Protocol`, and `NamedTuple` are skipped, because pydantic parses `"false"` and the others hold no runtime value.
 - **Switches.**
   - Dataclass fields annotated `bool`, `bool | None`, or `Optional[bool]`, including quoted annotations.
   - On plain classes, bool `__init__` parameters that are actually stored or read.
@@ -174,7 +178,7 @@ The plan assigns `C006` to `finite-numeric-guards`. The catalog listed C006 as "
 - `lint/rules/c006_finite_numeric_guards.py`, `lint/rules/c007_strict_bool_switches.py`, `lint/rules/c008_shared_validator_owner.py`: the new rules.
 - `lint/rules/c006_source_index.py`: C006's read-only source indexes (literals, module constants, and engine-built records), split out to keep the rule module small.
 - `lint/core/registry.py`: three appended `RULE_MODULES` entries.
-- `lint/baseline.json`: the keys C006 = 104, C007 = 15, C008 = 45, each seeded with `--update-baseline --rule <ID>`.
+- `lint/baseline.json`: the keys C006 = 104, C007 = 16, C008 = 45, each seeded with `--update-baseline --rule <ID>`.
 - `lint/README.md`: three C-series catalogue rows. The Responsibilities line now describes the C-series without a fixed count.
 - `lint/rules/README.md`: four File Index lines (the three rules and C006's source index).
 - `docs/design/lint-sdk-settings-validation.md`: this document.
@@ -196,8 +200,8 @@ The SDK lint design (`docs/design/sdk-agent-facing-lint-suite.md`, "No new featu
 
 ## Verification plan
 
-- Run `python lint/run.py --rule C006|C007|C008 --format json` on the tree and classify every finding by hand: 104, 15, and 45 findings, all true positives.
+- Run `python lint/run.py --rule C006|C007|C008 --format json` on the tree and classify every finding by hand: 104, 16, and 45 findings, all true positives.
 - Run a scratch fixture self-test per rule. Correct code must give 0 findings, each problem kind must give exactly the expected findings, and every diagnostic must render all six fields with numbered steps, real example paths, at least two will-not-work entries including the baseline, and no empty-list prose.
-- Run scratch mutation tests: 39 mutants for C006, 19 for C007, and 42 for C008, each of which must make the self-test fail.
+- Run scratch mutation tests: 39 mutants for C006, 29 for C007, and 42 for C008, each of which must make the self-test fail.
 - Simulate an agent regression for each rule in a real file, confirm REGRESSED and a readable message, then revert.
 - Run the full gate: `python -m pip install -e ".[dev]"` into the lane venv, then `python scripts/run_ci.py`.

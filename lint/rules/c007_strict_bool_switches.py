@@ -2,11 +2,11 @@
 
 PURPOSE: Detect bool switches on configuration classes that are never proven to be real bools at construction.
 ROLE IN CODEBASE: Enforces C007 so a configured "false" string, 0, or 1 can never flip a settings switch through truthiness.
-ARCHITECTURE NOTE: Static AST over *Settings/*Config/*Configuration/*Policy/*Options classes. A switch is proven by isinstance(x, bool) or type(x) is bool in any method, a bool-validator call, or a hand-off to another configuration class.
+ARCHITECTURE NOTE: Static AST over *Settings/*Config/*Configuration/*Policy/*Options classes, plus top-level classes of config.py/configs.py/settings.py modules whose constructor raises ConfigurationError. A switch is proven by isinstance(x, bool) or type(x) is bool in any method, a bool-validator call, or a hand-off to another configuration class.
 FUNCTION INVENTORY: ConfigurationClassFinder selects owners; SwitchCollector lists bool members; StrictnessIndex records proofs; StrictBoolSwitchAnalyzer coordinates; StrictBoolSwitchesRule reports.
 COMMON MODIFICATION PATTERNS: Widen the owner suffixes or the accepted proofs together with the diagnostic, then rerun C007 and its scratch fixtures.
-WHAT NOT TO DO: Do not import SDK modules, accept bool(x) as a proof, or flag result records and component constructors outside the configuration suffixes.
-KNOWN EDGE CASES: Pydantic, Enum, TypedDict, Protocol, and NamedTuple classes are skipped because they parse bools themselves or hold no runtime value. Unused plain __init__ switches are not reported. A hand-off to another configuration class trusts that class, which C007 checks separately.
+WHAT NOT TO DO: Do not import SDK modules, accept bool(x) as a proof, or flag result records and component constructors outside the configuration suffixes and config modules.
+KNOWN EDGE CASES: Pydantic, Enum, TypedDict, Protocol, and NamedTuple classes are skipped because they parse bools themselves or hold no runtime value. Unused plain __init__ switches are not reported. A class in a config.py/configs.py/settings.py module counts only when its own constructor raises ConfigurationError, so translators and loaders there stay out of scope. A hand-off to another configuration class trusts that class, which C007 checks separately.
 RELATED DOCS: docs/design/lint-sdk-settings-validation.md; vidbyte/agents/settings/fallback.py (@intent fallback-enabled-is-not-truthiness)
 TESTS: python lint/run.py --rule C007; fixture and mutation results are recorded in the S1 pull request body.
 """
@@ -22,6 +22,8 @@ from lint.core.discovery import SourceCatalog, SourceFile
 from lint.core.registry import Rule
 
 _OWNER_SUFFIX = re.compile(r"(Settings|Config|Configuration|Policy|Options)$")
+_CONFIG_MODULES = frozenset({"config.py", "configs.py", "settings.py"})
+_CONSTRUCTORS = frozenset({"__init__", "__post_init__"})
 _SKIPPED_BASES = frozenset({"BaseModel", "Enum", "StrEnum", "IntEnum", "Flag", "IntFlag", "TypedDict", "Protocol", "NamedTuple"})
 _BOOL_ANNOTATIONS = frozenset({"bool", "bool|None", "None|bool", "Optional[bool]", "typing.Optional[bool]"})
 _BOOL_VALIDATOR = re.compile(r"^_?(require|validate|validated|ensure|check|coerce|normalize|resolve|is)_(strict_)?(bool|boolean|flag|switch)(_|$)|^_?(strict_)?(bool|boolean)_(flag|switch|value)$")
@@ -79,13 +81,23 @@ class LiteralName:
 
 
 class ConfigurationClassFinder:
-    """Selects the classes that hold configuration by their name."""
+    """Selects the classes that hold configuration: by their name, or by their module and their constructor's error."""
 
     def find(self, source: SourceFile) -> list[ast.ClassDef]:
-        # Owners end in Settings/Config/Configuration/Policy/Options and are not models, enums, or typing shells.
+        # Owners end in Settings/Config/Configuration/Policy/Options, or sit at the top of a config/configs/settings module
+        # and raise ConfigurationError from their constructor (ActorRuntime); models, enums, and typing shells are skipped.
         if source.tree is None:
             return []
-        return [node for node in ast.walk(source.tree) if isinstance(node, ast.ClassDef) and _OWNER_SUFFIX.search(node.name) and not self._skipped(node)]
+        owners = [node for node in ast.walk(source.tree) if isinstance(node, ast.ClassDef) and _OWNER_SUFFIX.search(node.name) and not self._skipped(node)]
+        if source.rel.rsplit("/", 1)[-1] in _CONFIG_MODULES:
+            owners += [node for node in source.tree.body if isinstance(node, ast.ClassDef) and node not in owners and not self._skipped(node) and self._rejects_configuration(node)]
+        return owners
+
+    @staticmethod
+    def _rejects_configuration(node: ast.ClassDef) -> bool:
+        # A constructor that raises ConfigurationError declares its arguments configuration, whatever the class is called.
+        constructors = [item for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name in _CONSTRUCTORS]
+        return any(isinstance(item, ast.Raise) and item.exc is not None and LiteralName.of(item.exc.func if isinstance(item.exc, ast.Call) else item.exc) == _DEFAULT_ERROR for function in constructors for item in ast.walk(function))
 
     @staticmethod
     def _skipped(node: ast.ClassDef) -> bool:
@@ -267,7 +279,7 @@ class StrictBoolSwitchesRule(Rule):
     id = "C007"
     name = "strict-bool-switches"
     severity = "blocking"
-    summary = "A bool field or __init__ switch on a *Settings/*Config/*Configuration/*Policy/*Options class must be checked with isinstance(value, bool) when the object is built. Without that check, the string \"false\" is truthy and turns the switch on, and 0 or 1 are kept as ints. The finding names the class, the switch, and every other unchecked switch on the same class."
+    summary = "A bool field or __init__ switch on a *Settings/*Config/*Configuration/*Policy/*Options class, or on a config-module class whose constructor raises ConfigurationError, must be checked with isinstance(value, bool) when the object is built. Without that check, the string \"false\" is truthy and turns the switch on, and 0 or 1 are kept as ints. The finding names the class, the switch, and every other unchecked switch on the same class."
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # One finding per unchecked switch, anchored at its declaration.
