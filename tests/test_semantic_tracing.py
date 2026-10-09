@@ -90,6 +90,21 @@ class SemanticTraceProfileTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             TraceProfile(max_chars=0)
 
+    def test_profile_detail_applies_to_unlisted_components(self) -> None:
+        # Verifies a profile without component settings filters spans by its own detail level.
+        # @intent unlisted-components-follow-profile-detail
+        verbose_span = SpanSpec("runtime.iteration", component="runtimes", detail=TraceDetail.VERBOSE)
+        standard_span = SpanSpec("parser.tool_calls", component="parsers", detail=TraceDetail.STANDARD)
+        minimal_span = SpanSpec("agent.run", component="agents", detail=TraceDetail.MINIMAL)
+        self.assertTrue(TraceProfile(detail=TraceDetail.VERBOSE).allows(verbose_span))
+        self.assertFalse(TraceProfile(detail=TraceDetail.MINIMAL).allows(standard_span))
+        self.assertTrue(TraceProfile(detail=TraceDetail.MINIMAL).allows(minimal_span))
+        self.assertTrue(TraceProfile().allows(standard_span))
+        self.assertFalse(TraceProfile().allows(verbose_span))
+        overridden = TraceProfile(detail=TraceDetail.MINIMAL, components={"parsers": "verbose", "runtimes": "off"})
+        self.assertTrue(overridden.allows(standard_span))
+        self.assertFalse(TraceProfile(detail=TraceDetail.DIAGNOSTIC, components={"runtimes": "off"}).allows(verbose_span))
+
     def test_profile_decisions_only_enables_middleware_decisions(self) -> None:
         # Verifies the middleware decisions_only preset includes decision spans.
         profile = TraceProfile.default().with_components(middleware="decisions_only")
