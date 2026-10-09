@@ -55,6 +55,7 @@ from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
+from vidbyte.tools.base import BaseTool, _unwrap_tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolPermission, ToolSpec
@@ -379,6 +380,8 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.pause import PauseAgentTool
         from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 
+        # customize() and with_activity() views keep the wrapped tool's runtime, so bind the wrapped tool.
+        tool = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
         if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
         if isinstance(tool, AttachMcpServerTool):
@@ -394,8 +397,8 @@ class BaseAgent(McpAttachableMixin):
         self._bind_session_tool(tool)
 
     def _bind_session_tool(self, tool: object) -> None:
-        # Bind a session-builtin tool to this agent's active session when one is attached.
-        binder = getattr(tool, "bind_session", None)
+        # Bind a session-builtin tool to this agent's active session when one is attached, looking through tool views.
+        binder = getattr(_unwrap_tool(tool) if isinstance(tool, BaseTool) else tool, "bind_session", None)
         if not callable(binder):
             return
         if self._active_session is not None:
