@@ -5,6 +5,8 @@ import json
 import unittest
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
@@ -30,6 +32,22 @@ class Quote(BaseModel):
 class QuoteRecord:
     sku: str
     price: float
+
+
+class Priority(Enum):
+    LOW = "low"
+    HIGH = "high"
+
+
+class Ticket(BaseModel):
+    priority: Priority
+    due: datetime
+
+
+@dataclass
+class TicketRecord:
+    priority: Priority
+    due: datetime
 
 
 def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -260,6 +278,24 @@ class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(result.output)
         self.assertEqual(payload["items"], [{"price": 9.5, "sku": "A1"}, {"price": 1.0, "sku": "B2"}])
         self.assertEqual(payload["kind"], str(QuoteRecord))
+
+    async def test_enum_and_datetime_leaves_serialize_like_the_model(self) -> None:
+        due = datetime(2026, 10, 9, 15)
+
+        def ticket_model() -> Ticket:
+            return Ticket(priority=Priority.HIGH, due=due)
+
+        def ticket_record() -> TicketRecord:
+            return TicketRecord(priority=Priority.HIGH, due=due)
+
+        def ticket_dict() -> dict[str, Any]:
+            return {"priority": Priority.HIGH, "due": due}
+
+        results = [await self._run(func, output_schema=Ticket) for func in (ticket_model, ticket_record, ticket_dict)]
+
+        for result in results:
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output, '{"due": "2026-10-09T15:00:00", "priority": "high"}')
 
     async def test_wrong_shape_still_fails_its_output_schema(self) -> None:
         def quote() -> Passenger:

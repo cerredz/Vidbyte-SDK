@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ValidationError, create_model
+from pydantic_core import to_jsonable_python
 
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import (
@@ -159,9 +160,14 @@ def _stringify_output(value: object) -> str:
 def _json_default(value: object) -> object:
     # @intent tool-model-output-is-json
     # Models and dataclass instances become JSON objects so output_schema validation sees fields, not a repr string.
+    # Other leaves (Enum, datetime, UUID, set) take pydantic's JSON-mode value, so a dict or dataclass return
+    # serializes exactly like the equivalent model; only types pydantic cannot serialize fall back to str().
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return dataclasses.asdict(value)
-    return str(value)
+    try:
+        return to_jsonable_python(value)
+    except ValueError:  # PydanticSerializationError and UnicodeDecodeError are both ValueErrors.
+        return str(value)
 
