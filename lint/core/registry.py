@@ -33,6 +33,7 @@ RULE_MODULES = (
     "lint.rules.c005_cost_arithmetic_site_parity",
     "lint.rules.c013_jev_decision_helper_only",
     "lint.rules.c014_jev_done_check_parity",
+    "lint.rules.c015_package_data_coverage",
     "lint.rules.s001_python_correctness_foundation",
     "lint.rules.s002_exception_cause_chaining",
     "lint.rules.s003_strict_zip",

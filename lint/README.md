@@ -161,6 +161,7 @@ Nested folders:
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C013 | jev-decision-helper-only | Agents ask and score Jev only through DecisionModelHelper, one request per decision |
 | C014 | jev-done-check-parity | Every JevDoneCheck has its question module, keys, registry entries, handoff section, and handlers |
+| C015 | package-data-coverage | Every non-README file in the vidbyte package ships in the wheel; no README ships; no pattern is dead |
 
 ## Adding a rule
 

@@ -23,6 +23,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c005_cost_arithmetic_site_parity.py` -- reviewed cost-arithmetic locations.
 - `c013_jev_decision_helper_only.py` -- Jev requests and answer thresholds through DecisionModelHelper.
 - `c014_jev_done_check_parity.py` -- every done check wired through registry, handoff, and handler maps.
+- `c015_package_data_coverage.py` -- wheel package-data coverage of non-Python package files.
 - `s001_python_correctness_foundation.py` -- Pyflakes/syntax correctness.
 - `s002_exception_cause_chaining.py` -- explicit translated causes.
 - `s003_strict_zip.py` -- explicit zip length behavior.
