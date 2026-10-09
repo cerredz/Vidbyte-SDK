@@ -27,6 +27,7 @@ from vidbyte.tools.base import _ToolWrapper
 from vidbyte.tools.catalog import Tools
 
 if TYPE_CHECKING:
+    from vidbyte.context.manager import ContextManager
     from vidbyte.lib.dataclasses.agents import AgentForkSettings
 
 
@@ -37,10 +38,12 @@ class AgentForker:
     def fork(cls, agent: BaseAgent, settings: AgentForkSettings) -> BaseAgent:
         # Builds an isolated child agent branch with resolved config, copied state, and fresh lineage.
         child_run_id = cls._run_id(agent, settings.run_id)
+        # The child edits its own copy of the parent's managed context window, so branch edits never reach the parent.
+        child_manager = cls._context_manager(agent, settings)
         child = BaseAgent(
             name=settings.name or agent.name,
             runtime=settings.runtime if settings.runtime is not None else (agent.runtime_config_obj or agent.runtime_type),
-            tools=cls._tool_items(agent, settings),
+            tools=cls._tool_items(agent, settings, child_manager),
             permission_policy=agent.permission_policy,
             agent_loop_settings=cls._loop_settings(agent, settings),
             middleware=agent.middleware if settings.middleware is None else settings.middleware,
@@ -56,7 +59,7 @@ class AgentForker:
             capabilities=agent.capabilities,
             agent_metadata=agent.agent_metadata,
             context_items=agent.context_items if settings.context_items is None else settings.context_items,
-            context_manager=agent.context_manager if settings.context_manager is None else settings.context_manager,
+            context_manager=child_manager,
             algorithm=agent.algorithm if settings.algorithm is None else settings.algorithm,
             metadata=cls._metadata(agent, child_run_id, settings.metadata),
             tracer=agent._tracer,
@@ -69,6 +72,14 @@ class AgentForker:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())
         cls._copy_run_state(agent, child, settings)
         return child
+
+    @staticmethod
+    def _context_manager(agent: BaseAgent, settings: AgentForkSettings) -> ContextManager | None:
+        # @intent fork-isolates-context-manager
+        # An explicit override is used as-is; an inherited manager is copied so the child cannot rewrite the parent's.
+        if settings.context_manager is not None:
+            return settings.context_manager
+        return agent.context_manager.copy() if agent.context_manager is not None else None
 
     @staticmethod
     def _api_key(agent: BaseAgent, settings: AgentForkSettings) -> str | None:
@@ -109,29 +120,32 @@ class AgentForker:
         )
 
     @classmethod
-    def _tool_items(cls, agent: BaseAgent, settings: AgentForkSettings) -> tuple[object, ...]:
+    def _tool_items(cls, agent: BaseAgent, settings: AgentForkSettings, child_manager: ContextManager | None) -> tuple[object, ...]:
         # Returns child-safe tools by removing parent MCP bridged tools, cloning bound builtins, and applying deltas.
         tools = settings.tools
         selected = tools.all() if isinstance(tools, Tools) else (agent._agent_tool_items if tools is None else tuple(tools))
         parent_mcp_tools = set(agent._mcp_bridged_tools_for_fork())
-        child_items = [cls._clone_tool(tool) for tool in selected if tool not in parent_mcp_tools]
-        child_items.extend(cls._clone_tool(tool) for tool in settings.add_tools)
+        child_items = [cls._clone_tool(tool, agent.context_manager, child_manager) for tool in selected if tool not in parent_mcp_tools]
+        child_items.extend(cls._clone_tool(tool, agent.context_manager, child_manager) for tool in settings.add_tools)
         if not settings.drop_tools:
             return tuple(child_items)
         dropped = {str(name) for name in settings.drop_tools}
         return tuple(tool for tool in child_items if agent._tool_name(tool) not in dropped)
 
     @classmethod
-    def _clone_tool(cls, tool: object) -> object:
+    def _clone_tool(cls, tool: object, parent_manager: ContextManager | None, child_manager: ContextManager | None) -> object:
         # Clones SDK tools that carry mutable agent bindings, preserving custom tools by identity.
         if isinstance(tool, _ToolWrapper):
             # A customize() or with_activity() view clones the tool it wraps and keeps the same view over the copy.
-            inner = cls._clone_tool(tool.wrapped_tool)
+            inner = cls._clone_tool(tool.wrapped_tool, parent_manager, child_manager)
             return tool if inner is tool.wrapped_tool else tool._rewrap(inner)
         clone = getattr(tool, "clone_for_fork", None)
         if callable(clone):
             return clone()
-        return tool
+        # @intent fork-rebinds-context-tools
+        # Tools writing to the parent's context manager are rebound to the child's, matching what the child renders.
+        rebind = getattr(tool, "rebind_context_manager", None)
+        return rebind(parent_manager, child_manager) if callable(rebind) else tool
 
     @staticmethod
     def _run_id(agent: BaseAgent, explicit_run_id: str | None) -> str:
