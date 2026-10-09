@@ -60,8 +60,47 @@ class ContextCompactionEngine:
         opts = dict(options or {})
         strategy = self._build_strategy(selected, opts)
         compacted = await strategy.compact(before)
+        # Drop tool results whose call was removed and tool calls whose results were removed, because providers reject a transcript with a broken call/result pairing.
+        compacted = self._repair_tool_pairing(compacted, self._tool_pairing_tags(compacted))
         restored = tuple(self._context_message_to_provider(m) for m in compacted)
         return restored, self._stats(before, compacted, selected)
+
+    def _tool_pairing_tags(self, messages: Sequence[ContextMessage]) -> tuple[tuple[str | None, frozenset[str] | None], ...]:
+        # Tags each message as a tool "call", a tool "result", or neither, with its tool-call ids when every entry carries one.
+        tags: list[tuple[str | None, frozenset[str] | None]] = []
+        for message in messages:
+            raw = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
+            raw = raw if isinstance(raw, Mapping) else {}
+            blocks = [b for b in (raw.get("content") if isinstance(raw.get("content"), list) else ()) if isinstance(b, Mapping)]
+            parts = raw.get("parts") if isinstance(raw.get("parts"), list) else ()
+            calls = raw.get("tool_calls") if isinstance(raw.get("tool_calls"), list) else []
+            if message.kind == "tool_result":
+                role, ids = "result", ([raw.get("tool_call_id")] if "tool_call_id" in raw else [b.get("tool_use_id") for b in blocks if b.get("type") == "tool_result"])
+            elif calls or any(b.get("type") == "tool_use" for b in blocks) or any(isinstance(p, Mapping) and ("functionCall" in p or "function_call" in p) for p in parts):
+                role, ids = "call", [c.get("id") if isinstance(c, Mapping) else None for c in calls] + [b.get("id") for b in blocks if b.get("type") == "tool_use"]
+            else:
+                role, ids = None, []
+            tags.append((role, frozenset(str(i) for i in ids) if ids and all(i is not None for i in ids) else None))
+        return tuple(tags)
+
+    def _repair_tool_pairing(self, messages: Sequence[ContextMessage], tags: Sequence[tuple[str | None, frozenset[str] | None]]) -> tuple[ContextMessage, ...]:
+        # Keeps a tool result only right after its call turn and drops a call turn (with its results) unless every call id was answered.
+        kept: list[ContextMessage] = []
+        call_at: int | None = None
+        wanted: frozenset[str] | None = None
+        answered: set[str] = set()
+        for message, (role, ids) in [*zip(messages, tags), (None, (None, None))]:
+            if role == "result":
+                if call_at is not None and (wanted is None or ids is None or ids <= wanted - answered):
+                    kept.append(message)
+                    answered |= ids or set()
+                continue
+            if call_at is not None and (len(kept) == call_at + 1 or (wanted is not None and answered != wanted)):
+                del kept[call_at:]
+            call_at, wanted, answered = (len(kept) if role == "call" else None), ids, set()
+            if message is not None:
+                kept.append(message)
+        return tuple(kept)
 
     def compact_tool_result(self, call: ToolCall, result: ToolResult, *, mode: CompactionMode | str, options: Mapping[str, Any] | None = None) -> tuple[ToolResult, CompactionStats]:
         # Applies a tool-result compaction strategy to one model-visible tool result.
