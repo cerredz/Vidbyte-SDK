@@ -47,6 +47,7 @@ class AgentForker:
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
             model_name=agent.runner_config.model_name if settings.model_name is None else settings.model_name,
             temperature=agent.runner_config.temperature if settings.temperature is None else settings.temperature,
+            timeout_seconds=agent.runner_config.timeout_seconds,
             run_id=child_run_id,
             description=agent.description,
             capabilities=agent.capabilities,
@@ -68,7 +69,7 @@ class AgentForker:
 
     @staticmethod
     def _loop_settings(agent: BaseAgent, settings: AgentForkSettings) -> AgentLoopSettings:
-        # Resolves inherited or overridden loop settings, with max_iterations as a shallow delta.
+        # Resolves inherited or overridden loop settings; max_iterations replaces only that field, all others inherit.
         if settings.agent_loop_settings is not None:
             return settings.agent_loop_settings
         if settings.max_iterations is None:
@@ -78,6 +79,7 @@ class AgentForker:
             max_iterations=settings.max_iterations,
             max_tokens=base.max_tokens,
             max_tool_calls=base.max_tool_calls,
+            max_queued_prompts=base.max_queued_prompts,
             max_parallel_tool_calls=base.max_parallel_tool_calls,
             max_retries=base.max_retries,
             timeout_seconds=base.timeout_seconds,
@@ -85,6 +87,10 @@ class AgentForker:
             compaction_trigger_tokens=base.compaction_trigger_tokens,
             compaction_target_tokens=base.compaction_target_tokens,
             allowed_tools=base.allowed_tools,
+            tool_error_policy=base.tool_error_policy,
+            tool_settings=base.tool_settings,
+            output_contracts=base.output_contracts,
+            max_contract_rejections=base.max_contract_rejections,
         )
 
     @classmethod

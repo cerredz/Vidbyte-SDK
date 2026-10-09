@@ -674,7 +674,7 @@ class AgentSettings(_ConfigValidation):
         # @intent reachable-nested-loop-settings
         # AgentLoopSettings requires real nested objects, so a YAML mapping for these fields would
         # otherwise be rejected outright and leave three documented loop settings unusable from a file.
-        from vidbyte.agents.contracts import OutputContract
+        from vidbyte.agents import contracts
         from vidbyte.agents.settings import ToolErrorPolicy, ToolSettings
 
         for key, builder in (("tool_error_policy", ToolErrorPolicy), ("tool_settings", ToolSettings)):
@@ -684,18 +684,25 @@ class AgentSettings(_ConfigValidation):
                     mapping[key] = builder(**payload)
                 except (TypeError, ValueError, ConfigurationError) as error:
                     raise cls._error(f"'agent.loop.{key}' is invalid: {error}", f"agent.loop.{key}") from error
-        contracts = mapping.get("output_contracts")
-        if isinstance(contracts, list):
-            mapping["output_contracts"] = tuple(cls._coerce_contract(OutputContract, item, index) for index, item in enumerate(contracts))
+        contracts_value = mapping.get("output_contracts")
+        if isinstance(contracts_value, list):
+            # The abstract base cannot be built (its empty key is never satisfied), and SchemaConformance
+            # is declared through agent.output_schema, so a document names one concrete floor by class name.
+            floors = {name: getattr(contracts, name) for name in contracts.__all__ if name not in {"OutputContract", "SchemaConformance"}}
+            mapping["output_contracts"] = tuple(cls._coerce_contract(contracts.OutputContract, floors, item, index) for index, item in enumerate(contracts_value))
 
     @classmethod
-    def _coerce_contract(cls, builder: type, item: object, index: int) -> Any:
-        # Builds one output contract from a document mapping, passing an already-built contract through and naming its position on failure.
-        if isinstance(item, builder):
+    def _coerce_contract(cls, base: type, floors: Mapping[str, type], item: object, index: int) -> Any:
+        # Builds the concrete floor a document mapping names by `type`, passing an already-built contract through and naming its position on failure.
+        if isinstance(item, base):
             return item
         if not isinstance(item, Mapping):
-            raise cls._error(f"'agent.loop.output_contracts[{index}]' must be a mapping of contract fields or an already-built {builder.__name__}.", f"agent.loop.output_contracts[{index}]", actual_type=type(item).__name__)
+            raise cls._error(f"'agent.loop.output_contracts[{index}]' must be a mapping of contract fields or an already-built {base.__name__}.", f"agent.loop.output_contracts[{index}]", actual_type=type(item).__name__)
         payload = cls._mapping(item, f"agent.loop.output_contracts[{index}]")
+        name = payload.pop("type", None)
+        builder = floors.get(name) if isinstance(name, str) else None
+        if builder is None:
+            raise cls._error(f"'agent.loop.output_contracts[{index}].type' must be one of {sorted(floors)}.", f"agent.loop.output_contracts[{index}].type", actual_value=name, allowed=sorted(floors))
         try:
             return builder(**payload)
         except (TypeError, ValueError, ConfigurationError) as error:

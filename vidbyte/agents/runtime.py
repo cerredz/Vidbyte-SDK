@@ -522,7 +522,7 @@ class AgentRuntime:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
             finish_attempt_continued = False
-            for call in tool_calls:
+            for call_index, call in enumerate(tool_calls):
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
                     return await self._finish_result(processed, state)
@@ -549,6 +549,7 @@ class AgentRuntime:
                         if unmet:
                             rejections += 1
                             self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), state.provider, MiddlewareDecision.continue_())
+                            self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                             contract_rejected = True
                             break
                     final = self._final_result(
@@ -559,6 +560,9 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
+                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, "finish attempt not accepted yet; continue with the next message", metadata={"error": "finish_not_accepted"}), state.provider, MiddlewareDecision.continue_())
+                    self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                     if await self._continue_finish_attempt(final, state, messages):
                         finish_attempt_continued = True
                         break
@@ -660,6 +664,11 @@ class AgentRuntime:
                     retry_ordinal += AGENT_SPEED_FIRST_INDEX
                     continue
                 if decision.action is MiddlewareAction.ABORT_RUN:
+                    # A spent retry budget hands the error to _arun_once's fallback switch when a next model exists.
+                    # Only _arun_once sets the chain index, so external callers keep the abort result.
+                    chain_index = state.run_state.get("_speed_fallback_index")
+                    if self.fallback is not None and chain_index is not None and self.fallback.advance(exc, int(chain_index)) is not None:
+                        raise
                     return (
                         self._middleware_abort_result(
                             decision,
@@ -1546,13 +1555,15 @@ class AgentRuntime:
         return context_record, result
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
-        # Applies ToolSettings before local execution: hard budgets first, then deny-class rules.
-        settings = self.config.tool_settings
-        if settings is None or tool_is_internal:
+        # Applies the total tool-call budget, then ToolSettings hard budgets and deny-class rules, before local execution.
+        if tool_is_internal:
             return None
+        settings = self.config.tool_settings
         budget_stop = self._tool_settings_budget_stop(settings, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
         if budget_stop is not None:
             return budget_stop
+        if settings is None:
+            return None
         hard_budget = settings.budget_stop(tool_name=call.tool_name, arguments=dict(call.arguments), call_contexts=call_contexts, iteration_count=iteration_count)
         if hard_budget is not None:
             reason, meta = hard_budget
@@ -1562,9 +1573,11 @@ class AgentRuntime:
             return None
         return self._apply_tool_denial(settings, call, provider, messages, call_contexts, denial, iteration_count=iteration_count, tokens_used=tokens_used)
 
-    def _tool_settings_budget_stop(self, settings: ToolSettings, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
+    def _tool_settings_budget_stop(self, settings: ToolSettings | None, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
         # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
-        if settings.max_calls is None or len(call_contexts) < settings.max_calls:
+        # The budget is ToolSettings.max_calls or AgentRuntimeConfig.max_tool_calls (AgentLoopSettings.max_tool_calls), whichever is lower.
+        limits = [limit for limit in (self.config.max_tool_calls, settings.max_calls if settings is not None else None) if limit is not None]
+        if not limits or len(call_contexts) < min(limits):
             return None
         return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
@@ -1616,6 +1629,16 @@ class AgentRuntime:
                 continue
             counts[ctx.tool_name] = counts.get(ctx.tool_name, 0) + 1
         return counts
+
+    def _answer_skipped_tool_calls(self, messages: list[dict[str, Any]], skipped: Sequence[ToolCall], provider: str) -> None:
+        """Give every call left unprocessed after a turned-down isDone a tool result, so the assistant turn's ids are all answered."""
+        # @intent answer-every-tool-call-id
+        # The assistant turn already lists every tool_call id; chat and Anthropic APIs reject (HTTP 400) any id
+        # without a following tool result. Skipped calls are answered, never executed, and must precede any
+        # continuation message so the tool results stay contiguous after the assistant turn.
+        for call in skipped:
+            reason = "tool call not executed: the isDone finish attempt in this turn was turned down; call it again if it is still needed"
+            self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, reason, metadata={"error": "not_executed"}), provider, MiddlewareDecision.continue_())
 
     def _append_tool_result_message(
         self,

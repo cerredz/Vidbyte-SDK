@@ -9,7 +9,7 @@ Use this skill before you add a new continuation setting to `JevAgent`, or chang
 
 Load these first:
 
-- `AGENTS.md`: read its **Placement Rules** and **JEV File Locations** sections. They are binding, and a workflow moves misplaced code on every PR.
+- `AGENTS.md` and `REPO_MAP.md`: read the **Placement Rules** section of `AGENTS.md`, including **New JEV code**, and the **JEV File Locations** section of `REPO_MAP.md`. They are binding, and a workflow moves misplaced code on every PR.
 - `skills/asking-jev-questions/SKILL.md`: load it before you write or review any Jev question. Its "Writing a full question" section is the layout every done question follows.
 - `skills/jev-agent/SKILL.md`: the product contract for `JevAgent` as a whole.
 

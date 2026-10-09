@@ -27,6 +27,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.lib.dataclasses.middleware import MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
@@ -735,6 +736,23 @@ class ToolActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.metadata["tool_settings_budget"], "max_identical_calls")
+
+    async def test_loop_settings_max_tool_calls_stops_a_fan_out_turn_before_executing_past_the_budget(self) -> None:
+        """AgentLoopSettings.max_tool_calls caps a parallel turn mid-iteration, matching ToolSettings.max_calls."""
+        tool = CountingSearchTool()
+        runtime = AgentRuntime(
+            agent_name="researcher",
+            system_prompt="Research.",
+            tools=Tools([tool]),
+            permission_policy=PermissionPolicy(),
+            config=AgentLoopSettings(max_tool_calls=2).to_runtime_config(),
+        )
+        fan_out = FakeResponse("", {"output": [{"type": "function_call", "name": "counting_search", "arguments": f'{{"query": "q{index}"}}'} for index in range(4)]})
+
+        result = await self._run(runtime, [fan_out, self._done_response()])
+
+        self.assertEqual(len(tool.executed_arguments), 2)
+        self.assertEqual(result.metadata["stop_reason"], "max_tool_calls")
 
     async def test_denied_call_retains_its_activity(self) -> None:
         """A middleware-denied call keeps the annotation so a product can say the action was blocked."""

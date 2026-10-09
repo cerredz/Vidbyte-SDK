@@ -485,7 +485,7 @@ class CallSpeedStats:
     output_tokens_total: int | None = None
     weighted_output_tokens_per_second: float | None = None
     prompt_tokens_per_second: float | None = None
-    retry_count_total: int = AGENT_SPEED_ZERO_COUNT
+    retry_count_total: int = AGENT_SPEED_ZERO_COUNT  # number of retry attempts (records with retry_count > 0)
     fallback_call_count: int = 0
     ttft_ms_p90: float | None = None
     ttft_ms_min: float | None = None
@@ -682,7 +682,7 @@ class ModelSpeedStats:
     output_tokens_per_second_p90: float | None = None
     output_tokens_per_second_min: float | None = None
     output_tokens_per_second_stdev: float | None = None
-    retry_count_total: int = AGENT_SPEED_ZERO_COUNT
+    retry_count_total: int = AGENT_SPEED_ZERO_COUNT  # number of retry attempts (records with retry_count > 0)
     fallback_call_count: int = AGENT_SPEED_ZERO_COUNT
     cancelled_call_count: int = 0
     cancellation_rate: float = 0.0

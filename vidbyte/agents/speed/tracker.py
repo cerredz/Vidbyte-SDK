@@ -417,7 +417,8 @@ class AgentSpeedTracker:
                 [float(call.input_tokens or AGENT_SPEED_ZERO_COUNT) for call in prompt_records],
                 [_ttft_seconds(call) for call in prompt_records],
             ),
-            retry_count_total=sum(call.retry_count for call in calls),
+            # Each retry attempt is one record with a positive ordinal; summing ordinals over-counts.
+            retry_count_total=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.retry_count > AGENT_SPEED_ZERO_COUNT),
             fallback_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if (call.fallback_index or AGENT_SPEED_ZERO_COUNT) > AGENT_SPEED_ZERO_COUNT),
             cancelled_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled),
             cancellation_rate=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled) / len(calls),
@@ -552,7 +553,8 @@ class AgentSpeedTracker:
             prompt_tokens_per_second=MathHelper.weighted_rate_or_none([float(call.input_tokens or AGENT_SPEED_ZERO_COUNT) for call in prompt_calls], [_ttft_seconds(call) for call in prompt_calls]),
             input_tokens_total=_sum_ints(call.input_tokens for call in calls),
             output_tokens_total=_sum_ints(call.output_tokens for call in calls),
-            retry_count_total=sum(call.retry_count for call in calls),
+            # Each retry attempt is one record with a positive ordinal; summing ordinals over-counts.
+            retry_count_total=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.retry_count > AGENT_SPEED_ZERO_COUNT),
             fallback_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if (call.fallback_index or AGENT_SPEED_ZERO_COUNT) > AGENT_SPEED_ZERO_COUNT),
             cancelled_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled),
             cancellation_rate=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled) / len(calls),

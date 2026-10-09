@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from tests.agent_test_support import build_test_agent
-from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
+from vidbyte.agents import AgentForkSettings, AgentLoopSettings, AgentMessage, BaseAgent, MinToolCalls, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.tracing import SpanContext, TracerBase
@@ -241,6 +241,26 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(child.runner_config.run_id, "child-run")
         self.assertEqual(child.metadata["fork_child_run_id"], "child-run")
+
+    def test_fork_max_iterations_override_inherits_remaining_parent_config(self) -> None:
+        # A max_iterations delta must keep every other parent loop guardrail and the parent model-call timeout.
+        tool_settings = ToolSettings(denied_tools={"delete_file"})
+        error_policy = ToolErrorPolicy(max_retries_per_tool_call=1)
+        contract = MinToolCalls(1)
+        loop = AgentLoopSettings(max_iterations=10, max_queued_prompts=2, tool_settings=tool_settings, tool_error_policy=error_policy, output_contracts=[contract], max_contract_rejections=5)
+        parent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), agent_loop_settings=loop, timeout_seconds=12.5)
+
+        child = parent.fork(AgentForkSettings(max_iterations=3))
+        child_loop = child.agent_loop_settings
+
+        self.assertEqual(child_loop.max_iterations, 3)
+        self.assertIs(child_loop.tool_settings, tool_settings)
+        self.assertIs(child_loop.tool_error_policy, error_policy)
+        self.assertEqual(child_loop.output_contracts, (contract,))
+        self.assertEqual(child_loop.max_queued_prompts, 2)
+        self.assertEqual(child_loop.max_contract_rejections, 5)
+        self.assertEqual(child.runner_config.timeout_seconds, 12.5)
+        self.assertEqual(parent.fork().runner_config.timeout_seconds, 12.5)
 
     def test_fork_trace_option_override_matches_docs(self) -> None:
         # fork(trace_option=...) should set the child continual trace option as documented.
