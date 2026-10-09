@@ -300,11 +300,12 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def add_tool(self, tool: object) -> BaseAgent:
-        self._agent_tool_items = (*self._agent_tool_items, tool)
+        # Register with the catalog first so a rejected tool leaves the agent unchanged.
         try:
             self.tools = self.tools.add(tool)
         except TypeError:
             pass
+        self._agent_tool_items = (*self._agent_tool_items, tool)
         self._bind_agent_tool_context(tool)
         return self
 
