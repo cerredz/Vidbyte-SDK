@@ -415,5 +415,57 @@ class ContinualTraceSeesRunConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(USER_PROMPT, prompts[0])
         self.assertIn(TOOL_OUTPUT, prompts[0])
 
+
+FINAL_REPLY = "RESOLVED: rotated the expired TLS cert on lb-2"
+
+
+class _PlainFinalRunner(_PromptCapturingRunner):
+    """Main agent calls lookup, then finishes with a plain-text reply instead of isDone."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.main_requests: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        if "<trace_schema>" in prompt:
+            return super().run(prompt, **kwargs)
+        self.main_requests.append(prompt + str(kwargs.get("messages", "")))
+        if "messages" not in kwargs:
+            return super().run(prompt, **kwargs)
+        reply = _Resp({"output": []})
+        reply.text = FINAL_REPLY
+        return reply
+
+
+class ContinualTraceSeesFinalTextReplyTests(unittest.IsolatedAsyncioTestCase):
+    async def _run(self, every_n: int) -> _PlainFinalRunner:
+        runner = _PlainFinalRunner()
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work.",
+            runner=runner,
+            tools=[_DistinctLookup()],
+            trace_option=TraceOption.continual(ActionTrace, every_n_iterations=every_n, max_trace_iterations=1),
+        )
+        reply = await agent.arun(USER_PROMPT)
+        self.assertEqual(reply.content, FINAL_REPLY)
+        # The main model is called once per iteration and is never sent its own final reply back.
+        self.assertEqual(len(runner.main_requests), 2)
+        self.assertTrue(all(FINAL_REPLY not in request for request in runner.main_requests))
+        return runner
+
+    async def test_after_iteration_cadence_sees_final_reply(self) -> None:  # [Silent Failure]
+        prompts = (await self._run(every_n=1)).trace_prompts
+        self.assertNotIn(FINAL_REPLY, prompts[0])
+        self.assertEqual(prompts[-1].count(FINAL_REPLY), 1)
+        self.assertIn(TOOL_OUTPUT, prompts[-1])
+
+    async def test_after_run_only_update_sees_final_reply(self) -> None:  # [Silent Failure]
+        prompts = (await self._run(every_n=9)).trace_prompts
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(prompts[0].count(FINAL_REPLY), 1)
+        self.assertIn(TOOL_OUTPUT, prompts[0])
+
+
 if __name__ == "__main__":
     unittest.main()
