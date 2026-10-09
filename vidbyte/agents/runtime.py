@@ -862,12 +862,14 @@ class AgentRuntime:
             self._end_semantic_span(algorithm_span, error=exc)
             raise
 
-    @staticmethod
-    async def _invoke_context_window_runner(runner: object, prompt: str, **options: Any) -> object:
-        """Invoke the current RunnerHandle for an inner-loop context-window algorithm."""
+    async def _invoke_context_window_runner(self, runner: object, prompt: str, **options: Any) -> object:
+        """Invoke the current RunnerHandle for an inner-loop context-window algorithm and meter its usage."""
         if not isinstance(runner, RunnerHandle):
             raise TypeError("Inner context-window runner must be a RunnerHandle.")
-        return await runner.invoke(prompt, **options)
+        response = await runner.invoke(prompt, **options)
+        # Algorithm side calls are billed like loop calls, so they land in the same usage ledger.
+        self.usage_tracker.record_call(response)
+        return response
 
     @staticmethod
     def _iteration_snapshot(*, message: str, provider: str, iteration_count: int, assistant_output: str | None, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, metadata: Mapping[str, Any]) -> AgentIterationSnapshot:
