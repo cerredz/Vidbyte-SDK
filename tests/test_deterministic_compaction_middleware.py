@@ -126,6 +126,41 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
             _assert_valid_tool_transcript(self, after)
             self.assertEqual(after[0]["role"], "system")
 
+    async def test_provider_compaction_leaves_unchanged_openai_messages_identical(self) -> None:
+        # [Silent Failure] Assistant tool-call turns keep content None instead of a rendered repr string.
+        history = tuple({**m, "content": "x" * 80} if m["role"] == "tool" else m for m in _parallel_tool_history())
+        for mode, options in ((CompactionMode.HEAD_TAIL_TOOL_PREVIEW, {"head_chars": 4, "tail_chars": 2}), (CompactionMode.KEEP_LAST_N_MESSAGES, {"n": 4})):
+            after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=mode, options=options)
+            for message in after:
+                if message["role"] != "tool":
+                    self.assertIn(message, history)
+            if mode is CompactionMode.HEAD_TAIL_TOOL_PREVIEW:
+                self.assertTrue(all(len(m["content"]) < 80 for m in after if m["role"] == "tool"))
+
+    async def test_provider_compaction_preserves_anthropic_tool_use_blocks(self) -> None:
+        # [Hidden Failure] Anthropic tool_use blocks keep their ids so later tool_result blocks still pair up.
+        history = (
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": [{"type": "text", "text": "reading"}, {"type": "tool_use", "id": "t1", "name": "read_file", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "y" * 80}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "read_file", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "z" * 80}]},
+        )
+        for mode, options in ((CompactionMode.HEAD_TAIL_TOOL_PREVIEW, {"head_chars": 4, "tail_chars": 2}), (CompactionMode.KEEP_LAST_N_MESSAGES, {"n": 4})):
+            after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=mode, options=options)
+            calls = [m for m in after if m["role"] == "assistant"]
+            self.assertTrue(calls)
+            self.assertTrue(all(m in history for m in calls))
+            if mode is CompactionMode.HEAD_TAIL_TOOL_PREVIEW:
+                self.assertEqual([m["content"][0]["tool_use_id"] for m in after[2::2]], ["t1", "t2"])
+                self.assertTrue(all(len(m["content"][0]["content"]) < 80 for m in after[2::2]))
+
+    async def test_replace_provider_content_keeps_anthropic_tool_use_blocks(self) -> None:
+        # [Hidden Failure] Rewriting an assistant turn's text never flattens its tool_use blocks.
+        message = {"role": "assistant", "content": [{"type": "text", "text": "long text"}, {"type": "tool_use", "id": "t1", "name": "f", "input": {}}]}
+        rewritten = ContextCompactionEngine()._replace_provider_content(dict(message), "short")
+        self.assertEqual(rewritten["content"], [{"type": "text", "text": "short"}, {"type": "tool_use", "id": "t1", "name": "f", "input": {}}])
+
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
         messages = (msg("user", "a"), msg("assistant", "b"))
