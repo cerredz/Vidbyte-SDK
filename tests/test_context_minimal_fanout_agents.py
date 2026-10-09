@@ -1,9 +1,12 @@
-"""Regression tests for ContextMinimalFanoutParadigm stage-agent construction.
+"""FILE: tests/test_context_minimal_fanout_agents.py
 
-The paradigm once passed a removed ``runner=`` argument to ``BaseAgent``, so
-every run raised ``TypeError`` before any model call. These tests build each
-stage agent offline and drive the context stage with a scripted runner supplied
-through ``AgentRoleSettings.runner``.
+PURPOSE: Regression tests proving ContextMinimalFanoutParadigm can build and run its stage agents.
+ROLE IN CODEBASE: Guards the paradigm against passing removed BaseAgent arguments such as runner=.
+ARCHITECTURE NOTE: Builds stage agents offline and drives the context stage on a scripted runner supplied through AgentRoleSettings.runner.
+COMMON MODIFICATION PATTERNS: Add a case here when a stage builder changes how it constructs BaseAgent.
+KNOWN EDGE CASES: BaseAgent resolves the runner type from provider/model first, so roles keep a real text model name.
+RELATED DOCS: docs/design/paradigm-stale-runner-kwarg.md
+TESTS: python -m pytest tests/test_context_minimal_fanout_agents.py
 """
 
 from __future__ import annotations
