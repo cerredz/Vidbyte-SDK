@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import functools
 import unittest
+from collections.abc import Callable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -12,6 +15,14 @@ from vidbyte.tools import ToolCall, ToolRegistry, ToolStatus
 class Passenger(BaseModel):
     name: str
     age: int
+
+
+def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
@@ -130,6 +141,31 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received["passenger"], Passenger(name="Al", age=30))
         self.assertIsInstance(received["parameter"], ToolParameter)
         self.assertEqual(received["parameter"].name, "city")  # type: ignore[union-attr]
+
+    async def test_sync_decorated_async_function_result_is_awaited(self) -> None:
+        @tool
+        @_logged
+        async def restart(service: str) -> str:
+            """Restart a service."""
+            return f"restarted {service}"
+
+        result = await restart.execute(ToolCall("restart", {"service": "db"}))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.output, "restarted db")
+
+    async def test_sync_decorated_async_function_error_becomes_failure(self) -> None:
+        @tool
+        @_logged
+        async def restart(service: str) -> str:
+            """Restart a service."""
+            raise RuntimeError(f"cannot restart {service}")
+
+        result = await restart.execute(ToolCall("restart", {"service": "db"}))
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertEqual(result.output, "cannot restart db")
+        self.assertEqual(result.metadata["error_type"], "RuntimeError")
 
 
 if __name__ == "__main__":
