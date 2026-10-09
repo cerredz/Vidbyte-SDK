@@ -501,6 +501,32 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(imported[-1].parent_id, original[-1].parent_id)
         self.assertEqual(imported[-1].trace_artifact, {"goal": "g"})
 
+    async def test_new_id_import_into_same_store_mints_fresh_checkpoint_ids(self) -> None:  # [Silent Failure]
+        # @intent bundle-copy-never-shares-checkpoint-ids
+        # A same-store copy must not overwrite or shadow the original's checkpoints.
+        with tempfile.TemporaryDirectory() as root:
+            for name, store in (("memory", InMemorySessionStore()), ("file", FileSessionStore(root))):
+                with self.subTest(store=name):
+                    session = Session(FakeAgent(), store=store)
+                    await session.arun("one")
+                    await session.arun("two")
+                    original = store.history(session.id)
+
+                    copy_id = SessionBundleImporter(store).import_bundle(SessionBundleExporter(store).export(session.id), new_id=f"se_copy_{name}")
+                    copied = store.history(copy_id)
+
+                    self.assertEqual(store.history(session.id), original)
+                    self.assertTrue(all(store.get(c.id).session_id == session.id for c in original))
+                    self.assertTrue(all(store.get(c.id).session_id == copy_id for c in copied))
+                    self.assertFalse({c.id for c in copied} & {c.id for c in original})
+                    self.assertEqual([c.seq for c in copied], [c.seq for c in original])
+                    self.assertEqual([c.parent_id for c in copied], [None, copied[0].id])
+                    self.assertEqual(store.get_meta(copy_id).head_id, copied[-1].id)
+                    session.rewind(to=original[0].id)
+                    Session.resume(store, copy_id).rewind(to=copied[0].id)
+                    self.assertEqual(store.get_meta(session.id).head_id, original[0].id)
+                    self.assertEqual(store.get_meta(copy_id).head_id, copied[0].id)
+
     async def test_imports_file_bundle_into_memory_store_with_same_id_when_absent(self) -> None:  # [Hidden Failure]
         # Verify file-to-memory import preserves the original id when no collision exists.
         with tempfile.TemporaryDirectory() as root:
