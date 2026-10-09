@@ -9,8 +9,22 @@ ROLE IN CODEBASE:
     Exercises vidbyte/harnesses/serialization.py, the redaction chokepoint the
     TrajectoryCollector applies to every task/output/history value.
 
+ARCHITECTURE NOTE:
+    Runs offline against the real redactor; no sink or session is needed
+    because the leak lived entirely in HarnessRedactor's string handling.
+
+COMMON MODIFICATION PATTERNS:
+    When the credential-assignment pattern grows, add the new key shape to the
+    nested-record case and keep a neighbouring benign phrase in the
+    ordinary-text case.
+
 WHAT NOT TO DO IN THIS FILE:
     Do not assert a secret value survives redaction anywhere in the output.
+
+KNOWN EDGE CASES:
+    "Tokens used: 42" is not an assignment ("Tokens" is not the bare word
+    "token"), so it must stay untouched; "password: x" normalizes to
+    "password=<redacted>".
 
 RELATED DOCS: docs/design/harness-free-text-redaction.md
 TESTS: python -m pytest tests/test_harness_redaction.py
