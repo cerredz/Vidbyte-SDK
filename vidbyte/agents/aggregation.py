@@ -226,23 +226,29 @@ class AggregateAgent(BaseAgent):
         try:
             with usage_ledger_scope(self._usage_tracker):
                 result = await self._engine.aggregate(prompt)
+            # Report the merged proposer and aggregator tokens the way a BaseAgent reply does, so a
+            # Session's usage rollup counts this turn and its tokens.
             reply = AgentMessage(
                 sender=self.name,
                 recipient=str(options.get("recipient", "orchestrator")),
                 content=result.content,
-                metadata=dict(result.metadata),
+                metadata={**result.metadata, "tokens_used": self._usage_tracker.rollup().total_tokens},
             )
             self.history.append(reply)
             self.last_prompt = prompt
             self.last_reply = reply
             self._tracer.end_trace(trace_ctx, output=result.content)
-            return reply
         except BaseException as exc:
             # AggregateAgent overrides generate_reply entirely and does not go through
             # BaseAgent's own try/except, so it must notify the Session boundary itself.
             self._notify_session_exception(exc)
             self._tracer.end_trace(trace_ctx, error=exc)
             raise
+        else:
+            # For the same reason, checkpoint the completed turn into a bound Session here; it runs
+            # outside the try so a persistence error can never re-end the trace as a failure.
+            self._notify_session(reply)
+            return reply
         finally:
             self._active_prompt = ""
             if parent is not None and parent is not self._usage_tracker:
