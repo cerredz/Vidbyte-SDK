@@ -181,6 +181,29 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
         self.assertEqual(list(after), [history[0], history[1], history[2], history[5], history[6]])
 
+    async def test_salience_eviction_keeps_newest_tool_pair_on_every_provider_shape(self) -> None:
+        # [Silent Failure] Anthropic tool_use and Gemini functionCall turns score as tool calls, so the newest pair survives as on OpenAI.
+        shapes = {
+            "openai": (lambda i: {"role": "assistant", "content": None, "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]}, lambda i: {"role": "tool", "tool_call_id": f"c{i}", "content": f"out{i}"}),
+            "anthropic": (lambda i: {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{i}", "name": "read_file", "input": {}}]}, lambda i: {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": f"out{i}"}]}),
+            "gemini": (lambda i: {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"i": i}}}]}, lambda i: {"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": f"out{i}"}}}]}),
+        }
+        for name, (call, result) in shapes.items():
+            with self.subTest(provider=name):
+                history = ({"role": "user", "content": "audit"}, *(m for i in (1, 2, 3) for m in (call(i), result(i))))
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 4})
+                self.assertEqual(list(after), [history[0], history[-2], history[-1]])
+
+    async def test_remove_all_tool_calls_removes_gemini_function_call_turns(self) -> None:
+        # [Hidden Failure] A Gemini functionCall turn is classified as a tool call and leaves with its functionResponse.
+        engine = ContextCompactionEngine()
+        call = {"role": "model", "parts": [{"functionCall": {"name": "lookup", "args": {}}}]}
+        snake_call = {"role": "model", "parts": [{"function_call": {"name": "lookup", "args": {}}}]}
+        self.assertEqual([engine._provider_message_kind(m) for m in (call, snake_call)], ["tool_call", "tool_call"])
+        history = ({"role": "user", "parts": [{"text": "go"}]}, call, {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": "r1"}}}]}, {"role": "model", "parts": [{"text": "done"}]})
+        after, _ = await engine.compact_provider_messages(history, mode=CompactionMode.REMOVE_ALL_TOOL_CALLS)
+        self.assertEqual(list(after), [history[0], history[3]])
+
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
         messages = (msg("user", "a"), msg("assistant", "b"))

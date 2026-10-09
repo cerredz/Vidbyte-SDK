@@ -274,6 +274,12 @@ class ContextCompactionEngine:
         parts = message.get("parts")
         if isinstance(parts, list) and any(isinstance(item, Mapping) and "functionResponse" in item for item in parts):
             return "tool_result"
+        # @intent tool-call-kind-covers-every-provider-shape
+        # Anthropic tool_use blocks and Gemini functionCall parts are tool calls too; as plain messages they outrank their own results and get pruned apart.
+        if isinstance(content, list) and any(isinstance(item, Mapping) and item.get("type") == "tool_use" for item in content):
+            return "tool_call"
+        if isinstance(parts, list) and any(isinstance(item, Mapping) and ("functionCall" in item or "function_call" in item) for item in parts):
+            return "tool_call"
         return "message"
 
     def _provider_message_content(self, message: Mapping[str, Any]) -> str:
