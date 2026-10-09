@@ -99,6 +99,7 @@ from vidbyte.lib.enums.cot_events import (
     Reversibility,
 )
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins._note_ids import next_free_counter
 from vidbyte.tools.types import (
     ToolCall,
     ToolParameter,
@@ -206,6 +207,7 @@ class _CotEventToolBase(BaseTool):
 
     def _next_primitive_id(self) -> str:
         """Return the next append-only ID for this tool instance."""
+        self._counter = next_free_counter(self._manager, self.spec().name, self._counter)
         return f"{self.spec().name}:{self._counter}"
 
     @staticmethod
