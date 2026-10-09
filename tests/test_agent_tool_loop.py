@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -600,3 +601,24 @@ class IterationFloorAtMaxIterationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["stop_reason"], "final_response")
         self.assertEqual(reply.content, "answer 3")
         self.assertEqual(len(runner.calls), 3)
+
+
+class IsDoneObjectFinalAnswerTests(unittest.IsolatedAsyncioTestCase):
+    # Models often send isDone's final_answer as a JSON object rather than a JSON-encoded string.
+    async def test_object_final_answer_parses_against_output_schema_on_first_call(self) -> None:
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": {"summary": "café"}}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, output_schema=_Report)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(reply.structured, _Report(summary="café"))
+        self.assertEqual(len(runner.calls), 1, "a valid object answer must not be rejected and retried")
+
+    async def test_object_final_answer_without_schema_is_json_content(self) -> None:
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": {"severity": "high", "owners": ["dba"]}}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(json.loads(reply.content), {"severity": "high", "owners": ["dba"]})
