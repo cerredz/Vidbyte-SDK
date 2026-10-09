@@ -70,6 +70,7 @@ have been reviewed. Analyzer failures are never recorded as zero.
 
 Nested folders:
 
+- `contracts/` -- byte-for-byte copies of contracts other Vidbyte repositories generate, read by C017-C020.
 - `core/` -- source discovery, analyzers, rule contracts, baselines, and reports.
 - `rules/` -- one independently selectable module per S, A, or C rule.
 
@@ -160,6 +161,7 @@ Nested folders:
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
 | C016 | public-api-contract-current | contracts/sdk-public-api.json equals the generator's output for vidbyte.__all__ and the pyproject version |
+| C017 | platform-route-contract | SDK requests to Vidbyte hosts use a contract route, an accepted method, and an admitted credential |
 
 ## Adding a rule
 

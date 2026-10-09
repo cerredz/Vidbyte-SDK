@@ -35,11 +35,11 @@ flowchart TD
     D1 --> D2{committed contracts/sdk-public-api.json equals the derivation, byte for byte?}
     D2 -->|no| F16[Finding: missing, malformed, exports/version/distribution stale, not canonical]
 
-    C017 --> U[lint/core/url_flow.py: every call with url= / method=, URL values traced through constants, f-strings, str methods, typed config methods]
+    C017 --> U[lint/core/url_flow.py over string_flow.py and python_index.py: every call receiving url=, its URL, method, and headers traced through constants, f-strings, str methods, typed receivers, and up to three caller levels]
     U --> U2{URL origin is a Vidbyte host?}
     U2 -->|yes| U3{contract route with this path, method, and access?}
-    U3 -->|no| F17[Finding: unknown-route, method-mismatch, access-mismatch, method-unresolved]
-    U2 -->|a Vidbyte URL constant reaches no request site| ERR
+    U3 -->|no| F17[Finding: unknown-route, path-unresolved, method-unresolved, method-mismatch, access-mismatch]
+    U2 -->|a Vidbyte API URL literal reaches no traced request| F17b[Finding: untraced-url]
 
     C018 --> H1[Non-docstring string literals under vidbyte/ containing a Vidbyte API URL]
     H1 --> H2{origin listed in public_api_hosts with status live?}
@@ -56,6 +56,7 @@ flowchart TD
 
     F16 --> R[RuleRunner compares counts with lint/baseline.json]
     F17 --> R
+    F17b --> R
     F18a --> R
     F18b --> R
     F19 --> R
@@ -168,26 +169,30 @@ The implementation plan pre-assigns C016–C020 to this PR. S1 owns C006–C008,
   - `POST /api/v1/models/runs/{run_id}/close` (`models.runs.close`).
 
   The catalog listed only the first two. The run-close route is built in `DecisionModelConfig.resolved_run_close_url` from `JEV_MANAGED_RUN_CLOSE_PATH`. All three are `API_KEY` routes, and all three resolve today.
-- **Request sites.** A request site is any call with a `url` argument, given by keyword or by position when the callee's signature is known. Its `method` comes from the same call.
-- **URL tracing.** `lint/core/url_flow.py` traces each URL expression to its possible string values. It follows:
+- **Request sites.** A request site is any call that receives a `url` argument, given by keyword, or by position when the callee is a `vidbyte` function, method, or dataclass whose signature is known. Its `method` and `headers` come from the same call. When the call omits `method`, the callee's declared default is used.
+- **Helpers are traced where the request is sent.** If a callee passes its own `url` parameter on to another request call, the outer call is not judged on its own. The inner call is evaluated once per traced caller, so the request is judged with the method and headers the helper really sends.
+- **Callers.** When a request's URL, method, or headers are built from the enclosing function's parameters, the call is re-evaluated with each traced caller's arguments, up to three caller levels. A parameter that fills exactly one path segment, such as `run_id` in `/runs/{run_id}/close`, is a route parameter and needs no caller. When the URL needed a caller, the finding is anchored at the outermost caller that supplied it, which is where the fix goes.
+- **URL tracing.** `lint/core/string_flow.py` evaluates each URL expression to its possible string values, over the source model in `lint/core/python_index.py`. Each value is a sequence of literal pieces, each with its `rel:line` origin, and holes for values only known at run time. It follows:
   - literals and f-strings, and `+` concatenation;
-  - `or` and conditional expressions;
-  - module constants, including constants imported from other `vidbyte` modules;
-  - class constants;
-  - `str.format` (which keeps `{name}` placeholders), `removesuffix`, `removeprefix`, and `strip`/`rstrip`/`lstrip`;
-  - `os.environ.get` and `os.getenv` defaults;
-  - local assignments;
+  - `or`, `and`, and conditional expressions;
+  - module constants, including constants imported from other `vidbyte` modules through absolute, relative, aliased-module, and package re-export imports, and constants defined inside `if`, `try`, and `with` blocks;
+  - upper-case or `ClassVar` class constants (lower-case class attributes, dataclass fields, and enum members are runtime state, so they are holes);
+  - properties;
+  - `str.format` (a non-literal argument stays a hole named after its field), `removesuffix`, `removeprefix`, and `strip`/`rstrip`/`lstrip`;
+  - `str()`, and `os.environ.get` and `os.getenv` defaults;
+  - parameter and local bindings;
   - the return values of called functions and methods.
 
-  A method call is followed only when the receiver's class is known: `self`/`cls`, a class name, a parameter annotated with a class, or a local assigned from a constructor or from an annotated call. Arguments are bound to parameters, and unknown values become holes. Following only typed receivers is what keeps `TextModelConfig.resolved_endpoint()` in the Anthropic adapter from borrowing `DecisionModelConfig`'s Vidbyte endpoint.
-- **Vidbyte requests.** A traced URL whose literal prefix has a Vidbyte origin is a platform call. A Vidbyte origin is a host listed in the contract, or a host under `vidbyte.pro` or `vidbyte.ai`, or a `*.onrender.com` host whose name contains `vidbyte`. Its path is compared with each contract route path, with every `{param}` normalized.
-- **Access.** A request carries the caller's Vidbyte API key when its headers come from a function that returns an `Authorization` header, or from a dict with that key. The SDK holds no other Vidbyte credential, because it has no browser session. Such a request needs an `API_KEY` or `PUBLIC` route. A request with no `Authorization` header needs a `PUBLIC` route. When the headers cannot be traced, access is unknowable, so it is not checked.
+  A method call is followed only when the receiver's class is known: `self`/`cls`, a class name, a parameter or attribute annotated with a class, or a local assigned from a constructor or from an annotated call. Arguments are bound to parameters, and unknown values become holes. Following only typed receivers is what keeps `TextModelConfig.resolved_endpoint()` in the Anthropic adapter from borrowing `DecisionModelConfig`'s Vidbyte endpoint. An expression with more than 64 possible values, or a request reached through more than 256 caller contexts, raises instead of being traced partially, so the rule is ERRORED rather than silently incomplete.
+- **Vidbyte requests.** A traced URL whose literal prefix has a Vidbyte origin is a platform call. A Vidbyte origin is a host listed in the contract, or a host under `vidbyte.pro` or `vidbyte.ai`, or a `*.onrender.com` host whose name contains `vidbyte`. The query string and fragment are dropped. The path matches a contract route when some concrete path fits both: a contract `{param}` stands for one non-empty segment, and a hole stands for any text. When a literal path matches both a literal route and a parameterized one, the literal route wins.
+- **Access.** A request carries the caller's Vidbyte API key when its `headers` argument is, or is built from, a function returning a dict with an `Authorization` key, a dict literal with that key, or a local dict that gets that key assigned. The SDK holds no other Vidbyte credential, because it has no browser session. Such a request needs an `API_KEY` or `PUBLIC` route. A request whose headers are fully known and have no `Authorization` key needs a `PUBLIC` route. When the headers cannot be read statically, or the call passes none, access is not checked, except that a `SESSION` route is always a mismatch. If the contract gives a matched route an access class C017 does not know, the rule raises (ERRORED) rather than guess.
 - **Kinds.**
   - `unknown-route`: no contract route has this path. The finding names the closest routes.
+  - `path-unresolved`: the parts of the path known only at run time let it match more than one contract path.
+  - `method-unresolved`: the method is not a literal at the call, from its callers, or from the callee's default.
   - `method-mismatch`: the path exists, but not for this method.
   - `access-mismatch`: the route's access class cannot accept this request's credential.
-  - `method-unresolved`: a Vidbyte request whose method is not statically known.
-- **Fail closed.** If a whole-value Vidbyte URL literal reaches no request site, C017 cannot prove which routes the SDK calls, so it raises (ERRORED) instead of reporting zero.
+  - `untraced-url`: a whole-value Vidbyte API URL literal (C018's scope) that no traced request is built from. C017 cannot tell which routes the SDK calls with it, so it reports the literal instead of passing. This is a finding rather than ERRORED so that it carries the full six-field diagnostic.
 
 ### C018 canonical-api-host
 
@@ -261,7 +266,7 @@ The implementation plan pre-assigns C016–C020 to this PR. S1 owns C006–C008,
 - New shared lint-core helpers. The SDK's rules never import one another, so code needed by more than one rule lives here:
   - `lint/core/public_api_contract.py` is used by C016 and the generator;
   - `lint/core/platform_contract.py` is used by C017–C020;
-  - `lint/core/url_flow.py` is used by C017 and C018.
+  - `lint/core/url_flow.py`, with `lint/core/string_flow.py` and `lint/core/python_index.py` beneath it, is used by C017 and C018. The tracer was split into these three modules to keep each well below AGENTS.md's 1,000-line guideline.
 - New rules:
   - `lint/rules/c016_public_api_contract_current.py`;
   - `lint/rules/c017_platform_route_contract.py`;
@@ -275,7 +280,7 @@ The implementation plan pre-assigns C016–C020 to this PR. S1 owns C006–C008,
   - a `contracts/` nested-folder line;
   - the count-free Responsibilities line that S1–S3 also use.
 - `lint/rules/README.md`: five File Index lines.
-- `lint/core/README.md`: three File Index lines.
+- `lint/core/README.md`: five File Index lines.
 - `docs/design/lint-sdk-cross-repo-contracts.md`: this document.
 
 The SDK lint design (`docs/design/sdk-agent-facing-lint-suite.md:48`, "No new feature-test files") declines committed rule tests. Fixtures and mutants therefore ran from a scratch directory, and their results are recorded in the PR body.
@@ -283,7 +288,7 @@ The SDK lint design (`docs/design/sdk-agent-facing-lint-suite.md:48`, "No new fe
 ## Risks and open questions
 
 - **The vendored copy can go stale.** Consumer rules compare SDK code with the copy, not with the live backend. No scheduled refresh exists yet; the README's refresh steps are manual. A copy that is stale but well-formed passes.
-- **C017 traces typed receivers only.** A URL built through an untyped receiver, `getattr`, or another module's helper that the tracer cannot follow is not seen. The fail-closed check covers the case where a Vidbyte URL constant drops out entirely. It does not cover one request site out of several silently becoming untraceable while the others still use the constant. Every current site is traced.
+- **C017 traces typed receivers only.** A URL built through an untyped receiver, `getattr`, a container lookup, or more than three caller levels is a hole. The `untraced-url` finding covers the case where a Vidbyte URL literal drops out entirely. It does not cover one request site out of several silently becoming untraceable while the others still use the literal. Every current site is traced.
 - **C019 has no sites today.** It cannot see a generic two-token code (for example `"authentication_required"`) or a stale code that left the contract without a family or near-miss link. It will catch the gateway codes the SDK is most likely to start handling.
 - **C018 treats website links as out of scope.** A docs link on an `api.` host or a `/api/` path would be reported. No such literal exists.
 - **Squash merges and `source.commit`.** The generator records `HEAD`. A later PR that changes `__all__` records a branch commit that a squash merge removes from `main`. V1 has the same property, and keeping the commit when the data is unchanged limits churn.

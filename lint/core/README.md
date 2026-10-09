@@ -20,11 +20,15 @@ SDK architecture policy beyond analyzer transport and baseline integrity.
 - `diagnostic.py` -- immutable finding/diagnostic contracts.
 - `discovery.py` -- tracked package/repository-wide source and README catalogues.
 - `mypy.py` -- cached pinned mypy subprocess adapter.
+- `platform_contract.py` -- vendored platform-contract reader (fails closed), Vidbyte host classification, and route matching.
 - `public_api_contract.py` -- SDK public-API contract schema, canonical rendering, and static `__all__` derivation.
+- `python_index.py` -- static index of vidbyte modules, classes, functions, and imports for source tracing.
 - `registry.py` -- rule interface and S001-S021 catalogue.
 - `report.py` -- text/JSON result rendering.
 - `ruff.py` -- cached pinned Ruff subprocess adapter.
 - `runner.py` -- fail-closed execution and baseline comparison.
+- `string_flow.py` -- evaluates expressions to possible string values, receiver classes, and header credentials.
+- `url_flow.py` -- static tracer for request URLs, methods, and headers, and Vidbyte API URL literals.
 
 ## Change Log
 
