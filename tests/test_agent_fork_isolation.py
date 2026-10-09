@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -10,6 +11,8 @@ from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentLoopSettings, AgentMessage, BaseAgent, MinToolCalls, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
+from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
@@ -318,6 +321,30 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(child.runner_config.run_id, "child-run")
         self.assertEqual(child.metadata["fork_child_run_id"], "child-run")
+
+    def test_cross_provider_fork_does_not_inherit_parent_api_key(self) -> None:
+        # @intent fork-key-never-crosses-providers: a DeepSeek key must never be sent to OpenAI.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-openai-ENV"}):
+            for provider in ("openai", ModelProvider.OPENAI):
+                child = parent.fork(AgentForkSettings(provider=provider, model_name="gpt-5.4-mini"))
+                self.assertIsNone(child.runner_config.api_key)
+                self.assertEqual(child.runner_config.provider, "openai")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(child.runner_config.provider, child.runner_config.api_key), "sk-openai-ENV")
+        self.assertEqual(parent.runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_same_provider_fork_keeps_parent_api_key(self) -> None:
+        # Staying on the parent's provider, including model-only overrides, keeps the parent's explicit key.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+
+        for settings in (
+            AgentForkSettings(),
+            AgentForkSettings(model_name="deepseek-v4-pro"),
+            AgentForkSettings(provider="deepseek", model_name="deepseek-v4-pro"),
+            AgentForkSettings(provider=ModelProvider.DEEPSEEK),
+        ):
+            self.assertEqual(parent.fork(settings).runner_config.api_key, "sk-deepseek-SECRET")
 
     def test_fork_max_iterations_override_inherits_remaining_parent_config(self) -> None:
         # A max_iterations delta must keep every other parent loop guardrail and the parent model-call timeout.

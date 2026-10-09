@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.tools.base import _ToolWrapper
 from vidbyte.tools.catalog import Tools
 
@@ -44,7 +45,8 @@ class AgentForker:
             agent_loop_settings=cls._loop_settings(agent, settings),
             middleware=agent.middleware if settings.middleware is None else settings.middleware,
             system_prompt=agent.system_prompt if settings.system_prompt is None else settings.system_prompt,
-            api_key=agent.runner_config.api_key,
+            # The parent's key belongs to its own vendor, so a child on another provider resolves its own credential.
+            api_key=cls._api_key(agent, settings),
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
             model_name=agent.runner_config.model_name if settings.model_name is None else settings.model_name,
             temperature=agent.runner_config.temperature if settings.temperature is None else settings.temperature,
@@ -67,6 +69,18 @@ class AgentForker:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())
         cls._copy_run_state(agent, child, settings)
         return child
+
+    @staticmethod
+    def _api_key(agent: BaseAgent, settings: AgentForkSettings) -> str | None:
+        # @intent fork-key-never-crosses-providers
+        # Sending the parent vendor's secret to another vendor leaks it and fails auth; None lets the
+        # child's provider read its own env key. Same-provider forks (or model-only overrides) keep the key.
+        if settings.provider is None:
+            return agent.runner_config.api_key
+        child_provider = settings.provider.value if isinstance(settings.provider, ModelProvider) else str(settings.provider)
+        if child_provider.strip().lower() != str(agent.runner_config.provider or "").strip().lower():
+            return None
+        return agent.runner_config.api_key
 
     @staticmethod
     def _loop_settings(agent: BaseAgent, settings: AgentForkSettings) -> AgentLoopSettings:
