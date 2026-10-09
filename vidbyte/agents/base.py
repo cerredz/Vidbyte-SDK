@@ -247,8 +247,11 @@ class BaseAgent(McpAttachableMixin):
         self._speed_tracker = AgentSpeedTracker()
         self._behavior_view: Any = None
         self._active_session: Session | None = None
-        self._queued_prompts: list[str] = []
-        self._draining_queued_prompts: bool = False
+        # @intent run-scoped-prompt-queue
+        # Each top-level run owns its follow-up queue, so concurrent runs never drain or clear each other's follow-ups.
+        self._pending_prompts: list[str] = []
+        self._run_queue_var: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(f"vidbyte_run_queue_{id(self)}", default=None)
+        self._draining_var: contextvars.ContextVar[bool] = contextvars.ContextVar(f"vidbyte_draining_{id(self)}", default=False)
         self.last_queued_replies: list[AgentMessage] = []
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
@@ -353,6 +356,17 @@ class BaseAgent(McpAttachableMixin):
     @_active_prompt.setter
     def _active_prompt(self, value: str) -> None:
         self._active_prompt_var.set(value)
+
+    @property
+    def _queued_prompts(self) -> list[str]:
+        # The current run's follow-up queue; outside a run, the pending prompts the next run claims.
+        queue = self._run_queue_var.get()
+        return self._pending_prompts if queue is None else queue
+
+    @property
+    def _draining_queued_prompts(self) -> bool:
+        # True while the run executing in the current task is draining its queue.
+        return self._draining_var.get()
 
     @property
     def session(self) -> Session | None:
@@ -687,14 +701,23 @@ class BaseAgent(McpAttachableMixin):
         # Helper agents, specialists, and fresh agents a JevAgent spawns are ordinary BaseAgents; each records into
         # its own tracker (so its own get_usage() stays its own) and hands that run's rollup to the parent ledger
         # exactly once, in `finally`, so usage spent before a failure is still counted.
-        parent = active_usage_ledger()
-        if parent is None or parent is self._usage_tracker:
-            return await self._generate_reply(message, **options)
-        with usage_ledger_scope(self._usage_tracker):
-            try:
+        # A top-level run claims the pending prompts as its own queue; a drained run joins the originating run's queue.
+        token = None
+        if not self._draining_queued_prompts:
+            claimed, self._pending_prompts = self._pending_prompts, []
+            token = self._run_queue_var.set(claimed)
+        try:
+            parent = active_usage_ledger()
+            if parent is None or parent is self._usage_tracker:
                 return await self._generate_reply(message, **options)
-            finally:
-                self._merge_usage_into(parent)
+            with usage_ledger_scope(self._usage_tracker):
+                try:
+                    return await self._generate_reply(message, **options)
+                finally:
+                    self._merge_usage_into(parent)
+        finally:
+            if token is not None:
+                self._run_queue_var.reset(token)
 
     def _merge_usage_into(self, parent: UsageLedger) -> None:
         # Merges this run's usage into the parent ledger, flagging the parent corrupted if the merge cannot happen.
@@ -949,7 +972,7 @@ class BaseAgent(McpAttachableMixin):
 
     async def _drain_queued_prompts(self, metadata: dict[str, Any]) -> None:
         """Run queued prompts in order after the primary run, recording outcomes into metadata."""
-        self._draining_queued_prompts = True
+        draining = self._draining_var.set(True)
         self.last_queued_replies = []
         completed = 0
         # Each drained run resets the usage tracker, so keep every run's usage to restore after the drain.
@@ -974,7 +997,7 @@ class BaseAgent(McpAttachableMixin):
             self._notify_session_exception(exc)
             self._queued_prompts.clear()
         finally:
-            self._draining_queued_prompts = False
+            self._draining_var.reset(draining)
             # @intent queued-prompt-drain-keeps-every-run-usage
             # One arun() call owns the primary run and every drained run, so its usage covers all of them.
             self._usage_tracker.reset()
