@@ -21,7 +21,6 @@ Relations:
 from __future__ import annotations
 
 import json
-import re
 import inspect
 from typing import Any, ClassVar
 from vidbyte.agents.base import BaseAgent
@@ -113,12 +112,13 @@ class RubricGrader(BaseGrader):
 
     def _parse_response(self, text: str) -> GraderResult:
         # Safely extracts the dimension scores and calculates the weighted average against the threshold.
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
+        start = text.find("{")
+        if start < 0:
             return GraderResult(score=0.0, passed=False, reason=f"Failed to find JSON block in rubric response: {text}")
 
         try:
-            parsed = json.loads(match.group(0))
+            # Decode only the first JSON object so trailing prose (even with braces) cannot break the scores.
+            parsed, _ = json.JSONDecoder().raw_decode(text, start)
             scores = parsed.get("scores", {})
             reasons = parsed.get("reasons", {})
             
