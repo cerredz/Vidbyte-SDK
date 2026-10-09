@@ -24,7 +24,13 @@ from vidbyte.agents.types import AgentCard
 from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 
 class StudioToolRegistry:
@@ -91,7 +97,7 @@ class StudioAgentsListTool(BaseTool):
             name="studio.agents.list",
             description="List all registered agents and their capabilities.",
             parameters=(
-                ToolParameter("filter_name", "string", "Only list agents whose name contains this text.", required=False),
+                ToolParameter("filter_name", "string", "An optional text filter applied to the registered agent names. When it is provided, only agents whose name contains this text are listed, which keeps the response small on studios with many agents. Leave it out to list every registered agent. The match is a plain substring check on the agent name and does not change which agents can be run.", required=False),
             ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
@@ -123,8 +129,8 @@ class StudioAgentsRunTool(BaseTool):
             name="studio.agents.run",
             description="Run a named agent with a prompt and return its response.",
             parameters=(
-                ToolParameter("agent_name", "string", "Name of the agent to run."),
-                ToolParameter("prompt", "string", "Input message for the agent."),
+                ToolParameter("agent_name", "string", "The registered name of the studio agent that should handle this request. It must match one of the names returned by studio.agents.list, because the studio only runs agents it was configured with. Use it to choose which specialist answers the prompt. An unknown name returns an error instead of running a different agent."),
+                ToolParameter("prompt", "string", "The user message the selected agent receives as its task for this run. The agent treats it exactly like a prompt passed to its own run method, with its own tools, middleware, and loop settings. Provide the complete request in plain language, including any context the agent needs, because the studio adds nothing else. The agent's final reply is returned as the tool result."),
             ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
@@ -189,8 +195,8 @@ class StudioStrategiesRunTool(BaseTool):
             name="studio.strategies.run",
             description="Run a named strategy with a prompt (placeholder).",
             parameters=(
-                ToolParameter("strategy_name", "string", "Name of the strategy to run."),
-                ToolParameter("prompt", "string", "Input text for the strategy.", required=False),
+                ToolParameter("strategy_name", "string", "The name of the registered strategy to describe for this request. It must be one of the names returned by studio.strategies.list, which is the set the studio was configured with. Use it when a client wants to know how a strategy would treat an input. Strategy execution itself requires a runner, so the result reports the strategy and input rather than running a model."),
+                ToolParameter("prompt", "string", "Optional input text to associate with the strategy request. It is echoed back in the result so a client can see which input the strategy description refers to. Provide it when the caller wants the response tied to a concrete task. It does not cause any model call, because strategy execution needs a runner that the studio does not provide here.", required=False),
             ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
@@ -218,7 +224,7 @@ class StudioPromptsListTool(BaseTool):
             name="studio.prompts.list",
             description="List available prompt templates grouped by family.",
             parameters=(
-                ToolParameter("family", "string", "Only list prompts in this family.", required=False),
+                ToolParameter("family", "string", "An optional prompt family name used to narrow the listing. When it is provided, only prompt keys from that family are returned, compared without regard to letter case. Leave it out to list every prompt family the studio exposes. Use it to keep responses small when the prompt registry is large.", required=False),
             ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
@@ -243,7 +249,7 @@ class StudioPromptsGetTool(BaseTool):
             name="studio.prompts.get",
             description="Get the content of a named prompt template.",
             parameters=(
-                ToolParameter("name", "string", "Key of the prompt to fetch."),
+                ToolParameter("name", "string", "The key of the prompt template whose full text should be returned. It must match a key from studio.prompts.list or the MCP prompts/list response, including its family prefix. Use it to retrieve the exact text of a built-in or studio-supplied prompt before reusing it. An unknown key returns a result marked as not found with empty content."),
             ),
             permission=ToolPermission.EXECUTE,
             metadata={"source": "studio"},
