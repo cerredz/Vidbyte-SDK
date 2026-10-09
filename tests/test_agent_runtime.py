@@ -973,6 +973,11 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
                 result, _ = self._run(ActorRuntime(topology=topology))
                 self.assertEqual(result.content, "ANSWER")
 
+    def test_actor_quiescence_does_not_complete_the_run_twice(self) -> None:
+        # [Regression] A reply that completed the run during the quiescence poll was set again.
+        result, _ = self._run(ActorRuntime(termination_mode="quiescence", include_actors=[]))
+        self.assertEqual(result.content, "ANSWER")
+
 if __name__ == "__main__":
     unittest.main()
 
