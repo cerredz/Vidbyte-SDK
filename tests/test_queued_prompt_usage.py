@@ -4,8 +4,8 @@ PURPOSE: Regression tests that queued prompts drained after the primary run keep
 ROLE IN CODEBASE: Guards BaseAgent._drain_queued_prompts, whose drained generate_reply calls reset the usage tracker and once left get_usage() reporting only the last drained run, and BaseAgent._close_failed_reply, which once left queued prompts for the next unrelated run.
 ARCHITECTURE NOTE: Offline scripted runners; the usage tests report a priced model's token usage, the cleanup tests drive the real run_prompts_sequentially tool through function-call responses.
 COMMON MODIFICATION PATTERNS: Add a case here when the drain gains a new exit path that could drop a run's usage or leave prompts queued.
-KNOWN EDGE CASES: A drained run that fails before its model call records nothing, so only the runs before it are counted. A cancellation during the automatic handoff, after the primary run succeeded, must also clear the queue.
-RELATED DOCS: docs/design/queued-drain-keeps-usage.md, docs/design/queued-prompts-cleared-on-failure.md, docs/design/queued-prompts-cleared-on-handoff-cancel.md, docs/design/run-scoped-prompt-queue.md.
+KNOWN EDGE CASES: A drained run that fails before its model call records nothing, so only the runs before it are counted. A cancellation during the automatic handoff, after the primary run succeeded, must also clear the queue. A run that fails its output_schema must raise before its follow-ups drain.
+RELATED DOCS: docs/design/queued-drain-keeps-usage.md, docs/design/queued-prompts-cleared-on-failure.md, docs/design/queued-prompts-cleared-on-handoff-cancel.md, docs/design/run-scoped-prompt-queue.md, docs/design/schema-failure-skips-queued-prompts.md.
 TESTS: python -m pytest tests/test_queued_prompt_usage.py.
 """
 
@@ -18,7 +18,10 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
+from pydantic import BaseModel
+
 from tests.agent_test_support import build_test_agent
+from vidbyte import OutputSchemaViolationError, tool
 from vidbyte.agents.pricing import UsageTracker
 from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.lib.errors import AgentExecutionError
@@ -272,6 +275,72 @@ class RunScopedQueueTests(unittest.IsolatedAsyncioTestCase):
         reply = await agent.arun("second")
         self.assertEqual(reply.metadata["queued_prompt_runs"], 1)
         self.assertEqual(runner.prompts, ["first", "second", "later follow-up"])
+        self.assertEqual(agent._queued_prompts, [])
+
+
+class _Ticket(BaseModel):
+    summary: str
+
+
+def _call_send_email(prompt: str) -> _FunctionCallResponse:
+    return _FunctionCallResponse("send_email", {"to": "customer@example.com"})
+
+
+def _finish_ticket(prompt: str) -> _FunctionCallResponse:
+    return _FunctionCallResponse("isDone", {"final_answer": json.dumps({"summary": "refund filed"})})
+
+
+class SchemaFailureQueuedPromptTests(unittest.IsolatedAsyncioTestCase):
+    # @intent failed-run-leaves-no-queued-prompts
+    # A run that fails its output_schema must raise before its queued follow-ups run, so a retry cannot repeat their side effects.
+
+    def _agent(self, runner: PerRunRunner, sent: list[str]) -> Any:
+        @tool
+        def send_email(to: str) -> str:
+            """Send the refund email."""
+            sent.append(to)
+            return "sent"
+
+        return build_test_agent(
+            runner=runner, name="queued", system_prompt="Answer briefly.", tools=[RunPromptsSequentiallyTool(), send_email], output_schema=_Ticket
+        )
+
+    async def test_schema_failure_raises_before_queued_followup_runs(self) -> None:
+        # The primary run queues the email follow-up, then never returns valid Ticket JSON.
+        runner = PerRunRunner({"file the ticket": [partial(_queue_prompts, ["send the refund email"])], "send the refund email": [_call_send_email, _finish_ticket]})
+        sent: list[str] = []
+        agent = self._agent(runner, sent)
+        with self.assertRaises(OutputSchemaViolationError):
+            await agent.arun("file the ticket")
+        self.assertNotIn("send the refund email", runner.prompts)
+        self.assertEqual(sent, [])
+        self.assertEqual(agent._queued_prompts, [])
+        # The failed turn is still recorded in history before the error is raised.
+        self.assertIs(agent.history[-1], agent.last_reply)
+        self.assertEqual(agent.history[-1].sender, "queued")
+        self.assertIsNone(agent.history[-1].structured)
+
+    async def test_schema_success_still_drains_queued_followup(self) -> None:
+        runner = PerRunRunner(
+            {"file the ticket": [partial(_queue_prompts, ["send the refund email"]), _finish_ticket], "send the refund email": [_call_send_email, _finish_ticket]}
+        )
+        sent: list[str] = []
+        agent = self._agent(runner, sent)
+        reply = await agent.arun("file the ticket")
+        self.assertEqual(reply.structured, _Ticket(summary="refund filed"))
+        self.assertEqual(reply.metadata["queued_prompt_runs"], 1)
+        self.assertNotIn("queued_prompt_error", reply.metadata)
+        self.assertEqual(sent, ["customer@example.com"])
+        self.assertEqual(agent._queued_prompts, [])
+
+    async def test_drained_schema_failure_is_recorded_on_primary_reply(self) -> None:
+        # A drained follow-up that fails its schema is reported on the successful primary reply, not raised.
+        runner = PerRunRunner({"file the ticket": [partial(_queue_prompts, ["send the refund email"]), _finish_ticket]})
+        sent: list[str] = []
+        agent = self._agent(runner, sent)
+        reply = await agent.arun("file the ticket")
+        self.assertEqual(reply.structured, _Ticket(summary="refund filed"))
+        self.assertIn("OutputSchemaViolationError", reply.metadata["queued_prompt_error"])
         self.assertEqual(agent._queued_prompts, [])
 
 
