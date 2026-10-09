@@ -27,6 +27,8 @@ class TreeTool(FileSystemTool):
         max_depth = int(call.arguments.get("max_depth", 3))
         max_entries = int(call.arguments.get("max_entries", 200))
         try:
+            assert max_depth >= 0, "TreeTool max_depth must be at least 0."
+            assert max_entries >= 1, "TreeTool max_entries must be at least 1."
             target = self._path(path)
             FileSystemPermissions.require_existing_directory(target)
             root = self._config.resolved_root()
