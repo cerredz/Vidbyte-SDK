@@ -24,6 +24,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c009_default_model_priced.py` -- provider default models resolve to a rate.
 - `c010_pricebook_vintage_bump.py` -- pricebook vintage moves with its rates (lock and refresh command).
 - `c011_agent_owned_usage_and_sync_twins.py` -- agent-owned usage recording and run()/arun() twins.
+- `c012_provider_model_registry_validation.py` -- registry-validated, enum-typed provider/model config fields.
 - `s001_python_correctness_foundation.py` -- Pyflakes/syntax correctness.
 - `s002_exception_cause_chaining.py` -- explicit translated causes.
 - `s003_strict_zip.py` -- explicit zip length behavior.

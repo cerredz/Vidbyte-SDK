@@ -163,6 +163,7 @@ Nested folders:
 | C009 | default-model-priced | Every token-priced provider default resolves to a pricebook rate |
 | C010 | pricebook-vintage-bump | Changed rates move their pricebook vintage and refresh the lock |
 | C011 | agent-owned-usage-and-sync-twins | Model usage reaches the agent's tracker; entry classes pair run() with arun() |
+| C012 | provider-model-registry-validation | Config provider/model fields are checked against the registry and typed ModelProvider |
 
 ## Adding a rule
 
