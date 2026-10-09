@@ -134,7 +134,7 @@ class BaseActorRuntime(ABC):
             history=tuple(history) + tuple(agent_history),
             tools=self.tools.specs(),
             file_paths=tuple(managed_context.file_paths),
-            strategy_metadata=dict(managed_context.strategy_metadata),
+            run_metadata=dict(managed_context.run_metadata),
             tool_calls=(*tuple(managed_context.tool_calls), *tuple(existing_tool_calls)),
             responses=tuple(managed_context.responses),
             budget=managed_context.budget,
