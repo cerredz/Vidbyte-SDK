@@ -79,6 +79,26 @@ class TextModelRunnerTests(unittest.TestCase):
             ],
         )
 
+    def test_openai_responses_flattens_nested_function_tools(self) -> None:
+        # @intent responses-function-tools-are-flat
+        # Responses rejects the Chat Completions nested function shape with 400 "Missing required parameter: 'tools[0].name'".
+        transport = FakeTransport({"output_text": "ok"})
+        parameters = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        tools = [
+            {"type": "function", "function": {"name": "lookup", "description": "Find it.", "parameters": parameters}},
+            {"type": "web_search"},
+        ]
+
+        runner.run("Hello", tools=tools, tool_choice={"type": "function", "function": {"name": "lookup"}})
+
+        body = transport.requests[0]["json_body"]
+        self.assertEqual(
+            body["tools"],
+            [{"type": "function", "name": "lookup", "description": "Find it.", "parameters": parameters}, {"type": "web_search"}],
+        )
+        self.assertEqual(body["tool_choice"], {"type": "function", "name": "lookup"})
+
     def test_anthropic_messages_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"content": [{"type": "text", "text": "ok"}]})
         runner = TextModelRunner(
