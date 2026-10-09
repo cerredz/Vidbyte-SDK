@@ -71,6 +71,7 @@ prompt text.
 | Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
 | Jev Run Brief | `jev_run_brief` | system_prompt, update_prompt | [jev_run_brief/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_brief) |
   | Jev Run State | `jev_run_state` | system_prompt, required_sequence_agent | [jev_run_state/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state) |
+| Jev Swarm | `jev_swarm` | plan_prompt, assignment_prompt, results_prompt, rejected_prompt, retry_prompt, closed_prompt, tool_description, conventions_description, assignments_description, name_description, objective_description, inputs_description, deliverable_description, boundaries_description, verification_description | [jev_swarm/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_swarm) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
@@ -248,6 +249,17 @@ clone the original request and the verified run brief; `results_prompt` hands th
 clones' replies back to the main agent to compare and continue from.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clone>
+
+#### Jev Swarm — `jev_swarm`
+
+Instructions for JevAgent's SWARM dynamic-compute option. `plan_prompt` asks the main
+agent to plan a team through the `launch_swarm` tool; `assignment_prompt` gives each
+helper its assignment and the shared conventions; `results_prompt` hands the helpers'
+results back to merge. `rejected_prompt`, `retry_prompt`, and `closed_prompt` explain a
+rejected plan, the attempts left, and a closed tool, and the `*_description` entries are
+the tool's model-facing descriptions.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_swarm>
 
 #### Jev Fresh Continuation — `jev_fresh_continuation`
 
