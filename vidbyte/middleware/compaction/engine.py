@@ -256,6 +256,9 @@ class ContextCompactionEngine:
         # Converts a compacted ContextMessage back to a provider message dictionary.
         original = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
         if isinstance(original, Mapping):
+            # Hand back messages the strategy did not rewrite untouched, because re-rendering them would replace None or structured content with a flattened string.
+            if message.content == self._provider_message_content(original):
+                return dict(original)
             return self._replace_provider_content(dict(original), message.content)
         return {"role": "assistant" if message.role != "system" else "system", "content": message.content}
 
@@ -329,7 +332,9 @@ class ContextCompactionEngine:
                     item["content"] = content
                     message["content"] = items
                     return message
-            message["content"] = content
+            # Keep tool_use and other structured blocks, replacing only the text blocks with one text block, so call ids stay intact.
+            others = [item for item in items if not (isinstance(item, dict) and item.get("type") == "text") and not isinstance(item, str)]
+            message["content"] = [*([{"type": "text", "text": content}] if content else []), *others] if others else content
             return message
         parts = message.get("parts")
         if isinstance(parts, list):
