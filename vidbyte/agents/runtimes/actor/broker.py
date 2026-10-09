@@ -222,7 +222,8 @@ class BaseActorRuntime(ABC):
                 # Option B: Quiescence monitor
                 while not self._completion_future.done():
                     await asyncio.sleep(0.01)
-                    if self._check_quiescence():
+                    # An actor reply may have completed the run during the sleep; keep that first result.
+                    if not self._completion_future.done() and self._check_quiescence():
                         self._completion_future.set_result("Quiescence reached. Swarm execution completed.")
                         break
             else:
