@@ -71,3 +71,19 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("pkg/auth.py", result.output)
         self.assertIn("check_jwt", result.output)
+
+    async def test_root_under_ignored_ancestor_still_searches_its_files(self) -> None:
+        """Ignore patterns apply below the root, not to the root's own ancestors."""
+        for ancestor in ("node_modules", "venv"):
+            root = self.root / "project" / ancestor / "left-pad"
+            (root / "src").mkdir(parents=True)
+            (root / "src" / "index.js").write_text("// TODO pad\n", encoding="utf-8")
+            (root / "node_modules" / "inner").mkdir(parents=True)
+            (root / "node_modules" / "inner" / "x.js").write_text(
+                "// TODO inner\n", encoding="utf-8"
+            )
+            grep = await GrepTool(root).execute(ToolCall("grep", {"pattern": "TODO"}))
+            glob = await GlobTool(root).execute(ToolCall("glob", {"pattern": "**/*.js"}))
+            for result in (grep, glob):
+                self.assertIn("src/index.js", result.output)
+                self.assertNotIn("inner", result.output)
