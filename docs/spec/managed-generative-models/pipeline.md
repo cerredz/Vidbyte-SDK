@@ -16,8 +16,8 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 18:10 | 2026-10-10 18:24 | reports/S0-scout.md | base_commit c07529316 |
-| S1 spec + review | running | 2026-10-10 19:20 | | reports/S1-spec-review-2.md | r2 @c57d39d0 (round 1 + backend r3 contract absorbed); scoped review round 2 running |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-10 19:20 | 2026-10-11 01:10 | reports/S1-spec-review-2.md | spec r4 approved @ed9f098a; 2 review rounds + orchestrator r4 |
+| S2 tests | running | 2026-10-11 01:12 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -37,6 +37,9 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - 2026-10-10 22:45 — Holding the SDK revision until backend spec r3 lands, so the author absorbs reviewer findings plus backend §9.2 r2 and r3 changes in one revision.
 - 2026-10-10 22:45 — Contract vendoring: re-vendor from the backend branch commit that regenerates the contract (C017-C020 check only repository, 40-hex commit, schema_version, generator). Backend origin/main mixes merge commits and squash merges, so if the backend PR is squash-merged the SDK must re-vendor from backend main afterwards; this is a stated merge-order note, not a gate.
 - 2026-10-10 23:50 — Launched scoped review round 2 (last allowed) — r2 changed §8, §8.5, §9, §10 and the shape of §12 and absorbed the backend r3 contract.
+- 2026-10-11 00:30 — Round-2 R-1: INV-10 rewording, an EC row, a README line and floor-first max() are in scope; changing DebateStageSettings or other agent timeouts outside vidbyte/lib/ is out of scope (stated limitation).
+- 2026-10-11 00:55 — Resolved SDK Q-7 as YES (same-key transport retries in VidbyteGatewayTransport, only on 409/502/non-JSON answers) and withdrew NG-13 — request.md §C 'idempotent replay on retries' and §E.4 'SDK retries a timed-out call and you pay twice → Reuse existing, send the header', plus the settled mirror-Jev decision (Jev retries twice with one key). Applied as r4 without a third review round (cap 2 reached); S4 reviewers check it.
+- 2026-10-11 01:10 — Q-n defaults applied (no user reply): Q-1 no key reuse across agent-runtime retries (outside lib; EC-14 limitation); Q-2 SDK-authored error messages only; Q-3 no direct-only mode; Q-4 key-crossing guards unchanged; Q-5 8,192 default cap for all six providers; Q-6 resolve_active unchanged; Q-8..Q-11 not built.
 
 ## User replies (verbatim)
 - none yet
@@ -68,3 +71,8 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - r2: timeout floor 630.0 s (above backend 600 s total deadline); D-17 raise pattern: `except` saves locals, raise after the block, body decoded with `json.loads` in a narrow try (no `parse_json_response`), `__context__ is None`. — *source:* S1 author r2
 - r2 phases: endpoint constant in row 15; P2 = rows 15, 6, 11, 12 in one commit with the contract copied from the backend branch row-20 commit, found with `git log -1 --format=%H feat/generative-model-gateway -- contracts/vidbyte-platform-contract.json` (backend worktree shares `C:/Users/422mi/vidbyte-repos/vidbyte/.git`); C020 ratchet in P1; §14 Ask-first if the row-20 commit is missing. — *source:* S1 author r2
 - §9.2 failure order: inner ProviderRequestError -> other Exception -> not a JSON object (any status) -> 2xx success -> `"error": true` -> relayed; catches only `Exception`, never `BaseException`. §9.2 table: `*` marks fields allowed only as false/null. spec.md is CRLF in the working tree (autocrlf=true). — *source:* S1 author r2
+- Agent timeouts that can cancel a managed call the gateway still bills: `DebateStageSettings.timeout_seconds = 120.0` (`vidbyte/context/algorithms/prosecutor_defender_judge.py:67`, enforced at `vidbyte/agents/algorithms/prosecutor_defender_judge.py:494`); `per_proposer_timeout`, `run_timeout_seconds`, `worker_timeout_seconds` default None (`lib/dataclasses/multi_agent.py:127,399,401`). — *source:* S1 reviewer round 2
+- `lint/core/platform_contract.py:175` decodes the vendored contract as strict UTF-8; a BOM (PowerShell) makes C017-C020 ERRORED. S001 runs Ruff F (F401/F841): no unused `except ... as exc`; `os`/`re` in `model_configs.py` go after delegation. — *source:* S1 reviewer round 2
+- SDK origin/main has moved past the base (`jev.py` 694 lines at base, 712 on origin/main); the SDK origin/main vendors contract copy b17222cd; backend main's 6dfc4d20 (agent-run routes) is not on the backend branch. mypy 2.3.1, Python 3.11.0 installed; C017 CLEAN today. — *source:* S1 reviewer round 2
+- r4: `VidbyteGatewayTransport` owns the retry loop: up to 1 + `JEV_DEFAULT_RETRY_COUNT` (3) attempts with one `Idempotency-Key` and identical envelope; each attempt is one `inner.request` with `timeout_seconds` and `idempotency_key`, `retry_count` 0; waits `n × JEV_RETRY_BACKOFF_SECONDS` via `asyncio.sleep` (patch it in `vidbyte.lib.http.vidbyte_gateway`). Retries only 409, 502, non-JSON-object answers; never 401/402/403/413/422/429, JSON 500/503, or a missing response. — *source:* S1 author r4
+- `HttpTransport.request` (`lib/http/transport.py:40-57`) retries only on `retry_status_codes`; a `RequestError` escapes on first failure; POST guard requires `idempotency_key` only when `retry_count > 0`. `JEV_DEFAULT_RETRY_COUNT = 2`, `JEV_RETRY_BACKOFF_SECONDS = 0.5`, `JEV_NO_RETRIES = 0` (`constants/jev.py:40-43`). — *source:* S1 author r4
