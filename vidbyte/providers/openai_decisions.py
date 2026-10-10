@@ -256,7 +256,7 @@ class OpenAIDecisionsProvider:
             raw_usage = parsed.get("usage")
             usage = raw_usage if isinstance(raw_usage, Mapping) else None
             answers = OpenAIDecisionsAnswers(usage).normalize(request, parsed)
-            # OpenAI documents no response-level model echo, so the ledger prices the model id that was requested.
+            # OpenAI documents a response-level `model` string without saying how it relates to the requested id, so the ledger prices the model id that was requested.
             return DecisionModelResponse(provider=self.provider, model=resolved.resolved_model(), answers=answers, raw=parsed, usage=usage)
         except ProviderResponseError:
             raise
