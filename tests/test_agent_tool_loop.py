@@ -14,6 +14,7 @@ from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
 
 
 class FakeResponse:
@@ -623,6 +624,37 @@ class IsDoneObjectFinalAnswerTests(unittest.IsolatedAsyncioTestCase):
             reply = await agent.arun("task")
 
         self.assertEqual(json.loads(reply.content), {"severity": "high", "owners": ["dba"]})
+
+
+class IsDoneFalsyFinalAnswerTests(unittest.IsolatedAsyncioTestCase):
+    # @intent falsy-final-answer-is-still-an-answer
+    # A typed answer of 0, 0.0, or false is the model's real answer and must not be replaced by the "Done." placeholder.
+    async def _output(self, arguments: dict) -> str:
+        result = await IsDoneTool().execute(ToolCall(IS_DONE_TOOL_NAME, arguments))
+        return result.output
+
+    async def test_falsy_typed_final_answers_are_rendered(self) -> None:
+        for value, expected in ((0, "0"), (0.0, "0.0"), (False, "False")):
+            with self.subTest(value=value):
+                self.assertEqual(await self._output({"final_answer": value}), expected)
+
+    async def test_missing_none_or_blank_final_answer_falls_back_to_done(self) -> None:
+        for arguments in ({}, {"final_answer": None}, {"final_answer": ""}, {"final_answer": "   "}):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(await self._output(arguments), "Done.")
+
+    async def test_blank_final_answer_uses_the_answer_alias(self) -> None:
+        self.assertEqual(await self._output({"final_answer": "", "answer": "from alias"}), "from alias")
+        self.assertEqual(await self._output({"final_answer": None, "answer": 0}), "0")
+
+    async def test_zero_final_answer_is_the_agent_reply(self) -> None:
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": 0}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("what is 7-7?")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(reply.content, "0")
 
 
 class CompactionFloorTests(unittest.IsolatedAsyncioTestCase):
