@@ -686,3 +686,4 @@ Secrets follow the repo's existing convention: credentials are passed explicitly
 
 - `BashTool._spawn(executable, command)` instead of `_spawn(command)` (§12.3 row 1): `execute` passes the executable it has just checked for `None`, so mypy (S009) sees a `str` without a second check. No behavior change (`25b5260b`).
 - Row 3 has a second commit, `4c4a62ef`, that only adds step comments to `_FetchedPagesView.execute` (AGENTS.md Style 2); no code change.
+- `BashTool._stop` tolerates `PermissionError` alongside `ProcessLookupError`, on the kill and on the transport close, and closes the transport in `finally` (S5, review R-1). D-14 named only `ProcessLookupError`, but `os.killpg` raises `PermissionError` when no group member may be signalled, and the stdlib transport `close()` kills a still-running direct child and lets `PermissionError` through; either would replace a propagating `CancelledError` (INV-12) or skip the close (INV-26).

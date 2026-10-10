@@ -167,22 +167,28 @@ class BashTool(BaseTool):
         # @intent stop-kills-waits-briefly-and-closes-the-pipe
         # Runs only on timeout or cancellation, never after a normal completion, and never raises, because an exception
         # here would replace a propagating CancelledError. On POSIX the group is killed even when bash itself has already
-        # exited, since a background child can still hold the output; ProcessLookupError means the group is already empty.
-        # On Windows only Git's launcher can be killed. The wait after the kill is bounded because a process the kill cannot
-        # reach (a setsid descendant, the command behind Git's launcher) keeps the pipe open, and Python 3.12+ waits for the
-        # pipe. Closing the transport last releases the parent's end of the pipe; without it a long-lived service leaks one
-        # pipe per timed-out command and asyncio.run reports "Event loop is closed" at shutdown. getattr keeps mypy clean
-        # and degrades to that documented leak on a Python without the private attribute instead of raising.
-        with contextlib.suppress(ProcessLookupError):
-            if sys.platform != "win32":
-                os.killpg(process.pid, signal.SIGKILL)
-            elif process.returncode is None:
-                process.kill()
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(process.wait(), BASH_KILL_GRACE_SECONDS)
-        transport = getattr(process, "_transport", None)
-        if transport is not None:
-            transport.close()
+        # exited, since a background child can still hold the output; ProcessLookupError means the group is already empty,
+        # and PermissionError means no member may be signalled (for example a root-owned sudo leader), so the stop moves on
+        # instead of failing. On Windows only Git's launcher can be killed. The wait after the kill is bounded because a
+        # process the kill cannot reach (a setsid descendant, the command behind Git's launcher) keeps the pipe open, and
+        # Python 3.12+ waits for the pipe. Closing the transport in finally releases the parent's end of the pipe even when
+        # a second cancellation lands during the wait; without it a long-lived service leaks one pipe per timed-out command
+        # and asyncio.run reports "Event loop is closed" at shutdown. close() kills a direct child that is still running and
+        # lets that PermissionError through, so it is tolerated there too. getattr keeps mypy clean and degrades to that
+        # documented leak on a Python without the private attribute instead of raising.
+        try:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                if sys.platform != "win32":
+                    os.killpg(process.pid, signal.SIGKILL)
+                elif process.returncode is None:
+                    process.kill()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.wait(), BASH_KILL_GRACE_SECONDS)
+        finally:
+            transport = getattr(process, "_transport", None)
+            if transport is not None:
+                with contextlib.suppress(PermissionError):
+                    transport.close()
 
     def _render(self, buffer: bytearray, omitted: int, exit_code: int) -> ToolResult:
         """Build the success result: the kept output, a note on what was cut, and the exit code as the last line."""
