@@ -126,6 +126,11 @@ class AgentFallbackSettings:
             raise ConfigurationError(
                 f"AgentFallbackSettings.models[{position}] names provider {provider!r} but no model: {entry!r}."
             )
+        # @intent openrouter-keeps-its-own-model-ids
+        # OpenRouter's own ids such as 'openrouter/auto' include the prefix on the wire, so, as in
+        # Runner, only strip it when what follows is itself a vendor/model slug.
+        if provider == ModelProvider.OPENROUTER.value and "/" not in remainder:
+            return provider, f"{provider}/{remainder.strip()}"
         return provider, remainder.strip()
 
     @staticmethod
