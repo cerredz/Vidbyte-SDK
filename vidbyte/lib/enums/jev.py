@@ -256,6 +256,7 @@ class JevDynamicComputeOption(str, Enum):
     FORK_AGENT = "fork_agent"
     SUBAGENT = "subagent"
     CLONE = "clone"
+    SWARM = "swarm"
 
 
 class JevComputeQuestionKey(str, Enum):
@@ -309,6 +310,27 @@ class JevComputeQuestionKey(str, Enum):
     CLONE_COMPARABLE_OUTPUTS = "clone.comparable_outputs"
     CLONE_AFFORDABLE_ATTEMPT = "clone.affordable_attempt"
     CLONE_GOAL_DEPENDS_ON_STEP = "clone.goal_depends_on_step"
+    SWARM_MANY_UNITS = "swarm.many_units"
+    SWARM_SUBSTANTIAL_UNITS = "swarm.substantial_units"
+    SWARM_ENUMERATED_UNITS = "swarm.enumerated_units"
+    SWARM_DISJOINT_SCOPES = "swarm.disjoint_scopes"
+    SWARM_INDEPENDENT_UNITS = "swarm.independent_units"
+    SWARM_SETTLED_CONVENTIONS = "swarm.settled_conventions"
+    SWARM_SEPARATE_BLOCKERS = "swarm.separate_blockers"
+    SWARM_UNIT_VERIFICATION = "swarm.unit_verification"
+    SWARM_ISOLATED_WRITES = "swarm.isolated_writes"
+    SWARM_LONG_HORIZON = "swarm.long_horizon"
+    SWARM_CONTEXT_OVERFLOW = "swarm.context_overflow"
+    SWARM_COMBINED_RESULT = "swarm.combined_result"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+class JevSwarmPlanQuestionKey(str, Enum):
+    """The key of every fixed question Jev answers about one assignment of a SWARM plan."""
+
+    SELF_CONTAINED = "swarm_plan.self_contained"
+    DISJOINT = "swarm_plan.disjoint"
+    IN_SCOPE = "swarm_plan.in_scope"
+    CHECKABLE_DELIVERABLE = "swarm_plan.checkable_deliverable"
+
+
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse", "JevSwarmPlanQuestionKey"]

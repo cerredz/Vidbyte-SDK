@@ -17,9 +17,12 @@ Relations:
 
 from __future__ import annotations
 
+import json
 import unittest
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareContext,
@@ -67,6 +70,22 @@ async def invoke_echo_runner(runner: EchoRunner, prompt: str, **kwargs: object) 
         return response
     runner.seen_tool_output = str(kwargs["messages"][-1]["content"])
     return FakeModelResponse(runner.seen_tool_output if runner.echo else "Summary: nothing sensitive.")
+
+
+async def invoke_exfiltrating_runner(runner: EchoRunner, prompt: str, **kwargs: object) -> FakeModelResponse:
+    # Calls lookup, then smuggles the tool output it saw into send's arguments with empty text,
+    # the way the Anthropic, Responses and Gemini runners shape tool-call-only turns.
+    del prompt
+    if runner.seen_tool_output:
+        return FakeModelResponse("Done.")
+    call = {"type": "function_call", "name": "lookup", "arguments": "{}"}
+    if runner.called_tool:
+        runner.seen_tool_output = str(kwargs["messages"][-1]["content"])
+        call = {"type": "function_call", "name": "send", "arguments": json.dumps({"body": runner.seen_tool_output})}
+    runner.called_tool = True
+    response = FakeModelResponse("")
+    response.raw = {"output": [call]}
+    return response
 
 
 def echo_runner_text(response: object) -> str:
@@ -363,6 +382,50 @@ class CanaryTripwireRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["stop_reason"], "middleware_abort")
         self.assertEqual(result.metadata["middleware_abort_reason"], "canary_leaked")
         self.assertEqual(result.metadata["tool_calls"][0].result.output, "internal document")
+
+    async def test_canary_in_tool_arguments_aborts_before_tool_runs(self) -> None:
+        # [Silent Failure] A canary leaked only through tool arguments, with empty response text, is still caught.
+        sent: list[str] = []
+
+        @tool
+        def lookup() -> str:
+            # Returns an internal document the model should not exfiltrate.
+            return "internal document"
+
+        @tool
+        def send(body: str) -> str:
+            # Records anything the model tries to send out.
+            sent.append(body)
+            return "sent"
+
+        middleware = (CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7),)
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup, send]), permission_policy=PermissionPolicy.allow_all(), middleware=middleware)
+        context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        runner = EchoRunner(echo=True)
+        handle = RunnerHandle(runner=runner, provider="openai", invoke=invoke_exfiltrating_runner, extract_text=echo_runner_text, extract_metadata=echo_runner_metadata)
+        result = await runtime.arun("task", handle=handle, context=context)
+        self.assertIn("VIDBYTE-CANARY-", runner.seen_tool_output)
+        self.assertEqual(result.metadata.get("middleware_abort_reason"), "canary_leaked")
+        self.assertEqual(sent, [])
+
+    async def test_canary_survives_tool_result_truncation(self) -> None:
+        # @intent appended-middleware-notes-survive-truncation
+        # [Silent Failure] A result_max_chars cap shorter than the tool output must not cut the canary off.
+        @tool
+        def lookup() -> str:
+            # Returns an internal document longer than the visible-output cap.
+            return "internal document " * 25
+
+        middleware = (CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7),)
+        config = AgentRuntimeConfig(tool_settings=ToolSettings(result_max_chars=120))
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), config=config, middleware=middleware)
+        context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        runner = EchoRunner(echo=True)
+        handle = RunnerHandle(runner=runner, provider="openai", invoke=invoke_echo_runner, extract_text=echo_runner_text, extract_metadata=echo_runner_metadata)
+        result = await runtime.arun("task", handle=handle, context=context)
+        self.assertIn("tool output truncated by ToolSettings", runner.seen_tool_output)
+        self.assertIn("VIDBYTE-CANARY-", runner.seen_tool_output)
+        self.assertEqual(result.metadata["middleware_abort_reason"], "canary_leaked")
 
     async def test_model_not_echoing_tool_output_finishes_normally(self) -> None:
         # [Edge Case] A model that does not repeat the canary finishes without an abort.

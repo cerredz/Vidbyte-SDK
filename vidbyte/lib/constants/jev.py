@@ -382,6 +382,29 @@ JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD: float = 0.8
 JEV_COMPUTE_CLONES_DEFAULT: int = 2
 JEV_COMPUTE_CLONES_MAX: int = 4
 
+# How many helpers one SWARM launch may run: the setting's default and the inclusive bounds every plan respects.
+JEV_COMPUTE_SWARM_AGENTS_DEFAULT: int = 10
+JEV_COMPUTE_SWARM_AGENTS_MIN: int = 2
+JEV_COMPUTE_SWARM_AGENTS_MAX: int = 10
+# The model-facing name of the internal tool the main agent calls to launch a SWARM.
+JEV_SWARM_TOOL_NAME: str = "launch_swarm"
+# How many plans the main agent may submit in one run before the SWARM tool closes.
+JEV_SWARM_PLAN_MAX_ATTEMPTS: int = 3
+# Minimum P(true) each plan-check question needs for its assignment to pass; a lower answer rejects the plan.
+JEV_SWARM_PLAN_MIN_THRESHOLD: float = 0.5
+# Code-assigned assignment ids are this prefix followed by the assignment's position, starting at one.
+JEV_SWARM_ASSIGNMENT_ID_PREFIX: str = "A"
+JEV_SWARM_FIRST_ASSIGNMENT: int = 1
+JEV_SWARM_ASSIGNMENT_ID_PATTERN: str = r"^A[1-9][0-9]?$"
+# Bounds on a SWARM plan's text: an assignment's name, and every other field including the shared conventions.
+JEV_SWARM_NAME_MAX_CHARS: int = 80
+JEV_SWARM_FIELD_MAX_CHARS: int = 8_000
+# How much of one helper's reply the main agent receives, keeping its head and tail.
+JEV_SWARM_OUTPUT_MAX_CHARS: int = 6_000
+# Titles of the typed context items every SWARM helper receives beside its assignment.
+JEV_SWARM_REQUEST_CONTEXT_TITLE: str = "Original request"
+JEV_SWARM_BRIEF_CONTEXT_TITLE: str = "Verified notes about the run so far"
+
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
@@ -660,4 +683,18 @@ __all__ = [
     "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
     "JEV_COMPUTE_CLONES_DEFAULT",
     "JEV_COMPUTE_CLONES_MAX",
+    "JEV_COMPUTE_SWARM_AGENTS_DEFAULT",
+    "JEV_COMPUTE_SWARM_AGENTS_MIN",
+    "JEV_COMPUTE_SWARM_AGENTS_MAX",
+    "JEV_SWARM_TOOL_NAME",
+    "JEV_SWARM_PLAN_MAX_ATTEMPTS",
+    "JEV_SWARM_PLAN_MIN_THRESHOLD",
+    "JEV_SWARM_ASSIGNMENT_ID_PREFIX",
+    "JEV_SWARM_FIRST_ASSIGNMENT",
+    "JEV_SWARM_ASSIGNMENT_ID_PATTERN",
+    "JEV_SWARM_NAME_MAX_CHARS",
+    "JEV_SWARM_FIELD_MAX_CHARS",
+    "JEV_SWARM_OUTPUT_MAX_CHARS",
+    "JEV_SWARM_REQUEST_CONTEXT_TITLE",
+    "JEV_SWARM_BRIEF_CONTEXT_TITLE",
 ]

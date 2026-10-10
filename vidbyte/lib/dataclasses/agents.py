@@ -187,7 +187,11 @@ class FallbackModel:
     temperature: float | None = None
 
     def __post_init__(self) -> None:
-        """Reject entries that do not name both a provider and a model."""
+        """Normalize an enum provider to its string value and reject blank provider or model names."""
+        # @intent fallback-provider-is-a-plain-string
+        # A ModelProvider member would otherwise render as 'ModelProvider.ANTHROPIC' in identity() and run metadata.
+        if isinstance(self.provider, Enum):
+            object.__setattr__(self, "provider", self.provider.value)
         if not str(self.provider).strip():
             raise ValueError("FallbackModel.provider cannot be empty")
         if not str(self.model).strip():

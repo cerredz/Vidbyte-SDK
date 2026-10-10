@@ -63,14 +63,8 @@ class GrepTool(BaseCodeSearchTool):
             for index, line in enumerate(lines):
                 if not compiled.search(line):
                     continue
-                start = max(0, index - context_lines)
-                end = min(len(lines), index + context_lines + 1)
-                rel = self.relative_path(path)
-                body = "\n".join(
-                    f"{line_number + 1}: {lines[line_number]}"
-                    for line_number in range(start, end)
-                )
-                snippets.append(f"{rel}:{index + 1}\n{body}")
+                # @intent code-search-truncation-means-hits-were-cut
+                # Only a hit arriving after the list is already full proves results were cut.
                 if len(snippets) >= max_results:
                     output = "\n\n".join(snippets) + "\n\nResults truncated; narrow the pattern."
                     if len(output) > max_chars:
@@ -80,6 +74,14 @@ class GrepTool(BaseCodeSearchTool):
                         output,
                         metadata={"count": len(snippets), "truncated": True},
                     )
+                start = max(0, index - context_lines)
+                end = min(len(lines), index + context_lines + 1)
+                rel = self.relative_path(path)
+                body = "\n".join(
+                    f"{line_number + 1}: {lines[line_number]}"
+                    for line_number in range(start, end)
+                )
+                snippets.append(f"{rel}:{index + 1}\n{body}")
         if not snippets:
             return ToolResult.success(self.name, "No matches found.", metadata={"count": 0})
         return ToolResult.success(

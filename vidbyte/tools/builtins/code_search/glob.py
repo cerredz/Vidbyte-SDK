@@ -50,19 +50,23 @@ class GlobTool(BaseCodeSearchTool):
             return ToolResult.success(self.name, "No files matched.", metadata={"count": 0})
 
         matches: list[str] = []
+        truncated = False
         for path in start.glob(pattern):
             resolved = Path(path).resolve()
             if not resolved.is_file() or self.should_ignore(resolved):
                 continue
             try:
-                matches.append(self.relative_path(resolved))
+                relative = self.relative_path(resolved)
             except ValueError:
                 continue
+            # @intent code-search-truncation-means-hits-were-cut
+            # Only a match arriving after the list is already full proves results were cut.
             if len(matches) >= max_results:
+                truncated = True
                 break
+            matches.append(relative)
         if not matches:
             return ToolResult.success(self.name, "No files matched.", metadata={"count": 0})
-        truncated = len(matches) >= max_results
         suffix = "\nResults truncated; narrow the pattern." if truncated else ""
         output = "\n".join(matches) + suffix
         if len(output) > max_chars:
