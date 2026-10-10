@@ -49,6 +49,8 @@ class ContinualTraceAgent(BaseAgent):
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, schema: TraceSchema | type | Mapping[str, Any], *, trace_so_far: Mapping[str, Any] | None = None, max_trace_iterations: int = 3) -> "ContinualTraceAgent":
         """Build a trace agent that reuses a source agent's runner and provider configuration."""
+        # @intent side-agents-route-like-source
+        # Trace updates must route like the source agent, including its timeout and fallback chain.
         agent = cls(
             schema,
             trace_so_far=trace_so_far,
@@ -57,6 +59,8 @@ class ContinualTraceAgent(BaseAgent):
             model_name=source_agent.runner_config.model_name,
             api_key=source_agent.runner_config.api_key,
             temperature=source_agent.runner_config.temperature,
+            timeout_seconds=source_agent.runner_config.timeout_seconds,
+            fallback=source_agent._fallback_spec,
         )
         agent._runner_cache.update(source_agent._runner_cache)
         return agent
