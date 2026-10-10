@@ -129,3 +129,36 @@ Spec revised to r2 in commit `4be45f84`. All 8 findings were accepted (1 Blocker
 - **3.12 is unmeasured.** I did not measure whether asyncio's `wait()` on Python 3.12 waits for the pipes to close. The grace bound makes this irrelevant to correctness.
 - **POSIX `killpg` on a reaped leader is not demonstrated here.** It relies on the group id staying valid while any member is alive, which is standard POSIX behaviour.
 - **Choosing the first 50,000 bytes over the last is a judgement call.**
+
+## Addendum — r3 (S1 review round 2, final round)
+
+Spec revised to r3 in commit `8f669933`, with `status: approved`. All three findings were accepted, and §16 records each one.
+
+**What changed**
+
+- **R-9 (Major): close the pipe transport.**
+  - New decision D-18 and invariant INV-26. `_stop` now ends by closing the subprocess transport, reached through `getattr(process, "_transport", None)` and closed only when it is present.
+  - I checked the CPython 3.11 source myself:
+    - `asyncio.subprocess.Process.__init__` stores `self._transport`.
+    - `BaseSubprocessTransport.close()` is idempotent. It closes the pipes, and it re-kills the direct child only if that child is still running.
+  - Why `getattr` with a `None` default:
+    - It passes mypy (S009), whereas `process._transport` does not.
+    - If a future Python lacks the attribute, the tool falls back to the documented leak. It does not raise inside the cancellation handler, where an exception would replace the `CancelledError`.
+  - Other updates: new AC-28; EC-14 and EC-30 now state that the parent closes its end of the pipe; new §12.4 line; §13 facts.
+  - I also corrected §8.2 and §11: `McpStdioTransport.close` has an unbounded wait after `kill()`, so it must not be cited as a bounded-wait pattern to copy.
+- **R-10 (Minor): truncation signal on timeout.**
+  - Two fixes were possible: make the timeout result signal truncation, or weaken EC-10's promise. I chose the signal (D-19).
+  - When the buffer is full, the timeout result now adds a truncation line without a byte count and sets `metadata["truncated"]`.
+  - Reasoning: a command that never stops printing always ends in a timeout, so this is where the model most needs to know its output was cut. The signal costs one condition. Carrying the actual byte count would need a counter that outlives `_collect`.
+  - Other updates: EC-10, the §8.5 result contract, AC-13 (now scoped to "exits within the limit"), and new AC-29.
+- **R-11 (Minor): redirect both streams.** Wording change only. The tool description content, EC-9, AC-26, INV-25 and the README caveat now tell the model to redirect both standard output and standard error of a background process.
+- **A-2 boundary.** A scoop or `git.portable` shim gets `bash_not_found`. This is noted as reported by the reviewer and not reproduced here.
+
+**Self-check (Stage E, re-run):**
+- 18 `## §` sections.
+- §12.3 has 8 rows, and they are the only lines starting with `| <digit>`.
+- 2 CREATE rows, matching the §8.4 budget of 2 new files.
+- The four `BASH_*` constants appear identically in §8.5, §9.3 and §12.3.
+- The `CodingAgent` signature names in §4, §8.5 and §12.3 are unchanged.
+
+**Disagreements:** none. Nothing is left to dispute, so no new questions (Q-n) were added.
