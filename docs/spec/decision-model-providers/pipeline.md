@@ -14,7 +14,7 @@ started: 2026-10-10 01:32
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 01:32 | 2026-10-10 02:45 | reports/S0-scout.md, reports/S0-research.md | base_commit 278448b0; context/code-map.md (244 lines); context/provider-research.md (473 lines, 32 catalog rows) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | in progress | 2026-10-10 02:50 | | reports/S1-spec-author.md (spec r1 at ecf0c4b7; report at 9fb806b8); reviewer round 1 running | spec.md r1 (768 lines, 18 sections, 20 §12.3 rows, 3 new files, 6 new ModelProvider members) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -52,3 +52,9 @@ started: 2026-10-10 01:32
 - Every qualifying provider prices per input token with output free or zero; no per-request pricing found. Cloudflare silently truncates `state` to a 65,536-token window; clef-flash is $0.038/M. — *source:* S0 research
 - Renamed or deprecated in 2025–2026: Nebius AI Studio → Token Factory; Mistral Classifier Factory deprecated; Cohere `/v1/classify` deprecated 2025-09-15; Writer palmyra-x4/x5 deprecated 2026-12-14; DeepSeek pricing has peak/off-peak and cache tiers. — *source:* S0 research
 - Perplexity Decisions: 10 rps/org, 1–128 questions, 1–255 options, 1–10 levels, < 262,144 input tokens, 504 after ~1 minute, `Retry-After` on 429; official price $0.02/M. — *source:* S0 research
+- `ModalityDetector` treats the `gpt-` prefix as a TEXT model, so a `VERCEL` enum member defaulting to `openai/gpt-6-luna-decisions` would auto-activate as a text provider via `_resolve_from_environment`; the spec uses a README recipe (D-8) instead of a member. — *source:* S1 author
+- `_catalog_name` strips to after the first `/`, so the Baseten default `inception/mercury-decide` needs the bare alias `mercury-decide` in `MODEL_RUNNER_TYPE_MAP` or `test_accepts_every_text_provider_default_model` fails (D-16). — *source:* S1 author
+- `get_default_endpoint` already raises on falsy values, so `""` defaults for the tenant-scoped hosts (Cloudflare, Foundry) need only a message change (D-7). — *source:* S1 author
+- `tests/test_jev_usage_ledger.py` patches `vidbyte.providers.typesafe.TypeSafeProvider.run_decision`; that import path and its keyword-only signature must survive the refactor (INV-24). — *source:* S1 author
+- `gpt-6-luna` is absent from every text catalog at base, so a 0.0 output price cannot under-bill chat usage (A-16 / D-12). — *source:* S1 author
+- Lint and semgrep scan tracked files only: run `git add -A` before `python lint/run.py` or the gate skips new files. — *source:* S1 author
