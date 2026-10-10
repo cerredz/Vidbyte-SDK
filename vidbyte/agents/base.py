@@ -55,6 +55,7 @@ from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSc
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.base import BaseTool, _unwrap_tool
@@ -1386,8 +1387,9 @@ class BaseAgent(McpAttachableMixin):
 
     @staticmethod
     def _is_secret_trace_key(key: str) -> bool:
-        upper = key.upper()
-        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Exact credential names and suffixes only, so author_id or max_tokens stay in the trace.
+        return CredentialKeyPolicy.is_secret_key(key)
 
     @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
@@ -1562,7 +1564,8 @@ def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
         upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+        # @intent trace-scrub-uses-precise-credential-keys
+        if upper.startswith("LANGSMITH_") or CredentialKeyPolicy.is_secret_key(key_text):
             continue
         safe[key_text] = _safe_trace_value(value)
     return safe
