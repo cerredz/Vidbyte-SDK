@@ -43,6 +43,12 @@ class ModelProvider(str, Enum):
     ELEVENLABS = "elevenlabs"
     PLAYAI = "playai"
     TYPESAFE = "typesafe"
+    PERPLEXITY = "perplexity"
+    CLOUDFLARE = "cloudflare"
+    FOUNDRY = "foundry"
+    LIQUID = "liquid"
+    BASETEN = "baseten"
+    MERAGPT = "meragpt"
 
     def usage_class(self) -> type[ProviderUsage] | None:
         # Resolves this provider's token-usage parser class, or None when the
@@ -57,7 +63,9 @@ def _usage_class_map() -> dict[ModelProvider, type[ProviderUsage]]:
     # imports the higher-level agents.pricing package at load, avoiding both an
     # import cycle and a layering inversion. Compatible providers (xAI, DeepSeek,
     # GLM, MiniMax, Kimi, Meta, Mistral) share the chat-completions usage shape;
-    # TypeSafe (Jev) reports its own input/output-only decision usage shape.
+    # TypeSafe (Jev) reports its own input/output-only decision usage shape, and
+    # every System One host (Perplexity, Cloudflare, Foundry, Liquid, Baseten,
+    # meraGPT) reports that same input/output-only decision usage.
     from vidbyte.agents.pricing import AnthropicUsage, ChatCompletionUsage, GeminiUsage, JevUsage, OpenAIUsage, OpenRouterUsage
 
     return {
@@ -73,6 +81,12 @@ def _usage_class_map() -> dict[ModelProvider, type[ProviderUsage]]:
         ModelProvider.MISTRAL: ChatCompletionUsage,
         ModelProvider.OPENROUTER: OpenRouterUsage,
         ModelProvider.TYPESAFE: JevUsage,
+        ModelProvider.PERPLEXITY: JevUsage,
+        ModelProvider.CLOUDFLARE: JevUsage,
+        ModelProvider.FOUNDRY: JevUsage,
+        ModelProvider.LIQUID: JevUsage,
+        ModelProvider.BASETEN: JevUsage,
+        ModelProvider.MERAGPT: JevUsage,
     }
 
 

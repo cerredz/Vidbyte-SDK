@@ -20,6 +20,9 @@ WHAT NOT TO DO: Do not add pricing, API keys, endpoints, HTTP payloads, or UI
     layers named above.
 KNOWN EDGE CASES: `gpt-5.6` is an OpenAI alias for `gpt-5.6-sol`; it remains a
     distinct catalog entry so strict validation accepts the caller's spelling.
+    `mercury-decide` is a bare alias of Baseten's `inception/mercury-decide`:
+    ProviderModelRegistry's catalog name strips the vendor prefix, so both
+    spellings must resolve to the decision runner.
 RELATED DOCS: docs/design/openai-gpt-5-6-catalog-pricing.md and
     https://developers.openai.com/api/docs/models.
 AUTO-GENERATED FLAG: No; maintained source data.
@@ -166,6 +169,15 @@ MODEL_PROVIDER_RUNNER_TYPE_MAP: dict[str, str] = {
     "gemini/text-embedding-004": RUNNER_TYPE_EMBEDDING,
     "gemini/embedding-001": RUNNER_TYPE_EMBEDDING,
     "typesafe/jev-latest": RUNNER_TYPE_DECISION,
+    "perplexity/pplx-decider-v1.1-27b": RUNNER_TYPE_DECISION,
+    "perplexity/pplx-decider-v1-27b": RUNNER_TYPE_DECISION,
+    "cloudflare/clef": RUNNER_TYPE_DECISION,
+    "cloudflare/clef-flash": RUNNER_TYPE_DECISION,
+    "foundry/microsoft-decision-1": RUNNER_TYPE_DECISION,
+    "liquid/d1": RUNNER_TYPE_DECISION,
+    "baseten/inception/mercury-decide": RUNNER_TYPE_DECISION,
+    "meragpt/sd-1": RUNNER_TYPE_DECISION,
+    "meragpt/state-decider-1": RUNNER_TYPE_DECISION,
 }
 
 MODEL_RUNNER_TYPE_MAP: dict[str, str] = {
@@ -298,6 +310,16 @@ MODEL_RUNNER_TYPE_MAP: dict[str, str] = {
     "playdialog": RUNNER_TYPE_AUDIO,
     "playdialogmultilingual": RUNNER_TYPE_AUDIO,
     "jev-latest": RUNNER_TYPE_DECISION,
+    "pplx-decider-v1.1-27b": RUNNER_TYPE_DECISION,
+    "pplx-decider-v1-27b": RUNNER_TYPE_DECISION,
+    "clef": RUNNER_TYPE_DECISION,
+    "clef-flash": RUNNER_TYPE_DECISION,
+    "microsoft-decision-1": RUNNER_TYPE_DECISION,
+    "d1": RUNNER_TYPE_DECISION,
+    "inception/mercury-decide": RUNNER_TYPE_DECISION,
+    "mercury-decide": RUNNER_TYPE_DECISION,
+    "sd-1": RUNNER_TYPE_DECISION,
+    "state-decider-1": RUNNER_TYPE_DECISION,
     "speech-2.8-hd": RUNNER_TYPE_AUDIO,
     "speech-2.8-turbo": RUNNER_TYPE_AUDIO,
     "speech-2.6-hd": RUNNER_TYPE_AUDIO,
@@ -327,6 +349,12 @@ PROVIDER_DEFAULT_RUNNER_TYPE_MAP: dict[str, str] = {
     "elevenlabs": RUNNER_TYPE_AUDIO,
     "playai": RUNNER_TYPE_AUDIO,
     "typesafe": RUNNER_TYPE_DECISION,
+    "perplexity": RUNNER_TYPE_DECISION,
+    "cloudflare": RUNNER_TYPE_DECISION,
+    "foundry": RUNNER_TYPE_DECISION,
+    "liquid": RUNNER_TYPE_DECISION,
+    "baseten": RUNNER_TYPE_DECISION,
+    "meragpt": RUNNER_TYPE_DECISION,
 }
 
 MODEL_PREFIX_RUNNER_TYPE_MAP: dict[str, str] = {
@@ -355,6 +383,9 @@ MODEL_PREFIX_RUNNER_TYPE_MAP: dict[str, str] = {
     "eleven_": RUNNER_TYPE_AUDIO,
     "playdialog": RUNNER_TYPE_AUDIO,
     "jev-": RUNNER_TYPE_DECISION,
+    "pplx-decider-": RUNNER_TYPE_DECISION,
+    "microsoft-decision-": RUNNER_TYPE_DECISION,
+    "mercury-decide": RUNNER_TYPE_DECISION,
     "speech-": RUNNER_TYPE_AUDIO,
     "text-embedding": RUNNER_TYPE_EMBEDDING,
     "embedding-": RUNNER_TYPE_EMBEDDING,

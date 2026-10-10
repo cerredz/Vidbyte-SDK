@@ -6,8 +6,11 @@ Purpose:
     Eliminates one-off provider-model dicts and environment resolution scattered across the SDK.
 Architecture:
     - ProviderModelRegistry: Centralized model definitions, endpoints, API keys, and lookup methods.
+    - DECISION_DEFAULT_MODELS: The default decision model per decision provider; its keys are the
+      providers DecisionModelConfig accepts.
 Key Functions:
     - default_model: Returns the default model string for a given provider enum.
+    - decision_default_model: Returns the default decision model for a decision provider.
     - get_api_key_env_var: Retrieves the API key environment variable name.
     - get_default_endpoint: Retrieves the default endpoint for a provider.
     - resolve_api_key: Resolves explicit API key or retrieves environment variable.
@@ -41,6 +44,7 @@ from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.constants.jev import JEV_DEFAULT_MODEL
 from vidbyte.lib.constants.runners import MODEL_PROVIDER_RUNNER_TYPE_MAP, MODEL_RUNNER_TYPE_MAP
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -68,6 +72,12 @@ class ProviderModelRegistry:
         ModelProvider.ELEVENLABS: "eleven_multilingual_v2",
         ModelProvider.PLAYAI: "PlayDialog",
         ModelProvider.TYPESAFE: "jev-latest",
+        ModelProvider.PERPLEXITY: "pplx-decider-v1.1-27b",
+        ModelProvider.CLOUDFLARE: "clef",
+        ModelProvider.FOUNDRY: "microsoft-decision-1",
+        ModelProvider.LIQUID: "d1",
+        ModelProvider.BASETEN: "inception/mercury-decide",
+        ModelProvider.MERAGPT: "sd-1",
     }
 
     API_KEY_ENV_VARS: ClassVar[dict[ModelProvider, str]] = {
@@ -85,6 +95,12 @@ class ProviderModelRegistry:
         ModelProvider.ELEVENLABS: "ELEVENLABS_API_KEY",
         ModelProvider.PLAYAI: "PLAYAI_API_KEY",
         ModelProvider.TYPESAFE: "TYPESAFE_API_KEY",
+        ModelProvider.PERPLEXITY: "PERPLEXITY_API_KEY",
+        ModelProvider.CLOUDFLARE: "CLOUDFLARE_API_TOKEN",
+        ModelProvider.FOUNDRY: "FOUNDRY_API_KEY",
+        ModelProvider.LIQUID: "LIQUID_API_KEY",
+        ModelProvider.BASETEN: "BASETEN_API_KEY",
+        ModelProvider.MERAGPT: "MERAGPT_API_KEY",
     }
 
     DEFAULT_ENDPOINTS: ClassVar[dict[ModelProvider, str]] = {
@@ -102,6 +118,26 @@ class ProviderModelRegistry:
         ModelProvider.ELEVENLABS: "https://api.elevenlabs.io/v1",
         ModelProvider.PLAYAI: "https://api.play.ai/api/v1",
         ModelProvider.TYPESAFE: "https://api.typesafe.ai/v1",
+        ModelProvider.PERPLEXITY: "https://api.perplexity.ai/v1",
+        # Cloudflare and Foundry endpoints are tenant-scoped (account id / resource name), so no
+        # shared default exists: the caller passes `endpoint`, and resolution raises without one.
+        ModelProvider.CLOUDFLARE: "",
+        ModelProvider.FOUNDRY: "",
+        ModelProvider.LIQUID: "https://api.liquid.ai/decisions/v1",
+        ModelProvider.BASETEN: "https://inference.baseten.co/v1",
+        ModelProvider.MERAGPT: "https://meragpt.com/v1",
+    }
+
+    DECISION_DEFAULT_MODELS: ClassVar[dict[ModelProvider, str]] = {
+        ModelProvider.TYPESAFE: JEV_DEFAULT_MODEL,
+        ModelProvider.PERPLEXITY: "pplx-decider-v1.1-27b",
+        ModelProvider.OPENROUTER: "typesafe/jev-1.13",
+        ModelProvider.LIQUID: "d1",
+        ModelProvider.BASETEN: "inception/mercury-decide",
+        ModelProvider.MERAGPT: "sd-1",
+        ModelProvider.CLOUDFLARE: "clef",
+        ModelProvider.FOUNDRY: "microsoft-decision-1",
+        ModelProvider.OPENAI: "gpt-6-luna",
     }
 
     MODEL_ALIASES: ClassVar[dict[ModelProvider, dict[str, str]]] = {
@@ -125,6 +161,21 @@ class ProviderModelRegistry:
         return model
 
     @classmethod
+    def decision_default_model(cls, provider: ModelProvider | str) -> str:
+        # Returns the model a decision call sends when DecisionModelConfig.model is omitted.
+        # @intent one-decision-default-per-provider
+        # The decision default differs from the text default for providers that serve both (OpenAI,
+        # OpenRouter), and the keys of this map are the providers the decision runner accepts.
+        try:
+            p_enum = provider if isinstance(provider, ModelProvider) else ModelProvider(provider)
+        except ValueError as exc:
+            raise ConfigurationError(f"Unrecognized provider '{provider}'.") from exc
+        model = cls.DECISION_DEFAULT_MODELS.get(p_enum)
+        if model is None:
+            raise ConfigurationError(f"No decision model registered for provider '{p_enum.value}'.")
+        return model
+
+    @classmethod
     def get_api_key_env_var(cls, provider: ModelProvider | str) -> str:
         # Returns the environment variable name configured for the given provider.
         try:
@@ -145,7 +196,7 @@ class ProviderModelRegistry:
             raise ConfigurationError(f"Unrecognized provider '{provider}'.") from exc
         endpoint = cls.DEFAULT_ENDPOINTS.get(p_enum)
         if not endpoint:
-            raise ConfigurationError(f"No default endpoint registered for provider '{p_enum.value}'.")
+            raise ConfigurationError(f"No default endpoint registered for provider '{p_enum.value}'. Pass endpoint explicitly with the provider's base URL.")
         return endpoint
 
     @classmethod
