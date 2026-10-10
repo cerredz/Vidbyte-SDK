@@ -98,7 +98,8 @@ class CodingAgent(BaseAgent):
     @staticmethod
     def _resolve_root(root_dir: str | Path) -> Path:
         """Return root_dir as an absolute path, or raise ConfigurationError when it is not an existing directory."""
-        if not isinstance(root_dir, (str, os.PathLike)) or not Path(root_dir).is_dir():
+        # os.path.isdir, not Path.is_dir: Path("") is the current folder, so an empty string would pass (FR-3, D-8).
+        if not isinstance(root_dir, (str, os.PathLike)) or not os.path.isdir(root_dir):
             raise ConfigurationError("CodingAgent root_dir must be an existing directory.", details={"root_dir": str(root_dir)})
         return Path(root_dir).resolve()
 
