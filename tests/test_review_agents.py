@@ -463,11 +463,12 @@ def test_a_push_race_is_resolved_by_replaying_on_top(repo: _Fixture) -> None:
 
 
 def _diverge(repo: _Fixture) -> str:
-    # The base branch changes the line the feature changed, and adds a file of its own.
+    # The base branch changes the line the feature changed, adds a file, and changes restored config.
     other = repo.root / "main-side"
     _git(repo.root, "clone", "-q", "-b", "main", str(repo.remote), str(other))
     (other / "app.txt").write_text("main\n", encoding="utf-8")
     (other / "lib.txt").write_text("from main\n", encoding="utf-8")
+    (other / ".claude" / "ci-settings.json").write_text('{"from": "main"}\n', encoding="utf-8")
     _git(other, "add", "-A")
     _git(other, "commit", "-q", "-m", "main moves on")
     _git(other, "push", "-q", "origin", "main")
@@ -504,16 +505,19 @@ def test_git_previews_the_conflicts_without_touching_the_checkout(repo: _Fixture
 def test_a_settled_merge_is_pushed_as_a_two_parent_merge_commit(repo: _Fixture) -> None:
     base = _diverge(repo)
     start = _start_merge(repo)
-    # The agent settles the conflict, and the action had swapped CLAUDE.md for another copy.
+    # The agent settles the conflict, and the action had swapped restored config for other copies.
     (repo.work / "app.txt").write_text("main and ok\n", encoding="utf-8")
     (repo.work / "CLAUDE.md").write_text("tampered\n", encoding="utf-8")
+    (repo.work / ".claude" / "ci-settings.json").write_text("tampered\n", encoding="utf-8")
     result = _finalize_merge(repo, start, _merged("Kept both sides."))
     assert result.status is TaskStatus.CHANGED, result.detail
     assert _remote_head(repo) == result.commit_sha
     assert _git(repo.work, "rev-parse", "HEAD^1", "HEAD^2").split() == [start, base]
     assert _git(repo.work, "show", "HEAD:app.txt") == "main and ok"
     assert _git(repo.work, "show", "HEAD:lib.txt") == "from main"
+    # Restored config comes back as the clean merge holds it, keeping the base branch's change.
     assert _git(repo.work, "show", "HEAD:CLAUDE.md") == "@AGENTS.md"
+    assert _git(repo.work, "show", "HEAD:.claude/ci-settings.json") == '{"from": "main"}'
     assert "Claude-Review-Agent: merge-conflicts" in _git(repo.work, "log", "-1", "--format=%B")
 
 
