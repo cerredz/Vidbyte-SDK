@@ -1,7 +1,7 @@
 ---
 spec: coding-agent
 title: CodingAgent — a minimal BaseAgent with seven file-system and web tools
-status: verified            # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open             # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-coding-agent
@@ -128,15 +128,18 @@ sequenceDiagram
   else time limit reached
     BT->>OS: kill the process group (POSIX) or Git's launcher (Windows)
     BT->>OS: wait for exit, at most BASH_KILL_GRACE_SECONDS
+    BT->>OS: close the subprocess transport (in finally, so a second cancellation still closes it)
     BT-->>RT: ToolResult.error(metadata error="timeout")
   else cancelled (agent tool timeout or task cancel)
     BT->>OS: kill the process group (POSIX) or Git's launcher (Windows)
     BT->>OS: wait for exit, at most BASH_KILL_GRACE_SECONDS
+    BT->>OS: close the subprocess transport (in finally)
     BT-->>RT: CancelledError re-raised
   end
+  Note over BT,OS: _stop ignores ProcessLookupError and PermissionError on the kill and on the close, so it never raises
 ```
 
-Construction is where everything is validated: `CodingAgent.__init__` rejects a `root_dir` that is not an existing directory and any fetch key that is blank or supplied alongside another key, before `BaseAgent.__init__` runs and rejects an empty name or system prompt. At run time the existing `AgentRuntime._check_permission` (`runtime.py:1270`) decides each call before any tool code runs; a denial becomes a DENIED result and nothing raises. Bash state changes only inside the child process. The tool catches its own time limit; on cancellation it stops the child and then lets the cancellation propagate. In both cases the wait for the child to exit after the kill is capped by a short grace period, so the call always returns. A keyed fetch's billing metadata passes through the view untouched, so the runtime prices it exactly as it prices the bare tool.
+Construction is where everything is validated: `CodingAgent.__init__` rejects a `root_dir` that is not an existing directory and any fetch key that is blank or supplied alongside another key, before `BaseAgent.__init__` runs and rejects an empty name or system prompt. At run time the existing `AgentRuntime._check_permission` (`runtime.py:1270`) decides each call before any tool code runs; a denial becomes a DENIED result and nothing raises. Bash state changes only inside the child process. The tool catches its own time limit; on cancellation it stops the child and then lets the cancellation propagate. In both cases the wait for the child to exit after the kill is capped by a short grace period, so the call always returns, and the subprocess transport is then closed. A keyed fetch's billing metadata passes through the view untouched, so the runtime prices it exactly as it prices the bare tool.
 
 ---
 
@@ -681,6 +684,7 @@ Secrets follow the repo's existing convention: credentials are passed explicitly
 | r2 | 2026-10-10 | S1 review round 1 | Bash always returns (one limit over read and wait, bounded wait after kill, unconditional stop); Windows git-relative lookup covers three parents; output cap 50,000 bytes; constants moved into the bash tool module (2 new files); Windows limitation stated (Q-6, A-9); wording fixes R-6 to R-8. |
 | r3 | 2026-10-10 | S1 review round 2 | `_stop` closes the subprocess transport (D-18, INV-26, AC-28); the timeout result reports truncation (D-19, AC-29); background processes must redirect both streams; A-2 scoop boundary; §8.2/§11 MCP citation corrected. Status approved. |
 | r3 | 2026-10-10 | S3 implement | All 8 §12.3 rows built in §12.6 order (`25b5260b` to `19cb42db`, plus `4c4a62ef` step comments on row 3); spec text unchanged; coding-agent pack green on Windows 3.11 and WSL 3.12, full local gate passes; draft PR #690. |
+| r3 | 2026-10-10 | S6 PR | finalized for review. §5 sequence diagram brought in line with the code: both stop paths now show the transport close in `finally` (D-18, INV-26) and a note that `_stop` ignores `ProcessLookupError` and `PermissionError` (S5 R-1, `415f7c22`). No other spec text changed. PR body: `docs/spec/coding-agent/pr-body.md`. |
 
 **Implementation deviations (S3)**
 
