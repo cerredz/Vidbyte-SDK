@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "f8b048ab479c504cfe88a59a660e941e71549b86", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "1bb1d3b48288f9beb3964d4e0ab13cc5cc769a81", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.2.0",
   "exports": [
@@ -107,6 +107,7 @@
     "CodexTurnError",
     "CodexTurnSettings",
     "CodexUsageResponse",
+    "CodingAgent",
     "CompactRecovery",
     "CompactionMode",
     "CompactionStats",
