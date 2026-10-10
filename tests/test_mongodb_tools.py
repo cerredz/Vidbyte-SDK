@@ -1,15 +1,12 @@
-"""Context Protocol Header
+"""FILE: tests/test_mongodb_tools.py
 
-Description:
-    Tests the MongoDB provider operation tools against a recording fake store.
-Purpose:
-    Verifies that declared boolean arguments are read strictly, so a stringly "false"
-    is refused before the store is called instead of widening a delete or update.
-Architecture:
-    - RecordingStore: Fake store that records every provider call it receives.
-    - MongoBooleanArgumentTests: Strict boolean argument tests for MongoDB tools.
-Relations:
-    Related to vidbyte.tools.builtins.providers.mongodb and vidbyte.tools.base.
+PURPOSE: Tests the MongoDB provider operation tools against a recording fake store.
+ROLE IN CODEBASE: Regression coverage proving declared boolean arguments are read strictly, so a stringly "false" is refused before the store is called.
+ARCHITECTURE NOTE: RecordingStore is a fake store that records every provider call; MongoBooleanArgumentTests drives the tools through execute().
+COMMON MODIFICATION PATTERNS: Add a fake store method when a new MongoDB tool gains a boolean argument, then assert the store sees no call on refusal.
+KNOWN EDGE CASES: A JSON null means the documented default; only a real bool is passed through; any other value is a tool error.
+RELATED DOCS: docs/design/tool-args-strict-booleans.md; vidbyte/tools/base.py (@intent boolean-tool-args-reject-stringly-truthiness)
+TESTS: python -m pytest tests/test_mongodb_tools.py
 """
 
 from __future__ import annotations
