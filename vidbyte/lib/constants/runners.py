@@ -22,7 +22,10 @@ KNOWN EDGE CASES: `gpt-5.6` is an OpenAI alias for `gpt-5.6-sol`; it remains a
     distinct catalog entry so strict validation accepts the caller's spelling.
     `mercury-decide` is a bare alias of Baseten's `inception/mercury-decide`:
     ProviderModelRegistry's catalog name strips the vendor prefix, so both
-    spellings must resolve to the decision runner.
+    spellings must resolve to the decision runner. The bare id now also
+    belongs to Inception, whose qualified key `inception/mercury-decide` must
+    stay after `baseten/inception/mercury-decide` (provider_for_model returns
+    the first match in insertion order).
 RELATED DOCS: docs/design/openai-gpt-5-6-catalog-pricing.md and
     https://developers.openai.com/api/docs/models.
 AUTO-GENERATED FLAG: No; maintained source data.
@@ -176,8 +179,21 @@ MODEL_PROVIDER_RUNNER_TYPE_MAP: dict[str, str] = {
     "foundry/microsoft-decision-1": RUNNER_TYPE_DECISION,
     "liquid/d1": RUNNER_TYPE_DECISION,
     "baseten/inception/mercury-decide": RUNNER_TYPE_DECISION,
+    # Keep Inception's key after Baseten's: provider_for_model returns the first key, in insertion
+    # order, whose model part or whole key matches, so this order keeps Baseten's slashed default
+    # `inception/mercury-decide` on Baseten while the bare `mercury-decide` resolves to Inception.
+    "inception/mercury-decide": RUNNER_TYPE_DECISION,
     "meragpt/sd-1": RUNNER_TYPE_DECISION,
     "meragpt/state-decider-1": RUNNER_TYPE_DECISION,
+    "celeris/celeris-1-decision": RUNNER_TYPE_DECISION,
+    "nace/drex-v1.5": RUNNER_TYPE_DECISION,
+    "nace/drex-v1.0": RUNNER_TYPE_DECISION,
+    "upstage/solar-decide": RUNNER_TYPE_DECISION,
+    "hanzo/kai": RUNNER_TYPE_DECISION,
+    "vansa/vansa-3.4": RUNNER_TYPE_DECISION,
+    "zoodata/instinct": RUNNER_TYPE_DECISION,
+    "zoodata/instinct-dual-4b": RUNNER_TYPE_DECISION,
+    "zoodata/instinct-tuned-4b": RUNNER_TYPE_DECISION,
 }
 
 MODEL_RUNNER_TYPE_MAP: dict[str, str] = {
@@ -320,6 +336,15 @@ MODEL_RUNNER_TYPE_MAP: dict[str, str] = {
     "mercury-decide": RUNNER_TYPE_DECISION,
     "sd-1": RUNNER_TYPE_DECISION,
     "state-decider-1": RUNNER_TYPE_DECISION,
+    "celeris-1-decision": RUNNER_TYPE_DECISION,
+    "drex-v1.5": RUNNER_TYPE_DECISION,
+    "drex-v1.0": RUNNER_TYPE_DECISION,
+    "solar-decide": RUNNER_TYPE_DECISION,
+    "kai": RUNNER_TYPE_DECISION,
+    "vansa-3.4": RUNNER_TYPE_DECISION,
+    "instinct": RUNNER_TYPE_DECISION,
+    "instinct-dual-4b": RUNNER_TYPE_DECISION,
+    "instinct-tuned-4b": RUNNER_TYPE_DECISION,
     "speech-2.8-hd": RUNNER_TYPE_AUDIO,
     "speech-2.8-turbo": RUNNER_TYPE_AUDIO,
     "speech-2.6-hd": RUNNER_TYPE_AUDIO,
@@ -355,6 +380,13 @@ PROVIDER_DEFAULT_RUNNER_TYPE_MAP: dict[str, str] = {
     "liquid": RUNNER_TYPE_DECISION,
     "baseten": RUNNER_TYPE_DECISION,
     "meragpt": RUNNER_TYPE_DECISION,
+    "celeris": RUNNER_TYPE_DECISION,
+    "nace": RUNNER_TYPE_DECISION,
+    "upstage": RUNNER_TYPE_DECISION,
+    "inception": RUNNER_TYPE_DECISION,
+    "hanzo": RUNNER_TYPE_DECISION,
+    "vansa": RUNNER_TYPE_DECISION,
+    "zoodata": RUNNER_TYPE_DECISION,
 }
 
 MODEL_PREFIX_RUNNER_TYPE_MAP: dict[str, str] = {
@@ -386,6 +418,8 @@ MODEL_PREFIX_RUNNER_TYPE_MAP: dict[str, str] = {
     "pplx-decider-": RUNNER_TYPE_DECISION,
     "microsoft-decision-": RUNNER_TYPE_DECISION,
     "mercury-decide": RUNNER_TYPE_DECISION,
+    "drex-": RUNNER_TYPE_DECISION,
+    "vansa-": RUNNER_TYPE_DECISION,
     "speech-": RUNNER_TYPE_AUDIO,
     "text-embedding": RUNNER_TYPE_EMBEDDING,
     "embedding-": RUNNER_TYPE_EMBEDDING,

@@ -78,6 +78,13 @@ class ProviderModelRegistry:
         ModelProvider.LIQUID: "d1",
         ModelProvider.BASETEN: "inception/mercury-decide",
         ModelProvider.MERAGPT: "sd-1",
+        ModelProvider.CELERIS: "celeris-1-decision",
+        ModelProvider.NACE: "drex-v1.5",
+        ModelProvider.UPSTAGE: "solar-decide",
+        ModelProvider.INCEPTION: "mercury-decide",
+        ModelProvider.HANZO: "kai",
+        ModelProvider.VANSA: "vansa-3.4",
+        ModelProvider.ZOODATA: "instinct",
     }
 
     API_KEY_ENV_VARS: ClassVar[dict[ModelProvider, str]] = {
@@ -101,6 +108,13 @@ class ProviderModelRegistry:
         ModelProvider.LIQUID: "LIQUID_API_KEY",
         ModelProvider.BASETEN: "BASETEN_API_KEY",
         ModelProvider.MERAGPT: "MERAGPT_API_KEY",
+        ModelProvider.CELERIS: "CELERIS_API_KEY",
+        ModelProvider.NACE: "NACE_API_KEY",
+        ModelProvider.UPSTAGE: "UPSTAGE_API_KEY",
+        ModelProvider.INCEPTION: "INCEPTION_API_KEY",
+        ModelProvider.HANZO: "HANZO_API_KEY",
+        ModelProvider.VANSA: "VANSA_KEY",
+        ModelProvider.ZOODATA: "ZOODATA_API_KEY",
     }
 
     DEFAULT_ENDPOINTS: ClassVar[dict[ModelProvider, str]] = {
@@ -126,6 +140,15 @@ class ProviderModelRegistry:
         ModelProvider.LIQUID: "https://api.liquid.ai/decisions/v1",
         ModelProvider.BASETEN: "https://inference.baseten.co/v1",
         ModelProvider.MERAGPT: "https://meragpt.com/v1",
+        # Celeris puts the model name in the base URL (https://inference.celeris.ai/<model>/v1), so a
+        # caller who sends another `model` passes the matching `endpoint` with it.
+        ModelProvider.CELERIS: "https://inference.celeris.ai/celeris-1-decision/v1",
+        ModelProvider.NACE: "https://console.nace.ai/v1",
+        ModelProvider.UPSTAGE: "https://api.upstage.ai/v1",
+        ModelProvider.INCEPTION: "https://api.inceptionlabs.ai/v1",
+        ModelProvider.HANZO: "https://api.hanzo.ai/v1",
+        ModelProvider.VANSA: "https://api.vansa.org/v1",
+        ModelProvider.ZOODATA: "https://api.zoodata.ai/v1",
     }
 
     DECISION_DEFAULT_MODELS: ClassVar[dict[ModelProvider, str]] = {
@@ -137,6 +160,13 @@ class ProviderModelRegistry:
         ModelProvider.MERAGPT: "sd-1",
         ModelProvider.CLOUDFLARE: "clef",
         ModelProvider.FOUNDRY: "microsoft-decision-1",
+        ModelProvider.CELERIS: "celeris-1-decision",
+        ModelProvider.NACE: "drex-v1.5",
+        ModelProvider.UPSTAGE: "solar-decide",
+        ModelProvider.INCEPTION: "mercury-decide",
+        ModelProvider.HANZO: "kai",
+        ModelProvider.VANSA: "vansa-3.4",
+        ModelProvider.ZOODATA: "instinct",
         ModelProvider.OPENAI: "gpt-6-luna",
     }
 

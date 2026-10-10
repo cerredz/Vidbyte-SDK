@@ -49,6 +49,13 @@ class ModelProvider(str, Enum):
     LIQUID = "liquid"
     BASETEN = "baseten"
     MERAGPT = "meragpt"
+    CELERIS = "celeris"
+    NACE = "nace"
+    UPSTAGE = "upstage"
+    INCEPTION = "inception"
+    HANZO = "hanzo"
+    VANSA = "vansa"
+    ZOODATA = "zoodata"
 
     def usage_class(self) -> type[ProviderUsage] | None:
         # Resolves this provider's token-usage parser class, or None when the
@@ -65,7 +72,8 @@ def _usage_class_map() -> dict[ModelProvider, type[ProviderUsage]]:
     # GLM, MiniMax, Kimi, Meta, Mistral) share the chat-completions usage shape;
     # TypeSafe (Jev) reports its own input/output-only decision usage shape, and
     # every System One host (Perplexity, Cloudflare, Foundry, Liquid, Baseten,
-    # meraGPT) reports that same input/output-only decision usage.
+    # meraGPT, Celeris, Nace.AI, Upstage, Inception, Hanzo, Vansa, ZooData)
+    # reports that same input/output-only decision usage.
     from vidbyte.agents.pricing import AnthropicUsage, ChatCompletionUsage, GeminiUsage, JevUsage, OpenAIUsage, OpenRouterUsage
 
     return {
@@ -87,6 +95,13 @@ def _usage_class_map() -> dict[ModelProvider, type[ProviderUsage]]:
         ModelProvider.LIQUID: JevUsage,
         ModelProvider.BASETEN: JevUsage,
         ModelProvider.MERAGPT: JevUsage,
+        ModelProvider.CELERIS: JevUsage,
+        ModelProvider.NACE: JevUsage,
+        ModelProvider.UPSTAGE: JevUsage,
+        ModelProvider.INCEPTION: JevUsage,
+        ModelProvider.HANZO: JevUsage,
+        ModelProvider.VANSA: JevUsage,
+        ModelProvider.ZOODATA: JevUsage,
     }
 
 

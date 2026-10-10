@@ -96,12 +96,18 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "gpt-5.4-mini": ModelPricing(input_per_million=0.75, output_per_million=4.5, cache_read_per_million=0.075),
         "gpt-5.4-nano": ModelPricing(input_per_million=0.2, output_per_million=1.25, cache_read_per_million=0.02),
         "gpt-5.4-pro": ModelPricing(input_per_million=30.0, output_per_million=180.0),
-        # gpt-6-luna through the Decisions API, checked 2026-10-10 against
-        # https://developers.openai.com/api/docs/guides/decisions: $0.10 per 1M input tokens;
-        # output, cache read, and cache write are $0. The model is reached only through the
-        # decisions adapter (it is not in the text runner catalog), so the decision rate is the
-        # one this row carries (spec decision D-12).
-        "gpt-6-luna": ModelPricing(input_per_million=0.10, output_per_million=0.0),
+        # gpt-6-luna through the Decisions API (/v1/decisions), checked 2026-10-10 against the
+        # Decisions guide https://developers.openai.com/api/docs/guides/decisions ("With `gpt-6-luna`,
+        # input costs $0.10 per 1M tokens. You pay only for input tokens: there are no cache-read,
+        # cache-write, or output-token charges." and "Regional processing premiums and long-context
+        # input pricing multipliers apply. These rates apply to `/v1/decisions`"). The multiplier is
+        # on the model page https://developers.openai.com/api/docs/models/gpt-6-luna: "Prompts with
+        # more than 272K input tokens are priced at 2x input [...] for the full request", so input
+        # over 272K is 0.20 (derived as 2x; no page prints it). The 10% regional processing premium
+        # is not represented, as for every OpenAI row. The model is reached only through the
+        # decisions adapter (it is not in the text runner catalog), so the decision rate is the one
+        # this row carries (spec D-12).
+        "gpt-6-luna": ModelPricing(input_per_million=0.10, output_per_million=0.0, threshold_tokens=272_000, input_over_threshold_per_million=0.20, output_over_threshold_per_million=0.0),
     },
     ModelProvider.ANTHROPIC: {
         # claude-sonnet-5 introductory pricing, in effect through 2026-08-31.
@@ -153,59 +159,150 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     },
     # OpenRouter models are priced per-generation by the marketplace; the SDK
     # prefers the provider-reported usage.cost over table math for this provider.
+    # For reference, the decision default typesafe/jev-1.13 is listed at "$0.042 per million input
+    # tokens, $0 per million output tokens" on https://openrouter.ai/typesafe/jev-1.13/pricing
+    # (retrieved 2026-10-10); no row is kept because usage.cost is authoritative (lint C009 declares
+    # OPENROUTER priced per response).
     ModelProvider.OPENROUTER: {},
     # Meta Model API (OpenAI-compatible); Muse Spark 1.1 is flat-rate, no context tier.
     ModelProvider.META: {
         "muse-spark-1.1": ModelPricing(input_per_million=1.25, output_per_million=4.25, cache_read_per_million=0.15),
     },
-    # TypeSafe Jev 1.13 (System One decision model), checked 2026-09-21 against
-    # https://docs.typesafe.ai/models.md: "$42 / $0.042" per Btok / per Mtok, "Charged per
-    # input token. Output tokens are free." The API reports only input_tokens and
-    # output_tokens (https://docs.typesafe.ai/api.md#response-body) and publishes no cached-
-    # token rate, so no cache_read rate applies. Responses name the versioned model that
-    # answered (jev-1.13.0), which the "jev-1.13" prefix prices; both aliases point to it.
+    # TypeSafe Jev 1.13 (System One decision model), re-checked 2026-10-10 against TypeSafe's API
+    # model docs https://docs.typesafe.ai/models.md (TypeSafe has no separate pricing page):
+    # "Price (per Btok / per Mtok) | $42 / $0.042" and "Charged per input token. Output tokens are
+    # free." The API reports only input_tokens and output_tokens
+    # (https://docs.typesafe.ai/api.md#response-body) and publishes no cached-token rate, so no
+    # cache_read rate applies. Responses name the versioned model that answered (jev-1.13.0), which
+    # the "jev-1.13" prefix prices; the jev-latest and jev-preview aliases both point to it.
     ModelProvider.TYPESAFE: {
         "jev-1.13": ModelPricing(input_per_million=0.042, output_per_million=0.0),
         "jev-latest": ModelPricing(input_per_million=0.042, output_per_million=0.0),
         "jev-preview": ModelPricing(input_per_million=0.042, output_per_million=0.0),
     },
-    # Perplexity Decisions API (System One wire), checked 2026-10-10 against
-    # https://docs.perplexity.ai/getting-started/pricing and
-    # https://docs.perplexity.ai/api-reference/decisions-post: $0.02 per 1M input tokens for both
-    # decider models; output is not charged.
+    # Perplexity Decisions API (System One wire), checked 2026-10-10 against the API pricing page
+    # https://docs.perplexity.ai/docs/getting-started/pricing ("Decisions API Pricing", columns
+    # $/1M input tokens | output tokens | per-request fee: "pplx-decider-v1.1-27b | $0.02 | Free |
+    # None" and "pplx-decider-v1-27b | $0.02 | Free | None") and the API reference
+    # https://docs.perplexity.ai/api-reference/decisions-post ("Input tokens are billed at $0.02 per
+    # million; output tokens are free").
     ModelProvider.PERPLEXITY: {
         "pplx-decider-v1.1-27b": ModelPricing(input_per_million=0.02, output_per_million=0.0),
         "pplx-decider-v1-27b": ModelPricing(input_per_million=0.02, output_per_million=0.0),
     },
-    # Cloudflare Workers AI Clef decision models, checked 2026-10-10 against
-    # https://developers.cloudflare.com/workers-ai/platform/pricing/: clef $0.240 and clef-flash
-    # $0.038 per 1M input tokens, no output charge (Workers AI also meters these as neurons).
+    # Cloudflare Workers AI Clef decision models, checked 2026-10-10 against the Workers AI pricing
+    # page https://developers.cloudflare.com/workers-ai/platform/pricing/ ("@cf/cloudflare/clef |
+    # $0.240 per M input tokens" and "@cf/cloudflare/clef-flash | $0.038 per M input tokens") and the
+    # model page https://developers.cloudflare.com/workers-ai/models/clef/ ("Clef models do not
+    # charge for output tokens"). Workers AI bills these as neurons (21818 and 3455 per M input
+    # tokens at $0.011 per 1,000 neurons), which is the same charge as the token price.
     ModelProvider.CLOUDFLARE: {
         "clef": ModelPricing(input_per_million=0.24, output_per_million=0.0),
         "clef-flash": ModelPricing(input_per_million=0.038, output_per_million=0.0),
     },
-    # Microsoft-Decision-1 on Microsoft Foundry, checked 2026-10-10 against
-    # https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742:
-    # $0.042 per 1M input tokens, output not charged. The request `model` is the caller's
-    # deployment name, so this row prices only a deployment named microsoft-decision-1.
+    # Microsoft-Decision-1 on Microsoft Foundry, checked 2026-10-10 against Microsoft's Azure Retail
+    # Prices API (https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices):
+    # https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Microsoft%20Decision%20Models%27
+    # returns one meter, "Microsoft Decision 1 1M Tokens", at retailPrice 0.042 USD per "1M" in all
+    # 37 regions (effective 2026-10-01), with no output meter; Microsoft's announcement
+    # https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742
+    # lists "Input Tokens (#/1M) $0.042 | Output tokens (#/1M) N/A" for the US and EU Datazones. The
+    # request `model` is the caller's deployment name, so this row prices only a deployment named
+    # microsoft-decision-1.
     ModelProvider.FOUNDRY: {
         "microsoft-decision-1": ModelPricing(input_per_million=0.042, output_per_million=0.0),
     },
-    # Liquid AI d1 (System One wire), retrieved 2026-10-10 from the methodology footnote of
-    # Liquid's own d1 announcement, dated 2026-10-05 (https://www.liquid.ai/blog/d1-decision-model):
-    # $0.04 per 1M input tokens. Output tokens are always 0 (https://docs.liquid.ai/lfm/models/d1),
-    # so no output rate applies. The longest-prefix match also prices an explicit `d1:free` here.
+    # Liquid AI d1 (System One wire), retrieved 2026-10-10. Liquid publishes no API pricing page
+    # (https://www.liquid.ai/pricing covers open-weight licensing only, https://console.liquid.ai/pricing
+    # needs a login, and https://docs.liquid.ai/lfm/models/d1 states no rate), so the first-party
+    # source is the methodology footnote of Liquid's own d1 announcement, dated 2026-10-05
+    # (https://www.liquid.ai/blog/d1-decision-model): "d1's costs use $0.04 per million input
+    # tokens"; its "Availability and pricing" section adds "d1 is billed on input tokens only, with no
+    # output tokens". Output tokens are always 0 (https://docs.liquid.ai/lfm/models/d1). The
+    # longest-prefix match also prices an explicit `d1:free` here.
     ModelProvider.LIQUID: {
         "d1": ModelPricing(input_per_million=0.04, output_per_million=0.0),
     },
-    # Baseten Mercury Decide (https://www.baseten.co/library/mercury-decide/): no first-party
-    # pricing page found on 2026-10-10; omitted rather than guessed, so cost resolves to None.
-    ModelProvider.BASETEN: {},
-    # meraGPT Decider 1 (System One wire), retrieved 2026-10-10 from https://meragpt.com/docs/models,
-    # https://meragpt.com/models/decider-1 and https://meragpt.com/#pricing: $0.04 / $0.00 per 1M
-    # tokens for decider-1, whose documented alias sd-1 is the id the SDK sends and records.
+    # Baseten Mercury Decide (inception/mercury-decide). Baseten publishes no price for this model:
+    # its Model APIs pricing page https://www.baseten.co/pricing/ has no Mercury Decide row and the
+    # model page https://www.baseten.co/library/mercury-decide/ states none (both checked
+    # 2026-10-10). By the user's decision (2026-10-10), this row uses Inception's published price for
+    # Mercury Decide on Inception's own API, retrieved 2026-10-10 from
+    # https://docs.inceptionlabs.ai/get-started/models ("Mercury Decide | ~~$0.04~~ → $0.02 | $0 |
+    # $0 | v1/decisions", columns input / cached input / output per 1M tokens) and
+    # https://docs.inceptionlabs.ai/capabilities/decisions ("Mercury Decide costs $0.02 per million
+    # input tokens (50% off the regular $0.04 price). Only input tokens are billed"). The $0.02 rate
+    # is promotional: Inception states no end date for the discount (the regular price is $0.04),
+    # and Baseten may bill its route at a different rate.
+    ModelProvider.BASETEN: {
+        "inception/mercury-decide": ModelPricing(input_per_million=0.02, output_per_million=0.0),
+    },
+    # meraGPT Decider 1 (System One wire), retrieved 2026-10-10 from the models and pricing table
+    # https://meragpt.com/docs/models ("decider-1 | sd-1 | 4,096 | $0.04 / 1M | $0.00 / 1M |
+    # Available"), the model card https://meragpt.com/models/decider-1 ("input price $0.04 / 1M
+    # tokens", "output price $0.00 / 1M tokens"), https://meragpt.com/#pricing, and the public
+    # catalogue https://meragpt.com/v1/models ("input_usd_per_million_tokens":0.04,
+    # "output_usd_per_million_tokens":0, "aliases":["sd-1","state-decider-1"]). sd-1 is the
+    # documented alias of decider-1 and is the id the SDK sends and records.
     ModelProvider.MERAGPT: {
         "sd-1": ModelPricing(input_per_million=0.04, output_per_million=0.0),
+    },
+    # Celeris celeris-1-decision (System One wire), retrieved 2026-10-10 from the API pricing page
+    # https://docs.celeris.ai/pricing.md (columns input / cached input / output): "celeris-1-decision |
+    # US$0.04 per million | US$0.04 per million | Free". Cached input costs the input rate, which an
+    # unset cache_read rate already bills, so the row sets no cache field.
+    ModelProvider.CELERIS: {
+        "celeris-1-decision": ModelPricing(input_per_million=0.04, output_per_million=0.0),
+    },
+    # Nace.AI Drex (System One wire), retrieved 2026-10-10 from the pricing page
+    # https://console.nace.ai/docs/drex/reference/pricing ("Per 1M input tokens, drex-v1.0 $ 0.04" and
+    # "Per 1M input tokens, drex-v1.5 $ 0.05"; "There is no per-request fee and no charge per
+    # question") and the models page https://console.nace.ai/docs/drex/reference/models ("drex-latest
+    # is an alias. It currently points to drex-v1.5." and "The response model reports the pinned
+    # version that answered, never the alias"), so alias calls are priced on the pinned rows here.
+    ModelProvider.NACE: {
+        "drex-v1.5": ModelPricing(input_per_million=0.05, output_per_million=0.0),
+        "drex-v1.0": ModelPricing(input_per_million=0.04, output_per_million=0.0),
+    },
+    # Upstage Solar Decide (System One wire, beta), retrieved 2026-10-10 from the model page
+    # https://console.upstage.ai/docs/models/solar-decide ("$ 0.1 /1M tokens Input Token", "Free
+    # Output Token", "$ 0.1 /1M tokens Cached Token"). Cached tokens cost the input rate, which an
+    # unset cache_read rate already bills, so the row sets no cache field.
+    ModelProvider.UPSTAGE: {
+        "solar-decide": ModelPricing(input_per_million=0.10, output_per_million=0.0),
+    },
+    # Inception Mercury Decide on Inception's own API (System One body on /decisions), retrieved
+    # 2026-10-10 from the models and pricing page https://docs.inceptionlabs.ai/get-started/models
+    # ("Mercury Decide | ~~$0.04~~ → $0.02 | $0 | $0 | v1/decisions", columns input / cached input /
+    # output per 1M tokens) and https://docs.inceptionlabs.ai/capabilities/decisions ("Mercury Decide
+    # costs $0.02 per million input tokens (50% off the regular $0.04 price). Only input tokens are
+    # billed"). The $0.02 rate is promotional, with no stated end date; the regular price is $0.04.
+    ModelProvider.INCEPTION: {
+        "mercury-decide": ModelPricing(input_per_million=0.02, output_per_million=0.0),
+    },
+    # Hanzo Kai (System One body on /decisions), retrieved 2026-10-10 from the pricing page
+    # https://hanzo.ai/pricing ("Kai starter Hanzo's decision model. $0.021 per million input tokens,
+    # half of Jev's $0.042. Output is free.") and the decisions docs https://docs.hanzo.ai/docs/decisions
+    # ("kai $0.021 per million input tokens ( usage.input_tokens ); output is free").
+    ModelProvider.HANZO: {
+        "kai": ModelPricing(input_per_million=0.021, output_per_million=0.0),
+    },
+    # Vansa vansa-3.4 (System One wire), retrieved 2026-10-10 from the pricing page
+    # https://vansa.org/pricing ("$0.034" per 1 million input tokens, output-token cost "None", and
+    # prepaid credit at "$0.034/1M input tokens" for "Any amount from $1 to $1,000"). This is the
+    # prepaid list rate; the monthly plans' lower effective rates are not represented.
+    ModelProvider.VANSA: {
+        "vansa-3.4": ModelPricing(input_per_million=0.034, output_per_million=0.0),
+    },
+    # ZooData Instinct (System One wire), retrieved 2026-10-10 from the docs
+    # https://instinct.zoowork.ai/docs/ ("instinct US$0.03 per million input tokens", "instinct-dual-4b
+    # US$0.01 per million input tokens", "instinct-tuned-4b US$0.01 per million input tokens", and
+    # "Output tokens are free on all models"). These are the paid host's rates; calls sent to the
+    # free preview host by endpoint override are priced here too.
+    ModelProvider.ZOODATA: {
+        "instinct": ModelPricing(input_per_million=0.03, output_per_million=0.0),
+        "instinct-dual-4b": ModelPricing(input_per_million=0.01, output_per_million=0.0),
+        "instinct-tuned-4b": ModelPricing(input_per_million=0.01, output_per_million=0.0),
     },
 }
 
