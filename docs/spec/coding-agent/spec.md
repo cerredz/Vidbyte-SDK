@@ -1,7 +1,7 @@
 ---
 spec: coding-agent
 title: CodingAgent — a minimal BaseAgent with seven file-system and web tools
-status: approved         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: tests-written        # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-coding-agent
