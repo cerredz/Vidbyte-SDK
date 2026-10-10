@@ -45,7 +45,7 @@ schema = tool_spec_to_provider_schema(lookup_metric.spec(), "openai")
 - `openai.py`, `anthropic.py`, `gemini.py`, `xai.py`, `openrouter.py`, `compatible.py` (DeepSeek, GLM, MiniMax, Kimi, Mistral): provider adapters.
 - `typesafe.py`: TypeSafe decision adapter; adds the managed-gateway headers and run context, `/models`, and run close on top of the System One wire.
 - `decisions.py`: shared decision plumbing: `DecisionHttpCall` (one bounded, timed, retrying call) and `DecisionFailures` (status-to-message mapping worded for each host).
-- `systemone.py`: the System One wire (`SystemOneRequest`, `SystemOneAnswers`) and `SystemOneProvider`, which serves Perplexity, OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, and Microsoft Foundry from one `HOSTS` table.
+- `systemone.py`: the System One wire (`SystemOneRequest`, `SystemOneAnswers`) and `SystemOneProvider`, which serves Perplexity, OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry, Celeris, Nace.AI, Upstage, Inception, Hanzo, Vansa, and ZooData from one `HOSTS` table.
 - `openai_decisions.py`: the OpenAI Decisions wire and `OpenAIDecisionsProvider` (predicate, choice, and score questions; answers matched by name).
 - `tracing/`: provider-backed trace adapters.
 
@@ -93,6 +93,13 @@ that contract so an adapter can be reviewed without leaving the repository.
 | meraGPT | `systemone.py` | `Authorization: Bearer` | `/systemone` |
 | Cloudflare | `systemone.py` | `Authorization: Bearer` (API token) | tenant endpoint `…/client/v4/accounts/{ACCOUNT_ID}/ai` + `/run/@cf/cloudflare/clef` |
 | Microsoft Foundry | `systemone.py` | `Authorization: Bearer` (key or Entra token) | tenant resource endpoint + `/providers/microsoft/v1/systemone` |
+| Celeris | `systemone.py` | `Authorization: Bearer` | `/systemone` under `https://inference.celeris.ai/celeris-1-decision/v1` |
+| Nace.AI | `systemone.py` | `Authorization: Bearer` | `/systemone` |
+| Upstage | `systemone.py` | `Authorization: Bearer` | `/systemone` (beta) |
+| Inception | `systemone.py` | `Authorization: Bearer` | `/decisions` (System One body) |
+| Hanzo | `systemone.py` | `Authorization: Bearer` | `/decisions` (System One body; `sk-` keys) |
+| Vansa | `systemone.py` | `Authorization: Bearer` | `/systemone` |
+| ZooData | `systemone.py` | `Authorization: Bearer` | `/systemone` |
 | OpenAI (Decisions) | `openai_decisions.py` | `Authorization: Bearer` | `/decisions` |
 
 ## Official Provider Documentation
@@ -122,14 +129,21 @@ Decision providers (**retrieved:** 2026-10-10):
 | Provider | API overview | Contract reference |
 | --- | --- | --- |
 | TypeSafe | [Models](https://docs.typesafe.ai/models.md) | [System One API](https://docs.typesafe.ai/api.md) |
-| Perplexity | [Decisions quickstart](https://docs.perplexity.ai/docs/decisions/quickstart) | [POST /v1/decisions](https://docs.perplexity.ai/api-reference/decisions-post), [pricing](https://docs.perplexity.ai/getting-started/pricing) |
+| Perplexity | [Decisions quickstart](https://docs.perplexity.ai/docs/decisions/quickstart) | [POST /v1/decisions](https://docs.perplexity.ai/api-reference/decisions-post), [pricing](https://docs.perplexity.ai/docs/getting-started/pricing) |
 | OpenRouter | [Jev guide](https://openrouter.ai/docs/guides/community/jev) | [System One SDK](https://openrouter.ai/docs/client-sdks/go/sdks/systemone/README) |
 | Liquid AI | [Decision models](https://docs.liquid.ai/lfm/models/decision-models) | [d1](https://docs.liquid.ai/lfm/models/d1) |
 | Baseten | [Mercury Decide](https://www.baseten.co/library/mercury-decide/) | [Auth schemes](https://docs.baseten.co/reference/inference-api/chat-completions) |
 | meraGPT | [Docs](https://meragpt.com/docs) | [Docs](https://meragpt.com/docs) |
 | Cloudflare | [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) | [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) |
-| Microsoft Foundry | [Microsoft-Decision-1](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742) | [Microsoft-Decision-1](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742) |
-| OpenAI | [Decisions guide](https://developers.openai.com/api/docs/guides/decisions) | [Pricing](https://developers.openai.com/api/docs/pricing) |
+| Microsoft Foundry | [Microsoft-Decision-1](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742) | [Microsoft-Decision-1](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742), [Retail Prices API](https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Microsoft%20Decision%20Models%27) |
+| Celeris | [Models](https://docs.celeris.ai/models.md) | [Decisions](https://docs.celeris.ai/decisions.md), [pricing](https://docs.celeris.ai/pricing.md) |
+| Nace.AI | [Quickstart](https://console.nace.ai/docs/drex/quickstart) | [Models](https://console.nace.ai/docs/drex/reference/models), [pricing](https://console.nace.ai/docs/drex/reference/pricing) |
+| Upstage | [Solar Decide](https://console.upstage.ai/docs/models/solar-decide) | [System One API](https://console.upstage.ai/api/systemone) |
+| Inception | [Models & pricing](https://docs.inceptionlabs.ai/get-started/models) | [Decisions](https://docs.inceptionlabs.ai/capabilities/decisions.md) |
+| Hanzo | [Kai](https://docs.hanzo.ai/docs/models/kai) | [Decisions](https://docs.hanzo.ai/docs/decisions), [pricing](https://hanzo.ai/pricing) |
+| Vansa | [Pricing](https://vansa.org/pricing) | [API reference](https://docs.vansa.org/skills/vansa-api/references/api.md) |
+| ZooData | [Instinct](https://instinct.zoowork.ai/docs/) | [Instinct](https://instinct.zoowork.ai/docs/) |
+| OpenAI | [Decisions guide](https://developers.openai.com/api/docs/guides/decisions) | [Pricing](https://developers.openai.com/api/docs/pricing), [API reference](https://developers.openai.com/api/reference/typescript/resources/decisions/methods/create) |
 | Vercel AI Gateway | [Changelog](https://vercel.com/changelog/openai-decisions-api-now-available-on-ai-gateway) | [gpt-6-luna-decisions](https://vercel.com/ai-gateway/models/gpt-6-luna-decisions) |
 
 ### Expanded provider reading maps
@@ -580,10 +594,11 @@ needs per-provider cost classes rather than one shared formula.
 | Liquid AI | `usage` | `input_tokens` | `output_tokens` (always 0) | — (derived) |
 | Baseten | `usage` | `input_tokens` | `output_tokens` | — (derived) |
 | meraGPT | `usage` | `input_tokens` | `output_tokens` | — (derived) |
+| Celeris, Nace.AI, Upstage, Inception, Hanzo, Vansa, ZooData | `usage` | `input_tokens` | `output_tokens` | — (derived) |
 | OpenRouter (decisions) | `usage` | `input_tokens` | `output_tokens` | — (derived); plus `cost` in USD, which wins |
 | Cloudflare | undocumented (research §3.4); parsed as System One keys | | | |
 | Microsoft Foundry | undocumented (research §3.3); parsed as System One keys | | | |
-| OpenAI (Decisions) | `usage` | `input_tokens` | `output_tokens` | — (spec A-2) |
+| OpenAI (Decisions) | `usage` | `input_tokens` | `output_tokens` | `total_tokens` |
 
 Four consequences worth stating explicitly:
 
@@ -596,11 +611,11 @@ Four consequences worth stating explicitly:
    `prompt_tokens`/`completion_tokens`; the Responses API uses `input_tokens`/`output_tokens`.
    Because `compatible.py`, `xai.py`, and `openrouter.py` target OpenAI-*compatible* surfaces, a
    vendor behind those adapters may emit either naming depending on which OpenAI API it mirrors.
-4. **Decision calls are priced on `DecisionModelResponse.model`.** TypeSafe and Perplexity document
-   the model they echo, so the echo is the pricebook key. Every other decision host (OpenRouter,
-   Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry, OpenAI Decisions) reports the model id
-   the caller sent, because its echo is undocumented or names a deployment; key its pricing rows by
-   that request id.
+4. **Decision calls are priced on `DecisionModelResponse.model`.** TypeSafe, Perplexity, Celeris,
+   Nace.AI, Inception, Hanzo, and Vansa document the model they echo, so the echo is the pricebook key.
+   Every other decision host (OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry,
+   Upstage, ZooData, OpenAI Decisions) reports the model id the caller sent, because its echo is
+   undocumented, unverified, or names a deployment; key its pricing rows by that request id.
 
 ### Nested Usage Details
 
@@ -696,7 +711,22 @@ runner = DecisionModelRunner(DecisionModelConfig(provider=ModelProvider.PERPLEXI
   `state`, `instructions`, and descriptions are sent as JSON text.
 - **Cloudflare silently truncates** a `state` longer than Clef's 65,536-token window; the answer
   reflects the truncated state and the SDK cannot detect it.
-- **No model list or managed runs elsewhere.** Only TypeSafe has `/models` and managed runs; on every
+- **No model list or managed runs elsewhere.** Only TypeSafe's `/models` is wired (Nace.AI publishes one the
+  SDK does not call), and only TypeSafe has managed runs; on every
   other host `alist_models()` and `aclose_run()` raise `ProviderConfigurationError` without a network call.
-- **Unpriced hosts.** Liquid AI, Baseten, and meraGPT publish no first-party price, so their calls are
-  recorded with `cost_usd=None` rather than a guessed rate.
+- **Celeris** puts the model in the base URL (`https://inference.celeris.ai/<model>/v1`), so pass
+  `model` and `endpoint` together.
+- **Hanzo** caps the state plus each question at 1,024 tokens, takes 1 to 100 questions, and accepts
+  only secret `sk-` keys.
+- **Upstage** Solar Decide is in beta (its schema may change), and a choice takes 2 to 26 options.
+- **Vansa** reads `VANSA_KEY` and asks for a descriptive `User-Agent`, which the SDK does not send.
+  Describe every option, because `null` descriptions are unverified on Vansa.
+- **Nace.AI** publishes `/v1/models`, but `alist_models()` still raises. Nace reports the pinned
+  version that answered (`drex-v1.5` for `drex-latest`), and that version is priced.
+- **ZooData**'s free preview host `https://api.zoowork.ai/v1` is an endpoint override, priced at the
+  paid rates.
+- **Inception and Baseten** serve one model, Mercury Decide, as `mercury-decide` (Inception) and
+  `inception/mercury-decide` (Baseten); pair each id with its own provider.
+- **Price proof.** Every decision row in `vidbyte/lib/registries/pricing.py` cites the vendor's own price
+  URL and the retrieval date. Baseten uses Inception's promotional rate; Vansa's monthly plans and
+  OpenAI's regional premium are not represented.
