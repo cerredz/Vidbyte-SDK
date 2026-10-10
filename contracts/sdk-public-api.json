@@ -107,6 +107,7 @@
     "CodexTurnError",
     "CodexTurnSettings",
     "CodexUsageResponse",
+    "CodingAgent",
     "CompactRecovery",
     "CompactionMode",
     "CompactionStats",
