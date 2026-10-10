@@ -18,12 +18,12 @@ started: 2026-10-10 00:51
 | S2 tests | done | 2026-10-10 | 2026-10-10 | reports/S2-test-author.md | S2_HEAD d158d5f6 (tests a25a3c41, proof d158d5f6); 42 fns / 97 cases in tests/features/coding_agent/; red: 86 = 67 ImportError(CodingAgent) + 19 ModuleNotFoundError(bash), 11 POSIX-only skipped on win32; spec status tests-written @0b2b4f56 |
 | S3 implement | done | 2026-10-10 | 2026-10-10 | reports/S3-implementer.md | S3_HEAD 4e285d91; draft PR #690 https://github.com/cerredz/Vidbyte-SDK/pull/690; 8 rows in 9 code commits (25b5260b..4c4a62ef); pack 86 pass/11 skip win 3.11, 97/97 WSL 3.12 (orchestrator re-ran both); test diff vs S2_HEAD empty; budget 2/2 files, 0/0 enums+dataclasses, 2/2 public names; remote CI 38046509073 + static-policy 38046510490 success @4c4a62ef |
 | S4 adversarial review | done | 2026-10-10 | 2026-10-10 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | MERGEABLE AFTER FIXES; raw C 1B/2M/2m, V 0B/1M/5m, E 1B/4M/1m → confirmed 2 Blockers (R-1 _stop never-raises/always-closes, R-2 EC-11 test cannot fail) + 2 Majors (R-3 root_dir "", R-4 bash description); 5 Minors (R-5..R-9; R-8 layering + R-9 relative git downgraded); 0 refuted; spec status reviewed |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | done (converged) | 2026-10-10 | 2026-10-10 | reports/S5-repair-1.md; verify-log.md | 1 iteration: R-1 @415f7c22, R-2 @a49b7dd8 (granted test), R-3 @64df91ce, R-4 @977c7d23, R-5 @15aed1e0, R-6 @388993f9, R-7 @581fc272 (granted README); R-8/R-9 follow-up; orchestrator re-ran source (2715 passed) + package + lint PASS; remote CI 38075705506 + static-policy 38075707127 success @581fc272; test diff vs S2_HEAD = exactly the 2 granted files |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S2_HEAD: d158d5f6 · S3_HEAD: 4e285d91 · PR: #690 · S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S2_HEAD: d158d5f6 · S3_HEAD: 4e285d91 · PR: #690 · S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 00:51 — Unset the branch upstream (`git branch --unset-upstream`) — `git worktree add -b … origin/main` made `feat/coding-agent` track `origin/main`; pushes must use `git push -u origin feat/coding-agent`.
@@ -39,6 +39,8 @@ started: 2026-10-10 00:51
 - 2026-10-10 — GRANTED one-line doc correction for R-7 in `tests/features/coding_agent/README.md:7` (file tools live in `vidbyte/tools/filesystem/`, not `vidbyte/tools/builtins/`). Reason: factual error in prose, no test behavior changes; it would otherwise be a human review comment.
 - 2026-10-10 — DECLINED new regression tests for R-1 (EPERM patch, double cancel) and the optional `""` AC-11 case for R-3. Reason: skill default is no test changes except a test that contradicts a spec ID or cannot fail; neither applies. Listed as follow-ups for the user in the final report.
 - 2026-10-10 — Not forwarding R-8 (move `_FetchedPagesView` to tools layer) or R-9 (relative `git` on Windows): verifier downgraded both to follow-up (no AGENTS.md rule broken; R-9 `[scope-adding]` vs spec as written). Both go to the user as follow-ups.
+
+- 2026-10-10 — Not acting on repair-1's observation that `ruff --select I001` flags import order in `tests/features/coding_agent/test_coding_agent_contract.py:14` and `test_coding_agent_web_fetch.py:14`: no gate scans `tests/` for I001 (S051 runs ruff on `pyproject.toml vidbyte` only, `lint/core/ruff.py:68`), it is not a confirmed finding, and it would need a test-tree grant. Mention as a trivial follow-up.
 
 ## User replies (verbatim)
 - (none yet during the run)
@@ -80,3 +82,5 @@ started: 2026-10-10 00:51
 - S3 limitation: `_stop` suppresses only ProcessLookupError and the grace TimeoutError, so an EPERM from `killpg` could replace CancelledError. `bash_not_found` hint reads `sys.platform` at call time. A blank line precedes `exit code: N` when output ends with a newline (spec literal format). — *source:* S3 implementer
 - origin/main moved to e6cdfa31 and adds lint rules A009, C006, C007, C008 that this branch lacks; none of the 8 §12.3 files changed upstream. Re-lint after any rebase/merge of main. — *source:* S3 implementer
 - AC-27 (Python 3.13) not run: `py -3.13` lacks pytest_asyncio and PyYAML; installing into it is off-limits. AC-22 against a real Git for Windows layout not run (manual per test plan). — *source:* S3 implementer
+- `git rev-parse --short A B` fails with "Needed a single revision" (`--short` implies `--verify`); query one ref per call. — *source:* orchestrator
+- R-1 regression check: verifier probes `probe_stop.py` / `probe_eperm_alive.py` in the session scratchpad, run with the WSL venv python; every `[CODE]` row must end `is_closing=True`. wsl.exe expands every `$NAME` in `-lc` strings. — *source:* S4 verifier / S5 repair-1
