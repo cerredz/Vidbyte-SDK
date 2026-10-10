@@ -123,3 +123,28 @@ Input: `reports/S1-spec-review-2.md` (SOUND WITH FIXES: R-1 Major, R-2..R-4 Mino
   - §11 has a drift note and §14 an Always check (`jev.py` is 694 lines at the base and 712 on origin/main). D-7's line counts are updated.
 
 Least sure: whether the backend generator keeps the `"name"` and `"path"` string tokens unchanged. The grep checks only the quoted values, so a whitespace change cannot break it.
+
+## Addendum: orchestrator decision r4 (Q-7, same-key transport retries)
+
+The orchestrator resolved Q-7 as yes. The spec is at revision 4 and its status stays `approved`. §16 records the change as "orchestrator decision r4 (Q-7)", and Q-7 is marked resolved.
+
+- **Design.** `VidbyteGatewayTransport` owns the retry loop.
+  - Each `arun` call sends one envelope with one key, in up to 1 + `JEV_DEFAULT_RETRY_COUNT` (3) attempts. Every attempt is a single `inner.request` with `timeout_seconds` and `idempotency_key`, and `retry_count` stays at 0.
+  - The wait before retry n is `n × JEV_RETRY_BACKOFF_SECONDS`, giving 0.5 s and then 1.0 s through `asyncio.sleep`. These are the same waits as `HttpTransport`'s doubling backoff, with no multiplier literal (A007).
+  - The SDK re-sends only a 409 or a 502 (`HTTPStatus.CONFLICT`, `HTTPStatus.BAD_GATEWAY`) whatever the body, or a body that is not a JSON object whatever the status. Every other status is raised after one POST. That includes 401, 402, 403, 413, 422, 429, a JSON 500 or 503, and any other relayed status.
+  - It reuses `JEV_DEFAULT_RETRY_COUNT` and `JEV_RETRY_BACKOFF_SECONDS`, so it adds no constant, rows 3 and 15 are unchanged, and the §8.4 budget holds.
+- **Why the loop is in the decorator and not in `HttpTransport`.** `HttpTransport.request` retries by status only (`lib/http/transport.py:47-52`), so it cannot tell when a body is not a JSON object. Retrying in both layers would multiply the attempts.
+- **A missing response is not retried, including a timeout.** I read backend §9.2.5 for the conditional the orchestrator left open:
+  - Its same-key rule covers "a response that is not a JSON object", that is, an answer that arrived. It does not cover a missing answer.
+  - `HttpTransport` never retries a connection failure either (`transport.py:53-56`).
+  - A retry after a 630 s timeout would meet 409 while the claim is pending (backend INV-22: pending up to 660 s). It would add another 630 s without getting an answer.
+  - INV-10 now applies per attempt. The worst case is three attempts, each a 502 at the gateway's deadline: about 3 × 630 s + 1.5 s, roughly 32 minutes. The README line and AC-18 say so.
+- **Ripple.**
+  - Text updated: §2, §4, §5 (flow, sequence, prose) and §8.2 (new Jev same-key pattern).
+  - Invariants and criteria: INV-1, INV-3, INV-10, INV-11, INV-16; AC-10, AC-12, AC-18, AC-20, AC-25 and new AC-27.
+  - Edge cases: EC-13, EC-15, EC-20, EC-34, plus new EC-37 (a retry meets 409), EC-38 (a 502 retried after the deadline forwards again) and EC-39 (replay store outage, so a retry can bill twice).
+  - Decisions and design: D-9, D-10, the §8.5 docstring, §9.2 (`Idempotency-Key` bullet, rows 3, 5 and 6 with a 409 reason, new "Retries" bullet), T-4, §11, §12.1, §12.3 rows 6 and 14, §12.4 and §13.
+  - NG-13 is struck. EC-14 is narrowed to runtime-level retries, and Q-1 stays No.
+- **Least sure.**
+  - JSON 503 and 500 gateway errors are not retried. Backend §9.2.6 marks them "Retry: yes", but it does not call them same-key safe, and the orchestrator's list leaves them out.
+  - The 0.5 s and 1.0 s waits are short, so a retry after an edge cut usually ends in 409 (EC-37). This matches the Jev backoff; the backend asks only for "a delay".
