@@ -13,6 +13,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent/test_ba
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sys
@@ -126,9 +127,18 @@ async def test_command_reaches_bash_verbatim_as_one_argument(bash_module, tmp_pa
 @pytest.mark.asyncio
 async def test_command_reading_stdin_sees_end_of_file_at_once(bash_module, tmp_path, monkeypatch) -> None:
     # EC-11 / D-10: stdin is the null device; an open stdin would hang this call until the (shortened) time limit.
+    # pytest's capture already puts the null device on fd 0, so give this process a stdin that never reaches end of
+    # file: only the tool's own stdin=DEVNULL can then let the read see end of file.
     monkeypatch.setattr(bash_module, "BASH_TIMEOUT_SECONDS", 10.0)
-
-    result = await bash_module.BashTool(tmp_path).execute(_bash_call("read -r line; echo read-status:$?"))
+    read_end, write_end = os.pipe()
+    saved_stdin = os.dup(0)
+    os.dup2(read_end, 0)
+    try:
+        result = await bash_module.BashTool(tmp_path).execute(_bash_call("read -r line; echo read-status:$?"))
+    finally:
+        os.dup2(saved_stdin, 0)
+        for fd in (saved_stdin, read_end, write_end):
+            os.close(fd)
 
     assert result.status is ToolStatus.SUCCESS
     assert result.output.splitlines()[0] == "read-status:1"
