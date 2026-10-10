@@ -61,6 +61,60 @@ class GeminiToolSchemaTests(unittest.TestCase):
         self.assertNotIn("$ref", blob)
 
 
+class GeminiUnionTypeTests(unittest.TestCase):
+    """Gemini's Schema.type is a single enum; JSON Schema type lists must be collapsed."""
+
+    def _parameters(self, schema: dict) -> dict:
+        return ToolsFormatter.to_gemini_tool(_spec_with_schema(schema))["function_declarations"][0]["parameters"]
+
+    def test_nullable_string_becomes_string_with_nullable(self) -> None:
+        # The shape zod-built MCP servers emit for nullable fields.
+        schema = {
+            "type": "object",
+            "properties": {
+                "note": {"type": ["string", "null"], "description": "Note text, or null to clear."},
+                "pinned": {"type": "boolean"},
+            },
+            "required": ["note"],
+        }
+        note = self._parameters(schema)["properties"]["note"]
+        self.assertEqual(note, {"type": "string", "description": "Note text, or null to clear.", "nullable": True})
+
+    def test_nested_type_lists_are_collapsed(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": ["integer", "null"]}},
+                "meta": {"type": "object", "properties": {"owner": {"type": ["null", "string"]}}},
+            },
+        }
+        parameters = self._parameters(schema)
+        self.assertEqual(parameters["properties"]["tags"]["items"], {"type": "integer", "nullable": True})
+        self.assertEqual(parameters["properties"]["meta"]["properties"]["owner"], {"type": "string", "nullable": True})
+
+    def test_several_types_become_any_of(self) -> None:
+        node = self._parameters({"type": "object", "properties": {"v": {"type": ["string", "integer", "null"]}}})["properties"]["v"]
+        self.assertEqual(node, {"nullable": True, "anyOf": [{"type": "string"}, {"type": "integer"}]})
+
+    def test_degenerate_type_lists_do_not_raise(self) -> None:
+        properties = self._parameters({"type": "object", "properties": {"a": {"type": []}, "b": {"type": ["null"]}}})["properties"]
+        self.assertEqual(properties["a"], {})
+        self.assertEqual(properties["b"], {"nullable": True})
+
+    def test_non_union_schema_is_unchanged(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {"n": {"type": "integer", "nullable": True}, "s": {"type": "array", "items": {"type": "string"}}},
+            "required": ["n"],
+        }
+        self.assertEqual(self._parameters(schema), schema)
+
+    def test_other_providers_keep_type_lists(self) -> None:
+        schema = {"type": "object", "properties": {"note": {"type": ["string", "null"]}}}
+        openai = ToolsFormatter.to_openai_tool(_spec_with_schema(schema))
+        self.assertIn('"type": ["string", "null"]', json.dumps(openai))
+
+
 class GeminiToolResultRoleTests(unittest.TestCase):
     """generateContent accepts only 'user' and 'model' turns."""
 
