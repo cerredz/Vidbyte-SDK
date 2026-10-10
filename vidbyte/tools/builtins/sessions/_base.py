@@ -41,6 +41,10 @@ class _SessionBuiltinTool(BaseTool):
         self._session = session
         self._scope.allow(session.id)
 
+    def clone_for_fork(self) -> "_SessionBuiltinTool":
+        # Return an unbound copy with its own scope so a forked agent cannot steal or widen the parent's binding.
+        return type(self)(self._store, scope=self._scope.copy())
+
     def _denied(self, name: str, session_id: str) -> ToolResult:
         # Return a denied result for an out-of-scope session id.
         return ToolResult.error(name, f"Access denied for session: {session_id}.")

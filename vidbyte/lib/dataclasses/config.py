@@ -35,6 +35,7 @@ Non-Goals:
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 from collections.abc import Mapping, Sequence
@@ -354,6 +355,7 @@ class AgentSettings(_ConfigValidation):
         self.output_schema = self._validated_output_schema(self.output_schema)
         self.trace_option = self._validated_trace_option(self.trace_option)
         self.max_tool_rounds = self._positive_int(self.max_tool_rounds, "agent.max_tool_rounds")
+        self.loop = self._loop_with_tool_rounds(self.loop, self.max_tool_rounds)
         self._validate_runtime_compatibility()
 
     @classmethod
@@ -416,7 +418,8 @@ class AgentSettings(_ConfigValidation):
             "agent_metadata": self.agent_metadata,
             "output_schema": dict(self.output_schema) if self.output_schema is not None else None,
             "trace_option": self.trace_option,
-            "max_tool_rounds": self.max_tool_rounds,
+            # The round cap already lives in agent_loop_settings; BaseAgent rejects it passed twice.
+            "max_tool_rounds": None,
         }
 
     @staticmethod
@@ -668,6 +671,27 @@ class AgentSettings(_ConfigValidation):
             return AgentLoopSettings(**mapping)
         except (TypeError, ValueError, ConfigurationError) as error:
             raise cls._error(f"'agent.loop' is invalid: {error}", "agent.loop") from error
+
+    @classmethod
+    def _loop_with_tool_rounds(cls, loop: "AgentLoopSettings", rounds: int | None) -> "AgentLoopSettings":
+        # @intent yaml-max-tool-rounds-in-loop
+        # BaseAgent refuses a loop object alongside a flat round cap, so the top-level cap is folded into
+        # a copy of the loop; the caller's loop object is never changed, and a conflicting cap is rejected.
+        if rounds is None or loop.max_iterations == rounds:
+            return loop
+        if loop.max_iterations is not None:
+            raise cls._error("'agent.max_tool_rounds' conflicts with 'agent.loop.max_iterations'; set one, or give both the same value.", "agent.max_tool_rounds", actual_value=rounds, loop_max_iterations=loop.max_iterations)
+        merged = copy.copy(loop)
+        merged.max_iterations = rounds
+        # @intent yaml-max-tool-rounds-validates-floors
+        # The loop checks its floors against its ceilings only when it is built, so the copy is checked again
+        # with the new cap; otherwise a floor the cap makes unreachable would load under this spelling but be
+        # rejected under 'agent.loop.max_iterations'. The check only reads fields, so running it twice is safe.
+        try:
+            merged._validate()
+        except ConfigurationError as error:
+            raise cls._error(f"'agent.max_tool_rounds' is invalid: {error}", "agent.max_tool_rounds", actual_value=rounds) from error
+        return merged
 
     @classmethod
     def _coerce_loop_members(cls, mapping: dict[str, Any]) -> None:

@@ -230,6 +230,10 @@ class McpAttachableMixin:
                 self.tools = without(bridged_tool_set)
             else:
                 self.tools = [t for t in self.tools if t not in bridged_tool_set]
+            # Agents also keep their own tool list for forks, exports, and sessions, so drop the closed tools there too.
+            agent_tool_items = getattr(self, "_agent_tool_items", None)
+            if agent_tool_items is not None:
+                self._agent_tool_items = tuple(t for t in agent_tool_items if t not in bridged_tool_set)
 
     def _attach_tools(self, tools: Sequence[BaseTool]) -> None:
         add_tool = getattr(self, "add_tool", None)

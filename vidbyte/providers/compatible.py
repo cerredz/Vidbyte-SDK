@@ -10,9 +10,10 @@ from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 # A reply that is one markdown fence from start to end; its body is unwrapped only when it is JSON.
-_WHOLE_FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n?(.*?)\n?[ \t]*```\s*\Z", re.DOTALL)
+_WHOLE_FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n?(.*?)\n?[ \t]*```\s*\Z", re.DOTALL | re.IGNORECASE)
 
 
 class OpenAICompatibleProvider:
@@ -89,7 +90,8 @@ class OpenAICompatibleProvider:
         tier = StructuredOutputRegistry.resolve(self.provider, config.model)
         match tier:
             case StructuredOutputSupport.NATIVE_SCHEMA:
-                payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": schema, "strict": True}}
+                strict_schema = OutputSchemaFormatter().strict(schema)
+                payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": strict_schema, "strict": True}}
                 return
             case StructuredOutputSupport.JSON_MODE:
                 payload["response_format"] = {"type": "json_object"}

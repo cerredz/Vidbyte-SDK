@@ -7,7 +7,7 @@ from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgen
 from vidbyte.context import ContextManager, ContextWindow, ContextWindowPlacement, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.errors import AgentExecutionError, ToolRegistrationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.tools import ToolSpec
@@ -132,6 +132,19 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forked.metadata["branch"], "copy")
         self.assertEqual(forked.metadata["forked_from"], "run-123")
         self.assertEqual(forked.metadata["fork_depth"], 1)
+
+    async def test_add_tool_duplicate_name_leaves_agent_unchanged(self) -> None:
+        # A rejected add_tool must not record the duplicate, or fork and state export break.
+        agent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("search")])
+        items_before = agent._agent_tool_items
+
+        with self.assertRaises(ToolRegistrationError):
+            agent.add_tool(FakeTool("search"))
+
+        self.assertEqual(agent._agent_tool_items, items_before)
+        self.assertEqual(agent.tools.names(), ("search",))
+        self.assertEqual(agent.fork(AgentForkSettings(name="child")).tools.names(), ("search",))
+        self.assertEqual(tuple(agent.export_state().tool_names), ("search",))
 
     async def test_agent_fork_preserves_middleware(self) -> None:
         middleware = FakeMiddleware()

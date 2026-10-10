@@ -11,6 +11,7 @@ Functions:
     - agrade: Core grading algorithm preparing prompt, calling model, and parsing JSON scores.
     - _invoke_judge: Dispatches prompt to the judge runner asynchronously or synchronously.
     - _parse_response: Safely extracts and decodes json output from the judge runner response.
+    - _coerce_passed: Strictly reads the judge verdict so string values like "false" never pass.
 Relations:
     Related to vidbyte.evals.base (BaseGrader), vidbyte.evals.types (EvalCase, GraderResult),
     and vidbyte.prompts (fetches judgment templates).
@@ -19,9 +20,10 @@ Relations:
 from __future__ import annotations
 
 import json
-import re
 import inspect
 from typing import Any, ClassVar
+from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.types import AgentForkSettings
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult
 from vidbyte.lib.enums.prompts import Prompt
@@ -74,6 +76,9 @@ class LLMJudgeGrader(BaseGrader):
     async def _invoke_judge(self, prompt: str) -> str:
         # Invokes the judge runner asynchronously if supported, otherwise runs it synchronously.
         runner = self.judge_runner
+        if isinstance(runner, BaseAgent):
+            # Judge on a fresh fork so earlier verdicts never leak into this case; preloaded history is kept.
+            runner = runner.fork(AgentForkSettings(name=f"{runner.name}_judge", include_history=bool(runner.history)))
         if hasattr(runner, "arun"):
             res = await runner.arun(prompt, temperature=0.0)
         elif hasattr(runner, "generate_reply"):
@@ -98,15 +103,26 @@ class LLMJudgeGrader(BaseGrader):
 
     def _parse_response(self, text: str) -> GraderResult:
         # Safely extracts the JSON object from model outputs and converts it into a GraderResult.
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
+        start = text.find("{")
+        if start < 0:
             return GraderResult(score=0.0, passed=False, reason=f"Failed to find JSON block in judge response: {text}")
 
         try:
-            parsed = json.loads(match.group(0))
+            # Decode only the first JSON object so trailing prose (even with braces) cannot break the verdict.
+            parsed, _ = json.JSONDecoder().raw_decode(text, start)
             score = float(parsed.get("score", 0.0))
-            passed = bool(parsed.get("passed", False))
+            # Only a real true (or the string "true") passes; "false", numbers, or a missing verdict fail closed.
+            passed = self._coerce_passed(parsed.get("passed", False))
             reason = str(parsed.get("reason", "Graded by LLM Judge."))
             return GraderResult(score=score, passed=passed, reason=reason)
         except Exception as exc:
             return GraderResult(score=0.0, passed=False, reason=f"Failed to parse judge JSON: {str(exc)}")
+
+    @staticmethod
+    def _coerce_passed(value: object) -> bool:
+        # Reads the judge verdict strictly, since bool("false") would otherwise count as a pass.
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() == "true"
+        return False

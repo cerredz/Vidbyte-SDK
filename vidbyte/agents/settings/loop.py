@@ -142,21 +142,32 @@ class AgentLoopSettings:
             raise ConfigurationError("AgentLoopSettings.max_tool_calls and ToolSettings.max_calls must match when both are provided.")
 
     def _validate_output_contracts(self) -> None:
-        # Rejects any effort floor whose minimum meets or exceeds its paired ceiling (an unreachable floor).
+        # Rejects any effort floor its paired ceiling makes unreachable.
         for contract in self._output_contracts:
             self._validate_contract_ceiling(contract)
             self._validate_tool_calls_by_id_ceiling(contract)
 
     def _validate_contract_ceiling(self, contract: OutputContract) -> None:
-        # Enforces the strict floor < ceiling invariant against this settings object's own ceiling fields.
+        # Enforces floor < ceiling (floor <= ceiling for max_iterations) against this settings object's own ceiling fields.
         if not contract.ceiling_key:
             return
         ceiling = getattr(self, contract.ceiling_key, None)
-        if ceiling is not None and contract.minimum >= ceiling:
+        source = f"AgentLoopSettings.{contract.ceiling_key}"
+        # The tool-call budget may be given only as ToolSettings.max_calls, which the runtime enforces the same way.
+        if ceiling is None and contract.ceiling_key == "max_tool_calls" and self.tool_settings is not None:
+            ceiling = self.tool_settings.max_calls
+            source = "ToolSettings.max_calls"
+        # @intent iteration-floor-may-equal-max-iterations
+        # max_iterations is checked before an iteration starts, but the floor is checked when the model offers
+        # its answer inside that iteration, after the count has grown. The model can finish in iteration number
+        # max_iterations, so minimum == max_iterations is reachable. The other ceilings stop the run once
+        # reached, before an answer at that ceiling can be accepted, so they keep the strict rule.
+        inclusive = contract.ceiling_key == "max_iterations"
+        if ceiling is not None and (contract.minimum > ceiling if inclusive else contract.minimum >= ceiling):
             raise ConfigurationError(
                 f"{contract.name}(minimum={contract.minimum}) conflicts with "
-                f"AgentLoopSettings.{contract.ceiling_key}={ceiling}: the floor is unreachable "
-                "(require minimum < ceiling)."
+                f"{source}={ceiling}: the floor is unreachable "
+                f"({'require minimum <= max_iterations' if inclusive else 'require minimum < ceiling'})."
             )
 
     def _validate_tool_calls_by_id_ceiling(self, contract: OutputContract) -> None:
@@ -168,11 +179,15 @@ class AgentLoopSettings:
         if self.tool_settings is None:
             return
         limit = self.tool_settings.max_calls_per_tool.get(contract.tool_name)
-        if limit is not None and contract.minimum >= limit:
+        # @intent per-tool-floor-may-equal-cap
+        # Unlike the global ceilings, a per-tool cap never stops the run: it only denies call limit + 1.
+        # The agent can run the tool exactly `limit` times and then finish, so minimum == limit is reachable
+        # (under on_deny="abort" too, since no denied call is needed). Only minimum > limit is unreachable.
+        if limit is not None and contract.minimum > limit:
             raise ConfigurationError(
                 f"{contract.name}(tool_name={contract.tool_name!r}, minimum={contract.minimum}) conflicts with "
                 f"ToolSettings.max_calls_per_tool[{contract.tool_name!r}]={limit}: the floor is unreachable "
-                "(require minimum < max_calls_per_tool)."
+                "(require minimum <= max_calls_per_tool)."
             )
 
     def to_runtime_config(self) -> "AgentRuntimeConfig":

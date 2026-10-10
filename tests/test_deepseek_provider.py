@@ -87,6 +87,12 @@ class DeepSeekFenceTests(unittest.TestCase):
         self.assertEqual(self._text('```json\n{"a": 1}\n```'), '{"a": 1}')
         self.assertEqual(self._text("```\n[1, 2]\n```\n"), "[1, 2]")
 
+    def test_whole_reply_json_fence_tag_is_case_insensitive(self) -> None:
+        """An upper- or mixed-case JSON tag is unwrapped the same as a lowercase one."""
+        for tag in ("JSON", "Json"):
+            with self.subTest(tag=tag):
+                self.assertEqual(self._text(f'```{tag}\n{{"a": 1}}\n```'), '{"a": 1}')
+
     def test_output_schema_agent_parses_a_fenced_json_reply(self) -> None:
         """An output_schema agent on DeepSeek still gets structured output from a json-fenced reply."""
         schema = {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]}

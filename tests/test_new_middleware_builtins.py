@@ -865,6 +865,44 @@ class TestCircuitBreakerMiddleware(unittest.IsolatedAsyncioTestCase):
         await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE))
         self.assertEqual(mw.state, CircuitState.CLOSED)
 
+    async def test_abandoned_half_open_probe_expires_after_recovery_timeout(self) -> None:
+        # [Hidden Failure] A granted probe that never reports back must not wedge HALF_OPEN forever.
+        now, clock = self._controlled_clock()
+        mw = CircuitBreakerMiddleware(failure_threshold=1, recovery_timeout=5.0, half_open_max_calls=1, clock=clock)
+        await mw.on_model_error(_ctx(hook=MiddlewareHook.ON_MODEL_ERROR))
+        now[0] = 5.0
+        probe = await mw.before_model_call(_ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL))
+        self.assertEqual(probe.action, MiddlewareAction.CONTINUE)
+        self.assertEqual(mw.state, CircuitState.HALF_OPEN)
+        # The probe is abandoned: no after_model_response and no on_model_error ever arrive.
+        now[0] = 9.9
+        blocked = await mw.before_model_call(_ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL))
+        self.assertEqual(blocked.action, MiddlewareAction.ABORT_RUN)
+        self.assertEqual(blocked.reason, "circuit_half_open_limit")
+        now[0] = 10.0
+        fresh = await mw.before_model_call(_ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL))
+        self.assertEqual(fresh.action, MiddlewareAction.CONTINUE)
+        self.assertEqual(mw.state, CircuitState.HALF_OPEN)
+        # The fresh probe window is bounded again until it also expires.
+        again = await mw.before_model_call(_ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL))
+        self.assertEqual(again.reason, "circuit_half_open_limit")
+        await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE))
+        self.assertEqual(mw.state, CircuitState.CLOSED)
+
+    async def test_reopened_circuit_does_not_reuse_stale_probe_window(self) -> None:
+        # [Edge Case] After a failed probe re-opens the circuit, OPEN timing applies, not the old probe window.
+        now, clock = self._controlled_clock()
+        mw = CircuitBreakerMiddleware(failure_threshold=1, recovery_timeout=5.0, clock=clock)
+        await mw.on_model_error(_ctx(hook=MiddlewareHook.ON_MODEL_ERROR))
+        now[0] = 5.0
+        await mw.before_model_call(_ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL))
+        now[0] = 6.0
+        await mw.on_model_error(_ctx(hook=MiddlewareHook.ON_MODEL_ERROR))
+        self.assertEqual(mw.state, CircuitState.OPEN)
+        now[0] = 10.5
+        d = await mw.before_model_call(_ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL))
+        self.assertEqual(d.reason, "circuit_open")
+
     def test_raises_on_zero_threshold(self) -> None:
         # [Edge Case] A threshold of zero would open the circuit immediately.
         with self.assertRaises(ValueError):

@@ -65,9 +65,9 @@ class ContextCompactionEngine:
         restored = tuple(self._context_message_to_provider(m) for m in compacted)
         return restored, self._stats(before, compacted, selected)
 
-    def _tool_pairing_tags(self, messages: Sequence[ContextMessage]) -> tuple[tuple[str | None, frozenset[str] | None], ...]:
-        # Tags each message as a tool "call", a tool "result", or neither, with its tool-call ids when every entry carries one.
-        tags: list[tuple[str | None, frozenset[str] | None]] = []
+    def _tool_pairing_tags(self, messages: Sequence[ContextMessage]) -> tuple[tuple[str | None, frozenset[str] | None, int], ...]:
+        # Tags each message as a tool "call", a tool "result", or neither, with its tool-call ids when every entry carries one and its count of id-less Gemini function parts.
+        tags: list[tuple[str | None, frozenset[str] | None, int]] = []
         for message in messages:
             raw = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
             raw = raw if isinstance(raw, Mapping) else {}
@@ -81,25 +81,30 @@ class ContextCompactionEngine:
                 role, ids = "call", [c.get("id") if isinstance(c, Mapping) else None for c in calls] + [b.get("id") for b in blocks if b.get("type") == "tool_use"]
             else:
                 role, ids = None, []
-            tags.append((role, frozenset(str(i) for i in ids) if ids and all(i is not None for i in ids) else None))
+            keys = ("functionResponse", "function_response") if role == "result" else ("functionCall", "function_call")
+            tags.append((role, frozenset(str(i) for i in ids) if ids and all(i is not None for i in ids) else None, sum(1 for p in parts if isinstance(p, Mapping) and any(k in p for k in keys))))
         return tuple(tags)
 
-    def _repair_tool_pairing(self, messages: Sequence[ContextMessage], tags: Sequence[tuple[str | None, frozenset[str] | None]]) -> tuple[ContextMessage, ...]:
-        # Keeps a tool result only right after its call turn and drops a call turn (with its results) unless every call id was answered.
+    def _repair_tool_pairing(self, messages: Sequence[ContextMessage], tags: Sequence[tuple[str | None, frozenset[str] | None, int]]) -> tuple[ContextMessage, ...]:
+        # Keeps a tool result only right after its call turn and drops a call turn (with its results) unless every call was answered.
         kept: list[ContextMessage] = []
         call_at: int | None = None
         wanted: frozenset[str] | None = None
         answered: set[str] = set()
-        steps: list[tuple[ContextMessage | None, tuple[str | None, frozenset[str] | None]]] = [*zip(messages, tags, strict=True), (None, (None, None))]
-        for message, (role, ids) in steps:
+        calls = responses = 0
+        steps: list[tuple[ContextMessage | None, tuple[str | None, frozenset[str] | None, int]]] = [*zip(messages, tags, strict=True), (None, (None, None, 0))]
+        for message, (role, ids, parts) in steps:
             if role == "result":
                 if message is not None and call_at is not None and (wanted is None or ids is None or ids <= wanted - answered):
                     kept.append(message)
                     answered |= ids or set()
+                    responses += parts
                 continue
-            if call_at is not None and (len(kept) == call_at + 1 or (wanted is not None and answered != wanted)):
+            # @intent id-less-call-turns-must-be-fully-answered
+            # Gemini function calls carry no ids, so their response-part count must equal the call-part count; Gemini rejects a partly answered call turn.
+            if call_at is not None and (len(kept) == call_at + 1 or (wanted is not None and answered != wanted) or (wanted is None and 0 < calls != responses)):
                 del kept[call_at:]
-            call_at, wanted, answered = (len(kept) if role == "call" else None), ids, set()
+            call_at, wanted, answered, calls, responses = (len(kept) if role == "call" else None), ids, set(), parts, 0
             if message is not None:
                 kept.append(message)
         return tuple(kept)
@@ -274,6 +279,12 @@ class ContextCompactionEngine:
         parts = message.get("parts")
         if isinstance(parts, list) and any(isinstance(item, Mapping) and "functionResponse" in item for item in parts):
             return "tool_result"
+        # @intent tool-call-kind-covers-every-provider-shape
+        # Anthropic tool_use blocks and Gemini functionCall parts are tool calls too; as plain messages they outrank their own results and get pruned apart.
+        if isinstance(content, list) and any(isinstance(item, Mapping) and item.get("type") == "tool_use" for item in content):
+            return "tool_call"
+        if isinstance(parts, list) and any(isinstance(item, Mapping) and ("functionCall" in item or "function_call" in item) for item in parts):
+            return "tool_call"
         return "message"
 
     def _provider_message_content(self, message: Mapping[str, Any]) -> str:

@@ -72,6 +72,8 @@ class PhoenixTracer(TracerBase):
             if error is not None:
                 context.span.set_attribute("error.message", str(error))
                 context.span.record_exception(error)
+                # Mark the span failed; record_exception alone leaves it UNSET, which Phoenix shows as success.
+                context.span.set_status(self._trace_module.Status(self._trace_module.StatusCode.ERROR, str(error)))
             context.span.end()
         except Exception:
             pass
@@ -115,6 +117,8 @@ class PhoenixTracer(TracerBase):
             if error is not None:
                 context.span.set_attribute("error.message", str(error))
                 context.span.record_exception(error)
+                # Mark the span failed; record_exception alone leaves it UNSET, which Phoenix shows as success.
+                context.span.set_status(self._trace_module.Status(self._trace_module.StatusCode.ERROR, str(error)))
             context.span.end()
         except Exception:
             pass

@@ -234,6 +234,36 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(doc, ResearchHandoff)
         self.assertEqual(doc.sections["Question"], "q")
 
+    async def test_handoff_by_plain_agent_generates_on_that_agents_runner(self) -> None:
+        agent = self._agent("primary output")
+        await agent.generate_reply("task")
+        cheap_runner = HandoffRunner(_ENGINEERING_BODY)
+        cheap = build_test_agent(name="cheap", system_prompt="Summarize.", runner=cheap_runner)
+        doc = await agent.handoff(EngineeringHandoff(), by=cheap)
+        self.assertIsInstance(doc, EngineeringHandoff)
+        self.assertEqual(doc.sections["Next Steps"], "Deploy.")
+        self.assertGreater(cheap_runner.calls, 0)
+
+    async def test_handoff_explicit_spec_overrides_handoff_agent_default_spec(self) -> None:
+        agent = self._agent("primary output")
+        await agent.generate_reply("task")
+        generator_runner = HandoffRunner(_ENGINEERING_BODY)
+        generator = build_test_agent(agent_type=HandoffAgent, runner=generator_runner)
+        doc = await agent.handoff(EngineeringHandoff(), by=generator)
+        self.assertIsInstance(doc, EngineeringHandoff)
+        self.assertEqual(doc.sections["Objective"], "Ship the feature.")
+        self.assertGreater(generator_runner.calls, 0)
+        self.assertIsInstance(generator.spec, MinimalHandoff)
+
+    async def test_handoff_by_handoff_agent_without_spec_uses_it_unchanged(self) -> None:
+        agent = self._agent("primary output", handoff=EngineeringHandoff())
+        custom_runner = HandoffRunner("## Question\nq\n## Findings\nf")
+        custom = build_test_agent(ResearchHandoff(), agent_type=HandoffAgent, runner=custom_runner)
+        doc = await agent.handoff(by=custom)
+        # The source agent's own auto-handoff spec must not replace the supplied generator's spec.
+        self.assertIsInstance(doc, ResearchHandoff)
+        self.assertGreater(custom_runner.calls, 0)
+
     def test_fork_propagates_handoff_spec(self) -> None:
         agent = self._agent("x", handoff=EngineeringHandoff())
         child = agent.fork(AgentForkSettings(name="child"))

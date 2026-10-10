@@ -39,6 +39,7 @@ from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.multi_agent import CompletionCheck, LedgerFactory, MultiAgentEventCallback, MultiAgentResult, MultiAgentRunState, MultiAgentSettings, TaskLedgerSnapshot
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import TracerBase
+from vidbyte.lib.usage_ledger import active_usage_ledger, usage_ledger_scope
 
 if TYPE_CHECKING:
     from vidbyte.sessions.session import Session
@@ -113,7 +114,17 @@ class MultiAgent(BaseAgent):
         request = self._validator.normalize_input(message)
         state = MultiAgentRunState(run_id=uuid.uuid4().hex, request=request, context=context, history=tuple(history))
         self._prepare_public_run_state(request)
-        result = await self._lifecycle.execute(state, self._runner.run_with_timeout)
+        # @intent multi-agent-usage-reaches-the-team-ledger
+        # Manager and worker calls merge into this team's own usage for this run, and the team hands
+        # that run's total to an outer metered run exactly once, even when the run fails.
+        parent = active_usage_ledger()
+        self._usage_tracker.reset()
+        try:
+            with usage_ledger_scope(self._usage_tracker):
+                result = await self._lifecycle.execute(state, self._runner.run_with_timeout)
+        finally:
+            if parent is not None and parent is not self._usage_tracker:
+                self._merge_usage_into(parent)
         return await self._post_runner.build_reply(result, request.prompt, recipient, request.metadata)
 
     def card(self) -> AgentCard:

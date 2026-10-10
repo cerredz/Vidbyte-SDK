@@ -9,6 +9,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
 class OpenAIProvider:
@@ -214,15 +215,32 @@ class OpenAIProvider:
 
     def _attach_tools(self, payload: dict[str, Any], config: TextModelConfig) -> None:
         # OpenAI Responses supports built-in and function tools plus tool_choice.
+        # @intent responses-function-tools-are-flat
+        # Tools arrive in the Chat Completions nested shape {type, function: {...}}; Responses rejects it
+        # (400 "Missing required parameter: 'tools[0].name'") and wants name/parameters at the top level.
+        # Built-in and already-flat tools pass through unchanged.
         if config.tools:
-            payload["tools"] = [dict(tool) for tool in config.tools]
-        if config.tool_choice is not None:
-            payload["tool_choice"] = config.tool_choice
+            tools: list[dict[str, Any]] = []
+            for tool in config.tools:
+                nested = tool.get("function") if tool.get("type") == "function" else None
+                if isinstance(nested, Mapping):
+                    hoisted = {key: nested[key] for key in ("name", "description", "parameters", "strict") if key in nested}
+                    tools.append({"type": "function", **hoisted})
+                else:
+                    tools.append(dict(tool))
+            payload["tools"] = tools
+        choice = config.tool_choice
+        if isinstance(choice, Mapping) and choice.get("type") == "function" and isinstance(choice.get("function"), Mapping):
+            choice = {"type": "function", "name": choice["function"].get("name")}
+        if choice is not None:
+            payload["tool_choice"] = choice
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # Wraps the resolved JSON schema in the Responses API's strict text.format envelope.
+        # Wraps the resolved JSON schema, rewritten into strict mode's dialect, in the Responses API's
+        # strict text.format envelope.
         if config.response_format is not None:
-            payload["text"] = {"format": {"type": "json_schema", "name": "agent_output", "schema": dict(config.response_format), "strict": True}}
+            schema = OutputSchemaFormatter().strict(config.response_format)
+            payload["text"] = {"format": {"type": "json_schema", "name": "agent_output", "schema": schema, "strict": True}}
 
     def _attach_metadata(self, payload: dict[str, Any], config: TextModelConfig, metadata: Mapping[str, object] | None) -> None:
         # Merge runner-call metadata with static config metadata.

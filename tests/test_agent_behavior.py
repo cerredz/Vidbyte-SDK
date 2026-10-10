@@ -29,8 +29,10 @@ from vidbyte.evals import Behavior, ContainsGrader, EvalCase, EvalRunner, EvalSu
 from vidbyte.evals.behavior.efficiency import EfficiencyBehavior
 from vidbyte.evals.behavior.output import OutputBehavior
 from vidbyte.evals.behavior.tool import ToolBehavior
+from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
+from vidbyte.lib.runners import TextModelResponse
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -110,6 +112,18 @@ class MockAgent(BaseAgent):
         return reply
 
 
+class HandoffOnPromptRunner:
+    """Runner that records a handoff on the bound agent whenever the prompt says "handoff"."""
+
+    def __init__(self) -> None:
+        self.agent: BaseAgent | None = None
+
+    def run(self, prompt: str, **_: object) -> TextModelResponse:
+        if "handoff" in prompt and self.agent is not None:
+            self.agent.record_handoff(Handoff(sections={"summary": prompt}))
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Final answer: OK", raw={})
+
+
 class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
     """Main test suite validating all behavior predicate categories and integration."""
 
@@ -160,6 +174,20 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         calls = (make_call("a", state=ToolCallState.SUCCEEDED), make_call("b", state=ToolCallState.FAILED))
         probe = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"tool_calls": calls})))
         self.assertEqual(probe.tool_call_states, ("succeeded", "failed"))
+
+    def test_probe_excludes_internal_finish_tool(self) -> None:
+        # [Hidden Assumption] the runtime's internal isDone call is plumbing, not a developer tool call.
+        done = ToolCallContext(tool_name="isDone", arguments={}, state=ToolCallState.SUCCEEDED, metadata={"internal": True})
+        md = {"tool_calls": (make_call("lookup"), done), "tool_call_states": ("succeeded", "succeeded"), "tool_call_count": 2}
+        probe = RunProbe.from_reply(make_reply(metadata=md))
+        b = behavior_from_probe(probe)
+        self.assertTrue(b.tool.called_only_tools(["lookup"]))
+        self.assertEqual(b.tool.called_tool_names(), ("lookup",))
+        self.assertEqual(b.stop.total_tool_calls(), 1)
+        self.assertEqual(probe.tool_call_states, ("succeeded",))
+        only_done = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"tool_calls": (done,), "tool_call_count": 1})))
+        self.assertTrue(behavior_from_probe(only_done).tool.called_no_tools())
+        self.assertEqual(only_done.tool_call_count, 0)
 
     def test_probe_from_agent_structured(self) -> None:
         # [Hidden Assumption] from_agent copies metadata["structured"] into probe.structured.
@@ -379,6 +407,19 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.handoff.handoff_occurred())
         self.assertFalse(b.handoff.handoff_is_filled())
         self.assertEqual(b.handoff.handoff_count(), 0)
+
+    async def test_handoff_predicates_cover_only_the_latest_run(self) -> None:
+        # [Hidden Failure] a handoff from an earlier run must not be reported for a later run without one.
+        runner = HandoffOnPromptRunner()
+        agent = build_test_agent(name="t", system_prompt="t", runner=runner)
+        runner.agent = agent
+        await agent.arun("please handoff")
+        self.assertTrue(agent.behavior.handoff.handoff_occurred())
+        self.assertEqual(agent.behavior.handoff.handoff_count(), 1)
+        await agent.arun("plain answer")
+        self.assertFalse(agent.behavior.handoff.handoff_occurred())
+        self.assertEqual(agent.behavior.handoff.handoff_count(), 0)
+        self.assertEqual(len(agent.handoffs), 1)
 
     # --- OutputBehavior Category F ---
 

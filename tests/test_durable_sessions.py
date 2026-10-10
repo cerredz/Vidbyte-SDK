@@ -49,7 +49,7 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, SessionTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -117,6 +117,29 @@ class EchoRunner:
     def run(self, prompt: str, **_kwargs: object) -> _Resp:
         self.calls += 1
         return _Resp(_fc("isDone", '{"final_answer": "answer-%d"}' % self.calls, "c%d" % self.calls))
+
+
+class FetchThenDoneRunner:
+    """Scripted runner that fetches one source per run, then finishes; records every prompt it sees."""
+
+    def __init__(self, sources: list[str]) -> None:
+        self.calls = 0
+        self.sources = sources
+        self.prompts: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        self.calls += 1
+        self.prompts.append(f"{prompt} {kwargs}")
+        if self.calls % 2:
+            source = self.sources[(self.calls - 1) // 2]
+            return _Resp(_fc("fetch", '{"source": "%s"}' % source, "f%d" % self.calls))
+        return _Resp(_fc("isDone", '{"final_answer": "done-%d"}' % self.calls, "d%d" % self.calls))
+
+
+@tool
+def fetch(source: str) -> str:
+    """Fetch a source by name."""
+    return f"SOURCE-{source}-CONTENT"
 
 
 class SessionBindingProbe:
@@ -219,6 +242,69 @@ class SerializerTests(unittest.TestCase):
         from vidbyte.sessions.errors import SessionSerializationError
         with self.assertRaises(SessionSerializationError):
             self.s.checkpoint_from_dict({"schema_version": SESSION_SCHEMA_VERSION})
+
+
+class SettingsNamesSurviveCheckpointTests(unittest.TestCase):
+    """Names inside SDK settings structures look like secrets but must survive a checkpoint."""
+
+    SCHEMA = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "author": {"type": "string"}, "token_count": {"type": "integer"}},
+        "required": ["title", "author"],
+    }
+
+    def _round_trip(self, agent: Agent) -> Agent:
+        # Mirror Session persist/resume: export, serialize to JSON text, parse, restore.
+        serializer = SessionSerializer()
+        text = json.dumps(serializer._run_state_to_dict(agent.export_state()))
+        return Agent.restore(serializer._run_state_from_dict(json.loads(text)))
+
+    def test_round_trip_keeps_schema_tool_cap_and_trace_field_names(self) -> None:  # [Silent Failure]
+        settings = AgentLoopSettings(tool_settings=ToolSettings(max_calls_per_tool={"check_auth_status": 2}))
+        trace_option = TraceOption.continual({"token_estimate": TraceField(description="Estimated tokens", type="integer")})
+        agent = Agent(name="w", system_prompt="s", provider="openai", model_name="gpt-4.1", output_schema=self.SCHEMA, agent_loop_settings=settings, trace_option=trace_option)
+        restored = self._round_trip(agent)
+        self.assertEqual(restored.output_schema, self.SCHEMA)
+        self.assertEqual(dict(restored.agent_loop_settings.tool_settings.max_calls_per_tool), {"check_auth_status": 2})
+        self.assertIn("token_estimate", restored._trace_option.schema.fields)
+
+    def test_round_trip_keeps_structured_reply_keys(self) -> None:  # [Silent Failure]
+        agent = Agent(name="w", system_prompt="s", provider="openai", model_name="gpt-4.1")
+        structured = {"title": "T", "author": "Ana", "token_count": 3}
+        agent.history.append(AgentMessage(sender="w", recipient="o", content=json.dumps(structured), metadata={}, structured=structured))
+        restored = self._round_trip(agent)
+        self.assertEqual(restored.history[0].structured, structured)
+
+    def test_metadata_api_key_is_still_dropped(self) -> None:  # [Hidden Assumption]
+        agent = Agent(name="w", system_prompt="s", provider="openai", model_name="gpt-4.1", metadata={"api_key": "sk-live", "keep": 1})
+        payload = SessionSerializer()._run_state_to_dict(agent.export_state())
+        self.assertNotIn("api_key", payload["metadata"])
+        self.assertEqual(payload["metadata"]["keep"], 1)
+        self.assertNotIn("sk-live", json.dumps(payload))
+
+    def test_checkpoint_keeps_trace_artifact_field_names(self) -> None:  # [Silent Failure]
+        artifact = {"token_estimate": 1200, "auth_flow": "oauth device code", "summary": "billed run"}
+        checkpoint = replace(_checkpoint("se", "c1"), trace_artifact=artifact)
+        serializer = SessionSerializer()
+        restored = serializer.checkpoint_from_dict(json.loads(json.dumps(serializer.checkpoint_to_dict(checkpoint))))
+        self.assertEqual(restored.trace_artifact, artifact)
+
+    def test_checkpoint_trace_artifact_drops_exact_credential_names(self) -> None:  # [Hidden Assumption]
+        artifact = {"api_key": "sk-live", "client_secret": "cs-live", "token_estimate": 1200, "auth_flow": "oauth device code", "summary": "billed run"}
+        checkpoint = replace(_checkpoint("se", "c1"), trace_artifact=artifact)
+        serializer = SessionSerializer()
+        payload = serializer.checkpoint_to_dict(checkpoint)
+        restored = serializer.checkpoint_from_dict(json.loads(json.dumps(payload)))
+        self.assertEqual(restored.trace_artifact, {"token_estimate": 1200, "auth_flow": "oauth device code", "summary": "billed run"})
+        self.assertNotIn("sk-live", json.dumps(payload))
+        self.assertNotIn("cs-live", json.dumps(payload))
+
+    def test_checkpoint_trace_events_still_drop_api_key(self) -> None:  # [Hidden Assumption]
+        events = ({"event": "llm_call", "api_key": "sk-live", "token_estimate": 5},)
+        checkpoint = replace(_checkpoint("se", "c1"), trace_events=events)
+        payload = SessionSerializer().checkpoint_to_dict(checkpoint)
+        self.assertEqual(payload["checkpoint"]["trace_events"], [{"event": "llm_call"}])
+        self.assertNotIn("sk-live", json.dumps(payload))
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +501,32 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(imported[-1].parent_id, original[-1].parent_id)
         self.assertEqual(imported[-1].trace_artifact, {"goal": "g"})
 
+    async def test_new_id_import_into_same_store_mints_fresh_checkpoint_ids(self) -> None:  # [Silent Failure]
+        # @intent bundle-copy-never-shares-checkpoint-ids
+        # A same-store copy must not overwrite or shadow the original's checkpoints.
+        with tempfile.TemporaryDirectory() as root:
+            for name, store in (("memory", InMemorySessionStore()), ("file", FileSessionStore(root))):
+                with self.subTest(store=name):
+                    session = Session(FakeAgent(), store=store)
+                    await session.arun("one")
+                    await session.arun("two")
+                    original = store.history(session.id)
+
+                    copy_id = SessionBundleImporter(store).import_bundle(SessionBundleExporter(store).export(session.id), new_id=f"se_copy_{name}")
+                    copied = store.history(copy_id)
+
+                    self.assertEqual(store.history(session.id), original)
+                    self.assertTrue(all(store.get(c.id).session_id == session.id for c in original))
+                    self.assertTrue(all(store.get(c.id).session_id == copy_id for c in copied))
+                    self.assertFalse({c.id for c in copied} & {c.id for c in original})
+                    self.assertEqual([c.seq for c in copied], [c.seq for c in original])
+                    self.assertEqual([c.parent_id for c in copied], [None, copied[0].id])
+                    self.assertEqual(store.get_meta(copy_id).head_id, copied[-1].id)
+                    session.rewind(to=original[0].id)
+                    Session.resume(store, copy_id).rewind(to=copied[0].id)
+                    self.assertEqual(store.get_meta(session.id).head_id, original[0].id)
+                    self.assertEqual(store.get_meta(copy_id).head_id, copied[0].id)
+
     async def test_imports_file_bundle_into_memory_store_with_same_id_when_absent(self) -> None:  # [Hidden Failure]
         # Verify file-to-memory import preserves the original id when no collision exists.
         with tempfile.TemporaryDirectory() as root:
@@ -467,15 +579,17 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
 
     def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
         # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
+        # The trace artifact drops exact credential names but keeps declared field names like token_estimate.
         store = InMemorySessionStore()
-        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"api_key": "secret", "ok": 1})
+        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"api_key": "secret", "token_estimate": 7, "ok": 1}, trace_events=({"api_key": "secret", "ok": 1},))
         meta = SessionMeta(session_id="se", head_id="c1", parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
         store.ingest(meta, [checkpoint])
 
         with zipfile.ZipFile(BytesIO(SessionBundleExporter(store).export("se")), mode="r") as archive:
             checkpoint_payload = json.loads(archive.read("checkpoints/00000003-c1.json").decode("utf-8"))
 
-        self.assertEqual(checkpoint_payload["checkpoint"]["trace_artifact"], {"ok": 1})
+        self.assertEqual(checkpoint_payload["checkpoint"]["trace_events"], [{"ok": 1}])
+        self.assertEqual(checkpoint_payload["checkpoint"]["trace_artifact"], {"token_estimate": 7, "ok": 1})
 
     def test_ingest_preserves_supplied_seq_parent_and_head_verbatim(self) -> None:  # [Silent Failure]
         # Verify ingest writes the exact supplied DAG fields without seq/head mutation.
@@ -735,6 +849,46 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SessionError):
             session.rewind(to="foreign")
 
+    async def test_rewind_drops_tool_outputs_of_abandoned_turns(self) -> None:  # [Silent Failure]
+        # A rewound branch must not see tool outputs from turns after the rewind point.
+        runner = FetchThenDoneRunner(["A", "B", "C"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=InMemorySessionStore())
+        await session.arun("fetch A")
+        first = session.head
+        await session.arun("fetch B")
+        self.assertIn("SOURCE-B-CONTENT", str(agent._tool_call_contexts))
+        session.rewind(to=first)
+        self.assertEqual(agent._tool_call_contexts, [])
+        turn_three_start = len(runner.prompts)
+        await session.arun("fetch C")
+        self.assertNotIn("SOURCE-B-CONTENT", " ".join(runner.prompts[turn_three_start:]))
+        self.assertEqual([c.arguments.get("source") for c in agent._tool_call_contexts if c.tool_name == "fetch"], ["C"])
+
+    async def test_adopt_drops_own_pre_adopt_tool_outputs(self) -> None:  # [Silent Failure]
+        # Adopting another checkpoint replaces history, so the agent's prior tool outputs must go too.
+        store = InMemorySessionStore()
+        donor = Session(FakeAgent(name="donor"), store=store)
+        await donor.arun("donor work")
+        runner = FetchThenDoneRunner(["OWN", "NEXT"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=store)
+        await session.arun("fetch own")
+        self.assertIn("SOURCE-OWN-CONTENT", str(agent._tool_call_contexts))
+        session.adopt(donor.head)
+        self.assertEqual(agent._tool_call_contexts, [])
+        next_start = len(runner.prompts)
+        await session.arun("fetch next")
+        self.assertNotIn("SOURCE-OWN-CONTENT", " ".join(runner.prompts[next_start:]))
+
+    def test_rewind_tolerates_agent_without_tool_memory(self) -> None:  # [Hidden Assumption]
+        # Compatible agents without tool-call memory still rewind cleanly.
+        agent = FakeAgent()
+        session = Session(agent, store=InMemorySessionStore())
+        first = session.checkpoint()
+        session.rewind(to=first)
+        self.assertFalse(hasattr(agent, "_tool_call_contexts"))
+
     async def test_fork_at_own_checkpoint_branches(self) -> None:  # [Edge Case]
         store = InMemorySessionStore()
         session = Session(FakeAgent(), store=store)
@@ -960,6 +1114,46 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": source.id, "checkpoint_id": "foreign"}))
         self.assertEqual(result.status.value, "error")
         self.assertEqual(len(store.list_sessions()), sessions_before)
+
+    async def _resume_fixture(self, tool_cls: type) -> tuple:
+        # Build a permitted public session, an out-of-scope HR session, and a bound session the tool writes into.
+        store = InMemorySessionStore()
+        public = Session(FakeAgent(), store=store)
+        await public.arun("public notes")
+        hr = Session(FakeAgent(), store=store)
+        await hr.arun("SECRET: Alice salary 250k.")
+        bound = Session(FakeAgent(), store=store)
+        await bound.arun("mine")
+        tool = tool_cls(store, scope=SessionScope.sessions([public.id]))
+        tool.bind_session(bound)
+        return store, public, hr, bound, tool
+
+    async def test_resume_tools_reject_checkpoint_from_out_of_scope_session(self) -> None:  # [Hidden Assumption]
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                store, public, hr, bound, tool = await self._resume_fixture(tool_cls)
+                history_before = list(bound.agent.history)
+                foreign = store.head(hr.id).id
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": foreign}))
+                self.assertEqual(result.status.value, "error")
+                self.assertIn("does not belong", result.output)
+                self.assertEqual(bound.agent.history, history_before)
+
+    async def test_resume_tools_unknown_checkpoint_is_error_not_raised(self) -> None:  # [Edge Case]
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                _store, public, _hr, _bound, tool = await self._resume_fixture(tool_cls)
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": "missing"}))
+                self.assertEqual(result.status.value, "error")
+
+    async def test_resume_tools_accept_checkpoint_from_permitted_session(self) -> None:  # [Silent Failure]
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                store, public, _hr, bound, tool = await self._resume_fixture(tool_cls)
+                own = store.head(public.id).id
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": own}))
+                self.assertEqual(result.status.value, "success")
+                self.assertTrue(any("public notes" in str(message.content) for message in bound.agent.history))
 
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()

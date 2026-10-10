@@ -17,6 +17,7 @@ import unittest
 from collections.abc import Sequence
 from typing import Any
 
+from tests.agent_test_support import bind_test_runner
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.multi import AgentBinding, AgentTransfer, MultiAgent
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
@@ -25,7 +26,11 @@ from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, AgentReport, MultiAgentSettings, OrchestrationContext, OrchestratorDecision, OrchestratorPlan, TaskEvidence, TaskLedgerSnapshot, TaskSpec
 from vidbyte.lib.enums.multi_agent import MultiAgentStopReason, OrchestratorAction, TaskStatus
+from vidbyte.agents.pricing import UsageTracker
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import AgentTransferError
+from vidbyte.lib.runners import TextModelResponse
+from vidbyte.lib.usage_ledger import usage_ledger_scope
 
 
 class ScriptedWorker(BaseAgent):
@@ -83,6 +88,46 @@ class ScriptedOrchestrator:
         self.closed = True
 
 
+class UsageRunner:
+    """Offline text runner whose every response reports priced usage."""
+
+    def run(self, prompt: str, system: str = "", **_: object) -> TextModelResponse:
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="answer", raw={}, usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12})
+
+
+def _metered_agent(name: str) -> BaseAgent:
+    # Builds a real BaseAgent bound to the offline usage-reporting runner.
+    return bind_test_runner(BaseAgent(name=name, system_prompt="s", provider="openai", model_name="gpt-5.4-mini"), UsageRunner())
+
+
+def _metered_worker_fork(agent: BaseAgent, settings: AgentForkSettings | None) -> BaseAgent:
+    # Each run-local worker fork keeps the offline usage-reporting runner.
+    return _metered_agent(agent.name)
+
+
+class MeteredOrchestrator(ScriptedOrchestrator):
+    """Scripted orchestrator that makes one billed manager call per protocol phase."""
+
+    def __init__(self, decisions: Sequence[OrchestratorDecision], manager: BaseAgent) -> None:
+        super().__init__(decisions)
+        self._manager = manager
+
+    def fork(self) -> "MeteredOrchestrator":
+        return MeteredOrchestrator(tuple(self._decisions), self._manager)
+
+    async def plan(self, context: OrchestrationContext) -> OrchestratorPlan:
+        await self._manager.generate_reply("plan")
+        return await super().plan(context)
+
+    async def decide(self, context: OrchestrationContext) -> OrchestratorDecision:
+        await self._manager.generate_reply("decide")
+        return await super().decide(context)
+
+    async def finalize(self, context: Any) -> str:
+        await self._manager.generate_reply("finalize")
+        return await super().finalize(context)
+
+
 class MultiAgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
     """End-to-end behavior checks around the decomposed runtime."""
 
@@ -123,6 +168,25 @@ class MultiAgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         assert result is not None
         self.assertEqual(result.stop_reason, MultiAgentStopReason.COMPLETED)
         self.assertIn("worker.close", events)
+
+    async def test_usage_rolls_up_manager_and_workers_per_run_and_into_outer_ledger_once(self) -> None:
+        # [Silent Failure] Manager and worker calls reach the team's own usage, reset per run, and reach an outer ledger once.
+        decisions = (
+            OrchestratorDecision(action=OrchestratorAction.DELEGATE, task_id="task-1", owner="worker", instruction="run"),
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="candidate"),
+        )
+        binding = AgentBinding(_metered_agent("worker"), transfer=AgentTransfer(), fork_factory=_metered_worker_fork)
+        team = MultiAgent(name="team", system_prompt="coordinate", orchestrator=MeteredOrchestrator(decisions, _metered_agent("manager")), agents=(binding,))
+        # Plan, two decisions, and finalize are four manager calls; the delegated task is one worker call.
+        for _ in range(2):
+            await team.generate_reply("complete the task")
+            self.assertEqual(team.get_usage().model_call_count, 5)
+            self.assertEqual(team.get_usage().input_tokens, 50)
+            self.assertIsNotNone(team.get_cost_usd())
+        outer = UsageTracker()
+        with usage_ledger_scope(outer):
+            await team.generate_reply("complete the task")
+        self.assertEqual(outer.rollup().model_call_count, 5)
 
     async def test_builder_failure_closes_in_progress_ledger_attempt(self) -> None:
         # [Hidden Failure] An ordinary transfer exception cannot strand IN_PROGRESS state.

@@ -123,6 +123,21 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(agent.mcp_servers()), 0)
         self.assertEqual(len(agent.tools), 0)
 
+    async def test_close_drops_bridged_tools_from_agent_tool_items(self) -> None:
+        """Closed MCP tools must not linger in the agent tool list, forks, or exported state."""
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner())
+        await agent.attach_mcp_server(command=["closer"])
+        bridged = agent.mcp_servers()[0].bridged_tools
+        self.assertTrue(bridged)
+        self.assertTrue(all(any(t is b for t in agent._agent_tool_items) for b in bridged))
+
+        await agent.close_mcp_servers()
+
+        self.assertFalse(any(t is b for t in agent._agent_tool_items for b in bridged))
+        child = agent.fork()
+        self.assertFalse(any(t is b for t in child._agent_tool_items for b in bridged))
+        self.assertNotIn("remote_closer", agent.export_state().tool_names)
+
     async def test_batch_attach_concurrency_and_fail_safe(self) -> None:
         """Concurrent attachments roll back successfully started servers if one fails."""
         agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner())

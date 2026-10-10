@@ -368,6 +368,9 @@ class Session:
     def _restore_agent_history(self, checkpoint: Checkpoint) -> None:
         # Reset the wrapped agent's history to a checkpoint's recorded state.
         self._agent.history = [self._serializer.message_from_dict(item) for item in checkpoint.run_state.history]
+        # Checkpoints do not persist tool-call memory, so clear it to match a cold resume and drop abandoned tool outputs.
+        if hasattr(self._agent, "_tool_call_contexts"):
+            self._agent._tool_call_contexts = []
 
     def _frame_resumed_history(self, checkpoint: Checkpoint) -> list[AgentMessage]:
         # Render another session's history as a single framed assistant message preserving its turns.

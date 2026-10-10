@@ -7,8 +7,9 @@ from pathlib import Path
 from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentFallbackSettings
 from vidbyte.config import YamlLoader
-from vidbyte.lib.dataclasses.agents import AgentMetadata
+from vidbyte.lib.dataclasses.agents import AgentMetadata, FallbackModel
 from vidbyte.lib.dataclasses.config import AgentSettings, ToolDefinition
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
 
@@ -25,6 +26,35 @@ class FallbackEnabledValidationTests(unittest.TestCase):
         self.assertFalse(AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=False).enabled)
         self.assertTrue(AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=True).enabled)
 
+
+
+class FallbackApiKeyInheritanceTests(unittest.TestCase):
+    PRIMARY = FallbackModel(provider="openai", model="gpt-x", api_key="sk-openai", temperature=0.3)
+
+    def resolve(self, *entries: str | FallbackModel, primary: FallbackModel | None = None) -> tuple[FallbackModel, ...]:
+        # Resolves the declared entries against the primary and drops the primary itself from the result.
+        return AgentFallbackSettings(models=entries).resolved_models(primary=primary or self.PRIMARY)[1:]
+
+    def test_same_provider_entries_inherit_the_agent_key(self) -> None:
+        bare, prefixed = self.resolve("gpt-y", "openai/gpt-y")
+        self.assertEqual((bare.provider, bare.api_key), ("openai", "sk-openai"))
+        self.assertEqual((prefixed.provider, prefixed.api_key), ("openai", "sk-openai"))
+
+    def test_other_provider_prefix_does_not_receive_the_agent_key(self) -> None:
+        (entry,) = self.resolve("anthropic/claude-z")
+        self.assertEqual((entry.provider, entry.model, entry.api_key, entry.temperature), ("anthropic", "claude-z", None, 0.3))
+
+    def test_enum_or_cased_primary_provider_still_counts_as_same_provider(self) -> None:
+        for provider in (ModelProvider.OPENAI, "OpenAI"):
+            with self.subTest(provider=provider):
+                primary = FallbackModel(provider=provider, model="gpt-x", api_key="sk-openai")
+                same, other = self.resolve("openai/gpt-y", "gemini/gemini-z", primary=primary)
+                self.assertEqual(same.api_key, "sk-openai")
+                self.assertIsNone(other.api_key)
+
+    def test_explicit_fallback_model_keeps_its_own_key(self) -> None:
+        explicit = FallbackModel(provider="anthropic", model="claude-z", api_key="sk-ant")
+        self.assertEqual(self.resolve(explicit), (explicit,))
 
 def build(**overrides: object) -> AgentSettings:
     # Builds one agent settings object from the minimal valid document plus the overrides under test.
@@ -338,7 +368,42 @@ class AgentKwargsTests(unittest.TestCase):
 
         for key in ("max_tool_rounds", "output_schema", "agent_metadata", "trace_option", "context_items"):
             self.assertIn(key, kwargs)
-        self.assertEqual(kwargs["max_tool_rounds"], 4)
+        self.assertEqual(kwargs["agent_loop_settings"].max_iterations, 4)
+        self.assertIsNone(kwargs["max_tool_rounds"])
+
+    def test_builds_an_agent_from_a_document_with_max_tool_rounds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent.yaml"
+            path.write_text("type: base\nname: support\nsystem_prompt: Help.\nprovider: deepseek\nmodel_name: deepseek-v4-flash\nmax_tool_rounds: 3\n", encoding="utf-8")
+            loader = YamlLoader()
+            settings = loader.load_agent(path)
+            first, second = loader.build_agent(settings), loader.build_agent(settings)
+
+        for agent in (first, second):
+            self.assertEqual(agent.agent_loop_settings.max_iterations, 3)
+            self.assertEqual(agent.max_tool_rounds, 3)
+
+    def test_rejects_max_tool_rounds_that_conflicts_with_the_loop(self) -> None:
+        self.assertEqual(build(max_tool_rounds=5, loop={"max_iterations": 5}).loop.max_iterations, 5)
+        with self.assertRaises(ConfigurationError) as ctx:
+            build(max_tool_rounds=5, loop={"max_iterations": 7})
+
+        self.assertEqual(ctx.exception.details["field"], "agent.max_tool_rounds")
+
+    def test_max_tool_rounds_rejects_a_floor_it_makes_unreachable(self) -> None:
+        # @intent yaml-max-tool-rounds-validates-floors
+        floor = [{"type": "MinIterations", "minimum": 5}]
+        with self.assertRaises(ConfigurationError) as nested:
+            build(loop={"max_iterations": 3, "output_contracts": floor})
+        with self.assertRaises(ConfigurationError) as top_level:
+            build(max_tool_rounds=3, loop={"output_contracts": floor})
+
+        self.assertEqual(nested.exception.details["field"], "agent.loop")
+        self.assertEqual(top_level.exception.details["field"], "agent.max_tool_rounds")
+        self.assertIn("MinIterations(minimum=5) conflicts with AgentLoopSettings.max_iterations=3", str(top_level.exception))
+        reachable = build(max_tool_rounds=2, loop={"output_contracts": [{"type": "MinToolCalls", "minimum": 1}], "tool_settings": {"max_calls": 2}})
+        self.assertEqual(reachable.loop.max_iterations, 2)
+        self.assertEqual(build(max_tool_rounds=5, loop={"output_contracts": floor}).loop.max_iterations, 5)
 
     def test_does_not_alias_the_caller_output_schema(self) -> None:
         schema = {"type": "object", "properties": {}}

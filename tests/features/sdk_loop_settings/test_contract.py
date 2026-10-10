@@ -3,7 +3,7 @@
 PURPOSE: Probe the public AgentLoopSettings boundary for invalid budgets and timeouts before an agent starts; do not emulate a model provider here.
 ROLE IN CODEBASE: Calls vidbyte.agents.settings.AgentLoopSettings and reads the resulting AgentRuntimeConfig; complements tests/test_agent_settings_validation.py.
 ARCHITECTURE NOTE: Tests bind no runner and make no network calls, so a failure identifies configuration rather than model behavior.
-FUNCTION INVENTORY: test_integer_limits_reject_non_integer_values tests all count fields; test_timeout_rejects_non_finite_or_invalid_values tests loop timeouts; test_tool_timeout_rejects_non_finite_values tests tool-call timeouts; test_invalid_retry_counts and test_invalid_backoff_parameters test tool-error policy; test_valid_limits_reach_runtime_config tests conversion. Run this file with pytest.
+FUNCTION INVENTORY: test_integer_limits_reject_non_integer_values tests all count fields; test_timeout_rejects_non_finite_or_invalid_values tests loop timeouts; test_tool_timeout_rejects_non_finite_values tests tool-call timeouts; test_invalid_retry_counts and test_invalid_backoff_parameters test tool-error policy; test_valid_limits_reach_runtime_config tests conversion; test_tool_call_floor_must_stay_below_tool_settings_budget and test_tool_call_floor_below_tool_settings_budget_is_accepted test effort floors against a budget given only as ToolSettings.max_calls; test_per_tool_floor_equal_to_per_tool_cap_is_accepted and test_per_tool_floor_above_per_tool_cap_is_rejected test MinToolCallsById against ToolSettings.max_calls_per_tool; test_iteration_floor_equal_to_max_iterations_is_accepted and test_iteration_floor_above_max_iterations_is_rejected test MinIterations against max_iterations. Run this file with pytest.
 COMMON MODIFICATION PATTERNS: Add an invalid value when a new public count or timeout field is introduced; assert the named ConfigurationError and the valid runtime value.
 WHAT NOT TO DO IN THIS FILE: 1. Do not implement validation here; vidbyte/agents/settings/loop.py owns it. 2. Do not call live providers; tests/agent_test_support.py owns offline agent fixtures.
 KNOWN EDGE CASES: bool inherits int, NaN is not ordered, and a string throws TypeError before comparison.
@@ -17,6 +17,7 @@ import math
 
 import pytest
 
+from vidbyte.agents.contracts import MinIterations, MinSuccessfulToolCalls, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.errors import ConfigurationError
 
@@ -72,3 +73,37 @@ def test_valid_limits_reach_runtime_config() -> None:
 def test_zero_retries_and_finite_backoff_are_valid() -> None:
     settings = ToolErrorPolicy(max_retries_per_tool_call=0, retry_backoff_base_seconds=0.0, retry_backoff_multiplier=1.0, retry_backoff_cap_seconds=0.0)
     assert settings.max_retries_per_tool_call == 0
+
+
+@pytest.mark.parametrize("contract", [MinToolCalls(5), MinSuccessfulToolCalls(5), MinToolCalls(3)])
+def test_tool_call_floor_must_stay_below_tool_settings_budget(contract: object) -> None:
+    # The budget given only as ToolSettings.max_calls stops the run, so a floor at or above it can never be met.
+    with pytest.raises(ConfigurationError, match=r"ToolSettings\.max_calls=3: the floor is unreachable"):
+        AgentLoopSettings(tool_settings=ToolSettings(max_calls=3), output_contracts=[contract])
+
+
+def test_tool_call_floor_below_tool_settings_budget_is_accepted() -> None:
+    settings = AgentLoopSettings(tool_settings=ToolSettings(max_calls=3), output_contracts=[MinToolCalls(2)])
+    assert settings.to_runtime_config().max_tool_calls == 3
+
+
+def test_per_tool_floor_equal_to_per_tool_cap_is_accepted() -> None:
+    # A per-tool cap only denies the call after the cap and never stops the run, so a floor equal to it is reachable.
+    settings = AgentLoopSettings(tool_settings=ToolSettings(max_calls_per_tool={"web_search": 2}), output_contracts=(MinToolCallsById("web_search", 2),), max_iterations=6)
+    assert settings.to_runtime_config().tool_settings.max_calls_per_tool == {"web_search": 2}
+
+
+def test_per_tool_floor_above_per_tool_cap_is_rejected() -> None:
+    with pytest.raises(ConfigurationError, match=r"max_calls_per_tool\['web_search'\]=2: the floor is unreachable \(require minimum <= max_calls_per_tool\)"):
+        AgentLoopSettings(tool_settings=ToolSettings(max_calls_per_tool={"web_search": 2}), output_contracts=(MinToolCallsById("web_search", 3),))
+
+
+def test_iteration_floor_equal_to_max_iterations_is_accepted() -> None:
+    # The floor is checked inside an iteration after the count grows, so the model can meet it in its last iteration.
+    settings = AgentLoopSettings(max_iterations=3, output_contracts=(MinIterations(3),))
+    assert settings.to_runtime_config().max_iterations == 3
+
+
+def test_iteration_floor_above_max_iterations_is_rejected() -> None:
+    with pytest.raises(ConfigurationError, match=r"AgentLoopSettings\.max_iterations=3: the floor is unreachable \(require minimum <= max_iterations\)"):
+        AgentLoopSettings(max_iterations=3, output_contracts=(MinIterations(4),))

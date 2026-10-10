@@ -4,13 +4,14 @@ PURPOSE: Defines the user-visible continual trace schema and configuration contr
 ROLE IN CODEBASE: Consumed by vidbyte/trace/continual/{agent,middleware}.py, rendered into a model-facing JSON Schema by vidbyte/tools/continual_trace.py, and re-exported by vidbyte.trace and vidbyte.__init__ for public use.
 ARCHITECTURE NOTE: TraceMode/TraceFieldType/TraceField/TraceSchema/TraceOption are configuration contracts only; none of them execute a trace update. TraceField.fields/.items let an OBJECT/ARRAY field declare a nested shape recursively, validated and depth-capped once, on TraceField itself, so every construction path (from_model, a raw mapping, or direct construction) is provably within bounds.
 COMMON MODIFICATION PATTERNS: Add a new leaf TraceFieldType by extending _annotation_to_type. Add a new way to declare nested shape by extending _field_from_annotation, keeping the depth cap and OBJECT/ARRAY-only validation on TraceField itself rather than duplicating it in the builder.
-KNOWN EDGE CASES: A plain dict[str, Any] or list[dict[str, Any]] annotation still maps to an opaque OBJECT/ARRAY with fields/items left None — only a nested BaseModel (or list[BaseModel]) annotation triggers the recursive builder. A list[SubModel] item's description falls back to a generated string when SubModel has no docstring.
+KNOWN EDGE CASES: A plain dict[str, Any] or list[dict[str, Any]] annotation still maps to an opaque OBJECT/ARRAY with fields/items left None — only a nested BaseModel (or list[BaseModel]) annotation triggers the recursive builder. A list[SubModel] item's description falls back to a generated string when SubModel has no docstring. Optional[X] / X | None (and list[X | None] items) map as plain X; a multi-type union such as int | str still maps to STRING.
 RELATED DOCS: docs/design/nested-continual-trace-shapes.md, docs/design/continual-trace-agent.md, skills/vidbyte-sdk/continual-tracing.md
 TESTS: tests/test_continual_trace.py, scripts/test-continual-trace.py
 """
 
 from __future__ import annotations
 
+import types
 import typing
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -161,12 +162,16 @@ class TraceSchema:
     @classmethod
     def _field_from_annotation(cls, annotation: Any, description: str, *, depth: int) -> TraceField:
         # Builds one typed TraceField from a pydantic annotation, recursing into a nested submodel's own fields.
+        # @intent optional-trace-field-keeps-its-type
+        # Every trace field already starts at None, so Optional[X] / X | None is mapped as plain X rather than falling through to string.
+        annotation = cls._unwrap_optional(annotation)
         origin = typing.get_origin(annotation)
         target = origin if origin is not None else annotation
         if isinstance(target, type) and issubclass(target, BaseModel):
             return TraceField(description=description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(target, depth=depth + _CHILD_DEPTH_STEP))
         if origin in (list, tuple, set, frozenset):
-            item_field = cls._item_field_from_args(typing.get_args(annotation), depth=depth)
+            item_args = tuple(cls._unwrap_optional(arg) for arg in typing.get_args(annotation))
+            item_field = cls._item_field_from_args(item_args, depth=depth)
             return TraceField(description=description, type=TraceFieldType.ARRAY, items=item_field)
         return TraceField(description=description, type=cls._annotation_to_type(annotation))
 
@@ -182,6 +187,14 @@ class TraceSchema:
             return None
         item_description = (item_target.__doc__ or "").strip() or f"One entry in this list, each describing a single {item_target.__name__} record."
         return TraceField(description=item_description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(item_target, depth=depth + _CHILD_DEPTH_STEP))
+
+    @staticmethod
+    def _unwrap_optional(annotation: Any) -> Any:
+        # Returns X for Optional[X] / X | None; any other annotation, including a multi-type union, passes through unchanged.
+        if typing.get_origin(annotation) not in (typing.Union, types.UnionType):
+            return annotation
+        members = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+        return members[0] if len(members) == 1 else annotation
 
     @staticmethod
     def _annotation_to_type(annotation: Any) -> TraceFieldType:
