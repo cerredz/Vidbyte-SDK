@@ -21,7 +21,7 @@ class ListDirTool(FileSystemTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Validate the directory exists, list its entries, and return them as a newline-joined string.
-        path = call.arguments.get("path", ".")
+        path = self._optional_argument(call, "path", default=".")
         try:
             target = self._path(path)
             FileSystemPermissions.require_existing_directory(target)

@@ -67,10 +67,10 @@ class SemanticSearchTool(BaseCodeSearchTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Rank indexed chunks and return bounded top results."""
         query = str(call.arguments["query"])
-        subdir = str(call.arguments.get("subdir", "."))
-        max_results = max(1, min(int(call.arguments.get("max_results", 5)), 25))
-        max_chars = max(200, min(int(call.arguments.get("max_chars_per_result", 1200)), 5000))
-        total_max_chars = max(500, min(int(call.arguments.get("max_chars", 12000)), 50000))
+        subdir = str(self._optional_argument(call, "subdir", default="."))
+        max_results = max(1, min(int(self._optional_argument(call, "max_results", default=5)), 25))
+        max_chars = max(200, min(int(self._optional_argument(call, "max_chars_per_result", default=1200)), 5000))
+        total_max_chars = max(500, min(int(self._optional_argument(call, "max_chars", default=12000)), 50000))
         try:
             self.rebuild_index(subdir=subdir)
         except ValueError as exc:
