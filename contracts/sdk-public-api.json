@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "fb88ed22b96647d51bde215123ab31f4cd8358f2", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "2c6713dee95c3bd23a8ebb5006f9548ba145c937", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.2.0",
   "exports": [
@@ -75,6 +75,9 @@
     "CheckpointTool",
     "ChoiceMatchGrader",
     "ClassificationTemplate",
+    "ClaudeSkillReference",
+    "ClaudeSkillSession",
+    "ClaudeSkillType",
     "CodexAgentError",
     "CodexAgentInput",
     "CodexAgentSettings",
@@ -492,6 +495,8 @@
     "SessionVersionError",
     "ShortAnswerFactTemplate",
     "SkillDocument",
+    "SkillSource",
+    "SkillSourceKind",
     "SpanKind",
     "SpanSpec",
     "SplitPrompt",

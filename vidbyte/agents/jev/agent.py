@@ -23,7 +23,8 @@ from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.lib.dataclasses.jev import JevAgentResponse
-from vidbyte.lib.enums import AgentRuntimeType, JevContinuationGate
+from vidbyte.lib.dataclasses.skills import SkillDocument, SkillSource
+from vidbyte.lib.enums import AgentRuntimeType, JevContinuationGate, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -65,12 +66,19 @@ class JevAgent(BaseAgent):
             self.continuation = JevFreshContinuation(self.run_state, runtime_settings.continual, self._response, fresh_agent_factory)
         else:
             self.continuation = JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+        skill_candidates: list[SkillDocument | SkillSource] = []
+        for candidate in settings.alignment.skills:
+            if not isinstance(candidate, (SkillDocument, SkillSource)):
+                raise ConfigurationError("JevAlignmentSettings.skills must be normalized before JevAgent construction.")
+            skill_candidates.append(candidate)
         self.skill_preload = (
             JevSkillsPreload(
-                skills=settings.alignment.skills,
+                skills=tuple(skill_candidates),
                 decision=runtime_settings.decision,
                 threshold=runtime_settings.skills_threshold,
                 response=self._response,
+                provider=settings._normalized_provider(),
+                claude_api_key=settings.api_key if settings.provider is ModelProvider.ANTHROPIC else None,
             )
             if settings.alignment.skills
             else None

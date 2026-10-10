@@ -123,7 +123,12 @@ from vidbyte.lib.enums.reasoning_strategies import (
     TestimonyTrust,
     TransitivityConsistency,
 )
-from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
+from vidbyte.lib.enums.skills import (
+    ClaudeSkillType,
+    ContextMinimalFanoutSkill,
+    Skill,
+    SkillSourceKind,
+)
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
@@ -152,6 +157,7 @@ __all__ = [
     "CodexThreadStartSource",
     "CompositionDivisionValidity",
     "ConsistencyStatus",
+    "ClaudeSkillType",
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DefeasibleRuleApplies",
@@ -210,6 +216,7 @@ __all__ = [
     "RuleErrorMode",
     "Skill",
     "SkillEnums",
+    "SkillSourceKind",
     "StrawmanCriticism",
     "StructuredOutputSupport",
     "TaskStatus",

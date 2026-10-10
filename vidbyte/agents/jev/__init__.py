@@ -115,7 +115,12 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeItem,
     JevUsageReport,
 )
-from vidbyte.lib.dataclasses.skills import SkillDocument
+from vidbyte.lib.dataclasses.skills import (
+    ClaudeSkillReference,
+    ClaudeSkillSession,
+    SkillDocument,
+    SkillSource,
+)
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
@@ -133,6 +138,7 @@ from vidbyte.lib.enums.jev import (
     JevScopeUniverse,
     JevSkillStatus,
 )
+from vidbyte.lib.enums.skills import ClaudeSkillType, SkillSourceKind
 
 __all__ = [
     "JevAgent",
@@ -245,7 +251,12 @@ __all__ = [
     "JevSkillResult",
     "JevSkillsOutcome",
     "JevSkillStatus",
+    "ClaudeSkillType",
+    "ClaudeSkillReference",
+    "ClaudeSkillSession",
     "SkillDocument",
+    "SkillSource",
+    "SkillSourceKind",
     "JevSelfReviewEvidence",
     "JevSpecialist",
     "JevTargetOutcome",

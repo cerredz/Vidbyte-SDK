@@ -31,6 +31,22 @@ class ContextMinimalFanoutSkill(str, Enum):
     DECOMPOSE_FANOUT = "context_minimal_fanout.decompose_fanout"
 
 
+class SkillSourceKind(str, Enum):
+    """Closed set of supported caller-selected skill sources."""
+
+    FILE = "file"
+    GITHUB = "github"
+    SKILLS_SH = "skills_sh"
+    CLAUDE = "claude"
+
+
+class ClaudeSkillType(str, Enum):
+    """Claude Messages API skill source discriminator."""
+
+    CUSTOM = "custom"
+    ANTHROPIC = "anthropic"
+
+
 Skill: TypeAlias = ContextMinimalFanoutSkill
 
 Skills: Final[dict[str, type[Skill]]] = {
@@ -55,6 +71,8 @@ def skill_from_value(value: str) -> Skill:
 
 __all__ = [
     "ContextMinimalFanoutSkill",
+    "ClaudeSkillType",
+    "SkillSourceKind",
     "Skill",
     "Skills",
     "iter_skill_values",

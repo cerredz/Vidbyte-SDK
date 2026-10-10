@@ -59,6 +59,7 @@ from vidbyte.lib.constants.jev import (
     JEV_RUN_BRIEF_NOTES_MAX,
     JEV_SPECIALIST_NONE,
 )
+from vidbyte.lib.dataclasses.skills import ClaudeSkillReference
 from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
@@ -3693,6 +3694,7 @@ class JevSkillResult:
     source: str | None
     status: JevSkillStatus
     probability: float | None = None
+    detail: str | None = None
 
     def __post_init__(self) -> None:
         # @intent-response-never-retains-skill-bodies
@@ -3707,6 +3709,11 @@ class JevSkillResult:
             raise ConfigurationError("JevSkillResult.source must be None or non-blank text.")
         if not isinstance(self.status, JevSkillStatus):
             raise ConfigurationError("JevSkillResult.status must be a JevSkillStatus.")
+        if self.detail is not None:
+            if not isinstance(self.detail, str) or not self.detail.strip():
+                raise ConfigurationError("JevSkillResult.detail must be None or non-blank text.")
+            if self.status is not JevSkillStatus.UNAVAILABLE:
+                raise ConfigurationError("JevSkillResult.detail is only valid for UNAVAILABLE results.")
         if self.probability is not None:
             object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name="skill relevance probability"))
 
@@ -3717,6 +3724,7 @@ class JevSkillsOutcome:
 
     results: tuple[JevSkillResult, ...] = ()
     usage: ProviderUsage | None = None
+    claude_skills: tuple[ClaudeSkillReference, ...] = ()
 
     def __post_init__(self) -> None:
         # @intent-preserve-independent-candidate-results
@@ -3725,6 +3733,8 @@ class JevSkillsOutcome:
         """Freeze one ordered result per configured document."""
         if not isinstance(self.results, tuple) or not all(isinstance(result, JevSkillResult) for result in self.results):
             raise ConfigurationError("JevSkillsOutcome.results must be a tuple of JevSkillResult values.")
+        if not isinstance(self.claude_skills, tuple) or not all(isinstance(skill, ClaudeSkillReference) for skill in self.claude_skills):
+            raise ConfigurationError("JevSkillsOutcome.claude_skills must be a tuple of ClaudeSkillReference values.")
 
 
 @dataclass(frozen=True, slots=True)

@@ -189,9 +189,13 @@ class JevRuntime(AgentRuntime):
         if has_system_override:
             context = replace(context, system_prompt=explicit_system)
         context = await self.skill_preload.run(message, context)
-        if not has_system_override:
-            return context, options
-        run_options["system"] = context.system_prompt
+        if has_system_override:
+            run_options["system"] = context.system_prompt
+        outcome = self.response.state.skills
+        if outcome is None:
+            raise ConfigurationError("The Jev skill preload did not record its outcome.")
+        run_options["claude_skills"] = outcome.claude_skills
+        run_options["claude_skill_session"] = None
         return context, run_options
 
     @staticmethod

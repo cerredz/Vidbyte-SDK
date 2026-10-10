@@ -64,6 +64,8 @@ from vidbyte.agents import (
     BaseAgent,
     CallSpeedRecord,
     CallSpeedStats,
+    ClaudeSkillReference,
+    ClaudeSkillSession,
     CodexAgentInput,
     CodexAgentSettings,
     CodexApprovalMode,
@@ -237,6 +239,7 @@ from vidbyte.agents import (
     RunSpeedSnapshot,
     RunSpeedStats,
     SkillDocument,
+    SkillSource,
     StepSpeedRecord,
     StepSpeedStats,
     StreamSpeedRecord,
@@ -423,8 +426,10 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
 )
 from vidbyte.lib.enums import (
     BudgetPreset,
+    ClaudeSkillType,
     PermissionPreset,
     Prompt,
+    SkillSourceKind,
     StructuredOutputSupport,
 )
 from vidbyte.lib.enums.config import AgentType
@@ -815,7 +820,12 @@ __all__ = [
     "JevSkillResult",
     "JevSkillsOutcome",
     "JevSkillStatus",
+    "ClaudeSkillType",
+    "ClaudeSkillReference",
+    "ClaudeSkillSession",
     "SkillDocument",
+    "SkillSource",
+    "SkillSourceKind",
     "JevTargetOutcome",
     "JevTargetOutcomeEvidence",
     "JevTargetOutcomeEvidenceItem",

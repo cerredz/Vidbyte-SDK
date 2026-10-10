@@ -78,6 +78,9 @@ from vidbyte.agents.contracts import (
 from vidbyte.agents.fallback import AgentFallback, FallbackTransform
 from vidbyte.agents.handoff import HandoffAgent
 from vidbyte.agents.jev import (
+    ClaudeSkillReference,
+    ClaudeSkillSession,
+    ClaudeSkillType,
     JevAgent,
     JevAgentResponse,
     JevAgentSettings,
@@ -195,6 +198,8 @@ from vidbyte.agents.jev import (
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeItem,
     SkillDocument,
+    SkillSource,
+    SkillSourceKind,
 )
 from vidbyte.agents.multi import (
     AgentBinding,
@@ -370,7 +375,12 @@ __all__ = [
     "JevSkillResult",
     "JevSkillsOutcome",
     "JevSkillStatus",
+    "ClaudeSkillType",
+    "ClaudeSkillReference",
+    "ClaudeSkillSession",
     "SkillDocument",
+    "SkillSource",
+    "SkillSourceKind",
     "JevCanSimplify",
     "JevCanSimplifyEvidence",
     "JevAssumptionEvidence",

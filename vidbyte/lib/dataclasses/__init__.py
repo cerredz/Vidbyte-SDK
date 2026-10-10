@@ -208,7 +208,12 @@ from vidbyte.lib.dataclasses.sessions import (
     TraceCapture,
     UsageRollup,
 )
-from vidbyte.lib.dataclasses.skills import SkillDocument
+from vidbyte.lib.dataclasses.skills import (
+    ClaudeSkillReference,
+    ClaudeSkillSession,
+    SkillDocument,
+    SkillSource,
+)
 from vidbyte.lib.dataclasses.sources import (
     ArtifactRef,
     FetchResponse,
@@ -430,7 +435,10 @@ __all__ = [
     "SearchHit",
     "SearchPayload",
     "Selection",
+    "ClaudeSkillReference",
+    "ClaudeSkillSession",
     "SkillDocument",
+    "SkillSource",
     "SessionMeta",
     "SessionStatus",
     "SourceResult",

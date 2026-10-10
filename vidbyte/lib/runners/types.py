@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.dataclasses.jev import JevAnswer
+from vidbyte.lib.dataclasses.skills import ClaudeSkillSession
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -15,6 +16,7 @@ class TextModelResponse:
     text: str
     raw: Mapping[str, Any]
     usage: Mapping[str, Any] | None = None
+    claude_skill_session: ClaudeSkillSession | None = None
 
 
 @dataclass(frozen=True, slots=True)
