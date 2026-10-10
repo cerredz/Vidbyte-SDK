@@ -372,8 +372,12 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Every JEV enum: question types, dynamic-compute options and keys, preflight presets and keys, and done checks and keys | `vidbyte/lib/enums/jev.py` |
 | JEV limits, defaults, wire literals, and dynamic-compute, preflight, and done-check policy values | `vidbyte/lib/constants/jev.py` |
 | `DecisionModelRunner` (runs a decision request, `score_noul`) | `vidbyte/lib/runners/decision.py` |
-| TypeSafe System One provider adapter (wire shape, HTTP) | `vidbyte/providers/typesafe.py` |
-| TypeSafe usage pricing (`ModelProvider.TYPESAFE`) | `vidbyte/agents/pricing/typesafe.py` |
+| TypeSafe-specific adapter (managed gateway headers, `/models`, run close) | `vidbyte/providers/typesafe.py` |
+| System One wire and the seven-host `SystemOneProvider` | `vidbyte/providers/systemone.py` |
+| OpenAI Decisions wire and `OpenAIDecisionsProvider` | `vidbyte/providers/openai_decisions.py` |
+| Shared decision HTTP call and failure mapping | `vidbyte/providers/decisions.py` |
+| Decision default models per provider | `vidbyte/lib/registries/models.py` (`DECISION_DEFAULT_MODELS`) |
+| System One usage pricing (`JevUsage`, bound to TypeSafe and the six System One hosts) | `vidbyte/agents/pricing/typesafe.py` |
 | Clarification agent prompt family | `vidbyte/prompts/prompts/jev_clarification/`; key in `vidbyte/lib/enums/prompts.py` |
 | House style for writing Jev questions (load it before writing or reviewing one) | `skills/asking-jev-questions/SKILL.md` |
 | Dynamic-compute evidence-question guidance | `skills/asking-jev-dynamic-compute-questions/SKILL.md` |
