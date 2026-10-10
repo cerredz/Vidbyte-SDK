@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "f8b048ab479c504cfe88a59a660e941e71549b86", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "fb88ed22b96647d51bde215123ab31f4cd8358f2", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.2.0",
   "exports": [
@@ -235,6 +235,7 @@
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
+    "JevAlignmentSettings",
     "JevAssumptionEvidence",
     "JevAssumptionsReconciledEvidence",
     "JevBoundaryKind",
@@ -339,6 +340,9 @@
     "JevSequenceStage",
     "JevSequenceStageEvidence",
     "JevSequenceWork",
+    "JevSkillResult",
+    "JevSkillStatus",
+    "JevSkillsOutcome",
     "JevSpecialist",
     "JevTargetOutcome",
     "JevTargetOutcomeEvidence",
@@ -487,6 +491,7 @@
     "SessionTracer",
     "SessionVersionError",
     "ShortAnswerFactTemplate",
+    "SkillDocument",
     "SpanKind",
     "SpanSpec",
     "SplitPrompt",

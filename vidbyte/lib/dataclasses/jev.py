@@ -80,6 +80,7 @@ from vidbyte.lib.enums.jev import (
     JevScopeBreadth,
     JevScopeUnitSource,
     JevScopeUniverse,
+    JevSkillStatus,
 )
 from vidbyte.lib.errors import ConfigurationError
 
@@ -3684,6 +3685,49 @@ class JevClarification:
 
 
 @dataclass(frozen=True, slots=True)
+class JevSkillResult:
+    """Metadata and relevance decision for one configured skill, without its text."""
+
+    name: str
+    description: str
+    source: str | None
+    status: JevSkillStatus
+    probability: float | None = None
+
+    def __post_init__(self) -> None:
+        # @intent-response-never-retains-skill-bodies
+        # Skill bodies may contain private caller instructions and are only needed by the live run context.
+        # The response keeps identifying metadata and the decision evidence, not the injected content.
+        """Validate public skill outcome metadata and any available probability."""
+        for field_name in ("name", "description"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigurationError(f"JevSkillResult.{field_name} must be non-blank text.")
+        if self.source is not None and (not isinstance(self.source, str) or not self.source.strip()):
+            raise ConfigurationError("JevSkillResult.source must be None or non-blank text.")
+        if not isinstance(self.status, JevSkillStatus):
+            raise ConfigurationError("JevSkillResult.status must be a JevSkillStatus.")
+        if self.probability is not None:
+            object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name="skill relevance probability"))
+
+
+@dataclass(frozen=True, slots=True)
+class JevSkillsOutcome:
+    """Per-skill outcomes and TypeSafe usage for one JevAgent run."""
+
+    results: tuple[JevSkillResult, ...] = ()
+    usage: ProviderUsage | None = None
+
+    def __post_init__(self) -> None:
+        # @intent-preserve-independent-candidate-results
+        # A missing answer for one skill must not collapse valid outcomes for its siblings; the tuple records
+        # each candidate in settings order so response consumers can associate every decision reliably.
+        """Freeze one ordered result per configured document."""
+        if not isinstance(self.results, tuple) or not all(isinstance(result, JevSkillResult) for result in self.results):
+            raise ConfigurationError("JevSkillsOutcome.results must be a tuple of JevSkillResult values.")
+
+
+@dataclass(frozen=True, slots=True)
 class JevUsageReport:
     """One JevAgent run's usage, read from the agent's one usage ledger and priced from the SDK pricebook.
 
@@ -3768,6 +3812,7 @@ class JevAgentResponse:
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
     compute_decisions: list[JevComputeDecision] = field(default_factory=list)
     clone: JevCloneResult | None = None
+    skills: JevSkillsOutcome = field(default_factory=JevSkillsOutcome)
 
     @property
     def needs_clarification(self) -> bool:
@@ -4432,4 +4477,6 @@ __all__ = [
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",
+    "JevSkillResult",
+    "JevSkillsOutcome",
 ]

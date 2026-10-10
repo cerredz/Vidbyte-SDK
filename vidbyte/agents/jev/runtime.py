@@ -20,6 +20,7 @@ from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.preflight import JevPreflightTools
+from vidbyte.agents.jev.preload import JevPreload
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.agents.jev.usage import JevUsageAccount
@@ -47,19 +48,26 @@ class JevRuntime(AgentRuntime):
         continuation: JevContinuation | None = None,
         compute: JevComputeController | None = None,
         response: JevResponse | None = None,
+        skill_preload: JevPreload | None = None,
         **kwargs: Any,
     ) -> None:
         # Retains the validated runtime settings, the gate, the done checks, the continuation, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
         # @intent jev-runtime-needs-jev-agent
         # AgentRuntimeType.JEV is selectable by string, so a generic BaseAgent can reach this class
         # without them; refusing here names JevAgent instead of failing later on a None field.
-        if not isinstance(runtime_settings, JevRuntimeSettings) or not isinstance(preflight, JevPreflightGate) or not isinstance(response, JevResponse):
+        if (
+            not isinstance(runtime_settings, JevRuntimeSettings)
+            or not isinstance(preflight, JevPreflightGate)
+            or not isinstance(response, JevResponse)
+            or (skill_preload is not None and not isinstance(skill_preload, JevPreload))
+        ):
             raise ConfigurationError(
                 "The 'jev' runtime is only available through JevAgent; construct JevAgent(JevAgentSettings(...)) instead of BaseAgent(runtime='jev').",
                 details={
                     "received_runtime_settings": type(runtime_settings).__name__,
                     "received_preflight": type(preflight).__name__,
                     "received_response": type(response).__name__,
+                    "received_skill_preload": type(skill_preload).__name__,
                 },
             )
         self.runtime_settings = runtime_settings
@@ -68,6 +76,7 @@ class JevRuntime(AgentRuntime):
         self.continuation = continuation
         self.compute = compute
         self.response = response
+        self.skill_preload = skill_preload
         super().__init__(**kwargs)
         self.usage = JevUsageAccount(self.usage_tracker, self.agent_name)
 
@@ -110,6 +119,8 @@ class JevRuntime(AgentRuntime):
         if self.preflight.specialist is not None:
             reply = await self.preflight.specialist.agent.arun(message)
             return self.response.delegated(reply, self.usage.settle())
+        context, options = await self._preload_skills(message, context, options)
+        self.usage.require_accounted()
         if self.compute is not None:
             self.compute.begin(message)
         if self.run_state is not None:
@@ -166,6 +177,22 @@ class JevRuntime(AgentRuntime):
                 "jev_tool_selector": selector_metadata,
             },
         ), self.usage.settle())
+
+    async def _preload_skills(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
+        # @intent explicit-system-option-is-the-effective-skill-baseline
+        # An explicit provider override remains the caller's baseline, with selected skill text appended in the run context and provider option.
+        if self.skill_preload is None:
+            return context, options
+        run_options = dict(options or {})
+        explicit_system = run_options.get("system")
+        has_system_override = isinstance(explicit_system, str)
+        if has_system_override:
+            context = replace(context, system_prompt=explicit_system)
+        context = await self.skill_preload.run(message, context)
+        if not has_system_override:
+            return context, options
+        run_options["system"] = context.system_prompt
+        return context, run_options
 
     @staticmethod
     def _prior_user_turns(history: Sequence[object]) -> tuple[str, ...]:

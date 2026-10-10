@@ -24,6 +24,7 @@ from vidbyte.lib.constants.jev import (
     JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS,
     JEV_HANDOFF_MAX_ITERATIONS,
     JEV_HANDOFF_MAX_TOKENS,
+    JEV_NOUL_YES_THRESHOLD,
     JEV_REVIEW_MAX_ITERATIONS,
     JEV_REVIEW_MAX_TOKENS,
     JEV_RUN_BRIEF_EVERY_ITERATIONS,
@@ -38,6 +39,7 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
+from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.enums import (
     DecisionModelMode,
     JevContinuationGate,
@@ -50,6 +52,50 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.tools.security import PermissionPolicy
+
+
+@dataclass(frozen=True, slots=True)
+class JevAlignmentSettings:
+    """Select request-time skill guidance for JevAgent."""
+
+    skills: tuple[SkillDocument | str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Normalizes caller skills once so every run reads the same named documents.
+        object.__setattr__(self, "skills", self._normalized_skills())
+
+    def _normalized_skills(self) -> tuple[SkillDocument, ...]:
+        # @intent names-uniquely-identify-response-results
+        # JevAgent.response exposes each decision by the configured name. Duplicate names would make two
+        # different candidate bodies indistinguishable to callers and future source adapters.
+        """Normalize caller strings and require unique stable names for every skill."""
+        if isinstance(self.skills, (str, bytes)):
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings, not a string.")
+        try:
+            candidates = tuple(self.skills)
+        except TypeError as exc:
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings.") from exc
+        skills: list[SkillDocument] = []
+        for index, candidate in enumerate(candidates, start=1):
+            if isinstance(candidate, str):
+                candidate = SkillDocument(
+                    name=f"inline_skill_{index}",
+                    description="Caller-supplied inline skill text.",
+                    text=candidate,
+                    source="inline",
+                )
+            if not isinstance(candidate, SkillDocument):
+                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillDocument or string values.")
+            skills.append(candidate)
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for skill in skills:
+            if skill.name in seen:
+                duplicates.add(skill.name)
+            seen.add(skill.name)
+        if duplicates:
+            raise ConfigurationError("JevAlignmentSettings.skills must have unique document names.", details={"names": sorted(duplicates)})
+        return tuple(skills)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +113,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     agents: tuple[JevSpecialist, ...] = ()
+    alignment: JevAlignmentSettings = field(default_factory=JevAlignmentSettings)
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -91,6 +138,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
         if not isinstance(self.loop, AgentLoopSettings):
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
+        if not isinstance(self.alignment, JevAlignmentSettings):
+            raise ConfigurationError("JevAgentSettings.alignment must be a JevAlignmentSettings instance.")
         self._validate_agents()
 
     def _validate_agents(self) -> None:
@@ -270,6 +319,7 @@ class JevRuntimeSettings:
     continual: JevContinualSettings = field(default_factory=JevContinualSettings)
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
     compute: JevComputeSettings | None = None
+    skills_threshold: float = JEV_NOUL_YES_THRESHOLD
 
     def __post_init__(self) -> None:
         # Keeps every JevAgent decision on the Vidbyte-managed path before runtime construction.
@@ -283,6 +333,7 @@ class JevRuntimeSettings:
         if self.compute is not None and not isinstance(self.compute, JevComputeSettings):
             raise ConfigurationError("JevRuntimeSettings.compute must be a JevComputeSettings instance or None.")
         self._validate_tool_selector_threshold()
+        self._validate_skills_threshold()
 
     def _validate_tool_selector_threshold(self) -> None:
         # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
@@ -296,5 +347,14 @@ class JevRuntimeSettings:
             raise ConfigurationError("JevRuntimeSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
+    def _validate_skills_threshold(self) -> None:
+        # @intent boundary-probabilities-are-inclusive
+        # Thresholds represent the minimum calibrated P(yes), so 0 and 1 are meaningful policies; booleans
+        # are rejected even though Python treats them as integers.
+        """Require a finite yes-probability cutoff for each skill selection."""
+        value = self.skills_threshold
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ConfigurationError("JevRuntimeSettings.skills_threshold must be a finite probability between 0 and 1 inclusive.")
+        object.__setattr__(self, "skills_threshold", float(value))
 
-__all__ = ["JevAgentSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevAlignmentSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
