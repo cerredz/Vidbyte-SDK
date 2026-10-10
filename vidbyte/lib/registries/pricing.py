@@ -51,7 +51,7 @@ class ModelPricing:
     tier_rates: Mapping[str, Mapping[str, float]] | None = None
 
 
-PRICING_AS_OF: str = "2026-07-30"
+PRICING_AS_OF: str = "2026-10-10"
 PRICING_SOURCE_URL: str = "https://developers.openai.com/api/docs/pricing"
 
 # Rates verified against official provider pricing pages on PRICING_AS_OF.
@@ -96,6 +96,12 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "gpt-5.4-mini": ModelPricing(input_per_million=0.75, output_per_million=4.5, cache_read_per_million=0.075),
         "gpt-5.4-nano": ModelPricing(input_per_million=0.2, output_per_million=1.25, cache_read_per_million=0.02),
         "gpt-5.4-pro": ModelPricing(input_per_million=30.0, output_per_million=180.0),
+        # gpt-6-luna through the Decisions API, checked 2026-10-10 against
+        # https://developers.openai.com/api/docs/guides/decisions: $0.10 per 1M input tokens;
+        # output, cache read, and cache write are $0. The model is reached only through the
+        # decisions adapter (it is not in the text runner catalog), so the decision rate is the
+        # one this row carries (spec decision D-12).
+        "gpt-6-luna": ModelPricing(input_per_million=0.10, output_per_million=0.0),
     },
     ModelProvider.ANTHROPIC: {
         # claude-sonnet-5 introductory pricing, in effect through 2026-08-31.
@@ -163,6 +169,37 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "jev-latest": ModelPricing(input_per_million=0.042, output_per_million=0.0),
         "jev-preview": ModelPricing(input_per_million=0.042, output_per_million=0.0),
     },
+    # Perplexity Decisions API (System One wire), checked 2026-10-10 against
+    # https://docs.perplexity.ai/getting-started/pricing and
+    # https://docs.perplexity.ai/api-reference/decisions-post: $0.02 per 1M input tokens for both
+    # decider models; output is not charged.
+    ModelProvider.PERPLEXITY: {
+        "pplx-decider-v1.1-27b": ModelPricing(input_per_million=0.02, output_per_million=0.0),
+        "pplx-decider-v1-27b": ModelPricing(input_per_million=0.02, output_per_million=0.0),
+    },
+    # Cloudflare Workers AI Clef decision models, checked 2026-10-10 against
+    # https://developers.cloudflare.com/workers-ai/platform/pricing/: clef $0.240 and clef-flash
+    # $0.038 per 1M input tokens, no output charge (Workers AI also meters these as neurons).
+    ModelProvider.CLOUDFLARE: {
+        "clef": ModelPricing(input_per_million=0.24, output_per_million=0.0),
+        "clef-flash": ModelPricing(input_per_million=0.038, output_per_million=0.0),
+    },
+    # Microsoft-Decision-1 on Microsoft Foundry, checked 2026-10-10 against
+    # https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742:
+    # $0.042 per 1M input tokens, output not charged. The request `model` is the caller's
+    # deployment name, so this row prices only a deployment named microsoft-decision-1.
+    ModelProvider.FOUNDRY: {
+        "microsoft-decision-1": ModelPricing(input_per_million=0.042, output_per_million=0.0),
+    },
+    # Liquid AI d1 (https://docs.liquid.ai/lfm/models/d1): no first-party pricing page found on
+    # 2026-10-10; omitted rather than guessed, so cost resolves to None.
+    ModelProvider.LIQUID: {},
+    # Baseten Mercury Decide (https://www.baseten.co/library/mercury-decide/): no first-party
+    # pricing page found on 2026-10-10; omitted rather than guessed, so cost resolves to None.
+    ModelProvider.BASETEN: {},
+    # meraGPT Decider 1 (https://meragpt.com/docs): no first-party pricing page found on
+    # 2026-10-10; omitted rather than guessed, so cost resolves to None.
+    ModelProvider.MERAGPT: {},
 }
 
 
