@@ -1,10 +1,10 @@
 """FILE: scripts/review_agents/gitops.py
 
 PURPOSE: Wraps the git and shell commands the review-agents workflow runs, so finalize reads as steps rather than plumbing.
-ROLE IN CODEBASE: finalize.py commits, reverts, and pushes through Git; run.py reads earlier review commits through their trailers; CommandRunner runs the gate and each guard's check.
+ROLE IN CODEBASE: finalize.py and merging.py commit, revert, and push through Git; run.py reads earlier review commits through their trailers and previews the merge with the base branch to plan the merge agent; CommandRunner runs the gate and each guard's check.
 ARCHITECTURE NOTE: The trailer names here are the contract between finalize, which writes them, and every later step, which finds this review's commits by them.
 COMMON MODIFICATION PATTERNS: Add a trailer as a TRAILER_ constant and read it in review_commits(); keep every subprocess call argument-list based except a guard's own check command.
-KNOWN EDGE CASES: A guard's check command is a shell string the agent wrote, so it alone runs with shell=True; output is decoded as UTF-8 with replacement so a stray byte never crashes a job.
+KNOWN EDGE CASES: A guard's check command is a shell string the agent wrote, so it alone runs with shell=True; output is decoded as UTF-8 with replacement so a stray byte never crashes a job; merge_preview needs git 2.38 or later for `merge-tree --write-tree`.
 RELATED DOCS: docs/design/claude-review-agents.md
 TESTS: tests/test_review_agents.py drives these wrappers against temporary git repositories.
 """
@@ -34,6 +34,14 @@ class ReviewCommit:
     agent: str
     unit: str
     comment_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MergePreview:
+    """What merging the base branch would produce, worked out without touching the working tree."""
+
+    tree: str
+    conflicts: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +79,15 @@ class Git:
             comment_ids = tuple(int(value) for value in re.findall(r"\d+", trailers.get(TRAILER_COMMENTS, "")))
             commits.append(ReviewCommit(sha=sha, subject=subject, review_id=review_id, agent=trailers.get(TRAILER_AGENT, ""), unit=trailers.get(TRAILER_UNIT, ""), comment_ids=comment_ids))
         return tuple(commits)
+
+
+    def merge_preview(self, base: str, head: str) -> MergePreview:
+        # merge-tree prints the merged tree, then each conflicted path, and exits 1 on conflicts.
+        result = self.run("merge-tree", "--write-tree", "--name-only", "--no-messages", base, head, check=False)
+        if result.returncode not in {0, 1}:
+            raise RuntimeError(f"git merge-tree {base} {head} failed: {result.stderr.strip()}")
+        tree, *paths = result.stdout.splitlines()
+        return MergePreview(tree=tree.strip(), conflicts=tuple(dict.fromkeys(path for path in paths if path)))
 
 
 class CommandRunner:

@@ -1,8 +1,8 @@
 """FILE: scripts/review_agents/run.py
 
 PURPOSE: The review-agents workflow's only entry point: `python scripts/review_agents/run.py <step> ...`.
-ROLE IN CODEBASE: Each subcommand is one step of .github/workflows/claude-review-agents.yml: collect, plan, prompt, finalize, report, and check, the last a local validation of every committed prompt.
-ARCHITECTURE NOTE: Steps hand data to each other through JSON files and GitHub step outputs, never through a model, so the plan, the prompts, the commits, and the report are the same on every run of the same review.
+ROLE IN CODEBASE: Each subcommand is one step of .github/workflows/claude-review-agents.yml: collect, plan, prompt, finalize, report, and check, the last a local validation of every committed prompt. sweep is the one step of .github/workflows/claude-review-sweep.yml.
+ARCHITECTURE NOTE: Steps hand data to each other through JSON files and GitHub step outputs, never through a model, so the plan, the prompts, the commits, and the report are the same on every run of the same review. The plan step asks git whether the branch conflicts with its base, and a merge task's finalize goes through MergeFinalizer.
 COMMON MODIFICATION PATTERNS: A new step adds one parser in ArgumentParserFactory, one method on ReviewAgentsApp, and one entry in the step table in run().
 KNOWN EDGE CASES: Outside GitHub Actions step outputs are printed instead of written; an agent's structured output arrives through an environment variable, never the shell, and a malformed one counts as no result.
 RELATED DOCS: docs/design/claude-review-agents.md
@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -24,12 +25,14 @@ if __package__ in {None, ""}:
 from review_agents.finalize import FinalizeRequest, TaskFinalizer
 from review_agents.github import GhCli, ReviewFetcher
 from review_agents.gitops import CommandRunner, Git
+from review_agents.merging import MergeFinalizer
 from review_agents.planning import PlanBuilder
 from review_agents.prompting import AGENT_SCHEMA, PromptBuilder, compact_schema
 from review_agents.readmes import ReadmeLocator
 from review_agents.registry import AgentRegistry, PromptContractError
 from review_agents.report import ReportWriter
-from review_agents.review_data import AgentReport, TaskResult, TaskStatus, plan_from_json, report_from_json, result_from_json, review_from_json, to_json
+from review_agents.review_data import AgentReport, Scope, TaskResult, TaskStatus, plan_from_json, report_from_json, result_from_json, review_from_json, to_json
+from review_agents.sweep import ReviewSweeper
 
 
 class ActionOutputs:
@@ -82,6 +85,8 @@ class ArgumentParserFactory:
         report.add_argument("--out", type=Path, required=True)
         check = steps.add_parser("check", help="Validate every review prompt.")
         check.add_argument("--agents-dir", type=Path, required=True)
+        sweep = steps.add_parser("sweep", help="Start the agents for @claude reviews on conflicting pull requests.")
+        sweep.add_argument("--repository", action="append", required=True)
         return parser
 
 
@@ -93,7 +98,7 @@ class ReviewAgentsApp:
 
     def run(self, argv: list[str] | None = None) -> int:
         args = ArgumentParserFactory.build().parse_args(argv)
-        step = {"collect": self.collect, "plan": self.plan, "prompt": self.prompt, "finalize": self.finalize, "report": self.report, "check": self.check}[args.step]
+        step = {"collect": self.collect, "plan": self.plan, "prompt": self.prompt, "finalize": self.finalize, "report": self.report, "check": self.check, "sweep": self.sweep}[args.step]
         try:
             return step(args)
         except PromptContractError as error:
@@ -101,20 +106,23 @@ class ReviewAgentsApp:
             return 2
 
     def collect(self, args: argparse.Namespace) -> int:
-        # Ask GitHub, not a model, which comments this review contains.
+        # Ask GitHub, not a model, which comments this round of review contains.
         review = ReviewFetcher(GhCli()).fetch(args.repository, args.pull, args.review)
         _write_json(args.out, to_json(review))
         self._outputs.write("head_ref", review.head_ref)
+        self._outputs.write("base_ref", review.base_ref)
         return 0
 
     def plan(self, args: argparse.Namespace) -> int:
-        # Load every agent, then lay out its runs over the review's comments.
+        # Ask git whether the branch conflicts with its base, which decides if the merge agent runs.
         review = review_from_json(_read_json(args.review_file))
+        conflicts = Git(Path.cwd()).merge_preview(f"origin/{review.base_ref}", f"origin/{review.head_ref}").conflicts
+        # Load every agent, then lay out its runs over the round's comments and conflicts.
         agents = AgentRegistry(args.agents_dir).load()
-        plan = PlanBuilder().build(review, agents)
+        plan = PlanBuilder().build(review, agents, conflicts)
         _write_json(args.out, to_json(plan))
-        # The matrix only needs each task's ID and a readable job name.
-        matrix = [{"id": task.id, "title": task.title} for task in plan.tasks]
+        # The matrix needs each task's ID, a readable job name, and whether to start a merge first.
+        matrix = [{"id": task.id, "title": task.title, "merge": task.scope is Scope.MERGE} for task in plan.tasks]
         self._outputs.write("tasks", json.dumps(matrix, ensure_ascii=False))
         self._outputs.write("task_count", str(len(plan.tasks)))
         return 0
@@ -139,7 +147,9 @@ class ReviewAgentsApp:
         agent = next(spec for spec in AgentRegistry(args.agents_dir).load() if spec.name == task.agent)
         # The agent's structured output arrives through the environment, never the shell.
         request = FinalizeRequest(plan=plan, task=task, agent=agent, report=_agent_report(os.environ.get(args.report_env, "")), agent_succeeded=args.agent_outcome == "success", start_sha=args.start_sha, push_remote=os.environ.get(args.push_remote_env, ""))
-        result = TaskFinalizer(Git(Path.cwd()), CommandRunner()).finalize(request)
+        # A merge lands as a two-parent merge commit; every other task as one ordinary commit.
+        finalizer = MergeFinalizer if task.scope is Scope.MERGE else TaskFinalizer
+        result = finalizer(Git(Path.cwd()), CommandRunner()).finalize(request)
         _write_json(args.out, to_json(result))
         sys.stdout.write(f"{task.id}: {result.status.value}\n{result.detail}\n")
         return 1 if result.status is TaskStatus.FAILED else 0
@@ -148,7 +158,9 @@ class ReviewAgentsApp:
         plan = plan_from_json(_read_json(args.plan_file))
         agents = AgentRegistry(args.agents_dir).load()
         results = _read_results(args.results_dir)
-        body, ok = ReportWriter().render(plan, tuple(agent.name for agent in agents), results)
+        # The merge agent owns no comments, so it gets a line of its own rather than a table column.
+        columns = tuple(agent.name for agent in agents if agent.scope is not Scope.MERGE)
+        body, ok = ReportWriter().render(plan, columns, results)
         args.out.write_text(body, encoding="utf-8")
         return 0 if ok else 1
 
@@ -157,6 +169,20 @@ class ReviewAgentsApp:
         names = ", ".join(f"{agent.order:02d}-{agent.name} ({agent.scope.value})" for agent in agents)
         sys.stdout.write(f"Review prompts are valid: {names}\n")
         return 0
+
+    def sweep(self, args: argparse.Namespace) -> int:
+        # One repository failing, such as one the token cannot read, must not stop the others.
+        sweeper, failed = ReviewSweeper(GhCli()), 0
+        for repository in args.repository:
+            try:
+                started = sweeper.sweep(repository)
+            except (subprocess.CalledProcessError, KeyError, TypeError, ValueError) as error:
+                failed += 1
+                detail = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) else repr(error)
+                sys.stderr.write(f"{repository}: sweep failed: {detail}\n")
+                continue
+            sys.stdout.write("".join(f"{repository}#{dispatch.pull_number}: started the agents for review {dispatch.review_id}\n" for dispatch in started) or f"{repository}: nothing to start\n")
+        return 1 if failed else 0
 
 
 def _read_json(path: Path) -> dict[str, object]:

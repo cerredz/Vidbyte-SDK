@@ -1,8 +1,8 @@
 """FILE: tests/test_review_agents.py
 
-PURPOSE: Prove the @claude review-agents workflow's helpers in scripts/review_agents/ plan, prompt, gate, commit, verify, and report each review the way the workflow relies on, and that lint rule A009 bounds the folder READMEs its notes writer edits.
-ROLE IN CODEBASE: The offline spec for .github/workflows/claude-review-agents.yml; it loads the committed prompts in .github/prompts/review-agents/ and pins what the reviewer asked of each one.
-ARCHITECTURE NOTE: GitHub is a fake reader, no model runs, and the finalize cases commit and push to a bare repository under tmp_path, never to a real remote; scripts/ is put on sys.path because the workflow runs these tools without installing the SDK.
+PURPOSE: Prove the @claude review-agents workflow's helpers in scripts/review_agents/ collect each round, plan, prompt, gate, commit, merge, verify, report, and sweep the way the workflow relies on, and that lint rule A009 bounds the folder READMEs its notes writer edits.
+ROLE IN CODEBASE: The offline spec for .github/workflows/claude-review-agents.yml and claude-review-sweep.yml; it loads the committed prompts in .github/prompts/review-agents/ and pins what the reviewer asked of each one.
+ARCHITECTURE NOTE: GitHub is a fake reader, no model runs, and the finalize and merge cases commit and push to a bare repository under tmp_path, never to a real remote; scripts/ is put on sys.path because the workflow runs these tools without installing the SDK.
 COMMON MODIFICATION PATTERNS: A new prompt or scope adds a case here next to the registry ones; a new finalize refusal gets a case that also proves nothing reached the remote.
 KNOWN EDGE CASES: Test commits need a git identity, so the finalize fixture sets one through monkeypatch; the workflow's own commits set theirs explicitly.
 RELATED DOCS: docs/design/claude-review-agents.md
@@ -27,17 +27,21 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "scripts"))
 
 from review_agents.finalize import FinalizeRequest, TaskFinalizer
-from review_agents.github import ReviewFetcher
+from review_agents.github import ROUND_MARKER, ReviewFetcher
 from review_agents.gitops import CommandRunner, Git
+from review_agents.merging import MergeFinalizer
 from review_agents.planning import PlanBuilder
 from review_agents.prompting import AGENT_SCHEMA, PromptBuilder, compact_schema
 from review_agents.readmes import ReadmeLocator
 from review_agents.registry import AgentRegistry, PromptContractError
 from review_agents.report import ReportWriter
 from review_agents.review_data import AgentReport, AgentSpec, BiteVerdict, Review, ReviewComment, Scope, TaskResult, TaskStatus, plan_from_json, to_json
+from review_agents.sweep import RUN_NAME, ReviewSweeper
 
 _AGENTS_DIR = _ROOT / ".github" / "prompts" / "review-agents"
+_WORKFLOWS = _ROOT / ".github" / "workflows"
 _SHA = "a" * 40
+_THROUGH = "2026-10-10T06:26:37Z"
 _PASS = (sys.executable, "-c", "raise SystemExit(0)")
 _FAIL = (sys.executable, "-c", "raise SystemExit(1)")
 
@@ -47,7 +51,7 @@ def _comment(comment_id: int, body: str = "Fix this.", path: str | None = "app.t
 
 
 def _review(*comments: ReviewComment, sha: str = _SHA) -> Review:
-    return Review("o/r", 1, 77, sha, "feat", "main", "", comments)
+    return Review("o/r", 1, 77, sha, "feat", "main", "", comments, "", _THROUGH)
 
 
 def _agent(name: str, order: int, scope: Scope, guard: bool = False) -> AgentSpec:
@@ -59,11 +63,32 @@ def _agent(name: str, order: int, scope: Scope, guard: bool = False) -> AgentSpe
 
 def test_real_prompts_run_resolver_then_preventer_per_comment_then_notes_writer() -> None:
     agents = AgentRegistry(_AGENTS_DIR).load()
-    assert [(spec.name, spec.scope, spec.guard) for spec in agents] == [("resolver", Scope.REVIEW, False), ("preventer", Scope.COMMENT, True), ("readme-notes", Scope.REVIEW, False)]
-    plan = PlanBuilder().build(_review(_comment(1), _comment(2)), agents)
-    # The resolver owns every comment first and the notes writer every comment last.
+    assert [(spec.name, spec.scope, spec.guard) for spec in agents] == [("merge-conflicts", Scope.MERGE, False), ("resolver", Scope.REVIEW, False), ("preventer", Scope.COMMENT, True), ("readme-notes", Scope.REVIEW, False)]
+    plan = PlanBuilder().build(_review(_comment(1), _comment(2)), agents, ())
+    # Without conflicts no merge runs; the resolver owns every comment first and the notes writer every comment last.
     assert [(task.id, task.comment_ids) for task in plan.tasks] == [("10-resolver-review", (1, 2)), ("20-preventer-c1", (1,)), ("20-preventer-c2", (2,)), ("30-readme-notes-review", (1, 2))]
     assert all("scope:" not in spec.body for spec in agents)
+
+
+def test_a_conflicting_branch_is_merged_before_any_comment_is_handled() -> None:
+    agents = AgentRegistry(_AGENTS_DIR).load()
+    plan = PlanBuilder().build(_review(_comment(1)), agents, ("app.txt",))
+    assert [(task.id, task.scope, task.comment_ids) for task in plan.tasks][:2] == [("05-merge-conflicts-merge", Scope.MERGE, ()), ("10-resolver-review", Scope.REVIEW, (1,))]
+    # A conflicted branch is merged even when the round holds no comments.
+    assert [task.id for task in PlanBuilder().build(_review(), agents, ("app.txt",)).tasks] == ["05-merge-conflicts-merge"]
+    # The merge prompt lists the conflicted files and leaves the comments to the runs after it.
+    merge = PromptBuilder().agent_prompt(plan, plan.tasks[0], agents[0], (), {})
+    assert merge.startswith("# Merge Conflict Resolver")
+    assert "- `app.txt`" in merge
+    assert "- 1 at app.txt:1: Fix this." in merge
+    assert "#### Comment 1" not in merge
+
+
+def test_merge_resolver_settles_both_sides_and_never_commits() -> None:
+    merge = _bodies()["merge-conflicts"]
+    assert "combining both sides' intent" in merge
+    assert "do not commit or push" in merge
+    assert "python scripts/run_ci.py" in merge
 
 
 def test_resolver_groups_comments_checks_its_fixes_and_runs_the_gate() -> None:
@@ -144,12 +169,12 @@ def test_a_new_agent_needs_only_its_file_and_defaults_to_one_run_per_review(tmp_
 
 
 def test_tasks_follow_agent_order_then_units_and_survive_json() -> None:
-    agents = (_agent("preventer", 20, Scope.COMMENT, guard=True), _agent("resolver", 10, Scope.REVIEW), _agent("docs", 30, Scope.REVIEW))
-    plan = PlanBuilder().build(_review(_comment(1), _comment(2)), agents)
-    assert [task.id for task in plan.tasks] == ["10-resolver-review", "20-preventer-c1", "20-preventer-c2", "30-docs-review"]
+    agents = (_agent("preventer", 20, Scope.COMMENT, guard=True), _agent("resolver", 10, Scope.REVIEW), _agent("docs", 30, Scope.REVIEW), _agent("merge", 5, Scope.MERGE))
+    plan = PlanBuilder().build(_review(_comment(1), _comment(2)), agents, ("a.py",))
+    assert [task.id for task in plan.tasks] == ["05-merge-merge", "10-resolver-review", "20-preventer-c1", "20-preventer-c2", "30-docs-review"]
     # The plan crosses from the plan job to every agent leg as JSON.
     assert plan_from_json(json.loads(json.dumps(to_json(plan)))) == plan
-    assert PlanBuilder().build(_review(), agents).tasks == ()
+    assert PlanBuilder().build(_review(), agents, ()).tasks == ()
 
 
 # Reading GitHub
@@ -168,28 +193,54 @@ class _FakeReader:
         return result
 
 
-def _github(body: str, comments: list[dict[str, Any]]) -> _FakeReader:
+def _raw_review(review_id: int, at: str, body: str = "", association: str = "OWNER", kind: str = "User") -> dict[str, Any]:
+    return {"id": review_id, "body": body, "commit_id": _SHA, "html_url": f"u{review_id}", "submitted_at": at, "author_association": association, "user": {"login": "someone", "type": kind}}
+
+
+def _github(trigger_body: str, comments: list[dict[str, Any]], reviews: tuple[dict[str, Any], ...] = (), issue_comments: tuple[dict[str, Any], ...] = (), association: str = "OWNER") -> _FakeReader:
     base = "repos/o/r/pulls/4"
-    return _FakeReader({base: {"head": {"ref": "feat"}, "base": {"ref": "main"}}, f"{base}/reviews/77": {"id": 77, "body": body, "commit_id": _SHA, "html_url": "u"}, f"{base}/comments": comments})
+    trigger = _raw_review(77, _THROUGH, trigger_body, association)
+    return _FakeReader({base: {"head": {"ref": "feat"}, "base": {"ref": "main"}}, f"{base}/reviews/77": trigger, f"{base}/reviews": [*reviews, trigger], f"{base}/comments": comments, "repos/o/r/issues/4/comments": list(issue_comments)})
 
 
-def test_fetch_keeps_only_this_reviews_comments_with_their_context() -> None:
+def _marker(through: str, login: str = "github-actions[bot]") -> dict[str, Any]:
+    return {"body": "## Claude review agents\n\n" + ROUND_MARKER.format(through=through), "user": {"login": login}}
+
+
+def test_a_round_holds_every_single_comment_review_since_the_last_clean_round() -> None:
+    # "Add single comment" makes each comment its own review, and the @claude review holds none.
+    reviews = (_raw_review(60, "2026-10-10T05:00:00Z"), _raw_review(61, "2026-10-10T06:22:57Z"), _raw_review(62, "2026-10-10T06:25:15Z", "Also log it."))
     raw = [
         {"id": 5, "body": "Old thread.", "pull_request_review_id": 60, "path": "a.py", "line": 3},
-        {"id": 6, "body": "Still wrong.", "pull_request_review_id": 77, "path": "a.py", "line": None, "original_line": 3, "in_reply_to_id": 5, "diff_hunk": "@@"},
-        {"id": 7, "body": "Rename it.", "pull_request_review_id": 77, "path": "b.py", "line": 9},
+        {"id": 6, "body": "Still wrong.", "pull_request_review_id": 61, "path": "a.py", "line": None, "original_line": 3, "in_reply_to_id": 5, "diff_hunk": "@@"},
+        {"id": 7, "body": "Rename it.", "pull_request_review_id": 62, "path": "b.py", "line": 9},
     ]
-    fetched = ReviewFetcher(_github("@claude please", raw)).fetch("o/r", 4, 77)
-    assert [comment.id for comment in fetched.comments] == [6, 7]
-    assert fetched.summary == "please"
+    fetched = ReviewFetcher(_github("@claude please", raw, reviews, (_marker("2026-10-10T05:30:00Z"),))).fetch("o/r", 4, 77)
+    # Comment 5 belongs to the round that already finished; a summary on another review is a request of its own.
+    assert [comment.id for comment in fetched.comments] == [6, 7, 62]
+    assert fetched.comments[-1].body == "Also log it."
+    assert (fetched.summary, fetched.since, fetched.through) == ("please", "2026-10-10T05:30:00Z", _THROUGH)
     # A reply carries the comment it answers, and an outdated one keeps its original line.
     assert fetched.comments[0].parent_body == "Old thread."
     assert fetched.comments[0].line == 3
 
 
-def test_a_summary_only_review_becomes_one_comment() -> None:
+def test_a_round_ignores_bots_people_without_write_access_and_forged_markers() -> None:
+    reviews = (_raw_review(60, "2026-10-10T06:00:00Z", association="NONE"), _raw_review(61, "2026-10-10T06:01:00Z", kind="Bot"), _raw_review(62, "2026-10-10T06:02:00Z"))
+    raw = [{"id": number, "body": "Do it.", "pull_request_review_id": review, "path": "a.py", "line": 1} for number, review in ((5, 60), (6, 61), (7, 62))]
+    # Only the workflow's own comment can end a round, so a forged marker moves nothing.
+    fetched = ReviewFetcher(_github("@claude", raw, reviews, (_marker("2026-10-10T06:10:00Z", login="mallory"),))).fetch("o/r", 4, 77)
+    assert [comment.id for comment in fetched.comments] == [7]
+    with pytest.raises(ValueError, match="write access"):
+        ReviewFetcher(_github("@claude", [], association="CONTRIBUTOR")).fetch("o/r", 4, 77)
+
+
+def test_a_summary_only_round_becomes_one_comment() -> None:
     fetched = ReviewFetcher(_github("@CLAUDE rename x", [])).fetch("o/r", 4, 77)
     assert [(comment.id, comment.body, comment.path) for comment in fetched.comments] == [(77, "rename x", None)]
+    # A review that a clean round already covered starts an empty round, not a repeat.
+    again = ReviewFetcher(_github("@claude rename x", [], issue_comments=(_marker(_THROUGH),))).fetch("o/r", 4, 77)
+    assert again.comments == ()
 
 
 # Building prompts
@@ -197,7 +248,7 @@ def test_a_summary_only_review_becomes_one_comment() -> None:
 
 def test_the_resolver_prompt_holds_every_comment_to_group_itself() -> None:
     agents = AgentRegistry(_AGENTS_DIR).load()
-    plan = PlanBuilder().build(_review(_comment(1, "Use a logger."), _comment(2, "Rename this.", "b.py")), agents)
+    plan = PlanBuilder().build(_review(_comment(1, "Use a logger."), _comment(2, "Rename this.", "b.py")), agents, ())
     specs = {spec.name: spec for spec in agents}
     text = PromptBuilder().agent_prompt(plan, plan.tasks[0], specs["resolver"], (), {1: "pkg/README.md"})
     assert text.startswith("# Review Comment Resolver")
@@ -210,7 +261,7 @@ def test_the_resolver_prompt_holds_every_comment_to_group_itself() -> None:
 
 def test_a_per_comment_prompt_lists_the_other_comments_out_of_scope() -> None:
     agents = AgentRegistry(_AGENTS_DIR).load()
-    plan = PlanBuilder().build(_review(_comment(1, "Use a logger."), _comment(2, "Rename this.", "b.py")), agents)
+    plan = PlanBuilder().build(_review(_comment(1, "Use a logger."), _comment(2, "Rename this.", "b.py")), agents, ())
     specs = {spec.name: spec for spec in agents}
     text = PromptBuilder().agent_prompt(plan, plan.tasks[1], specs["preventer"], (), {})
     assert "#### Comment 1 at app.txt:1" in text
@@ -220,7 +271,7 @@ def test_a_per_comment_prompt_lists_the_other_comments_out_of_scope() -> None:
 
 def test_a_comment_without_a_file_says_why_it_has_no_readme() -> None:
     agents = AgentRegistry(_AGENTS_DIR).load()
-    plan = PlanBuilder().build(_review(_comment(5, path=None)), agents)
+    plan = PlanBuilder().build(_review(_comment(5, path=None)), agents, ())
     notes_task = plan.tasks[-1]
     spec = next(agent for agent in agents if agent.name == notes_task.agent)
     text = PromptBuilder().agent_prompt(plan, notes_task, spec, (), {})
@@ -295,7 +346,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Fixture:
 
 def _finalize(repo: _Fixture, task_index: int, report: AgentReport | None, gate: tuple[str, ...] = _PASS, succeeded: bool = True, start: str | None = None) -> TaskResult:
     agents = (_agent("resolver", 10, Scope.REVIEW), _agent("preventer", 20, Scope.COMMENT, True))
-    plan = PlanBuilder().build(repo.review, agents)
+    plan = PlanBuilder().build(repo.review, agents, ())
     task = plan.tasks[task_index]
     spec = next(agent for agent in agents if agent.name == task.agent)
     request = FinalizeRequest(plan=plan, task=task, agent=spec, report=report, agent_succeeded=succeeded, start_sha=start or _git(repo.work, "rev-parse", "HEAD"), push_remote=str(repo.remote), gate=gate)
@@ -408,30 +459,208 @@ def test_a_push_race_is_resolved_by_replaying_on_top(repo: _Fixture) -> None:
     assert "mine.txt" in remote_files
 
 
+# Merging the base branch, against real git repositories
+
+
+def _diverge(repo: _Fixture) -> str:
+    # The base branch changes the line the feature changed, adds a file, and changes restored config.
+    other = repo.root / "main-side"
+    _git(repo.root, "clone", "-q", "-b", "main", str(repo.remote), str(other))
+    (other / "app.txt").write_text("main\n", encoding="utf-8")
+    (other / "lib.txt").write_text("from main\n", encoding="utf-8")
+    (other / ".claude" / "ci-settings.json").write_text('{"from": "main"}\n', encoding="utf-8")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-q", "-m", "main moves on")
+    _git(other, "push", "-q", "origin", "main")
+    _git(repo.work, "fetch", "-q", "origin")
+    return _git(repo.work, "rev-parse", "origin/main")
+
+
+def _start_merge(repo: _Fixture) -> str:
+    # What the workflow's "Start merging the base branch" step does before the agent runs.
+    start = _git(repo.work, "rev-parse", "HEAD")
+    subprocess.run(["git", "merge", "--no-commit", "--no-ff", "origin/main"], cwd=repo.work, capture_output=True, check=False)
+    return start
+
+
+def _finalize_merge(repo: _Fixture, start: str, report: AgentReport | None) -> TaskResult:
+    agent = _agent("merge-conflicts", 5, Scope.MERGE)
+    plan = PlanBuilder().build(_review(sha=start), (agent,), ("app.txt",))
+    request = FinalizeRequest(plan=plan, task=plan.tasks[0], agent=agent, report=report, agent_succeeded=True, start_sha=start, push_remote=str(repo.remote), gate=_PASS)
+    return MergeFinalizer(Git(repo.work), CommandRunner()).finalize(request)
+
+
+def _merged(summary: str) -> AgentReport:
+    return AgentReport(TaskStatus.CHANGED, "chore(merge): merge main into feat", summary, "")
+
+
+def test_git_previews_the_conflicts_without_touching_the_checkout(repo: _Fixture) -> None:
+    _diverge(repo)
+    preview = Git(repo.work).merge_preview("origin/main", "HEAD")
+    assert preview.conflicts == ("app.txt",)
+    assert _git(repo.work, "status", "--porcelain") == ""
+    assert Git(repo.work).merge_preview("origin/main", "origin/main").conflicts == ()
+
+
+def test_a_settled_merge_is_pushed_as_a_two_parent_merge_commit(repo: _Fixture) -> None:
+    base = _diverge(repo)
+    start = _start_merge(repo)
+    # The agent settles the conflict, and the action had swapped restored config for other copies.
+    (repo.work / "app.txt").write_text("main and ok\n", encoding="utf-8")
+    (repo.work / "CLAUDE.md").write_text("tampered\n", encoding="utf-8")
+    (repo.work / ".claude" / "ci-settings.json").write_text("tampered\n", encoding="utf-8")
+    result = _finalize_merge(repo, start, _merged("Kept both sides."))
+    assert result.status is TaskStatus.CHANGED, result.detail
+    assert _remote_head(repo) == result.commit_sha
+    assert _git(repo.work, "rev-parse", "HEAD^1", "HEAD^2").split() == [start, base]
+    assert _git(repo.work, "show", "HEAD:app.txt") == "main and ok"
+    assert _git(repo.work, "show", "HEAD:lib.txt") == "from main"
+    # Restored config comes back as the clean merge holds it, keeping the base branch's change.
+    assert _git(repo.work, "show", "HEAD:CLAUDE.md") == "@AGENTS.md"
+    assert _git(repo.work, "show", "HEAD:.claude/ci-settings.json") == '{"from": "main"}'
+    assert "Claude-Review-Agent: merge-conflicts" in _git(repo.work, "log", "-1", "--format=%B")
+
+
+def test_a_merge_the_agent_committed_itself_still_keeps_both_parents(repo: _Fixture) -> None:
+    base = _diverge(repo)
+    start = _start_merge(repo)
+    (repo.work / "app.txt").write_text("settled\n", encoding="utf-8")
+    _git(repo.work, "commit", "-q", "-am", "agent merge")
+    result = _finalize_merge(repo, start, _merged("Settled."))
+    assert result.status is TaskStatus.CHANGED, result.detail
+    assert _git(repo.work, "rev-parse", "HEAD^1", "HEAD^2").split() == [start, base]
+
+
+def test_a_merge_with_markers_left_or_a_moved_branch_is_never_pushed(repo: _Fixture) -> None:
+    _diverge(repo)
+    start = _start_merge(repo)
+    # The agent claims success but leaves git's conflict markers in place.
+    unsettled = _finalize_merge(repo, start, _merged("Done."))
+    assert unsettled.status is TaskStatus.FAILED
+    assert "Conflict markers remain in app.txt" in unsettled.detail
+    assert _remote_head(repo) == start
+    # Someone pushes while the agent works: a merge is never replayed, because that would flatten it.
+    other = repo.root / "other"
+    _git(repo.root, "clone", "-q", "-b", "feat", str(repo.remote), str(other))
+    (other / "theirs.txt").write_text("theirs\n", encoding="utf-8")
+    _git(other, "add", "theirs.txt")
+    _git(other, "commit", "-q", "-m", "a human push")
+    _git(other, "push", "-q", "origin", "feat")
+    (repo.work / "app.txt").write_text("settled\n", encoding="utf-8")
+    raced = _finalize_merge(repo, start, _merged("Settled."))
+    assert raced.status is TaskStatus.FAILED
+    assert "rejected" in raced.detail
+    assert _remote_head(repo) == _git(other, "rev-parse", "HEAD")
+
+
+def test_a_merge_may_not_edit_workflow_files_the_base_branch_left_alone(repo: _Fixture) -> None:
+    _diverge(repo)
+    start = _start_merge(repo)
+    (repo.work / "app.txt").write_text("settled\n", encoding="utf-8")
+    (repo.work / ".github" / "workflows").mkdir(parents=True)
+    (repo.work / ".github" / "workflows" / "x.yml").write_text("on: push\n", encoding="utf-8")
+    refused = _finalize_merge(repo, start, _merged("Also edited CI."))
+    assert refused.status is TaskStatus.FAILED
+    assert ".github/workflows/x.yml" in refused.detail
+    assert _remote_head(repo) == start
+
+
 # The summary comment
 
 
 def test_the_report_shows_one_row_per_comment_and_fails_on_missing_results() -> None:
     agents = (_agent("resolver", 10, Scope.REVIEW), _agent("preventer", 20, Scope.COMMENT, True))
-    plan = PlanBuilder().build(_review(_comment(1), _comment(2)), agents)
+    plan = PlanBuilder().build(_review(_comment(1), _comment(2)), agents, ())
     done = {
         "10-resolver-review": TaskResult("10-resolver-review", TaskStatus.CHANGED, "Fixed.", "b" * 40, BiteVerdict.NOT_APPLICABLE, ""),
         "20-preventer-c1": TaskResult("20-preventer-c1", TaskStatus.CHANGED, "Guarded.", "c" * 40, BiteVerdict.VERIFIED, ""),
     }
     body, ok = ReportWriter().render(plan, ("resolver", "preventer"), done)
-    assert "on commit `aaaaaaaaaaaa`: 2 comment(s)." in body
+    assert "on commit `aaaaaaaaaaaa`: 2 comment(s) left since the pull request opened." in body
     assert "| Comment | resolver | preventer |" in body
     assert "guard verified" in body
     # A task that never reported is shown as failed and fails the report.
     assert body.count("did not report") >= 2
     assert not ok
+    # A round that failed leaves no marker, so the next @claude review covers its comments again.
+    assert "claude-review-agents through=" not in body
+
+
+def test_a_clean_round_with_a_merge_reports_it_first_and_ends_with_the_marker() -> None:
+    agents = (_agent("merge-conflicts", 5, Scope.MERGE), _agent("resolver", 10, Scope.REVIEW))
+    plan = PlanBuilder().build(_review(_comment(1)), agents, ("app.txt", "b.py"))
+    done = {
+        "05-merge-conflicts-merge": TaskResult("05-merge-conflicts-merge", TaskStatus.CHANGED, "Merged.", "d" * 40, BiteVerdict.NOT_APPLICABLE, ""),
+        "10-resolver-review": TaskResult("10-resolver-review", TaskStatus.CHANGED, "Fixed.", "b" * 40, BiteVerdict.NOT_APPLICABLE, ""),
+    }
+    body, ok = ReportWriter().render(plan, ("resolver",), done)
+    assert ok
+    assert "Merge of `main`, 2 conflicted file(s): ✅ changed `ddddddd`" in body
+    assert body.index("Merge of `main`") < body.index("| Comment | resolver |")
+    assert body.rstrip().endswith(ROUND_MARKER.format(through=_THROUGH))
 
 
 def test_an_empty_review_reports_that_and_passes() -> None:
     agents = (_agent("resolver", 10, Scope.REVIEW),)
-    body, ok = ReportWriter().render(PlanBuilder().build(_review(), agents), (), {})
-    assert "no comments" in body
+    body, ok = ReportWriter().render(PlanBuilder().build(_review(), agents, ()), (), {})
+    assert "no new comments" in body
     assert ok
+
+
+# The sweep for reviews on conflicting pull requests
+
+
+@dataclass
+class _FakeSweepGitHub:
+    pulls: list[dict[str, Any]]
+    run_titles: list[str]
+    posted: list[tuple[str, dict[str, Any]]]
+
+    def get(self, path: str) -> dict[str, Any]:
+        assert path == "repos/o/r/actions/workflows/claude-review-agents.yml/runs?per_page=100"
+        return {"workflow_runs": [{"display_title": title} for title in self.run_titles]}
+
+    def graphql(self, query: str, variables: dict[str, str]) -> dict[str, Any]:
+        assert variables == {"owner": "o", "name": "r"}
+        return {"repository": {"defaultBranchRef": {"name": "main"}, "pullRequests": {"nodes": self.pulls}}}
+
+    def post(self, path: str, payload: dict[str, Any]) -> None:
+        self.posted.append((path, payload))
+
+
+def _pull(number: int, mergeable: str, reviews: list[tuple[int, str, str, str]], marker: str = "") -> dict[str, Any]:
+    nodes = [{"databaseId": review_id, "body": body, "submittedAt": at, "authorAssociation": association, "author": {"__typename": "User", "login": "someone"}} for review_id, body, at, association in reviews]
+    comments = [{"body": ROUND_MARKER.format(through=marker), "author": {"login": "github-actions"}}] if marker else []
+    return {"number": number, "mergeable": mergeable, "isCrossRepository": False, "reviews": {"nodes": nodes}, "comments": {"nodes": comments}}
+
+
+def test_the_sweep_starts_the_newest_unhandled_claude_review_on_conflicting_pull_requests_only() -> None:
+    pulls = [
+        _pull(1, "CONFLICTING", [(10, "@claude", "2026-10-10T06:00:00Z", "OWNER"), (11, "nit", "2026-10-10T06:05:00Z", "OWNER"), (12, "@claude again", "2026-10-10T06:10:00Z", "OWNER")]),
+        # A mergeable pull request gets its own review event, so the sweep never races it.
+        _pull(2, "MERGEABLE", [(20, "@claude", "2026-10-10T06:00:00Z", "OWNER")]),
+        # Nobody without write access can start the agents.
+        _pull(3, "CONFLICTING", [(30, "@claude", "2026-10-10T06:00:00Z", "NONE")]),
+        # A clean round already covered this review.
+        _pull(4, "CONFLICTING", [(40, "@claude", "2026-10-10T06:00:00Z", "OWNER")], marker="2026-10-10T06:00:00Z"),
+        # An earlier sweep or event already started this one.
+        _pull(5, "CONFLICTING", [(50, "@claude", "2026-10-10T06:00:00Z", "MEMBER")]),
+    ]
+    github = _FakeSweepGitHub(pulls, [RUN_NAME.format(pull=5, review=50)], [])
+    started = ReviewSweeper(github).sweep("o/r")
+    assert [(dispatch.pull_number, dispatch.review_id) for dispatch in started] == [(1, 12)]
+    assert github.posted == [("repos/o/r/actions/workflows/claude-review-agents.yml/dispatches", {"ref": "main", "inputs": {"pr": "1", "review": "12"}})]
+
+
+def test_the_agents_workflow_names_its_runs_the_way_the_sweep_looks_for_them() -> None:
+    workflow = (_WORKFLOWS / "claude-review-agents.yml").read_text(encoding="utf-8")
+    expected = RUN_NAME.format(pull="${{ github.event.pull_request.number || inputs.pr }}", review="${{ github.event.review.id || inputs.review }}")
+    assert f'run-name: "{expected}"' in workflow
+    # Only people who can push may start the agents from a review.
+    assert """contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)""" in workflow
+    sweep = (_WORKFLOWS / "claude-review-sweep.yml").read_text(encoding="utf-8")
+    assert "run.py sweep" in sweep
+    assert "secrets.CLAUDE_REVIEW_SWEEP_TOKEN" in sweep
 
 
 def test_run_py_check_accepts_the_committed_prompts() -> None:
