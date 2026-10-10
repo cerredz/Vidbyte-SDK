@@ -91,3 +91,21 @@ class McpBridgeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(text, "part one\npart two\n[image: image/png, 12 base64 chars omitted]")
         self.assertNotIn("iVBORw0KGgo=", text)
+
+    def test_binary_embedded_resource_is_replaced_by_placeholder(self) -> None:
+        """An embedded resource's base64 blob never reaches the prompt; uri and mimeType do."""
+        client = McpClient(FakeTransport())
+        blob = "JVBERi0xLjQKJcfsj6IKBLOBPAYLOAD=="
+        text = client._content_to_text(
+            {
+                "content": [
+                    {"type": "text", "text": "exported"},
+                    {
+                        "type": "resource",
+                        "resource": {"uri": "file:///r.pdf", "mimeType": "application/pdf", "blob": blob},
+                    },
+                ]
+            }
+        )
+        self.assertEqual(text, f"exported\n[resource: file:///r.pdf, application/pdf, {len(blob)} base64 chars omitted]")
+        self.assertNotIn(blob, text)

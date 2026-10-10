@@ -109,6 +109,19 @@ class McpClient:
                     size = len(str(item.get("data", "")))
                     mime = item.get("mimeType", "unknown")
                     parts.append(f"[{item.get('type')}: {mime}, {size} base64 chars omitted]")
+                elif (
+                    item.get("type") == "resource"
+                    and isinstance(item.get("resource"), Mapping)
+                    and "blob" in item["resource"]
+                ):
+                    # @intent mcp-binary-content-stays-out-of-prompts
+                    # A binary embedded resource carries its base64 payload in `resource.blob`, so it
+                    # gets the same placeholder, keeping the uri and media type the model can act on.
+                    resource = item["resource"]
+                    size = len(str(resource.get("blob", "")))
+                    uri = resource.get("uri", "unknown")
+                    mime = resource.get("mimeType", "unknown")
+                    parts.append(f"[resource: {uri}, {mime}, {size} base64 chars omitted]")
                 else:
                     parts.append(str(item))
             else:
