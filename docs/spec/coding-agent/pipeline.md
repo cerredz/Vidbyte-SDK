@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-coding-agent
 branch: feat/coding-agent
 base_commit: 8f23fd676d60f413e0353281dd73e60dc719407a
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/690
 until: none
 started: 2026-10-10 00:51
 ---
@@ -16,14 +16,14 @@ started: 2026-10-10 00:51
 | S0 worktree + capture + recon | done | 2026-10-10 00:51 | 2026-10-10 01:08 | reports/S0-scout.md | base_commit 8f23fd67; code-map.md (4 sections, 329 lines) |
 | S1 spec + review | done | 2026-10-10 01:09 | 2026-10-10 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @8f669933 approved; r1 SOUND WITH FIXES (1B/3M/4m), r2 SOUND WITH FIXES (0B/1M/2m), all 11 applied |
 | S2 tests | done | 2026-10-10 | 2026-10-10 | reports/S2-test-author.md | S2_HEAD d158d5f6 (tests a25a3c41, proof d158d5f6); 42 fns / 97 cases in tests/features/coding_agent/; red: 86 = 67 ImportError(CodingAgent) + 19 ModuleNotFoundError(bash), 11 POSIX-only skipped on win32; spec status tests-written @0b2b4f56 |
-| S3 implement | pending | | | | |
+| S3 implement | done | 2026-10-10 | 2026-10-10 | reports/S3-implementer.md | S3_HEAD 4e285d91; draft PR #690 https://github.com/cerredz/Vidbyte-SDK/pull/690; 8 rows in 9 code commits (25b5260b..4c4a62ef); pack 86 pass/11 skip win 3.11, 97/97 WSL 3.12 (orchestrator re-ran both); test diff vs S2_HEAD empty; budget 2/2 files, 0/0 enums+dataclasses, 2/2 public names; remote CI 38046509073 + static-policy 38046510490 success @4c4a62ef |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S2_HEAD: d158d5f6 · S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S2_HEAD: d158d5f6 · S3_HEAD: 4e285d91 · PR: #690 · S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 00:51 — Unset the branch upstream (`git branch --unset-upstream`) — `git worktree add -b … origin/main` made `feat/coding-agent` track `origin/main`; pushes must use `git push -u origin feat/coding-agent`.
@@ -69,3 +69,7 @@ started: 2026-10-10 00:51
 - Missing bash must not raise in `BashTool.__init__` or `CodingAgent.__init__` (AC-17 builds with PATH pointed at an empty folder). Timeout result's last line contains the patched limit; `spawn_failed` names `ValueError`/`OSError` without the exception message. — *source:* S2 test author
 - Highest-value test: `test_bash_tool_process_bounds.py::test_cancellation_kills_the_process_group_even_after_the_shell_has_exited` fails a natural `if process.returncode is None` guard around POSIX `killpg`. AC-28 detects open `BaseSubprocessTransport` via gc after `execute`. — *source:* S2 test author
 - POSIX-only tests skip on win32; run them in WSL with `/tmp/s2-coding-agent-venv/bin/python` (distro MuseUbuntu1; `MSYS_NO_PATHCONV=1` from Git Bash). AC-27's Python 3.13 half is manual. AC-29 truncation line's only digits must be the cap. — *source:* S2 test author
+- S3 deviation: `_spawn(executable, command)` takes the already-None-checked executable (mypy S009); recorded in spec §17. Code reads two private attributes: `process._transport` (D-18) and `PricedOperationTool._PAYLOAD_KEY` in coding.py. — *source:* S3 implementer
+- S3 limitation: `_stop` suppresses only ProcessLookupError and the grace TimeoutError, so an EPERM from `killpg` could replace CancelledError. `bash_not_found` hint reads `sys.platform` at call time. A blank line precedes `exit code: N` when output ends with a newline (spec literal format). — *source:* S3 implementer
+- origin/main moved to e6cdfa31 and adds lint rules A009, C006, C007, C008 that this branch lacks; none of the 8 §12.3 files changed upstream. Re-lint after any rebase/merge of main. — *source:* S3 implementer
+- AC-27 (Python 3.13) not run: `py -3.13` lacks pytest_asyncio and PyYAML; installing into it is off-limits. AC-22 against a real Git for Windows layout not run (manual per test plan). — *source:* S3 implementer
