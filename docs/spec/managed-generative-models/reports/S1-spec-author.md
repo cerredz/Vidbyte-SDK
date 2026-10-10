@@ -74,3 +74,28 @@
 4. **A-2: C017 tracing.** I believe the tracer evaluates the decorator's inner call with the constant URL and the `bearer_headers` + subscript header shape and judges it API_KEY-credentialed. This is from reading `lint/core/url_flow.py`, not from running it, because the contract cannot be re-vendored at S1.
 5. **D-12: the placeholder key.** `resolved_api_key()` returns `"vidbyte-managed"` in managed state, which keeps the real key out of adapter-built headers. It is a new convention, and a reviewer could prefer another shape.
 6. **EC-27: behavior change for Jev users.** Anyone who already has `VIDBYTE_API_KEY` set and no provider key used to get an error from text calls. They are now billed. This is intended by the request, but it is money-affecting.
+
+## Addendum — revision round 1 (spec r2)
+
+Inputs: `reports/S1-spec-review.md` (REVISE: R-1 Blocker, R-2..R-7 Major, R-8..R-14 Minor) and backend spec r3 at `a14b37e7e` (approved, final), with its author report's "§9.2 changes in r2/r3" and "SDK obligations that follow from r3". Status stays `draft`, because §8, §8.5, §9, §10 and the shape of §12 changed. Revision 2.
+
+### Triage
+- **All 14 findings accepted.** None rejected, none deferred to the user. The scope-adding parts became optional questions defaulting to not built: Q-8 (client-side `extra_body` checks, R-4), Q-9 (fall-through warning, R-6), Q-10 (refuse managed `cached_content`, R-7). Every disposition is in spec §16.
+- **R-1:** floor 630.0 (D-9, INV-10, §8.5, §9.3). AC-9: 60/30/120/900 → 630/630/630/900.
+- **R-2:** new D-17 binds the raise shape: record locals in `except`, raise after the block, `json.loads` in a narrow try, no `parse_json_response`. AC-11/12 assert `__context__ is None`.
+- **R-3:** per the orchestrator. The endpoint constant is split into new row 15. P2 = rows 15, 6, 11, 12 in one commit, copied from the backend branch commit for backend §12.3 row 20. The C020 ratchet moves to P1. §15 has a merge-order note (squash-merge follow-up). No main or merge-base gate.
+- **R-4 to R-7:** INV-9 scoped, plus EC-8 and AC-8 (c)(d). A §9.2 emitted-keys table plus AC-26 and A-14. EC-30 and the per-provider README rule. T-7 and EC-31.
+- **R-8 to R-14:** the `HTTPStatus` 2xx test and S008/S002/S019 in §12.4. AC-17 corrected. Row 7 withdrawn. INV-14 narrowed, with the AC-21 reverse case. AC-25, EC-33, EC-34. Header inventories updated in rows 4 and 5. Citation and PowerShell fixes.
+
+### Backend r3 contract changes beyond the findings
+- A response that is not a JSON object, at any status, is an edge failure, classified before the 2xx and `"error": true` checks (INV-11, EC-15, AC-12).
+- Strict model catalogue and the model pattern (EC-9, A-8).
+- A relayed 429 or 400 can describe Vidbyte's own account (EC-32).
+- 409 cannot arise, because every call sends a fresh key. Same-key retries stay unbuilt (NG-13, Q-7).
+- The 600 s limit is a total deadline (D-9).
+- D-8 and FR-5 no longer cite backend r1 Q-4/Q-5. They cite r3 §9.2.4 steps 4.6 and 11.
+
+### Least-sure points in r2
+1. **Edge-failure wording.** For a non-JSON answer, the message says the edge answered, the failure is usually transient, and Vidbyte may already have billed the call. Whether a billed 2xx can be replaced by an edge page is not stated by the backend. I kept the cautious "may have billed".
+2. **Branch-commit lookup.** §12.5 finds the row-20 commit as the last commit on the local `feat/generative-model-gateway` branch that touched `contracts/vidbyte-platform-contract.json`. The backend worktree shares `C:/Users/422mi/vidbyte-repos/vidbyte/.git` (checked). If a later backend commit regenerates the contract again, the latest one is the right copy.
+3. **A-14.** The emitted-keys table matches the r3 lists by reading. A drift in either repository is caught only by AC-26 on the SDK side, plus the backend's own tests.
