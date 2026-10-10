@@ -747,6 +747,15 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(res.error)
         self.assertIn("Runner crashed!", res.error)
 
+    async def test_eval_runner_rejects_concurrency_below_one(self) -> None:
+        # @intent eval-concurrency-at-least-one
+        # [Silent Failure] concurrency=0 built Semaphore(0), so every case waited forever and arun() never returned.
+        for bad in (0, -1, True):
+            with self.assertRaisesRegex(ValueError, "concurrency must be an integer of at least 1"):
+                EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=bad)
+        runner = EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(EvalSuite("suite", [EvalCase(prompt="q1")]))).results), 1)
+
     async def test_eval_registry_and_comparison(self) -> None:
         # Tests EvalRegistry persistence loop and ComparisonReport metric generation.
         temp_dir = tempfile.mkdtemp()

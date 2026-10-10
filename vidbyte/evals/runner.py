@@ -39,6 +39,10 @@ class EvalRunner:
 
     def __init__(self, target: object, *, default_grader: BaseGrader, concurrency: int = 4, max_retries: int = 1) -> None:
         # Initializes the EvalRunner with an execution target, a default grader, and concurrency settings.
+        # @intent eval-concurrency-at-least-one
+        # Semaphore(0) would park every case forever, and True would silently mean one, so reject both here.
+        if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+            raise ValueError(f"EvalRunner concurrency must be an integer of at least 1, got {concurrency!r}.")
         self.target = target
         self.default_grader = default_grader
         self.concurrency = concurrency
