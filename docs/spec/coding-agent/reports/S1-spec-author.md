@@ -87,3 +87,45 @@ Spec: `docs/spec/coding-agent/spec.md` (revision 1, committed `672157b8`). This 
 - Each weighted word maps to an INV, NFR or FR (NFR-1, NFR-7, INV-8, INV-9, FR-2).
 - No test cases appear anywhere in the spec.
 - Every command flag the spec names exists (`--rule`, `--stage source|package`, `--check`).
+
+## Addendum — r2 (S1 review round 1)
+
+Spec revised to r2 in commit `4be45f84`. All 8 findings were accepted (1 Blocker, 3 Major, 4 Minor). §16 records each one.
+
+**What changed**
+
+- **R-1, Blocker.**
+  - Added `BASH_KILL_GRACE_SECONDS = 5.0`, the same value as the MCP transport's `_DEFAULT_SHUTDOWN_TIMEOUT`. `_stop` now waits for exit with `asyncio.wait_for(process.wait(), BASH_KILL_GRACE_SECONDS)` and carries on whether or not that wait finishes. Every call therefore returns within `BASH_TIMEOUT_SECONDS` + `BASH_KILL_GRACE_SECONDS` on every OS (INV-11, NFR-4).
+  - The Windows limitation is now stated plainly: killing the launcher leaves the command running (EC-14, A-9, README and header caveats).
+  - Killing the whole Windows process tree with a job object is optional Q-6, default no, because no tree kill was discussed.
+  - New criteria AC-25 (POSIX `setsid` descendant) and AC-27 (Windows), and new edge case EC-30.
+- **R-2, Major.**
+  - New decision D-17: `_collect` reads the output to its end and then waits for exit, both under one `asyncio.wait_for(..., BASH_TIMEOUT_SECONDS)`.
+  - `_stop` now runs unconditionally on timeout and on cancellation. On POSIX it calls `killpg` even when the shell itself has already exited.
+  - `_stop` never runs after a normal completion (new INV-25).
+  - Cancellation is handled by an explicit `except asyncio.CancelledError` that cleans up and re-raises, which is the pattern S019's repair text prescribes.
+  - New AC-24 and AC-26, new EC-28 and EC-29; AC-15 extended.
+- **R-3, Major.** The Windows lookup now checks `bin/bash.exe` under the first three parent folders of the resolved `git`. It is written flat to satisfy S024. AC-22 now covers `git.exe` in `cmd`, `bin` and `mingw64\bin`. New EC-31.
+- **R-4, Major.**
+  - `BASH_MAX_OUTPUT_BYTES` is now `50_000`, the upper bound of `GlobTool`/`GrepTool` `max_chars` (`glob.py:44`, `grep.py:51`).
+  - I kept the first bytes, which matches how `GlobTool`, `GrepTool` and `ToolSettings.truncate` cut. Keeping the last bytes is recorded as D-11's runner-up.
+- **R-5, Minor.**
+  - The constants are now module-level in `vidbyte/tools/builtins/bash.py`. `vidbyte/lib/constants/bash.py` and its row are gone, W-1 is withdrawn, and the budget is 2 new files.
+  - §12.3 is renumbered 1–8.
+  - The test seam (patching `vidbyte.tools.builtins.bash.<NAME>`) is unchanged.
+- **R-6, Minor.**
+  - D-16 now explains why the view stays in the agent module.
+  - The agents README gets a page-text caveat, and the tools README's Priced Operation Tools section gets one sentence.
+  - The root README is recorded as "no change", with the reason.
+- **R-7, Minor.** INV-3, INV-14, EC-21 and INV-23 are reworded to match the code.
+- **R-8, Minor.**
+  - S024 is added to §11, AC-19, §14 and §12.4, together with the other IMPROVED rules (S001, S009, S010).
+  - The S052 code list is corrected.
+
+**Disagreements:** none. I checked each cited fact before accepting it: `glob.py:44` and `grep.py:51` cap at 50,000; `code_execution.py:30-31` defines module-level constants; `transport.py:65` sets `_DEFAULT_SHUTDOWN_TIMEOUT = 5.0`; S019's repair text; S024's `MAX_NESTING_DEPTH = 3`; S052's codes; `retry_only_idempotent=True` is the default (`settings/tool_error.py:45`); and `py -0` shows 3.13 as this machine's default interpreter.
+
+**Least sure in r2**
+
+- **3.12 is unmeasured.** I did not measure whether asyncio's `wait()` on Python 3.12 waits for the pipes to close. The grace bound makes this irrelevant to correctness.
+- **POSIX `killpg` on a reaped leader is not demonstrated here.** It relies on the group id staying valid while any member is alive, which is standard POSIX behaviour.
+- **Choosing the first 50,000 bytes over the last is a judgement call.**
