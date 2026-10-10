@@ -277,6 +277,22 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, options={"exclude_tools": ("audit",)})
         self.assertEqual(tuple(m.content for m in after), ("safe", "[tool result cleared by compaction]"))
 
+    async def test_clear_tool_results_except_keeps_excluded_tool_on_every_provider_shape(self) -> None:
+        # [Silent Failure] Anthropic tool_result blocks (named through their tool_use id) and Gemini function parts resolve tool names, so the excluded tool survives as on OpenAI.
+        tools = ("read_file", "web_search")
+        shapes = {
+            "openai": (lambda b: {"role": "assistant", "content": None, "tool_calls": [{"id": f"c{b}{t}", "type": "function", "function": {"name": t, "arguments": "{}"}} for t in tools]}, lambda b, t: {"role": "tool", "tool_call_id": f"c{b}{t}", "name": t, "content": f"{t} body {b}"}, lambda m: m["content"]),
+            "anthropic": (lambda b: {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{b}{t}", "name": t, "input": {}} for t in tools]}, lambda b, t: {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{b}{t}", "content": f"{t} body {b}"}]}, lambda m: m["content"][0]["content"]),
+            "gemini": (lambda b: {"role": "model", "parts": [{"functionCall": {"name": t, "args": {"b": b}}} for t in tools]}, lambda b, t: {"role": "user", "parts": [{"functionResponse": {"name": t, "response": {"output": f"{t} body {b}"}}}]}, lambda m: m["parts"][0]["functionResponse"]["response"]["output"]),
+        }
+        for name, (call, result, body) in shapes.items():
+            with self.subTest(provider=name):
+                history = ({"role": "user", "content": "audit"}, *(m for b in (1, 2) for m in (call(b), *(result(b, t) for t in tools))))
+                engine = ContextCompactionEngine()
+                self.assertEqual([m.metadata["tool_name"] for m in engine.to_context_messages(history)][1:4], ["read_file", "read_file", "web_search"])
+                after, _ = await engine.compact_provider_messages(history, mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, options={"exclude_tools": ["read_file"]})
+                self.assertEqual([body(m) for m in (after[2], after[3], after[5], after[6])], ["read_file body 1", "[tool result cleared by compaction]", "read_file body 2", "[tool result cleared by compaction]"])
+
     async def test_head_tail_preview_short_content_and_counts(self) -> None:
         # [Edge Case] Short content is unchanged and long content gets the correct omitted count.
         messages = (msg("tool", "short", "tool_result"), msg("tool", "abcdefghi", "tool_result"))
