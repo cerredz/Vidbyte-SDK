@@ -9,8 +9,8 @@ repair, local precedent, rejected shortcuts, and focused verification command.
 
 - Run pinned Ruff once and expose the independently baselined analyzer policies,
   including 37 Ruff policies.
-- Enforce five SDK domain-contract policies (C001-C005) over the same source
-  catalogue.
+- Enforce the SDK domain-contract policies (the C-series table below) over the
+  same source catalogue.
 - Run pinned mypy once and ratchet every package type-contract error.
 - Scan transport, registry, export, boundary-error, pricing, cancellation,
   documentation, and helper-ownership contracts without importing the SDK.
@@ -70,6 +70,7 @@ have been reviewed. Analyzer failures are never recorded as zero.
 
 Nested folders:
 
+- `contracts/` -- byte-for-byte copies of contracts other Vidbyte repositories generate, read by C017-C020.
 - `core/` -- source discovery, analyzers, rule contracts, baselines, and reports.
 - `rules/` -- one independently selectable module per S, A, or C rule.
 
@@ -159,6 +160,11 @@ Nested folders:
 | C003 | no-dynamic-import-from-data | Runtime data cannot choose imported modules |
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
+| C016 | public-api-contract-current | contracts/sdk-public-api.json equals the generator's output for vidbyte.__all__ and the pyproject version |
+| C017 | platform-route-contract | SDK requests to Vidbyte hosts use a contract route, an accepted method, and an admitted credential |
+| C018 | canonical-api-host | Vidbyte API URLs in vidbyte/ string literals use an origin the platform contract lists as live |
+| C019 | platform-error-code-contract | Platform-family or near-miss error codes that SDK code compares, matches, maps, or defines are in the platform contract's error_codes |
+| C020 | api-key-prefix-contract | One *API_KEY_PREFIX constant in vidbyte/lib/constants/ spells the API-key prefix, equal to the platform contract's api_key_prefix; no inline or foreign copies |
 
 ## Adding a rule
 

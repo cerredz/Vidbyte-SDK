@@ -21,6 +21,11 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c003_no_dynamic_import_from_data.py` -- fixed import targets.
 - `c004_operation_pricing_rate_floor.py` -- operation pricebook magnitude floor.
 - `c005_cost_arithmetic_site_parity.py` -- reviewed cost-arithmetic locations.
+- `c016_public_api_contract_current.py` -- committed SDK public-API contract matches its generator.
+- `c017_platform_route_contract.py` -- SDK requests to Vidbyte hosts match a platform-contract route, method, and access class.
+- `c018_canonical_api_host.py` -- Vidbyte API URLs in SDK code use an origin the platform contract lists as live.
+- `c019_platform_error_code_contract.py` -- platform-family or near-miss error codes in SDK decision positions are exported by the platform contract.
+- `c020_api_key_prefix_contract.py` -- the Vidbyte API-key prefix is spelled once, by a constant equal to the platform contract.
 - `s001_python_correctness_foundation.py` -- Pyflakes/syntax correctness.
 - `s002_exception_cause_chaining.py` -- explicit translated causes.
 - `s003_strict_zip.py` -- explicit zip length behavior.
