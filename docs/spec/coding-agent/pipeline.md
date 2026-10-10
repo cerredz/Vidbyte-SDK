@@ -15,7 +15,7 @@ started: 2026-10-10 00:51
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 00:51 | 2026-10-10 01:08 | reports/S0-scout.md | base_commit 8f23fd67; code-map.md (4 sections, 329 lines) |
 | S1 spec + review | done | 2026-10-10 01:09 | 2026-10-10 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @8f669933 approved; r1 SOUND WITH FIXES (1B/3M/4m), r2 SOUND WITH FIXES (0B/1M/2m), all 11 applied |
-| S2 tests | pending | | | | |
+| S2 tests | done | 2026-10-10 | 2026-10-10 | reports/S2-test-author.md | S2_HEAD d158d5f6 (tests a25a3c41, proof d158d5f6); 42 fns / 97 cases in tests/features/coding_agent/; red: 86 = 67 ImportError(CodingAgent) + 19 ModuleNotFoundError(bash), 11 POSIX-only skipped on win32; spec status tests-written @0b2b4f56 |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-10 00:51
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S2_HEAD: d158d5f6 · S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 00:51 — Unset the branch upstream (`git branch --unset-upstream`) — `git worktree add -b … origin/main` made `feat/coding-agent` track `origin/main`; pushes must use `git push -u origin feat/coding-agent`.
@@ -63,3 +63,9 @@ started: 2026-10-10 00:51
 - A007 walks up from any `read(...)` to the enclosing `while`: `_collect`'s read loop must contain no numeric literal at all. — *source:* S1 review r2
 - Without the transport close, an orphan holding the pipe yields `Exception ignored … Event loop is closed` after `asyncio.run`; pytest reports PytestUnraisableExceptionWarning but has no `filterwarnings=error`, so AC-28 needs an explicit check. `BaseAgent.run` is `asyncio.run(...)` (`base.py:924`). — *source:* S1 review r2 / author r3
 - On Windows keep Git's `binash.exe` launcher (from a PowerShell-launched Python, `usrinash.exe` cannot find ls/grep/sleep). — *source:* S1 review r2
+- Test tree for the no-edit diff: `tests/features/coding_agent/` (conftest.py, 5 test modules, FEATURE.md, README.md). `git diff d158d5f6..HEAD --stat -- tests/` must stay empty after S2. — *source:* S2 test author
+- Tests import `vidbyte.CodingAgent`, `vidbyte.agents.CodingAgent`, `vidbyte.agents.coding.CodingAgent`, `vidbyte.tools.builtins.BashTool`, module `vidbyte.tools.builtins.bash` (BashTool + 4 BASH_* constants); each must be in its package `__all__`. Keyed fetch view needs public `wrapped_tool`. — *source:* S2 test author
+- BASH_* constants must be read at call time (tests monkeypatch timeout 2.0, grace 1.0, cap 1000). AC-22 patches `sys.platform` and `shutil.which` during `BashTool(root)` construction only: read them as module attributes, not `os.name` / `from shutil import which`. — *source:* S2 test author
+- Missing bash must not raise in `BashTool.__init__` or `CodingAgent.__init__` (AC-17 builds with PATH pointed at an empty folder). Timeout result's last line contains the patched limit; `spawn_failed` names `ValueError`/`OSError` without the exception message. — *source:* S2 test author
+- Highest-value test: `test_bash_tool_process_bounds.py::test_cancellation_kills_the_process_group_even_after_the_shell_has_exited` fails a natural `if process.returncode is None` guard around POSIX `killpg`. AC-28 detects open `BaseSubprocessTransport` via gc after `execute`. — *source:* S2 test author
+- POSIX-only tests skip on win32; run them in WSL with `/tmp/s2-coding-agent-venv/bin/python` (distro MuseUbuntu1; `MSYS_NO_PATHCONV=1` from Git Bash). AC-27's Python 3.13 half is manual. AC-29 truncation line's only digits must be the cap. — *source:* S2 test author
