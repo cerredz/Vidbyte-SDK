@@ -733,6 +733,7 @@ class ToolsFormatter:
         """Parse provider argument payloads into a plain dictionary."""
         # @intent null-tool-arguments-mean-no-arguments
         # Some OpenAI-compatible servers send "arguments": null for a zero-parameter call; treat it like a missing key.
+        # The JSON-encoded string "null" is the same payload on the wire, so it also means no arguments.
         if raw_arguments is None:
             return {}
         if isinstance(raw_arguments, Mapping):
@@ -741,6 +742,8 @@ class ToolsFormatter:
             if not raw_arguments.strip():
                 return {}
             parsed = json.loads(raw_arguments)
+            if parsed is None:
+                return {}
             if isinstance(parsed, Mapping):
                 return dict(parsed)
         raise ValueError("Tool call arguments must decode to an object")
