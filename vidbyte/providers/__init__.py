@@ -105,6 +105,13 @@ class ModelProviders:
             ModelProvider.MERAGPT: SystemOneProvider,
             ModelProvider.CLOUDFLARE: SystemOneProvider,
             ModelProvider.FOUNDRY: SystemOneProvider,
+            ModelProvider.CELERIS: SystemOneProvider,
+            ModelProvider.NACE: SystemOneProvider,
+            ModelProvider.UPSTAGE: SystemOneProvider,
+            ModelProvider.INCEPTION: SystemOneProvider,
+            ModelProvider.HANZO: SystemOneProvider,
+            ModelProvider.VANSA: SystemOneProvider,
+            ModelProvider.ZOODATA: SystemOneProvider,
         }
         return ModelProviders._build_provider(config.normalized_provider(), providers, capability="decision", decision_config=config)
 
