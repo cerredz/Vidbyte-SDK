@@ -17,7 +17,7 @@ started: 2026-10-10 00:51
 | S1 spec + review | done | 2026-10-10 01:09 | 2026-10-10 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @8f669933 approved; r1 SOUND WITH FIXES (1B/3M/4m), r2 SOUND WITH FIXES (0B/1M/2m), all 11 applied |
 | S2 tests | done | 2026-10-10 | 2026-10-10 | reports/S2-test-author.md | S2_HEAD d158d5f6 (tests a25a3c41, proof d158d5f6); 42 fns / 97 cases in tests/features/coding_agent/; red: 86 = 67 ImportError(CodingAgent) + 19 ModuleNotFoundError(bash), 11 POSIX-only skipped on win32; spec status tests-written @0b2b4f56 |
 | S3 implement | done | 2026-10-10 | 2026-10-10 | reports/S3-implementer.md | S3_HEAD 4e285d91; draft PR #690 https://github.com/cerredz/Vidbyte-SDK/pull/690; 8 rows in 9 code commits (25b5260b..4c4a62ef); pack 86 pass/11 skip win 3.11, 97/97 WSL 3.12 (orchestrator re-ran both); test diff vs S2_HEAD empty; budget 2/2 files, 0/0 enums+dataclasses, 2/2 public names; remote CI 38046509073 + static-policy 38046510490 success @4c4a62ef |
-| S4 adversarial review | pending | | | | |
+| S4 adversarial review | running | 2026-10-10 | | reports/S4-review-{conformance,conventions,engineering}.md | 3 reviewers launched in parallel on 4e285d91; all hit HTTP 429 mid-run, resumed via SendMessage after reset |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -32,6 +32,8 @@ started: 2026-10-10 00:51
 - 2026-10-10 — Launched scoped S1 review round 2 — r2 changed §8 decisions (D-11, D-13, D-14, D-17) and the shape of §12 (row removed, budget 3→2 new files).
 - 2026-10-10 — S1 round-2 reviewer hit an API rate limit mid-run; resumed the same agent after the reset (no report had been written) rather than relaunching fresh.
 - 2026-10-10 — Applied every open question's stated default (spec §15): Q-1 ReplaceTextTool; Q-2 no configurable timeout/cap; Q-3 no env allow-list; Q-4 no default result_max_chars; Q-5 no CodingAgent.restore; Q-6 no Windows job-object tree kill. Assumptions A-1..A-9 stand (notably A-1 keyed WebFetch shows page text; A-3 Bash inherits env; A-9 Windows timed-out command may keep running).
+
+- 2026-10-10 — All three S4 reviewers hit the API session limit (HTTP 429) mid-run; resumed each via SendMessage after the reset instead of relaunching (conformance had already written its report but not returned STATUS). Same handling as the S1 r2 reviewer.
 
 ## User replies (verbatim)
 - (none yet during the run)
