@@ -27,6 +27,8 @@ class FindTool(FileSystemTool):
         try:
             target_root = self._path(root)
             FileSystemPermissions.require_existing_directory(target_root)
+            # Refuse a pattern that would climb out of the root before the backend globs it.
+            FileSystemPermissions.require_pattern_inside_root(pattern)
             matches = self.backend.find(target_root, pattern)
             return ToolResult.success(self.name, "\n".join(matches), metadata={"root": str(target_root), "pattern": pattern})
         except Exception as exc:
