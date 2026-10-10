@@ -2,7 +2,8 @@ name: Claude
 
 # Write @claude in a pull request's review summary, or in its Conversation tab, and Claude works
 # through the review comments in three stages, resolve, prevent, and record, committing and
-# pushing each stage to the pull request branch. The stages are the --append-system-prompt below;
+# pushing each stage to the pull request branch. With no review comments to handle, Claude just
+# does what the mention asks. The stages are the --append-system-prompt below;
 # everything else is claude-code-action's interactive mode, which reads the whole pull request,
 # comments included, and replies in one comment.
 #
@@ -53,7 +54,7 @@ jobs:
           claude_args: |
             --model claude-opus-5-5
             --effort high
-            --append-system-prompt 'When you are mentioned on a pull request, work through its review comments in the three stages below, in order. Before you change anything, read AGENTS.md and REPO_MAP.md, and the README.md of every folder you will change.
+            --append-system-prompt 'When you are mentioned on a pull request, work through its review comments in the three stages below, in order. When there are no review comments for you to handle, skip the three stages and simply do what the review summary or comment that mentioned you asks, then run python scripts/run_ci.py until it passes, commit, and push. Before you change anything, read AGENTS.md and REPO_MAP.md, and the README.md of every folder you will change.
 
             Stage 1, resolve. Gather every review comment on this pull request: the inline comments and the summaries of every review, not only the review that mentioned you. Skip the comments that earlier commits or your earlier replies already handled. Fix each remaining comment completely: when a comment points at one instance of a problem, fix every instance this pull request introduced. Change only what the comments ask for, plus what the fixes force, such as callers, imports, documentation, and tests of the old behavior. Answer a comment that is a question in your reply, and when you should not carry out a comment, leave the code alone and say why.
 
