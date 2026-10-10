@@ -196,8 +196,9 @@ class _ConfigValidation:
             raise cls._error(f"'{field_name}' contains unsupported field(s): {', '.join(unknown)}.", f"{field_name}.{unknown[0]}", unknown=unknown, allowed=sorted(allowed))
 
     @classmethod
-    def _serializable(cls, value: object, field_name: str, ancestry: frozenset[int] = frozenset(), depth: int = 0) -> None:
+    def _serializable(cls, value: object, field_name: str, ancestry: frozenset[int] = frozenset(), depth: int = 0, *, check_secret_keys: bool = True) -> None:
         # Accepts only YAML data values, rejecting secrets, env interpolation, cycles, and deep nesting.
+        # check_secret_keys=False skips only the key-name credential check, for mappings whose keys are names.
         if value is None or isinstance(value, (bool, int, float)):
             return
         if isinstance(value, str):
@@ -208,7 +209,7 @@ class _ConfigValidation:
             cls._guard_cycle(value, field_name, ancestry)
             cls._guard_depth(field_name, depth)
             for index, item in enumerate(value):
-                cls._serializable(item, f"{field_name}[{index}]", ancestry | {id(value)}, depth + 1)
+                cls._serializable(item, f"{field_name}[{index}]", ancestry | {id(value)}, depth + 1, check_secret_keys=check_secret_keys)
             return
         if isinstance(value, Mapping) and all(isinstance(key, str) for key in value):
             cls._guard_cycle(value, field_name, ancestry)
@@ -216,9 +217,9 @@ class _ConfigValidation:
             for key, item in value.items():
                 # @intent yaml-secret-guard-normalizes-key-spelling
                 # Classify with the shared camelCase/hyphen normalization so apiKey or x-api-key cannot bypass the guard.
-                if _YamlSecretKeyPolicy.is_secret_key(key):
+                if check_secret_keys and _YamlSecretKeyPolicy.is_secret_key(key):
                     raise cls._error("Configuration must not contain YAML-held secrets.", f"{field_name}.{key}")
-                cls._serializable(item, f"{field_name}.{key}", ancestry | {id(value)}, depth + 1)
+                cls._serializable(item, f"{field_name}.{key}", ancestry | {id(value)}, depth + 1, check_secret_keys=check_secret_keys)
             return
         raise cls._error("Configuration values must be YAML scalars, lists, or string-keyed mappings.", field_name, actual_type=type(value).__name__)
 
@@ -595,7 +596,10 @@ class AgentSettings(_ConfigValidation):
         if value is None:
             return None
         schema = cls._mapping(value, "agent.output_schema")
-        cls._serializable(schema, "agent.output_schema")
+        # @intent output-schema-field-names-are-not-secrets
+        # Schema keys are JSON Schema keywords and the field names the model must output, so a property
+        # named token or auth is not a credential; interpolation, cycle, depth, and type checks still apply.
+        cls._serializable(schema, "agent.output_schema", check_secret_keys=False)
         if "type" not in schema and "properties" not in schema:
             raise cls._error("'agent.output_schema' must be a JSON Schema object declaring at least 'type' or 'properties'.", "agent.output_schema", keys=sorted(schema))
         return schema
