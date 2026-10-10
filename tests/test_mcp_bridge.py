@@ -76,3 +76,18 @@ class McpBridgeTests(unittest.IsolatedAsyncioTestCase):
             permission_policy=PermissionPolicy.allow_all(),
         ).execute_call(ToolCall("remote_echo", {"text": "hello"}))
         self.assertEqual(result.output, "hello")
+
+    def test_binary_content_is_replaced_by_placeholder(self) -> None:
+        """Image base64 payloads never reach the prompt; text parts survive."""
+        client = McpClient(FakeTransport())
+        text = client._content_to_text(
+            {
+                "content": [
+                    {"type": "text", "text": "part one"},
+                    {"type": "text", "text": "part two"},
+                    {"type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png"},
+                ]
+            }
+        )
+        self.assertEqual(text, "part one\npart two\n[image: image/png, 12 base64 chars omitted]")
+        self.assertNotIn("iVBORw0KGgo=", text)
