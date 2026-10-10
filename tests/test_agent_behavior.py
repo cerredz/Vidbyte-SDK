@@ -482,7 +482,18 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.output.contains_citation("bracket"))
         self.assertTrue(b.output.contains_citation("footnote"))
         self.assertTrue(b.output.contains_citation("url"))
-        self.assertTrue(b.output.citation_count("any", at_least=4))
+        self.assertEqual(b.output.citation_count("any"), 3)
+
+    def test_output_any_citation_counts_markdown_link_once(self) -> None:
+        # [Silent Failure] a markdown link's URL and numeric label must not count as extra references.
+        cases = {
+            "Rates rose in 2025 [Fed report](https://example.com/fed-2025).": 1,
+            "See [1](https://example.com/a).": 1,
+            "[a](https://a.test) and https://b.test plus [2] and [^3].": 4,
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(behavior_from_probe(RunProbe(output=text)).output.citation_count("any"), expected)
 
     def test_output_unknown_citation_style_raises(self) -> None:
         # [Hidden Failure] unknown citation style raises ValueError.
