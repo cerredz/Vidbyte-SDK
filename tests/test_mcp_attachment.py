@@ -23,7 +23,10 @@ from unittest.mock import patch
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import BaseAgent
 from vidbyte.lib.errors import McpAttachmentError, McpInitializeError
+from vidbyte.tools import ToolCall, ToolPermission, Tools
+from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
+from vidbyte.tools.security import PermissionPolicy
 
 
 class MockMcpStdioTransport:
@@ -48,12 +51,14 @@ class MockMcpStdioTransport:
         self.stderr_max_bytes = stderr_max_bytes
         self.closed = False
         self._started = False
+        self.methods: list[str] = []
         MockMcpStdioTransport.instances.append(self)
 
     async def start(self) -> None:
         self._started = True
 
     async def request(self, method: str, params: dict[str, any] | None = None) -> dict[str, any]:
+        self.methods.append(method)
         if self.closed:
             raise RuntimeError("Transport is closed")
         if self.command[0] == "fail":
@@ -137,6 +142,39 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
         child = agent.fork()
         self.assertFalse(any(t is b for t in child._agent_tool_items for b in bridged))
         self.assertNotIn("remote_closer", agent.export_state().tool_names)
+
+    async def test_disabled_server_exposes_no_runnable_tools(self) -> None:
+        """A DISABLED server bridges nothing, so its tool cannot run even under allow_all."""
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner())
+        await agent.attach_mcp_server(command=["off"], permission=McpToolPermission.DISABLED)
+        await agent.attach_mcp_server(command=["ro"], permission=McpToolPermission.READONLY)
+        await agent.attach_mcp_server(command=["rw"], permission=McpToolPermission.EXECUTE)
+        disabled, readonly, execute = agent.mcp_servers()
+
+        # The disabled server stays attached but contributes no tools anywhere the model looks.
+        self.assertEqual(disabled.bridged_tools, ())
+        self.assertEqual(agent.mcp_tool_names(), ("remote_ro", "remote_rw"))
+        self.assertNotIn("remote_off", [tool.name for tool in agent.tools])
+        self.assertEqual(readonly.bridged_tools[0].spec().permission, ToolPermission.READ)
+        self.assertEqual(execute.bridged_tools[0].spec().permission, ToolPermission.EXECUTE)
+
+        # Even a policy that allows every risk level cannot reach the disabled server's tool.
+        allow_all = ToolExecutor(Tools(agent.tools), permission_policy=PermissionPolicy.allow_all())
+        blocked = await allow_all.execute_call(ToolCall("remote_off", {"text": "hi"}))
+        self.assertEqual(blocked.metadata.get("error"), "unknown_tool")
+        self.assertNotIn("tools/call", disabled.transport.methods)
+        for name in ("remote_ro", "remote_rw"):
+            result = await allow_all.execute_call(ToolCall(name, {"text": "hi"}))
+            self.assertEqual(result.output, "mocked_response")
+
+        # The default policy still runs readonly tools and denies execute tools, as before.
+        default = ToolExecutor(Tools(agent.tools))
+        self.assertEqual((await default.execute_call(ToolCall("remote_ro", {"text": "hi"}))).output, "mocked_response")
+        denied = await default.execute_call(ToolCall("remote_rw", {"text": "hi"}))
+        self.assertEqual(denied.metadata.get("error"), "permission_denied")
+
+        await agent.close_mcp_servers()
+        self.assertTrue(disabled.transport.closed)
 
     async def test_batch_attach_concurrency_and_fail_safe(self) -> None:
         """Concurrent attachments roll back successfully started servers if one fails."""
