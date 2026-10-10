@@ -21,6 +21,10 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c003_no_dynamic_import_from_data.py` -- fixed import targets.
 - `c004_operation_pricing_rate_floor.py` -- operation pricebook magnitude floor.
 - `c005_cost_arithmetic_site_parity.py` -- reviewed cost-arithmetic locations.
+- `c006_finite_numeric_guards.py` -- bool/NaN/infinity-safe numeric range checks.
+- `c006_source_index.py` -- read-only source indexes for C006 (literals, constants, engine-built records).
+- `c007_strict_bool_switches.py` -- strict bool switches on configuration classes.
+- `c008_shared_validator_owner.py` -- one owner for primitive validators.
 - `c016_public_api_contract_current.py` -- committed SDK public-API contract matches its generator.
 - `c017_platform_route_contract.py` -- SDK requests to Vidbyte hosts match a platform-contract route, method, and access class.
 - `c018_canonical_api_host.py` -- Vidbyte API URLs in SDK code use an origin the platform contract lists as live.
