@@ -3,7 +3,7 @@
 PURPOSE: Semantic transport runner for calibrated decision models: validates a DecisionModelConfig, builds the provider adapter, runs one JevDecisionRequest, and lists the models the account can use.
 ROLE IN CODEBASE: DecisionModelHelper uses this runner to send Jev requests; other callers can use it for direct programmatic decisions.
 ARCHITECTURE NOTE: Mirrors EmbeddingModelRunner: the runner owns config validation and the transport, and `ModelProviders.decision()` owns adapter selection. Agents never build it through Runner.build, because decision models cannot drive an agent loop.
-COMMON MODIFICATION PATTERNS: Keep provider calls as thin pass-throughs; request shaping belongs to vidbyte/lib/dataclasses/jev.py and wire handling to vidbyte/providers/typesafe.py. Put shared question scoring in vidbyte/lib/jev/decision.py.
+COMMON MODIFICATION PATTERNS: Keep provider calls as thin pass-throughs; request shaping belongs to vidbyte/lib/dataclasses/jev.py and wire handling to `vidbyte/providers/systemone.py` (every System One host), `vidbyte/providers/openai_decisions.py` (OpenAI Decisions), and `vidbyte/providers/typesafe.py` (TypeSafe-specific managed gateway, model list, and run close). Put shared question scoring in vidbyte/lib/jev/decision.py.
 KNOWN EDGE CASES: Construction raises ConfigurationError when no API key resolves, which callers that must fail open treat as "decision model unavailable". DecisionModelHelper.score_noul needs no key and returns None when any named answer is missing or is not a noul answer.
 RELATED DOCS: docs/design/jev-agent-scaffold.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
@@ -49,7 +49,7 @@ class DecisionModelRunner:
         except VidbyteSdkError as exc:
             billed = exc.details.get("usage")
             if ledger is not None and isinstance(billed, Mapping):
-                ledger.record_billed_failure(self._provider.provider, self._config.model, billed, kind=UsageKind.DECISION)
+                ledger.record_billed_failure(self._provider.provider, self._config.resolved_model(), billed, kind=UsageKind.DECISION)
             raise
         if ledger is not None:
             ledger.record_call(response, kind=UsageKind.DECISION)
@@ -70,7 +70,7 @@ class DecisionModelRunner:
 
     def model_name(self) -> str:
         # Return the configured model identifier string.
-        return self._config.model
+        return self._config.resolved_model()
 
 
 __all__ = ["DecisionModelRunner"]
