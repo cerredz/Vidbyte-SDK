@@ -493,6 +493,7 @@ class BaseAgent(McpAttachableMixin):
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
             timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
+            fallback=state.runtime_config.get("fallback_models") or None,
             trace_option=cls._restore_trace_option(state),
             description=state.description,
             capabilities=tuple(state.capabilities),
@@ -518,6 +519,10 @@ class BaseAgent(McpAttachableMixin):
             "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
             "runner_timeout_seconds": self.runner_config.timeout_seconds,
         }
+        if self.fallback is not None:
+            # @intent resume-keeps-fallback-chain
+            # Store backups as credential-free 'provider/model' strings; keys re-resolve on restore.
+            config["fallback_models"] = [f"{getattr(m.provider, 'value', m.provider)}/{m.model}" for m in self.fallback.models[1:]]
         if isinstance(self.runtime_config_obj, ActorRuntime):
             config.update(
                 {
