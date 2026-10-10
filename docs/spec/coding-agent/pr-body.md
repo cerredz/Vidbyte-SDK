@@ -23,9 +23,9 @@ print(agent.tools.names())
 reply = agent.run("Run the tests with python -m pytest -q and fix the first failure.")
 print(reply.content)
 ```
-This is spec §4 unchanged. I ran it as written on this branch (Windows 11, Python 3.11.0, Git for Windows), from a temporary folder that holds an empty `my-project`. `fc-your-key` is a placeholder, and building the agent makes no network call. For the `agent.run(...)` line I did not call OpenAI. Instead I bound the feature pack's offline scripted model. It requested one `bash` call (`echo snippet-ran`) and then finished. The output was:
+This is spec §4 unchanged. I ran it as written on this branch after the `main` merges (head `215b9c0d`; Windows 11, Python 3.11.0, Git for Windows), from a temporary folder that holds an empty `my-project`. `fc-your-key` is a placeholder, and building the agent makes no network call. For the `agent.run(...)` line I did not call OpenAI. Instead I bound the feature pack's offline scripted model. It requested one `bash` call (`echo snippet-ran`) and then finished. The output was:
 ```
-C:\Users\…\AppData\Local\Temp\tmpa5xwq7sc\my-project
+C:\Users\…\AppData\Local\Temp\tmp3nc7rl61\my-project
 ('bash', 'read_lines', 'write_text', 'replace_text', 'glob', 'grep', 'firecrawl_fetch')
 Fixed the first failure.
 ```
@@ -88,6 +88,8 @@ sequenceDiagram
 Construction checks the root first, then the keys (blank keys, then how many), all before `BaseAgent.__init__` runs. `BaseAgent` then applies its own checks, such as the name, the prompt, and duplicate tool names. The only new state is `agent.root_dir`. At run time the existing runtime checks the policy and the tool's `validate_call` before any tool code runs. A denial becomes a DENIED result, and nothing raises. `BashTool.execute` returns the three failures it expects as error results: no bash, a command that could not start, and a timeout. A cancellation is re-raised after the stop. `_stop` suppresses `ProcessLookupError` and `PermissionError` and closes the transport in `finally`. So it never raises, and it closes the pipe even when a second cancellation lands during its wait. The keyed view changes only the `output` of a successful result. Its metadata passes through untouched, so billing is the same as for the bare tool.
 
 ## What changed
+The branch merged `main` four times (`563f1db8`, `6d2191f7`, `38dca66d`, `d104bd78`). Each merge brought in only `main`'s own files. The only conflict was the contract's `source.commit` line.
+
 | File | Change |
 |---|---|
 | `vidbyte/tools/builtins/bash.py` | New `BashTool`. It runs one `bash -c` process per call in the root folder, under four `BASH_*` bounds that are read at call time. On Windows it looks for Git for Windows' `bin/bash.exe` next to `git`. Its stop is bounded and always closes the pipe. |
@@ -95,7 +97,7 @@ Construction checks the root first, then the keys (blank keys, then how many), a
 | `vidbyte/tools/builtins/__init__.py` | Exports `BashTool`. |
 | `vidbyte/agents/__init__.py` | Exports `CodingAgent`. |
 | `vidbyte/__init__.py` | Exports `CodingAgent` from the root package. |
-| `contracts/sdk-public-api.json` | Regenerated; gains `CodingAgent`. |
+| `contracts/sdk-public-api.json` | Gains `CodingAgent`. It keeps `main`'s `source.commit` `787afabf`, as `main`'s own #698 did. `--check` passes with 599 exports. |
 | `vidbyte/agents/README.md` | New "Coding Agent" section (usage, key choice, policy, bash limits, fork/restore, Windows caveat) and a Key Modules bullet. |
 | `vidbyte/tools/README.md` | Lists bash under `builtins/`. Says that on `CodingAgent` a keyed fetch's `output` carries the page text. |
 | `tests/features/coding_agent/conftest.py` | Offline fixtures: a scripted tool-calling model and a fake provider HTTP send. |
@@ -105,7 +107,7 @@ Construction checks the root first, then the keys (blank keys, then how many), a
 | `tests/features/coding_agent/test_bash_tool_contract.py` | Covers the spec, validation, both streams and the exit code, the working folder, argv, stdin, spawn errors, UTF-8, the cap, a missing bash, and the Windows lookup. |
 | `tests/features/coding_agent/test_bash_tool_process_bounds.py` | Covers the timeout, the group kill, cancellation, `setsid`, background processes, endless output, and the pipe close. |
 | `tests/features/coding_agent/FEATURE.md`, `README.md` | The feature pack's description and file index. |
-| `docs/spec/coding-agent/` (20 files) | Spec r3, request, test plan, review, verify log, pipeline state, scout code map, stage reports, and this PR body. |
+| `docs/spec/coding-agent/` (23 files) | Spec r3, request, test plan, review, verify log, pipeline state, scout code map, stage reports, and this PR body. |
 
 ## Acceptance criteria → proof
 Test files are in `tests/features/coding_agent/`.
@@ -143,22 +145,25 @@ Test files are in `tests/features/coding_agent/`.
 | AC-29 | Endless output times out with the first bytes and a truncation line. | `test_bash_tool_process_bounds.py::test_endless_printer_times_out_with_the_first_bytes_and_a_truncation_marker` |
 
 ## Verification
-The code last changed at `581fc272`. Every commit after it touches only `docs/spec/`.
+The code last changed at `581fc272`. After that, the branch has only `docs/spec/` commits and four merges of `main`. Every gate below ran on the merged tree.
 
 | Gate | Command | Result |
 |---|---|---|
 | Feature pack, Windows 3.11 | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent/` | `86 passed, 11 skipped` (the 11 are POSIX-only cases) |
 | Feature pack, WSL Ubuntu 3.12 | the same command in WSL | `97 passed` |
-| Lint | `python lint/run.py` | `SDK-LINT: PASS` |
-| Full local gate, source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | `2715 passed, 12 skipped` / `CI passed.` |
-| Full local gate, package | `python scripts/run_ci.py --stage package` (`PYTHONPATH` unset) | `Installed vidbyte-sdk 0.2.0 passed smoke checks.` / `CI passed.` |
-| Remote CI on `581fc272` | `gh workflow run ci.yml` → run `38075705506` | Source 3.11 `2718 passed, 9 skipped`; Source 3.12 `2718 passed, 9 skipped`; Package passed |
-| Remote Semgrep on `581fc272` | `gh workflow run static-policy.yml` → run `38075707127` | `Ran 1 rule on 857 files: 0 findings.` |
-| Windows bash lookup on a real Git for Windows install | `BashTool(...)._executable` and one call, from Python started in PowerShell and in Git Bash | Both picked `C:\Program Files\Git\bin\bash.exe`. From PowerShell, `git` was `cmd\git.EXE` and the `PATH` bash was `system32\bash.EXE`. From Git Bash, `git` was `mingw64\bin\git.EXE` and the `PATH` bash was `usr\bin\bash.EXE`. Both calls returned `success … exit code: 0`. |
-| Scratch merge with `main` at `77084eb2` (contract conflict left unresolved) | the pack in Windows and WSL, plus full pytest on Windows | `86 passed, 11 skipped`; `97 passed`; `2857 passed, 12 skipped`. One earlier full run had one failure in the unrelated `tests/test_codex_tools.py::CodexSdkContractTests::test_cancelled_turn_releases_its_waiting_reader`, which passed alone 4 times and on a full re-run. |
+| Lint | `python lint/run.py` | `S063 RATCHETED: 4` / `S064 RATCHETED: 4` / `SDK-LINT: PASS`. `main`'s 14 new rules (A009, C006 to C015, S063, S064) give 0 findings in the feature files. |
+| Public API contract | `python scripts/generate-sdk-public-api.py --check` | `contracts/sdk-public-api.json is current at 787afabf… (vidbyte-sdk 0.2.1, 599 exports).` |
+| Full local gate, source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | `2865 passed, 12 skipped` / `CI passed.` |
+| Full local gate, package | `python scripts/run_ci.py --stage package` (`PYTHONPATH` unset) | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| Remote CI on `8ff4f472` | `gh workflow run ci.yml --ref feat/coding-agent` → run `38081709965` | Source 3.11 `2865 passed, 12 skipped` / `CI passed.`; Source 3.12 `2865 passed, 12 skipped, 12 warnings` / `CI passed.`; Package `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| Remote Semgrep on `8ff4f472` | `gh workflow run static-policy.yml --ref feat/coding-agent` → run `38081711732` | `Ran 1 rule on 869 files: 0 findings.` |
+| Windows bash lookup on a real Git for Windows install | `BashTool(...)._executable` and one call, from Python started in PowerShell and in Git Bash | Both picked `C:\Program Files\Git\bin\bash.exe`. From PowerShell, `git` was `cmd\git.EXE` and the `PATH` bash was `system32\bash.EXE`. From Git Bash, `git` was `mingw64\bin\git.EXE`. Both calls returned `success … exit code: 0`. |
+| Merge state | `gh pr view 690 --json mergeable,mergeStateStatus`; `git merge-tree --write-tree HEAD origin/main` | `MERGEABLE`, but `BEHIND` `main` (`b38afd90`: #704, #706, #708, none of which touches a feature file). The merge-tree is clean. |
+
+CI runs here only when someone dispatches it by hand, and GitHub does not link dispatched runs to pull requests. So `gh pr checks` reports "no checks". The check runs on each commit (`gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs`) are the signal. `main`'s branch protection reads those check runs on the head commit.
 
 ## Adversarial review
-4 findings were confirmed by an independent verifier across three lenses (spec conformance, repo conventions, engineering). All 4 were fixed and 0 were waived. Of the 5 Minors, R-5 to R-7 were fixed, and R-8 and R-9 are follow-ups. A conformance re-review after the repairs returned SOUND, with one Minor (R-C1, a follow-up). Full record: `docs/spec/coding-agent/review.md`.
+4 findings were confirmed by an independent verifier across three lenses (spec conformance, repo conventions, engineering). All 4 were fixed and 0 were waived. Of the 5 Minors, R-5 to R-7 were fixed, and R-8 and R-9 are follow-ups. A conformance re-review after the repairs returned SOUND, with one Minor (R-C1, a follow-up). A second re-review after the `main` merges also returned SOUND, with 0 findings. It found that `bash.py` and `coding.py` are unchanged since `581fc272`, and that the PR's net change is 1,868 lines both before and after the merges. Full record: `docs/spec/coding-agent/review.md`.
 
 | ID | Finding | Fixed in |
 |---|---|---|
@@ -171,16 +176,11 @@ The code last changed at `581fc272`. Every commit after it touches only `docs/sp
 - **`BashTool._spawn(executable, command)`** instead of `_spawn(command)` (§12.3 row 1). `execute` passes the executable it has just checked for `None`, so mypy sees a `str`. Behavior is the same (`25b5260b`; spec §17).
 - **`_stop` tolerates `PermissionError`** next to `ProcessLookupError`, on the kill and on `transport.close()`, and it closes the transport in `finally`. D-14 named only `ProcessLookupError`. But `os.killpg` raises `PermissionError` when no group member can be signalled, and the stdlib `close()` re-kills a running child and lets that error through. Either error would replace a propagating `CancelledError` (`415f7c22`; spec §17).
 - **Two test-tree edits after the tests were written**, both granted by the orchestrator: the EC-11 test body (R-2, `a49b7dd8`), and one line in the pack README that gave the wrong folder for the file tools (R-7, `581fc272`). No other test changed.
+- **The contract was resolved, not regenerated, in the `main` merges.** §12.3 row 6 says to regenerate it with the generator and never edit it by hand. The resolution instead keeps `main`'s `source.commit` line and adds `"CodingAgent"`, which is the same practice as `main`'s #698. The data equals what the generator produces (`--check` passes). A branch-specific stamp would conflict again at the next release bump.
 - **Spec §5's sequence diagram** did not show the transport close (D-18) or the `PermissionError` tolerance. It was updated in this PR to match the code (spec §17).
 
 ## Follow-ups
-- **Before merging: this branch conflicts with `main`.** `main` is 45 commits past this branch's base `8f23fd67` (at `d7b25110` when checked). `contracts/sdk-public-api.json` conflicts, because `main` bumped the version to 0.2.1 and the source commit. To resolve it:
-  1. Merge `main`.
-  2. Regenerate the contract with `python scripts/generate-sdk-public-api.py`.
-  3. Re-run `python lint/run.py`, because `main` added rules (A009, C006 to C015, S063, S064) that this branch has never run.
-  4. Re-run the full gate and both remote workflows.
-
-  `main` also changed files this agent builds on: `base.py`, `fork.py`, `runtime.py`, `glob.py`, `grep.py`, `fetch.py`, and `replace_text.py`. The scratch merge above passed.
+- **Before merging:** the branch is behind `main` (strict branch protection). Update the branch, then dispatch `ci.yml` on the new head.
 - **R-C1:** the last sentence of the bash description says a background process "is killed". That is false on Windows. The fix is one clause: "…otherwise the call waits for the time limit and is then stopped as described above".
 - **R-8:** consider moving `_FetchedPagesView` from `vidbyte/agents/coding.py` into the tools layer, where similar wrappers live. No AGENTS.md rule requires it.
 - **R-9:** on Windows, `shutil.which("git")` can return a relative `.\git.EXE` from the current folder. A planted `git` plus `bin\bash.exe` there would then be used. This is hardening the spec did not ask for. A possible fix is to ignore a relative `git` path.
