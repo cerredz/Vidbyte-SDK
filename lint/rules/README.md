@@ -25,6 +25,10 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c006_source_index.py` -- read-only source indexes for C006 (literals, constants, engine-built records).
 - `c007_strict_bool_switches.py` -- strict bool switches on configuration classes.
 - `c008_shared_validator_owner.py` -- one owner for primitive validators.
+- `c009_default_model_priced.py` -- provider default models resolve to a rate.
+- `c010_pricebook_vintage_bump.py` -- pricebook vintage moves with its rates (lock and refresh command).
+- `c011_agent_owned_usage_and_sync_twins.py` -- agent-owned usage recording and run()/arun() twins.
+- `c012_provider_model_registry_validation.py` -- registry-validated, enum-typed provider/model config fields.
 - `c016_public_api_contract_current.py` -- committed SDK public-API contract matches its generator.
 - `c017_platform_route_contract.py` -- SDK requests to Vidbyte hosts match a platform-contract route, method, and access class.
 - `c018_canonical_api_host.py` -- Vidbyte API URLs in SDK code use an origin the platform contract lists as live.
