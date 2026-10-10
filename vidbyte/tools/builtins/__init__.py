@@ -6,6 +6,7 @@ Purpose:
     Provides convenient imports for safe built-in tools without auto-registering
     environment-specific instances.
 Architecture:
+    - Minimal subprocess bash tool from builtins.bash.
     - Code search tools from builtins.code_search.
     - Patch/edit tools from builtins.editing.
     - Context compaction tools from builtins.context.
@@ -24,6 +25,7 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.tools.builtins.bash import BashTool
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
 from vidbyte.tools.builtins.context import (
@@ -188,6 +190,7 @@ __all__ = [
     "AssumptionCheckTool",
     "AttachMcpServerTool",
     "BacktrackTool",
+    "BashTool",
     "BatchForkTool",
     "BayesianUpdateTool",
     "BraveSearchTool",
