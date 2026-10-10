@@ -12,6 +12,7 @@ Architecture:
     - AgentCard: Local agent description, capabilities, and tools.
     - AgentMessage: Actor-to-actor message payload.
     - AgentSpec: Construction-friendly agent settings block.
+    - FinishReview: Accept, continue, or stop decision for one runtime finish attempt.
 Relations:
     Used by vidbyte.agents.base, vidbyte.agents.registry, and orchestration strategies.
 """
@@ -64,7 +65,39 @@ class AgentStopReason(str, Enum):
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     CONTRACT_UNSATISFIED = "contract_unsatisfied"
+    FINISH_REVIEW_REJECTED = "finish_review_rejected"
     ERROR = "error"
+
+
+class FinishReviewAction(str, Enum):
+    """What a runtime does with a finish attempt after reviewing it."""
+
+    ACCEPT = "accept"
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+@dataclass(frozen=True, slots=True)
+class FinishReview:
+    """Outcome of AgentRuntime.review_finish_attempt for one proposed final answer."""
+
+    action: FinishReviewAction = FinishReviewAction.ACCEPT
+    feedback: str = ""
+
+    @classmethod
+    def accept(cls) -> "FinishReview":
+        """Let the run finish with the proposed answer."""
+        return cls()
+
+    @classmethod
+    def continue_with(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and send feedback back into the same loop."""
+        return cls(action=FinishReviewAction.CONTINUE, feedback=feedback)
+
+    @classmethod
+    def stop(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and end the run with FINISH_REVIEW_REJECTED."""
+        return cls(action=FinishReviewAction.STOP, feedback=feedback)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +111,7 @@ class AgentRuntimeConfig:
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
     tool_settings: "ToolSettings | None" = None
+    allowed_tools: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         """Validate optional budget values."""
@@ -154,7 +188,11 @@ class FallbackModel:
     temperature: float | None = None
 
     def __post_init__(self) -> None:
-        """Reject entries that do not name both a provider and a model."""
+        """Normalize an enum provider to its string value and reject blank provider or model names."""
+        # @intent fallback-provider-is-a-plain-string
+        # A ModelProvider member would otherwise render as 'ModelProvider.ANTHROPIC' in identity() and run metadata.
+        if isinstance(self.provider, Enum):
+            object.__setattr__(self, "provider", self.provider.value)
         if not str(self.provider).strip():
             raise ValueError("FallbackModel.provider cannot be empty")
         if not str(self.model).strip():

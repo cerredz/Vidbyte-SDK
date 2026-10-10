@@ -71,3 +71,37 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("pkg/auth.py", result.output)
         self.assertIn("check_jwt", result.output)
+
+    async def test_root_under_ignored_ancestor_still_searches_its_files(self) -> None:
+        """Ignore patterns apply below the root, not to the root's own ancestors."""
+        for ancestor in ("node_modules", "venv"):
+            root = self.root / "project" / ancestor / "left-pad"
+            (root / "src").mkdir(parents=True)
+            (root / "src" / "index.js").write_text("// TODO pad\n", encoding="utf-8")
+            (root / "node_modules" / "inner").mkdir(parents=True)
+            (root / "node_modules" / "inner" / "x.js").write_text(
+                "// TODO inner\n", encoding="utf-8"
+            )
+            grep = await GrepTool(root).execute(ToolCall("grep", {"pattern": "TODO"}))
+            glob = await GlobTool(root).execute(ToolCall("glob", {"pattern": "**/*.js"}))
+            for result in (grep, glob):
+                self.assertIn("src/index.js", result.output)
+                self.assertNotIn("inner", result.output)
+
+    async def test_truncation_notice_only_when_a_hit_was_cut(self) -> None:
+        """Exactly max_results hits are not truncated; one more hit is."""
+        root = self.root / "exact"
+        root.mkdir()
+        for name in ("a", "b", "c"):
+            (root / f"{name}.py").write_text("# TODO\n", encoding="utf-8")
+        grep_call = ToolCall("grep", {"pattern": "TODO", "max_results": 3})
+        glob_call = ToolCall("glob", {"pattern": "*.py", "max_results": 3})
+        for result in (await GrepTool(root).execute(grep_call), await GlobTool(root).execute(glob_call)):
+            self.assertNotIn("Results truncated", result.output)
+            self.assertFalse(result.metadata["truncated"])
+            self.assertEqual(result.metadata["count"], 3)
+        (root / "d.py").write_text("# TODO\n", encoding="utf-8")
+        for result in (await GrepTool(root).execute(grep_call), await GlobTool(root).execute(glob_call)):
+            self.assertIn("Results truncated; narrow the pattern.", result.output)
+            self.assertTrue(result.metadata["truncated"])
+            self.assertEqual(result.metadata["count"], 3)

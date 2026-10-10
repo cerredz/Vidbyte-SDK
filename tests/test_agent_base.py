@@ -4,10 +4,10 @@ import unittest
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgent
-from vidbyte.context import ContextManager, ContextWindow, TaskContextItem, TextContextItem
+from vidbyte.context import ContextManager, ContextWindow, ContextWindowPlacement, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.errors import AgentExecutionError, ToolRegistrationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.tools import ToolSpec
@@ -132,6 +132,19 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forked.metadata["branch"], "copy")
         self.assertEqual(forked.metadata["forked_from"], "run-123")
         self.assertEqual(forked.metadata["fork_depth"], 1)
+
+    async def test_add_tool_duplicate_name_leaves_agent_unchanged(self) -> None:
+        # A rejected add_tool must not record the duplicate, or fork and state export break.
+        agent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("search")])
+        items_before = agent._agent_tool_items
+
+        with self.assertRaises(ToolRegistrationError):
+            agent.add_tool(FakeTool("search"))
+
+        self.assertEqual(agent._agent_tool_items, items_before)
+        self.assertEqual(agent.tools.names(), ("search",))
+        self.assertEqual(agent.fork(AgentForkSettings(name="child")).tools.names(), ("search",))
+        self.assertEqual(tuple(agent.export_state().tool_names), ("search",))
 
     async def test_agent_fork_preserves_middleware(self) -> None:
         middleware = FakeMiddleware()
@@ -311,6 +324,32 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         # Both calls must have received the system kwarg (injected by the runtime)
         for captured in runner.captured_options:
             self.assertIn("system", captured)
+
+    async def test_agent_input_context_manager_primitives_render_for_that_run_only(self) -> None:
+        # [Silent Failure] AgentInput(context_manager=...) managed primitives must reach the model without persisting
+        runner = OptionCaptureRunner()
+        agent_manager = ContextManager()
+        agent_manager.place_after_system_prompt(TextContextItem(title="Agent pin", content="AGENT_PLACED_PRIMITIVE"))
+        agent = build_test_agent(name="ctx", system_prompt="S.", runner=runner, context_manager=agent_manager)
+        before = agent_manager.registry_items()
+        ticket = ContextManager()
+        ticket.place_after_system_prompt(TextContextItem(title="Ticket pin", content="INPUT_PLACED_PRIMITIVE"))
+        ticket.upsert(
+            TextContextItem(title="Ticket tail", content="INPUT_CONVERSATION_PRIMITIVE", primitive_id="ticket:tail"),
+            placement=ContextWindowPlacement.END_OF_CONVERSATION,
+        )
+
+        await agent.arun(AgentInput(prompt="refund?", context_manager=ticket))
+
+        request = repr(runner.captured_options[0])
+        self.assertIn("AGENT_PLACED_PRIMITIVE", request)
+        self.assertIn("INPUT_PLACED_PRIMITIVE", request)
+        self.assertIn("INPUT_CONVERSATION_PRIMITIVE", request)
+        self.assertEqual(agent_manager.registry_items(), before)
+
+        await agent.arun("next")
+
+        self.assertNotIn("INPUT_PLACED_PRIMITIVE", repr(runner.captured_options[-1]))
 
 
 if __name__ == "__main__":

@@ -30,8 +30,14 @@ from vidbyte import (
     Trace,
     TraceProfile,
 )
+from tests.agent_test_support import bind_test_runner
+from vidbyte.agents.pricing import UsageTracker
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMessage, AgentMetadata
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
+from vidbyte.lib.runners import TextModelResponse
+from vidbyte.lib.usage_ledger import usage_ledger_scope
+from vidbyte.sessions import InMemorySessionStore, Session
 from vidbyte.tools.types import ToolCall, ToolStatus
 
 _TEMPLATE = "REQUEST:\n{request}\n\nCANDIDATES:\n{candidates}"
@@ -85,6 +91,18 @@ class BlankAgent:
 
     async def generate_reply(self, message: str, **_: object) -> AgentMessage:
         return AgentMessage(sender=self.name, recipient="agg", content="   ")
+
+
+class UsageRunner:
+    """Offline text runner whose every response reports priced usage."""
+
+    def run(self, prompt: str, system: str = "", **_: object) -> TextModelResponse:
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="answer", raw={}, usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12})
+
+
+def _metered_agent(name: str) -> BaseAgent:
+    # Builds a real BaseAgent bound to the offline usage-reporting runner.
+    return bind_test_runner(BaseAgent(name=name, system_prompt="s", provider="openai", model_name="gpt-5.4-mini"), UsageRunner())
 
 
 class EchoAggregator:
@@ -280,6 +298,32 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertIn("SYNTH::", result.output)
 
+    async def test_usage_rolls_up_children_per_run_and_into_outer_ledger_once(self) -> None:
+        # [Silent Failure] Proposer and aggregator calls reach the AggregateAgent's own usage, reset per run, and reach an outer ledger once.
+        agent = self._agent(proposers=[_metered_agent("a"), _metered_agent("b"), _metered_agent("c")], aggregator=_metered_agent("synth"))
+        for _ in range(2):
+            await agent.generate_reply("q")
+            self.assertEqual(agent.get_usage().model_call_count, 4)
+            self.assertEqual(agent.get_usage().input_tokens, 40)
+            self.assertIsNotNone(agent.get_cost_usd())
+        outer = UsageTracker()
+        with usage_ledger_scope(outer):
+            await agent.generate_reply("q")
+        self.assertEqual(outer.rollup().model_call_count, 4)
+
+    async def test_persisted_agent_checkpoints_each_successful_turn(self) -> None:
+        # [Silent Failure] A Session-bound AggregateAgent checkpoints every turn with its proposer and aggregator tokens.
+        agent = self._agent(proposers=[_metered_agent("a"), _metered_agent("b")], aggregator=_metered_agent("synth"))
+        store = InMemorySessionStore()
+        session = agent.persist(store=store)
+        for _ in range(2):
+            await session.arun("q")
+        usage = session.usage()
+        self.assertEqual(usage.turns, 2)
+        self.assertEqual(usage.tokens, 2 * 3 * 12)
+        resumed = Session.resume(store, session.id)
+        self.assertEqual([message.content for message in resumed.agent.history], [message.content for message in agent.history])
+
     def test_builds_distinct_child_agents_with_same_provider(self) -> None:
         # [Silent Failure] Two same-provider proposers get distinct labels.
         agent = AggregateAgent(
@@ -291,6 +335,60 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         labels = [label for label, _ in agent._engine._proposers]
         self.assertEqual(len(labels), 2)
         self.assertEqual(len(set(labels)), 2)
+
+    def test_explicit_key_never_reaches_a_proposer_on_another_provider(self) -> None:
+        # [Hidden Failure] The host vendor's secret must not be sent to a different vendor's proposer.
+        agent = AggregateAgent(
+            name="panel",
+            system_prompt="Answer.",
+            provider=ModelProvider.DEEPSEEK,
+            model_name="deepseek-v4-flash",
+            api_key="sk-deepseek-SECRET",
+            proposers=[("deepseek", "deepseek-v4-flash"), ("openai", "gpt-5.4-mini"), ProposerSpec(" DeepSeek ", "deepseek-v4-pro")],
+        )
+        keys = {label: child.runner_config.api_key for label, child in agent._engine._proposers}
+        self.assertEqual(keys["openai:gpt-5.4-mini"], None)
+        self.assertEqual(keys["deepseek:deepseek-v4-flash"], "sk-deepseek-SECRET")
+        self.assertEqual(keys[" DeepSeek :deepseek-v4-pro"], "sk-deepseek-SECRET")
+        self.assertEqual(agent._engine._aggregator.runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_explicit_key_never_reaches_an_aggregator_on_another_provider(self) -> None:
+        # [Hidden Failure] An explicit aggregator on another vendor resolves its own credential.
+        agent = AggregateAgent(
+            name="panel",
+            system_prompt="Answer.",
+            provider="deepseek",
+            model_name="deepseek-v4-flash",
+            api_key="sk-deepseek-SECRET",
+            proposers=[("deepseek", "deepseek-v4-flash")],
+            aggregator=("openai", "gpt-5.4-mini"),
+        )
+        self.assertIsNone(agent._engine._aggregator.runner_config.api_key)
+        self.assertEqual(agent._engine._proposers[0][1].runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_key_without_provider_reaches_every_child_when_all_name_one_provider(self) -> None:
+        # [Hidden Assumption] With no host provider, a single-vendor panel's key belongs to that vendor.
+        agent = AggregateAgent(
+            name="panel",
+            system_prompt="Answer.",
+            api_key="sk-deepseek-TEAM",
+            proposers=[("deepseek", "deepseek-v4-flash"), ProposerSpec(" DeepSeek ", "deepseek-v4-pro")],
+            aggregator=(ModelProvider.DEEPSEEK.value, "deepseek-v4-flash"),
+        )
+        self.assertEqual([child.runner_config.api_key for _, child in agent._engine._proposers], ["sk-deepseek-TEAM", "sk-deepseek-TEAM"])
+        self.assertEqual(agent._engine._aggregator.runner_config.api_key, "sk-deepseek-TEAM")
+
+    def test_key_without_provider_reaches_no_child_when_providers_are_mixed(self) -> None:
+        # [Hidden Assumption] A key given without a provider over a mixed panel cannot be attributed, so no child sends it.
+        agent = AggregateAgent(
+            name="panel",
+            system_prompt="Answer.",
+            api_key="sk-unknown-SECRET",
+            proposers=[("deepseek", "deepseek-v4-flash"), ("deepseek", "deepseek-v4-pro")],
+            aggregator=("openai", "gpt-5.4-mini"),
+        )
+        self.assertEqual([child.runner_config.api_key for _, child in agent._engine._proposers], [None, None])
+        self.assertIsNone(agent._engine._aggregator.runner_config.api_key)
 
 
 # ---------------------------------------------------------------------------

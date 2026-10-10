@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
@@ -8,6 +10,10 @@ from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.providers.output_schema import OutputSchemaFormatter
+
+# A reply that is one markdown fence from start to end; its body is unwrapped only when it is JSON.
+_WHOLE_FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n?(.*?)\n?[ \t]*```\s*\Z", re.DOTALL | re.IGNORECASE)
 
 
 class OpenAICompatibleProvider:
@@ -84,7 +90,8 @@ class OpenAICompatibleProvider:
         tier = StructuredOutputRegistry.resolve(self.provider, config.model)
         match tier:
             case StructuredOutputSupport.NATIVE_SCHEMA:
-                payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": schema, "strict": True}}
+                strict_schema = OutputSchemaFormatter().strict(schema)
+                payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": strict_schema, "strict": True}}
                 return
             case StructuredOutputSupport.JSON_MODE:
                 payload["response_format"] = {"type": "json_object"}
@@ -132,25 +139,8 @@ class DeepSeekProvider(OpenAICompatibleProvider):
     provider = ModelProvider.DEEPSEEK
 
     def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
-        # DeepSeek may return tool_calls even when no tools are configured,
-        # and may wrap JSON in markdown code fences.
-        # Always prefer text content; strip markdown wrappers.
-        choices = parsed.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
-        first = choices[0]
-        message = first.get("message") if isinstance(first, dict) else None
-        content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(content, str) and content.strip():
-            import re
-            return re.sub(r'\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z', r'\1', content.strip(), flags=re.DOTALL)
-        if not isinstance(content, str):
-            raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
-        return content
-
-    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
-        import re
-
+        # DeepSeek may hallucinate tool calls and wrap JSON in markdown fences, so prefer text
+        # content, fall back to the first call's arguments, and unwrap a fence only around pure JSON.
         choices = parsed.get("choices")
         if not isinstance(choices, list) or not choices:
             raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
@@ -166,11 +156,27 @@ class DeepSeekProvider(OpenAICompatibleProvider):
         else:
             text = content if isinstance(content, str) else ""
         if not text or not text.strip():
+            # @intent tool-calls-need-no-text
+            # A real tool-call turn (e.g. a zero-parameter tool with arguments "") carries no text,
+            # and the base provider returns "" for it; only a reply with neither text nor calls is invalid.
+            if has_tool_calls:
+                return ""
             raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
-        text = text.strip()
-        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
-        text = re.sub(r"\n?```\s*$", "", text)
-        return text
+        # @intent fence-unwrap-json-only
+        # Prose and code replies pass through untouched; only a reply that is entirely one fence
+        # around a JSON value is unwrapped, which is the DeepSeek habit PR #169 guarded against.
+        return self._unwrap_whole_json_fence(text)
+
+    def _unwrap_whole_json_fence(self, text: str) -> str:
+        match = _WHOLE_FENCE.match(text)
+        if match is None:
+            return text
+        inner = match.group(1).strip()
+        try:
+            json.loads(inner)
+        except ValueError:
+            return text
+        return inner
 
 
 class GLMProvider(OpenAICompatibleProvider):

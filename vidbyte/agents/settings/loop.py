@@ -7,7 +7,8 @@ Purpose:
     Consolidates loop budget and behavioral constraints into a single validated class,
     replacing scattered flat kwargs with a structured developer-facing abstraction.
 Architecture:
-    - AgentLoopSettings: Plain class with __init__-level validation.
+    - AgentLoopSettings: Plain class with __init__-level validation, rejecting
+      non-integral budgets and non-finite timeouts before runtime conversion.
     - to_runtime_config(): Converts to the internal AgentRuntimeConfig contract.
 Relations:
     Imported by vidbyte.agents.base. Exported from vidbyte.agents.settings.
@@ -18,6 +19,7 @@ Similar Files:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
@@ -96,19 +98,21 @@ class AgentLoopSettings:
         self._validate_output_contracts()
 
     def _validate_positive_int_fields(self) -> None:
-        # Each integer field must be strictly positive when provided.
+        # @intent invalid-budgets-never-disable-loop-guards
+        # A boolean or fractional limit can silently change how many iterations or tool calls are permitted.
         for field_name in _POSITIVE_INT_FIELDS:
             value = getattr(self, field_name)
-            if value is not None and value <= 0:
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ConfigurationError(
-                    f"AgentLoopSettings.{field_name} must be greater than zero when provided, got {value}."
+                    f"AgentLoopSettings.{field_name} must be a positive integer when provided, got {value!r}."
                 )
 
     def _validate_timeout_seconds(self) -> None:
-        # timeout_seconds must be a positive float when provided.
-        if self.timeout_seconds is not None and self.timeout_seconds <= 0.0:
+        # Non-finite values can bypass time-budget comparisons inside a running agent.
+        value = self.timeout_seconds
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0):
             raise ConfigurationError(
-                f"AgentLoopSettings.timeout_seconds must be greater than zero when provided, got {self.timeout_seconds}."
+                f"AgentLoopSettings.timeout_seconds must be a finite positive number when provided, got {value!r}."
             )
 
     def _validate_compaction_pair(self) -> None:
@@ -138,21 +142,32 @@ class AgentLoopSettings:
             raise ConfigurationError("AgentLoopSettings.max_tool_calls and ToolSettings.max_calls must match when both are provided.")
 
     def _validate_output_contracts(self) -> None:
-        # Rejects any effort floor whose minimum meets or exceeds its paired ceiling (an unreachable floor).
+        # Rejects any effort floor its paired ceiling makes unreachable.
         for contract in self._output_contracts:
             self._validate_contract_ceiling(contract)
             self._validate_tool_calls_by_id_ceiling(contract)
 
     def _validate_contract_ceiling(self, contract: OutputContract) -> None:
-        # Enforces the strict floor < ceiling invariant against this settings object's own ceiling fields.
+        # Enforces floor < ceiling (floor <= ceiling for max_iterations) against this settings object's own ceiling fields.
         if not contract.ceiling_key:
             return
         ceiling = getattr(self, contract.ceiling_key, None)
-        if ceiling is not None and contract.minimum >= ceiling:
+        source = f"AgentLoopSettings.{contract.ceiling_key}"
+        # The tool-call budget may be given only as ToolSettings.max_calls, which the runtime enforces the same way.
+        if ceiling is None and contract.ceiling_key == "max_tool_calls" and self.tool_settings is not None:
+            ceiling = self.tool_settings.max_calls
+            source = "ToolSettings.max_calls"
+        # @intent iteration-floor-may-equal-max-iterations
+        # max_iterations is checked before an iteration starts, but the floor is checked when the model offers
+        # its answer inside that iteration, after the count has grown. The model can finish in iteration number
+        # max_iterations, so minimum == max_iterations is reachable. The other ceilings stop the run once
+        # reached, before an answer at that ceiling can be accepted, so they keep the strict rule.
+        inclusive = contract.ceiling_key == "max_iterations"
+        if ceiling is not None and (contract.minimum > ceiling if inclusive else contract.minimum >= ceiling):
             raise ConfigurationError(
                 f"{contract.name}(minimum={contract.minimum}) conflicts with "
-                f"AgentLoopSettings.{contract.ceiling_key}={ceiling}: the floor is unreachable "
-                "(require minimum < ceiling)."
+                f"{source}={ceiling}: the floor is unreachable "
+                f"({'require minimum <= max_iterations' if inclusive else 'require minimum < ceiling'})."
             )
 
     def _validate_tool_calls_by_id_ceiling(self, contract: OutputContract) -> None:
@@ -164,11 +179,15 @@ class AgentLoopSettings:
         if self.tool_settings is None:
             return
         limit = self.tool_settings.max_calls_per_tool.get(contract.tool_name)
-        if limit is not None and contract.minimum >= limit:
+        # @intent per-tool-floor-may-equal-cap
+        # Unlike the global ceilings, a per-tool cap never stops the run: it only denies call limit + 1.
+        # The agent can run the tool exactly `limit` times and then finish, so minimum == limit is reachable
+        # (under on_deny="abort" too, since no denied call is needed). Only minimum > limit is unreachable.
+        if limit is not None and contract.minimum > limit:
             raise ConfigurationError(
                 f"{contract.name}(tool_name={contract.tool_name!r}, minimum={contract.minimum}) conflicts with "
                 f"ToolSettings.max_calls_per_tool[{contract.tool_name!r}]={limit}: the floor is unreachable "
-                "(require minimum < max_calls_per_tool)."
+                "(require minimum <= max_calls_per_tool)."
             )
 
     def to_runtime_config(self) -> "AgentRuntimeConfig":
@@ -183,6 +202,7 @@ class AgentLoopSettings:
             compaction_trigger_tokens=self.compaction_trigger_tokens,
             compaction_target_tokens=self.compaction_target_tokens,
             tool_settings=self.tool_settings,
+            allowed_tools=frozenset(self.allowed_tools) if self.allowed_tools is not None else None,
         )
 
     def __repr__(self) -> str:

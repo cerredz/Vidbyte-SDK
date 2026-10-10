@@ -1,0 +1,15 @@
+{
+  "name": "Jev Run Brief",
+  "description": "The prompts for JevRunBriefWriter, the cheap, tool-free agent that performs structured note-taking compaction between a JevAgent's iterations. The writer reads the previous brief and fresh numbered events, then returns only new high-signal notes as verbatim event passages with event ids; code verifies and appends them to the goal-plus-notes aggregate. The update prompt carries the original request, previous brief, and bounded new events. Its placeholders are {request}, {previous_brief}, {first_event}, {last_event}, and {events}.",
+  "key": "jev_run_brief",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_brief/system_prompt.md"
+    },
+    "update_prompt": {
+      "path": "update_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_brief/update_prompt.md"
+    }
+  }
+}

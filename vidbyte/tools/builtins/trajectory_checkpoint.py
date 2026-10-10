@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins._note_ids import next_free_counter
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
 
 if TYPE_CHECKING:
@@ -119,6 +120,7 @@ class TrajectoryCheckpointTool(BaseTool):
 
     def _next_primitive_id(self) -> str:
         # Generates a stable, unique primitive ID based on the instance counter.
+        self._counter = next_free_counter(self._manager, "trajectory_checkpoint", self._counter)
         return f"trajectory_checkpoint:{self._counter}"
 
     def _parse_score(self, raw: str | None) -> float | None:

@@ -19,10 +19,11 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
     def read_binary(self, path: Path) -> bytes:
         return path.read_bytes()
 
-    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool) -> None:
+    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding=encoding)
+        with path.open("w", encoding=encoding, newline=newline) as handle:
+            handle.write(content)
 
     def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool) -> None:
         if create_parents:
@@ -76,7 +77,13 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
             if source.is_file():
                 archive.write(source, arcname=source.name)
                 return
+            # @intent zip-never-archives-itself
+            # The archive file already exists once opened, so a destination inside the source
+            # would otherwise be added to itself as a half-written member.
+            archive_path = destination.resolve()
             for path in source.rglob("*"):
+                if path.resolve() == archive_path:
+                    continue
                 archive.write(path, arcname=path.relative_to(source.parent))
 
     def unzip_path(self, source: Path, destination: Path) -> tuple[str, ...]:

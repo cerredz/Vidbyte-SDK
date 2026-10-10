@@ -124,7 +124,7 @@ bundle = sdk.harnesses.sessions.export(store, session.id)
 session_id = sdk.harnesses.sessions.import_(store, bundle, new_id="se_restored")
 ```
 
-Importing without `new_id=` requires the target store not to already contain that session id. Passing `new_id=` rewrites only the session id fields; checkpoint ids and parent links are preserved.
+Importing without `new_id=` requires the target store not to already contain that session id. Passing `new_id=` rewrites the session id fields; checkpoint ids and parent links are preserved unless the target store already holds those checkpoint ids (such as a copy into the same store), in which case the copy gets fresh `ck_` ids with parent links and `head_id` remapped.
 
 ## Trace capture
 

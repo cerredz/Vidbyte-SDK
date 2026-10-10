@@ -165,7 +165,8 @@ class Session:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.arun(message, **options))
+            # The loop ends with this call, so the agent hands its MCP servers back before it closes.
+            return asyncio.run(self._agent._run_releasing_mcp(self.arun(message, **options)))
         raise AgentExecutionError("Session.run() cannot be called from an active event loop; use await arun().")
 
     def checkpoint(self, *, label: str = "") -> str:
@@ -186,6 +187,8 @@ class Session:
         checkpoint_id = at or self._head_id
         if checkpoint_id is None:
             raise SessionError("Cannot fork a session with no checkpoints.", details={"session_id": self._session_id})
+        if at is not None and self._store.get(at).session_id != self._session_id:
+            raise SessionError("Cannot fork from a checkpoint from another session.", details={"checkpoint_id": at})
         return self.fork_from(self._store, checkpoint_id, tools=tools or (), middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags)
 
     def batch_fork(self, count: int, *, at: str | None = None, tools: Sequence[object] | None = None, middleware: Sequence[object] | None = None) -> list[ForkOutcome]:
@@ -366,6 +369,9 @@ class Session:
     def _restore_agent_history(self, checkpoint: Checkpoint) -> None:
         # Reset the wrapped agent's history to a checkpoint's recorded state.
         self._agent.history = [self._serializer.message_from_dict(item) for item in checkpoint.run_state.history]
+        # Checkpoints do not persist tool-call memory, so clear it to match a cold resume and drop abandoned tool outputs.
+        if hasattr(self._agent, "_tool_call_contexts"):
+            self._agent._tool_call_contexts = []
 
     def _frame_resumed_history(self, checkpoint: Checkpoint) -> list[AgentMessage]:
         # Render another session's history as a single framed assistant message preserving its turns.

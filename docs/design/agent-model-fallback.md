@@ -92,7 +92,7 @@ Conveniently, `_arun_once` already wraps the `_invoke_with_middleware` call in a
 
 1. `BaseAgent.__init__` accepts `fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None`.
 2. A bare string entry (`"gpt-5.2"`) inherits the agent's `provider`, `api_key`, and `temperature`.
-3. A provider-prefixed string entry (`"anthropic/claude-sonnet-5"`) sets provider and model explicitly, overriding the agent's provider.
+3. A provider-prefixed string entry (`"anthropic/claude-sonnet-5"`) sets provider and model explicitly, overriding the agent's provider. It inherits the agent's `api_key` only when it names the agent's own provider; any other provider resolves its own credential (environment variable or config), so one vendor's key is never sent to another.
 4. A `FallbackModel` entry may override `provider`, `model`, `api_key`, and `temperature` independently.
 5. The effective chain is `[primary, *fallback]`, where `primary` is built from the agent's own `runner_config`.
 6. On a model-call error the runtime advances to the next chain index and re-enters the loop with that model.
@@ -352,7 +352,7 @@ class AgentFallbackSettings:
 `resolved_models(primary)` normalizes each entry against the primary:
 1. A `FallbackModel` passes through unchanged.
 2. A string containing `/` splits once. If the left side names a valid `ModelProvider`, it becomes the provider and the right side the model. If not, the whole string is treated as a bare model name (so OpenRouter-style `vendor/model` identifiers still work).
-3. A bare string becomes `FallbackModel(provider=primary.provider, model=entry, api_key=primary.api_key, temperature=primary.temperature)`.
+3. A bare string becomes `FallbackModel(provider=primary.provider, model=entry, api_key=primary.api_key, temperature=primary.temperature)`. A prefixed string keeps `primary.temperature` but takes `primary.api_key` only when its provider equals the primary's (compared case-insensitively); otherwise `api_key` is `None`.
 4. Returns `(primary, *normalized)`.
 
 The prefix is parsed here rather than delegated to `Runner`, because `Runner._normalize_provider_and_model` only applies a model prefix when the explicit provider is `None` or already matches (`lib/runners/utility.py:121`) — which would silently ignore a cross-provider fallback entry.

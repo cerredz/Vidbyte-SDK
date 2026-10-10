@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from typing import Any
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.context.handoff import EngineeringHandoff
 from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.runners import TextModelResponse
@@ -109,6 +110,27 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["fork_depth"], 1)
         self.assertEqual(result.metadata["name"], "child")
 
+    async def test_model_chosen_provider_swap_does_not_pass_parent_api_key(self) -> None:
+        # A model-requested provider swap must not carry the parent's vendor key to the new provider.
+        tool = ForkConversationTool()
+        agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+        children: list[BaseAgent] = []
+        real_fork = agent.fork
+
+        def fork_with_fake_runner(settings: AgentForkSettings) -> BaseAgent:
+            # Fork for real, then bind the offline runner so the child can answer without a provider.
+            child = real_fork(settings)
+            child._runner_cache.update(agent._runner_cache)
+            children.append(child)
+            return child
+
+        with patch.object(agent, "fork", side_effect=fork_with_fake_runner):
+            result = await tool.execute(_call(prompt="solve it", provider="openai"))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(children[0].runner_config.provider, "openai")
+        self.assertIsNone(children[0].runner_config.api_key)
+
     async def test_history_last_n_and_tool_names_translate_to_fork_kwargs(self) -> None:
         # The tool should slice history and resolve tool_names before calling parent.fork().
         agent = StubAgent()
@@ -206,6 +228,27 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, ToolStatus.ERROR)
         self.assertIn("parent cap", result.output)
+
+    async def test_loop_overrides_keep_parent_tool_guardrails(self) -> None:
+        # Model-requested loop overrides must not drop the parent's denied tools or other guardrails.
+        for overrides in ({"max_iterations": 2}, {"loop_settings": {"max_tokens": 5000}}):
+            with self.subTest(overrides=overrides):
+                agent = StubAgent()
+                parent = AgentLoopSettings(max_iterations=3, tool_settings=ToolSettings(denied_tools={"beta"}), tool_error_policy=ToolErrorPolicy(), max_contract_rejections=5, max_queued_prompts=7)
+                agent.agent_loop_settings = parent
+                tool = ForkConversationTool()
+                tool.bind_agent(agent)
+
+                result = await tool.execute(_call(prompt="branch", **overrides))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS)
+                settings = agent.captured.agent_loop_settings
+                self.assertIs(settings.tool_settings, parent.tool_settings)
+                self.assertIsNotNone(settings.tool_settings.denial("beta", {}))
+                self.assertIs(settings.tool_error_policy, parent.tool_error_policy)
+                self.assertEqual(settings.output_contracts, parent.output_contracts)
+                self.assertEqual(settings.max_contract_rejections, 5)
+                self.assertEqual(settings.max_queued_prompts, 7)
 
     async def test_depth_cap_prevents_recursive_fork_construction(self) -> None:
         # Depth cap should be checked before parent.fork is called.

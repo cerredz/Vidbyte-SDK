@@ -16,6 +16,8 @@ from __future__ import annotations
 import difflib
 from pathlib import Path
 
+from vidbyte.lib.tools.filesystem import LineEndings
+from vidbyte.lib.util import SubstringCounter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -51,10 +53,13 @@ class PatchTool(BaseTool):
         try:
             path = self._resolve(file_path)
             before = path.read_text(encoding=self.encoding)
+            # Remember the file's own line endings so the edit does not rewrite every line.
+            newline = LineEndings.detect(path.read_bytes().decode(self.encoding))
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "read_error"})
 
-        count = before.count(search_block)
+        # @intent unique-edit-counts-overlapping-matches
+        count = SubstringCounter.count_overlapping(before, search_block)
         if count == 0:
             return ToolResult.error(
                 self.name,
@@ -70,7 +75,8 @@ class PatchTool(BaseTool):
 
         after = before.replace(search_block, replace_block, 1)
         try:
-            path.write_text(after, encoding=self.encoding)
+            with path.open("w", encoding=self.encoding, newline=newline) as handle:
+                handle.write(after)
         except OSError as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "write_error"})
         diff = "".join(

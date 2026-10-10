@@ -77,7 +77,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -137,6 +137,7 @@ from vidbyte.lib.errors import (
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.middleware.builtins.context_compaction import (
     ToolResultCompactionMiddleware,
@@ -170,6 +171,8 @@ class BaseAgentRuntimeLoopState:
     model_call_count: int = 0
     tokens_used: int | None = None
     model_response: object | None = None
+    # The run's live provider conversation (the same list the loop appends to), so after_run sees it.
+    messages: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def tool_call_count(self) -> int:
@@ -193,6 +196,8 @@ class AgentRuntime:
         self._tracer: TracerBase = tracer or NullTracer()
         self.middleware = MiddlewarePipeline((*tuple(middleware), *self._context_window_admission_middleware()))
         self.context_manager = context_manager
+        # Run-scoped, read-only per-call manager (AgentInput.context_manager); rendered, never upserted into.
+        self.input_context_manager: ContextManager | None = None
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
@@ -299,6 +304,9 @@ class AgentRuntime:
             await self._run_inner_context_window_hook(state, message=message, provider=state.provider)
         tool_schemas = self._resolve_tool_schemas(state.provider)
         messages = self._extract_initial_messages(run_options)
+        # @intent after-hooks-see-run-conversation
+        # Keep the live conversation on the loop state so the end-of-run hooks can show it to observers like the continual trace.
+        state.messages = messages
         rejections = 0
         compaction_count = 0
         last_assistant_output: str | None = None
@@ -411,6 +419,7 @@ class AgentRuntime:
                     raise
                 handle, state.provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
+                state.messages = messages
                 fallback_index = transition.index
                 # A non-None transition proves self.fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
@@ -479,12 +488,12 @@ class AgentRuntime:
                     )
                     return await self._finish_result(token_stop, state)
                 if self.output_contract.active():
-                    counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=last_assistant_output, compaction_count=compaction_count)
+                    counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=last_assistant_output, compaction_count=compaction_count, run_state=state.run_state)
                     self._publish_contract_evaluations(state.run_state, counters)
                     unmet = self.output_contract.unmet(counters)
                     if unmet and self.output_contract.exhausted(rejections):
                         return await self._finish_result(
-                            self._stopped_result(last_assistant_output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts),
+                            self._final_result(output=last_assistant_output or "", runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED),
                             state,
                         )
                     if unmet:
@@ -501,7 +510,11 @@ class AgentRuntime:
                 )
                 if state.inner_context_window_algorithm is not None:
                     messages.append(self._assistant_message(last_assistant_output))
-                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+                # @intent after-hooks-see-final-reply
+                # Observers like the continual trace must see how the run ended, but a continuation below must keep
+                # sending the model the same messages as before, so the after-hooks get a copy with the reply added.
+                finished_messages = messages if state.inner_context_window_algorithm is not None else [*messages, self._assistant_message(last_assistant_output)]
+                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=finished_messages))
                 if state.inner_context_window_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
                     continue
                 if decision.action is not MiddlewareAction.CONTINUE:
@@ -511,19 +524,26 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         contexts=state.call_contexts,
                     )
+                elif await self._continue_finish_attempt(final, state, messages):
+                    if state.inner_context_window_algorithm is None:
+                        messages.append(self._assistant_message(last_assistant_output))
+                    continue
+                # The run ends here, so the end-of-run hooks read the conversation including the final reply.
+                state.messages = finished_messages
                 return await self._finish_result(final, state)
 
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
-            for call in tool_calls:
+            finish_attempt_continued = False
+            for call_index, call in enumerate(tool_calls):
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
                     return await self._finish_result(processed, state)
                 _, result = processed
                 if call.tool_name == IS_DONE_TOOL_NAME:
-                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
                     if decision.action is not MiddlewareAction.CONTINUE:
                         abort_result = self._middleware_abort_result(
                             decision,
@@ -533,17 +553,18 @@ class AgentRuntime:
                         )
                         return await self._finish_result(abort_result, state)
                     if self.output_contract.active():
-                        counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=result.output, compaction_count=compaction_count)
+                        counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=result.output, compaction_count=compaction_count, run_state=state.run_state)
                         self._publish_contract_evaluations(state.run_state, counters)
                         unmet = self.output_contract.unmet(counters)
                         if unmet and self.output_contract.exhausted(rejections):
                             return await self._finish_result(
-                                self._stopped_result(result.output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts),
+                                self._final_result(output=result.output or "", runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED),
                                 state,
                             )
                         if unmet:
                             rejections += 1
                             self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), state.provider, MiddlewareDecision.continue_())
+                            self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                             contract_rejected = True
                             break
                     final = self._final_result(
@@ -554,12 +575,18 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
+                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, "finish attempt not accepted yet; continue with the next message", metadata={"error": "finish_not_accepted"}), state.provider, MiddlewareDecision.continue_())
+                    self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
+                    if await self._continue_finish_attempt(final, state, messages):
+                        finish_attempt_continued = True
+                        break
                     return await self._finish_result(final, state)
 
-            if contract_rejected:
+            if finish_attempt_continued or contract_rejected:
                 continue
 
-            decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+            decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
             if decision.action is not MiddlewareAction.CONTINUE:
                 result = self._middleware_abort_result(
                     decision,
@@ -568,6 +595,13 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+            catalog = self.tools
+            await self._after_tool_iteration(state, messages)
+            if self.tools is not catalog:
+                # @intent a-replaced-catalog-reaches-the-next-model-call
+                # Schemas are resolved once per run, so a hook that replaced the catalog (JevRuntime adding launch_swarm)
+                # needs them resolved again; an untouched catalog keeps the schemas already resolved.
+                tool_schemas = self._resolve_tool_schemas(state.provider)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
@@ -651,6 +685,11 @@ class AgentRuntime:
                     retry_ordinal += AGENT_SPEED_FIRST_INDEX
                     continue
                 if decision.action is MiddlewareAction.ABORT_RUN:
+                    # A spent retry budget hands the error to _arun_once's fallback switch when a next model exists.
+                    # Only _arun_once sets the chain index, so external callers keep the abort result.
+                    chain_index = state.run_state.get("_speed_fallback_index")
+                    if self.fallback is not None and chain_index is not None and self.fallback.advance(exc, int(chain_index)) is not None:
+                        raise
                     return (
                         self._middleware_abort_result(
                             decision,
@@ -745,6 +784,22 @@ class AgentRuntime:
         base = dict(published) if isinstance(published, Mapping) else {}
         run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
 
+    async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
+        """Let a specialized linear runtime send a normal finish attempt back to work with feedback."""
+        # Default runtimes accept every finish attempt; a specialized runtime appends its feedback to messages and returns True.
+        # @intent finish-attempts-can-continue-the-same-loop
+        # A check that runs when the model tries to finish (JevRuntime's done checks) must be able to keep this loop's
+        # messages, tool history, and budgets, so the hook sits at both finish points instead of re-running the agent.
+        return False
+
+    async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
+        """Let a specialized linear runtime act between a finished tool iteration and the next model call."""
+        # Default runtimes do nothing here; a specialized runtime reads the loop state, may append to messages, and may
+        # replace self.tools with a new catalog, whose schemas the loop resolves before the next model call.
+        # @intent iterations-can-be-observed-mid-run
+        # A decision made while the agent works (JevRuntime's compute checkpoint) needs the live loop state after each
+        # iteration's tool calls, and must run only once the middleware has let the loop continue, so it is called last.
+
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
         decision = await self.middleware.after_run(
@@ -752,6 +807,7 @@ class AgentRuntime:
                 MiddlewareHook.AFTER_RUN,
                 state,
                 tool_call_count=int(dict(result.metadata).get("tool_call_count", 0)),
+                provider_messages=state.messages,
             )
         )
         if decision.action is MiddlewareAction.ABORT_RUN:
@@ -838,12 +894,14 @@ class AgentRuntime:
             self._end_semantic_span(algorithm_span, error=exc)
             raise
 
-    @staticmethod
-    async def _invoke_context_window_runner(runner: object, prompt: str, **options: Any) -> object:
-        """Invoke the current RunnerHandle for an inner-loop context-window algorithm."""
+    async def _invoke_context_window_runner(self, runner: object, prompt: str, **options: Any) -> object:
+        """Invoke the current RunnerHandle for an inner-loop context-window algorithm and meter its usage."""
         if not isinstance(runner, RunnerHandle):
             raise TypeError("Inner context-window runner must be a RunnerHandle.")
-        return await runner.invoke(prompt, **options)
+        response = await runner.invoke(prompt, **options)
+        # Algorithm side calls are billed like loop calls, so they land in the same usage ledger.
+        self.usage_tracker.record_call(response)
+        return response
 
     @staticmethod
     def _iteration_snapshot(*, message: str, provider: str, iteration_count: int, assistant_output: str | None, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, metadata: Mapping[str, Any]) -> AgentIterationSnapshot:
@@ -927,8 +985,8 @@ class AgentRuntime:
     @staticmethod
     def _is_secret_trace_key(key: str) -> bool:
         # Identifies credential-like keys that must not be sent to trace providers.
-        upper = key.upper()
-        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+        # @intent trace-scrub-uses-precise-credential-keys
+        return CredentialKeyPolicy.is_secret_key(key)
 
     def _middleware_context(
         self,
@@ -964,7 +1022,8 @@ class AgentRuntime:
             model_response=model_response if model_response is not None else state.model_response,
             model_usage=model_usage,
             error=error,
-            provider_messages=tuple(provider_messages),
+            # Copy each message so middleware reads a snapshot and can never edit the run's live conversation.
+            provider_messages=tuple(dict(message) for message in provider_messages),
             system=system,
             tool_is_internal=tool_is_internal,
             metadata=dict(metadata if metadata is not None else state.metadata),
@@ -1365,18 +1424,22 @@ class AgentRuntime:
     def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """Assemble placed context-window conversation messages around runtime messages."""
         # Preserves existing runtime messages while adding explicit conversation placements.
-        if self.context_manager is None:
-            return tuple(messages)
-        top = self.context_manager.render_conversation_messages(ContextWindowPlacement.TOP_OF_CONVERSATION)
-        end = self.context_manager.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)
+        managers = self._render_context_managers()
+        top = tuple(m for manager in managers for m in manager.render_conversation_messages(ContextWindowPlacement.TOP_OF_CONVERSATION))
+        end = tuple(m for manager in managers for m in manager.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION))
         return (*top, *tuple(messages), *end)
+
+    def _render_context_managers(self) -> tuple[ContextManager, ...]:
+        """Return the agent manager, then this run's input manager, whose primitives render this call."""
+        managers = (self.context_manager, self.input_context_manager)
+        return tuple(m for i, m in enumerate(managers) if m is not None and all(m is not prev for prev in managers[:i]))
 
     def _build_system_string(self, context: BaseAgentContext, *, loop_settings_block: str = "") -> str:
         """Assemble the system string with fixed header, loop settings, primitives zone, and body in order."""
         # loop_settings_block is placed directly after the fixed system-prompt header so the agent
         # always sees its live loop budgets (current usage / configured limit) near the top of context.
         fixed = context.build_context_fixed()
-        primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
+        primitives_zone = "\n\n".join(zone for zone in (m.render_primitives_zone() for m in self._render_context_managers()) if zone)
         body = context.build_context_body()
         parts = [p for p in (fixed, loop_settings_block, primitives_zone, body) if p]
         self._record_context_build_span(system_chars=len(fixed), primitive_chars=len(primitives_zone), body_chars=len(body))
@@ -1506,6 +1569,11 @@ class AgentRuntime:
                 break
             if after_decision.sleep_seconds:
                 await self.middleware.sleep(after_decision.sleep_seconds)
+        if after_decision.action is not MiddlewareAction.ABORT_RUN and call.tool_name != IS_DONE_TOOL_NAME:
+            # Show the model its view of the result, and remember that view on the record
+            # so later runs replay what the model saw rather than the raw, unprotected output.
+            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision)
+            context_record = self._with_model_visible_result(context_record, result, visible_result)
         state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
@@ -1514,33 +1582,51 @@ class AgentRuntime:
                 tokens_used=state.tokens_used,
                 contexts=state.call_contexts,
             )
-        if call.tool_name != IS_DONE_TOOL_NAME:
-            self._append_tool_result_message(messages, call, result, state.provider, after_decision)
         failure_stop = self._enforce_tool_settings_after_failure(context_record, tool_is_internal, state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used)
         if failure_stop is not None:
             return failure_stop
         return context_record, result
 
+    @staticmethod
+    def _with_model_visible_result(context_record: ToolCallContext, result: ToolResult, visible_result: ToolResult) -> ToolCallContext:
+        # Attaches the model-visible view only when it differs from the raw result, which the record keeps.
+        if visible_result is result:
+            return context_record
+        return replace(context_record, model_visible_result=visible_result)
+
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
-        # Applies ToolSettings before local execution: hard budgets first, then deny-class rules.
-        settings = self.config.tool_settings
-        if settings is None or tool_is_internal:
+        # Applies the total tool-call budget, then ToolSettings hard budgets, then the allowed_tools gate and ToolSettings deny-class rules, before local execution.
+        if tool_is_internal:
             return None
+        settings = self.config.tool_settings
         budget_stop = self._tool_settings_budget_stop(settings, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
         if budget_stop is not None:
             return budget_stop
-        hard_budget = settings.budget_stop(tool_name=call.tool_name, arguments=dict(call.arguments), call_contexts=call_contexts, iteration_count=iteration_count)
+        hard_budget = settings.budget_stop(tool_name=call.tool_name, arguments=dict(call.arguments), call_contexts=call_contexts, iteration_count=iteration_count) if settings is not None else None
         if hard_budget is not None:
             reason, meta = hard_budget
             return self._tool_settings_hard_budget_stop(reason, meta, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
-        denial = settings.denial(call.tool_name, self._executed_counts(call_contexts))
+        denial = self._allowed_tools_denial(call.tool_name)
+        if denial is None and settings is not None:
+            denial = settings.denial(call.tool_name, self._executed_counts(call_contexts))
         if denial is None:
             return None
         return self._apply_tool_denial(settings, call, provider, messages, call_contexts, denial, iteration_count=iteration_count, tokens_used=tokens_used)
 
-    def _tool_settings_budget_stop(self, settings: ToolSettings, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
+    def _allowed_tools_denial(self, tool_name: str) -> tuple[str, dict] | None:
+        # @intent allowed-tools-gate-is-enforced
+        # AgentLoopSettings.allowed_tools is a public gate that forks and restored agents inherit,
+        # so a call outside it is refused exactly like a denied tool instead of silently running.
+        allowed = self.config.allowed_tools
+        if allowed is None or tool_name in allowed:
+            return None
+        return "allowed_tools_denied", {"tool_name": tool_name, "allowed_tools": sorted(allowed)}
+
+    def _tool_settings_budget_stop(self, settings: ToolSettings | None, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
         # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
-        if settings.max_calls is None or len(call_contexts) < settings.max_calls:
+        # The budget is ToolSettings.max_calls or AgentRuntimeConfig.max_tool_calls (AgentLoopSettings.max_tool_calls), whichever is lower.
+        limits = [limit for limit in (self.config.max_tool_calls, settings.max_calls if settings is not None else None) if limit is not None]
+        if not limits or len(call_contexts) < min(limits):
             return None
         return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
@@ -1573,10 +1659,10 @@ class AgentRuntime:
         reason, meta = failure_stop
         return self._tool_settings_hard_budget_stop(reason, meta, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
-    def _apply_tool_denial(self, settings: ToolSettings, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], denial: tuple[str, dict], *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
+    def _apply_tool_denial(self, settings: ToolSettings | None, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], denial: tuple[str, dict], *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         # Aborts the run or records an in-context denial according to the on_deny policy.
         reason, meta = denial
-        if settings.aborts_on_deny:
+        if settings is not None and settings.aborts_on_deny:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
         context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta, iteration_count=iteration_count)
         call_contexts.append(context_record)
@@ -1593,6 +1679,16 @@ class AgentRuntime:
             counts[ctx.tool_name] = counts.get(ctx.tool_name, 0) + 1
         return counts
 
+    def _answer_skipped_tool_calls(self, messages: list[dict[str, Any]], skipped: Sequence[ToolCall], provider: str) -> None:
+        """Give every call left unprocessed after a turned-down isDone a tool result, so the assistant turn's ids are all answered."""
+        # @intent answer-every-tool-call-id
+        # The assistant turn already lists every tool_call id; chat and Anthropic APIs reject (HTTP 400) any id
+        # without a following tool result. Skipped calls are answered, never executed, and must precede any
+        # continuation message so the tool results stay contiguous after the assistant turn.
+        for call in skipped:
+            reason = "tool call not executed: the isDone finish attempt in this turn was turned down; call it again if it is still needed"
+            self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, reason, metadata={"error": "not_executed"}), provider, MiddlewareDecision.continue_())
+
     def _append_tool_result_message(
         self,
         messages: list[dict[str, Any]],
@@ -1602,13 +1698,15 @@ class AgentRuntime:
         decision: MiddlewareDecision,
         *,
         truncate: bool = True,
-    ) -> None:
+    ) -> ToolResult:
+        # Returns the model-visible result it appended so callers can record what the model saw.
         visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
         # Provider-specific result formatting remains the single place that
         # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
         # chat messages represent tool failures.
         formatted = ToolsFormatter.format_tool_result(call, visible_result, provider)
         messages.append(dict(formatted))
+        return visible_result
 
     def _model_visible_tool_result(
         self,
@@ -1627,6 +1725,13 @@ class AgentRuntime:
         visible = result if decision.transform is None else (decision.transform.model_visible_tool_result or result)
         if not truncate:
             return visible
+        # @intent appended-middleware-notes-survive-truncation: truncation keeps the head, so a note a
+        # middleware appended (canary watermark, loop-detection notice) would be cut off a long output.
+        # Cap only the raw part and re-attach the appended tail; replaced outputs are capped whole.
+        if visible is not result and result.output and visible.output.startswith(result.output):
+            capped = self._truncate_for_tool_settings(call, result)
+            tail = visible.output[len(result.output):]
+            return ToolResult(tool_name=visible.tool_name, status=visible.status, output=capped.output + tail, metadata={**dict(capped.metadata), **dict(visible.metadata)})
         return self._truncate_for_tool_settings(call, visible)
 
     def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
@@ -1762,7 +1867,7 @@ class AgentRuntime:
             "usage_rollup": self.usage_tracker.rollup(),
         }
 
-    def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, final_output: str | None = None, compaction_count: int = 0) -> dict[str, Any]:
+    def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, final_output: str | None = None, compaction_count: int = 0, run_state: Mapping[Any, Any] | None = None) -> dict[str, Any]:
         # Packages the live runtime counters into the dict output contracts read by key.
         # Internal tools (e.g. isDone) are excluded so effort floors count only real work.
         final_text = final_output or ""
@@ -1776,9 +1881,10 @@ class AgentRuntime:
             "tool_calls_by_name": self._tool_calls_by_name(non_internal),
             "tokens_used": tokens_used or 0,
             "elapsed_seconds": self.middleware.clock() - started_at,
+            "final_output": final_text,
             "final_output_chars": len(final_text),
             "final_output_tokens": self._approx_output_tokens(final_text),
-            "cost_spent_usd": self._cost_spent_usd(tokens_used),
+            "cost_spent_usd": self._cost_spent_usd(run_state),
             "compaction_count": compaction_count,
         }
 
@@ -1806,14 +1912,13 @@ class AgentRuntime:
         # Estimates tokens deterministically as ceil(chars/4), matching compaction heuristics.
         return max(1, math.ceil(len(text) / 4)) if text else 0
 
-    def _cost_spent_usd(self, tokens_used: int | None) -> float:
-        # Returns estimated USD spend from CostBudgetMiddleware when attached, else 0.0.
-        del tokens_used
+    def _cost_spent_usd(self, run_state: Mapping[Any, Any] | None) -> float:
+        # Returns this run's estimated USD spend from CostBudgetMiddleware when attached, else 0.0.
         from vidbyte.middleware.builtins.cost_budget import CostBudgetMiddleware
 
         for middleware in self.middleware.middleware:
             if isinstance(middleware, CostBudgetMiddleware):
-                return float(middleware.estimated_spend_usd)
+                return middleware.estimated_spend_usd_for(run_state or {})
         return 0.0
 
     def _compaction_event_delta(self, decision: MiddlewareDecision) -> int:
@@ -1824,6 +1929,10 @@ class AgentRuntime:
         meta = dict(transform.metadata or {})
         if "compaction" not in meta:
             return 0
+        # @intent content-rewrites-count-as-compactions
+        # Prefer the middleware's own changed flag, because an in-place rewrite keeps the message count.
+        if isinstance(meta.get("changed"), bool):
+            return 1 if meta["changed"] else 0
         before = meta.get("before_count")
         after = meta.get("after_count")
         if before is not None and after is not None:
@@ -1914,7 +2023,9 @@ def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
         upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Exact credential names and suffixes only, so author_id or max_tokens stay in the span.
+        if upper.startswith("LANGSMITH_") or CredentialKeyPolicy.is_secret_key(key_text):
             continue
         safe[key_text] = _safe_trace_value(value)
     return safe

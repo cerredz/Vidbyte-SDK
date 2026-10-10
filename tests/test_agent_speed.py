@@ -67,6 +67,7 @@ from tests.agent_test_support import build_test_agent
 from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.lib.dataclasses.speed import (
     CallSpeedRecord,
+    RecordModelCallFailureInput,
     RecordModelCallInput,
     RecordToolCallInput,
     ToolCallSpeedRecord,
@@ -328,6 +329,15 @@ class AgentSpeedTrackerRollupTests(unittest.TestCase):
         self.assertEqual(rollup.call_stats.call_count, 0)
         self.assertIsNone(rollup.run_stats.total_duration_ms)
 
+    def test_rollup_retry_count_total_counts_retry_attempts_not_summed_ordinals(self) -> None:
+        # Attempts carry retry ordinals 0, 1, 2: one original attempt plus two retries.
+        for ordinal in (0, 1):
+            self.tracker.record_call_failure(RecordModelCallFailureInput(provider="anthropic", model="claude-sonnet-5", dispatched_at=self.tracker.now(), retry_count=ordinal))
+        self.tracker.record_call(RecordModelCallInput(response=_FakeModelResponse(), dispatched_at=self.tracker.now(), retry_count=2))
+        rollup = self.tracker.rollup()
+        self.assertEqual(rollup.call_stats.retry_count_total, 2)
+        self.assertEqual(rollup.model_stats[0].retry_count_total, 2)
+
 
 class _FinalAnswerRunner:
     """Offline runner returning one TextModelResponse-shaped final answer."""
@@ -383,6 +393,17 @@ class AgentSpeedTrackerBaseAgentIntegrationTests(unittest.IsolatedAsyncioTestCas
             await agent.generate_reply("task")
         stats = agent.get_speed_stats()
         self.assertIsNotNone(stats.run_stats.total_duration_ms)
+
+    async def test_measure_stream_with_chunks_rolls_up_inter_chunk_gaps(self) -> None:
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work carefully.",
+            runner=_FinalAnswerRunner(),
+        )
+        self.assertEqual(list(agent.measure_stream(iter(["a", "b", "c"]))), ["a", "b", "c"])
+        stream_stats = agent.get_speed_stats().stream_stats
+        self.assertEqual(stream_stats.chunk_count, 3)
+        self.assertIsNotNone(stream_stats.inter_chunk_gap_ms_mean)
 
 
 if __name__ == "__main__":

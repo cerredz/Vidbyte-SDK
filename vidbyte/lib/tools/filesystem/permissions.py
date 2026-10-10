@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
+import re
+from pathlib import Path, PurePath
 
 from vidbyte.lib.dataclasses import FileSystemToolConfig
 from vidbyte.lib.errors import ToolExecutionError
@@ -19,6 +20,17 @@ class FileSystemPermissions:
                 details={"root": str(root), "path": str(path)},
             )
         return requested
+
+    @staticmethod
+    def require_pattern_inside_root(pattern: str) -> None:
+        # @intent find-pattern-stays-inside-root
+        # pathlib globs treat ".." literally, so a pattern with a ".." segment or an anchor would
+        # list entries outside the configured root even though the search root itself is scoped.
+        if PurePath(pattern).anchor or ".." in re.split(r"[\\/]", pattern):
+            raise ToolExecutionError(
+                "Filesystem tool glob pattern escaped the configured root.",
+                details={"pattern": pattern},
+            )
 
     @staticmethod
     def require_write_enabled(config: FileSystemToolConfig) -> None:

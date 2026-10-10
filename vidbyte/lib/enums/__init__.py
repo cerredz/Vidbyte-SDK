@@ -21,24 +21,36 @@ WHAT NOT TO DO IN THIS FILE:
     1. Do not implement enum behavior here; edit the owning sibling module.
     2. Do not import runtime instances or add import-time side effects.
 
-TEST FILES:
+COMMON MODIFICATION PATTERNS:
+    Update the sibling enum and this export list together when changing the public enum surface.
+
+KNOWN EDGE CASES:
+    Removing an obsolete enum requires updating imports and exports in its consumers.
+
+RELATED DOCS:
+    skills/jev-agent/SKILL.md
+
+TESTS:
+    tests/test_jev_agent.py and tests/test_jev_run_brief.py.
     Configuration and runtime tests cover the exported enum namespace.
 """
 
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
-from vidbyte.lib.enums.config import AgentType, DocumentType
-from vidbyte.lib.enums.codex import CodexApprovalMode, CodexContextAnchor, CodexInputType, CodexPersonality, CodexReasoningEffort, CodexReasoningSummary, CodexSandbox, CodexThreadSource, CodexThreadStartSource
-from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
-from vidbyte.lib.enums.failure import (
-    FailureCode,
-    FailureDisposition,
-    FailurePhase,
-    FailureSeverity,
-    FailureStatus,
-    RuleErrorMode,
+from vidbyte.lib.enums.codex import (
+    CodexApprovalMode,
+    CodexContextAnchor,
+    CodexInputType,
+    CodexPersonality,
+    CodexReasoningEffort,
+    CodexReasoningSummary,
+    CodexSandbox,
+    CodexThreadSource,
+    CodexThreadStartSource,
 )
+from vidbyte.lib.enums.config import AgentType, DocumentType
+from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -48,6 +60,38 @@ from vidbyte.lib.enums.cot_events import (
     ProgressState,
     ReturnableOption,
     Reversibility,
+)
+from vidbyte.lib.enums.decision_model import DecisionModelMode
+from vidbyte.lib.enums.failure import (
+    FailureCode,
+    FailureDisposition,
+    FailurePhase,
+    FailureSeverity,
+    FailureStatus,
+    RuleErrorMode,
+)
+from vidbyte.lib.enums.jev import (
+    JevBoundaryKind,
+    JevClaimKind,
+    JevCompletionStatus,
+    JevComputeQuestionKey,
+    JevContinuationGate,
+    JevDoneCheck,
+    JevDoneQuestionKey,
+    JevDynamicComputeOption,
+    JevExerciseMode,
+    JevOutputExtentComparator,
+    JevOutputExtentUnit,
+    JevPreflightPreset,
+    JevPreflightQuestionKey,
+    JevProblemCheckItemType,
+    JevQuestionType,
+    JevRunBriefUpdateStatus,
+    JevScenarioRole,
+    JevScopeBreadth,
+    JevScopeUnitSource,
+    JevScopeUniverse,
+    JevSwarmPlanQuestionKey,
 )
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
@@ -84,6 +128,7 @@ from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
+from vidbyte.lib.enums.usage import UsageAccountingFailure, UsageKind
 
 __all__ = [
     "AbsenceEvidenceSignificance",
@@ -96,9 +141,6 @@ __all__ = [
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
-    "CompositionDivisionValidity",
-    "ConsistencyStatus",
-    "ContextMinimalFanoutSkill",
     "CodexApprovalMode",
     "CodexContextAnchor",
     "CodexInputType",
@@ -108,9 +150,13 @@ __all__ = [
     "CodexSandbox",
     "CodexThreadSource",
     "CodexThreadStartSource",
+    "CompositionDivisionValidity",
+    "ConsistencyStatus",
+    "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DefeasibleRuleApplies",
     "DocumentType",
+    "DecisionModelMode",
     "EquivocationFallacy",
     "FailureCode",
     "FailureDisposition",
@@ -120,6 +166,27 @@ __all__ = [
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
+    "JevBoundaryKind",
+    "JevClaimKind",
+    "JevCompletionStatus",
+    "JevComputeQuestionKey",
+    "JevContinuationGate",
+    "JevDoneCheck",
+    "JevDoneQuestionKey",
+    "JevDynamicComputeOption",
+    "JevExerciseMode",
+    "JevOutputExtentComparator",
+    "JevOutputExtentUnit",
+    "JevPreflightPreset",
+    "JevPreflightQuestionKey",
+    "JevProblemCheckItemType",
+    "JevRunBriefUpdateStatus",
+    "JevQuestionType",
+    "JevScenarioRole",
+    "JevScopeBreadth",
+    "JevScopeUnitSource",
+    "JevScopeUniverse",
+    "JevSwarmPlanQuestionKey",
     "ModalStatus",
     "ModelModality",
     "ModelNameModality",
@@ -148,4 +215,6 @@ __all__ = [
     "TaskStatus",
     "TestimonyTrust",
     "TransitivityConsistency",
+    "UsageAccountingFailure",
+    "UsageKind",
 ]

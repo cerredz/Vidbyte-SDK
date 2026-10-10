@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unittest
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,22 @@ class _ProgressModel(BaseModel):
     goal: str = Field(description="The goal.")
     steps: list[str] = Field(default_factory=list, description="Ordered steps taken.")
     done: bool = Field(default=False, description="Whether the work is complete.")
+
+
+class _Owner(BaseModel):
+    name: str = Field(description="Owner name.")
+
+
+class _OptionalTraceModel(BaseModel):
+    """Trace whose fields are all optional, as trace fields start at None."""
+
+    summary: str | None = Field(None, description="One-line summary.")
+    confidence: float | None = Field(None, description="Confidence 0-1.")
+    blockers: list[str] | None = Field(None, description="Open blockers.")
+    owner: Optional[_Owner] = Field(None, description="Current owner.")  # noqa: UP045
+    pages: Union[int, None] = Field(None, description="Pages sent.")  # noqa: UP007
+    reviewers: list[_Owner | None] | None = Field(None, description="Reviewers.")
+    ref: int | str | None = Field(None, description="Ticket id or slug.")
 
 
 def _progress_schema() -> TraceSchema:
@@ -66,6 +83,19 @@ class TraceOptionTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             TraceSchema.from_model(NoDesc)
+
+    def test_from_model_unwraps_optional_annotations(self) -> None:  # [Silent Failure]
+        fields = TraceSchema.from_model(_OptionalTraceModel).fields
+        self.assertEqual(fields["summary"].type, TraceFieldType.STRING)
+        self.assertEqual(fields["confidence"].type, TraceFieldType.NUMBER)
+        self.assertEqual(fields["blockers"].type, TraceFieldType.ARRAY)
+        self.assertEqual(fields["owner"].type, TraceFieldType.OBJECT)
+        self.assertEqual(fields["owner"].fields["name"].type, TraceFieldType.STRING)
+        self.assertEqual(fields["pages"].type, TraceFieldType.INTEGER)
+        self.assertEqual(fields["reviewers"].items.fields["name"].type, TraceFieldType.STRING)
+
+    def test_from_model_multi_type_union_stays_string(self) -> None:  # [Hidden Assumption]
+        self.assertEqual(TraceSchema.from_model(_OptionalTraceModel).fields["ref"].type, TraceFieldType.STRING)
 
     def test_initial_artifact_keys_all_none(self) -> None:  # [Edge Case]
         artifact = _progress_schema().initial_artifact()
@@ -118,6 +148,16 @@ class UpdateTraceToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("output shape mismatch", result.output)
         self.assertEqual(tool.current_trace()["steps"], None)
+
+    async def test_accepts_values_matching_optional_model(self) -> None:  # [Silent Failure]
+        tool = UpdateTraceTool(TraceSchema.from_model(_OptionalTraceModel))
+        result = await tool.execute(_call({"confidence": 0.8, "blockers": ["x"], "owner": {"name": "a"}}))
+        self.assertNotEqual(result.status.value, "error", result.output)
+        await tool.execute(_call({"blockers": ["y"]}))
+        trace = tool.current_trace()
+        self.assertEqual(trace["confidence"], 0.8)
+        self.assertEqual(trace["blockers"], ["x", "y"])
+        self.assertEqual(trace["owner"], {"name": "a"})
 
     async def test_non_object_trace_returns_error(self) -> None:  # [Edge Case]
         tool = UpdateTraceTool(_progress_schema())
@@ -320,6 +360,111 @@ class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         reply = await agent.arun("task")
         self.assertEqual(reply.content, "done")
         self.assertGreaterEqual(reply.metadata["trace_metadata"]["error_count"], 1)
+
+
+# ---------------------------------------------------------------------------
+# Regression: the trace agent sees the current run's conversation
+# ---------------------------------------------------------------------------
+USER_PROMPT = "BRANCH: investigate the alternative"
+TOOL_OUTPUT = "lookup-result-7f3a"
+
+
+class _DistinctLookup(_Lookup):
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult.success("lookup", TOOL_OUTPUT)
+
+
+class _PromptCapturingRunner(ScriptedRunner):
+    """Records the first prompt of every trace update (the one carrying <main_context_window>)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trace_prompts: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        if "<trace_schema>" in prompt and "messages" not in kwargs:
+            self.trace_prompts.append(prompt)
+        return super().run(prompt, **kwargs)
+
+
+class ContinualTraceSeesRunConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def _trace_prompts(self, every_n: int) -> list[str]:
+        runner = _PromptCapturingRunner()
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work.",
+            runner=runner,
+            tools=[_DistinctLookup()],
+            trace_option=TraceOption.continual(ActionTrace, every_n_iterations=every_n, max_trace_iterations=1),
+        )
+        reply = await agent.arun(USER_PROMPT)
+        self.assertEqual(reply.content, "done")
+        return runner.trace_prompts
+
+    async def test_after_iteration_update_sees_prompt_and_tool_result(self) -> None:  # [Silent Failure]
+        prompts = await self._trace_prompts(every_n=1)
+        first = prompts[0]
+        self.assertIn('"iteration_count": 1', first)
+        self.assertIn(USER_PROMPT, first)
+        self.assertIn(TOOL_OUTPUT, first)
+        self.assertIn("Provider messages:", first)
+
+    async def test_after_run_only_update_sees_prompt_and_tool_result(self) -> None:  # [Silent Failure]
+        prompts = await self._trace_prompts(every_n=5)
+        self.assertEqual(len(prompts), 1)
+        self.assertIn(USER_PROMPT, prompts[0])
+        self.assertIn(TOOL_OUTPUT, prompts[0])
+
+
+FINAL_REPLY = "RESOLVED: rotated the expired TLS cert on lb-2"
+
+
+class _PlainFinalRunner(_PromptCapturingRunner):
+    """Main agent calls lookup, then finishes with a plain-text reply instead of isDone."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.main_requests: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        if "<trace_schema>" in prompt:
+            return super().run(prompt, **kwargs)
+        self.main_requests.append(prompt + str(kwargs.get("messages", "")))
+        if "messages" not in kwargs:
+            return super().run(prompt, **kwargs)
+        reply = _Resp({"output": []})
+        reply.text = FINAL_REPLY
+        return reply
+
+
+class ContinualTraceSeesFinalTextReplyTests(unittest.IsolatedAsyncioTestCase):
+    async def _run(self, every_n: int) -> _PlainFinalRunner:
+        runner = _PlainFinalRunner()
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work.",
+            runner=runner,
+            tools=[_DistinctLookup()],
+            trace_option=TraceOption.continual(ActionTrace, every_n_iterations=every_n, max_trace_iterations=1),
+        )
+        reply = await agent.arun(USER_PROMPT)
+        self.assertEqual(reply.content, FINAL_REPLY)
+        # The main model is called once per iteration and is never sent its own final reply back.
+        self.assertEqual(len(runner.main_requests), 2)
+        self.assertTrue(all(FINAL_REPLY not in request for request in runner.main_requests))
+        return runner
+
+    async def test_after_iteration_cadence_sees_final_reply(self) -> None:  # [Silent Failure]
+        prompts = (await self._run(every_n=1)).trace_prompts
+        self.assertNotIn(FINAL_REPLY, prompts[0])
+        self.assertEqual(prompts[-1].count(FINAL_REPLY), 1)
+        self.assertIn(TOOL_OUTPUT, prompts[-1])
+
+    async def test_after_run_only_update_sees_final_reply(self) -> None:  # [Silent Failure]
+        prompts = (await self._run(every_n=9)).trace_prompts
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(prompts[0].count(FINAL_REPLY), 1)
+        self.assertIn(TOOL_OUTPUT, prompts[0])
 
 
 if __name__ == "__main__":

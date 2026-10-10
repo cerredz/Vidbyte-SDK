@@ -17,6 +17,7 @@ Similar Files:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
@@ -42,9 +43,9 @@ class OpenRouterUsage(ChatCompletionUsage):
 
     @staticmethod
     def _cost_or_none(payload: Mapping[str, Any]) -> float | None:
-        # Coerces OpenRouter's usage.cost to float, rejecting bools and non-numerics.
+        # A malformed marketplace price must not turn an unpriced model call into a complete negative or infinite bill.
         value = payload.get("cost")
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             return None
         return float(value)
 

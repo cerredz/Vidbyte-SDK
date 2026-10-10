@@ -18,6 +18,7 @@ from vidbyte.context.primitives.base import ContextItem
 from vidbyte.lib.constants.reasoning_strategies import EQUIVOCATION_REQUIRED_FIELDS
 from vidbyte.lib.enums.reasoning_strategies import EquivocationFallacy
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins._note_ids import next_free_counter
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
     ToolCall,
@@ -139,7 +140,7 @@ class EquivocationTool(BaseTool):
         if error:
             return ToolResult.error(call.tool_name, error)
 
-        self._counter += 1
+        self._counter = next_free_counter(self._manager, "equivocation", self._counter + 1)
         primitive_id = f"equivocation:{self._counter}"
         item = self._build_item(args, primitive_id)
 

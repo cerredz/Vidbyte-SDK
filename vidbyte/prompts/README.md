@@ -64,6 +64,14 @@ prompt text.
 | Failure Pattern Repair | `failure_pattern_repair` | rulebook_feedback_loop, dependency_shape_triage, stage_gate_controller, evaluator_red_team, selective_regeneration_loop | [failure_pattern_repair/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair) |
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
+| Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
+| Jev Clone | `jev_clone` | clone_prompt, results_prompt | [jev_clone/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clone) |
+| Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
+| Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
+| Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
+| Jev Run Brief | `jev_run_brief` | system_prompt, update_prompt | [jev_run_brief/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_brief) |
+  | Jev Run State | `jev_run_state` | system_prompt, required_sequence_agent | [jev_run_state/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state) |
+| Jev Swarm | `jev_swarm` | plan_prompt, assignment_prompt, results_prompt, rejected_prompt, retry_prompt, closed_prompt, tool_description, conventions_description, assignments_description, name_description, objective_description, inputs_description, deliverable_description, boundaries_description, verification_description | [jev_swarm/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_swarm) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
@@ -214,6 +222,85 @@ structured, reusable handoff document another agent or human can use to continue
 the work cold.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md>
+
+#### Jev Clarification — `jev_clarification`
+
+The system prompt for JevClarificationAgent, the small generative agent a JevAgent
+routes an unclear request to when its clarity preflight fails. It receives the
+user's request and the details Jev found missing, and returns a few clarifying
+questions, each with two to four recommended answers, for the user to answer
+before the main agent starts.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md>
+
+#### Jev Continuation — `jev_continuation`
+
+The message a JevAgent's continuation appends to its main agent's loop when an
+enabled done check fails at a finish attempt. It hands the main agent the original
+request, the run state, the handoff, and the Jev questions that failed, and tells it
+to complete only the missing parts, with more focus on them.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md>
+
+#### Jev Clone — `jev_clone`
+
+Instructions for JevAgent's CLONE dynamic-compute option. `clone_prompt` gives each
+clone the original request and the verified run brief; `results_prompt` hands the
+clones' replies back to the main agent to compare and continue from.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clone>
+
+#### Jev Swarm — `jev_swarm`
+
+Instructions for JevAgent's SWARM dynamic-compute option. `plan_prompt` asks the main
+agent to plan a team through the `launch_swarm` tool; `assignment_prompt` gives each
+helper its assignment and the shared conventions; `results_prompt` hands the helpers'
+results back to merge. `rejected_prompt`, `retry_prompt`, and `closed_prompt` explain a
+rejected plan, the attempts left, and a closed tool, and the `*_description` entries are
+the tool's model-facing descriptions.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_swarm>
+
+#### Jev Fresh Continuation — `jev_fresh_continuation`
+
+Instructions for a clean-context JevAgent continuation. It gives the fresh agent
+the original request, the run state, and the latest handoff, then asks it to
+complete the request using those references.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md>
+
+#### Jev Handoff — `jev_handoff`
+
+The system prompt for JevHandoff, the small generative agent a JevAgent with done
+checks runs each time its main agent tries to finish. It receives the user's
+original request, the run state, and the main agent's context window through a
+context manager, and returns structured evidence shaped by the enabled done checks,
+without giving a verdict.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md>
+
+#### Jev Run Brief — `jev_run_brief`
+
+The prompts for JevRunBriefWriter, the tool-free recorder that performs structured
+note-taking compaction between a JevAgent's iterations. It reads the previous brief
+and fresh numbered events, then returns only new high-signal notes as verbatim event
+passages with ids. Code verifies and appends those notes to the goal-plus-notes brief.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_brief/system_prompt.md>
+
+#### Jev Run State — `jev_run_state`
+
+The system prompt for JevRunState, the small generative agent a JevAgent with done
+checks runs once before its main agent starts. It receives the user's request and
+returns a structured run state: a central goal, objective, mission, and limits, plus
+one section for every enabled done check.
+
+  Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md>
+
+  The `required_sequence_agent` asset is appended to the main agent's system prompt
+  when REQUIRED_SEQUENCE derives an active ordered stage list from the request.
+  It names those stages and explains how the finish check handles missing or
+  out-of-order work.
 
 #### Mimic Behavior — `mimic_behavior`
 

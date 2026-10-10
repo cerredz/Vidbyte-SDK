@@ -4,7 +4,7 @@ PURPOSE: Defines closed Codex SDK option vocabularies used by validated settings
 ROLE IN CODEBASE: Replaces free-form provider strings with discoverable public enum contracts.
 ARCHITECTURE NOTE: Empty PROVIDER_DEFAULT sentinels are omitted before SDK calls.
 COMMON MODIFICATION PATTERNS: Add an SDK-supported member when upgrading the pinned compatibility range.
-KNOWN EDGE CASES: Enum values must match openai-codex 0.147 wire values exactly.
+KNOWN EDGE CASES: Enum values must match openai-codex 0.162 wire values exactly.
 RELATED DOCS: https://developers.openai.com/codex/sdk; docs/design/codex-harness-agent.md.
 TESTS: python scripts/run_ci.py.
 """
@@ -15,7 +15,7 @@ from enum import Enum, StrEnum
 
 
 class CodexApprovalMode(str, Enum):
-    """Stable approval modes accepted by openai-codex 0.147."""
+    """Stable approval modes accepted by openai-codex 0.162."""
 
     PROVIDER_DEFAULT = ""
     AUTO_REVIEW = "auto_review"
@@ -54,7 +54,7 @@ class CodexReasoningSummary(str, Enum):
 
 
 class CodexSandbox(str, Enum):
-    """Stable sandbox modes accepted by openai-codex 0.147."""
+    """Stable sandbox modes accepted by openai-codex 0.162."""
 
     PROVIDER_DEFAULT = ""
     READ_ONLY = "read-only"
@@ -79,6 +79,14 @@ class CodexThreadStartSource(str, Enum):
     CLEAR = "clear"
 
 
+class CodexFailureClass(str, Enum):
+    """Whether a Codex failure can be survived, and by what kind of retry."""
+
+    MODEL_RETRYABLE = "model_retryable"
+    TRANSIENT = "transient"
+    TERMINAL = "terminal"
+
+
 class CodexInputType(str, Enum):
     """Input variants accepted by a Codex turn."""
 
@@ -99,6 +107,7 @@ class CodexContextAnchor(StrEnum):
 
 
 __all__ = [
+    "CodexFailureClass",
     "CodexApprovalMode",
     "CodexContextAnchor",
     "CodexInputType",

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from vidbyte.context import ContextBudget, ContextPermissions, ContextResponse, ContextToolCall, TaskContextItem
 from vidbyte.lib.dataclasses.context import BaseContext
-from vidbyte.lib.dataclasses import AgentCard, CandidateResult, ToolSpec
+from vidbyte.lib.dataclasses import AgentCard, AgentMessage, CandidateResult, ToolSpec
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
 from vidbyte.prompts import Prompts
 
@@ -52,6 +52,28 @@ class ContextDataclassTests(unittest.TestCase):
 
         self.assertIn("Context items:", built)
         self.assertIn("document the public API", built)
+
+    def test_history_agent_message_renders_content_without_metadata(self) -> None:
+        # [Context Bloat] Prior replies' metadata (tool outputs, usage) must not re-enter the prompt.
+        big_output = "TOOL-OUTPUT-" + "x" * 5000
+        message = AgentMessage(
+            sender="r",
+            recipient="orchestrator",
+            content="short answer",
+            metadata={"iteration_outputs": [big_output], "usage": {"total_tokens": 123}},
+        )
+
+        body = BaseContext(history=(message,)).build_context_body()
+
+        self.assertIn("History:\nr -> orchestrator: short answer", body)
+        self.assertNotIn("TOOL-OUTPUT-", body)
+        self.assertNotIn("metadata", body)
+        self.assertNotIn("AgentMessage(", body)
+
+    def test_history_non_agent_message_items_render_via_str(self) -> None:
+        body = BaseContext(history=("plain note", {"role": "user"})).build_context_body()
+
+        self.assertIn("History:\nplain note\n{'role': 'user'}", body)
 
     def test_prompt_catalog_contains_reflexion_prompts(self) -> None:
         prompts = Prompts().family("reflexion")

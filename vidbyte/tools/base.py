@@ -13,12 +13,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from copy import copy as shallow_copy
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
 
 from vidbyte.tools.types import ToolActivity, ToolCall, ToolResult, ToolSpec
 
 if TYPE_CHECKING:
+    from vidbyte.context.manager import ContextManager
     from vidbyte.lib.dataclasses.tools import ToolCustomization
 
 _EMPTY_PARAMETER_DESCRIPTIONS: Mapping[str, str] = MappingProxyType({})
@@ -37,6 +39,16 @@ class BaseTool(ABC):
         from vidbyte.tools.activity import ActivityToolFormatter
 
         return ActivityToolFormatter.bind(self, activity)
+
+    def rebind_context_manager(self, old: ContextManager | None, new: ContextManager | None) -> "BaseTool":
+        """Return a copy writing to ``new`` when this tool writes to the ``old`` context manager, else this tool."""
+        # @intent fork-rebinds-context-tools
+        # Manager-bound builtins keep their manager in _manager; a fork branch must write to its own copy.
+        if old is None or new is None or new is old or getattr(self, "_manager", None) is not old:
+            return self
+        clone = shallow_copy(self)
+        setattr(clone, "_manager", new)
+        return clone
 
     # @intent description-only-tool-view
     # Applications may adapt the language a model sees for local terminology,
@@ -92,6 +104,11 @@ class _ToolWrapper(BaseTool, ABC):
         # Return the implementation whose runtime behavior the wrapper preserves.
         raise NotImplementedError
 
+    @abstractmethod
+    def _rewrap(self, tool: BaseTool) -> BaseTool:
+        # Return the same kind of view, with the same model-facing changes, around another tool.
+        raise NotImplementedError
+
 
 class _CustomizedTool(_ToolWrapper):
     """Private wrapper that changes model-facing descriptions only."""
@@ -105,6 +122,10 @@ class _CustomizedTool(_ToolWrapper):
     def wrapped_tool(self) -> BaseTool:
         """Return the original tool whose runtime behavior this view preserves."""
         return self._tool
+
+    def _rewrap(self, tool: BaseTool) -> BaseTool:
+        # Reuses the validated customization around another copy of the same tool, such as a fork clone.
+        return _CustomizedTool(tool, self._customization)
 
     def spec(self) -> ToolSpec:
         """Return a fresh model-facing spec with validated descriptions replaced."""

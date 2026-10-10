@@ -11,7 +11,10 @@ Architecture:
       exposing shared async execution and pause behavior.
     - Owns one UsageTracker (cost) and one AgentSpeedTracker (latency) for its
       lifetime, both reset at the top of every generate_reply() and threaded
-      into the AgentRuntime it constructs for AgentRuntimeType.LINEAR.
+      into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
+    - Inside a metered run (an active vidbyte.lib.usage_ledger ledger, opened by
+      JevRuntime), a nested agent records into its own tracker and merges that
+      run's usage into the active ledger when it finishes.
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -22,14 +25,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
+import copy
+import dataclasses
 import inspect
+from enum import Enum
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.contracts import floors as contract_floors
+from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -40,23 +48,30 @@ from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.dataclasses.trace import TraceOption
+from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError, UsageAccountingError
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
+from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
+from vidbyte.tools.base import BaseTool, _unwrap_tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
-from vidbyte.tools.types import ToolCallContext, ToolSpec
+from vidbyte.tools.types import ToolCallContext, ToolPermission, ToolSpec
 
 if TYPE_CHECKING:
     from vidbyte.agents.contract import AgentLoopSettingsOutputContract
     from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
+
+# Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
+# fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass.
+_LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV})
 
 
 class BaseAgent(McpAttachableMixin):
@@ -197,7 +212,7 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support tool_settings."
             )
-        if self.agent_loop_settings.output_contract.active() and self.runtime_type is not AgentRuntimeType.LINEAR:
+        if self.agent_loop_settings.output_contract.active() and self.runtime_type not in _LINEAR_LOOP_RUNTIMES:
             raise ConfigurationError(
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support output contracts."
@@ -216,10 +231,16 @@ class BaseAgent(McpAttachableMixin):
         self.output_schema = output_schema
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
-        self._active_prompt: str = ""
+        # @intent concurrent-runs-keep-their-own-prompt
+        # Each run (asyncio Task) sees only its own prompt, so concurrent runs on one agent
+        # never forward another user's request to an as_tool() specialist.
+        self._active_prompt_var: contextvars.ContextVar[str] = contextvars.ContextVar(f"vidbyte_active_prompt_{id(self)}", default="")
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
         self.handoffs: list[Handoff] = []
+        # @intent run-probe-handoffs-are-per-run
+        # Index into the cumulative handoffs list where the latest run began, so run probes see only that run's handoffs.
+        self._run_handoff_start: int = 0
         self._trace_option: TraceOption | None = trace_option
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
@@ -231,8 +252,11 @@ class BaseAgent(McpAttachableMixin):
         self._speed_tracker = AgentSpeedTracker()
         self._behavior_view: Any = None
         self._active_session: Session | None = None
-        self._queued_prompts: list[str] = []
-        self._draining_queued_prompts: bool = False
+        # @intent run-scoped-prompt-queue
+        # Each top-level run owns its follow-up queue, so concurrent runs never drain or clear each other's follow-ups.
+        self._pending_prompts: list[str] = []
+        self._run_queue_var: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(f"vidbyte_run_queue_{id(self)}", default=None)
+        self._draining_var: contextvars.ContextVar[bool] = contextvars.ContextVar(f"vidbyte_draining_{id(self)}", default=False)
         self.last_queued_replies: list[AgentMessage] = []
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
@@ -290,11 +314,12 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def add_tool(self, tool: object) -> BaseAgent:
-        self._agent_tool_items = (*self._agent_tool_items, tool)
+        # Register with the catalog first so a rejected tool leaves the agent unchanged.
         try:
             self.tools = self.tools.add(tool)
         except TypeError:
             pass
+        self._agent_tool_items = (*self._agent_tool_items, tool)
         self._bind_agent_tool_context(tool)
         return self
 
@@ -329,6 +354,26 @@ class BaseAgent(McpAttachableMixin):
         return self._behavior_view
 
     @property
+    def _active_prompt(self) -> str:
+        # The prompt of the run executing in the current task; empty outside a run.
+        return self._active_prompt_var.get()
+
+    @_active_prompt.setter
+    def _active_prompt(self, value: str) -> None:
+        self._active_prompt_var.set(value)
+
+    @property
+    def _queued_prompts(self) -> list[str]:
+        # The current run's follow-up queue; outside a run, the pending prompts the next run claims.
+        queue = self._run_queue_var.get()
+        return self._pending_prompts if queue is None else queue
+
+    @property
+    def _draining_queued_prompts(self) -> bool:
+        # True while the run executing in the current task is draining its queue.
+        return self._draining_var.get()
+
+    @property
     def session(self) -> Session | None:
         # Return the durable session currently bound to this agent, if any.
         return self._active_session
@@ -355,6 +400,8 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.pause import PauseAgentTool
         from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 
+        # customize() and with_activity() views keep the wrapped tool's runtime, so bind the wrapped tool.
+        tool = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
         if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
         if isinstance(tool, AttachMcpServerTool):
@@ -370,8 +417,8 @@ class BaseAgent(McpAttachableMixin):
         self._bind_session_tool(tool)
 
     def _bind_session_tool(self, tool: object) -> None:
-        # Bind a session-builtin tool to this agent's active session when one is attached.
-        binder = getattr(tool, "bind_session", None)
+        # Bind a session-builtin tool to this agent's active session when one is attached, looking through tool views.
+        binder = getattr(_unwrap_tool(tool) if isinstance(tool, BaseTool) else tool, "bind_session", None)
         if not callable(binder):
             return
         if self._active_session is not None:
@@ -426,6 +473,7 @@ class BaseAgent(McpAttachableMixin):
             context_summary=self._export_context_summary(),
             trace_option=self._export_trace_option(),
             output_schema=self._export_output_schema(),
+            permission_policy=tuple(sorted(permission.value for permission in self.permission_policy.allowed)),
         )
 
     @classmethod
@@ -445,6 +493,9 @@ class BaseAgent(McpAttachableMixin):
             temperature=state.temperature,
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
+            timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
+            fallback=state.runtime_config.get("fallback_models") or None,
+            trace_option=cls._restore_trace_option(state),
             description=state.description,
             capabilities=tuple(state.capabilities),
             agent_metadata=agent_metadata,
@@ -452,7 +503,8 @@ class BaseAgent(McpAttachableMixin):
             metadata=dict(state.metadata),
             tracer=tracer,
             trace=trace,
-            output_schema=output_schema,
+            output_schema=cls._restore_output_schema(state, output_schema),
+            permission_policy=cls._restore_permission_policy(state),
         )
         child.history = [serializer.message_from_dict(item) for item in state.history]
         cls._record_resume_tool_mismatch(child, state.tool_names)
@@ -466,7 +518,12 @@ class BaseAgent(McpAttachableMixin):
             "max_tool_calls": self.runtime_config.max_tool_calls,
             "compaction_trigger_tokens": self.runtime_config.compaction_trigger_tokens,
             "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
+            "runner_timeout_seconds": self.runner_config.timeout_seconds,
         }
+        if self.fallback is not None:
+            # @intent resume-keeps-fallback-chain
+            # Store backups as credential-free 'provider/model' strings; keys re-resolve on restore.
+            config["fallback_models"] = [m.identity() for m in self.fallback.models[1:]]
         if isinstance(self.runtime_config_obj, ActorRuntime):
             config.update(
                 {
@@ -496,7 +553,46 @@ class BaseAgent(McpAttachableMixin):
         values = {name: getattr(self.agent_loop_settings, name, None) for name in fields}
         if isinstance(values.get("allowed_tools"), tuple):
             values["allowed_tools"] = list(values["allowed_tools"])
+        settings = self.agent_loop_settings
+        values["tool_settings"] = self._export_settings_object(getattr(settings, "tool_settings", None))
+        values["tool_error_policy"] = self._export_settings_object(getattr(settings, "tool_error_policy", None))
+        values["output_contracts"] = self._export_output_contracts(getattr(settings, "output_contracts", ())) or None
+        values["max_contract_rejections"] = getattr(settings, "max_contract_rejections", None)
         return {key: value for key, value in values.items() if value is not None}
+
+    @staticmethod
+    def _export_settings_object(settings: ToolSettings | ToolErrorPolicy | None) -> dict[str, Any] | None:
+        # Constructor kwargs as JSON-safe data so a resumed agent keeps its tool deny-list, caps, and retry policy.
+        if settings is None:
+            return None
+        names = [name for name in inspect.signature(type(settings)).parameters if hasattr(settings, name)]
+        data = {name: getattr(settings, name) for name in names}
+        for key, value in data.items():
+            if isinstance(value, (set, frozenset)):
+                data[key] = sorted(value)
+            elif isinstance(value, Mapping):
+                data[key] = dict(value)
+            elif isinstance(value, Enum):
+                data[key] = value.value
+        return data
+
+    @staticmethod
+    def _export_output_contracts(contracts: Iterable[object]) -> list[dict[str, Any]]:
+        # Built-in floors only; custom contracts carry arbitrary state, so callers must re-supply them.
+        exported: list[dict[str, Any]] = []
+        for contract in contracts:
+            if BaseAgent._builtin_floor(type(contract).__name__) is not type(contract):
+                continue
+            entry = {"type": type(contract).__name__, "minimum": getattr(contract, "minimum")}
+            entry.update({key: getattr(contract, key) for key in ("tool_name", "cost_per_million_tokens") if hasattr(contract, key)})
+            exported.append(entry)
+        return exported
+
+    @staticmethod
+    def _builtin_floor(name: str) -> type | None:
+        # Resolve a contract class name to a floor defined in vidbyte.agents.contracts.floors, else None.
+        floor = getattr(contract_floors, name, None)
+        return floor if isinstance(floor, type) and floor.__module__ == contract_floors.__name__ else None
 
     def _export_context_summary(self) -> dict[str, Any]:
         # Record resumable context metadata without serializing live context objects.
@@ -516,7 +612,7 @@ class BaseAgent(McpAttachableMixin):
             "schema_name": option.schema.name,
             "schema_description": option.schema.description,
             "schema_fields": {
-                name: {"description": field.description, "type": field.type.value}
+                name: field.model_dump(mode="json", exclude_none=True)
                 for name, field in option.schema.fields.items()
             },
             "every_n_iterations": option.every_n_iterations,
@@ -545,7 +641,45 @@ class BaseAgent(McpAttachableMixin):
             }
         if values.get("allowed_tools") is not None:
             values["allowed_tools"] = tuple(values["allowed_tools"])
+        values["tool_settings"] = ToolSettings(**values["tool_settings"]) if values.get("tool_settings") else None
+        values["tool_error_policy"] = ToolErrorPolicy(**values["tool_error_policy"]) if values.get("tool_error_policy") else None
+        values["output_contracts"] = tuple(
+            floor(**{key: value for key, value in entry.items() if key != "type"})
+            for entry in values.get("output_contracts") or ()
+            if (floor := BaseAgent._builtin_floor(str(entry.get("type")))) is not None
+        )
         return AgentLoopSettings(**{key: value for key, value in values.items() if value is not None})
+
+    @staticmethod
+    def _restore_permission_policy(state: RunState) -> PermissionPolicy | None:
+        # @intent restored-agent-keeps-its-permission-policy
+        # Rebuild exactly the exported tool-permission allow-list so a resumed agent is neither widened nor narrowed;
+        # checkpoints written before the field existed carry None and fall back to the constructor default.
+        if state.permission_policy is None:
+            return None
+        return PermissionPolicy(allowed=frozenset(ToolPermission(value) for value in state.permission_policy))
+
+    @staticmethod
+    def _restore_output_schema(state: RunState, supplied: object | None) -> object | None:
+        # @intent restored-agent-keeps-its-mapping-output-schema
+        # A caller-supplied schema always wins; otherwise rebuild a checkpointed JSON-Schema mapping so a resumed
+        # agent keeps its structured-output guarantee. A type marker cannot be rebuilt and must be re-supplied.
+        if supplied is not None:
+            return supplied
+        marker = state.output_schema or {}
+        if marker.get("kind") != "mapping" or not isinstance(marker.get("schema"), Mapping):
+            return None
+        return copy.deepcopy(dict(marker["schema"]))
+
+    @staticmethod
+    def _restore_trace_option(state: RunState) -> TraceOption | None:
+        # Rebuild the continual trace option from its exported primitives; older checkpoints carry none.
+        data = dict(state.trace_option or {})
+        if not data.get("schema_name"):
+            return None
+        fields = {name: TraceField.model_validate(spec) for name, spec in (data.get("schema_fields") or {}).items()}
+        schema = TraceSchema(name=data["schema_name"], fields=fields, description=data.get("schema_description", ""))
+        return TraceOption(mode=data.get("mode", "continual"), schema=schema, every_n_iterations=int(data.get("every_n_iterations", 5)), max_trace_iterations=int(data.get("max_trace_iterations", 3)))
 
     @staticmethod
     def _restore_runtime(state: RunState) -> AgentRuntimeType | str | ActorRuntime:
@@ -583,7 +717,41 @@ class BaseAgent(McpAttachableMixin):
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
 
-    async def generate_reply(
+    async def generate_reply(self, message: str | AgentInput, **options: Any) -> AgentMessage:
+        """Run one reply (options as _generate_reply takes them); inside a metered run, also merge this run's usage into the run's active ledger."""
+        # @intent nested-agent-usage-reaches-the-run-ledger
+        # Helper agents, specialists, and fresh agents a JevAgent spawns are ordinary BaseAgents; each records into
+        # its own tracker (so its own get_usage() stays its own) and hands that run's rollup to the parent ledger
+        # exactly once, in `finally`, so usage spent before a failure is still counted.
+        # A top-level run claims the pending prompts as its own queue; a drained run joins the originating run's queue.
+        token = None
+        if not self._draining_queued_prompts:
+            claimed, self._pending_prompts = self._pending_prompts, []
+            token = self._run_queue_var.set(claimed)
+        try:
+            parent = active_usage_ledger()
+            if parent is None or parent is self._usage_tracker:
+                return await self._generate_reply(message, **options)
+            with usage_ledger_scope(self._usage_tracker):
+                try:
+                    return await self._generate_reply(message, **options)
+                finally:
+                    self._merge_usage_into(parent)
+        finally:
+            if token is not None:
+                self._run_queue_var.reset(token)
+
+    def _merge_usage_into(self, parent: UsageLedger) -> None:
+        # Merges this run's usage into the parent ledger, flagging the parent corrupted if the merge cannot happen.
+        if not isinstance(parent, UsageTracker):
+            parent.mark_recording_corrupted()
+            return
+        try:
+            parent.merge(self.get_usage())
+        except Exception:
+            parent.mark_recording_corrupted()
+
+    async def _generate_reply(
         self,
         message: str | AgentInput,
         *,
@@ -603,6 +771,8 @@ class BaseAgent(McpAttachableMixin):
             self._speed_tracker.reset()
             self._speed_tracker.record_run_start()
             self._behavior_view = None
+            # Remember where this run's handoffs begin; the list itself stays cumulative for forks and handoff tools.
+            self._run_handoff_start = len(self.handoffs)
             runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
                 "agent.run",
@@ -632,6 +802,7 @@ class BaseAgent(McpAttachableMixin):
                 runner_type=runner_type,
                 trace_context=trace_ctx,
                 runtime_metadata={**self.metadata, **dict(input_metadata), **trace_metadata},
+                input_context_manager=input_context_manager,
                 **options,
             )
             self._record_agent_stop(trace_ctx, result)
@@ -639,11 +810,11 @@ class BaseAgent(McpAttachableMixin):
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
             self._speed_tracker.record_run_end()
         except Exception as exc:
-            self._notify_session_exception(exc)
-            if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, error=exc)
-            self._speed_tracker.record_run_end()
-            self._active_prompt = ""
+            self._close_failed_reply(exc, trace_ctx)
+            if isinstance(exc, UsageAccountingError):
+                # @intent usage-accounting-error-reaches-the-user
+                # A run that failed closed on usage must tell the user so, not surface as a generic reply failure.
+                raise
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
                 details={"agent": self.name, "error_type": type(exc).__name__},
@@ -651,11 +822,7 @@ class BaseAgent(McpAttachableMixin):
         except BaseException as exc:
             # Catches CancelledError and other BaseException subclasses that bypass
             # the Exception handler, ensuring the root trace is always finalized.
-            self._notify_session_exception(exc)
-            if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, error=exc)
-            self._speed_tracker.record_run_end()
-            self._active_prompt = ""
+            self._close_failed_reply(exc, trace_ctx)
             raise
         self._active_prompt = ""
         metadata: dict[str, Any] = {
@@ -682,12 +849,31 @@ class BaseAgent(McpAttachableMixin):
             trace_artifact = metadata.get("trace")
             self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
         if self._handoff_spec is not None:
-            await self._run_auto_handoff(metadata)
+            try:
+                await self._run_auto_handoff(metadata)
+            except BaseException:
+                # @intent failed-run-leaves-no-queued-prompts
+                # A cancelled handoff skips the drain, so its queued follow-ups must not wait for the next request.
+                self._queued_prompts.clear()
+                raise
         self._notify_session(reply)
+        # @intent failed-run-leaves-no-queued-prompts
+        # A run that fails its schema raises before the drain, so its queued follow-ups never run.
+        self._assert_schema_satisfied(result)
         if self._queued_prompts and not self._draining_queued_prompts:
             await self._drain_queued_prompts(metadata)
-        self._assert_schema_satisfied(result)
         return reply
+
+    def _close_failed_reply(self, exc: BaseException, trace_ctx: Any) -> None:
+        # Notifies the session, finalizes the root trace and speed run, and clears the active prompt for a failed reply.
+        self._notify_session_exception(exc)
+        if trace_ctx is not None:
+            self._tracer.end_trace(trace_ctx, error=exc)
+        self._speed_tracker.record_run_end()
+        self._active_prompt = ""
+        # @intent failed-run-leaves-no-queued-prompts
+        # Follow-ups queued by a failed or cancelled run must not run after the next, unrelated request.
+        self._queued_prompts.clear()
 
     def _assert_schema_satisfied(self, result: AgentResult) -> None:
         # Fails loudly when a declared schema produced no instance, rather than returning a silent None.
@@ -741,7 +927,8 @@ class BaseAgent(McpAttachableMixin):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.generate_reply(message, **options))
+            # The loop ends with this call, so hand MCP servers back to the pending list before it closes.
+            return asyncio.run(self._run_releasing_mcp(self.generate_reply(message, **options)))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
 
     def get_usage(self) -> UsageRollup:
@@ -788,7 +975,7 @@ class BaseAgent(McpAttachableMixin):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.arun_sequentially(prompts, **options))
+            return asyncio.run(self._run_releasing_mcp(self.arun_sequentially(prompts, **options)))
         raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
 
     def enqueue_prompts(self, prompts: Sequence[str]) -> int:
@@ -812,14 +999,19 @@ class BaseAgent(McpAttachableMixin):
 
     async def _drain_queued_prompts(self, metadata: dict[str, Any]) -> None:
         """Run queued prompts in order after the primary run, recording outcomes into metadata."""
-        self._draining_queued_prompts = True
+        draining = self._draining_var.set(True)
         self.last_queued_replies = []
         completed = 0
+        # Each drained run resets the usage tracker, so keep every run's usage to restore after the drain.
+        run_usage = [self._usage_tracker.rollup()]
         try:
             # Pop-one loop so prompts queued by drained runs join the same bounded drain.
             while self._queued_prompts and completed < self.agent_loop_settings.max_queued_prompts:
                 prompt = self._queued_prompts.pop(0)
-                reply = await self.generate_reply(prompt)
+                try:
+                    reply = await self.generate_reply(prompt)
+                finally:
+                    run_usage.append(self._usage_tracker.rollup())
                 self.last_queued_replies.append(reply)
                 completed += 1
             if self._queued_prompts:
@@ -832,7 +1024,12 @@ class BaseAgent(McpAttachableMixin):
             self._notify_session_exception(exc)
             self._queued_prompts.clear()
         finally:
-            self._draining_queued_prompts = False
+            self._draining_var.reset(draining)
+            # @intent queued-prompt-drain-keeps-every-run-usage
+            # One arun() call owns the primary run and every drained run, so its usage covers all of them.
+            self._usage_tracker.reset()
+            for rollup in run_usage:
+                self._usage_tracker.merge(rollup)
             if completed:
                 metadata["queued_prompt_runs"] = completed
 
@@ -840,7 +1037,12 @@ class BaseAgent(McpAttachableMixin):
         """Produce a structured handoff document describing this agent's most recent run."""
         from vidbyte.agents.handoff import HandoffAgent
         resolved = spec or self._handoff_spec or MinimalHandoff()
-        generator = by or HandoffAgent.from_source_agent(self, resolved)
+        # A ready HandoffAgent is used as-is unless the caller explicitly asked for a different spec.
+        if isinstance(by, HandoffAgent) and (spec is None or spec is by.spec):
+            generator = by
+        else:
+            # Otherwise build a generator for the requested spec on the given agent's model and runner, or on this agent's own.
+            generator = HandoffAgent.from_source_agent(by or self, resolved)
         return await generator.generate_handoff(HandoffAgent.render_source_run(self))
 
     def record_handoff(self, handoff: Handoff) -> None:
@@ -905,6 +1107,7 @@ class BaseAgent(McpAttachableMixin):
         runner_type: str = RUNNER_TYPE_TEXT,
         trace_context: object | None = None,
         runtime_metadata: Mapping[str, Any] | None = None,
+        input_context_manager: ContextManager | None = None,
         **options: Any,
     ) -> AgentResult:
         if runner is None:
@@ -919,7 +1122,10 @@ class BaseAgent(McpAttachableMixin):
             extract_text=self._runner_output_text,
             extract_metadata=self._runner_output_metadata,
         )
-        result = await self._runtime().arun(
+        runtime = self._runtime()
+        # Per-call managed primitives render for this run only; the agent's own manager stays unchanged.
+        runtime.input_context_manager = input_context_manager
+        result = await runtime.arun(
             message,
             handle=handle,
             context=context,
@@ -994,9 +1200,11 @@ class BaseAgent(McpAttachableMixin):
         return result
 
     def _record_tool_contexts(self, result: AgentResult) -> None:
+        # Later runs replay these records to the model, so keep the view the model was
+        # shown (truncated, redacted, or a primitive reference), never the raw output.
         contexts = result.metadata.get("tool_calls", ())
         self._tool_call_contexts.extend(
-            context
+            context if context.model_visible_result is None else dataclasses.replace(context, result=context.model_visible_result)
             for context in tuple(contexts)
             if isinstance(context, ToolCallContext)
         )
@@ -1005,7 +1213,7 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.lib.registries.runtimes import RuntimeRegistry
         runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
-        kwargs: dict[str, Any] = {}
+        kwargs = self._runtime_extension_kwargs()
         if self.runtime_type in (
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,
@@ -1028,7 +1236,7 @@ class BaseAgent(McpAttachableMixin):
                     "include_actors": None,
                 }
 
-        if self.runtime_type is AgentRuntimeType.LINEAR:
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES:
             kwargs["output_contract"] = self._output_contract_with_schema()
             kwargs["usage_tracker"] = self._usage_tracker
             kwargs["speed_tracker"] = self._speed_tracker
@@ -1049,12 +1257,16 @@ class BaseAgent(McpAttachableMixin):
             **kwargs,
         )
 
+    def _runtime_extension_kwargs(self) -> dict[str, Any]:
+        # Supplies runtime-specific constructor options (JevAgent passes its settings); standard agents add none.
+        return {}
+
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Appends settings-driven and tracing middleware to the user middleware.
         middleware = self.middleware
         active_session = getattr(self, "_active_session", None)
         session_failures = getattr(active_session, "failures", None)
-        if self.runtime_type is AgentRuntimeType.LINEAR and session_failures is not None and getattr(session_failures, "has_rules", False):
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES and session_failures is not None and getattr(session_failures, "has_rules", False):
             from vidbyte.middleware.builtins import FailureMiddleware
             middleware = (*middleware, FailureMiddleware(session_failures))
         if self.agent_loop_settings.tool_error_policy is not None:
@@ -1176,8 +1388,9 @@ class BaseAgent(McpAttachableMixin):
 
     @staticmethod
     def _is_secret_trace_key(key: str) -> bool:
-        upper = key.upper()
-        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Exact credential names and suffixes only, so author_id or max_tokens stay in the trace.
+        return CredentialKeyPolicy.is_secret_key(key)
 
     @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
@@ -1352,7 +1565,8 @@ def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
         upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+        # @intent trace-scrub-uses-precise-credential-keys
+        if upper.startswith("LANGSMITH_") or CredentialKeyPolicy.is_secret_key(key_text):
             continue
         safe[key_text] = _safe_trace_value(value)
     return safe

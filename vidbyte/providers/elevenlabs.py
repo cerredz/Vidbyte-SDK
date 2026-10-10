@@ -5,7 +5,7 @@ from typing import Any, Mapping
 from vidbyte.lib.config import AudioModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderConfigurationError, ProviderResponseError
-from vidbyte.lib.http import HttpTransport
+from vidbyte.lib.http import SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse
 
 
@@ -18,7 +18,7 @@ class ElevenLabsProvider:
         # Store the audio config; other kwargs are accepted but ignored for compat with factory.
         self._audio_config = audio_config
 
-    def run_tts(self, *, text: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+    def run_tts(self, *, text: str, transport: SyncHttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
         # POST to /text-to-speech/{voice_id} and return binary audio bytes.
         config = self._config(config)
         voice_id = self._require_voice(config)
@@ -31,7 +31,7 @@ class ElevenLabsProvider:
             raise ProviderResponseError("ElevenLabs TTS returned empty audio bytes.", provider=self.provider.value)
         return AudioModelResponse(provider=self.provider, model=config.model, audio_bytes=response.raw_bytes, transcript=None, raw={})
 
-    def run_stt(self, *, audio: bytes, format: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+    def run_stt(self, *, audio: bytes, format: str, transport: SyncHttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
         # ElevenLabs does not provide a public STT API; raise to signal unsupported operation.
         raise ConfigurationError("ElevenLabs does not support speech-to-text.")
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import json
 from collections.abc import Callable
 from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ValidationError, create_model
+from pydantic_core import to_jsonable_python
 
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import (
@@ -60,12 +62,16 @@ class FunctionTool(BaseTool):
         except ValidationError as exc:
             return ToolResult.failure(self.name, _validation_message(exc), metadata={"error_type": "validation"})
 
-        kwargs = model.model_dump(mode="python")
+        # Read validated attributes directly: model_dump would turn nested models and dataclasses back into dicts.
+        kwargs = {name: getattr(model, name) for name in type(model).model_fields}
         try:
             if inspect.iscoroutinefunction(self.func):
                 value = await self.func(**kwargs)
             else:
                 value = await asyncio.to_thread(self.func, **kwargs)
+                # A sync wrapper around an async function hands back a coroutine; finish it here so its work happens.
+                if inspect.isawaitable(value):
+                    value = await value
         except Exception as exc:
             return ToolResult.failure(self.name, str(exc), metadata={"error_type": exc.__class__.__name__})
 
@@ -112,7 +118,7 @@ class FunctionTool(BaseTool):
 
 def _build_args_model(func: Callable[..., Any], tool_name: str) -> type[BaseModel]:
     signature = inspect.signature(func)
-    hints = get_type_hints(func)
+    hints = get_type_hints(func, include_extras=True)
     fields: dict[str, tuple[Any, Any]] = {}
 
     for name, parameter in signature.parameters.items():
@@ -146,7 +152,22 @@ def _stringify_output(value: object) -> str:
     if isinstance(value, str):
         return value
     try:
-        return json.dumps(value, default=str, sort_keys=True)
+        return json.dumps(value, default=_json_default, sort_keys=True)
     except TypeError:
+        return str(value)
+
+
+def _json_default(value: object) -> object:
+    # @intent tool-model-output-is-json
+    # Models and dataclass instances become JSON objects so output_schema validation sees fields, not a repr string.
+    # Other leaves (Enum, datetime, UUID, set) take pydantic's JSON-mode value, so a dict or dataclass return
+    # serializes exactly like the equivalent model; only types pydantic cannot serialize fall back to str().
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return dataclasses.asdict(value)
+    try:
+        return to_jsonable_python(value)
+    except ValueError:  # PydanticSerializationError and UnicodeDecodeError are both ValueErrors.
         return str(value)
 

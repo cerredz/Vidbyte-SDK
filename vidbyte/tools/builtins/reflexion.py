@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins._note_ids import next_free_counter
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
 
 if TYPE_CHECKING:
@@ -104,6 +105,7 @@ class ReflexionTool(BaseTool):
 
     def _next_primitive_id(self) -> str:
         # Generates a stable, unique primitive ID based on the instance counter.
+        self._counter = next_free_counter(self._manager, "reflexion", self._counter)
         return f"reflexion:{self._counter}"
 
     def _build_item(self, args: dict, primitive_id: str) -> object:

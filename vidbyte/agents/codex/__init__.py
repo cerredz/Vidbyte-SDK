@@ -2,17 +2,21 @@
 
 from vidbyte.agents.codex.agent import CodexHarnessAgent
 from vidbyte.lib.dataclasses.codex import (
+    CodexAgentInput,
     CodexAgentSettings,
     CodexClientSettings,
     CodexContextPlacement,
     CodexContractOutcome,
     CodexContractResult,
+    CodexFailureRecord,
+    CodexFallbackAttempt,
     CodexForkSettings,
     CodexHarnessAgentSettings,
     CodexImageInput,
     CodexLocalImageInput,
     CodexMentionInput,
     CodexMessageData,
+    CodexMiddlewareRequest,
     CodexRunInput,
     CodexSkillInput,
     CodexSubagentSettings,
@@ -25,6 +29,7 @@ from vidbyte.lib.dataclasses.codex import (
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
+    CodexFailureClass,
     CodexPersonality,
     CodexReasoningEffort,
     CodexReasoningSummary,
@@ -34,13 +39,17 @@ from vidbyte.lib.enums.codex import (
 )
 
 __all__ = [
+    "CodexAgentInput",
     "CodexAgentSettings",
     "CodexApprovalMode",
     "CodexContextAnchor",
+    "CodexFailureClass",
     "CodexClientSettings",
     "CodexContextPlacement",
     "CodexContractOutcome",
     "CodexContractResult",
+    "CodexFailureRecord",
+    "CodexFallbackAttempt",
     "CodexForkSettings",
     "CodexHarnessAgent",
     "CodexHarnessAgentSettings",
@@ -48,6 +57,7 @@ __all__ = [
     "CodexLocalImageInput",
     "CodexMentionInput",
     "CodexMessageData",
+    "CodexMiddlewareRequest",
     "CodexPersonality",
     "CodexReasoningEffort",
     "CodexReasoningSummary",

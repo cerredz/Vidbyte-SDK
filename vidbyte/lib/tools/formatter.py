@@ -118,6 +118,16 @@ class ToolsFormatter:
         }
 
     @staticmethod
+    def to_codex_tool(spec: ToolSpec) -> dict[str, Any]:
+        """Convert a ToolSpec into a Codex app-server dynamic function tool."""
+        return {
+            "type": "function",
+            "name": spec.name,
+            "description": spec.description,
+            "inputSchema": ToolsFormatter._schema_for_spec(spec),
+        }
+
+    @staticmethod
     def to_grok_tool(spec: ToolSpec) -> dict[str, Any]:
         """Convert a ToolSpec into a Grok/xAI OpenAI-compatible tool."""
         return ToolsFormatter.to_openai_tool(spec)
@@ -158,7 +168,8 @@ class ToolsFormatter:
         Two things break otherwise, and both fail the whole request rather than degrading:
         `$defs`/`$ref`, which Pydantic emits for any nested model, and `additionalProperties`,
         which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
-        place and unsupported keywords are dropped.
+        place and unsupported keywords are dropped. A list-valued ``type`` (for example
+        ``["string", "null"]``) is also rejected, so it is collapsed to a single type.
         """
         defs = dict(schema.get("$defs") or {})
         root = {key: value for key, value in schema.items() if key != "$defs"}
@@ -166,12 +177,14 @@ class ToolsFormatter:
 
     @staticmethod
     def _gemini_node(node: Mapping[str, Any], defs: Mapping[str, Any], seen: tuple[str, ...]) -> dict[str, Any]:
-        # Expands $ref against $defs and keeps only Gemini-supported keywords, depth-first.
+        # Expands $ref against $defs, keeps only Gemini-supported keywords and collapses
+        # list-valued types, depth-first.
         kept: dict[str, Any] = {}
         for key, value in node.items():
             if key not in ToolsFormatter._GEMINI_SCHEMA_KEYWORDS:
                 continue
             kept[key] = ToolsFormatter._gemini_keyword_value(key, value, defs, seen)
+        kept = ToolsFormatter._gemini_single_type(kept)
         ref = node.get("$ref")
         if not isinstance(ref, str):
             return kept
@@ -196,6 +209,25 @@ class ToolsFormatter:
             if isinstance(value, list):
                 return [ToolsFormatter._gemini_node(item, defs, seen) if isinstance(item, Mapping) else item for item in value]
         return value
+
+    @staticmethod
+    def _gemini_single_type(kept: dict[str, Any]) -> dict[str, Any]:
+        # @intent gemini-schema-collapses-union-types
+        # Gemini's Schema.type is one enum value, so a JSON Schema type list such as
+        # ["string", "null"] (common from zod-built MCP servers) fails the whole request.
+        # "null" becomes nullable, one remaining type stays a plain type, several become anyOf.
+        types = kept.get("type")
+        if not isinstance(types, list):
+            return kept
+        collapsed = {key: value for key, value in kept.items() if key != "type"}
+        names = list(dict.fromkeys(name for name in types if isinstance(name, str) and name != "null"))
+        if "null" in types:
+            collapsed["nullable"] = True
+        if len(names) == 1:
+            collapsed["type"] = names[0]
+        elif names:
+            collapsed.setdefault("anyOf", [{"type": name} for name in names])
+        return collapsed
 
     @staticmethod
     def parse_tool_calls(raw: object, provider_or_model: str) -> tuple[ToolCall, ...]:
@@ -225,9 +257,9 @@ class ToolsFormatter:
 
     @staticmethod
     def _assistant_turn_openai(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
-        """Return the assistant message from an OpenAI chat-completions payload, or None for Responses API."""
+        """Return the chat-shaped assistant tool-call message from an OpenAI chat-completions or Responses payload."""
         if isinstance(raw_payload.get("output"), list):
-            return None
+            return ToolsFormatter._assistant_turn_openai_responses(raw_payload["output"])
         choices = raw_payload.get("choices")
         if not isinstance(choices, list) or not choices:
             return None
@@ -235,6 +267,35 @@ class ToolsFormatter:
         if isinstance(message, Mapping) and isinstance(message.get("tool_calls"), list):
             return dict(message)
         return None
+
+    @staticmethod
+    def _assistant_turn_openai_responses(output: list[Any]) -> Mapping[str, Any] | None:
+        # The transcript stays chat-shaped so fallback can carry it across OpenAI-compatible
+        # providers; OpenAIProvider translates it back into Responses input items.
+        items = [item for item in output if isinstance(item, Mapping)]
+        tool_calls = [
+            {
+                "id": str(item.get("call_id") or item.get("id") or item.get("name", "")),
+                "type": "function",
+                "function": {"name": str(item.get("name", "")), "arguments": ToolsFormatter._arguments_json(item.get("arguments"))},
+            }
+            for item in items
+            if item.get("type") in {"function_call", "tool_call"} and item.get("name")
+        ]
+        if not tool_calls:
+            return None
+        texts = [
+            str(part.get("text", ""))
+            for item in items
+            if item.get("type") == "message" and isinstance(item.get("content"), list)
+            for part in item["content"]
+            if isinstance(part, Mapping) and part.get("type") == "output_text"
+        ]
+        return {"role": "assistant", "content": "".join(texts) or None, "tool_calls": tool_calls}
+
+    @staticmethod
+    def _arguments_json(arguments: object) -> str:
+        return arguments if isinstance(arguments, str) else json.dumps(arguments if arguments is not None else {})
 
     @staticmethod
     def _assistant_turn_anthropic(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -309,8 +370,6 @@ class ToolsFormatter:
                 call.tool_name,
                 ToolsFormatter._gemini_error_response(error_parts),
             )
-        if ToolsFormatter._is_openai_responses_call(call):
-            return ToolsFormatter._format_openai_responses_tool_result(call_id, envelope)
         return ToolsFormatter._format_openai_tool_result(call, call_id, envelope)
 
     @staticmethod
@@ -345,10 +404,6 @@ class ToolsFormatter:
                 }
             ],
         }
-
-    @staticmethod
-    def _format_openai_responses_tool_result(call_id: str, output: str) -> Mapping[str, Any]:
-        return {"type": "function_call_output", "call_id": call_id, "output": output}
 
     @staticmethod
     def _format_openai_tool_result(call: ToolCall, call_id: str, content: str) -> Mapping[str, Any]:
@@ -458,11 +513,6 @@ class ToolsFormatter:
         return text[:max_chars]
 
     @staticmethod
-    def _is_openai_responses_call(call: ToolCall) -> bool:
-        # Detects tool calls parsed from the OpenAI Responses API output shape.
-        return str(dict(call.metadata or {}).get("provider_shape", "")).lower() == "openai_responses"
-
-    @staticmethod
     def parse_openai_tool_call(raw_call: Mapping[str, Any]) -> ToolCall:
         """Parse an OpenAI-compatible tool call into a ToolCall."""
         function = raw_call.get("function", raw_call)
@@ -509,12 +559,16 @@ class ToolsFormatter:
         )
 
     @staticmethod
+    def input_schema(spec: ToolSpec) -> dict[str, Any]:
+        """Return a tool's provider-neutral JSON Schema, without any activity annotation."""
+        if isinstance(spec.input_schema, Mapping):
+            return dict(spec.input_schema)
+        return ToolsFormatter._parameters_schema(spec.parameters)
+
+    @staticmethod
     def _schema_for_spec(spec: ToolSpec) -> dict[str, Any]:
         """Return the best available JSON Schema for a tool spec, including any activity annotation."""
-        if isinstance(spec.input_schema, Mapping):
-            schema = dict(spec.input_schema)
-        else:
-            schema = ToolsFormatter._parameters_schema(spec.parameters)
+        schema = ToolsFormatter.input_schema(spec)
         if spec.activity is None:
             return schema
         return ToolsFormatter._schema_with_activity(schema, spec.activity, spec.name)

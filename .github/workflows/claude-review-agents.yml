@@ -1,0 +1,237 @@
+name: Claude review agents
+
+# Runs when a reviewer submits a pull-request review whose summary mentions @claude. Every
+# prompt in .github/prompts/review-agents/ runs in file order as its own Claude Code session,
+# one matrix leg per task, so each task starts with a fresh context: the resolver once for the
+# whole review, grouping and fixing every comment; the preventer once per comment; the notes
+# writer once, last. Agents only edit files. scripts/review_agents/ runs scripts/run_ci.py,
+# commits with review trailers, verifies each guard, pushes, and posts one summary comment.
+# See docs/design/claude-review-agents.md.
+#
+# Process a review again by hand:
+#   gh workflow run claude-review-agents.yml -f pr=<number> -f review=<review id>
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number.
+        required: true
+      review:
+        description: ID of the submitted review to process.
+        required: true
+
+permissions:
+  contents: read
+
+# One review at a time per pull request, so a second review queues behind the first instead
+# of racing it on the same branch. Reviews without @claude get their own group, so they can
+# never displace a queued @claude review; GitHub keeps only one pending run per group.
+concurrency:
+  group: >-
+    claude-review-agents-${{ github.event.pull_request.number || inputs.pr }}-${{
+    github.event_name == 'workflow_dispatch' || contains(github.event.review.body, '@claude') }}
+  cancel-in-progress: false
+
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+  REVIEW_ID: ${{ github.event.review.id || inputs.review }}
+
+jobs:
+  plan:
+    name: Plan
+    # Same-repository branches only: fork branches get no secrets and cannot be pushed to.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(github.event.review.body, '@claude') &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      head_ref: ${{ steps.collect.outputs.head_ref }}
+      tasks: ${{ steps.plan.outputs.tasks }}
+      task_count: ${{ steps.plan.outputs.task_count }}
+    steps:
+      # The tools and prompts come from this event's commit: the pull request merged into its
+      # base, or the dispatched branch. A branch cut before this workflow existed still works.
+      - name: Check out the event commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Stage the review tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/review-tools" "$RUNNER_TEMP/review"
+          cp -r scripts/review_agents .github/prompts "$RUNNER_TEMP/review-tools/"
+
+      # GitHub, not a model, says which comments the review holds.
+      - name: Collect the review
+        id: collect
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 "$RUNNER_TEMP/review-tools/review_agents/run.py" collect \
+            --repository "$GITHUB_REPOSITORY" --pull "$PR_NUMBER" --review "$REVIEW_ID" \
+            --out "$RUNNER_TEMP/review/review.json"
+
+      # No model plans either: every agent runs over the units its scope names.
+      - name: Plan the tasks
+        id: plan
+        run: |
+          python3 "$RUNNER_TEMP/review-tools/review_agents/run.py" plan \
+            --review-file "$RUNNER_TEMP/review/review.json" \
+            --agents-dir "$RUNNER_TEMP/review-tools/prompts/review-agents" \
+            --out "$RUNNER_TEMP/review/plan.json"
+
+      - name: Upload the plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: review-plan
+          path: ${{ runner.temp }}/review/
+          if-no-files-found: error
+
+  agents:
+    name: ${{ matrix.title }}
+    needs: plan
+    if: needs.plan.outputs.task_count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: read
+    strategy:
+      # One task at a time, in plan order, so each starts from the branch the last one left.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.tasks) }}
+    steps:
+      - name: Check out the event commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the agent toolchain
+        uses: ./.github/actions/claude-setup
+
+      - name: Stage the review tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/review-tools"
+          cp -r scripts/review_agents .github/prompts "$RUNNER_TEMP/review-tools/"
+
+      - name: Download the plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: review-plan
+          path: ${{ runner.temp }}/review
+
+      # Every leg checks the branch out again, so it sees everything earlier legs pushed. The
+      # pull request may declare other dependencies than the event commit, so reinstall.
+      - name: Switch to the pull request branch
+        id: start
+        env:
+          HEAD_REF: ${{ needs.plan.outputs.head_ref }}
+        run: |
+          git checkout -q -B "$HEAD_REF" "origin/$HEAD_REF"
+          python -m pip install -q -e ".[dev]"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the task prompt
+        id: prompt
+        env:
+          TASK_ID: ${{ matrix.id }}
+        run: |
+          python "$RUNNER_TEMP/review-tools/review_agents/run.py" prompt \
+            --plan-file "$RUNNER_TEMP/review/plan.json" \
+            --agents-dir "$RUNNER_TEMP/review-tools/prompts/review-agents" \
+            --task "$TASK_ID"
+
+      - name: Run the agent
+        id: claude
+        continue-on-error: true
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          settings: .claude/ci-settings.json
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: |
+            --model claude-opus-5-5
+            --effort high
+            --json-schema '${{ steps.prompt.outputs.schema }}'
+
+      # CLAUDE_REVIEW_PUSH_TOKEN (a fine-grained PAT with Contents: write) is optional.
+      # Without it the push uses GITHUB_TOKEN, which never triggers other workflows, so CI
+      # will not run on these commits on its own.
+      - name: Gate, commit, and push
+        env:
+          TASK_ID: ${{ matrix.id }}
+          START_SHA: ${{ steps.start.outputs.sha }}
+          AGENT_OUTCOME: ${{ steps.claude.outcome }}
+          AGENT_REPORT: ${{ steps.claude.outputs.structured_output }}
+          PUSH_TOKEN: ${{ secrets.CLAUDE_REVIEW_PUSH_TOKEN || github.token }}
+        run: |
+          export PUSH_REMOTE="https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          python "$RUNNER_TEMP/review-tools/review_agents/run.py" finalize \
+            --plan-file "$RUNNER_TEMP/review/plan.json" \
+            --agents-dir "$RUNNER_TEMP/review-tools/prompts/review-agents" \
+            --task "$TASK_ID" --start-sha "$START_SHA" --agent-outcome "$AGENT_OUTCOME" \
+            --out "$RUNNER_TEMP/result/$TASK_ID.json"
+
+      - name: Upload the task result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: review-result-${{ matrix.id }}
+          path: ${{ runner.temp }}/result/
+          if-no-files-found: warn
+
+  report:
+    name: Report
+    needs: [plan, agents]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out the event commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download the plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: review-plan
+          path: ${{ runner.temp }}/review
+
+      # A task that never uploaded a result is reported as failed, not left out.
+      - name: Download the task results
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: review-result-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/result
+
+      - name: Post the summary comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/result"
+          status=0
+          python3 scripts/review_agents/run.py report \
+            --plan-file "$RUNNER_TEMP/review/plan.json" \
+            --agents-dir .github/prompts/review-agents \
+            --results-dir "$RUNNER_TEMP/result" \
+            --out "$RUNNER_TEMP/summary.md" || status=$?
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/summary.md"
+          exit "$status"

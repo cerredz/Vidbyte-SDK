@@ -133,13 +133,22 @@ class YamlLoader:
     def _parse_agent_settings(self, path: Path, document: Mapping[str, Any]) -> AgentSettings:
         # Resolves a system_prompt text-file reference, then delegates all validation to AgentSettings.
         prompt = document.get("system_prompt")
-        if isinstance(prompt, str) and Path(prompt.strip()).suffix.lower() in _TEXT_FILE_SUFFIXES:
-            document = {**document, "system_prompt": self._load_file(self._contained(path, prompt.strip()))}
+        if self._is_file_reference(prompt):
+            document = {**document, "system_prompt": self._load_file(self._contained(path, str(prompt).strip()))}
         try:
             return AgentSettings.from_mapping(document, "agent")
         except ConfigurationError as error:
             error.details.setdefault("path", str(path))
             raise
+
+    def _is_file_reference(self, prompt: object) -> bool:
+        # @intent prose-is-never-a-path
+        # An inline prompt such as "Save your notes to notes.md" ends in a text-file suffix too, so a
+        # reference must also be one whitespace-free token; anything sentence-like stays inline text.
+        if not isinstance(prompt, str):
+            return False
+        reference = prompt.strip()
+        return bool(reference) and not any(char.isspace() for char in reference) and Path(reference).suffix.lower() in _TEXT_FILE_SUFFIXES
 
     def _contained(self, document_path: Path, reference: str) -> Path:
         # @intent prompt-file-containment
@@ -158,7 +167,13 @@ class YamlLoader:
         # Loads one supported text-based file's contents as UTF-8, dispatching on its extension.
         match target.suffix.lower():
             case ".md" | ".markdown" | ".txt" | ".text" | ".rst":
-                return target.read_text(encoding="utf-8")
+                try:
+                    return target.read_text(encoding="utf-8")
+                except (OSError, UnicodeError) as error:
+                    raise ConfigurationError(
+                        f"Unable to read the system_prompt file '{target.name}' as UTF-8 text ({type(error).__name__}).",
+                        details={"field": "agent.system_prompt", "path": str(target), "error_type": type(error).__name__},
+                    ) from error
             case other:
                 raise ConfigurationError(f"Unsupported system_prompt file type '{other}'.", details={"field": "agent.system_prompt", "suffix": other})
 

@@ -10,6 +10,7 @@ Architecture:
     - ConfusedDeputyTests: Verifies independent tool output accumulation per run.
     - LoopDetectionTests: Verifies independent call history deques per run.
     - TokenRateLimitTests: Verifies independent token windows per run.
+    - CanaryTripwireTests: Verifies a sibling run cannot wipe another run's canary ledger.
     - CircuitBreakerTests: Verifies lock-protected cross-run state is consistent.
 Relations:
     Tests vidbyte.middleware.builtins under asyncio concurrent execution.
@@ -22,6 +23,7 @@ import unittest
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
 from vidbyte.middleware.builtins import (
+    CanaryTripwireMiddleware,
     CircuitBreakerMiddleware,
     ConfusedDeputyGuardMiddleware,
     LoopDetectionMiddleware,
@@ -304,6 +306,34 @@ class TokenRateLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.action.value, "sleep")
         self.assertEqual(decision.reason, "token_rate_limit")
 
+    async def test_new_window_counts_only_tokens_since_last_observation(self) -> None:
+        # [Silent Failure] tokens_used is cumulative; a fresh window must not be
+        # charged the whole run's history once the lifetime total exceeds max_tokens.
+        clock_val = [0.0]
+
+        def clock() -> float:
+            return clock_val[0]
+
+        mw = TokenRateLimitMiddleware(max_tokens=1000, per_seconds=60, clock=clock)
+        run_state: dict = {}
+        await mw.before_run(_make_ctx(MiddlewareHook.BEFORE_RUN, run_state))
+
+        for cumulative in (400, 800, 1200, 1600, 2000, 2400):
+            clock_val[0] += 61
+            decision = await mw.before_iteration(
+                _make_ctx(MiddlewareHook.BEFORE_ITERATION, run_state, tokens_used=cumulative)
+            )
+            self.assertEqual(decision.action.value, "continue",
+                             f"throttled at cumulative tokens_used={cumulative}")
+
+        # A window that genuinely exceeds the budget still sleeps.
+        clock_val[0] += 61
+        decision = await mw.before_iteration(
+            _make_ctx(MiddlewareHook.BEFORE_ITERATION, run_state, tokens_used=3500)
+        )
+        self.assertEqual(decision.action.value, "sleep")
+        self.assertEqual(decision.reason, "token_rate_limit")
+
     async def test_before_iteration_without_before_run_initializes_lazily(self) -> None:
         # [Hidden Assumption] Tests that call before_iteration without before_run still work.
         mw = TokenRateLimitMiddleware(max_tokens=100, per_seconds=10)
@@ -312,6 +342,38 @@ class TokenRateLimitTests(unittest.IsolatedAsyncioTestCase):
             _make_ctx(MiddlewareHook.BEFORE_ITERATION, run_state, tokens_used=10)
         )
         self.assertEqual(decision.action.value, "continue")
+
+
+class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sibling_before_run_does_not_wipe_outstanding_canary(self) -> None:
+        # @intent sibling-run-cannot-disarm-canary-tripwire
+        # [Silent Failure] Forks share one instance; run B starting mid-run must not hide run A's leak.
+        mw = CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7)
+        run_state_a: dict = {}
+        run_state_b: dict = {}
+
+        await mw.before_run(_make_ctx(MiddlewareHook.BEFORE_RUN, run_state_a))
+        decision = await mw.after_tool_call(
+            _make_ctx(
+                MiddlewareHook.AFTER_TOOL_CALL,
+                run_state_a,
+                tool_call=ToolCall("fetch"),
+                tool_result=ToolResult.success("fetch", "page"),
+            )
+        )
+        canary = decision.transform.model_visible_tool_result.output.splitlines()[-1]
+        await mw.before_run(_make_ctx(MiddlewareHook.BEFORE_RUN, run_state_b))
+
+        class _Response:
+            text = f"Here it is: {canary}"
+
+        leak_a = await mw.after_model_response(_make_ctx(MiddlewareHook.AFTER_MODEL_RESPONSE, run_state_a, model_response=_Response()))
+        leak_b = await mw.after_model_response(_make_ctx(MiddlewareHook.AFTER_MODEL_RESPONSE, run_state_b, model_response=_Response()))
+
+        self.assertEqual(leak_a.action.value, "abort_run")
+        self.assertEqual(leak_a.reason, "canary_leaked")
+        self.assertEqual(leak_a.metadata["source_tool"], "fetch")
+        self.assertEqual(leak_b.action.value, "continue")
 
 
 class CircuitBreakerTests(unittest.IsolatedAsyncioTestCase):

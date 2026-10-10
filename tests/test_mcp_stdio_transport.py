@@ -429,5 +429,32 @@ class McpStdioTransportHardeningTests(unittest.IsolatedAsyncioTestCase):
             McpStdioTransport([])
 
 
+class McpStdioTransportLoopBindingTests(unittest.TestCase):
+    """A transport reports when its pipes belong to an event loop other than the running one."""
+
+    def test_transport_is_unbound_on_another_loop_and_abandon_kills_the_child(self) -> None:
+        transport = McpStdioTransport(_python_child("import sys; sys.stdin.read()"))
+        owner_loop = asyncio.new_event_loop()
+        try:
+            owner_loop.run_until_complete(transport.start())
+            process = transport._process
+            self.assertTrue(owner_loop.run_until_complete(self._is_bound(transport)))
+            # A later asyncio.run call runs on a different loop, where these pipes cannot be used.
+            self.assertFalse(asyncio.run(self._is_bound(transport)))
+
+            # Abandon needs no running loop and must not leave the child process alive.
+            transport.abandon()
+            self.assertTrue(transport.closed)
+            exit_code = owner_loop.run_until_complete(asyncio.wait_for(process.wait(), timeout=5.0))
+            self.assertIsNotNone(exit_code)
+        finally:
+            owner_loop.run_until_complete(asyncio.sleep(0.05))
+            owner_loop.close()
+
+    @staticmethod
+    async def _is_bound(transport: McpStdioTransport) -> bool:
+        return transport.is_bound_to_running_loop()
+
+
 if __name__ == "__main__":
     unittest.main()

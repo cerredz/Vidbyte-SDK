@@ -7,7 +7,11 @@ from dataclasses import replace
 from typing import Any
 
 from vidbyte.agents.codex.contracts import CodexContractValidator
+from vidbyte.agents.codex.middleware import CodexMiddlewareValidator
+from vidbyte.agents.codex.tools import CodexToolTranslator
+from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.codex import (
+    CodexAgentInput,
     CodexAgentSettings,
     CodexAgentTranslation,
     CodexForkSettings,
@@ -16,6 +20,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexLocalImageInput,
     CodexMentionInput,
     CodexPrompt,
+    CodexRunInput,
     CodexSdkTypes,
     CodexSkillInput,
     CodexSubagentSettings,
@@ -58,6 +63,7 @@ class CodexVidbyteTranslator:
         # launch Codex and every later turn uses one deterministic wire shape.
         CodexSettingsValidator.validate(settings.codex)
         CodexContractValidator.validate(settings.loop)
+        CodexMiddlewareValidator.validate(settings.middleware)
         translated = replace(
             settings,
             name=settings.name.strip(),
@@ -71,6 +77,7 @@ class CodexVidbyteTranslator:
         return CodexAgentTranslation(
             settings=translated,
             output_schema=self.output_schema(settings.output_schema),
+            tools=CodexToolTranslator.translate(settings),
         )
 
     def output_schema(
@@ -87,6 +94,28 @@ class CodexVidbyteTranslator:
     @staticmethod
     def additional_context(value: str) -> str:
         return value.strip()
+
+    @staticmethod
+    def translate_input(value: CodexAgentInput) -> CodexRunInput:
+        # @intent one-request-shape-before-transport
+        # Every supported caller shape becomes one validated request here, so the
+        # context translator and transport never branch on the caller's type.
+        # AgentInput carries each field onto its counterpart; the manager passes by
+        # identity because the context translator collapses shared sources with `is`.
+        if isinstance(value, CodexRunInput):
+            return value
+        if isinstance(value, str):
+            return CodexRunInput.text(value)
+        if isinstance(value, AgentInput):
+            return CodexRunInput(
+                items=(CodexTextInput(value.prompt),),
+                metadata=dict(value.metadata),
+                context_items=value.context_items,
+                context_manager=value.context_manager,
+            )
+        raise ConfigurationError(
+            f"Codex run input must be str, AgentInput, or CodexRunInput, not {type(value).__name__}."
+        )
 
 
 class CodexContentTranslator:

@@ -295,7 +295,18 @@ class ForkConversationTool(BaseTool):
         parent_limit = self._agent.agent_loop_settings.max_iterations
         if requested is not None and parent_limit is not None and requested > parent_limit:
             raise ValueError(f"max_iterations cannot exceed the parent cap of {parent_limit}.")
-        return AgentLoopSettings(**values)
+        return AgentLoopSettings(**values, **self._inherited_guardrails())
+
+    def _inherited_guardrails(self) -> dict[str, Any]:
+        # Carries the parent's non-overridable guardrails so loop overrides cannot drop denied tools or contracts.
+        parent = self._agent.agent_loop_settings
+        return {
+            "tool_settings": parent.tool_settings,
+            "tool_error_policy": parent.tool_error_policy,
+            "output_contracts": parent.output_contracts,
+            "max_contract_rejections": parent.max_contract_rejections,
+            "max_queued_prompts": parent.max_queued_prompts,
+        }
 
     def _resolve_allowed_tools(self, raw_allowed_tools: Any) -> tuple[str, ...]:
         # Validates the optional runtime allowed_tools gate against the selectable tool catalog.
@@ -412,7 +423,7 @@ class ForkConversationTool(BaseTool):
                 },
                 "context_algorithm": {"type": "string", "enum": list(_CONTEXT_ALGORITHM_PRESETS), "description": "Direct ContextWindow preset override for the child. Prefer context_window.algorithm when grouping context edits."},
                 "model": {"type": "string", "description": "Optional model_name override. The value must appear in the developer-configured allowed_models list."},
-                "provider": {"type": "string", "enum": [provider.value for provider in ModelProvider], "description": "Optional Vidbyte ModelProvider override. API keys and credentials are still inherited and are never model-controlled."},
+                "provider": {"type": "string", "enum": [provider.value for provider in ModelProvider], "description": "Optional Vidbyte ModelProvider override. Credentials are never model-controlled: the parent's API key is inherited only on the same provider, and a different provider uses its own configured key."},
                 "temperature": {"type": "number", "minimum": 0, "maximum": 2, "description": "Optional child runner temperature override."},
                 "runtime": {"type": "string", "enum": [runtime.value for runtime in AgentRuntimeType], "description": "Optional AgentRuntimeType override, such as linear, mcts_search, actor_model_p2p, or actor_model_broadcast."},
                 "actor_runtime": {

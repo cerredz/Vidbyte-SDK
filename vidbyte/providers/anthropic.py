@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
-from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
 
 
@@ -96,7 +96,7 @@ class AnthropicProvider:
         if config.extra_body:
             payload.update(dict(config.extra_body))
 
-    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
+    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: SyncHttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
         # POST to /messages with stream=True and yield text from content_block_delta events.
         config = self._config(config)
         payload = self._create_payload(config, prompt, system, metadata)

@@ -7,13 +7,15 @@ Purpose:
     tool calls should retry, continue, or abort the run.
 Architecture:
     - UnrecoverableAction: Runtime action for terminal tool errors.
-    - ToolErrorPolicy: Validated developer-facing policy object.
+    - ToolErrorPolicy: Validated developer-facing policy object that rejects
+      fractional retry counts and non-finite backoff values before scheduling.
 Relations:
     Used by vidbyte.agents.settings.loop and ToolErrorPolicyMiddleware.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from enum import Enum
 
@@ -94,8 +96,14 @@ class ToolErrorPolicy:
 
     @staticmethod
     def _require_non_negative(name: str, value: int | float) -> None:
-        if value < 0:
-            raise ConfigurationError(f"ToolErrorPolicy.{name} must be non-negative.")
+        # A non-finite backoff cannot be safely scheduled as a retry delay.
+        valid = (
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            if name == "max_retries_per_tool_call"
+            else ToolErrorPolicy._finite_real(value) and value >= 0
+        )
+        if not valid:
+            raise ConfigurationError(f"ToolErrorPolicy.{name} must be a finite non-negative {'integer' if name == 'max_retries_per_tool_call' else 'number'}.")
 
     @staticmethod
     def _require_at_least(
@@ -105,15 +113,25 @@ class ToolErrorPolicy:
         *,
         minimum_name: str | None = None,
     ) -> None:
-        if value >= minimum:
+        if ToolErrorPolicy._finite_real(value) and value >= minimum:
             return
         target = minimum_name or str(minimum)
         raise ConfigurationError(f"ToolErrorPolicy.{name} must be greater than or equal to {target}.")
 
     @staticmethod
     def _require_positive_if_present(name: str, value: int | None) -> None:
-        if value is not None and value <= 0:
-            raise ConfigurationError(f"ToolErrorPolicy.{name} must be greater than zero when provided.")
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+            raise ConfigurationError(f"ToolErrorPolicy.{name} must be a positive integer when provided.")
+
+    @staticmethod
+    def _finite_real(value: object) -> bool:
+        # Reject booleans, strings and unbounded time values before comparison or scheduling.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
 
     def __repr__(self) -> str:
         # Returns a compact developer-readable representation of non-default policy values.

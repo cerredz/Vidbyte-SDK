@@ -61,6 +61,60 @@ class GeminiToolSchemaTests(unittest.TestCase):
         self.assertNotIn("$ref", blob)
 
 
+class GeminiUnionTypeTests(unittest.TestCase):
+    """Gemini's Schema.type is a single enum; JSON Schema type lists must be collapsed."""
+
+    def _parameters(self, schema: dict) -> dict:
+        return ToolsFormatter.to_gemini_tool(_spec_with_schema(schema))["function_declarations"][0]["parameters"]
+
+    def test_nullable_string_becomes_string_with_nullable(self) -> None:
+        # The shape zod-built MCP servers emit for nullable fields.
+        schema = {
+            "type": "object",
+            "properties": {
+                "note": {"type": ["string", "null"], "description": "Note text, or null to clear."},
+                "pinned": {"type": "boolean"},
+            },
+            "required": ["note"],
+        }
+        note = self._parameters(schema)["properties"]["note"]
+        self.assertEqual(note, {"type": "string", "description": "Note text, or null to clear.", "nullable": True})
+
+    def test_nested_type_lists_are_collapsed(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": ["integer", "null"]}},
+                "meta": {"type": "object", "properties": {"owner": {"type": ["null", "string"]}}},
+            },
+        }
+        parameters = self._parameters(schema)
+        self.assertEqual(parameters["properties"]["tags"]["items"], {"type": "integer", "nullable": True})
+        self.assertEqual(parameters["properties"]["meta"]["properties"]["owner"], {"type": "string", "nullable": True})
+
+    def test_several_types_become_any_of(self) -> None:
+        node = self._parameters({"type": "object", "properties": {"v": {"type": ["string", "integer", "null"]}}})["properties"]["v"]
+        self.assertEqual(node, {"nullable": True, "anyOf": [{"type": "string"}, {"type": "integer"}]})
+
+    def test_degenerate_type_lists_do_not_raise(self) -> None:
+        properties = self._parameters({"type": "object", "properties": {"a": {"type": []}, "b": {"type": ["null"]}}})["properties"]
+        self.assertEqual(properties["a"], {})
+        self.assertEqual(properties["b"], {"nullable": True})
+
+    def test_non_union_schema_is_unchanged(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {"n": {"type": "integer", "nullable": True}, "s": {"type": "array", "items": {"type": "string"}}},
+            "required": ["n"],
+        }
+        self.assertEqual(self._parameters(schema), schema)
+
+    def test_other_providers_keep_type_lists(self) -> None:
+        schema = {"type": "object", "properties": {"note": {"type": ["string", "null"]}}}
+        openai = ToolsFormatter.to_openai_tool(_spec_with_schema(schema))
+        self.assertIn('"type": ["string", "null"]', json.dumps(openai))
+
+
 class GeminiToolResultRoleTests(unittest.TestCase):
     """generateContent accepts only 'user' and 'model' turns."""
 
@@ -134,6 +188,112 @@ class GeminiContentsOrderingTests(unittest.TestCase):
         self.assertEqual(contents[0]["role"], "model")
         self.assertEqual(contents[0]["parts"][0]["text"], "prior answer")
         self.assertNotIn("content", contents[0])
+
+
+def _call_turn(*names: str) -> dict:
+    return {"role": "model", "parts": [{"functionCall": {"name": name, "args": {}}} for name in names]}
+
+
+def _response_turn(name: str) -> dict:
+    return {"role": "user", "parts": [{"functionResponse": {"name": name, "response": {"r": name}}}]}
+
+
+def _gemini_part_count_errors(contents: list) -> list:
+    # Mirrors Gemini's 400: a call turn must be answered by the next content, part for part.
+    errors = []
+    for index, turn in enumerate(contents):
+        calls = sum("functionCall" in part for part in turn.get("parts", []))
+        if not calls:
+            continue
+        following = contents[index + 1] if index + 1 < len(contents) else None
+        responses = sum("functionResponse" in part for part in following.get("parts", [])) if following else 0
+        if following is not None and responses != calls:
+            errors.append(f"turn {index}: {calls} calls, {responses} responses")
+    return errors
+
+
+class GeminiParallelFunctionResponseTests(unittest.TestCase):
+    """Responses to one parallel call turn must arrive as one user content."""
+
+    def _contents(self, messages: list) -> list:
+        from vidbyte.lib.config import TextModelConfig
+        from vidbyte.lib.enums import ModelProvider
+        from vidbyte.providers.gemini import GeminiProvider
+
+        config = TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-3.6-flash", messages=tuple(messages))
+        return GeminiProvider()._create_contents(config, "go")
+
+    def test_three_parallel_responses_merge_into_one_user_content(self) -> None:
+        contents = self._contents([_call_turn("a", "b", "c"), _response_turn("a"), _response_turn("b"), _response_turn("c")])
+        self.assertEqual([c["role"] for c in contents], ["user", "model", "user"])
+        self.assertEqual([p["functionResponse"]["response"]["r"] for p in contents[2]["parts"]], ["a", "b", "c"])
+        self.assertEqual(_gemini_part_count_errors(contents), [])
+
+    def test_text_turns_and_separate_call_turns_are_not_merged(self) -> None:
+        contents = self._contents(
+            [
+                _call_turn("a"),
+                _response_turn("a"),
+                _call_turn("b", "c"),
+                _response_turn("b"),
+                _response_turn("c"),
+                {"role": "user", "content": "feedback"},
+            ]
+        )
+        self.assertEqual([len(c["parts"]) for c in contents], [1, 1, 1, 2, 2, 1])
+        self.assertEqual(contents[-1]["parts"][0]["text"], "feedback")
+        self.assertEqual(_gemini_part_count_errors(contents), [])
+
+
+class GeminiParallelCallAgentTests(unittest.IsolatedAsyncioTestCase):
+    """End to end: a Gemini agent survives parallel calls across two runs on one agent."""
+
+    async def test_parallel_calls_validate_across_two_runs(self) -> None:
+        from unittest.mock import patch
+
+        from vidbyte import Agent, tool
+        from vidbyte.lib.http import HttpTransport
+        from vidbyte.lib.http.transport import HttpResponse
+
+        @tool
+        def search(query: str) -> str:
+            """Search for a query."""
+            return f"result {query}"
+
+        def model_turn(*parts: dict) -> dict:
+            return {"candidates": [{"content": {"role": "model", "parts": list(parts)}}]}
+
+        def search_call(query: str) -> dict:
+            return {"functionCall": {"name": "search", "args": {"query": query}}}
+
+        done = {"functionCall": {"name": "isDone", "args": {"final_answer": "done"}}}
+        replies = [
+            model_turn(search_call("a"), search_call("b"), search_call("c")),
+            model_turn(done),
+            model_turn(search_call("d"), search_call("e")),
+            model_turn(done),
+        ]
+        sent: list = []
+
+        async def strict_gemini(self, *, json_body=None, **kwargs) -> HttpResponse:
+            contents = list((json_body or {}).get("contents", []))
+            sent.append(contents)
+            errors = _gemini_part_count_errors(contents)
+            if errors:
+                body = {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "Please ensure that the number of function response parts is equal to the number of function call parts of the function call turn."}}
+                return HttpResponse(status_code=400, body=json.dumps(body), headers={})
+            return HttpResponse(status_code=200, body=json.dumps(replies.pop(0)), headers={})
+
+        agent = Agent(name="r", system_prompt="s", tools=[search], provider="gemini", model_name="gemini-3.5-flash", api_key="g")
+        with patch.object(HttpTransport, "request", strict_gemini):
+            await agent.arun("go")
+            await agent.arun("again")
+
+        self.assertEqual(replies, [])
+        merged = next(c for c in sent[1] if any("functionResponse" in p for p in c["parts"]))
+        self.assertEqual(merged["role"], "user")
+        self.assertEqual(len(merged["parts"]), 3)
+        self.assertTrue(all(_gemini_part_count_errors(contents) == [] for contents in sent))
 
 
 class AgentRequestTimeoutTests(unittest.TestCase):

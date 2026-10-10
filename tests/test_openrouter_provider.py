@@ -14,6 +14,7 @@ Key Functions:
     - test_empty_response_content: Verifies [Silent Failure] missing content handling.
     - test_headers_injection: Verifies [Silent Failure] client attribution headers.
     - test_default_routing_modality_fallback: Verifies [Hidden Assumption] fallback modality mapping.
+    - test_vendor_slug_ids_resolve_and_keep_wire_name: Verifies [Hidden Assumption] vendor/model ids resolve and openrouter/auto stays intact.
 Relations:
     Validates OpenRouterProvider and ModalityDetector configurations.
 Similar Files:
@@ -31,6 +32,7 @@ from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderResponseError, ProviderRequestError
 from vidbyte.lib.http import HttpResponse, HttpTransport
 from vidbyte.lib.runners import TextModelRunner
+from vidbyte.lib.runners.utility import Runner
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.lib.agents import ModalityDetector
 
@@ -122,6 +124,14 @@ class OpenRouterProviderTests(unittest.TestCase):
         # [Hidden Assumption] Verifies that unrecognized prefixed model names default to TEXT modality.
         modality = ModalityDetector.detect_modality("openrouter/meta-llama/llama-unknown-model-future")
         self.assertEqual(modality, ModelModality.TEXT)
+
+    def test_vendor_slug_ids_resolve_and_keep_wire_name(self) -> None:
+        # [Hidden Assumption] OpenRouter ids are vendor/model slugs; they must resolve and reach the wire unchanged.
+        for model_name in ("anthropic/claude-sonnet-5", "meta-llama/llama-4-maverick", "openrouter/auto"):
+            with self.subTest(model_name=model_name):
+                runner = Runner.from_model(provider="openrouter", model_name=model_name)
+                self.assertEqual(runner.resolve_runner_type(), "text")
+                self.assertEqual(runner.model_name, model_name)
 
 
 if __name__ == "__main__":
