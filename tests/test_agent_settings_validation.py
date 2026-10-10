@@ -358,6 +358,38 @@ class OutputSchemaValidationTests(unittest.TestCase):
 
         self.assertIn("JSON Schema object", str(ctx.exception))
 
+    def test_loads_credential_like_field_names_from_a_yaml_output_schema(self) -> None:
+        # @intent output-schema-field-names-are-not-secrets
+        with tempfile.TemporaryDirectory() as folder:
+            for name in ("token", "auth", "refresh_token", "password_policy"):
+                with self.subTest(name=name):
+                    path = self._write_agent(Path(folder), f"output_schema:\n  type: object\n  properties:\n    {name}:\n      type: string\n  required: [{name}]\n")
+                    settings = YamlLoader().load_agent(path)
+                    self.assertEqual(settings.output_schema["properties"], {name: {"type": "string"}})
+
+    def test_still_rejects_interpolation_inside_a_yaml_output_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = self._write_agent(Path(folder), "output_schema:\n  type: object\n  properties:\n    token:\n      type: string\n      default: ${API_TOKEN}\n")
+            with self.assertRaises(ConfigurationError) as ctx:
+                YamlLoader().load_agent(path)
+
+        self.assertIn("environment interpolation", str(ctx.exception))
+
+    def test_still_rejects_credential_keys_in_yaml_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = self._write_agent(Path(folder), "metadata:\n  apiKey: value123\n")
+            with self.assertRaises(ConfigurationError) as ctx:
+                YamlLoader().load_agent(path)
+
+        self.assertIn("must not contain YAML-held secrets", str(ctx.exception))
+        self.assertEqual(ctx.exception.details["field"], "agent.metadata.apiKey")
+
+    def _write_agent(self, folder: Path, extra: str) -> Path:
+        # Writes a minimal agent document followed by the YAML block under test.
+        path = folder / "agent.yaml"
+        path.write_text(f"type: base\nname: tokenizer\nsystem_prompt: Analyze.\nprovider: deepseek\nmodel_name: deepseek-chat\n{extra}", encoding="utf-8")
+        return path
+
 
 class AgentMetadataValidationTests(unittest.TestCase):
     def test_builds_agent_metadata_from_a_document_mapping(self) -> None:
