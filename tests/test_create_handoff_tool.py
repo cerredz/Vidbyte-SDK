@@ -99,6 +99,23 @@ class CreateHandoffToolTests(unittest.IsolatedAsyncioTestCase):
         # Handoff coerces instructions=None to "" via DEFAULT_INSTRUCTIONS
         self.assertEqual(agent.handoffs[0].instructions, "")
 
+    async def test_null_audience_and_instructions_behave_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default: a null optional must not reach the receiver as "None".
+        agent = StubAgent()
+        tool = CreateHandoffTool()
+        tool.bind_agent(agent)
+        result = await tool.execute(_call(title="H", sections={"A": "v"}, audience=None, instructions=None))
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(agent.handoffs[0].instructions, "")
+        self.assertNotIn("None", result.output)
+
+    async def test_null_audience_keeps_non_null_instructions(self) -> None:
+        agent = StubAgent()
+        tool = CreateHandoffTool()
+        tool.bind_agent(agent)
+        await tool.execute(_call(title="H", sections={"A": "v"}, audience=None, instructions="Be concise"))
+        self.assertEqual(agent.handoffs[0].instructions, "Instructions: Be concise")
+
     async def test_primitive_id_increments_across_calls(self) -> None:
         agent = StubAgent()
         tool = CreateHandoffTool()
