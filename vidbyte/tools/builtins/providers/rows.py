@@ -110,7 +110,7 @@ class ProviderSelectRowsTool(ProviderOperationTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         kwargs = {"schema": call.arguments.get("schema")} if call.arguments.get("schema") is not None else {}
-        return self._result(self.spec().name, lambda: self._store.select_rows(str(call.arguments["table"]), dict(call.arguments.get("where") or {}), limit=int(call.arguments.get("limit", 50)), **kwargs))
+        return self._result(self.spec().name, lambda: self._store.select_rows(str(call.arguments["table"]), dict(call.arguments.get("where") or {}), limit=int(self._optional_argument(call, "limit", default=50)), **kwargs))
 
 
 class ProviderUpdateRowsTool(ProviderOperationTool):

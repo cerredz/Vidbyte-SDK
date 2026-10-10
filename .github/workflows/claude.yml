@@ -1,0 +1,64 @@
+name: Claude
+
+# Write @claude in a pull request's review summary, or in its Conversation tab, and Claude works
+# through the review comments in three stages, resolve, prevent, and record, committing and
+# pushing each stage to the pull request branch. The stages are the --append-system-prompt below;
+# everything else is claude-code-action's interactive mode, which reads the whole pull request,
+# comments included, and replies in one comment.
+#
+# GitHub starts no pull_request_review workflow while a pull request conflicts with its base
+# branch, and Claude does not merge or rebase. On a conflicting pull request, update the branch
+# first, or write @claude in the Conversation tab to fix the comments without the merge.
+on:
+  pull_request_review:
+    types: [submitted]
+  issue_comment:
+    types: [created]
+
+# One run at a time per pull request, so two @claude requests never push to the branch at once.
+concurrency:
+  group: claude-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Install the agent toolchain
+        uses: ./.github/actions/claude-setup
+
+      - name: Run Claude
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: .claude/ci-settings.json
+          # This repository is public: only the owner's comments, and Claude's own replies,
+          # reach Claude, so nobody else's comment can become an instruction to it.
+          include_comments_by_actor: "cerredz,claude[bot]"
+          claude_args: |
+            --model claude-opus-5-5
+            --effort high
+            --append-system-prompt 'When you are mentioned on a pull request, work through its review comments in the three stages below, in order. Before you change anything, read AGENTS.md and REPO_MAP.md, and the README.md of every folder you will change.
+
+            Stage 1, resolve. Gather every review comment on this pull request: the inline comments and the summaries of every review, not only the review that mentioned you. Skip the comments that earlier commits or your earlier replies already handled. Fix each remaining comment completely: when a comment points at one instance of a problem, fix every instance this pull request introduced. Change only what the comments ask for, plus what the fixes force, such as callers, imports, documentation, and tests of the old behavior. Answer a comment that is a question in your reply, and when you should not carry out a comment, leave the code alone and say why.
+
+            Stage 2, prevent. For each comment you fixed, add the strongest deterministic guard that stops that kind of problem from coming back: a type or a validated dataclass, a lint rule under lint/, a test under tests/, or a check run by scripts/run_ci.py. A guard never asks a model. Prove each guard: undo your stage 1 fix for its comment, confirm the guard fails, then restore the fix and confirm it passes. When no guard can catch the problem without also flagging correct code, add none and say why.
+
+            Stage 3, record. For each comment whose lesson reaches beyond its own lines, add a short note to the closing Notes for agents section of the README.md of the folder the comment points into, and create that section when the README has none. Keep every README within the limit lint rule A009 sets, compacting older notes when a new one would cross it.
+
+            After each stage that changed files, run python scripts/run_ci.py until it passes, then commit with a message that names the stage, and push before you start the next stage. Finish by updating your comment with a table that has one row per review comment and says what each stage did for it, with links to the commits. Never edit files under .github/workflows, which the Claude GitHub App cannot push. Never merge or rebase: when the branch conflicts with its base, say so at the top of your reply.'

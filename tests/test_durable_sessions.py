@@ -49,7 +49,7 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -1170,6 +1170,38 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
                 result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": own}))
                 self.assertEqual(result.status.value, "success")
                 self.assertTrue(any("public notes" in str(message.content) for message in bound.agent.history))
+
+    async def test_checkpoint_null_optionals_checkpoint_bound_session(self) -> None:  # [Silent Failure]
+        # A JSON null session_id and label mean the defaults: the bound session and an empty label, never "None".
+        store = InMemorySessionStore()
+        bound = Session(FakeAgent(), store=store)
+        await bound.arun("mine")
+        tool = CheckpointTool(store)
+        tool.bind_session(bound)
+        result = await tool.execute(ToolCall(tool_name="checkpoint", arguments={"session_id": None, "label": None}))
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(store.get(result.output).session_id, bound.id)
+        self.assertEqual(store.get(result.output).label, "")
+
+    async def test_resume_tools_null_checkpoint_id_resumes_from_head(self) -> None:  # [Silent Failure]
+        # A JSON null checkpoint_id means the omitted default: resume from the target session's head.
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                _store, public, _hr, bound, tool = await self._resume_fixture(tool_cls)
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": None}))
+                self.assertEqual(result.status.value, "success")
+                self.assertTrue(any("public notes" in str(message.content) for message in bound.agent.history))
+
+    async def test_fork_tool_null_optionals_fork_bound_session_head(self) -> None:  # [Silent Failure]
+        # A JSON null session_id and checkpoint_id fork the bound session from its head, like omitted keys.
+        store = InMemorySessionStore()
+        bound = Session(FakeAgent(), store=store)
+        await bound.arun("one")
+        tool = ForkTool(store)
+        tool.bind_session(bound)
+        result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": None, "checkpoint_id": None}))
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(store.get_meta(result.output).parent_session_id, bound.id)
 
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
