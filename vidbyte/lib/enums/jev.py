@@ -32,6 +32,7 @@ class JevPreflightPreset(str, Enum):
 
     CLARITY = "clarity"
     TOOL_SELECTOR = "tool_selector"
+    RUN_STATE_RELATION = "run_state_relation"
 
 
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
@@ -238,6 +239,7 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_REFERENCES = "clarity.references"
     CLARITY_SCOPE_PARTS = "clarity.scope_parts"
     CLARITY_SCOPE_SIZE = "clarity.scope_size"
+    RUN_STATE_RELATION = "run_state_relation"
     CLARITY_COMPLETION = "clarity.completion"
     CLARITY_INFORMATION = "clarity.information"
     CLARITY_CONSTRAINTS = "clarity.constraints"
