@@ -8,10 +8,13 @@ Architecture:
     - TextModelConfig: dataclass for text/chat completions.
     - ImageModelConfig: dataclass for image generation.
     - VideoModelConfig: dataclass for video generation tasks.
-    - DecisionModelConfig: dataclass for calibrated decision models (TypeSafe Jev).
+    - DecisionModelConfig: dataclass for calibrated decision models: TypeSafe Jev and every
+      other System One or OpenAI Decisions host in ProviderModelRegistry.DECISION_DEFAULT_MODELS.
 Key Functions:
     - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry.
     - resolved_endpoint: Resolves provider endpoint by delegating to ProviderModelRegistry.
+    - DecisionModelConfig.resolved_model: Returns the decision model id, filled from the
+      provider's decision default when the caller omitted it.
 Relations:
     Used by runners, agents, and strategies to initialize model executions.
 Similar Files:
@@ -27,7 +30,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vidbyte.lib.constants.jev import (
-    JEV_DEFAULT_MODEL,
     JEV_DEFAULT_RETRY_COUNT,
     JEV_DEFAULT_TIMEOUT_SECONDS,
     JEV_MANAGED_GATEWAY_SUFFIX,
@@ -333,17 +335,21 @@ class EmbeddingModelConfig:
             raise ConfigurationError(f"{field_name} must be greater than zero.")
 
 
-DECISION_SUPPORTED_PROVIDERS: frozenset[ModelProvider] = frozenset({
-    ModelProvider.TYPESAFE,
-})
+DECISION_SUPPORTED_PROVIDERS: frozenset[ModelProvider] = frozenset(ProviderModelRegistry.DECISION_DEFAULT_MODELS)
 
 
 @dataclass(frozen=True, slots=True)
 class DecisionModelConfig:
-    """Configuration for one decision model using TypeSafe directly or Vidbyte's managed gateway."""
+    """Configuration for one decision model: any decision provider directly, or TypeSafe through Vidbyte's managed gateway.
+
+    `model` is `str | None` because its default depends on `provider`, so no single literal default
+    exists: None selects `ProviderModelRegistry.DECISION_DEFAULT_MODELS[provider]` during
+    `__post_init__`, after which the field always holds a non-blank string. Production code reads it
+    through `resolved_model()`, which is typed `str`.
+    """
 
     provider: ModelProvider | str = ModelProvider.TYPESAFE
-    model: str = JEV_DEFAULT_MODEL
+    model: str | None = None
     api_key: str | None = field(default=None, repr=False)
     endpoint: str | None = None
     timeout_seconds: float = JEV_DEFAULT_TIMEOUT_SECONDS
@@ -358,14 +364,24 @@ class DecisionModelConfig:
         provider = self.normalized_provider()
         if provider not in DECISION_SUPPORTED_PROVIDERS:
             raise UnsupportedProviderError(
-                f"DecisionModelRunner supports: {', '.join(p.value for p in DECISION_SUPPORTED_PROVIDERS)}.",
+                f"DecisionModelRunner supports: {', '.join(sorted(p.value for p in DECISION_SUPPORTED_PROVIDERS))}.",
                 details={"provider": provider.value},
             )
         if not isinstance(self.mode, DecisionModelMode):
             raise ConfigurationError("mode must be a DecisionModelMode value.")
+        # @intent managed-mode-is-typesafe-only
+        # The managed gateway proxies only TypeSafe; any other provider in managed mode would send the
+        # Vidbyte key to that vendor's host, so it fails here before any credential is read.
+        if self.mode is DecisionModelMode.VIDBYTE_MANAGED and provider is not ModelProvider.TYPESAFE:
+            raise ConfigurationError("VIDBYTE_MANAGED decision mode is available only for provider typesafe.")
         if self.mode is DecisionModelMode.VIDBYTE_MANAGED and self.endpoint is not None:
             if not isinstance(self.endpoint, str) or self.endpoint.strip():
                 raise ConfigurationError("A custom endpoint is not allowed for VIDBYTE_MANAGED decision mode.")
+        # @intent omitted-model-means-the-provider-decision-default
+        # Each provider names its decision models differently, so an omitted model takes that provider's
+        # registered default instead of a TypeSafe id another vendor would reject.
+        if self.model is None:
+            object.__setattr__(self, "model", ProviderModelRegistry.decision_default_model(provider))
         if not isinstance(self.model, str) or not self.model.strip():
             raise ConfigurationError("model must be non-empty.")
         if not isinstance(self.timeout_seconds, (int, float)) or self.timeout_seconds <= JEV_TIMEOUT_FLOOR_SECONDS:
@@ -384,8 +400,18 @@ class DecisionModelConfig:
             raise ConfigurationError(f"Unsupported model provider: {self.provider!r}") from exc
 
     def validate(self) -> None:
-        # Resolves the API key; shape checks already ran when the config was constructed.
+        # Resolves the API key, then the endpoint; shape checks already ran when the config was constructed.
+        # @intent tenant-endpoints-fail-before-the-first-call
+        # Cloudflare and Foundry have no shared default endpoint, so a missing one must fail when the
+        # runner is built, not as a 404 after the first billed call.
         self.resolved_api_key()
+        self.resolved_endpoint()
+
+    def resolved_model(self) -> str:
+        # Returns the model id as a str; __post_init__ already filled it, so None is unreachable.
+        if self.model is None:
+            raise ConfigurationError("DecisionModelConfig.model was not resolved.")
+        return self.model
 
     def resolved_api_key(self) -> str:
         # Resolves the selected mode's key source without exposing the credential in errors.
