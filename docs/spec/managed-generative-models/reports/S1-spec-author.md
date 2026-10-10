@@ -99,3 +99,27 @@ Inputs: `reports/S1-spec-review.md` (REVISE: R-1 Blocker, R-2..R-7 Major, R-8..R
 1. **Edge-failure wording.** For a non-JSON answer, the message says the edge answered, the failure is usually transient, and Vidbyte may already have billed the call. Whether a billed 2xx can be replaced by an edge page is not stated by the backend. I kept the cautious "may have billed".
 2. **Branch-commit lookup.** §12.5 finds the row-20 commit as the last commit on the local `feat/generative-model-gateway` branch that touched `contracts/vidbyte-platform-contract.json`. The backend worktree shares `C:/Users/422mi/vidbyte-repos/vidbyte/.git` (checked). If a later backend commit regenerates the contract again, the latest one is the right copy.
 3. **A-14.** The emitted-keys table matches the r3 lists by reading. A drift in either repository is caught only by AC-26 on the SDK side, plus the backend's own tests.
+
+## Addendum — revision round 2 (spec r3, final)
+
+Input: `reports/S1-spec-review-2.md` (SOUND WITH FIXES: R-1 Major, R-2..R-4 Minor), plus the orchestrator's guidance. This is the last round. Status is `approved`, revision 3. All four findings are accepted, so nothing is disputed and no new blocking question exists. Spec §16 rows r2-1..r2-4 record the dispositions, together with two rows for the orchestrator's facts.
+
+- **r2-1 (R-1):**
+  - INV-10 now promises only that the SDK's own transport never times out before the gateway's 600 s deadline.
+  - The floor comes first in `max(VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS, config.timeout_seconds)`, so a NaN timeout gives 630.0. This changed INV-10, D-9 and §8.5, and AC-9 gains a NaN case.
+  - New EC-35 names the 120 s `DebateStageSettings` default, which is on by default, and the three opt-in multi-agent limits. Each was checked at its cited line.
+  - The README line is in AC-18 and row 14, and §4 has one sentence.
+  - Changing those agent timeouts is outside lib, so it became optional Q-11, not built.
+- **r2-2 (R-2):**
+  - The lookup is now `log -1 origin/main..feat/generative-model-gateway -- contracts/...`. Empty output means STOP.
+  - A pre-copy check greps the commit's contract for `"models.generate"` and `"/api/v1/models/generate"`. Both values come from backend r3 §9.2.1, and backend §12.3 row 20 adds that route row. The vendored file's route rows use `{"name": …, "path": …}`.
+  - The backend P1 row-5 regeneration, which adds only the error codes, fails this check.
+  - §15 has a risk note on backend-main-only routes (`6dfc4d20`).
+- **r2-3 (R-3):** row 5 gains a 413 reason, using `HTTPStatus.REQUEST_ENTITY_TOO_LARGE` because `constants/jev.py` has no 413 constant. Also added EC-36 and a README line.
+- **r2-4 (R-4):** AC-26 now checks only top-level keys and direct `generationConfig` keys.
+- **Orchestrator facts:**
+  - §12.5 records that `platform_contract.py:175` decodes strict UTF-8, so a byte-order mark makes the rules report ERRORED.
+  - S001 runs Ruff `F`. Row 5 now removes `os` and `re` outright (their only uses are `:398` and `:401`). The §9.2 raise-shape bullet, row 6 and §12.4 forbid an unused `except … as exc`.
+  - §11 has a drift note and §14 an Always check (`jev.py` is 694 lines at the base and 712 on origin/main). D-7's line counts are updated.
+
+Least sure: whether the backend generator keeps the `"name"` and `"path"` string tokens unchanged. The grep checks only the quoted values, so a whitespace change cannot break it.
