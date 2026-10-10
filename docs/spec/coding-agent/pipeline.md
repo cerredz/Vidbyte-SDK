@@ -23,12 +23,13 @@ started: 2026-10-10 00:51
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 2 running) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 00:51 — Unset the branch upstream (`git branch --unset-upstream`) — `git worktree add -b … origin/main` made `feat/coding-agent` track `origin/main`; pushes must use `git push -u origin feat/coding-agent`.
 - 2026-10-10 00:51 — Recorded the unanswered Edit-tool choice as an open question with default `ReplaceTextTool` (the assistant's recommendation in the conversation) — the user replied to the other four decisions but not this one.
 - 2026-10-10 00:51 — Recorded "tool names I dont care" as: keep existing model-facing names, build no renaming layer — smallest reading; rule 11.
+- 2026-10-10 — Launched scoped S1 review round 2 — r2 changed §8 decisions (D-11, D-13, D-14, D-17) and the shape of §12 (row removed, budget 3→2 new files).
 
 ## User replies (verbatim)
 - (none yet during the run)
@@ -50,3 +51,9 @@ started: 2026-10-10 00:51
 - Pricing reads only `metadata["operation_usage"]` (`_billable_attempts`, `units_used`, `mode_used`, `attempts_used`), so replacing `output` in a wrapper does not change billing. — *source:* S1 author
 - Test seams: patch `HttpTransport._send_once` on the class (covers clients built from a key); bash constants are imported by name, so patch `vidbyte.tools.builtins.bash.BASH_*`. — *source:* S1 author
 - A returned `ToolResult.error` does not set the runtime's `timed_out` flag; only a raised `ToolExecutionError(error="timeout")` does. — *source:* S1 author
+- `C:\Program Files\Git\bin\bash.exe` is a 47 KB launcher for `usr\bin\bash.exe`; killing it leaves the command running; MSYS breaks the parent chain so `taskkill /F /T` does not reach it. — *source:* S1 review r1
+- asyncio `Process.wait()` returns at process exit on 3.11.0 but only after all pipes close on 3.13. `python` here is 3.11.0, `py` defaults to 3.13.1; CI is ubuntu-latest 3.11/3.12. — *source:* S1 review r1
+- `shutil.which` from Git Bash: git=`<G>\mingw64\bin\git.EXE`, bash=`<G>\usr\bin\bash.EXE`; from PowerShell: git=`<G>\cmd\git.EXE`, bash=WSL launcher `C:\WINDOWS\system32\bash.EXE`. — *source:* S1 review r1
+- No import cycle between `vidbyte.tools.builtins` and `vidbyte.agents`. Pricing recorded only at `vidbyte/agents/runtime.py:1195-1214`, unwrapping any `_ToolWrapper`. — *source:* S1 review r1
+- S024 caps control-flow nesting at 3 (if/for/with/try/match); main shows S024 IMPROVED 25→21. — *source:* S1 review r1
+- r2 contract: `process.wait()` may be called only in `_collect` (under `BASH_TIMEOUT_SECONDS`) and `_stop` (under `BASH_KILL_GRACE_SECONDS=5.0`, swallowing only that wait's TimeoutError). Bash output cap `BASH_MAX_OUTPUT_BYTES=50_000` (head kept). Constants are module-level in `vidbyte/tools/builtins/bash.py`. §12.3 rows: 1 bash.py, 2 builtins `__init__`, 3 coding.py, 4 agents `__init__`, 5 root `__init__`, 6 contract, 7 agents README, 8 tools README. — *source:* S1 author r2
