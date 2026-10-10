@@ -54,8 +54,10 @@ PRICED_ROWS = (
     ("FOUNDRY", "microsoft-decision-1", 0.042),
     ("OPENAI", "gpt-6-luna", 0.10),
     ("TYPESAFE", "jev-latest", 0.042),
+    ("LIQUID", "d1", 0.04),
+    ("MERAGPT", "sd-1", 0.04),
 )
-UNPRICED = ("LIQUID", "BASETEN", "MERAGPT")
+UNPRICED = ("BASETEN",)
 WIRE_CONSTANTS = {
     "PERPLEXITY_DECISIONS_PATH": "/decisions",
     "BASETEN_DECISIONS_PATH": "/decisions",

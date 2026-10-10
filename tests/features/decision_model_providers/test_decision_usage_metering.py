@@ -29,9 +29,9 @@ PRICING_CASES = (
     ("CLOUDFLARE", "clef-flash", "@cf/cloudflare/clef", "clef-flash", 0.038),
     ("FOUNDRY", None, fx.OMIT_MODEL, "microsoft-decision-1", 0.042),
     ("OPENAI", None, "decisions-2026-10-01", "gpt-6-luna", 0.10),
-    ("LIQUID", None, "d1-2026-09-01", "d1", None),
+    ("LIQUID", None, "d1-2026-09-01", "d1", 0.04),
     ("BASETEN", None, fx.OMIT_MODEL, "inception/mercury-decide", None),
-    ("MERAGPT", None, fx.OMIT_MODEL, "sd-1", None),
+    ("MERAGPT", None, fx.OMIT_MODEL, "sd-1", 0.04),
 )
 
 
@@ -95,14 +95,16 @@ class PricingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(OpenRouterUsage.from_usage_payload({"cost": 0.1}))
 
     async def test_liquid_zero_output_tokens_price_input_only(self) -> None:
-        # [Edge Case] EC-17/INV-18: output is free everywhere, and Liquid's always-zero output does not disturb the record.
+        # [Edge Case] EC-17/INV-18: d1 bills input at 0.04 per 1M and output at 0.0, so Liquid's always-zero output leaves a complete cost.
         runner, _ = fx.scripted_runner("LIQUID", fx.response(fx.systemone_body(_answers(), model="d1", usage={"input_tokens": 512, "output_tokens": 0})))
         tracker = UsageTracker()
         with usage_ledger_scope(tracker):
             await runner.arun(fx.customer_request())
         record = tracker.records[0]
-        self.assertEqual((record.usage.input_tokens, record.usage.output_tokens, record.cost_usd), (512, 0, None))
-        self.assertEqual(tracker.rollup().cost_complete, False)
+        self.assertEqual((record.usage.input_tokens, record.usage.output_tokens), (512, 0))
+        self.assertIsNotNone(record.cost_usd)
+        self.assertAlmostEqual(record.cost_usd, 512 * 0.04 / 1_000_000)
+        self.assertEqual(tracker.rollup().cost_complete, True)
 
 
 class LedgerBehaviourTests(unittest.IsolatedAsyncioTestCase):
