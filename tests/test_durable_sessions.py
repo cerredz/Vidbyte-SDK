@@ -1080,6 +1080,22 @@ class ResumeGuardrailTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(runner.calls, 1)
         self.assertEqual(executed, [])
 
+    def test_file_store_resume_keeps_fallback_chain_without_keys(self) -> None:  # [Silent Failure]
+        chain = ["anthropic/claude-sonnet-4-6", "openrouter/auto", "openrouter/anthropic/claude-sonnet-5"]
+        with tempfile.TemporaryDirectory() as root:
+            store = FileSessionStore(root)
+            agent = build_test_agent(name="support", system_prompt="Help.", runner=EchoRunner(), provider="deepseek", model_name="deepseek-v4-pro", api_key="sk-primary-secret", fallback=chain)
+            session = Session(agent, store=store)
+            session.checkpoint()
+            saved = "".join(path.read_text(encoding="utf-8") for path in Path(root).rglob("*") if path.is_file())
+            resumed = Session.resume(store, session.id)
+
+        self.assertNotIn("sk-primary-secret", saved)
+        identities = [model.identity() for model in resumed.agent.fallback.models]
+        self.assertEqual(identities, ["deepseek/deepseek-v4-pro", "anthropic/claude-sonnet-4-6", "openrouter/openrouter/auto", "openrouter/anthropic/claude-sonnet-5"])
+        self.assertEqual(resumed.agent.fallback.models[2].model, "openrouter/auto")
+        self.assertEqual(resumed.agent.fallback.models[3].model, "anthropic/claude-sonnet-5")
+
     def test_old_checkpoint_without_guardrail_keys_still_restores(self) -> None:  # [Edge Case]
         state = replace(_run_state(), runtime_config={"max_iterations": 4}, loop_settings={"max_iterations": 4}, trace_option={})
         restored = Agent.restore(state)
