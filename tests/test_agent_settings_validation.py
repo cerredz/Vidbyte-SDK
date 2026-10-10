@@ -53,6 +53,11 @@ class FallbackApiKeyInheritanceTests(unittest.TestCase):
                 self.assertEqual(same.api_key, "sk-openai")
                 self.assertIsNone(other.api_key)
 
+    def test_enum_provider_is_stored_and_labelled_as_its_string_value(self) -> None:
+        # A typed ModelProvider entry must not leak 'ModelProvider.ANTHROPIC' into identity() and run metadata.
+        entry = FallbackModel(provider=ModelProvider.ANTHROPIC, model="m")
+        self.assertEqual((type(entry.provider), entry.provider, entry.identity()), (str, "anthropic", "anthropic/m"))
+
     def test_explicit_fallback_model_keeps_its_own_key(self) -> None:
         explicit = FallbackModel(provider="anthropic", model="claude-z", api_key="sk-ant")
         self.assertEqual(self.resolve(explicit), (explicit,))
