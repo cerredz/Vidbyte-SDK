@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING, Any
 
+from vidbyte.lib.util import SubstringCounter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -145,10 +146,11 @@ class ContextEditTool(BaseTool):
 
     def _count_matches(self, value: Any, old_string: str) -> int:
         """Count exact old_string occurrences in a string or string-tuple field value."""
+        # @intent unique-edit-counts-overlapping-matches
         if isinstance(value, str):
-            return value.count(old_string)
+            return SubstringCounter.count_overlapping(value, old_string)
         if isinstance(value, tuple) and all(isinstance(part, str) for part in value):
-            return sum(part.count(old_string) for part in value)
+            return sum(SubstringCounter.count_overlapping(part, old_string) for part in value)
         return 0
 
     def _replace_hit_value(self, value: Any, old_string: str, new_string: str) -> Any:

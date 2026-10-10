@@ -31,7 +31,11 @@ def _url_list(call: ToolCall) -> list[str]:
     # Resolves the concrete page URLs a fetch call targets, dropping blank entries.
     urls = call.arguments.get("urls")
     if isinstance(urls, (list, tuple)):
-        return [str(url) for url in urls if isinstance(url, str) and url.strip()]
+        cleaned = [str(url) for url in urls if isinstance(url, str) and url.strip()]
+        # @intent fetch-url-used-when-urls-empty
+        # An empty urls list must not hide a single url the caller also supplied.
+        if cleaned:
+            return cleaned
     single = call.arguments.get("url")
     return [single] if isinstance(single, str) and single.strip() else []
 

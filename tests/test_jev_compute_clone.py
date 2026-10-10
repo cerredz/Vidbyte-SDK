@@ -26,6 +26,7 @@ from vidbyte.lib.dataclasses.jev import JevRunBriefAppendPayload
 from vidbyte.lib.enums import DecisionModelMode, JevDynamicComputeOption
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
 from vidbyte.lib.jev.compute import JevComputeRegistry
+from vidbyte.tools.builtins import PauseAgentTool, RunPromptsSequentiallyTool
 
 _HELPER = "vidbyte.agents.jev.compute.recognizer.DecisionModelHelper"
 CLONE_KEYS = {key.value for key in JevComputeRegistry.question_keys(JevDynamicComputeOption.CLONE)}
@@ -78,6 +79,15 @@ class JevCloneSettingsTests(unittest.TestCase):
         self.assertEqual(clone.name, "researcher-clone-2")
         self.assertEqual(clone.system_prompt, "Research.")
         self.assertEqual(clone.tools.names(), JevAgent(_settings()).tools.names())
+
+    def test_a_clone_leaves_the_main_agents_bound_tools_bound_to_the_main_agent(self) -> None:
+        pause, queue = PauseAgentTool(), RunPromptsSequentiallyTool()
+        settings = JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_key="main-key", tools=(pause, queue))
+        agent = JevAgent(settings)
+        clone = JevCloneAgent(settings, 1)
+        self.assertIs(pause._agent, agent)
+        self.assertIs(queue._agent, agent)
+        self.assertEqual(clone.tools.names(), agent.tools.names())
 
 
 class JevCloneLaunchTests(unittest.IsolatedAsyncioTestCase):

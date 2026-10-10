@@ -69,7 +69,7 @@ class MongoCreateIndexTool(ProviderOperationTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         keys = [(str(item[0]), int(item[1])) for item in call.arguments["keys"]]
-        return self._result(self.spec().name, lambda: self._store.create_index(str(call.arguments["collection"]), keys, unique=bool(call.arguments.get("unique", False))))
+        return self._result(self.spec().name, lambda: self._store.create_index(str(call.arguments["collection"]), keys, unique=self._resolve_bool_argument(call, "unique", default=False)))
 
 
 class MongoInsertDocumentTool(ProviderOperationTool):
@@ -153,7 +153,7 @@ class MongoUpdateDocumentsTool(ProviderOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        return self._result(self.spec().name, lambda: self._store.update_documents(str(call.arguments["collection"]), dict(call.arguments["query"]), dict(call.arguments["update"]), many=bool(call.arguments.get("many", True))))
+        return self._result(self.spec().name, lambda: self._store.update_documents(str(call.arguments["collection"]), dict(call.arguments["query"]), dict(call.arguments["update"]), many=self._resolve_bool_argument(call, "many", default=True)))
 
 
 class MongoDeleteDocumentsTool(ProviderOperationTool):
@@ -182,7 +182,7 @@ class MongoDeleteDocumentsTool(ProviderOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        return self._result(self.spec().name, lambda: self._store.delete_documents(str(call.arguments["collection"]), dict(call.arguments["query"]), many=bool(call.arguments.get("many", True))))
+        return self._result(self.spec().name, lambda: self._store.delete_documents(str(call.arguments["collection"]), dict(call.arguments["query"]), many=self._resolve_bool_argument(call, "many", default=True)))
 
 
 __all__ = [

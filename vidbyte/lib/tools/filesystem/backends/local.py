@@ -77,7 +77,13 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
             if source.is_file():
                 archive.write(source, arcname=source.name)
                 return
+            # @intent zip-never-archives-itself
+            # The archive file already exists once opened, so a destination inside the source
+            # would otherwise be added to itself as a half-written member.
+            archive_path = destination.resolve()
             for path in source.rglob("*"):
+                if path.resolve() == archive_path:
+                    continue
                 archive.write(path, arcname=path.relative_to(source.parent))
 
     def unzip_path(self, source: Path, destination: Path) -> tuple[str, ...]:

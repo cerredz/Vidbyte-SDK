@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.builtins.code_search.base import BaseCodeSearchTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -44,14 +45,16 @@ class GrepTool(BaseCodeSearchTool):
         """Run grep and return line-numbered snippets."""
         pattern = str(call.arguments["pattern"])
         subdir = str(call.arguments.get("subdir", "."))
-        use_regex = bool(call.arguments.get("regex", False))
         extensions = self._extensions(call.arguments.get("extensions", ()))
         context_lines = max(0, min(int(call.arguments.get("context_lines", 2)), 5))
         max_results = max(1, min(int(call.arguments.get("max_results", 50)), 500))
         max_chars = max(200, min(int(call.arguments.get("max_chars", 12000)), 50000))
         try:
+            use_regex = self._resolve_bool_argument(call, "regex", default=False)
             compiled = re.compile(pattern if use_regex else re.escape(pattern))
             files = tuple(self.iter_files(subdir, extensions=extensions))
+        except ToolExecutionError as exc:
+            return ToolResult.error(self.name, str(exc), metadata={"error": "invalid_argument"})
         except re.error as exc:
             return ToolResult.error(self.name, f"Invalid regex: {exc}", metadata={"error": "bad_regex"})
         except ValueError as exc:
@@ -63,14 +66,8 @@ class GrepTool(BaseCodeSearchTool):
             for index, line in enumerate(lines):
                 if not compiled.search(line):
                     continue
-                start = max(0, index - context_lines)
-                end = min(len(lines), index + context_lines + 1)
-                rel = self.relative_path(path)
-                body = "\n".join(
-                    f"{line_number + 1}: {lines[line_number]}"
-                    for line_number in range(start, end)
-                )
-                snippets.append(f"{rel}:{index + 1}\n{body}")
+                # @intent code-search-truncation-means-hits-were-cut
+                # Only a hit arriving after the list is already full proves results were cut.
                 if len(snippets) >= max_results:
                     output = "\n\n".join(snippets) + "\n\nResults truncated; narrow the pattern."
                     if len(output) > max_chars:
@@ -80,6 +77,14 @@ class GrepTool(BaseCodeSearchTool):
                         output,
                         metadata={"count": len(snippets), "truncated": True},
                     )
+                start = max(0, index - context_lines)
+                end = min(len(lines), index + context_lines + 1)
+                rel = self.relative_path(path)
+                body = "\n".join(
+                    f"{line_number + 1}: {lines[line_number]}"
+                    for line_number in range(start, end)
+                )
+                snippets.append(f"{rel}:{index + 1}\n{body}")
         if not snippets:
             return ToolResult.success(self.name, "No matches found.", metadata={"count": 0})
         return ToolResult.success(

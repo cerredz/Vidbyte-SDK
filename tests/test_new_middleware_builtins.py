@@ -5,12 +5,18 @@ LoopDetectionMiddleware, and CircuitBreakerMiddleware."""
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
+from vidbyte.agents import AgentRuntime
+from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
     MiddlewareContext,
     MiddlewareHook,
 )
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 from vidbyte.middleware.builtins import (
     CircuitBreakerMiddleware,
@@ -22,6 +28,8 @@ from vidbyte.middleware.builtins import (
 )
 from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
 from vidbyte.middleware.builtins.token_budget import TOKEN_BUDGET_FINAL_RESPONSE_NOTICE
+from vidbyte.tools import Tools, tool
+from vidbyte.tools.security import PermissionPolicy
 
 
 def _ctx(**kwargs) -> MiddlewareContext:
@@ -742,6 +750,42 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
         await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
         d = await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
         self.assertEqual(d.reason, "tool_loop_detected")
+
+    async def test_soft_notice_survives_tool_result_truncation(self) -> None:
+        # @intent appended-middleware-notes-survive-truncation
+        # [Silent Failure] A result_max_chars cap shorter than the tool output must not cut the notice off.
+        @tool
+        def lookup() -> str:
+            # Returns the same long page on every call so the soft threshold fires on the second.
+            return "same page " * 40
+
+        config = AgentRuntimeConfig(tool_settings=ToolSettings(result_max_chars=120))
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), config=config, middleware=(LoopDetectionMiddleware(soft_max_repeated_outputs=2),))
+        context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        runner = _RepeatingLookupRunner()
+        handle = RunnerHandle(runner=runner, provider="openai", invoke=_invoke_repeating_lookup, extract_text=lambda response: response.text, extract_metadata=lambda response: {"raw": response.raw})
+        await runtime.arun("task", handle=handle, context=context)
+        self.assertIn("tool output truncated by ToolSettings", runner.seen_tool_output)
+        self.assertIn(REPEATED_OUTPUT_LOOP_NOTICE, runner.seen_tool_output)
+
+
+class _RepeatingLookupRunner:
+    """Fake model that calls lookup twice, then answers, keeping the last tool result it saw."""
+
+    def __init__(self) -> None:
+        self.turns = 0
+        self.seen_tool_output = ""
+
+
+async def _invoke_repeating_lookup(runner: _RepeatingLookupRunner, prompt: str, **kwargs: object) -> SimpleNamespace:
+    # Calls lookup on the first two turns and records the newest tool result on every later turn.
+    del prompt
+    runner.turns += 1
+    if runner.turns > 1:
+        runner.seen_tool_output = str(kwargs["messages"][-1]["content"])
+    if runner.turns > 2:
+        return SimpleNamespace(text="Done.", raw={})
+    return SimpleNamespace(text="", raw={"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]})
 
 
 # ---------------------------------------------------------------------------

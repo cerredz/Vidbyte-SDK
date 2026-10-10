@@ -10,6 +10,7 @@ from vidbyte.context.primitives import (
     GitDiffContextItem,
     MemoryContextItem,
     ProgressContextItem,
+    ReflexionContextItem,
     TaskContextItem,
     TextContextItem,
 )
@@ -86,6 +87,30 @@ class RegistryUpsertTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             manager.upsert(frozen)
+
+    def test_place_generated_id_skips_taken_id(self) -> None:
+        """Verify an id-less placement never overwrites an existing note that already holds the generated id."""
+        manager = ContextManager()
+        model_note = ReflexionContextItem(primitive_id="reflexion:1", critique="model", correction_plan="plan")
+        manager.upsert(model_note)
+
+        new_id = manager.place_after_tools(ReflexionContextItem(primitive_id="", critique="human", correction_plan="plan"))
+
+        self.assertEqual(new_id, "reflexion:2")
+        self.assertIs(manager.get_by_id("reflexion:1"), model_note)
+        self.assertEqual(len(manager.registry_items()), 2)
+
+    def test_place_generated_id_skips_frozen_taken_id(self) -> None:
+        """Verify a frozen note holding the generated id does not make a fresh placement raise."""
+        manager = ContextManager()
+        manager.upsert(TaskContextItem(primitive_id="task:1", goal="model goal"))
+        manager.set_frozen("task:1", True)
+
+        new_id = manager.place_after_system_prompt(TaskContextItem(primitive_id="", goal="fresh goal"))
+
+        self.assertEqual(new_id, "task:2")
+        self.assertEqual(getattr(manager.get_by_id("task:1"), "goal", None), "model goal")
+        self.assertEqual(getattr(manager.get_by_id("task:2"), "goal", None), "fresh goal")
 
     def test_get_by_id_returns_none_for_missing_id(self) -> None:
         manager = ContextManager()

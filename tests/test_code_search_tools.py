@@ -64,6 +64,15 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("escapes root", result.output)
 
+    async def test_grep_refuses_string_regex_flag(self) -> None:
+        """Grep refuses a stringly boolean instead of reading "false" as True."""
+        result = await GrepTool(self.root).execute(
+            ToolCall("grep", {"pattern": "expiration", "regex": "false"})
+        )
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("'regex' must be a boolean (true/false)", result.output)
+        self.assertEqual(result.metadata["error"], "invalid_argument")
+
     async def test_semantic_fallback_ranks_token_overlap(self) -> None:
         """Semantic search works without an embedding provider."""
         result = await SemanticSearchTool(str(self.root)).execute(
@@ -87,3 +96,21 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
             for result in (grep, glob):
                 self.assertIn("src/index.js", result.output)
                 self.assertNotIn("inner", result.output)
+
+    async def test_truncation_notice_only_when_a_hit_was_cut(self) -> None:
+        """Exactly max_results hits are not truncated; one more hit is."""
+        root = self.root / "exact"
+        root.mkdir()
+        for name in ("a", "b", "c"):
+            (root / f"{name}.py").write_text("# TODO\n", encoding="utf-8")
+        grep_call = ToolCall("grep", {"pattern": "TODO", "max_results": 3})
+        glob_call = ToolCall("glob", {"pattern": "*.py", "max_results": 3})
+        for result in (await GrepTool(root).execute(grep_call), await GlobTool(root).execute(glob_call)):
+            self.assertNotIn("Results truncated", result.output)
+            self.assertFalse(result.metadata["truncated"])
+            self.assertEqual(result.metadata["count"], 3)
+        (root / "d.py").write_text("# TODO\n", encoding="utf-8")
+        for result in (await GrepTool(root).execute(grep_call), await GlobTool(root).execute(glob_call)):
+            self.assertIn("Results truncated; narrow the pattern.", result.output)
+            self.assertTrue(result.metadata["truncated"])
+            self.assertEqual(result.metadata["count"], 3)

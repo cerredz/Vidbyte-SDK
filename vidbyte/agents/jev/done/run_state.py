@@ -352,6 +352,10 @@ class JevRunState(BaseAgent):
             self.record = None
         self.response.run_state(self.record)
 
+    async def begin_delegated(self, message: str, prior_user_turns: Sequence[str] = ()) -> None:
+        """Leave legacy specialist runs without main-agent run state."""
+        return None
+
     def _run_state_input(
         self,
         request: str,
