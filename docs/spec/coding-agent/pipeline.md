@@ -14,7 +14,7 @@ started: 2026-10-10 00:51
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 00:51 | 2026-10-10 01:08 | reports/S0-scout.md | base_commit 8f23fd67; code-map.md (4 sections, 329 lines) |
-| S1 spec + review | running | 2026-10-10 01:09 | | reports/S1-spec-author.md, S1-spec-review.md | spec r1 @672157b8 (9 §12.3 rows, 3 new files) |
+| S1 spec + review | done | 2026-10-10 01:09 | 2026-10-10 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @8f669933 approved; r1 SOUND WITH FIXES (1B/3M/4m), r2 SOUND WITH FIXES (0B/1M/2m), all 11 applied |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,13 +23,15 @@ started: 2026-10-10 00:51
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 2 running) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 00:51 — Unset the branch upstream (`git branch --unset-upstream`) — `git worktree add -b … origin/main` made `feat/coding-agent` track `origin/main`; pushes must use `git push -u origin feat/coding-agent`.
 - 2026-10-10 00:51 — Recorded the unanswered Edit-tool choice as an open question with default `ReplaceTextTool` (the assistant's recommendation in the conversation) — the user replied to the other four decisions but not this one.
 - 2026-10-10 00:51 — Recorded "tool names I dont care" as: keep existing model-facing names, build no renaming layer — smallest reading; rule 11.
 - 2026-10-10 — Launched scoped S1 review round 2 — r2 changed §8 decisions (D-11, D-13, D-14, D-17) and the shape of §12 (row removed, budget 3→2 new files).
+- 2026-10-10 — S1 round-2 reviewer hit an API rate limit mid-run; resumed the same agent after the reset (no report had been written) rather than relaunching fresh.
+- 2026-10-10 — Applied every open question's stated default (spec §15): Q-1 ReplaceTextTool; Q-2 no configurable timeout/cap; Q-3 no env allow-list; Q-4 no default result_max_chars; Q-5 no CodingAgent.restore; Q-6 no Windows job-object tree kill. Assumptions A-1..A-9 stand (notably A-1 keyed WebFetch shows page text; A-3 Bash inherits env; A-9 Windows timed-out command may keep running).
 
 ## User replies (verbatim)
 - (none yet during the run)
@@ -57,3 +59,7 @@ started: 2026-10-10 00:51
 - No import cycle between `vidbyte.tools.builtins` and `vidbyte.agents`. Pricing recorded only at `vidbyte/agents/runtime.py:1195-1214`, unwrapping any `_ToolWrapper`. — *source:* S1 review r1
 - S024 caps control-flow nesting at 3 (if/for/with/try/match); main shows S024 IMPROVED 25→21. — *source:* S1 review r1
 - r2 contract: `process.wait()` may be called only in `_collect` (under `BASH_TIMEOUT_SECONDS`) and `_stop` (under `BASH_KILL_GRACE_SECONDS=5.0`, swallowing only that wait's TimeoutError). Bash output cap `BASH_MAX_OUTPUT_BYTES=50_000` (head kept). Constants are module-level in `vidbyte/tools/builtins/bash.py`. §12.3 rows: 1 bash.py, 2 builtins `__init__`, 3 coding.py, 4 agents `__init__`, 5 root `__init__`, 6 contract, 7 agents README, 8 tools README. — *source:* S1 author r2
+- `_stop` order: kill (POSIX `killpg` always; Windows `kill` only while `returncode is None`; ignore ProcessLookupError) → grace `wait_for` (swallow only its TimeoutError) → `getattr(process, "_transport", None)` close. Never raises. Nesting exactly at S024's limit of 3. — *source:* S1 author r3
+- A007 walks up from any `read(...)` to the enclosing `while`: `_collect`'s read loop must contain no numeric literal at all. — *source:* S1 review r2
+- Without the transport close, an orphan holding the pipe yields `Exception ignored … Event loop is closed` after `asyncio.run`; pytest reports PytestUnraisableExceptionWarning but has no `filterwarnings=error`, so AC-28 needs an explicit check. `BaseAgent.run` is `asyncio.run(...)` (`base.py:924`). — *source:* S1 review r2 / author r3
+- On Windows keep Git's `binash.exe` launcher (from a PowerShell-launched Python, `usrinash.exe` cannot find ls/grep/sleep). — *source:* S1 review r2
