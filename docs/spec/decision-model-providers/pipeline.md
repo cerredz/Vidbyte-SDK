@@ -14,7 +14,7 @@ started: 2026-10-10 01:32
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 01:32 | 2026-10-10 02:45 | reports/S0-scout.md, reports/S0-research.md | base_commit 278448b0; context/code-map.md (244 lines); context/provider-research.md (473 lines, 32 catalog rows) |
-| S1 spec + review | in progress | 2026-10-10 02:50 | | reports/S1-spec-author.md (spec r1 at ecf0c4b7; report at 9fb806b8); review round 1 SOUND WITH FIXES (0 Blocker / 2 Major / 8 Minor, reports/S1-spec-review.md at 86ad332a); author revised to r2 at a8c16e18; scoped review round 2 running | spec.md r1 (768 lines, 18 sections, 20 §12.3 rows, 3 new files, 6 new ModelProvider members) |
+| S1 spec + review | in progress | 2026-10-10 02:50 | | reports/S1-spec-author.md (spec r1 at ecf0c4b7; report at 9fb806b8); review round 1 SOUND WITH FIXES (0 Blocker / 2 Major / 8 Minor, reports/S1-spec-review.md at 86ad332a); author revised to r2 at a8c16e18; review round 2 SOUND WITH FIXES (0 Blocker / 1 Major / 3 Minor, reports/S1-spec-review-2.md at 8d0c5015); author revising to r3 + approved | spec.md r1 (768 lines, 18 sections, 20 §12.3 rows, 3 new files, 6 new ModelProvider members) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-10 01:32
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 01:33 — Ran a second S0 agent (a research scout) alongside the code scout, writing `context/provider-research.md` — the request explicitly asks for web research on 10+ providers, and a spec author should design from a sourced catalog rather than research on its own. Logged as a deviation from the playbook's "one scout".
@@ -32,6 +32,7 @@ started: 2026-10-10 01:32
 - 2026-10-10 02:45 — The request.md §C vocabulary "boolean / score / noul (free answer)" is wrong; both scouts independently corrected it to `JevQuestionType` = NOUL (yes/no, P(yes), no confidence) / CHOICE / SCORE. request.md is left verbatim as captured; the correction is carried in the niche facts below and in every briefing.
 - 2026-10-10 ~03:40 — The S1 reviewer was terminated by the account session usage limit (HTTP 429, reset 07:30) before writing anything; resumed with SendMessage after the reset. No artifact lost.
 - 2026-10-10 ~04:10 — S1 review round 1 returned SOUND WITH FIXES with no Blocker. R-1 (promote `resolved_model()` into the plan) and R-2 (echoed-model column in §9.1 plus a `SystemOneHost` flag) change §8.5 and §9, so per the playbook one more reviewer round scoped to §8.5/§9 and dependents follows the r2 revision, then one more author revision; the cap of 2 rounds is then reached and anything still disputed becomes a Q-n. The author was told not to set `status: approved` until that second round.
+- 2026-10-10 ~05:05 — S1 review round 2 (scoped) returned SOUND WITH FIXES with no Blocker: R-11 (§8.5 still named the old enum module), R-12 (mirror the per-call config guard on `OpenAIDecisionsProvider`), R-13 (`enums/jev.py` header obligation), R-14 (stale reader sentences). The cap of 2 review rounds is reached. The author applies all four in r3 and sets `status: approved`; anything it disputes becomes a Q-n whose stated default the run applies.
 
 ## User replies (verbatim)
 - 2026-10-10 ~01:50 — "it says the session couldnt be found on the website" (about the cloud session; answered: CLI account is vidbyte4@vidbyte.pro in org Vidbyte; not a pipeline instruction)
@@ -74,3 +75,11 @@ started: 2026-10-10 01:32
 - provider-research.md documents a response-level `model` only for TypeSafe (§2) and Perplexity (§3.2); OpenAI Decisions §3.1 documents only per-answer `name`; the spec therefore reports the request model id for OpenAI and every host with `SystemOneHost.model_from_request = True` (D-17). — *source:* S1 author (r2)
 - `REPO_MAP.md:372` routes every JEV enum to `enums/jev.py`; `docs/design/jev-managed-gateway-credentials.md:99,116` is what placed `DecisionModelMode` in `enums/decision_model.py`; `DecisionAuthScheme` goes to `enums/jev.py` (spec D-18, row 2). — *source:* S1 author (r2)
 - `JevRuntimeSettings` reads no `.model` from the decision config; `resolved_model()` has three readers: `SystemOneRequest.build`, `OpenAIDecisionsRequest.build`, and `DecisionModelRunner` (`record_billed_failure`, `model_name`). — *source:* S1 author (r2)
+- The TypeSafe `model` echo check (`typesafe.py:416-419`) runs AFTER `normalize()` (`:415`); `SystemOneAnswers.model` must be called after `normalize` so the answers error still wins when both fail (INV-23 byte-identity). — *source:* S1 reviewer r2
+- `DecisionModelConfig.__post_init__` non-empty check (`model_configs.py:365`) already starts with `isinstance(self.model, str)`, so the `str | None` field adds no mypy finding inside the dataclass; only the external readers need `resolved_model()`. — *source:* S1 reviewer r2
+- `ProviderSelectionError` is `vidbyte/lib/errors/base.py:243`, raised by `_build_provider` at `vidbyte/providers/__init__.py:132`; no test pins a decision-provider rejection (`tests/test_config_validation.py:42-53` is image/video only). — *source:* S1 reviewer r2
+- `registries/models.py` does not import `constants/jev.py` today (`models.py:70` holds the literal `"jev-latest"`); the spec row 6 import of `JEV_DEFAULT_MODEL` is a new downward edge; `constants/jev.py` imports only `__future__`. — *source:* S1 reviewer r2
+- `ProviderConfigurationError` exposes `.provider` and `details["provider"]` (`errors/base.py:263-268`), so `provider == "baseten"` is directly assertable. — *source:* S1 reviewer r2
+- The Vercel recipe model `openai/gpt-6-luna-decisions` is priced: `normalize_model` strips `openai/` and `resolve` prefix-matches `gpt-6-luna` (`pricing.py:184-200`). — *source:* S1 reviewer r2
+- `enums/__init__.py` `__all__` is not sorted (`"DocumentType"` at 157 precedes `"DecisionModelMode"` at 158); new names go adjacent to their family, not in sorted position. — *source:* S1 reviewer r2
+- TypeSafe response `model` is pinned at `tests/test_jev_agent.py:137,173` as `jev-1.13.0`; `DecisionModelResponse.model: str` (`runners/types.py:66`); `UsageTracker._record` prices `str(response.model)` (`tracker.py:99`). — *source:* S1 reviewer r2
