@@ -26,6 +26,7 @@ RULE_MODULES = (
     "lint.rules.a006_directed_dependency_graph",
     "lint.rules.a007_operational_constants",
     "lint.rules.a008_library_stdout_boundary",
+    "lint.rules.a009_readme_size_limit",
     "lint.rules.c001_settings_class_configuration_error_placement",
     "lint.rules.c002_duplicate_inline_bool_guard_validation",
     "lint.rules.c003_no_dynamic_import_from_data",

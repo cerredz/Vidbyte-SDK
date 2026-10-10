@@ -6,13 +6,12 @@
       "Write",
       "Agent",
       "Bash(python *)",
-      "Bash(git *)",
-      "Bash(gh pr *)",
-      "Bash(gh api *)"
+      "Bash(semgrep *)",
+      "Bash(git *)"
     ],
     "deny": [
-      "Bash(git push --force *)",
-      "Bash(git push -f *)"
+      "Bash(git push)",
+      "Bash(git push *)"
     ]
   }
 }
