@@ -86,7 +86,7 @@ class AgentFallbackSettings:
         """Return the full chain with the primary first and every entry normalized against it."""
         return (primary, *(self._resolve_entry(entry, primary, position) for position, entry in enumerate(self.models)))
 
-    def to_fallback(self, *, primary: FallbackModel) -> AgentFallback | None:
+    def to_fallback(self, *, primary: FallbackModel, timeout_seconds: float | None = None) -> AgentFallback | None:
         """Convert these settings into the internal AgentFallback, or None when disabled."""
         from vidbyte.agents.fallback import DEFAULT_FALLBACK_ERRORS, AgentFallback
 
@@ -95,6 +95,7 @@ class AgentFallbackSettings:
         return AgentFallback(
             self.resolved_models(primary=primary),
             fallback_on=self.fallback_on if self.fallback_on is not None else DEFAULT_FALLBACK_ERRORS,
+            timeout_seconds=timeout_seconds,
         )
 
     def _resolve_entry(self, entry: str | FallbackModel, primary: FallbackModel, position: int) -> FallbackModel:

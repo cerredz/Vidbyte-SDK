@@ -5,9 +5,10 @@ import unittest
 from pathlib import Path
 
 from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
+from vidbyte.agents.fallback import AgentFallback
 from vidbyte.agents.settings import AgentFallbackSettings
 from vidbyte.config import YamlLoader
-from vidbyte.lib.dataclasses.agents import AgentMetadata, FallbackModel
+from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, FallbackModel
 from vidbyte.lib.dataclasses.config import AgentSettings, ToolDefinition
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -60,6 +61,16 @@ class FallbackApiKeyInheritanceTests(unittest.TestCase):
         auto, slug = self.resolve("openrouter/auto", "openrouter/anthropic/claude-sonnet-5")
         self.assertEqual((auto.provider, auto.model), ("openrouter", "openrouter/auto"))
         self.assertEqual((slug.provider, slug.model), ("openrouter", "anthropic/claude-sonnet-5"))
+
+
+class FallbackRunnerTimeoutTests(unittest.TestCase):
+    def test_fallback_runner_inherits_the_agent_timeout(self) -> None:
+        # A backup model must get the agent's per-request timeout, not the 60-second library default.
+        config = AgentRunnerConfig(provider="deepseek", model_name="deepseek-v4-pro", api_key="k", timeout_seconds=300.0)
+        backup = FallbackModel(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-ant")
+        chain = AgentFallback.from_spec([backup], runner_config=config, agent_name="researcher")
+        self.assertEqual(chain.build_runner(1)._config.timeout_seconds, 300.0)
+
 
 def build(**overrides: object) -> AgentSettings:
     # Builds one agent settings object from the minimal valid document plus the overrides under test.
