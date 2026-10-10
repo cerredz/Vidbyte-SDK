@@ -87,3 +87,21 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
             for result in (grep, glob):
                 self.assertIn("src/index.js", result.output)
                 self.assertNotIn("inner", result.output)
+
+    async def test_truncation_notice_only_when_a_hit_was_cut(self) -> None:
+        """Exactly max_results hits are not truncated; one more hit is."""
+        root = self.root / "exact"
+        root.mkdir()
+        for name in ("a", "b", "c"):
+            (root / f"{name}.py").write_text("# TODO\n", encoding="utf-8")
+        grep_call = ToolCall("grep", {"pattern": "TODO", "max_results": 3})
+        glob_call = ToolCall("glob", {"pattern": "*.py", "max_results": 3})
+        for result in (await GrepTool(root).execute(grep_call), await GlobTool(root).execute(glob_call)):
+            self.assertNotIn("Results truncated", result.output)
+            self.assertFalse(result.metadata["truncated"])
+            self.assertEqual(result.metadata["count"], 3)
+        (root / "d.py").write_text("# TODO\n", encoding="utf-8")
+        for result in (await GrepTool(root).execute(grep_call), await GlobTool(root).execute(glob_call)):
+            self.assertIn("Results truncated; narrow the pattern.", result.output)
+            self.assertTrue(result.metadata["truncated"])
+            self.assertEqual(result.metadata["count"], 3)
