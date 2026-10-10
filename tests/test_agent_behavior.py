@@ -331,6 +331,14 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.tool_args.tool_never_called_with("search", query="java"))
         self.assertFalse(b.tool_args.tool_never_called_with("search", query="python"))
 
+    def test_tool_args_can_check_argument_named_name(self) -> None:
+        # [Hidden Failure] An argument called `name` is matched, not bound to the tool-name parameter.
+        b = behavior_from_probe(RunProbe(tool_calls=(make_call("create_user", args={"name": "Ada", "role": "admin"}),)))
+        self.assertTrue(b.tool_args.tool_called_with("create_user", name="Ada"))
+        self.assertFalse(b.tool_args.tool_called_with("create_user", name="Eve"))
+        self.assertTrue(b.tool_args.tool_never_called_with("create_user", name="Eve"))
+        self.assertFalse(b.tool_args.tool_never_called_with("create_user", name="Ada", role="admin"))
+
     def test_tool_called_with_matching(self) -> None:
         # [Hidden Assumption] tool_called_with_matching calls predicate on arg value.
         b = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"query": "python tutorial"}),)))
