@@ -1,8 +1,8 @@
 """Context Protocol Header
 
 FILE: vidbyte/agents/pricing/typesafe.py
-PURPOSE: Parses System One decision usage — TypeSafe Jev and every host bound to it in `_usage_class_map()` (Perplexity, Cloudflare, Foundry, Liquid, Baseten, meraGPT) — and prices it: input tokens at the table rate, output tokens free. from_decision and total are the one strict way Jev features read and add decision usage.
-ROLE IN CODEBASE: Bound to ModelProvider.TYPESAFE and the six other System One hosts through ModelProvider.usage_class, so UsageTracker.record_call prices every System One decision call a model-backed tool or DecisionModelRunner reports.
+PURPOSE: Parses System One decision usage — TypeSafe Jev and every host bound to it in `_usage_class_map()` (Perplexity, Cloudflare, Foundry, Liquid AI, Baseten, meraGPT, Celeris, Nace.AI, Upstage, Inception, Hanzo, Vansa, ZooData) — and prices it: input tokens at the table rate, output tokens free. from_decision and total are the one strict way Jev features read and add decision usage.
+ROLE IN CODEBASE: Bound to ModelProvider.TYPESAFE and the thirteen other System One hosts through ModelProvider.usage_class, so UsageTracker.record_call prices every System One decision call a model-backed tool or DecisionModelRunner reports.
 ARCHITECTURE NOTE: Jev reports only input_tokens and output_tokens and has no cached-token tier; total_tokens is derived, and cost goes through the shared subset_billing_cost formula so C005 keeps cost math inside this package.
 COMMON MODIFICATION PATTERNS: Change rates in vidbyte/lib/registries/pricing.py, not here; extend parsing only when TypeSafe adds usage fields.
 KNOWN EDGE CASES: A payload with neither token field parses to None, while from_decision raises ProviderResponseError unless both counts are present and total of no records is zero tokens; output tokens are priced at the table's output rate, which is 0.0 for every Jev model; any cache-looking field TypeSafe might add is ignored until TypeSafe documents a cache rate.
@@ -11,7 +11,7 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_skill_preload.py, and scripts/tes
 
 Description:
     JevUsage — the ProviderUsage subclass for the System One endpoint served by TypeSafe and
-    the other System One hosts (Perplexity, Cloudflare, Foundry, Liquid, Baseten, meraGPT).
+    the other System One hosts (Perplexity, Cloudflare, Foundry, Liquid AI, Baseten, meraGPT, Celeris, Nace.AI, Upstage, Inception, Hanzo, Vansa, ZooData).
 Relations:
     Registered in vidbyte/lib/enums/model_provider.py; priced by
     vidbyte/lib/registries/pricing.py.
