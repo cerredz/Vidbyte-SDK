@@ -30,6 +30,7 @@ started: 2026-10-10 01:32
 - 2026-10-10 01:39 — Ran the user's `claude --cloud` sentence as an experiment outside the pipeline: vendored the spec-pipeline and agentic-engineering skills on scratch branch `cloud/spec-pipeline-trial-20261010` (pushed), launched from a console window because `--cloud` requires a TTY. Cloud session `session_01W6gqR6YGeAdCmaBqcvk4jw`. It is not part of this PR and no subagent acts on it.
 - 2026-10-10 ~01:55 — Both S0 agents were terminated by the account's session usage limit (HTTP 429, reset 02:30). Resumed both with SendMessage after the reset; no artifact was lost (nothing had been written yet).
 - 2026-10-10 02:45 — The request.md §C vocabulary "boolean / score / noul (free answer)" is wrong; both scouts independently corrected it to `JevQuestionType` = NOUL (yes/no, P(yes), no confidence) / CHOICE / SCORE. request.md is left verbatim as captured; the correction is carried in the niche facts below and in every briefing.
+- 2026-10-10 ~03:40 — The S1 reviewer was terminated by the account session usage limit (HTTP 429, reset 07:30) before writing anything; resumed with SendMessage after the reset. No artifact lost.
 
 ## User replies (verbatim)
 - 2026-10-10 ~01:50 — "it says the session couldnt be found on the website" (about the cloud session; answered: CLI account is vidbyte4@vidbyte.pro in org Vidbyte; not a pipeline instruction)
