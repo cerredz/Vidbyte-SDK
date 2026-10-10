@@ -247,6 +247,32 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["id"], 7)
         self.assertEqual(response["result"]["serverInfo"]["name"], "vidbyte-sdk-studio")
 
+    async def test_notifications_get_no_reply_but_requests_do(self) -> None:
+        server = McpStudioServer()
+        for method in ("notifications/initialized", "notifications/bogus", "ping"):
+            self.assertIsNone(await server._dispatch({"jsonrpc": "2.0", "method": method}), method)
+        unknown = await server._dispatch({"jsonrpc": "2.0", "id": 3, "method": "notifications/bogus"})
+        self.assertEqual((unknown["id"], unknown["error"]["code"]), (3, JSONRPC_METHOD_NOT_FOUND))
+        null_id = await server._dispatch({"jsonrpc": "2.0", "id": None, "method": "bogus/method"})
+        self.assertEqual(null_id["error"]["code"], JSONRPC_METHOD_NOT_FOUND)
+
+    async def test_run_writes_nothing_for_notifications(self) -> None:
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 99}},
+            {"jsonrpc": "2.0", "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ]
+        stdin = io.BytesIO(b"".join(json.dumps(message).encode("utf-8") + b"\n" for message in messages))
+        stdout = io.BytesIO()
+        fake_sys = SimpleNamespace(platform="win32", stdin=SimpleNamespace(buffer=stdin), stdout=SimpleNamespace(buffer=stdout))
+        with mock.patch.object(server_core, "sys", fake_sys), mock.patch.object(server_core.ToolsListHandler, "handle", side_effect=[RuntimeError("boom"), {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}]):
+            await McpStudioServer().run()
+        responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
+        self.assertEqual([response["id"] for response in responses], [1, 2])
+        self.assertNotIn("error", responses[1])
+
     async def test_ping_returns_empty_result(self) -> None:
         response = await self._dispatch(McpStudioServer(), "ping", request_id=9)
         self.assertEqual(response, {"jsonrpc": "2.0", "id": 9, "result": {}})
