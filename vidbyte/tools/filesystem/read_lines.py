@@ -25,7 +25,7 @@ class ReadLinesTool(FileSystemTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         # Validate range bounds, read and slice the lines, return them newline-joined.
         path = call.arguments.get("path", "")
-        start = int(call.arguments.get("start", 1))
+        start = int(self._optional_argument(call, "start", default=1))
         end_raw = call.arguments.get("end", None)
         end: int | None = int(end_raw) if end_raw is not None else None
         try:
