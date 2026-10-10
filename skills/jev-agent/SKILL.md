@@ -43,7 +43,7 @@ The managed gateway authorizes the decision request only. It does not secure the
 - `vidbyte/lib/jev/done/` holds every fixed done question (`multi_part.py`, `claims.py`, `required_sequence.py`) and `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`). The structured-reply payloads (every field described in 4–6 sentences), the run-state, handoff, claim, sequence, and done records, and `JevDoneQuestion` live in `vidbyte/lib/dataclasses/jev.py`; `JevDoneCheck` and `JevDoneQuestionKey` live in `vidbyte/lib/enums/jev.py`.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`), model listing (`alist_models`), and noul scoring against a threshold (`score_noul`).
-- `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
+- `vidbyte/providers/systemone.py` owns System One wire serialization and normalization for every System One host; `vidbyte/providers/typesafe.py` adds only TypeSafe's managed-gateway, model-list, and run-close behaviour; `vidbyte/providers/openai_decisions.py` owns the OpenAI Decisions wire.
 
 With no preflight preset enabled and no specialist configured, a run performs no Jev call. A missing Vidbyte API key must not prevent settings or `JevAgent` construction; when an enabled policy needs a decision, missing or rejected credentials stop that Jev-controlled feature. Transient network and service failures, malformed or unavailable decision results, and failed clarification generation retain the advisory fallback. A missing or `none` specialist answer keeps the main agent on the run; a specialist is only ever chosen after the gate passes. Done checks remain advisory when run-state or handoff generation is unavailable. `JevPreflightPreset.TOOL_SELECTOR` keeps every tool whose P(yes) is at least `tool_selector_threshold`, a finite probability from 0 through 1 inclusive.
 
@@ -95,7 +95,7 @@ REQUIRED_SEQUENCE is a request-derived check. It is enabled with `JevContinualSe
 2. Describe the user-facing capability in product terms and add a named setting or preset. Keep caller configuration to the minimum product-level controls, such as a validated threshold.
 3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer. Write every question with `skills/asking-jev-questions/SKILL.md`: Jev matches state against definitions you supply; it does not reason, count, forecast, or generate.
 4. Define fail-open or fail-closed behavior for missing credentials, timeouts, malformed answers, and unsupported configurations. Never let an exception silently choose policy.
-5. Implement orchestration in `JevPreflightGate` and the steps under `vidbyte/agents/jev/gate/`, never as preset checks in `JevRuntime`; keep provider wire shapes in `vidbyte/providers/typesafe.py` and reusable validated records in `vidbyte/lib/`.
+5. Implement orchestration in `JevPreflightGate` and the steps under `vidbyte/agents/jev/gate/`, never as preset checks in `JevRuntime`; keep provider wire shapes in `vidbyte/providers/systemone.py` / `openai_decisions.py` and reusable validated records in `vidbyte/lib/`.
 6. Never meter usage by hand. Every Jev call goes through `DecisionModelRunner`, and every helper agent is a `BaseAgent`, so both land in the JevAgent's one usage ledger automatically (`docs/design/jev-run-usage-ledger.md`). Do not sum per-feature usage records into a total, and remember that any call the pricebook cannot price fails the run closed.
 7. Add tests for the disabled path, each enabled outcome, boundary thresholds, provider failure, the ordinary model/tool loop, and any context/schema/tool-catalog changes.
 8. Update this skill and the design documentation when the public philosophy or package boundary changes.
@@ -138,6 +138,8 @@ from vidbyte.lib.runners.decision import DecisionModelRunner
 
 runner = DecisionModelRunner(DecisionModelConfig(mode=DecisionModelMode.TYPESAFE))
 ```
+
+`DecisionModelConfig(provider=ModelProvider.PERPLEXITY)` and the other decision providers (OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry, OpenAI) work the same way in direct mode, each with its own API key and default model; see the "Decision Providers" section of `vidbyte/providers/README.md`.
 
 The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it. `agent.response.done[JevDoneCheck.MULTI_PART]` reports whether every requested deliverable was shown produced in full; `agent.response.done[JevDoneCheck.SCOPE_COVERAGE]` reports whether every required group member has evidence of the requested change.
 
