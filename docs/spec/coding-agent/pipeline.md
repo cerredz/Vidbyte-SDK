@@ -14,7 +14,7 @@ started: 2026-10-10 00:51
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 00:51 | 2026-10-10 01:08 | reports/S0-scout.md | base_commit 8f23fd67; code-map.md (4 sections, 329 lines) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 2026-10-10 01:09 | | reports/S1-spec-author.md, S1-spec-review.md | spec r1 @672157b8 (9 §12.3 rows, 3 new files) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -44,3 +44,9 @@ started: 2026-10-10 00:51
 - Semgrep is NOT in `run_ci.py`; it runs only in `.github/workflows/static-policy.yml` (dispatch only, `semgrep==1.170.1`). All CI is manual dispatch on ubuntu-latest (Python 3.11 and 3.12); Windows bash behaviour is never exercised by CI. — *source:* S0 scout
 - Workspace gotchas: run `scripts/run_ci.py` with `PYTHONPATH` unset (it breaks the package smoke step); Semgrep needs its own venv/pipx because the SDK pulls `mcp` 2.x; dispatch CI with `gh workflow run ci.yml --ref feat/coding-agent` or PR checks never appear. — *source:* orchestrator memory of earlier runs
 - Unverified (S0): which `bash` Python's subprocess resolves on Windows (Git Bash, WSL launcher, and WindowsApps bash are all on PATH); whether importing `vidbyte.tools.builtins` from `vidbyte/agents/__init__.py` cycles (`tools/builtins/fork/fork.py` imports `vidbyte.agents`). — *source:* S0 scout
+- `BaseAgent.__init__` has 31 keyword-only params; `name` and `system_prompt` have no default. Setting `self.root_dir` before `super().__init__` is safe (no slots, no clash). — *source:* S1 author
+- A002 also matches the function's own name and annotation names: `_web_fetch_tool` and anything annotated `asyncio.subprocess.Process` need `# @intent`. Check with `python lint/run.py --rule A002`. — *source:* S1 author
+- Use `sys.platform == "win32"` branches (not `os.name`): typeshed declares `os.killpg`/`signal.SIGKILL` only for non-Windows and S009 runs mypy on the host OS. — *source:* S1 author
+- Pricing reads only `metadata["operation_usage"]` (`_billable_attempts`, `units_used`, `mode_used`, `attempts_used`), so replacing `output` in a wrapper does not change billing. — *source:* S1 author
+- Test seams: patch `HttpTransport._send_once` on the class (covers clients built from a key); bash constants are imported by name, so patch `vidbyte.tools.builtins.bash.BASH_*`. — *source:* S1 author
+- A returned `ToolResult.error` does not set the runtime's `timed_out` flag; only a raised `ToolExecutionError(error="timeout")` does. — *source:* S1 author
