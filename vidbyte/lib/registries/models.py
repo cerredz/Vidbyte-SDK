@@ -294,6 +294,11 @@ class ProviderModelRegistry:
         if not cls.STRICT_MODEL_VALIDATION:
             return
         name = (provider.value if isinstance(provider, ModelProvider) else str(provider)).strip().lower()
+        # @intent openrouter-slugs-pass-ownership-check
+        # OpenRouter routes to other vendors, so its 'anthropic/claude-sonnet-5' style ids name a model
+        # another provider owns; the runner accepts them, so the vendor prefix is not a conflict here.
+        if name == ModelProvider.OPENROUTER.value and "/" in model:
+            return
         owner = cls.provider_for_model(model)
         if owner is not None and owner != name:
             raise ConfigurationError(
