@@ -52,8 +52,8 @@ class ResumeReplaceTool(_SessionBuiltinTool):
 
     def _perform(self, arguments: dict[str, Any]) -> ToolResult:
         # Decide own-thread rewind vs cross-thread adopt and dispatch.
-        session_id = str(arguments.get("session_id", "")).strip()
-        checkpoint_id = str(arguments.get("checkpoint_id", "")).strip() or None
+        session_id = self._optional_text(arguments, "session_id").strip()
+        checkpoint_id = self._optional_text(arguments, "checkpoint_id").strip() or None
         if not session_id or (self._session is not None and session_id == self._session.id):
             return self._replace_own(checkpoint_id)
         resolved_session_id = self._resolve_session_id(session_id)

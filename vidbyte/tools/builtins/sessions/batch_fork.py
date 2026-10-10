@@ -63,7 +63,7 @@ class BatchForkTool(_SessionBuiltinTool):
         session = self._require_bound(_TOOL_NAME)
         if session is None:
             return ToolResult.error(_TOOL_NAME, "No active session is bound to this tool.")
-        checkpoint_id = str(arguments.get("checkpoint_id", "")).strip() or None
+        checkpoint_id = self._optional_text(arguments, "checkpoint_id").strip() or None
         outcomes = session.batch_fork(count, at=checkpoint_id)
         return self._format_outcomes(outcomes)
 
