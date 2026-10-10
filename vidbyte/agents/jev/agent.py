@@ -15,6 +15,7 @@ from functools import partial
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.fork import AgentForker
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevDoneContinuation, JevFreshContinuation
 from vidbyte.agents.jev.done import JevRunState
@@ -57,7 +58,9 @@ class JevAgent(BaseAgent):
                 api_key=settings.api_key,
                 temperature=settings.temperature,
                 timeout_seconds=settings.timeout_seconds,
-                tools=settings.tools,
+                # @intent jev-children-never-steal-main-agent-tools
+                # Agent-bound builtins get unbound copies, as in a fork, so the main agent's tools stay bound to it.
+                tools=tuple(AgentForker._clone_tool(tool, None, None) for tool in settings.tools),
                 permission_policy=settings.permission_policy,
                 agent_loop_settings=settings.loop,
             )

@@ -42,6 +42,7 @@ from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
 from vidbyte.lib.jev.compute import JevComputeRegistry, JevSwarmPlanRegistry
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.runners.types import DecisionModelResponse
+from vidbyte.tools.builtins import PauseAgentTool, RunPromptsSequentiallyTool
 
 _RECOGNIZER = "vidbyte.agents.jev.compute.recognizer.DecisionModelHelper"
 _PLAN_CHECK = "vidbyte.agents.jev.compute.swarm_plan.DecisionModelHelper"
@@ -150,6 +151,14 @@ class JevSwarmSettingsTests(unittest.TestCase):
         self.assertEqual(helper.system_prompt, "Research.")
         self.assertEqual(helper.tools.names(), JevAgent(_settings()).tools.names())
         self.assertNotIn(TOOL, helper.tools.names())
+
+    def test_a_helper_leaves_the_main_agents_bound_tools_bound_to_the_main_agent(self) -> None:
+        pause, queue = PauseAgentTool(), RunPromptsSequentiallyTool()
+        settings = _settings(pause, queue)
+        agent = JevAgent(settings)
+        JevSwarmAgent(settings, JevSwarmAssignment(id="A1", **_assignment("users")))
+        self.assertIs(pause._agent, agent)
+        self.assertIs(queue._agent, agent)
 
     def test_a_caller_tool_named_launch_swarm_is_refused_only_when_swarm_is_enabled(self) -> None:
         def launch_swarm(task: str) -> str:

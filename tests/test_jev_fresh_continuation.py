@@ -28,6 +28,7 @@ from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums import JevContinuationGate, JevDoneCheck
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry
+from vidbyte.tools.builtins import PauseAgentTool, RunPromptsSequentiallyTool
 
 
 class FreshAgentStub:
@@ -101,6 +102,16 @@ class JevFreshContinuationTests(unittest.IsolatedAsyncioTestCase):
         second = agent.continuation.fresh_agent_factory()
         self.assertEqual(first.name, "jev-fresh-continuation")
         self.assertIsNot(first, second)
+
+    def test_fresh_agent_leaves_the_main_agents_bound_tools_bound_to_the_main_agent(self) -> None:
+        pause, queue = PauseAgentTool(), RunPromptsSequentiallyTool()
+        settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", tools=(pause, queue))
+        runtime = JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,), gate="fresh"))
+        agent = JevAgent(settings, runtime)
+        assert isinstance(agent.continuation, JevFreshContinuation)
+        agent.continuation.fresh_agent_factory()
+        self.assertIs(pause._agent, agent)
+        self.assertIs(queue._agent, agent)
 
     async def test_failed_check_runs_in_clean_context_and_returns_response_to_main_loop(self) -> None:
         run_state = RunStateStub()
