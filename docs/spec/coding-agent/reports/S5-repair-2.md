@@ -2,20 +2,20 @@
 
 **Scope.** This iteration had one defect: gate `merge-main`. PR #690 reported `mergeable=CONFLICTING DIRTY`. No review finding was open: R-1 to R-7 are `fixed`, and R-8 and R-9 are `follow-up` by the orchestrator's decision. The job was to merge `origin/main` into the branch and make every gate green on the merged tree, including main's new lint rules. No feature source, test, lint baseline, rule or config changed.
 
-## Gate matrix (HEAD `38dca66d`, `origin/main` `c6e758fe` merged)
+## Gate matrix (code HEAD `d104bd78`, `origin/main` `84f7aee3` merged)
 
 | Gate | Command | Result | Final lines |
 |---|---|---|---|
-| merge-main | `gh pr view 690 --json mergeable,mergeStateStatus,isDraft` | PASS | `{"headRefOid":"38dca66d…","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE"}`, main `c6e758fe` is an ancestor of HEAD. BLOCKED = the PR is a draft (`isDraft: true`); main's protection requires Source 3.11, Source 3.12 and Package on the head SHA, `strict: true`. |
+| merge-main | `gh pr view 690 --json mergeable,mergeStateStatus,isDraft` | PASS | `{"headRefOid":"d104bd78…","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE"}`, main `84f7aee3` is an ancestor of HEAD. BLOCKED = the PR is a draft (`isDraft: true`); main's protection requires Source 3.11, Source 3.12 and Package on the head SHA, `strict: true`. |
 | contract (C016's check) | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at 787afabf4c733f6489eed1cfc729d75f1fb0751a (vidbyte-sdk 0.2.1, 599 exports).` |
-| new tests, Windows 3.11 | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent/` | PASS | `86 passed, 11 skipped in 5.13s` |
-| new tests, WSL 3.12 | `MSYS_NO_PATHCONV=1 wsl.exe -d MuseUbuntu1 -- bash -lc '… /tmp/s2-coding-agent-venv/bin/python -m pytest -q tests/features/coding_agent/'` | PASS | `97 passed in 18.22s` |
+| new tests, Windows 3.11 | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent/` | PASS | `86 passed, 11 skipped in 5.06s` |
+| new tests, WSL 3.12 | `MSYS_NO_PATHCONV=1 wsl.exe -d MuseUbuntu1 -- bash -lc '… /tmp/s2-coding-agent-venv/bin/python -m pytest -q tests/features/coding_agent/'` | PASS | `97 passed in 17.27s` |
 | lint | `python lint/run.py` (step 2 of the source stage) | PASS | `S063 RATCHETED: 4 known finding(s).` / `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
-| full local gate, source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `reasoning trace contracts: ok (182 tools, 55 shapes)` / `====== 2894 passed, 12 skipped in 34.39s ======` / `CI passed.` |
+| full local gate, source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `reasoning trace contracts: ok (182 tools, 55 shapes)` / `====== 2865 passed, 12 skipped in 20.65s ======` / `CI passed.` (#703 deleted `tests/test_review_agents.py`, so the count dropped) |
 | full local gate, package | `python scripts/run_ci.py --stage package` (PYTHONPATH unset) | PASS | `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
-| remote CI | `gh workflow run ci.yml --ref feat/coding-agent` → `38080888378` on `38dca66d` | PASS | Source 3.11 `2894 passed, 12 skipped in 25.66s` / `CI passed.`; Source 3.12 `2894 passed, 12 skipped, 12 warnings in 30.29s` / `CI passed.`; Package `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
-| remote Semgrep | `gh workflow run static-policy.yml --ref feat/coding-agent` → `38080889677` on `38dca66d` | PASS | `Ran 1 rule on 869 files: 0 findings.` |
-| remote check-runs | `gh api repos/cerredz/Vidbyte-SDK/commits/38dca66d…/check-runs` | PASS (4/4) | `Package: success` / `Static policy: success` / `Source / Python 3.12: success` / `Source / Python 3.11: success` |
+| remote CI | `gh workflow run ci.yml --ref feat/coding-agent` → `38081495740` on `d104bd78` | PASS | Source 3.11 `2865 passed, 12 skipped in 28.60s` / `CI passed.`; Source 3.12 `2865 passed, 12 skipped, 12 warnings in 23.99s` / `CI passed.`; Package `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote Semgrep | `gh workflow run static-policy.yml --ref feat/coding-agent` → `38081497380` on `d104bd78` | PASS | `Ran 1 rule on 869 files: 0 findings.` |
+| remote check-runs | `gh api repos/cerredz/Vidbyte-SDK/commits/d104bd78…/check-runs` | PASS (4/4) | `Package: success` / `Static policy: success` / `Source / Python 3.12: success` / `Source / Python 3.11: success` |
 
 Each earlier merge passed the same gates locally before main moved again.
 - **Merge 1** (`563f1db8` + `72ef4638`, main at `6b7ba7c3`):
@@ -28,20 +28,27 @@ Each earlier merge passed the same gates locally before main moved again.
   - package: `CI passed.`;
   - pack: 86 passed / 11 skipped on Windows, and 97 passed on WSL;
   - remote: CI `38080381482` (Source 3.11 `2889 passed, 12 skipped in 26.57s` / `CI passed.`; Source 3.12 `2889 passed, 12 skipped, 12 warnings in 30.12s` / `CI passed.`; Package `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.`) and Static policy `38080383145` (`Ran 1 rule on 869 files: 0 findings.`), with all 4 check-runs `success` on `6d2191f7`.
+- **Merge 3** (`38dca66d`, main at `c6e758fe`):
+  - source: `2894 passed, 12 skipped in 34.39s` / `CI passed.`;
+  - package: `CI passed.`;
+  - pack: 86 passed / 11 skipped on Windows, and 97 passed on WSL;
+  - remote: CI `38080888378` (Source 3.11 `2894 passed, 12 skipped in 25.66s`; Source 3.12 `2894 passed, 12 skipped, 12 warnings in 30.29s`; Package `CI passed.`) and Static policy `38080889677`, 4/4 `success`.
 
 ## What I did, in order
 
-### 1. The merge: done three times, because `main` moved three times during the iteration
+### 1. The merge: done four times, because `main` moved four times during the iteration
 - **Fetch.** `git fetch origin` gave `origin/main = d7b25110`, as the briefing said.
 - **The first attempt was stale.** `git merge --no-ff --no-commit origin/main` conflicted only in `contracts/sdk-public-api.json`. Before committing, `git diff --cached --stat origin/main` showed files the branch never touched as differences: `vidbyte/tools/base.py -13`, the filesystem tools, `tests/test_mongodb_tools.py -81` and `docs/design/tool-args-strict-booleans.md -94`. `git rev-parse MERGE_HEAD` was `d7b25110`, but `origin/main` was now `6b7ba7c3`. #700 ("reject stringly booleans in model-facing tool arguments") had landed, and another session's fetch had updated the shared remote-tracking ref. I ran `git merge --abort` and merged `6b7ba7c3`.
 - **Merge 1 (`563f1db8`, main at `6b7ba7c3`).** Same single conflict. After this merge, `git diff --cached --stat origin/main` showed only the feature files.
 - **Main moved again.** After merge 1 was committed and gated, `git diff origin/main..HEAD` showed main-side Jev files as deletions, because `bfe395fe` (#698, Jev skills preload) had landed.
 - **Merge 2 (`6d2191f7`, main at `bfe395fe`).** It auto-merged with no conflict; the contract decision is described below. All local gates passed, and all 4 remote check-runs were green on `6d2191f7`.
 - **Main moved a third time.** The PR then showed `{"mergeStateStatus":"BEHIND","mergeable":"MERGEABLE"}`, because `c6e758fe` (#701, "treat null optional arguments as the documented default") had landed. It changes `glob.py`, `grep.py` and `read_lines.py`, three of the seven tools `CodingAgent` wires, and adds `BaseTool._optional_argument`.
-- **Merge 3 (`38dca66d`, main at `c6e758fe`).** It auto-merged with no conflict. The contract is untouched (`--check`: current, 599 exports). I re-ran every gate on it.
-- **The final state.** `git ls-remote origin refs/heads/main` = `c6e758fe`, and `git merge-base --is-ancestor origin/main HEAD` holds. `git diff origin/main..HEAD --stat -- . ':!docs/spec/coding-agent' ':!tests/features/coding_agent'` shows exactly the 8 §12.3 files: the contract (+1 line), `vidbyte/__init__.py`, `vidbyte/agents/README.md`, `vidbyte/agents/__init__.py`, `vidbyte/agents/coding.py`, `vidbyte/tools/README.md`, `vidbyte/tools/builtins/__init__.py` and `vidbyte/tools/builtins/bash.py`.
+- **Merge 3 (`38dca66d`, main at `c6e758fe`).** It auto-merged with no conflict. The contract is untouched (`--check`: current, 599 exports). I re-ran every gate on it, and remote CI `38080888378` and Static policy `38080889677` went 4/4 green on it.
+- **Main moved a fourth time.** While I committed the docs (`8b50a6ee`), `ebeb56b5` (#703: it replaces the review-agents pipeline with `.github/workflows/claude.yml`, and its `lint/rules/a009_readme_size_limit.py` change is docstring and diagnostic text only) and `84f7aee3` (#705: null `limit` on provider read tools) landed. `git merge-tree --write-tree HEAD origin/main` was clean.
+- **Merge 4 (`d104bd78`, main at `84f7aee3`).** It auto-merged with no conflict. I re-ran every gate on it. I stopped chasing here: any later main move is reported, not merged.
+- **The final state.** `git ls-remote origin refs/heads/main` = `84f7aee3`, and `git merge-base --is-ancestor origin/main HEAD` holds. `git diff origin/main..HEAD --stat -- . ':!docs/spec/coding-agent' ':!tests/features/coding_agent'` shows exactly the 8 §12.3 files: the contract (+1 line), `vidbyte/__init__.py`, `vidbyte/agents/README.md`, `vidbyte/agents/__init__.py`, `vidbyte/agents/coding.py`, `vidbyte/tools/README.md`, `vidbyte/tools/builtins/__init__.py` and `vidbyte/tools/builtins/bash.py`.
 
-**Conflicted files, across all three merges:** only `contracts/sdk-public-api.json`, line 3 (`source.commit`), in merge 1. Merge 2 auto-resolved every file, including the contract, `vidbyte/__init__.py` and `vidbyte/agents/__init__.py`. Merge 3 auto-resolved its 11 files, none of them a feature file.
+**Conflicted files, across all four merges:** only `contracts/sdk-public-api.json`, line 3 (`source.commit`), in merge 1. Merge 2 auto-resolved every file, including the contract, `vidbyte/__init__.py` and `vidbyte/agents/__init__.py`. Merges 3 and 4 auto-resolved their 11 and 25 files, none of them a feature file.
 
 ### 2. The contract
 The briefing names "this branch's two additions, `CodingAgent` and `BashTool`". The contract lists root `vidbyte.__all__` only. `BashTool` is exported from `vidbyte.tools.builtins` (`vidbyte/tools/builtins/__init__.py`), not from the root, so the branch's only contract line is `"CodingAgent"`. `git diff 8f23fd67 51c5745c -- contracts/sdk-public-api.json` shows exactly that, plus the `source` line.
@@ -71,7 +78,8 @@ The order the briefing gives cannot work as written. It says to take main's hunk
   - The `test_coding_agent_web_fetch.py` AC tests pass.
 - **Pricing unwrap.** `runtime.py:1208` still does `ActivityToolFormatter.unwrap(tool)`, which goes through `_unwrap_tool` (`vidbyte/tools/base.py:158-163`, `while isinstance(unwrapped, _ToolWrapper)`). Main's `runtime.py` changes are a catalog re-resolve, the `allowed_tools` gate, truncation of middleware tails, compaction counting and the trace scrub. None of them touches pricing or the unwrap path.
 - **#700 (strict booleans).** It added `BaseTool._resolve_bool_argument` and uses it in `write_text`, `grep` and others. `BashTool` reads only the string `command`. The pack's write and grep acceptance cases pass.
-- **#701 (null optional arguments).** It added `BaseTool._optional_argument` and uses it in `glob`, `grep`, `read_lines` and others. This only widens what those wired tools accept: a null now means the default. The pack's acceptance cases pass on the merged tree on both platforms. Lint was re-filtered per path on `38dca66d`: zero findings in feature files, nothing regressed (90 rules).
+- **#701 (null optional arguments).** It added `BaseTool._optional_argument` and uses it in `glob`, `grep`, `read_lines` and others. This only widens what those wired tools accept: a null now means the default. The pack's acceptance cases pass on the merged tree on both platforms. Lint was re-filtered per path on `38dca66d` and again on `d104bd78`: zero findings in feature files, nothing regressed (90 rules).
+- **#703 and #705.** Neither touches a file `CodingAgent` wires or depends on: #705 changes `providers/mongodb.py` and `providers/rows.py`, and #703 changes CI and review scripts. The A009 rule's logic is unchanged.
 
 ### 5. Scope checks
 - `git diff d158d5f6..HEAD --stat -- tests/features/coding_agent/` lists `README.md` and `test_bash_tool_contract.py` only, the two files granted in iteration 1.
@@ -86,8 +94,9 @@ The order the briefing gives cannot work as written. It says to take main's hunk
 - **Test changes proposed:** none.
 
 ## Notes for the next stage
-- **The re-review should look at merges 2 and 3, not only merge 1.**
+- **The re-review should look at merges 2 to 4, not only merge 1.**
   - `6d2191f7` brought #698, whose `vidbyte/agents/__init__.py` and `vidbyte/__init__.py` export blocks auto-merged next to `CodingAgent`.
   - `38dca66d` brought #701, which changes three of the seven wired tools.
-- **Main is moving fast:** three commits landed during this iteration (#700, #698, #701), all after the `d7b25110` the briefing named. `BEHIND` is not `CONFLICTING`, but main's protection has `strict: true` and requires Source 3.11, Source 3.12 and Package on the head SHA. So every new head, including a docs-only one, needs `ci.yml` dispatched again, and every main move needs another merge before the PR can merge. If the PR turns `CONFLICTING` again, the most likely cause is a release bump or another root export landing next to `"CodingAgent"` in the contract. Resolve it the same way: keep main's `source` line and the `"CodingAgent"` line, then run `--check`.
-- **The known flake** `tests/test_codex_tools.py::CodexSdkContractTests::test_cancelled_turn_releases_its_waiting_reader` did not occur in any of the three full runs (2869, 2889 and 2894 passed).
+  - `d104bd78` brought #703 and #705, which touch no feature-adjacent code.
+- **Main is moving fast:** five commits landed during this iteration (#700, #698, #701, #703, #705), all after the `d7b25110` the briefing named. `BEHIND` is not `CONFLICTING`, but main's protection has `strict: true` and requires Source 3.11, Source 3.12 and Package on the head SHA. So every new head, including a docs-only one, needs `ci.yml` dispatched again, and every main move needs another merge before the PR can merge. If the PR turns `CONFLICTING` again, the most likely cause is a release bump or another root export landing next to `"CodingAgent"` in the contract. Resolve it the same way: keep main's `source` line and the `"CodingAgent"` line, then run `--check`.
+- **The known flake** `tests/test_codex_tools.py::CodexSdkContractTests::test_cancelled_turn_releases_its_waiting_reader` did not occur in any of the four full runs (2869, 2889, 2894 and 2865 passed).
