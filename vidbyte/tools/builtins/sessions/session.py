@@ -66,7 +66,7 @@ class SessionTool(_SessionBuiltinTool):
         session = self._require_bound(_TOOL_NAME)
         if session is None:
             return ToolResult.error(_TOOL_NAME, "No active session is bound to this tool.")
-        checkpoint_id = session.checkpoint(label=str(arguments.get("label", "")))
+        checkpoint_id = session.checkpoint(label=self._optional_text(arguments, "label"))
         return ToolResult.success(_TOOL_NAME, checkpoint_id)
 
     def _fork_current(self, arguments: dict[str, Any]) -> ToolResult:
@@ -85,7 +85,7 @@ class SessionTool(_SessionBuiltinTool):
 
     def _read_run(self, arguments: dict[str, Any]) -> ToolResult:
         # Return a session's trace artifact, gated by scope and existence.
-        session_id = str(arguments.get("session_id", "")).strip()
+        session_id = self._optional_text(arguments, "session_id").strip()
         if not session_id:
             return ToolResult.error(_TOOL_NAME, "read_run requires a session_id.")
         resolved_session_id = self._resolve_session_id(session_id)

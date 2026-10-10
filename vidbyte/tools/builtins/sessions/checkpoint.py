@@ -53,8 +53,8 @@ class CheckpointTool(_SessionBuiltinTool):
 
     def _perform(self, arguments: dict[str, Any]) -> ToolResult:
         # Resolve the target session and write a labeled checkpoint on it.
-        label = str(arguments.get("label", ""))
-        session_id = str(arguments.get("session_id", "")).strip()
+        label = self._optional_text(arguments, "label")
+        session_id = self._optional_text(arguments, "session_id").strip()
         if not session_id:
             return self._checkpoint_bound(label)
         resolved_session_id = self._resolve_session_id(session_id)
