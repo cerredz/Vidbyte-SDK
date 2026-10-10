@@ -56,6 +56,11 @@ class FallbackApiKeyInheritanceTests(unittest.TestCase):
         explicit = FallbackModel(provider="anthropic", model="claude-z", api_key="sk-ant")
         self.assertEqual(self.resolve(explicit), (explicit,))
 
+    def test_openrouter_auto_keeps_its_full_id(self) -> None:
+        auto, slug = self.resolve("openrouter/auto", "openrouter/anthropic/claude-sonnet-5")
+        self.assertEqual((auto.provider, auto.model), ("openrouter", "openrouter/auto"))
+        self.assertEqual((slug.provider, slug.model), ("openrouter", "anthropic/claude-sonnet-5"))
+
 def build(**overrides: object) -> AgentSettings:
     # Builds one agent settings object from the minimal valid document plus the overrides under test.
     return AgentSettings.from_mapping({**BASE, **overrides})
