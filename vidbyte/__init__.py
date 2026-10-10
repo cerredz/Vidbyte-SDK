@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -95,6 +95,7 @@ from vidbyte.agents import (
     CodexTurnError,
     CodexTurnSettings,
     CodexUsageResponse,
+    CodingAgent,
     FinalizationContext,
     HandoffAgent,
     JevAgent,
@@ -698,6 +699,7 @@ __all__ = [
     "JudgeDecisionRecord",
     "JudgeReasonCode",
     "JudgeReportPayload",
+    "CodingAgent",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
