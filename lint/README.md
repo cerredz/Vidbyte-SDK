@@ -150,6 +150,7 @@ Nested folders:
 | A006 | directed-dependency-graph | Concrete imports obey cycles and documented layer boundaries |
 | A007 | operational-constants | Runtime policy values have named ownership |
 | A008 | library-stdout-boundary | Importable SDK code does not write unstructured stdout |
+| A009 | readme-size-limit | Folder READMEs stay short enough to read in full, so the @claude notes writer compacts its notes at 40,000 characters |
 
 ### SDK domain-contract rules
 

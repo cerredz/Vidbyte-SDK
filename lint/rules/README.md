@@ -93,6 +93,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `a006_directed_dependency_graph.py` -- concrete import cycles and layer edges.
 - `a007_operational_constants.py` -- named operational policy values.
 - `a008_library_stdout_boundary.py` -- CLI-only builtin stdout calls.
+- `a009_readme_size_limit.py` -- folder README character ceilings.
 
 ## Change Log
 
@@ -105,3 +106,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
   draft after S025-S050 landed on main concurrently; S052/S054 dropped the Ruff codes S045-S050
   already own).
 - 2026-09-25: Added S062 no-implicit-string-concatenation from PR #456 review comment 4108971007.
+- 2026-10-09: Added A009 readme-size-limit for the @claude review workflow's folder README notes.
