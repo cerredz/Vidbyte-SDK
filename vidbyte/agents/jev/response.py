@@ -60,7 +60,7 @@ class JevResponse:
         self.state.preflight_usage = usage
 
     def bulk_work(self, result: JevBulkWorkResult) -> None:
-        # Records the single bulk attempt, including a rejected plan used for serial fallback.
+        # Records the run's one bulk-work launch: every agent's handoff, in the order the main agent wrote the tasks.
         self.state.bulk_work = result
 
     def needs_clarification(self, clarification: JevClarification) -> None:

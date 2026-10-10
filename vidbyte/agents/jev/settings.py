@@ -16,14 +16,9 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
-    JEV_BULK_DEFAULT_MAX_ITEMS,
-    JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS,
-    JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS,
-    JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS,
-    JEV_BULK_MIN_ITEMS,
-    JEV_BULK_MIN_PARALLEL_AGENTS,
-    JEV_BULK_MIN_PLANNER_MAX_ITERATIONS,
-    JEV_BULK_MIN_PLANNER_MAX_TOKENS,
+    JEV_BULK_WORK_AGENTS,
+    JEV_BULK_WORK_MIN_AGENTS,
+    JEV_BULK_WORK_THRESHOLD,
     JEV_COMPUTE_CLONES_DEFAULT,
     JEV_COMPUTE_CLONES_MAX,
     JEV_COMPUTE_SWARM_AGENTS_DEFAULT,
@@ -47,7 +42,7 @@ from vidbyte.lib.constants.jev import (
     JEV_TOOL_SELECTOR_MAX_THRESHOLD,
     JEV_TOOL_SELECTOR_MIN_THRESHOLD,
 )
-from vidbyte.lib.dataclasses.jev import JevSpecialist
+from vidbyte.lib.dataclasses.jev import JevProbability, JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import (
     DecisionModelMode,
@@ -65,28 +60,16 @@ from vidbyte.tools.security import PermissionPolicy
 
 @dataclass(frozen=True, slots=True)
 class JevBulkSettings:
-    """Validated limits for one opt-in Jev bulk-work planning and execution pass."""
+    """The two BULK_WORK settings: how many fresh agents one approved request may split across, and the P(yes) every bulk-work question must reach."""
 
-    max_parallel_agents: int = JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS
-    max_items: int = JEV_BULK_DEFAULT_MAX_ITEMS
-    planner_max_iterations: int = JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS
-    planner_max_tokens: int = JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS
+    agents: int = JEV_BULK_WORK_AGENTS
+    threshold: float = JEV_BULK_WORK_THRESHOLD
 
     def __post_init__(self) -> None:
-        # Rejects invalid resource bounds before JevAgent builds its planner or worker pool.
-        self._validate_limit("max_parallel_agents", JEV_BULK_MIN_PARALLEL_AGENTS)
-        self._validate_limit("max_items", JEV_BULK_MIN_ITEMS)
-        self._validate_limit("planner_max_iterations", JEV_BULK_MIN_PLANNER_MAX_ITERATIONS)
-        self._validate_limit("planner_max_tokens", JEV_BULK_MIN_PLANNER_MAX_TOKENS)
-
-    def _validate_limit(self, field_name: str, minimum: int) -> None:
-        # Requires a whole-number resource limit and excludes bool, which is an int subclass.
-        value = getattr(self, field_name)
-        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-            raise ConfigurationError(
-                f"JevBulkSettings.{field_name} must be an integer of at least {minimum}.",
-                details={"received": repr(value)},
-            )
+        # Rejects a team too small to split work, and a threshold that is not a probability, before JevAgent is built.
+        if isinstance(self.agents, bool) or not isinstance(self.agents, int) or self.agents < JEV_BULK_WORK_MIN_AGENTS:
+            raise ConfigurationError(f"JevBulkSettings.agents must be an integer of at least {JEV_BULK_WORK_MIN_AGENTS}.", details={"received": repr(self.agents)})
+        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name="JevBulkSettings.threshold"))
 
 
 @dataclass(frozen=True, slots=True)

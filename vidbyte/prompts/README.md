@@ -65,7 +65,7 @@ prompt text.
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
-| Jev Bulk Work | `jev_bulk_work` | system_prompt, worker_system_prompt, synthesis_prompt | [jev_bulk_work/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work) |
+| Jev Bulk Work | `jev_bulk_work` | tool_description, tasks_description, task_prompt, worker_system_prompt, synthesis_prompt, rejected_prompt, closed_prompt | [jev_bulk_work/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work) |
 | Jev Clone | `jev_clone` | clone_prompt, results_prompt | [jev_clone/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clone) |
 | Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
 | Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
@@ -245,11 +245,13 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 
 #### Jev Bulk Work — `jev_bulk_work`
 
-The tool-free planner prompt turns an approved repeated independent operation
-into a complete structured list, preserving every requested target. The worker
-prompt scopes each isolated agent to one assigned item, and the synthesis prompt
-tells the main agent to preserve worker failures in its final response. Unsafe
-or invalid fan-out returns to the ordinary serial loop.
+Instructions for JevAgent's BULK_WORK preset. `tool_description` and
+`tasks_description` tell the main agent when to use the `run_bulk_work` tool and
+how to write one self-contained task per agent. `task_prompt` and
+`worker_system_prompt` scope each fresh agent to its one task, and
+`synthesis_prompt` returns every agent's handoff to the main agent with how to
+check them and finish. `rejected_prompt` and `closed_prompt` answer invalid tasks
+and a second call.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work>
 

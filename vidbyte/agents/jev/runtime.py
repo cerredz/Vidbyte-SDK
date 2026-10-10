@@ -1,6 +1,6 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
-PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state with supplied prior user turns, applies the tool selector, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
+PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state with supplied prior user turns, applies the tool selector, offers the run_bulk_work tool when the gate approved bulk work, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally. It wraps the whole run in JevUsageAccount.scope(), so every generative and decision call from this agent and every agent it spawns lands in this agent's one usage ledger, checks that ledger at each phase boundary, and fails the run closed when any usage cannot be recorded or priced.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
@@ -11,11 +11,10 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from vidbyte.agents.jev.bulk_work import JevBulkWork
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
@@ -27,7 +26,6 @@ from vidbyte.agents.jev.usage import JevUsageAccount
 from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.context import BaseAgentContext
-from vidbyte.lib.dataclasses.jev import JevBulkWorkResult
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums.jev import JevPreflightPreset
@@ -35,6 +33,7 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.managed import JevManagedRun
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.tools._internal import with_internal_agent_tools
+from vidbyte.tools.base import BaseTool
 
 
 class JevRuntime(AgentRuntime):
@@ -49,26 +48,20 @@ class JevRuntime(AgentRuntime):
         continuation: JevContinuation | None = None,
         compute: JevComputeController | None = None,
         response: JevResponse | None = None,
-        bulk_work: JevBulkWork | None = None,
+        bulk_work: Callable[[str, tuple[object, ...]], BaseTool] | None = None,
         **kwargs: Any,
     ) -> None:
-        # Retains the validated runtime settings, the gate, the done checks, the continuation, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
+        # Retains the validated runtime settings, the gate, the done checks, the continuation, the response writer, and the bulk-work tool constructor JevAgent built, and delegates the loop to AgentRuntime.
         # @intent jev-runtime-needs-jev-agent
         # AgentRuntimeType.JEV is selectable by string, so a generic BaseAgent can reach this class
         # without them; refusing here names JevAgent instead of failing later on a None field.
-        if (
-            not isinstance(runtime_settings, JevRuntimeSettings)
-            or not isinstance(preflight, JevPreflightGate)
-            or not isinstance(response, JevResponse)
-            or not isinstance(bulk_work, JevBulkWork)
-        ):
+        if not isinstance(runtime_settings, JevRuntimeSettings) or not isinstance(preflight, JevPreflightGate) or not isinstance(response, JevResponse):
             raise ConfigurationError(
                 "The 'jev' runtime is only available through JevAgent; construct JevAgent(JevAgentSettings(...)) instead of BaseAgent(runtime='jev').",
                 details={
                     "received_runtime_settings": type(runtime_settings).__name__,
                     "received_preflight": type(preflight).__name__,
                     "received_response": type(response).__name__,
-                    "received_bulk_work": type(bulk_work).__name__,
                 },
             )
         self.runtime_settings = runtime_settings
@@ -129,8 +122,7 @@ class JevRuntime(AgentRuntime):
             if sequence_instructions:
                 context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
         context, options, selector_metadata = await self._select_tools(message, context, options)
-        context, bulk_outcome = await self._run_bulk_work(message, context)
-        context, options = self._prepare_bulk_synthesis(context, options, bulk_outcome)
+        context, options = self._offer_bulk_work(message, context, options)
         result = await super().arun(
             message,
             handle=handle,
@@ -165,29 +157,16 @@ class JevRuntime(AgentRuntime):
             metadata["usage"] = {"model": selector.model, "input_tokens": selector.usage.input_tokens, "output_tokens": selector.usage.output_tokens}
         return context, run_options, metadata
 
-    async def _run_bulk_work(self, message: str, context: BaseAgentContext) -> tuple[BaseAgentContext, JevBulkWorkResult | None]:
-        # Runs bounded work only after selection and adds ordered results as immutable context data.
-        if not self.preflight.bulk_work_requested:
-            return context, None
-        outcome = await self.bulk_work.plan_and_run(message, context, self.user_tools.all())
-        self.response.bulk_work(outcome)
-        self.usage.require_accounted()
-        if outcome.plan_valid:
-            artifact = self.bulk_work.result_artifact(outcome)
-            context = replace(context, tools=self.tools.specs(), artifacts=(*context.artifacts, artifact))
-        return context, outcome
-
-    def _prepare_bulk_synthesis(self, context: BaseAgentContext, options: Mapping[str, Any] | None, outcome: JevBulkWorkResult | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
-        # Appends trusted synthesis instructions only for a valid plan, preserving a caller's explicit system override.
-        if outcome is None or not outcome.plan_valid:
+    def _offer_bulk_work(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
+        # @intent the-main-agent-plans-bulk-work
+        # Jev only recognizes that the request splits; the main agent holds the request and the selected tools, so it
+        # writes the tasks itself through a run-local tool whose workers hand their results back as the tool result.
+        if self.bulk_work is None or not self.preflight.bulk_work_requested:
             return context, options
+        self.tools = self.tools.add(self.bulk_work(message, self.user_tools.all()))
         run_options = dict(options or {})
-        explicit_system = run_options.get("system")
-        if isinstance(explicit_system, str):
-            run_options["system"] = f"{explicit_system}\n\n{self.bulk_work.synthesis_prompt}"
-            return context, run_options
-        effective_system = context.system_prompt or self.system_prompt
-        return replace(context, system_prompt=f"{effective_system}\n\n{self.bulk_work.synthesis_prompt}"), options
+        run_options.pop("tools", None)
+        return replace(context, tools=self.tools.specs()), run_options
 
     async def _delegate(self, message: str, context: BaseAgentContext) -> AgentResult:
         # Applies the run-state relation policy before handing the request to the specialist the gate chose.

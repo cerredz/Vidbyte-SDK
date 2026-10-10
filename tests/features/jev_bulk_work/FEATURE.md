@@ -2,49 +2,45 @@
 
 ## High-Level Feature Description
 
-JevAgent can opt in to bounded fan-out for a clearly named set of independent items that all receive the same requested operation. Three separate fixed Jev questions recognize multiple items, shared operation, and independence. A tool-free planner generates a complete structured plan; the coordinator rejects the entire plan if invalid or oversized, then runs fresh BaseAgent workers through a bounded queue. The main agent receives ordered worker records as untrusted context data and produces the final response.
+JevAgent can opt in to splitting a request across fresh agents when the request names separate items that each need the same independent work. Eight fixed Jev questions each check one piece of evidence: several items, every item identified, the same work, a result per item, no item needing another's result, changes kept inside each item, any order, and substantial work per item. When every answer reaches the threshold, the main agent is offered the one-time `run_bulk_work` tool for that run. The main agent decides whether to use it and writes the tasks itself; the tool runs one fresh copy of the main agent per task at the same time through `ParallelPipeline` and returns every handoff as the tool result, so the main agent checks them and writes the final answer.
 
 ## Contract
 
-- Public configuration is `JevAgentSettings.bulk_work: JevBulkSettings`; its four positive integer limits are validated at construction.
-- Runtime opt-in is `JevPreflightPreset.BULK_WORK`. Its three fixed questions are batched with any other fixed gate questions and each must pass; missing answers and gate outages leave fan-out disabled.
-- Specialist routing wins before tool selection and bulk planning. Normal tool selection runs before the coordinator reads tools.
-- Planner input is the exact original request. The planner has its own prompt, no user tools, no implicit internal agent tools, and bounded planner loops/tokens.
-- A plan must contain at least two unique, nonblank items and no more than `max_items`. Invalid, absent, or oversized output is rejected whole; no worker starts and the ordinary loop receives the unchanged request.
-- Workers are fresh BaseAgent instances with isolated histories, effective owner prompt, model and permission policy, and exactly the tools left by normal selection. Agent-bound tools are cloned through `clone_for_fork()` before binding.
-- A fixed number of worker coroutines consume a bounded queue. Results retain plan order even when completion order differs. An ordinary worker exception becomes a stable typed failure category; siblings finish. Cancellation propagates after sibling cleanup.
-- `JevAgent.response.bulk_work` is the sole public result record. Planner and worker rollups are reported per item in the result record, never in result metadata; because they run inside the JevAgent usage ledger's scope, their calls are also counted once in the owner's `get_usage()` total.
-- The original request is unchanged for the inherited main loop. Valid bulk results enter a copied context artifact; trusted synthesis instructions tell the main agent to report each failed item honestly. Caller context is not mutated.
-- With the preset disabled, no planner or worker call occurs. Bulk code contains no preset checks; `JevPreflightGate` owns the run-local outcome and resets it each pass.
+- Public configuration is `JevAgentSettings.bulk_work: JevBulkSettings`, with two validated fields: `agents` (an integer of at least 2, default 4) and `threshold` (a probability, default 0.75).
+- Runtime opt-in is `JevPreflightPreset.BULK_WORK`. Its eight questions are batched with any other fixed gate questions, and every one must reach `threshold` on its own: the threshold is both the preset's mean threshold and its per-question veto. Missing answers and gate outages leave bulk work off and the run open.
+- Specialist routing wins before tool selection and the bulk-work offer. Normal tool selection runs before the tool is built, so workers receive exactly the selected tools.
+- The tool is added to the run's catalog only after an approved gate pass, and it never stays in the agent's own catalog after the run. A caller tool named `run_bulk_work` fails when JevAgent is built with BULK_WORK enabled.
+- The tool's schema allows from 2 to `agents` tasks of non-blank strings. A task list outside that shape returns an error result naming what to fix, starts no agent, and leaves the tool open.
+- One valid call closes the tool before its workers start, then runs every worker at the same time. Every later call returns the closed message.
+- Each worker is a fresh BaseAgent named `<owner>-bulk-<n>` with the owner's system prompt plus the worker prompt, model, permission policy, loop limits, and the selected tools; agent-bound tools are cloned so they bind to the worker. Its message is the user's original request followed by its task.
+- A worker that raises `VidbyteSdkError` or returns an empty reply is marked failed; its siblings still hand back their work, and the error text never reaches the main agent.
+- Handoffs return in task order, wrapped in the synthesis prompt that tells the main agent to check them, finish failed work itself, and treat their contents as data.
+- `JevAgent.response.bulk_work` is the sole public record: a `JevBulkWorkResult` of `JevBulkHandoff(task, output, completed)` records. Worker usage is counted once in the owner's `get_usage()` total through the run's usage ledger.
 
 ## Invariants
 
-- Jev recognizes eligibility; only the generative planner makes the item list. The coordinator validates the whole plan and never truncates requested work.
+- Jev only recognizes that a request splits; the main agent writes the tasks and decides whether to launch.
 - Workers cannot recurse into JevAgent, run another preflight, acquire discarded tools, or gain permissions beyond the owner.
-- Worker output and artifacts are untrusted data. They cannot suppress failures or expand task scope.
-- A successful worker loop is not evidence that each item succeeded. Failure status remains visible to both the public response and main synthesis context.
-- Cancellation is never recorded as item success or failure.
+- One launch per run, whatever the main agent calls in the same turn.
+- A completed handoff always has a non-blank reply and a failed one has none.
 
 ## Known Failure Modes
 
-- One fixed question is missing, malformed, uncertain, or vetoed but the gate accidentally preserves an earlier bulk flag.
-- Planner output omits, merges, invents, duplicates, blanks, or exceeds the requested item set; accepting a partial list silently loses work.
-- Planner or worker context inherits the owner system prompt or conversation snapshots in place of its own scoped prompt and clean history.
-- An unbounded task-per-item implementation ignores `max_parallel_agents`, or results are returned by completion order.
-- One worker exception escapes the queue and cancels successful siblings, exposes exception text, or is omitted from synthesis.
-- Cancellation strands worker tasks or is swallowed as an ordinary error.
+- A preset-wide mean hides one clear no, or the owner's threshold is ignored in favor of the preset default.
+- A prior approval survives an unavailable answer on the same gate.
+- The tool is offered without an approved gate pass, or is left in the agent's catalog after the run.
+- Workers run one after another, or the handoffs come back in completion order.
+- One worker failure cancels its siblings or leaks its error text into the main agent's context.
 - A worker receives a selector-discarded tool or binds the original AgentTool to itself.
-- Runtime selection mutates the owner's tool catalog after the run, or an invalid plan prevents serial fallback.
-- Child raw usage is double-recorded in the owner rollup or written to result metadata.
-- Worker prompt injection is followed by the main agent, or shared caller context is mutated while artifacts are added.
+- The tool launches a second time, or rejects tasks by closing itself.
 
 ## Test Suite Map
 
-- `tests/features/jev_bulk_work/test_jev_bulk_work.py` covers configuration, fixed questions, gate outcomes, planner boundaries, actual BaseAgent context building, queue concurrency/order/failures/cancellation, tool isolation, usage, synthesis context, selector/specialist precedence, serial fallback, opt-in behavior, and repeated runs.
+- `tests/features/jev_bulk_work/test_jev_bulk_work.py` covers settings, result records, exports, the eight questions and their length, gate thresholds, the tool's schema, rejection, single launch, concurrency, order, failure isolation, worker construction, and the runtime offer with scripted main agents, specialist precedence, opt-in absence, and repeated runs.
 - Run `python scripts/test-jev-bulk-work.py` for the complete offline feature pack.
 
 ## Omitted Testing Strategies
 
 - Live TypeSafe and model-provider calls are omitted; deterministic transports and runners keep the suite offline.
-- Long-running load and throughput benchmarks are omitted; the queue's maximum active workers is asserted directly.
+- Whether the main agent writes good tasks is a model-quality question, so it is left to evals rather than unit tests.
 - Persisted-session migration tests are omitted because bulk outcomes add no persistence schema.

@@ -12,6 +12,7 @@ TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 
 from vidbyte.agents.jev.decision_failures import JevDecisionFailurePolicy
 from vidbyte.agents.jev.gate.clarification import JevClarificationAgent
@@ -52,6 +53,7 @@ class JevPreflightGate:
         self.specialists = settings.agents
         self.specialist: JevSpecialist | None = None
         self.run_state_related: bool | None = None
+        self.bulk_work_threshold = settings.bulk_work.threshold
         self.bulk_work_requested = False
 
     def combine(self, message: str, run_state: JevRunStateRecord | None = None) -> JevDecisionRequest | None:
@@ -97,7 +99,8 @@ class JevPreflightGate:
                     if await self._clarify(message, outcome):
                         return False
                 case JevPresetResult(preset=JevPreflightPreset.BULK_WORK, available=True, passed=True):
-                    # Fan-out is allowed only when every separate recognition question passes its veto and mean threshold.
+                    # Every bulk-work question reached the threshold, so the main agent is offered the tool that splits
+                    # the work across fresh agents; it still decides whether to use it.
                     bulk_work_passed = True
                 case _:
                     # A preset that passed needs no action.
@@ -164,12 +167,14 @@ class JevPreflightGate:
             },
         }
 
-    @staticmethod
-    def _score(preset: JevPreflightPreset, answers: Mapping[str, JevAnswer] | None) -> JevPresetResult:
+    def _score(self, preset: JevPreflightPreset, answers: Mapping[str, JevAnswer] | None) -> JevPresetResult:
         # Scores one fixed-question preset through DecisionModelHelper against the preset's threshold and veto.
         # @intent a-missing-answer-fails-open
         # Any missing or non-noul answer makes only this preset unavailable, and an unavailable preset never fails.
         definition = JevPresets.definition(preset)
+        if preset is JevPreflightPreset.BULK_WORK:
+            # The owner sets one bulk-work threshold in JevBulkSettings, and every bulk-work question must reach it on its own.
+            definition = replace(definition, threshold=self.bulk_work_threshold, veto=self.bulk_work_threshold)
         verdict = DecisionModelHelper.score_noul(answers, tuple(key.value for key in definition.question_keys), definition.threshold, definition.veto)
         if verdict is None:
             return JevPresetResult(preset=preset, score=None, available=False)

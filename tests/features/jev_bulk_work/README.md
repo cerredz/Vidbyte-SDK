@@ -5,7 +5,7 @@ This folder records the Jev bulk-work contract and its executable checks.
 ## Files
 
 - `FEATURE.md` describes API behavior, invariants, known regressions, and omitted test strategies.
-- `test_jev_bulk_work.py` runs deterministic unit and integration tests through production settings, registry, coordinator, and BaseAgent context construction.
+- `test_jev_bulk_work.py` runs deterministic unit and integration tests through production settings, registry, gate, the run_bulk_work tool, and JevRuntime.
 
 ## Run
 

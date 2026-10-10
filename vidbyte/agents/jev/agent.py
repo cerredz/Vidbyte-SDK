@@ -16,7 +16,7 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.fork import AgentForker
-from vidbyte.agents.jev.bulk_work import JevBulkWork
+from vidbyte.agents.jev.bulk_work import JevBulkWorkTool
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevDoneContinuation, JevFreshContinuation
 from vidbyte.agents.jev.done import JevRunState, JevRunStateRelation
@@ -45,7 +45,8 @@ class JevAgent(BaseAgent):
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
-        self.bulk_work = JevBulkWork(settings)
+        # With BULK_WORK on, each run whose gate approves bulk work gets a fresh run_bulk_work tool from this constructor.
+        self.bulk_work = JevBulkWorkTool.for_agent(settings, self._response) if JevPreflightPreset.BULK_WORK in self.preflight.presets else None
         self.compute = None if runtime_settings.compute is None else JevComputeController(settings, runtime_settings.compute, runtime_settings.decision, self._response)
         relation_enabled = JevPreflightPreset.RUN_STATE_RELATION in self.preflight.presets
         if relation_enabled:
@@ -109,7 +110,7 @@ class JevAgent(BaseAgent):
                 )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
-        # Passes the runtime settings, the gate, the done checks, the continuation, the compute controller, and the response writer built at construction to each run-local JevRuntime.
+        # Passes the runtime settings, the gate, the done checks, the continuation, the compute controller, the response writer, and the bulk-work tool constructor built at construction to each run-local JevRuntime.
         return {"runtime_settings": self.runtime_settings, "preflight": self.preflight, "run_state": self.run_state, "continuation": self.continuation, "compute": self.compute, "response": self._response, "bulk_work": self.bulk_work}
 
 
