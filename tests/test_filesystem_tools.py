@@ -431,6 +431,51 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             self.assertEqual(result.status, ToolStatus.ERROR)
 
 
+class FileSystemToolNullOptionalArgumentTests(unittest.TestCase):
+    """An explicit JSON null for an optional argument behaves exactly like leaving it out."""
+
+    def _assert_null_matches_omitted(self, tool, name: str, base: dict, nulls: dict) -> None:
+        omitted = run(tool.execute(ToolCall(name, dict(base))))
+        nulled = run(tool.execute(ToolCall(name, {**base, **nulls})))
+        self.assertEqual(omitted.status, ToolStatus.SUCCESS, omitted.output)
+        self.assertEqual(nulled.status, ToolStatus.SUCCESS, nulled.output)
+        self.assertEqual(nulled.output, omitted.output)
+        self.assertEqual(nulled.metadata, omitted.metadata)
+
+    def test_null_optional_arguments_use_documented_defaults(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp)
+            Path(tmp, "app.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+            Path(tmp, "sub").mkdir()
+            Path(tmp, "sub", "util.py").write_text("x", encoding="utf-8")
+            cases = (
+                (ReadLinesTool(config), "read_lines", {"path": "app.py"}, {"start": None}),
+                (ReadLinesTool(config), "read_lines", {"path": "app.py"}, {"start": None, "end": None}),
+                (FindTool(config), "find", {"pattern": "*.py"}, {"root": None}),
+                (ListDirTool(config), "list_dir", {}, {"path": None}),
+                (TreeTool(config), "tree", {}, {"path": None, "max_depth": None, "max_entries": None}),
+            )
+            for tool, name, base, nulls in cases:
+                with self.subTest(tool=name, nulls=sorted(nulls)):
+                    self._assert_null_matches_omitted(tool, name, base, nulls)
+
+    def test_read_lines_null_start_reads_from_first_line(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp)
+            Path(tmp, "app.py").write_text("one\ntwo\n", encoding="utf-8")
+            result = run(ReadLinesTool(config).execute(ToolCall("read_lines", {"path": "app.py", "start": None, "end": 1})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output, "one")
+
+    def test_tree_non_integer_max_depth_returns_error_result(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp)
+            for arguments in ({"max_depth": "abc"}, {"max_entries": "abc"}):
+                with self.subTest(arguments=arguments):
+                    result = run(TreeTool(config).execute(ToolCall("tree", arguments)))
+                    self.assertEqual(result.status, ToolStatus.ERROR)
+
+
 class FileSystemToolImportTests(unittest.TestCase):
     def test_filestat_importable_from_lib_dataclasses(self) -> None:
         from vidbyte.lib.dataclasses import FileStat

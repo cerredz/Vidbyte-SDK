@@ -23,7 +23,7 @@ class FindTool(FileSystemTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         # Validate the root directory exists, run the glob search, and return newline-joined matches.
         pattern = call.arguments.get("pattern", "")
-        root = call.arguments.get("root", ".")
+        root = self._optional_argument(call, "root", default=".")
         try:
             target_root = self._path(root)
             FileSystemPermissions.require_existing_directory(target_root)
