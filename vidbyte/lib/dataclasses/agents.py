@@ -111,6 +111,7 @@ class AgentRuntimeConfig:
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
     tool_settings: "ToolSettings | None" = None
+    allowed_tools: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         """Validate optional budget values."""

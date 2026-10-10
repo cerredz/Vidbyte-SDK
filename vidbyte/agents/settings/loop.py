@@ -202,6 +202,7 @@ class AgentLoopSettings:
             compaction_trigger_tokens=self.compaction_trigger_tokens,
             compaction_target_tokens=self.compaction_target_tokens,
             tool_settings=self.tool_settings,
+            allowed_tools=frozenset(self.allowed_tools) if self.allowed_tools is not None else None,
         )
 
     def __repr__(self) -> str:
