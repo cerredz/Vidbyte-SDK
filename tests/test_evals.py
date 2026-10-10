@@ -327,6 +327,26 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await length.agrade(EvalCase(prompt="t"), "abcd")).passed)
         self.assertFalse((await length.agrade(EvalCase(prompt="t"), "abcde")).passed)
 
+    async def test_bare_string_terms_are_one_term(self) -> None:
+        # @intent bare-string-term-is-one-term
+        # [Silent Failure] tuple("30 days") split the term into characters, so a wrong answer passed.
+        case = EvalCase(prompt="t")
+        wrong = "Refunds are accepted within 14 days; call 555-0300 for help."
+        missing = await ContainsAllGrader("30 days").agrade(case, wrong)
+        self.assertFalse(missing.passed)
+        self.assertIn("['30 days']", missing.reason)
+        self.assertTrue((await ContainsAllGrader("30 days").agrade(case, "Refunds within 30 days.")).passed)
+
+        clean = await ForbiddenContentGrader("password").agrade(case, "Reset it from the account page.")
+        self.assertTrue(clean.passed, clean.reason)
+        self.assertFalse((await ForbiddenContentGrader("password").agrade(case, "Your password is hunter2.")).passed)
+
+        template = T.concise_grounded_answer(required_terms="30 days", forbidden_terms="password")
+        self.assertFalse((await template.build_grader().agrade(case, wrong)).passed)
+        self.assertTrue((await template.build_grader().agrade(case, "Refunds within 30 days.")).passed)
+        support = T.safe_customer_support(forbidden_terms="password")
+        self.assertTrue((await support.build_grader().agrade(EvalCase(prompt="t", expected="30 days"), "Refunds within 30 days.")).passed)
+
     async def test_choice_numeric_and_json_match_graders(self) -> None:
         # Tests choice extraction, numeric tolerance, and JSON exact/subset matching.
         choice = ChoiceMatchGrader(["A", "B", "C"])
