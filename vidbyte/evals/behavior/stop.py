@@ -26,6 +26,11 @@ if TYPE_CHECKING:
 class StopBehavior:
     """Predicates over run-level stop conditions for a completed agent run."""
 
+    # @intent isdone-is-a-normal-stop
+    # The agentic-loop prompt tells the model to finish by calling isDone, so an is_done stop is
+    # a normal completion just like a plain-text final_response; both evals must agree on that.
+    NORMAL_STOP_REASONS = frozenset({AgentStopReason.FINAL_RESPONSE.value, AgentStopReason.IS_DONE.value})
+
     def __init__(self, behavior: Behavior) -> None:
         # Stores a reference to the parent Behavior facade for lazy probe access.
         self._behavior = behavior
@@ -44,8 +49,8 @@ class StopBehavior:
         return self._probe.stop_reason == reason
 
     def stopped_normally(self) -> bool:
-        # Returns True if the agent stopped with final_response (normal completion).
-        return self._probe.stop_reason == AgentStopReason.FINAL_RESPONSE.value
+        # Returns True if the agent stopped with final_response or is_done (normal completion).
+        return self._probe.stop_reason in self.NORMAL_STOP_REASONS
 
     def did_not_hit_max_iterations(self) -> bool:
         # Returns True if the agent did not stop due to reaching max_iterations.
