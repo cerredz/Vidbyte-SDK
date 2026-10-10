@@ -48,8 +48,9 @@ class EvalRunner:
         # Asynchronously executes the full suite against the target and returns a compiled EvalSuiteResult.
         cases = suite.cases
         if tags:
-            target_tags = set(tags)
-            cases = tuple(c for c in cases if any(t in target_tags for t in c.tags))
+            # @intent bare-string-tag-is-one-tag
+            # Select the slice through EvalSuite.filter so tags="billing" means one tag, not its letters.
+            cases = suite.filter(tags).cases
 
         semaphore = asyncio.Semaphore(self.concurrency)
         tasks = [self._run_single_case(case, semaphore, case_index=index, suite_name=suite.name) for index, case in enumerate(cases)]
