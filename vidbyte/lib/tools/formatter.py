@@ -537,12 +537,16 @@ class ToolsFormatter:
         )
 
     @staticmethod
+    def input_schema(spec: ToolSpec) -> dict[str, Any]:
+        """Return a tool's provider-neutral JSON Schema, without any activity annotation."""
+        if isinstance(spec.input_schema, Mapping):
+            return dict(spec.input_schema)
+        return ToolsFormatter._parameters_schema(spec.parameters)
+
+    @staticmethod
     def _schema_for_spec(spec: ToolSpec) -> dict[str, Any]:
         """Return the best available JSON Schema for a tool spec, including any activity annotation."""
-        if isinstance(spec.input_schema, Mapping):
-            schema = dict(spec.input_schema)
-        else:
-            schema = ToolsFormatter._parameters_schema(spec.parameters)
+        schema = ToolsFormatter.input_schema(spec)
         if spec.activity is None:
             return schema
         return ToolsFormatter._schema_with_activity(schema, spec.activity, spec.name)
