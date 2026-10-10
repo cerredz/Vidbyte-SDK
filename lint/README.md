@@ -151,6 +151,7 @@ Nested folders:
 | A006 | directed-dependency-graph | Concrete imports obey cycles and documented layer boundaries |
 | A007 | operational-constants | Runtime policy values have named ownership |
 | A008 | library-stdout-boundary | Importable SDK code does not write unstructured stdout |
+| A009 | readme-size-limit | Folder READMEs stay short enough to read in full, so the @claude notes writer compacts its notes at 40,000 characters |
 
 ### SDK domain-contract rules
 
@@ -161,6 +162,9 @@ Nested folders:
 | C003 | no-dynamic-import-from-data | Runtime data cannot choose imported modules |
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
+| C006 | finite-numeric-guards | Numeric range checks reject bool, NaN, and infinities first |
+| C007 | strict-bool-switches | Configuration bool switches are real bools, never truthiness |
+| C008 | shared-validator-owner | Primitive validators live in one shared module |
 | C009 | default-model-priced | Every token-priced provider default resolves to a pricebook rate |
 | C010 | pricebook-vintage-bump | Changed rates move their pricebook vintage and refresh the lock |
 | C011 | agent-owned-usage-and-sync-twins | Model usage reaches the agent's tracker; entry classes pair run() with arun() |

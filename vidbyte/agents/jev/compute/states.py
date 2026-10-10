@@ -37,9 +37,9 @@ class JevComputeStates:
         # @intent every-option-reads-the-same-bounded-evidence
         # The verified brief and exact fact fields stay intact, while request and recent event text have explicit size bounds.
         event_lines = tuple(line for line in events.lines if not line.partition(" ")[2].startswith("USER: "))
-        recent = "\n".join(cls._clip(line, _RECENT_EVENT_MAX_CHARS) for line in event_lines[-_RECENT_EVENT_COUNT:])
+        recent = "\n".join(cls.clip(line, _RECENT_EVENT_MAX_CHARS) for line in event_lines[-_RECENT_EVENT_COUNT:])
         return {
-            "request": cls._clip(request, JEV_RUN_BRIEF_REQUEST_MAX_CHARS),
+            "request": cls.clip(request, JEV_RUN_BRIEF_REQUEST_MAX_CHARS),
             "brief": brief.render(),
             "facts": {
                 "iteration": facts.iteration,
@@ -51,7 +51,7 @@ class JevComputeStates:
         }
 
     @staticmethod
-    def _clip(text: str, limit: int) -> str:
+    def clip(text: str, limit: int) -> str:
         """Keep a bounded head and tail and show how many characters were omitted."""
         if len(text) <= limit:
             return text
