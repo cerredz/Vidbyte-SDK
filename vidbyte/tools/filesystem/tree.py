@@ -4,6 +4,10 @@ from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
+# Documented defaults used when the model omits a bound or sends null for it.
+_DEFAULT_MAX_DEPTH = 3
+_DEFAULT_MAX_ENTRIES = 200
+
 
 class TreeTool(FileSystemTool):
     """Return a bounded recursive directory tree for a scoped path, newline-joined."""
@@ -23,10 +27,11 @@ class TreeTool(FileSystemTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Traverse the directory tree up to max_depth/max_entries and return entries newline-joined.
-        path = call.arguments.get("path", ".")
-        max_depth = int(call.arguments.get("max_depth", 3))
-        max_entries = int(call.arguments.get("max_entries", 200))
         try:
+            # Read the optional arguments inside the error handling so a bad value becomes an error result.
+            path = self._optional_argument(call, "path", default=".")
+            max_depth = int(self._optional_argument(call, "max_depth", default=_DEFAULT_MAX_DEPTH))
+            max_entries = int(self._optional_argument(call, "max_entries", default=_DEFAULT_MAX_ENTRIES))
             target = self._path(path)
             FileSystemPermissions.require_existing_directory(target)
             root = self._config.resolved_root()

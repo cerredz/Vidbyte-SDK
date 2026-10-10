@@ -1,7 +1,7 @@
 """FILE: tests/test_mongodb_tools.py
 
 PURPOSE: Tests the MongoDB provider operation tools against a recording fake store.
-ROLE IN CODEBASE: Regression coverage proving declared boolean arguments are read strictly, so a stringly "false" is refused before the store is called.
+ROLE IN CODEBASE: Regression coverage proving declared boolean arguments are read strictly, so a stringly "false" is refused before the store is called, and that a null find limit means the default.
 ARCHITECTURE NOTE: RecordingStore is a fake store that records every provider call; MongoBooleanArgumentTests drives the tools through execute().
 COMMON MODIFICATION PATTERNS: Add a fake store method when a new MongoDB tool gains a boolean argument, then assert the store sees no call on refusal.
 KNOWN EDGE CASES: A JSON null means the documented default; only a real bool is passed through; any other value is a tool error.
@@ -17,6 +17,7 @@ from typing import Any
 from vidbyte.tools.builtins.providers.mongodb import (
     MongoCreateIndexTool,
     MongoDeleteDocumentsTool,
+    MongoFindDocumentsTool,
     MongoUpdateDocumentsTool,
 )
 from vidbyte.tools.types import ToolCall, ToolStatus
@@ -39,6 +40,10 @@ class RecordingStore:
     def create_index(self, collection: str, keys: list[tuple[str, int]], *, unique: bool) -> str:
         self.calls.append(("create_index", {"collection": collection, "keys": keys, "unique": unique}))
         return "idx"
+
+    def find_documents(self, collection: str, query: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
+        self.calls.append(("find_documents", {"collection": collection, "query": query, "limit": limit}))
+        return []
 
 
 class MongoBooleanArgumentTests(unittest.IsolatedAsyncioTestCase):
@@ -75,6 +80,18 @@ class MongoBooleanArgumentTests(unittest.IsolatedAsyncioTestCase):
         await delete.execute(ToolCall("mongodb_delete_documents", {"collection": "users", "query": {}, "many": False}))
         await delete.execute(ToolCall("mongodb_delete_documents", {"collection": "users", "query": {}, "many": None}))
         self.assertEqual([call[1]["many"] for call in store.calls], [False, True])
+
+
+class MongoNullLimitTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies find_documents treats a null limit like an omitted one."""
+
+    async def test_find_documents_null_limit_uses_documented_default(self) -> None:
+        store = RecordingStore()
+        result = await MongoFindDocumentsTool(store).execute(
+            ToolCall("mongodb_find_documents", {"collection": "users", "query": None, "limit": None})
+        )
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(store.calls, [("find_documents", {"collection": "users", "query": {}, "limit": 50})])
 
 
 if __name__ == "__main__":

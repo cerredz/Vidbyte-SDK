@@ -42,7 +42,10 @@ class EvalSuite:
         name = str(data.get("name", "Loaded JSON Suite"))
         cases_list = []
         for c in data.get("cases", []):
-            case_tags = tuple(c.get("tags", []))
+            # @intent tag-string-is-tag-text
+            # tuple("billing") would split the tag into characters; a string is read like a CSV tags cell.
+            raw_tags = c.get("tags", [])
+            case_tags = cls._split_tag_text(raw_tags) if isinstance(raw_tags, str) else tuple(raw_tags)
             templates = cls._load_templates(c)
             cases_list.append(
                 EvalCase(
@@ -65,7 +68,7 @@ class EvalSuite:
                 prompt = row.get(prompt_col, "")
                 expected = row.get(expected_col)
                 tags_str = row.get("tags", "")
-                case_tags = tuple(t.strip() for t in tags_str.split(",") if t.strip()) if tags_str else ()
+                case_tags = cls._split_tag_text(tags_str) if tags_str else ()
                 cases_list.append(
                     EvalCase(
                         prompt=prompt,
@@ -78,9 +81,16 @@ class EvalSuite:
 
     def filter(self, tags: Sequence[str]) -> EvalSuite:
         # Filters and returns a new EvalSuite containing only cases matching any of the specified tags.
-        target_tags = set(tags)
+        # @intent bare-string-tag-is-one-tag
+        # set("billing") would match single letters and select nothing; a bare string is one tag.
+        target_tags = {tags} if isinstance(tags, str) else set(tags)
         filtered_cases = [c for c in self.cases if any(t in target_tags for t in c.tags)]
         return EvalSuite(name=f"{self.name}_filtered", cases=filtered_cases)
+
+    @staticmethod
+    def _split_tag_text(text: str) -> tuple[str, ...]:
+        # Reads comma-separated tag text such as "billing, refunds" into stripped, non-empty tags.
+        return tuple(t.strip() for t in text.split(",") if t.strip())
 
     @classmethod
     def _load_templates(cls, case_data: Mapping[str, Any]) -> tuple[Any, ...]:

@@ -107,6 +107,14 @@ class BaseTool(ABC):
             raise ToolExecutionError(f"'{name}' must be a boolean (true/false).", details={"parameter": name})
         return value
 
+    @staticmethod
+    def _optional_argument(call: ToolCall, name: str, *, default: Any) -> Any:
+        # @intent null-optional-arg-means-default
+        # Models often send JSON null for an optional argument they mean to leave out; treat it exactly
+        # like an omitted key so the documented default applies instead of crashing on None.
+        value = call.arguments.get(name)
+        return default if value is None else value
+
 
 class _ToolWrapper(BaseTool, ABC):
     """Private base contract for SDK wrappers that preserve one underlying tool."""

@@ -32,6 +32,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunBriefUpdate,
     JevRunFacts,
     JevRunStateRecord,
+    JevSkillsOutcome,
     JevSpecialist,
     JevSwarmResult,
     JevUsageReport,
@@ -91,6 +92,12 @@ class JevResponse:
         """Record the cumulative extra loop budget JevAgent granted to failed faithful-scope continuations."""
         for name, amount in extension.items():
             self.state.continuation_budget[name] = self.state.continuation_budget.get(name, JEV_CONTINUATION_BUDGET_INITIAL) + amount
+
+    def skills(self, outcome: JevSkillsOutcome) -> None:
+        # @intent response-never-retains-skill-content
+        # The public record exposes per-document status and decision usage, while selected text stays in the run context only.
+        """Record per-skill relevance outcomes and usage without retaining candidate text."""
+        self.state.skills = outcome
 
     def run_facts(self, facts: JevRunFacts | None) -> None:
         """Record the exact run facts the compute checkpoint read most recently."""

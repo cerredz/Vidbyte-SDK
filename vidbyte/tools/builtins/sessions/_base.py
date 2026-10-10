@@ -14,8 +14,8 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.tools.base import BaseTool
 from vidbyte.sessions.errors import SessionError
@@ -48,6 +48,14 @@ class _SessionBuiltinTool(BaseTool):
     def _denied(self, name: str, session_id: str) -> ToolResult:
         # Return a denied result for an out-of-scope session id.
         return ToolResult.error(name, f"Access denied for session: {session_id}.")
+
+    @staticmethod
+    def _optional_text(arguments: Mapping[str, Any], name: str) -> str:
+        # @intent null-optional-arg-means-default
+        # Models often send JSON null for an optional argument they mean to leave out; treat it exactly
+        # like an omitted key so the documented default applies instead of the literal text "None".
+        value = arguments.get(name)
+        return "" if value is None else str(value)
 
     def _resolve_session_id(self, identifier: str) -> str:
         # Resolve a concrete session id or tag/name through the bound store.

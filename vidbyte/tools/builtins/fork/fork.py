@@ -125,7 +125,12 @@ class ForkConversationTool(BaseTool):
         if not prompt:
             raise ValueError("fork_conversation requires a non-empty 'prompt'.")
         context_window = self._optional_mapping(args.get("context_window"), "context_window")
-        history_mode = str(args.get("history_mode", context_window.get("history_mode", "full"))).strip() or "full"
+        # @intent null-optional-arg-means-default
+        # A null history_mode means "not given": fall back to context_window's mode, then "full", never "none".
+        raw_history_mode = args.get("history_mode")
+        if raw_history_mode is None:
+            raw_history_mode = context_window.get("history_mode")
+        history_mode = "full" if raw_history_mode is None else (str(raw_history_mode).strip() or "full")
         if history_mode not in _HISTORY_MODES:
             raise ValueError("history_mode must be one of: full, none, last_n.")
         request = {
