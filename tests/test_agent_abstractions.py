@@ -177,6 +177,46 @@ class TestCodeExecutionSafeEval(unittest.IsolatedAsyncioTestCase):
         self.assertIn("forbidden", result.output)
 
 
+class TestCalculatorBoundedEval(unittest.IsolatedAsyncioTestCase):
+    """Verifies the calculator keeps normal results and rejects oversized arithmetic quickly."""
+
+    async def _run(self, expression: str) -> ToolResult:
+        return await CalculatorTool().execute(ToolCall("calculator", {"expression": expression}))
+
+    async def test_normal_expressions_keep_their_results(self) -> None:
+        cases = {
+            "(1200*12)+350": "14750",
+            "round(2.5)": "2",
+            "max(3, 7)": "7",
+            "abs(-4)": "4",
+            "pow(2, 10)": "1024",
+            "7 / 2": "3.5",
+            "1.5 * 2": "3.0",
+            "round(3.456, 1)": "3.5",
+        }
+        for expression, expected in cases.items():
+            result = await self._run(expression)
+            self.assertEqual((result.status, result.output), (ToolStatus.SUCCESS, expected), expression)
+
+    async def test_oversized_powers_return_bound_error_quickly(self) -> None:
+        for expression in ("9**9**7", "9**9**9", "pow(9, 9**9)", "pow(10, 10**10)", "((2**64)**64)**64", "round(5, -2**128)"):
+            started = time.perf_counter()
+            result = await self._run(expression)
+            self.assertLess(time.perf_counter() - started, 0.5, expression)
+            self.assertEqual(result.status, ToolStatus.ERROR, expression)
+            self.assertIn("exceeds the calculator bound", result.output)
+
+    async def test_oversized_product_returns_bound_error(self) -> None:
+        result = await self._run("(2**100)**40 * (2**100)**40")
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("integer result exceeds the calculator bound", result.output)
+
+    async def test_disallowed_names_and_tuples_are_rejected(self) -> None:
+        self.assertIn("double underscores", (await self._run("__import__('os')")).output)
+        self.assertIn("name 'exp' is not permitted", (await self._run("exp(1)")).output)
+        self.assertEqual((await self._run("1,000*3")).status, ToolStatus.ERROR)
+
+
 class TestPrompts(unittest.TestCase):
     """Verifies JSON-backed prompt loading."""
 

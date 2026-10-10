@@ -161,6 +161,93 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         rewritten = ContextCompactionEngine()._replace_provider_content(dict(message), "short")
         self.assertEqual(rewritten["content"], [{"type": "text", "text": "short"}, {"type": "tool_use", "id": "t1", "name": "f", "input": {}}])
 
+    async def test_deduplicate_tool_calls_ignores_openai_call_ids(self) -> None:
+        # [Silent Failure] Identical calls with different ids collapse to the first pair; different arguments survive.
+        def call(call_id: str, query: str) -> dict[str, object]:
+            return {"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "lookup", "arguments": f'{{"q": "{query}"}}'}}]}
+        history = ({"role": "system", "content": "sys"}, {"role": "user", "content": "go"}, call("c1", "q1"), {"role": "tool", "tool_call_id": "c1", "content": "fact"}, call("c2", "q1"), {"role": "tool", "tool_call_id": "c2", "content": "fact"}, call("c3", "q3"), {"role": "tool", "tool_call_id": "c3", "content": "other"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), [history[0], history[1], history[2], history[3], history[6], history[7]])
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_deduplicate_tool_calls_ignores_anthropic_tool_use_ids(self) -> None:
+        # [Silent Failure] Anthropic tool_use blocks dedupe on name and input, not on their unique block ids.
+        def call(call_id: str, query: str) -> dict[str, object]:
+            return {"role": "assistant", "content": [{"type": "tool_use", "id": call_id, "name": "lookup", "input": {"q": query}}]}
+
+        def result(call_id: str) -> dict[str, object]:
+            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": "fact"}]}
+        history = ({"role": "user", "content": "go"}, call("t1", "q1"), result("t1"), call("t2", "q1"), result("t2"), call("t3", "q3"), result("t3"))
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), [history[0], history[1], history[2], history[5], history[6]])
+
+    async def test_salience_eviction_keeps_newest_tool_pair_on_every_provider_shape(self) -> None:
+        # [Silent Failure] Anthropic tool_use and Gemini functionCall turns score as tool calls, so the newest pair survives as on OpenAI.
+        shapes = {
+            "openai": (lambda i: {"role": "assistant", "content": None, "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]}, lambda i: {"role": "tool", "tool_call_id": f"c{i}", "content": f"out{i}"}),
+            "anthropic": (lambda i: {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{i}", "name": "read_file", "input": {}}]}, lambda i: {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": f"out{i}"}]}),
+            "gemini": (lambda i: {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"i": i}}}]}, lambda i: {"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": f"out{i}"}}}]}),
+        }
+        for name, (call, result) in shapes.items():
+            with self.subTest(provider=name):
+                history = ({"role": "user", "content": "audit"}, *(m for i in (1, 2, 3) for m in (call(i), result(i))))
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 4})
+                self.assertEqual(list(after), [history[0], history[-2], history[-1]])
+
+    async def test_remove_all_tool_calls_removes_gemini_function_call_turns(self) -> None:
+        # [Hidden Failure] A Gemini functionCall turn is classified as a tool call and leaves with its functionResponse.
+        engine = ContextCompactionEngine()
+        call = {"role": "model", "parts": [{"functionCall": {"name": "lookup", "args": {}}}]}
+        snake_call = {"role": "model", "parts": [{"function_call": {"name": "lookup", "args": {}}}]}
+        self.assertEqual([engine._provider_message_kind(m) for m in (call, snake_call)], ["tool_call", "tool_call"])
+        history = ({"role": "user", "parts": [{"text": "go"}]}, call, {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": "r1"}}}]}, {"role": "model", "parts": [{"text": "done"}]})
+        after, _ = await engine.compact_provider_messages(history, mode=CompactionMode.REMOVE_ALL_TOOL_CALLS)
+        self.assertEqual(list(after), [history[0], history[3]])
+
+    async def test_partly_answered_gemini_parallel_call_turn_is_dropped(self) -> None:
+        # [Hidden Failure] Gemini parts carry no ids, so a 3-call turn left with 1 response is dropped with it instead of sent and rejected.
+        call = {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"i": i}}} for i in (1, 2, 3)]}
+        responses = [{"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": f"out{i}"}}}]} for i in (1, 2, 3)]
+        history = ({"role": "user", "parts": [{"text": "audit"}]}, call, *responses)
+        for mode, options in ((CompactionMode.REMOVE_LAST_N_TOOL_CALLS, {"n": 2}), (CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, {"start": 2, "end": 3})):
+            with self.subTest(mode=mode.value):
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=mode, options=options)
+                self.assertEqual(list(after), [history[0]])
+
+    async def test_fully_answered_gemini_parallel_call_turn_is_kept(self) -> None:
+        # [Silent Failure] A Gemini call turn whose every functionCall part has a response survives, in separate or merged response turns.
+        call = {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"i": i}}} for i in (1, 2)]}
+        separate = tuple({"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": f"out{i}"}}}]} for i in (1, 2))
+        merged = ({"role": "user", "parts": [p for m in separate for p in m["parts"]]},)
+        for name, results in (("separate", separate), ("merged", merged)):
+            with self.subTest(responses=name):
+                history = ({"role": "user", "parts": [{"text": "audit"}]}, call, *results, {"role": "model", "parts": [{"text": "done"}]})
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.KEEP_LAST_N_MESSAGES, options={"n": 10})
+                self.assertEqual(list(after), list(history))
+
+    async def test_head_tail_preview_keeps_gemini_function_response_output_head(self) -> None:
+        # [Silent Failure] The Gemini preview is cut from the real tool output, not from the functionResponse part's repr.
+        output = "# a.py\n" + "def f():\n    return 1\n" * 40
+        call = {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"path": "a.py"}}}]}
+        history = ({"role": "user", "parts": [{"text": "audit"}]}, call, {"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": output}}}]})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.HEAD_TAIL_TOOL_PREVIEW, options={"head_chars": 10, "tail_chars": 5})
+        self.assertEqual(list(after[:2]), list(history[:2]))
+        function_response = after[2]["parts"][0]["functionResponse"]
+        self.assertEqual(function_response["name"], "read_file")
+        self.assertTrue(function_response["response"]["output"].startswith("# a.py\ndef"))
+        self.assertLess(len(function_response["response"]["output"]), len(output))
+
+    async def test_scrub_bloat_reduces_gemini_function_response_output(self) -> None:
+        # [Silent Failure] Line-based bloat detection sees the Gemini tool output's real lines, as it does for OpenAI and Anthropic.
+        output = "header\n" + "A" * 90 + "\nline\nline\nline"
+        history = ({"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": output}}}]})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.MECHANICAL_BLOAT_SCRUBBER, options={"max_repeated_lines": 1})
+        scrubbed = after[1]["parts"][0]["functionResponse"]["response"]["output"]
+        self.assertIn("[scrubbed base64: 90 chars]", scrubbed)
+        self.assertEqual(scrubbed.count("line"), 1)
+        self.assertLess(len(scrubbed), len(output))
+        self.assertEqual(after[0], history[0])
+
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
         messages = (msg("user", "a"), msg("assistant", "b"))
@@ -212,6 +299,22 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         messages = (msg("tool", "safe", "tool_result", tool_name="audit"), msg("tool", "hide", "tool_result"))
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, options={"exclude_tools": ("audit",)})
         self.assertEqual(tuple(m.content for m in after), ("safe", "[tool result cleared by compaction]"))
+
+    async def test_clear_tool_results_except_keeps_excluded_tool_on_every_provider_shape(self) -> None:
+        # [Silent Failure] Anthropic tool_result blocks (named through their tool_use id) and Gemini function parts resolve tool names, so the excluded tool survives as on OpenAI.
+        tools = ("read_file", "web_search")
+        shapes = {
+            "openai": (lambda b: {"role": "assistant", "content": None, "tool_calls": [{"id": f"c{b}{t}", "type": "function", "function": {"name": t, "arguments": "{}"}} for t in tools]}, lambda b, t: {"role": "tool", "tool_call_id": f"c{b}{t}", "name": t, "content": f"{t} body {b}"}, lambda m: m["content"]),
+            "anthropic": (lambda b: {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{b}{t}", "name": t, "input": {}} for t in tools]}, lambda b, t: {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{b}{t}", "content": f"{t} body {b}"}]}, lambda m: m["content"][0]["content"]),
+            "gemini": (lambda b: {"role": "model", "parts": [{"functionCall": {"name": t, "args": {"b": b}}} for t in tools]}, lambda b, t: {"role": "user", "parts": [{"functionResponse": {"name": t, "response": {"output": f"{t} body {b}"}}}]}, lambda m: m["parts"][0]["functionResponse"]["response"]["output"]),
+        }
+        for name, (call, result, body) in shapes.items():
+            with self.subTest(provider=name):
+                history = ({"role": "user", "content": "audit"}, *(m for b in (1, 2) for m in (call(b), *(result(b, t) for t in tools))))
+                engine = ContextCompactionEngine()
+                self.assertEqual([m.metadata["tool_name"] for m in engine.to_context_messages(history)][1:4], ["read_file", "read_file", "web_search"])
+                after, _ = await engine.compact_provider_messages(history, mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, options={"exclude_tools": ["read_file"]})
+                self.assertEqual([body(m) for m in (after[2], after[3], after[5], after[6])], ["read_file body 1", "[tool result cleared by compaction]", "read_file body 2", "[tool result cleared by compaction]"])
 
     async def test_head_tail_preview_short_content_and_counts(self) -> None:
         # [Edge Case] Short content is unchanged and long content gets the correct omitted count.

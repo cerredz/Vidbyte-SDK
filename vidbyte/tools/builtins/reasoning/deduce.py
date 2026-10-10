@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins._note_ids import next_free_counter
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
     ToolCall,
@@ -136,7 +137,7 @@ class DeduceTool(BaseTool):
         if error:
             return ToolResult.error(call.tool_name, error)
 
-        self._counter += 1
+        self._counter = next_free_counter(self._manager, "deduce", self._counter + 1)
         primitive_id = f"deduce:{self._counter}"
         item = self._build_item(args, primitive_id)
 
