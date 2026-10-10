@@ -4,7 +4,7 @@ PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally. It wraps the whole run in JevUsageAccount.scope(), so every generative and decision call from this agent and every agent it spawns lands in this agent's one usage ledger, checks that ledger at each phase boundary, and fails the run closed when any usage cannot be recorded or priced.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
-KNOWN EDGE CASES: With a managed decision config, the whole run is one managed run on Vidbyte's gateway and is closed when arun returns or raises. With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here. With JevRuntimeSettings.compute set, the main agent's run calls the JevComputeController after every tool iteration that continues; a specialist's run does not.
+KNOWN EDGE CASES: With a managed decision config, the whole run is one managed run on Vidbyte's gateway and is closed when arun returns or raises. With no done check and no RUN_STATE_RELATION preset there is no JevRunState, so no run state is written and every finish attempt stands. With RUN_STATE_RELATION enabled, the gate reads the persistent run-state record and the run state keeps it for a related request, including one routed to a specialist. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here. With JevRuntimeSettings.compute set, the main agent's run calls the JevComputeController after every tool iteration that continues; a specialist's run does not.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-tool-selector.py.
 """
@@ -104,12 +104,12 @@ class JevRuntime(AgentRuntime):
         # A closed gate returns without invoking the generative runner, so an unclear request is answered
         # with questions before any generative tokens are spent.
         self.response.start(message)
-        if not await self.preflight.pass_(message):
+        run_state_record = None if self.run_state is None else self.run_state.record
+        if not await self.preflight.pass_(message, run_state_record):
             return self.response.stopped(self.usage.settle())
         self.usage.require_accounted()
         if self.preflight.specialist is not None:
-            reply = await self.preflight.specialist.agent.arun(message)
-            return self.response.delegated(reply, self.usage.settle())
+            return await self._delegate(message, context)
         if self.compute is not None:
             self.compute.begin(message)
         if self.run_state is not None:
@@ -166,6 +166,14 @@ class JevRuntime(AgentRuntime):
                 "jev_tool_selector": selector_metadata,
             },
         ), self.usage.settle())
+
+    async def _delegate(self, message: str, context: BaseAgentContext) -> AgentResult:
+        # Applies the run-state relation policy before handing the request to the specialist the gate chose.
+        if self.run_state is not None:
+            await self.run_state.begin_delegated(message, prior_user_turns=self._prior_user_turns(context.history))
+            self.usage.require_accounted()
+        reply = await self.preflight.specialist.agent.arun(message)
+        return self.response.delegated(reply, self.usage.settle())
 
     @staticmethod
     def _prior_user_turns(history: Sequence[object]) -> tuple[str, ...]:

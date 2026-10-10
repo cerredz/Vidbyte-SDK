@@ -16,6 +16,7 @@ Feedback on one question applies to every question, so when you change the patte
 ## Where things live
 
 - `clarity.py` holds the clarity preset's questions.
+- `run_state_relation.py` holds the fixed relationship question for an existing run-state record.
 - `specialist.py` holds the specialist Choice question; its options are built per run from `JevAgentSettings.agents`, with `none` always last.
 - `preflight.py` holds `JevPreflightRegistry` (`get`, `questions`, `specialists`, `validate`).
 - The flags and their question keys are in `vidbyte/lib/jev/presets.py` and `vidbyte/lib/enums/jev.py`; the records are in `vidbyte/lib/dataclasses/jev.py`.
