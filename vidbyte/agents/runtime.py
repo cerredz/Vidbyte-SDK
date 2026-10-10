@@ -985,8 +985,8 @@ class AgentRuntime:
     @staticmethod
     def _is_secret_trace_key(key: str) -> bool:
         # Identifies credential-like keys that must not be sent to trace providers.
-        upper = key.upper()
-        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+        # @intent trace-scrub-uses-precise-credential-keys
+        return CredentialKeyPolicy.is_secret_key(key)
 
     def _middleware_context(
         self,
