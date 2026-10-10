@@ -311,8 +311,7 @@ class CodexHarnessAgent:
         if not unmet:
             return
         raise CodexAgentError(
-            f"Codex turn did not satisfy output contract {unmet[0].name}. "
-            f"{unmet[0].error}",
+            f"Codex turn did not satisfy output contract {unmet[0].name}. {unmet[0].error}",
             failure_code=FailureCode.CODEX_CONTRACT_UNMET.value,
             operation="evaluate_contracts",
             error_type=",".join(result.name for result in unmet),

@@ -17,11 +17,12 @@ ROLE IN CODEBASE:
     vidbyte/agents/contracts/ floor classes and AgentLoopSettings.
 
 ARCHITECTURE NOTE:
-    Every test runs offline. CodexItem payloads are shaped exactly like the
-    pinned openai-codex 0.147 model_dump output — CommandExecutionThreadItem
-    carries status and exit_code, McpToolCallThreadItem carries status and
-    error, DynamicToolCallThreadItem carries an explicit success flag — so a
-    field-name drift in the SDK would surface here.
+    Every test runs offline. CodexItem payloads are shaped exactly like
+    CodexResultSerializer's model_dump(by_alias=True) output —
+    CommandExecutionThreadItem carries status and exitCode, McpToolCallThreadItem
+    carries status and error, DynamicToolCallThreadItem carries an explicit
+    success flag. SerializedSdkItemTests builds real SDK items and runs them
+    through the serializer, so a field-name drift in the SDK surfaces here.
 
 FUNCTION INVENTORY:
     No production functions. _command(), _mcp(), and _dynamic() build one
@@ -47,6 +48,7 @@ TESTS: python -m pytest tests/test_codex_output_contracts.py
 
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from typing import Any
 
@@ -55,6 +57,7 @@ from vidbyte.agents.codex.contracts import (
     CodexContractTranslator,
     CodexContractValidator,
 )
+from vidbyte.agents.codex.result import CodexResultSerializer
 from vidbyte.agents.contracts import (
     MinCompactions,
     MinDistinctTools,
@@ -94,11 +97,11 @@ def _command(
     status: str = "completed",
     exit_code: int | None = 0,
 ) -> CodexItem:
-    # Mirrors CommandExecutionThreadItem's model_dump: command, status, exit_code.
+    # Mirrors CommandExecutionThreadItem's model_dump(by_alias=True): command, status, exitCode.
     return CodexItem(
         id="it_cmd",
         type="commandExecution",
-        fields={"command": command, "status": status, "exit_code": exit_code},
+        fields={"command": command, "status": status, "exitCode": exit_code},
     )
 
 
@@ -304,6 +307,30 @@ class ToolCounterTests(unittest.TestCase):
         items = (CodexItem(id="c", type="contextCompaction", fields={}),)
 
         self.assertEqual(_counters(_run_result(items))["compaction_count"], 1)
+
+
+@unittest.skipUnless(importlib.util.find_spec("openai_codex"), "requires the optional openai-codex extra")
+class SerializedSdkItemTests(unittest.TestCase):
+    """Covers the success rules against items the real serializer produced."""
+
+    @staticmethod
+    def _serialized_command(exit_code: int) -> CodexItem:
+        # Builds a real SDK command item and serializes it the way a live turn does.
+        from openai_codex.generated.v2_all import CommandExecutionSource, CommandExecutionThreadItem, ThreadItem
+
+        native = CommandExecutionThreadItem(id="it_cmd", type="commandExecution", command="pytest -q", cwd=".", status="completed", exit_code=exit_code, command_actions=[], source=CommandExecutionSource.agent)
+        return CodexResultSerializer._item(ThreadItem(root=native))
+
+    def test_counts_a_serialized_zero_exit_command_as_successful(self) -> None:
+        counters = _counters(_run_result((self._serialized_command(0),)))
+
+        self.assertEqual(counters["successful_tool_call_count"], 1)
+
+    def test_rejects_a_serialized_nonzero_exit_command(self) -> None:
+        counters = _counters(_run_result((self._serialized_command(1),)))
+
+        self.assertEqual(counters["tool_call_count"], 1)
+        self.assertEqual(counters["successful_tool_call_count"], 0)
 
 
 class UsageAndOutputCounterTests(unittest.TestCase):

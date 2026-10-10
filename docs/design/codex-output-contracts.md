@@ -44,7 +44,7 @@ The Codex side is richer than I expected. Inspecting the pinned `openai-codex==0
 
 | Item | Fields that matter |
 |---|---|
-| `CommandExecutionThreadItem` | `command`, `status`, `exit_code`, `duration_ms` |
+| `CommandExecutionThreadItem` | `command`, `status`, `exit_code` (serialized as `exitCode`), `duration_ms` |
 | `McpToolCallThreadItem` | `tool`, `server`, `status`, `error`, `duration_ms` |
 | `DynamicToolCallThreadItem` | `tool`, `namespace`, `status`, `success` |
 | `ContextCompactionThreadItem` | `id`, `type` only |
@@ -81,7 +81,7 @@ Two field-guide constraints bind the work. *Class-Bound Helpers → "Audit every
 3. Construction raises `ConfigurationError` naming the contract when `output_contracts` contains one whose `key` is `iteration_count` or `model_call_count`.
 4. A new `CodexContractTranslator` builds a `counters` mapping with the same thirteen keys `AgentRuntime._contract_counters` produces.
 5. `tool_call_count` counts `commandExecution`, `mcpToolCall`, and `dynamicToolCall` items, and excludes `webSearch`, `fileChange`, `imageView`, and every non-tool item type.
-6. `successful_tool_call_count` counts a command item when `status == "completed"` **and** `exit_code == 0`; an MCP item when `status == "completed"` and `error` is absent; and a dynamic item when `success` is true.
+6. `successful_tool_call_count` counts a command item when `status == "completed"` **and** `exitCode == 0`; an MCP item when `status == "completed"` and `error` is absent; and a dynamic item when `success` is true.
 7. A tool item still `inProgress` counts toward `tool_call_count` but never toward `successful_tool_call_count`.
 8. `tool_calls_by_name` names a command item by the first whitespace-separated token of its `command`, and an MCP or dynamic item by its `tool` field.
 9. `distinct_tool_count` is the number of distinct names in `tool_calls_by_name`.

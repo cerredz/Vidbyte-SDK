@@ -50,6 +50,9 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings.loop import AgentLoopSettings
 
 _COMMAND_ITEM = "commandExecution"
+# CodexResultSerializer dumps SDK items by alias, so the command's exit_code
+# field arrives under its camelCase wire name.
+_EXIT_CODE_FIELD = "exitCode"
 _ZERO_COUNTERS = {"iteration_count": 0, "model_call_count": 0}
 
 
@@ -67,17 +70,12 @@ class CodexContractValidator:
         unsupported = cls._unsupported_fields(loop)
         if unsupported:
             raise ConfigurationError(
-                "Codex cannot enforce AgentLoopSettings "
-                f"{', '.join(unsupported)}: Codex owns its model and tool loop, its "
-                "own context window, and its own tool executor. Only output_contracts "
-                "are honored by this adapter."
+                f"Codex cannot enforce AgentLoopSettings {', '.join(unsupported)}: Codex owns its model and tool loop, its own context window, and its own tool executor. Only output_contracts are honored by this adapter."
             )
         unobservable = cls._unsupported_contracts(loop)
         if unobservable:
             raise ConfigurationError(
-                f"Codex cannot observe the counters output contracts "
-                f"{', '.join(unobservable)} read: Codex owns its iterations and "
-                "reports neither an iteration nor a model-call count."
+                f"Codex cannot observe the counters output contracts {', '.join(unobservable)} read: Codex owns its iterations and reports neither an iteration nor a model-call count."
             )
 
     @staticmethod
@@ -194,7 +192,7 @@ class CodexContractTranslator:
         if item.type == _COMMAND_ITEM:
             return (
                 fields.get("status") == CODEX_ITEM_COMPLETED_STATUS
-                and fields.get("exit_code") == CODEX_COMMAND_SUCCESS_EXIT_CODE
+                and fields.get(_EXIT_CODE_FIELD) == CODEX_COMMAND_SUCCESS_EXIT_CODE
             )
         if "success" in fields:
             return fields.get("success") is True
