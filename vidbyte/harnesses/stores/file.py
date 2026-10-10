@@ -13,29 +13,44 @@ ARCHITECTURE NOTE:
     Implements the TrajectorySink protocol in stores/base.py. Serializes off the
     event loop and appends one compact JSON object per line under a per-process
     lock, creating the parent directory lazily on first write. Concurrent
-    multi-process appends to the same file are not guaranteed and are unsupported.
+    multi-process appends to the same file are not guaranteed and are unsupported
+    — see vidbyte/harnesses/stores/{s3,gcs,azure_blob}.py for cloud backends that
+    sidestep this by giving every run its own object instead of one shared file.
+    Encoding is shared with those backends via _sink_support.SinkEncoding so a
+    serialization failure raises the same HarnessSinkPayloadError everywhere.
 
 PUBLIC API INVENTORY:
     FileTrajectorySink; path; write(record).
 
+COMMON MODIFICATION PATTERNS:
+    Change the wire encoding or size guard in
+    vidbyte/harnesses/stores/_sink_support.SinkEncoding, shared with every
+    cloud sink, rather than editing the json.dumps(...) call here directly.
+
+KNOWN EDGE CASES:
+    Concurrent multi-process appends to the same file are not guaranteed and
+    are unsupported — see s3.py/gcs.py/azure_blob.py for cloud backends that
+    sidestep this by giving every run its own object instead of one shared,
+    growing file.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
 
 TESTS:
-    Exercised by inline collect/sink smoke verification; no dedicated test file was
-    added under the approved no-tests workflow.
+    Exercised by inline collect/sink smoke verification; regression-covered by
+    tests/test_cloud_trajectory_sinks.py for the shared encoding path only.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
-from dataclasses import asdict
 from pathlib import Path
 
 from vidbyte.harnesses.contracts import TrajectoryRecord
 from vidbyte.harnesses.errors import HarnessSinkError
+from vidbyte.harnesses.stores._sink_support import SinkEncoding
 
 
 class FileTrajectorySink:
@@ -57,15 +72,12 @@ class FileTrajectorySink:
 
     def _append(self, record: TrajectoryRecord) -> None:
         # Encodes one compact JSON object followed by exactly one newline under a lock.
-        try:
-            line = json.dumps(asdict(record), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        except (TypeError, ValueError) as exc:
-            raise HarnessSinkError("Trajectory record could not be encoded as JSON.", details={"run_id": record.run_id, "error_type": type(exc).__name__}) from exc
+        payload = SinkEncoding.encode_record(record)
         try:
             with self._lock:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
                 with self._path.open("a", encoding="utf-8", newline="\n") as stream:
-                    stream.write(line + "\n")
+                    stream.write(payload.decode("utf-8") + "\n")
         except OSError as exc:
             raise HarnessSinkError("Trajectory record could not be written to its destination.", details={"destination": self._path.name, "error_type": type(exc).__name__}) from exc
 
