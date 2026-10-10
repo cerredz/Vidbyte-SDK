@@ -53,6 +53,7 @@ import asyncio
 import importlib.util
 import inspect
 import threading
+import time
 import unittest
 from collections.abc import Mapping
 from types import SimpleNamespace
@@ -652,6 +653,30 @@ class CodexSdkContractTests(unittest.TestCase):
 
         self.assertIn("self.request(", inspect.getsource(CodexClient.thread_start))
         self.assertIn("self._approval_handler(", inspect.getsource(CodexClient._handle_server_request))
+
+    def test_cancelled_turn_releases_its_waiting_reader(self) -> None:
+        # openai-codex 0.147 left a cancelled turn's reader blocked forever, which hung the
+        # process at exit; the pin admits only releases where unregistering wakes the reader.
+        from openai_codex._message_router import MessageRouter
+        from openai_codex.errors import TransportClosedError
+
+        router = MessageRouter()
+        router.register_turn("turn_1")
+        outcome: list[str] = []
+
+        def read() -> None:
+            try:
+                router.next_turn_notification("turn_1")
+            except TransportClosedError:
+                outcome.append("released")
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        time.sleep(0.05)
+        router.unregister_turn("turn_1")
+        reader.join(timeout=2)
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(outcome, ["released"])
 
 
 if __name__ == "__main__":
