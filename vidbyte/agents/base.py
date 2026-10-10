@@ -522,7 +522,7 @@ class BaseAgent(McpAttachableMixin):
         if self.fallback is not None:
             # @intent resume-keeps-fallback-chain
             # Store backups as credential-free 'provider/model' strings; keys re-resolve on restore.
-            config["fallback_models"] = [f"{getattr(m.provider, 'value', m.provider)}/{m.model}" for m in self.fallback.models[1:]]
+            config["fallback_models"] = [m.identity() for m in self.fallback.models[1:]]
         if isinstance(self.runtime_config_obj, ActorRuntime):
             config.update(
                 {
