@@ -17,7 +17,7 @@ started: 2026-10-10 00:51
 | S1 spec + review | done | 2026-10-10 01:09 | 2026-10-10 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @8f669933 approved; r1 SOUND WITH FIXES (1B/3M/4m), r2 SOUND WITH FIXES (0B/1M/2m), all 11 applied |
 | S2 tests | done | 2026-10-10 | 2026-10-10 | reports/S2-test-author.md | S2_HEAD d158d5f6 (tests a25a3c41, proof d158d5f6); 42 fns / 97 cases in tests/features/coding_agent/; red: 86 = 67 ImportError(CodingAgent) + 19 ModuleNotFoundError(bash), 11 POSIX-only skipped on win32; spec status tests-written @0b2b4f56 |
 | S3 implement | done | 2026-10-10 | 2026-10-10 | reports/S3-implementer.md | S3_HEAD 4e285d91; draft PR #690 https://github.com/cerredz/Vidbyte-SDK/pull/690; 8 rows in 9 code commits (25b5260b..4c4a62ef); pack 86 pass/11 skip win 3.11, 97/97 WSL 3.12 (orchestrator re-ran both); test diff vs S2_HEAD empty; budget 2/2 files, 0/0 enums+dataclasses, 2/2 public names; remote CI 38046509073 + static-policy 38046510490 success @4c4a62ef |
-| S4 adversarial review | running | 2026-10-10 | | reports/S4-review-{conformance,conventions,engineering}.md | 3 reviewers launched in parallel on 4e285d91; all hit HTTP 429 mid-run, resumed via SendMessage after reset |
+| S4 adversarial review | done | 2026-10-10 | 2026-10-10 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | MERGEABLE AFTER FIXES; raw C 1B/2M/2m, V 0B/1M/5m, E 1B/4M/1m → confirmed 2 Blockers (R-1 _stop never-raises/always-closes, R-2 EC-11 test cannot fail) + 2 Majors (R-3 root_dir "", R-4 bash description); 5 Minors (R-5..R-9; R-8 layering + R-9 relative git downgraded); 0 refuted; spec status reviewed |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -34,6 +34,11 @@ started: 2026-10-10 00:51
 - 2026-10-10 — Applied every open question's stated default (spec §15): Q-1 ReplaceTextTool; Q-2 no configurable timeout/cap; Q-3 no env allow-list; Q-4 no default result_max_chars; Q-5 no CodingAgent.restore; Q-6 no Windows job-object tree kill. Assumptions A-1..A-9 stand (notably A-1 keyed WebFetch shows page text; A-3 Bash inherits env; A-9 Windows timed-out command may keep running).
 
 - 2026-10-10 — All three S4 reviewers hit the API session limit (HTTP 429) mid-run; resumed each via SendMessage after the reset instead of relaunching (conformance had already written its report but not returned STATUS). Same handling as the S1 r2 reviewer.
+
+- 2026-10-10 — GRANTED test change for R-2 only: replace `test_command_reading_stdin_sees_end_of_file_at_once` body in `tests/features/coding_agent/test_bash_tool_contract.py` with the exact "Fix detail R-2" After block in review.md (+ `import os`). Reason: the verifier proved the test cannot fail (mutation dropping stdin=DEVNULL passes on Windows 3.11 and WSL 3.12; proposed test fails the mutant, passes the real code). A test that cannot fail does not prove EC-11.
+- 2026-10-10 — GRANTED one-line doc correction for R-7 in `tests/features/coding_agent/README.md:7` (file tools live in `vidbyte/tools/filesystem/`, not `vidbyte/tools/builtins/`). Reason: factual error in prose, no test behavior changes; it would otherwise be a human review comment.
+- 2026-10-10 — DECLINED new regression tests for R-1 (EPERM patch, double cancel) and the optional `""` AC-11 case for R-3. Reason: skill default is no test changes except a test that contradicts a spec ID or cannot fail; neither applies. Listed as follow-ups for the user in the final report.
+- 2026-10-10 — Not forwarding R-8 (move `_FetchedPagesView` to tools layer) or R-9 (relative `git` on Windows): verifier downgraded both to follow-up (no AGENTS.md rule broken; R-9 `[scope-adding]` vs spec as written). Both go to the user as follow-ups.
 
 ## User replies (verbatim)
 - (none yet during the run)
