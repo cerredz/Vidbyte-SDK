@@ -530,6 +530,10 @@ class ToolsFormatter:
         """Parse an Anthropic tool_use block into a ToolCall."""
         name = str(raw_call.get("name", ""))
         raw_input = raw_call.get("input", {})
+        # @intent null-tool-arguments-mean-no-arguments
+        # An explicit null input means the same as a missing one: a call with no arguments.
+        if raw_input is None:
+            raw_input = {}
         if not isinstance(raw_input, Mapping):
             raise ValueError("Anthropic tool input must be an object")
         return ToolCall(
@@ -550,6 +554,10 @@ class ToolsFormatter:
         if not isinstance(function_call, Mapping):
             raise ValueError("Gemini tool call must include a function call object")
         args = function_call.get("args", {})
+        # @intent null-tool-arguments-mean-no-arguments
+        # An explicit null args means the same as a missing one: a call with no arguments.
+        if args is None:
+            args = {}
         if not isinstance(args, Mapping):
             raise ValueError("Gemini function call args must be an object")
         return ToolCall(
@@ -723,6 +731,10 @@ class ToolsFormatter:
     @staticmethod
     def _parse_arguments(raw_arguments: object) -> dict[str, Any]:
         """Parse provider argument payloads into a plain dictionary."""
+        # @intent null-tool-arguments-mean-no-arguments
+        # Some OpenAI-compatible servers send "arguments": null for a zero-parameter call; treat it like a missing key.
+        if raw_arguments is None:
+            return {}
         if isinstance(raw_arguments, Mapping):
             return dict(raw_arguments)
         if isinstance(raw_arguments, str):
