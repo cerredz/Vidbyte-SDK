@@ -83,3 +83,32 @@
   - `test_decision_contract.py::FactoryAndPricebookTests::test_pricebook_rows_and_freshness_stamp`
   - `test_decision_usage_metering.py::PricingTests::test_every_host_is_priced_from_the_pricebook_key`
   - `test_decision_usage_metering.py::PricingTests::test_liquid_zero_output_tokens_price_input_only`
+
+## Revision r7 (user reply to the Baseten question)
+
+- **Commit:** `16465922` — `docs(spec): r7 — Baseten at Inception rate, luna long-context tier, 7 new System One providers, price-proof links`; `revision: 7`; `status: implemented` left as set. Only spec.md committed.
+- **User reply** appended verbatim to §0.2 (dated 2026-10-10), with a one-paragraph interpretation that maps each clause to rulings (a)–(f).
+- **(a) Baseten:** `inception/mercury-decide` 0.02/0.0 at Inception's published rate (promotional; regular 0.04). Cited with both Inception URLs and Baseten's two no-price pages. Changed: INV-18, FR-4, D-10, §9.1, row 8, AC-12, A-15 (retired), Q-4 (resolved). EC-17 did not need a change.
+- **(b) gpt-6-luna:** Option B, `threshold_tokens=272_000`, over-threshold 0.20/0.0. Changed: D-12, FR-4, §9.1, row 8, AC-12 (0.20 at 1M; 0.0272 at the 272,000 boundary), EC-33.
+- **(c, c2) Seven new providers** as `SystemOneHost` rows: CELERIS, NACE, UPSTAGE, INCEPTION, HANZO, VANSA, ZOODATA. They reuse `JEV_SYSTEMONE_PATH` and `PERPLEXITY_DECISIONS_PATH`, so no constant, field, adapter, file, or dependency is added. Totals: 16 providers, 15 `HOSTS` rows, 3 adapters. Vansa ships under A-18.
+- **(d) Deferred:** NG-16 (Gemini, with the MediaPipe URL), NG-17 Fastino, NG-18 Alibaba, NG-19 decisionmodels.io, NG-20 milliseconds.ai, NG-21 resellers and gateways, NG-22 `clef-omni`, NG-23 (promotional, plan, and premium pricing shapes), NG-24 (per-host headers and model-derived endpoints). Matching default-no questions: Q-11 to Q-16.
+- **(e) Price proof:** INV-29 (a source-text check of the comment URLs above every decision block and the `gpt-6-luna` row) and AC-21; NFR-6 points to it.
+- **(f) OpenAI:** no wire change. A-2, A-8, and A-11 are verified against the TypeScript reference. D-17 and the §9.1 echo cell are updated, and row 15's wording is corrected.
+- **Inception/Baseten:** INV-30, D-20, AC-22, EC-34. Pricing is keyed per provider. The qualified `inception/mercury-decide` must follow `baseten/inception/mercury-decide`. The D-16 flip text is adjusted.
+- **Added IDs:** INV-29, INV-30; AC-20, AC-21, AC-22; EC-29 to EC-37; NG-16 to NG-24; D-19, D-20; A-17 to A-23; Q-11 to Q-16; §16 U-1 to U-5; §17 r7; phase P5.
+- **§12.3:** no new rows. r7 deltas are in rows 1, 6, 7, 8, 11, 13, 16, 18, 19, 20; rows 2–5, 9, 10, 12, 14, 15, 17, 21 are unchanged.
+- **Self-check:** all tables have consistent pipe counts (§9.1 rows have 12 each, 7 new); every ID family is contiguous with no undefined references; the `--cloud` text is absent; contract-name counts did not decrease and no new `*_PATH` name appears.
+- **S2 tests that now contradict the spec** (scoped r7 grant):
+  - `test_decision_contract.py::ProviderCatalogTests::test_supported_set_is_the_nine_keys_of_the_decision_default_map`: expects 9 providers, now 16.
+  - `test_decision_contract.py::HostTableTests::test_hosts_table_matches_section_9_1`: expects 8 hosts, now 15.
+  - `test_decision_config.py::ProviderGuardTests::test_unsupported_provider_lists_the_nine_supported_values_sorted`: the expected message now lists 16 values.
+  - `test_decision_contract.py::FactoryAndPricebookTests::test_pricebook_rows_and_freshness_stamp`: `UNPRICED` becomes empty, and there are new rows.
+  - `test_decision_usage_metering.py::PricingTests::test_every_host_is_priced_from_the_pricebook_key`: Baseten goes from None to 0.02, and OpenAI from 0.10 to 0.20.
+  - `test_decision_usage_metering.py::LedgerBehaviourTests::test_two_providers_in_one_scope_keep_their_own_records`: OpenAI becomes 0.20 and the rollup 0.22.
+  - `test_decision_usage_metering.py::LedgerBehaviourTests::test_billed_failures_are_recorded_once_with_their_usage`: Baseten is now priced at 0.02 × 300 / 1e6.
+  - `test_decision_regression_typesafe.py::AgentBoundaryTests::test_agent_settings_accept_decision_providers_but_runner_build_refuses_them`: the `("baseten", "mercury-decide")` case now raises at settings construction (EC-34).
+  - New tests are needed for AC-20 (seven subtests), AC-21, and AC-22, plus additions to the `HOST_ROWS` fixture.
+- **Open items:**
+  - `vidbyte/providers/openai_decisions.py:259` still says "OpenAI documents no response-level model echo", which research-2 §2.4 makes stale. Ruling (f) forbids changes there, so a comment-only fix is left for the coordinator.
+  - Rule (c) asks for a `.env.example` line, but no `.env.example` exists, and creating one would add a fourth file. Env vars are documented in §9.3 and the README instead.
+  - Remaining risks: Vansa's User-Agent (A-17); promotional Inception and Baseten rates (EC-36); fragile `provider_for_model` ordering (INV-30); Nace's `alist_models` message is inaccurate (Q-11).
