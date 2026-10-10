@@ -4,7 +4,7 @@ PURPOSE: Prove OutputSchemaBuilder keeps each value slot in the shape of its lat
 ROLE IN CODEBASE: Drives DeclareOutputSchemaTool, AppendOutputTool and ExtendOutputSchemaTool on one shared OutputSchemaBuilder.
 ARCHITECTURE NOTE: Pure in-memory tests; no agent, runner or network.
 COMMON MODIFICATION PATTERNS: Add a case when a new declaration attribute changes how values are stored.
-KNOWN EDGE CASES: Scalar to repeated wraps a set value; repeated to scalar keeps the latest entry; empty slots reseed.
+KNOWN EDGE CASES: Scalar to repeated wraps a set value; repeated to scalar keeps the latest entry; empty slots reseed; a null name or description counts as omitted.
 RELATED DOCS: docs/design/builtin-tool-transport-and-builder-fixes.md
 TESTS: This module; full source gate via scripts/run_ci.py.
 """
@@ -58,3 +58,23 @@ def test_redeclaring_empty_fields_seeds_the_new_shape() -> None:
     builder.declare([{"name": "a", "repeated": True}, {"name": "b"}])
 
     assert builder.snapshot()["values"] == {"a": [], "b": None}
+
+
+@pytest.mark.asyncio
+async def test_null_field_name_and_description_are_treated_as_omitted() -> None:
+    builder = OutputSchemaBuilder()
+    declare, _, _ = _tools(builder)
+    fields = [
+        {"name": "changes", "description": None, "repeated": True},
+        {"name": None, "description": "stray"},
+        {"name": "summary", "description": "One-line recap."},
+    ]
+
+    await declare.execute(ToolCall("declare_output_schema", {"fields": fields}))
+
+    snapshot = builder.snapshot()
+    assert snapshot["fields"] == [
+        {"name": "changes", "description": "", "repeated": True},
+        {"name": "summary", "description": "One-line recap.", "repeated": False},
+    ]
+    assert snapshot["values"] == {"changes": [], "summary": None}
