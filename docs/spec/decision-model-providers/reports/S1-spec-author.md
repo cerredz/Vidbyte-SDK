@@ -112,3 +112,19 @@
   - `vidbyte/providers/openai_decisions.py:259` still says "OpenAI documents no response-level model echo", which research-2 §2.4 makes stale. Ruling (f) forbids changes there, so a comment-only fix is left for the coordinator.
   - Rule (c) asks for a `.env.example` line, but no `.env.example` exists, and creating one would add a fourth file. Env vars are documented in §9.3 and the README instead.
   - Remaining risks: Vansa's User-Agent (A-17); promotional Inception and Baseten rates (EC-36); fragile `provider_for_model` ordering (INV-30); Nace's `alist_models` message is inaccurate (Q-11).
+
+## Revision r8 (scoped review of r7: R-15 … R-21, orchestrator item O-1)
+
+- **Commit:** `c4d2c8b8` — `docs(spec): r8 — apply scoped review of r7 (R-15..R-21)`. Frontmatter: `revision: 8`, `status: approved`. Only spec.md was committed. No finding was disputed, so no new Q-n was added.
+- **Dispositions:**
+  - R-15: applied. EC-19 and §13 now list the 7 False-echo hosts and the 8 True hosts. A-13 covers all seven; A-22 now has research-2 citations and an alias-row caveat for flipping Nace.AI or Vansa.
+  - R-16: applied with change. Rows 11, 13 and 18 now name every header or comment line that r7 makes false, by field or symbol. I also added two lines the review missed: `systemone.py` KNOWN EDGE CASES and the README "No model list" bullet, both made false by Nace.AI's `/v1/models`.
+  - R-17: applied. The HANZO proof URLs are now https://hanzo.ai/pricing and https://docs.hanzo.ai/docs/decisions. Auditing every other §9.1 proof URL against research-2 §6 and `context/pricing-proof.md` found no other defect. Two of them rest on lighter reads: Vansa's pricing page was read by summarising fetch only, and Inception's pages were read as `.md` in research-2 and as HTML in pricing-proof §8.
+  - R-18: applied. A-18 cites the "Jev-compatible" quote and names the null-criteria risk; D-19 is updated; EC-38 is added; the row 18 Vansa note tells callers to describe every option.
+  - R-19: applied. Row 4 gets an r8 comment-only change: the comment on `PERPLEXITY_DECISIONS_PATH` now names Inception and Hanzo.
+  - R-20: applied. NFR-6 is scoped to decision rows and the README rows r7 adds; INV-18 states the Baseten exception.
+  - R-21: applied. README size is now 48,690 characters, so at most 53,190 after r7. The settings test is cited by name, at lines 125-131 as of `d7feca99`.
+  - O-1: applied. Row 15 gets an r8 comment-only fix at `openai_decisions.py:259`.
+- **Merge safety:** rows 4, 11 and 19 edit files that origin/main `868ff97f` also changed. Those rows name each edit by symbol, header field or quoted text. The §12.3 closing note and P5 say S3 merges origin/main first. P5 deltas are rows 1, 4, 6, 7, 8, 11, 13, 15, 16, 18, 19, 20; rows 4 and 15 are comment-only.
+- **IDs:** added EC-38, §16 R-15 … R-21 and O-1, and §17 r8. Changed: INV-18, NFR-6, EC-19, FR-13, D-19, A-13, A-18, A-22, the §9.1 HANZO cell, §11, §12.3 rows 4, 7, 11, 13, 15 and 18 plus the closing note, §12.6 P1 and P5, and §13.
+- **Self-check:** tables are consistent; every ID family is contiguous; there are no undefined references; no contract name lost a mention; `--cloud` is absent.
