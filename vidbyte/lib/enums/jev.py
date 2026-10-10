@@ -208,6 +208,14 @@ class JevProblemCheckItemType(str, Enum):
     REQUEST_COMPLETION = "request_completion"
 
 
+class JevSkillStatus(str, Enum):
+    """Outcome of evaluating one configured skill for the current request."""
+
+    SELECTED = "selected"
+    SKIPPED = "skipped"
+    UNAVAILABLE = "unavailable"
+
+
 class JevRunBriefUpdateStatus(str, Enum):
     """Outcome of one scheduled mid-run brief refresh attempt."""
 
@@ -342,4 +350,4 @@ class JevSwarmPlanQuestionKey(str, Enum):
     CHECKABLE_DELIVERABLE = "swarm_plan.checkable_deliverable"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse", "JevSwarmPlanQuestionKey"]
+__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse", "JevSkillStatus", "JevSwarmPlanQuestionKey"]

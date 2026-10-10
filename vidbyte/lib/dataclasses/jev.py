@@ -89,6 +89,7 @@ from vidbyte.lib.enums.jev import (
     JevScopeBreadth,
     JevScopeUnitSource,
     JevScopeUniverse,
+    JevSkillStatus,
     JevSwarmPlanQuestionKey,
 )
 from vidbyte.lib.errors import ConfigurationError
@@ -3722,6 +3723,68 @@ class JevBulkWorkResult:
 
 
 @dataclass(frozen=True, slots=True)
+class JevSkillResult:
+    """Metadata and relevance decision for one configured skill, without its text."""
+
+    name: str
+    description: str
+    source: str | None
+    status: JevSkillStatus
+    probability: float | None = None
+
+    def __post_init__(self) -> None:
+        # @intent-response-never-retains-skill-bodies
+        # Skill bodies may contain private caller instructions and are only needed by the live run context.
+        # The response keeps identifying metadata and the decision evidence, not the injected content.
+        """Validate public skill outcome metadata and any available probability."""
+        for field_name in ("name", "description"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigurationError(f"JevSkillResult.{field_name} must be non-blank text.")
+        if self.source is not None and (not isinstance(self.source, str) or not self.source.strip()):
+            raise ConfigurationError("JevSkillResult.source must be None or non-blank text.")
+        if not isinstance(self.status, JevSkillStatus):
+            raise ConfigurationError("JevSkillResult.status must be a JevSkillStatus.")
+        if self.probability is not None:
+            object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name="skill relevance probability"))
+
+
+@dataclass(frozen=True, slots=True)
+class JevSkillsOutcome:
+    """Per-skill outcomes and TypeSafe usage for one JevAgent run."""
+
+    results: tuple[JevSkillResult, ...] = ()
+    usage: ProviderUsage | None = None
+
+    def __post_init__(self) -> None:
+        # @intent-preserve-independent-candidate-results
+        # A missing answer for one skill must not collapse valid outcomes for its siblings; the tuple records
+        # each candidate in settings order so response consumers can associate every decision reliably.
+        """Freeze one ordered result per configured document."""
+        if not isinstance(self.results, tuple) or not all(isinstance(result, JevSkillResult) for result in self.results):
+            raise ConfigurationError("JevSkillsOutcome.results must be a tuple of JevSkillResult values.")
+
+
+@dataclass(frozen=True, slots=True)
+class JevSkillBatch:
+    """One skill relevance request and the settings positions of the skills it asks about."""
+
+    indices: tuple[int, ...]
+    request: JevDecisionRequest
+
+    def __post_init__(self) -> None:
+        # @intent batch-indices-route-answers
+        # Each index is the skill's position in the settings, and its answer comes back under that index's
+        # question, so a batch whose indices and questions disagree would score the wrong skill. Each index value
+        # is already validated by JevSkillRelevanceQuestion, which built the question it names.
+        """Require exactly one distinct settings index per question in the request."""
+        if not isinstance(self.request, JevDecisionRequest):
+            raise ConfigurationError("JevSkillBatch.request must be a JevDecisionRequest.", details={"request": type(self.request).__name__})
+        if not isinstance(self.indices, tuple) or len(set(self.indices)) != len(self.indices) or len(self.indices) != len(self.request.questions):
+            raise ConfigurationError("JevSkillBatch.indices must be a tuple naming each request question's skill exactly once.", details={"indices": repr(self.indices), "questions": len(self.request.questions)})
+
+
+@dataclass(frozen=True, slots=True)
 class JevUsageReport:
     """One JevAgent run's usage, read from the agent's one usage ledger and priced from the SDK pricebook.
 
@@ -3809,6 +3872,7 @@ class JevAgentResponse:
     clone: JevCloneResult | None = None
     swarm: JevSwarmResult | None = None
     bulk_work: JevBulkWorkResult | None = None
+    skills: JevSkillsOutcome = field(default_factory=JevSkillsOutcome)
 
     @property
     def needs_clarification(self) -> bool:
@@ -4601,4 +4665,7 @@ __all__ = [
     "TypeSafeWireRequest",
     "JevBulkHandoff",
     "JevBulkWorkResult",
+    "JevSkillBatch",
+    "JevSkillResult",
+    "JevSkillsOutcome",
 ]

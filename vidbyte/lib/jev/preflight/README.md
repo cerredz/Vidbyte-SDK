@@ -18,6 +18,7 @@ Feedback on one question applies to every question, so when you change the patte
 - `clarity.py` holds the clarity preset's questions.
 - `run_state_relation.py` holds the fixed relationship question for an existing run-state record.
 - `bulk_work.py` holds the BULK_WORK preset's eight questions, each one separate piece of evidence that a request's work can be split across fresh agents.
+- `skills.py` builds the dynamic indexed relevance question for each configured skill document.
 - `specialist.py` holds the specialist Choice question; its options are built per run from `JevAgentSettings.agents`, with `none` always last.
 - `preflight.py` holds `JevPreflightRegistry` (`get`, `questions`, `specialists`, `validate`).
 - The flags and their question keys are in `vidbyte/lib/jev/presets.py` and `vidbyte/lib/enums/jev.py`; the records are in `vidbyte/lib/dataclasses/jev.py`.
