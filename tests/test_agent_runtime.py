@@ -516,6 +516,29 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["tokens_used"], 4)
         self.assertEqual(len(runner.calls), 1)
 
+    async def test_runtime_max_tokens_counts_anthropic_cache_buckets(self) -> None:
+        # @intent anthropic-cache-buckets-count-toward-total
+        usage = {"input_tokens": 50, "output_tokens": 20, "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 0}
+        runner = FakeRunner([FakeResponse("working", {"usage": usage}), FakeResponse("working", {"usage": usage})])
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(max_tokens=5000),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="anthropic", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        self.assertEqual(result.metadata["stop_reason"], "max_tokens")
+        self.assertEqual(result.metadata["tokens_used"], 20070)
+        self.assertEqual(len(runner.calls), 1)
+
     async def test_runtime_without_limits_continues_until_final_response(self) -> None:
         @tool
         def lookup() -> str:
