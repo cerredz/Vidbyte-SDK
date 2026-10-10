@@ -3,7 +3,7 @@
 PURPOSE: Probe the public AgentLoopSettings boundary for invalid budgets and timeouts before an agent starts; do not emulate a model provider here.
 ROLE IN CODEBASE: Calls vidbyte.agents.settings.AgentLoopSettings and reads the resulting AgentRuntimeConfig; complements tests/test_agent_settings_validation.py.
 ARCHITECTURE NOTE: Tests bind no runner and make no network calls, so a failure identifies configuration rather than model behavior.
-FUNCTION INVENTORY: test_integer_limits_reject_non_integer_values tests all count fields; test_timeout_rejects_non_finite_or_invalid_values tests loop timeouts; test_tool_timeout_rejects_non_finite_values tests tool-call timeouts; test_invalid_retry_counts and test_invalid_backoff_parameters test tool-error policy; test_valid_limits_reach_runtime_config tests conversion; test_tool_call_floor_must_stay_below_tool_settings_budget and test_tool_call_floor_below_tool_settings_budget_is_accepted test effort floors against a budget given only as ToolSettings.max_calls; test_per_tool_floor_equal_to_per_tool_cap_is_accepted and test_per_tool_floor_above_per_tool_cap_is_rejected test MinToolCallsById against ToolSettings.max_calls_per_tool; test_iteration_floor_equal_to_max_iterations_is_accepted and test_iteration_floor_above_max_iterations_is_rejected test MinIterations against max_iterations. Run this file with pytest.
+FUNCTION INVENTORY: test_integer_limits_reject_non_integer_values tests all count fields; test_timeout_rejects_non_finite_or_invalid_values tests loop timeouts; test_tool_timeout_rejects_non_finite_values tests tool-call timeouts; test_invalid_retry_counts and test_invalid_backoff_parameters test tool-error policy; test_valid_limits_reach_runtime_config tests conversion; test_tool_call_floor_must_stay_below_tool_settings_budget and test_tool_call_floor_below_tool_settings_budget_is_accepted test effort floors against a budget given only as ToolSettings.max_calls; test_per_tool_floor_equal_to_per_tool_cap_is_accepted and test_per_tool_floor_above_per_tool_cap_is_rejected test MinToolCallsById against ToolSettings.max_calls_per_tool; test_iteration_floor_equal_to_max_iterations_is_accepted and test_iteration_floor_above_max_iterations_is_rejected test MinIterations against max_iterations; the test_allowed_tools_* tests cover bare-string, padded, blank, and normal allowed_tools. Run this file with pytest.
 COMMON MODIFICATION PATTERNS: Add an invalid value when a new public count or timeout field is introduced; assert the named ConfigurationError and the valid runtime value.
 WHAT NOT TO DO IN THIS FILE: 1. Do not implement validation here; vidbyte/agents/settings/loop.py owns it. 2. Do not call live providers; tests/agent_test_support.py owns offline agent fixtures.
 KNOWN EDGE CASES: bool inherits int, NaN is not ordered, and a string throws TypeError before comparison.
@@ -107,3 +107,36 @@ def test_iteration_floor_equal_to_max_iterations_is_accepted() -> None:
 def test_iteration_floor_above_max_iterations_is_rejected() -> None:
     with pytest.raises(ConfigurationError, match=r"AgentLoopSettings\.max_iterations=3: the floor is unreachable \(require minimum <= max_iterations\)"):
         AgentLoopSettings(max_iterations=3, output_contracts=(MinIterations(4),))
+
+
+@pytest.mark.parametrize("value", ["search", b"search"])
+def test_allowed_tools_rejects_a_bare_string(value: object) -> None:
+    # ("search") without a trailing comma is a string; its gate would be single letters that deny "search".
+    with pytest.raises(ConfigurationError, match=r"AgentLoopSettings\.allowed_tools must be an iterable of tool names, not a string"):
+        AgentLoopSettings(allowed_tools=value)
+
+
+def test_allowed_tools_strips_padded_names_so_the_tool_is_allowed() -> None:
+    settings = AgentLoopSettings(allowed_tools=(" search ", "fetch"))
+    assert settings.allowed_tools == ("search", "fetch")
+    assert settings.to_runtime_config().allowed_tools == frozenset({"search", "fetch"})
+
+
+@pytest.mark.parametrize("value", [("search", ""), ("search", "   ")])
+def test_allowed_tools_rejects_blank_names(value: tuple[str, ...]) -> None:
+    with pytest.raises(ConfigurationError, match=r"AgentLoopSettings\.allowed_tools cannot include blank tool names"):
+        AgentLoopSettings(allowed_tools=value)
+
+
+@pytest.mark.parametrize("value", [("search", "fetch"), ["search", "fetch"]])
+def test_allowed_tools_keeps_a_normal_tuple_or_list(value: object) -> None:
+    settings = AgentLoopSettings(allowed_tools=value)
+    assert settings.allowed_tools == ("search", "fetch")
+    assert settings.to_runtime_config().allowed_tools == frozenset({"search", "fetch"})
+
+
+@pytest.mark.parametrize("value", [None, ()])
+def test_allowed_tools_none_and_empty_keep_their_meaning(value: object) -> None:
+    settings = AgentLoopSettings(allowed_tools=value)
+    assert settings.allowed_tools == value
+    assert settings.to_runtime_config().allowed_tools == (None if value is None else frozenset())
