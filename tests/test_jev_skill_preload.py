@@ -23,14 +23,15 @@ from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent, JevAgentSettings, JevRuntimeSettings
 from vidbyte import JevSkillStatus as RootJevSkillStatus
 from vidbyte import SkillDocument as RootSkillDocument
-from vidbyte.agents.jev.alignment.skills import (
-    _MAX_REQUEST_JSON_BYTES,
-    _MAX_STATE_AND_QUESTION_JSON_BYTES,
-    JevSkillsPreload,
-)
+from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAlignmentSettings, JevContinualSettings
+from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.constants.jev import (
+    JEV_SKILLS_MAX_REQUEST_JSON_BYTES,
+    JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES,
+)
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.jev import (
@@ -58,12 +59,13 @@ _HELPER_PATH = "vidbyte.agents.jev.alignment.skills.DecisionModelHelper"
 class ScriptedDecisionRunner:
     """Records bounded request batches and returns indexed answers or scripted failures."""
 
-    def __init__(self, *, probabilities: Mapping[int, float] | None = None, per_call: Sequence[Mapping[int, float]] = (), missing: frozenset[int] = frozenset(), fail_calls: frozenset[int] = frozenset()) -> None:
+    def __init__(self, *, probabilities: Mapping[int, float] | None = None, per_call: Sequence[Mapping[int, float]] = (), missing: frozenset[int] = frozenset(), fail_calls: frozenset[int] = frozenset(), unreported_usage_calls: frozenset[int] = frozenset()) -> None:
         # Keeps outcomes deterministic while allowing each batch and call to differ.
         self.probabilities = probabilities or {}
         self.per_call = tuple(per_call)
         self.missing = missing
         self.fail_calls = fail_calls
+        self.unreported_usage_calls = unreported_usage_calls
         self.requests: list[JevDecisionRequest] = []
 
     async def arun(self, request: JevDecisionRequest) -> DecisionModelResponse:
@@ -83,7 +85,7 @@ class ScriptedDecisionRunner:
             model="jev-1.13.0",
             answers=answers,
             raw={},
-            usage={"input_tokens": call_number * 10, "output_tokens": call_number},
+            usage=None if call_number in self.unreported_usage_calls else {"input_tokens": call_number * 10, "output_tokens": call_number},
         )
 
 
@@ -261,12 +263,12 @@ class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] every full candidate appears exactly once, even after question packing splits the settings order.
         documents = _skills(8)
         preload = _preloader(documents)
-        batches, oversized = preload._build_batches("Do the requested work")
-        self.assertFalse(oversized)
+        batches = preload._build_batches("Do the requested work")
         self.assertGreater(len(batches), 1)
-        indices = tuple(index for batch_indices, _ in batches for index in batch_indices)
+        indices = tuple(index for batch in batches for index in batch.indices)
         self.assertEqual(indices, tuple(range(1, len(documents) + 1)))
-        for batch_indices, request in batches:
+        for batch in batches:
+            batch_indices, request = batch.indices, batch.request
             self.assertEqual(tuple(question.name for question in request.questions), tuple(f"skills.skill_{index}" for index in batch_indices))
             self.assertEqual(tuple(request.state["skills"]), tuple(f"skills.skill_{index}" for index in batch_indices))
             self.assertEqual(tuple(request.state["skills"][f"skills.skill_{index}"]["text"] for index in batch_indices), tuple(documents[index - 1].text for index in batch_indices))
@@ -282,24 +284,24 @@ class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
                     for question in request.questions
                 },
             }
-            self.assertLessEqual(len(json.dumps(wire).encode("utf-8")), _MAX_REQUEST_JSON_BYTES)
+            self.assertLessEqual(len(json.dumps(wire).encode("utf-8")), JEV_SKILLS_MAX_REQUEST_JSON_BYTES)
             for question in request.questions:
                 pair = {"state": JevJson.thaw(request.state), "question": wire["questions"][question.name]}
-                self.assertLessEqual(len(json.dumps(pair).encode("utf-8")), _MAX_STATE_AND_QUESTION_JSON_BYTES)
+                self.assertLessEqual(len(json.dumps(pair).encode("utf-8")), JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES)
 
-    async def test_failed_batch_and_oversized_skill_only_affect_their_own_candidates(self) -> None:
-        # [Hidden Failure] neither an outage nor one too-large document blocks passing siblings in other batches.
+    async def test_failed_batch_and_oversized_skill_leave_answered_skills_selected(self) -> None:
+        # [Hidden Failure] neither a late outage nor one too-large document erases passing skills already answered.
         documents = (_skills(3)[0], SkillDocument(name="too_large", description="oversized", text="x" * 35_000), *_skills(4)[1:])
         preload = _preloader(tuple(documents))
-        batches, oversized = preload._build_batches("Classify each configured item")
-        self.assertIn(2, oversized)
+        batches = preload._build_batches("Classify each configured item")
+        self.assertNotIn(2, {index for batch in batches for index in batch.indices})
         self.assertGreaterEqual(len(batches), 2)
-        scripted = ScriptedDecisionRunner(probabilities={index: 0.9 for index in range(1, 7)}, fail_calls=frozenset({1}))
+        scripted = ScriptedDecisionRunner(probabilities={index: 0.9 for index in range(1, 7)}, fail_calls=frozenset({len(batches)}))
         with patch(_HELPER_PATH, new=_helper_class(scripted)):
             context = await preload.run("Classify each configured item", BaseAgentContext(system_prompt="Base."))
 
         statuses = tuple(result.status for result in preload.response.state.skills.results)
-        failed_indices = set(batches[0][0])
+        failed_indices = set(batches[-1].indices)
         self.assertEqual(statuses[1], JevSkillStatus.UNAVAILABLE)
         for index, status in enumerate(statuses, start=1):
             if index in failed_indices or index == 2:
@@ -308,22 +310,37 @@ class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(status, JevSkillStatus.SELECTED)
         self.assertNotIn("x" * 1_000, context.system_prompt)
         successful_calls = len(batches) - 1
-        self.assertEqual(preload.response.state.skills.usage.input_tokens, sum(range(20, 10 * (len(batches) + 1), 10)))
-        self.assertEqual(preload.response.state.skills.usage.output_tokens, sum(range(2, successful_calls + 2)))
+        self.assertEqual(preload.response.state.skills.usage.input_tokens, sum(range(10, 10 * (successful_calls + 1), 10)))
+        self.assertEqual(preload.response.state.skills.usage.output_tokens, sum(range(1, successful_calls + 1)))
 
-    async def test_all_batch_failures_fail_open_without_skill_injection(self) -> None:
-        # [Provider Outage] independent provider failures produce unavailable results but preserve the baseline context.
+    async def test_batch_failure_stops_later_batches_and_fails_open(self) -> None:
+        # [Provider Outage] the first failure ends the asking, every skill stays unavailable, and the baseline context is kept.
         documents = _skills(6)
         preload = _preloader(documents)
-        batches, _ = preload._build_batches("Do this work")
-        scripted = ScriptedDecisionRunner(fail_calls=frozenset(range(1, len(batches) + 1)))
+        batches = preload._build_batches("Do this work")
+        self.assertGreaterEqual(len(batches), 2)
+        scripted = ScriptedDecisionRunner(fail_calls=frozenset({1}))
         original = BaseAgentContext(system_prompt="Base context.")
         with patch(_HELPER_PATH, new=_helper_class(scripted)):
             result = await preload.run("Do this work", original)
 
         self.assertEqual(result, original)
+        self.assertEqual(len(scripted.requests), 1)
         self.assertEqual(tuple(item.status for item in preload.response.state.skills.results), (JevSkillStatus.UNAVAILABLE,) * len(documents))
-        self.assertIsNone(preload.response.state.skills.usage)
+        self.assertEqual(preload.response.state.skills.usage, JevUsage.total(()))
+        self.assertEqual((preload.response.state.skills.usage.input_tokens, preload.response.state.skills.usage.output_tokens), (0, 0))
+
+    async def test_decision_without_token_counts_counts_as_a_failed_batch(self) -> None:
+        # [Silent Failure] a reply whose cost cannot be recorded never selects skills or reports a partial usage total.
+        preload = _preloader(_skills(1))
+        scripted = ScriptedDecisionRunner(probabilities={1: 0.95}, unreported_usage_calls=frozenset({1}))
+        original = BaseAgentContext(system_prompt="Base.")
+        with patch(_HELPER_PATH, new=_helper_class(scripted)):
+            result = await preload.run("Update the docs", original)
+
+        self.assertEqual(result, original)
+        self.assertEqual(preload.response.state.skills.results[0].status, JevSkillStatus.UNAVAILABLE)
+        self.assertEqual(preload.response.state.skills.usage.total_tokens, 0)
 
     async def test_no_skills_performs_zero_decision_calls(self) -> None:
         # [Silent Failure] the empty tuple is a true opt-out and leaves the context unchanged.

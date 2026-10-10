@@ -2,13 +2,13 @@
 
 PURPOSE: Selects caller-configured skill documents for one JevAgent request and appends only passing document bodies to that run's system prompt.
 ROLE IN CODEBASE: JevAgent builds this preload only for nonempty `JevAlignmentSettings.skills`; JevRuntime invokes it after prompt and tool alignment and before run-state setup and the main loop.
-ARCHITECTURE NOTE: The preload packs indexed questions into bounded TypeSafe decision requests, scores each answer independently, and records metadata plus summed usage without storing skill text in JevAgent.response. Context replacement is immutable; runtime mutation cleanup remains JevRuntime's responsibility.
+ARCHITECTURE NOTE: The preload packs indexed questions into bounded TypeSafe decision requests, scores each answer independently, and records metadata plus the JevUsage total of the answered requests without storing skill text in JevAgent.response. Context replacement is immutable; runtime mutation cleanup remains JevRuntime's responsibility.
 FUNCTION INVENTORY:
     JevSkillsPreload.__init__(skills, decision, threshold, response) -> None: stores the validated run-time inputs.
-    JevSkillsPreload.run(message, context) -> BaseAgentContext: batches questions, records per-skill outcomes, and returns the skill-extended context.
-    JevSkillsPreload._build_batches(message) -> tuple: greedily packs whole candidate records under local serialized-byte bounds and returns oversized indices separately.
+    JevSkillsPreload.run(message, context) -> BaseAgentContext: asks Jev batch by batch, records per-skill outcomes, and returns the skill-extended context.
+    JevSkillsPreload._build_batches(message) -> tuple[JevSkillBatch, ...]: greedily packs whole skills in settings order; a skill too large to send alone joins no batch.
+    JevSkillsPreload._build_batch(message, indices) -> JevSkillBatch | None: builds one request, or None when it would exceed the byte bounds.
     JevSkillsPreload._score_skill(index, skill, answers) -> JevSkillResult: independently scores one fixed-index answer.
-    JevSkillsPreload._sum_usage(usages) -> JevUsage | None: adds available usage from successful batches once.
     JevSkillsPreload._append_selected(context, selected) -> BaseAgentContext: appends exact full texts to a replaced system prompt.
 COMMON MODIFICATION PATTERNS: Keep source resolution outside this core contract. Future source adapters may provide resolved SkillDocument values, but must preserve indexed question prose and per-candidate result behavior.
 WHAT NOT TO DO:
@@ -16,7 +16,7 @@ WHAT NOT TO DO:
     2. Do not interpolate caller names, descriptions, sources, or text into Jev instructions.
     3. Do not let one missing answer or failed batch erase another candidate's valid answer.
     4. Do not catch cancellation or arbitrary programming errors as provider failures.
-KNOWN EDGE CASES: A candidate that cannot fit alone is unavailable without truncation; a failed batch does not block other batches. An empty tuple is handled by JevAgent, which constructs no preload and makes no skill call.
+KNOWN EDGE CASES: A candidate that cannot fit alone is unavailable without truncation. The first failed batch stops the asking: skills already answered keep their outcome and every skill not yet answered is unavailable. An empty tuple is handled by JevAgent, which constructs no preload and makes no skill call.
 RELATED DOCS: `docs/design/jev-skills-preload.md`, `tests/features/jev_skills_preload/FEATURE.md`, and `skills/jev-agent/SKILL.md`.
 TESTS: `tests/test_jev_skill_preload.py` and `scripts/test-jev-skills-preload.py`.
 """
@@ -24,19 +24,25 @@ TESTS: `tests/test_jev_skill_preload.py` and `scripts/test-jev-skills-preload.py
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import replace
 
 from vidbyte.agents.jev.preload import JevPreload
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.config import DecisionModelConfig
-from vidbyte.lib.constants.jev import JEV_MAX_QUESTIONS
+from vidbyte.lib.constants.jev import (
+    JEV_SKILL_INDEX_BASE,
+    JEV_SKILLS_MAX_REQUEST_JSON_BYTES,
+    JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES,
+    JEV_SKILLS_PROMPT_SECTION,
+)
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevDecisionRequest,
     JevJson,
+    JevSkillBatch,
     JevSkillResult,
     JevSkillsOutcome,
 )
@@ -45,16 +51,6 @@ from vidbyte.lib.enums.jev import JevQuestionType, JevSkillStatus
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.jev.decision import DecisionModelHelper
 from vidbyte.lib.jev.preflight.skills import JevSkillRelevanceQuestion
-
-_SKILL_SECTION = """
-
---- Caller-selected skill guidance for this request ---
-
-"""
-_SKILL_INDEX_BASE = 1
-_MAX_REQUEST_JSON_BYTES = 60_000
-_MAX_STATE_AND_QUESTION_JSON_BYTES = 30_000
-_SkillBatch = tuple[tuple[int, ...], JevDecisionRequest]
 
 
 class JevSkillsPreload(JevPreload):
@@ -70,100 +66,66 @@ class JevSkillsPreload(JevPreload):
 
     async def run(self, message: str, context: BaseAgentContext) -> BaseAgentContext:
         # @intent each-candidate-has-an-independent-result
-        # Batching bounds the request without truncating candidate text; an outage or oversized record only affects its own batch or candidate.
-        batches, oversized = self._build_batches(message)
-        oversized_set = set(oversized)
-        results: dict[int, JevSkillResult] = {
+        # An answer only ever decides its own skill, and a skill Jev never answered for is unavailable rather than a no.
+        # Start every skill as unavailable; a skill's status changes only once Jev has actually answered for it.
+        results = {
             index: JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=JevSkillStatus.UNAVAILABLE)
-            for index, skill in enumerate(self.skills, start=_SKILL_INDEX_BASE)
-            if index in oversized_set
+            for index, skill in enumerate(self.skills, start=JEV_SKILL_INDEX_BASE)
         }
-        selected_indices: set[int] = set()
-        usages: list[JevUsage | None] = []
-        for indices, request in batches:
-            try:
-                decision = await DecisionModelHelper(self.decision).arun(request)
-            except VidbyteSdkError:
-                for index in indices:
-                    skill = self.skills[index - _SKILL_INDEX_BASE]
-                    results[index] = JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=JevSkillStatus.UNAVAILABLE)
-                continue
-            usages.append(JevUsage.from_usage_payload(decision.usage or {}))
-            for index in indices:
-                skill = self.skills[index - _SKILL_INDEX_BASE]
-                result = self._score_skill(index, skill, decision.answers)
-                results[index] = result
-                if result.status is JevSkillStatus.SELECTED:
-                    selected_indices.add(index)
-        ordered_results = tuple(results[index] for index in range(1, len(self.skills) + 1))
-        selected = tuple(skill for index, skill in enumerate(self.skills, start=1) if index in selected_indices)
-        self.response.skills(JevSkillsOutcome(results=ordered_results, usage=self._sum_usage(usages)))
+        # Split the skills into requests small enough for Jev. A skill too large to send even on its own joins no
+        # batch, so it stays unavailable instead of being cut short.
+        batches = self._build_batches(message)
+        usages: list[JevUsage] = []
+        try:
+            for batch in batches:
+                # Ask Jev about every skill in this batch in one request.
+                decision = await DecisionModelHelper(self.decision).arun(batch.request)
+                # Count the tokens the request used; a reply without token counts fails like any other Jev error.
+                usages.append(JevUsage.from_decision(decision))
+                # Score each skill from its own answer, so a missing or malformed answer cannot change a sibling's outcome.
+                results.update({index: self._score_skill(index, self.skills[index - JEV_SKILL_INDEX_BASE], decision.answers) for index in batch.indices})
+        except VidbyteSdkError:
+            # Jev failed, so stop asking: skills it already answered keep their outcome, the rest stay unavailable,
+            # and the run goes on without them because skills are optional guidance.
+            pass
+        # Record every skill's outcome in settings order with the tokens the answered requests used, but never the skill text.
+        self.response.skills(JevSkillsOutcome(results=tuple(results.values()), usage=JevUsage.total(usages)))
+        # Add the full text of each selected skill to this run's system prompt only.
+        selected = tuple(skill for skill, result in zip(self.skills, results.values(), strict=True) if result.status is JevSkillStatus.SELECTED)
         return self._append_selected(context, selected)
 
-    def _build_batches(self, message: str) -> tuple[tuple[_SkillBatch, ...], tuple[int, ...]]:
+    def _build_batches(self, message: str) -> tuple[JevSkillBatch, ...]:
         # @intent pack-without-truncating-candidates
-        # Each trial serializes the same model/state/question shape as the provider body and keeps the original global question index.
-        batches: list[_SkillBatch] = []
-        oversized: list[int] = []
-        current: list[tuple[int, SkillDocument]] = []
-        for index, skill in enumerate(self.skills, start=1):
-            candidate = (index, skill)
-            _, fits_alone = self._build_batch(message, (candidate,))
-            if not fits_alone:
-                oversized.append(index)
+        # Skills are packed whole in settings order, so each keeps its global question index and its full text.
+        batches: list[JevSkillBatch] = []
+        for index, _ in enumerate(self.skills, start=JEV_SKILL_INDEX_BASE):
+            alone = self._build_batch(message, (index,))
+            # A skill too large to send even on its own joins no batch.
+            if alone is None:
                 continue
-            _, fits_current = self._build_batch(message, (*current, candidate))
-            if current and not fits_current:
-                completed, _ = self._build_batch(message, current)
-                if completed is not None:
-                    batches.append(completed)
-                current = [candidate]
+            grown = self._build_batch(message, (*batches[-1].indices, index)) if batches else None
+            # Add the skill to the open batch while the request still fits; otherwise it opens the next batch.
+            if grown is None:
+                batches.append(alone)
             else:
-                current.append(candidate)
-        if current:
-            completed, _ = self._build_batch(message, current)
-            if completed is not None:
-                batches.append(completed)
-        return tuple(batches), tuple(oversized)
+                batches[-1] = grown
+        return tuple(batches)
 
-    def _build_batch(self, message: str, indexed: Sequence[tuple[int, SkillDocument]]) -> tuple[_SkillBatch | None, bool]:
+    def _build_batch(self, message: str, indices: tuple[int, ...]) -> JevSkillBatch | None:
         # @intent byte-bounds-match-the-provider-json-shape
-        # Counting the UTF-8 bytes of a standard JSON encoding keeps the estimate conservative without claiming provider byte limits.
-        questions = tuple(JevSkillRelevanceQuestion(index).to_question() for index, _ in indexed)
-        state = {
-            "request": message,
-            "skills": {
-                JevSkillRelevanceQuestion(index).name: {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "source": skill.source,
-                    "text": skill.text,
-                }
-                for index, skill in indexed
-            },
-        }
-        question_payloads = {
-            question.name: {
-                "type": question.question_type.value,
-                "instructions": JevJson.thaw(question.instructions),
-                "criteria": {option.name: JevJson.thaw(option.description) for option in question.options},
-            }
-            for question in questions
-        }
-        wire = {"model": self.decision.model, "state": state, "questions": question_payloads}
-        request_bytes = len(json.dumps(wire).encode("utf-8"))
-        state_question_bytes = max(
-            len(json.dumps({"state": state, "question": payload}).encode("utf-8"))
-            for payload in question_payloads.values()
-        )
-        within_bounds = (
-            1 <= len(questions) <= JEV_MAX_QUESTIONS
-            and request_bytes <= _MAX_REQUEST_JSON_BYTES
-            and state_question_bytes <= _MAX_STATE_AND_QUESTION_JSON_BYTES
-        )
-        if not within_bounds:
-            return None, False
-        return (tuple(index for index, _ in indexed), JevDecisionRequest(state=state, questions=questions)), True
+        # Counting the UTF-8 bytes of the JSON body TypeSafe receives keeps the estimate conservative without claiming provider byte limits.
+        # The state carries the user's message and each skill's full record under its own question's name.
+        questions = tuple(JevSkillRelevanceQuestion(index).to_question() for index in indices)
+        skills = (self.skills[index - JEV_SKILL_INDEX_BASE] for index in indices)
+        records = {question.name: {"name": skill.name, "description": skill.description, "source": skill.source, "text": skill.text} for question, skill in zip(questions, skills, strict=True)}
+        state = {"request": message, "skills": records}
+        # Measure the whole body, and the state paired with each single question, the way TypeSafe receives them.
+        payloads = {question.name: {"type": question.question_type.value, "instructions": JevJson.thaw(question.instructions), "criteria": {option.name: JevJson.thaw(option.description) for option in question.options}} for question in questions}
+        request_bytes = len(json.dumps({"model": self.decision.model, "state": state, "questions": payloads}).encode("utf-8"))
+        state_and_question_bytes = max(len(json.dumps({"state": state, "question": payload}).encode("utf-8")) for payload in payloads.values())
+        if request_bytes > JEV_SKILLS_MAX_REQUEST_JSON_BYTES or state_and_question_bytes > JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES:
+            return None
+        return JevSkillBatch(indices=indices, request=JevDecisionRequest(state=state, questions=questions))
 
     def _score_skill(self, index: int, skill: SkillDocument, answers: Mapping[str, JevAnswer]) -> JevSkillResult:
         # @intent canonical-noul-threshold-owns-selection
@@ -178,24 +140,12 @@ class JevSkillsPreload(JevPreload):
         return JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=status, probability=answer.noul)
 
     @staticmethod
-    def _sum_usage(usages: Sequence[JevUsage | None]) -> JevUsage | None:
-        # @intent batch-usage-is-counted-once
-        # Successful batch usage is folded into one TypeSafe record, matching existing Jev alignment aggregation semantics.
-        present = [usage for usage in usages if usage is not None]
-        if not present:
-            return None
-        return JevUsage.from_usage_payload({
-            "input_tokens": sum(usage.input_tokens or 0 for usage in present),
-            "output_tokens": sum(usage.output_tokens or 0 for usage in present),
-        })
-
-    @staticmethod
     def _append_selected(context: BaseAgentContext, selected: tuple[SkillDocument, ...]) -> BaseAgentContext:
         # @intent preserve-baseline-and-append-selected-guidance
         # The selected source text is added only to the immutable replacement context for this run and is never copied into its response record.
         if not selected:
             return context
-        text = _SKILL_SECTION + "\n\n---\n\n".join(skill.text for skill in selected)
+        text = JEV_SKILLS_PROMPT_SECTION + "\n\n---\n\n".join(skill.text for skill in selected)
         return replace(context, system_prompt=f"{context.system_prompt or ''}{text}")
 
 

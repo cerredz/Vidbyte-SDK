@@ -12,7 +12,7 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 - Caller fields remain structured, untrusted decision state. Question wording contains only generated identifiers, never caller-provided metadata or body text.
 - Each candidate answer is scored with `DecisionModelHelper.score_noul` and the configured `skills_threshold` independently.
 - A valid answer remains usable when a sibling answer is missing; missing or malformed answers make only their own candidate unavailable.
-- A Jev SDK/request failure marks that batch unavailable; other batches can still select skills, and the main agent continues.
+- A Jev SDK/request failure stops the asking: skills already answered keep their outcome, every skill not yet answered is unavailable, and the main agent continues.
 - Only selected full bodies are appended, in configuration order, after the existing effective system prompt. Caller context and agent settings remain unchanged.
 - An explicit `options["system"]` value is the effective baseline and the provider receives that value with selected skill text appended.
 - Gate stop and specialist delegation precede preload; both perform zero skill relevance calls.
@@ -42,10 +42,10 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 - A passing answer adds only its corresponding full skill text to the provider's system prompt.
 - A below-threshold answer is skipped and does not alter the prompt.
 - A missing/non-noul answer marks only that skill unavailable; sibling passing answers still inject their text.
-- A request/provider SDK failure marks only that batch unavailable; other batches can still inject selected skills, and the main run continues.
+- A request/provider SDK failure, including a reply without both token counts, sends no further batches; earlier batches can still inject selected skills, and the main run continues.
 - An explicit `system` option remains the prompt baseline; the effective provider option includes selected text.
 - The original context remains unchanged and repeated runs do not inherit prior skill text or temporary tools.
-- Usage is carried with candidate outcomes when TypeSafe supplies it.
+- Usage is carried with candidate outcomes as `JevUsage.total` of the answered requests; it is zero tokens when no request was answered.
 
 ## State Transitions
 
@@ -53,7 +53,7 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 2. The gate stops the request or delegates to a specialist, returning before skill preload; otherwise the main path continues.
 3. Enabled prompt and tool alignment finish and update the run context.
 4. The runtime selects the explicit caller `system` option as baseline when it is a string; otherwise the aligned context prompt is the baseline.
-5. The preload greedily packs indexed questions under conservative UTF-8 JSON byte bounds, preserving global indices and full candidate text. SDK failure marks only that batch unavailable; later batches continue.
+5. The preload greedily packs indexed questions under conservative UTF-8 JSON byte bounds, preserving global indices and full candidate text. The first SDK failure stops the asking, so that batch and every later batch stay unavailable.
 6. Code scores each normalized noul independently, records every result, and appends selected full bodies in settings order.
 7. Run-state setup, selector processing, and the inherited loop execute with the resulting context.
 8. A `finally` block restores system prompt and tool fields and releases attached tool sessions.
@@ -64,7 +64,7 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 - Small collections fit in one skill request; larger collections use multiple bounded requests in stable configured order.
 - Candidate identifiers depend only on configured tuple order; names and bodies cannot steer question prose or answer mapping.
 - Every candidate body appears whole in decision state and, if selected, whole in the final run prompt.
-- A missing answer affects only its candidate; a batch request failure selects none from that batch.
+- A missing answer affects only its candidate; a batch request failure selects none from that batch or any later batch.
 - The response contains no skill body.
 - No runtime mutation or injected prompt text is retained by a later run.
 - The classifier checks relevance only; skill content is not executed or retrieved.
@@ -77,7 +77,7 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 
 ## Known Failure Modes
 
-- A batch request failure makes only its candidates unavailable; no text is truncated and successful batches retain independent results.
+- A batch request failure makes its candidates and every later candidate unavailable; no text is truncated and batches answered before it retain independent results.
 - A single candidate that exceeds local request bounds is unavailable without preventing later candidates from being classified.
 - A missing or malformed individual answer is unavailable rather than a negative answer.
 - Skill relevance is a model judgment and can be misclassified; the threshold remains caller configurable.

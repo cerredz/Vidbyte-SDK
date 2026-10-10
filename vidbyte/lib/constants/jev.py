@@ -383,6 +383,14 @@ JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
+# Skill preload. Selected skill bodies follow this heading in the run's system prompt, and relevance questions
+# are numbered from the base index. Each relevance request stays under these local UTF-8 JSON byte caps, which
+# sit below TypeSafe's token limits, so a skill is batched whole and never truncated.
+JEV_SKILLS_PROMPT_SECTION: str = "\n\n--- Caller-selected skill guidance for this request ---\n\n"
+JEV_SKILL_INDEX_BASE: int = 1
+JEV_SKILLS_MAX_REQUEST_JSON_BYTES: int = 60_000
+JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES: int = 30_000
+
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
     "JEV_CAN_SIMPLIFY_THRESHOLD",
@@ -654,4 +662,8 @@ __all__ = [
     "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
     "JEV_COMPUTE_CLONES_DEFAULT",
     "JEV_COMPUTE_CLONES_MAX",
+    "JEV_SKILLS_PROMPT_SECTION",
+    "JEV_SKILL_INDEX_BASE",
+    "JEV_SKILLS_MAX_REQUEST_JSON_BYTES",
+    "JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES",
 ]

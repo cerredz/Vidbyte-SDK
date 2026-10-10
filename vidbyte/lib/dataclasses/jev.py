@@ -3728,6 +3728,25 @@ class JevSkillsOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class JevSkillBatch:
+    """One skill relevance request and the settings positions of the skills it asks about."""
+
+    indices: tuple[int, ...]
+    request: JevDecisionRequest
+
+    def __post_init__(self) -> None:
+        # @intent batch-indices-route-answers
+        # Each index is the skill's position in the settings, and its answer comes back under that index's
+        # question, so a batch whose indices and questions disagree would score the wrong skill. Each index value
+        # is already validated by JevSkillRelevanceQuestion, which built the question it names.
+        """Require exactly one distinct settings index per question in the request."""
+        if not isinstance(self.request, JevDecisionRequest):
+            raise ConfigurationError("JevSkillBatch.request must be a JevDecisionRequest.", details={"request": type(self.request).__name__})
+        if not isinstance(self.indices, tuple) or len(set(self.indices)) != len(self.indices) or len(self.indices) != len(self.request.questions):
+            raise ConfigurationError("JevSkillBatch.indices must be a tuple naming each request question's skill exactly once.", details={"indices": repr(self.indices), "questions": len(self.request.questions)})
+
+
+@dataclass(frozen=True, slots=True)
 class JevUsageReport:
     """One JevAgent run's usage, read from the agent's one usage ledger and priced from the SDK pricebook.
 
@@ -4477,6 +4496,7 @@ __all__ = [
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",
+    "JevSkillBatch",
     "JevSkillResult",
     "JevSkillsOutcome",
 ]
