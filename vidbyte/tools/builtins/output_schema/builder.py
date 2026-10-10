@@ -114,12 +114,17 @@ class OutputSchemaBuilder:
             name = raw.strip()
             return OutputSchemaField(name=name) if name else None
         if isinstance(raw, Mapping):
-            name = str(raw.get("name", "")).strip()
+            # @intent null-optional-arg-means-default
+            # Models send unset optionals as JSON null; treat a null name or description
+            # like an omitted key so str(None) never becomes the literal text "None".
+            raw_name = raw.get("name")
+            name = "" if raw_name is None else str(raw_name).strip()
             if not name:
                 return None
+            raw_description = raw.get("description")
             return OutputSchemaField(
                 name=name,
-                description=str(raw.get("description", "")).strip(),
+                description="" if raw_description is None else str(raw_description).strip(),
                 repeated=bool(raw.get("repeated", False)),
             )
         return None
