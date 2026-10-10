@@ -31,7 +31,6 @@ TYPESAFE_401 = "TypeSafe decision request failed: TypeSafe rejected the API key 
 TYPESAFE_MISMATCH = "TypeSafe answers do not match the questions sent: missing ['team'], unexpected ['extra']."
 MANAGED_ONLY = "JevRuntimeSettings.decision must use VIDBYTE_MANAGED mode; direct TypeSafe configurations are supported only with standalone DecisionModelRunner."
 DECISION_REFUSAL = "Model '{model}' is a decision model and cannot drive an agent loop; call it through DecisionModelRunner."
-BASETEN_ALIAS_REFUSAL = "Model 'mercury-decide' is registered under provider 'inception', not 'baseten'."
 VIDBYTE_KEY = "vb_live_" + "a" * 32
 
 
@@ -132,7 +131,7 @@ class AgentBoundaryTests(unittest.TestCase):
         self.assertIs(settings.decision.normalized_provider(), ModelProvider.TYPESAFE)
 
     def test_agent_settings_accept_decision_providers_but_runner_build_refuses_them(self) -> None:
-        # [Hidden Failure] EC-22/D-14/EC-34: settings pass (modality AUTO); the first runner build names DecisionModelRunner instead; Baseten's bare alias is refused at settings (r8).
+        # [Hidden Failure] EC-22/D-14/EC-34: settings pass (modality AUTO); the first runner build names DecisionModelRunner instead; Baseten's bare alias is accepted by settings and refused at runner build too (r10).
         cases = (("perplexity", "pplx-decider-v1.1-27b"), ("baseten", "inception/mercury-decide"), ("inception", "mercury-decide"), ("meragpt", "sd-1"), ("cloudflare", "clef-flash"))
         for provider, model in cases:
             with self.subTest(provider=provider, model=model):
@@ -144,10 +143,13 @@ class AgentBoundaryTests(unittest.TestCase):
                 self.assertEqual(caught.exception.details["runner_type"], "decision")
         self.assertEqual(Runner(provider=None, model_name="perplexity/pplx-decider-v1-27b").resolve_runner_type(), "decision")
         self.assertEqual(Runner(provider="foundry", model_name="microsoft-decision-2").resolve_runner_type(), "decision")
-        # [Hidden Failure] EC-34/INV-30: `mercury-decide` belongs to Inception from r8, so pairing it with Baseten fails at settings construction.
+        # [Hidden Failure] EC-34/INV-30/D-14: settings accept Baseten's bare alias `mercury-decide`; the first runner build refuses it as a decision model.
+        settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="baseten", model_name="mercury-decide")
+        self.assertEqual((settings.provider, settings.model_name), ("baseten", "mercury-decide"))
         with self.assertRaises(ConfigurationError) as alias:
-            JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="baseten", model_name="mercury-decide")
-        self.assertEqual(alias.exception.message, BASETEN_ALIAS_REFUSAL)
+            Runner(provider="baseten", model_name="mercury-decide").build()
+        self.assertEqual(alias.exception.message, DECISION_REFUSAL.format(model="mercury-decide"))
+        self.assertEqual(alias.exception.details["runner_type"], "decision")
 
     def test_helper_scores_noul_answers_from_any_provider(self) -> None:
         # [Silent Failure] INV-25: score_noul and noul_passes read JevAnswer records, not the provider that produced them.

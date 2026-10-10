@@ -95,7 +95,7 @@ Paths below are relative to `tests/features/decision_model_providers/`. Level: *
 | INV-24 | `TypeSafeRunnerTests.test_call_builder_returns_a_header_free_decision_http_call` | unit | `_TypeSafeCallBuilder.decision` renamed, signature changed, headers in repr, managed headers dropped | `isinstance(DecisionHttpCall)`, repr scans for both keys, URLs, headers, signature parameter kinds |
 | INV-24, NFR-7 | `TypeSafeRunnerTests.test_three_adapters_share_the_run_decision_signature` | unit | A new adapter with a different keyword-only signature (`tests/test_jev_usage_ledger.py` patch pattern breaks) | Parameter names and kinds compared across the three adapters for three methods |
 | AC-15, INV-22 | `AgentBoundaryTests.test_jev_runtime_settings_still_rejects_direct_configs` | unit | `JevRuntimeSettings` accepting a direct Perplexity config | Exact existing message for three direct providers; managed TypeSafe still accepted |
-| EC-22, D-14, EC-34 | `AgentBoundaryTests.test_agent_settings_accept_decision_providers_but_runner_build_refuses_them` | unit | Settings rejecting the provider or `Runner.build` constructing a text runner for a decision model; Baseten paired with the bare `mercury-decide` passing settings (spec r8) | Five provider/model pairs (Baseten with `inception/mercury-decide`, Inception with `mercury-decide`): settings construct, `build()` raises the exact refusal with `runner_type == "decision"`; qualified and prefix resolution checked; `JevAgentSettings(provider="baseten", model_name="mercury-decide")` raises the exact EC-34 message |
+| EC-22, D-14, EC-34 | `AgentBoundaryTests.test_agent_settings_accept_decision_providers_but_runner_build_refuses_them` | unit | Settings rejecting the provider or `Runner.build` constructing a text runner for a decision model, including Baseten paired with the bare `mercury-decide` (spec r10) | Five provider/model pairs (Baseten with `inception/mercury-decide`, Inception with `mercury-decide`): settings construct, `build()` raises the exact refusal with `runner_type == "decision"`; qualified and prefix resolution checked; `JevAgentSettings(provider="baseten", model_name="mercury-decide")` constructs and `Runner(provider="baseten", model_name="mercury-decide").build()` raises the same decision refusal (EC-34, D-14); the registry ownership message stays pinned by `test_inception_and_baseten_resolve_to_their_own_provider` |
 | INV-25 | `AgentBoundaryTests.test_helper_scores_noul_answers_from_any_provider` | unit | `SystemOneAnswers` producing answers `score_noul` cannot read; `model()` ignoring the echo for Perplexity | Mean, veto, and `noul_passes` asserted over Perplexity-normalized answers; `error()` carries usage and provider |
 
 ## Tests deliberately NOT written
@@ -246,3 +246,17 @@ The 24 failures are the 8 granted tests, the widened `test_each_host_posts_the_t
   - The Liquid and meraGPT subtests already pass.
 
 No failure comes from the fixtures or from a test-authoring bug. Each failure goes away when the matching §12.3 row of r8 lands.
+
+### r10 grant
+
+One-assertion grant from the coordinator after spec r10 (`3240c66e`). The S3 implementer found that `JevAgentSettings.__post_init__` never calls `validate_provider_model_pair`, and it refuses only TypeSafe. D-14 already places the agent refusal at runner build, and Q-5 (default no) declines a settings-level check. So r10 restates EC-34:
+- the settings accept `(baseten, mercury-decide)`;
+- the first runner build refuses the pair through `_refuse_decision_runner`, with runner type `decision`.
+
+The registry half is unchanged: `validate_provider_model_pair(BASETEN, "mercury-decide")` raises the INV-30 ownership message, and `test_inception_and_baseten_resolve_to_their_own_provider` still asserts it. Checked against r10 EC-34 (spec line 269) and D-14 before editing. No test was renamed.
+
+| Test (file → name) | Grant reason | Before | After |
+|---|---|---|---|
+| `test_decision_regression_typesafe.py` → `AgentBoundaryTests.test_agent_settings_accept_decision_providers_but_runner_build_refuses_them` | EC-34, D-14, Q-5 (spec r10) | The closing assertion expected `JevAgentSettings(provider="baseten", model_name="mercury-decide")` to raise `ConfigurationError: Model 'mercury-decide' is registered under provider 'inception', not 'baseten'.` (constant `BASETEN_ALIAS_REFUSAL`) | The settings construct with `(provider, model_name) == ("baseten", "mercury-decide")`. `Runner(provider="baseten", model_name="mercury-decide").build()` raises `ConfigurationError` with `DECISION_REFUSAL.format(model="mercury-decide")` and `details["runner_type"] == "decision"`. `BASETEN_ALIAS_REFUSAL` is removed. |
+
+Run against the built implementation (HEAD after this grant): `python -m pytest tests/features/decision_model_providers -q` → 87 passed.
