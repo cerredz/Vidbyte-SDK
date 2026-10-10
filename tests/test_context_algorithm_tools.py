@@ -220,6 +220,22 @@ class TrajectoryCheckpointToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(manager.get_by_id("trajectory_checkpoint:1"), frozen)
         self.assertEqual(manager.get_by_id("trajectory_checkpoint:2").reasoning_summary, "new")
 
+    async def test_null_title_and_feedback_match_omitted(self) -> None:
+        # @intent null-optional-arg-means-default: null title/feedback render exactly like omitted ones.
+        omitted_tool, omitted_manager = self._tool()
+        null_tool, null_manager = self._tool()
+        omitted = await omitted_tool.execute(self._call(reasoning_summary="r", trajectory="t", output="o"))
+        nulled = await null_tool.execute(
+            self._call(reasoning_summary="r", trajectory="t", output="o", title=None, feedback=None)
+        )
+        self.assertEqual(nulled.status, ToolStatus.SUCCESS, nulled.output)
+        self.assertEqual(nulled.output, omitted.output)
+        stored = null_manager.get_by_id("trajectory_checkpoint:1")
+        self.assertEqual(stored.title, omitted_manager.get_by_id("trajectory_checkpoint:1").title)
+        self.assertEqual(stored.title, "Runtime Checkpoint")
+        self.assertEqual(stored.feedback, "")
+        self.assertNotIn("None", nulled.output)
+
     async def test_rejected_upsert_returns_error(self) -> None:
         tool, _ = self._tool()
         call = self._call(reasoning_summary="r", trajectory="t", output="o")
