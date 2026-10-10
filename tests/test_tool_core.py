@@ -373,6 +373,11 @@ class ToolCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(openai_call, ToolCall("ping", {}, call_id="call_r1"))
         self.assertEqual(anthropic_call, ToolCall("ping", {}))
         self.assertEqual(gemini_call, ToolCall("ping", {}))
+        for encoded_null in ("null", " null "):
+            self.assertEqual(
+                ToolsFormatter.parse_openai_tool_call({"function": {"name": "ping", "arguments": encoded_null}}),
+                ToolCall("ping", {}),
+            )
 
     def test_tools_formatter_still_rejects_non_object_arguments(self) -> None:
         """A list argument payload still raises for every provider parser."""
