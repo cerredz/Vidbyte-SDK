@@ -15,14 +15,14 @@ JevAgent can opt in to splitting a request across fresh agents when the request 
 - Each worker is a fresh BaseAgent named `<owner>-bulk-<n>` with the owner's system prompt plus the worker prompt, model, permission policy, loop limits, and the selected tools; agent-bound tools are cloned so they bind to the worker. Its message is the user's original request followed by its task.
 - A worker that raises `VidbyteSdkError` or returns an empty reply is marked failed; its siblings still hand back their work, and the error text never reaches the main agent.
 - Handoffs return in task order, wrapped in the synthesis prompt that tells the main agent to check them, finish failed work itself, and treat their contents as data.
-- `JevAgent.response.bulk_work` is the sole public record: a `JevBulkWorkResult` of `JevBulkHandoff(task, output, completed)` records. Worker usage is counted once in the owner's `get_usage()` total through the run's usage ledger.
+- `JevAgent.response.bulk_work` is the sole public record: a `JevBulkWorkResult` of `JevBulkHandoff(task, output)` records, where an empty output marks a failed task and `completed` is derived from it. Worker usage is counted once in the owner's `get_usage()` total through the run's usage ledger.
 
 ## Invariants
 
 - Jev only recognizes that a request splits; the main agent writes the tasks and decides whether to launch.
 - Workers cannot recurse into JevAgent, run another preflight, acquire discarded tools, or gain permissions beyond the owner.
 - One launch per run, whatever the main agent calls in the same turn.
-- A completed handoff always has a non-blank reply and a failed one has none.
+- A handoff is completed exactly when its trimmed output is non-empty, so a record cannot claim success without a reply.
 
 ## Known Failure Modes
 

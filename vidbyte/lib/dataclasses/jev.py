@@ -3697,18 +3697,20 @@ class JevClarification:
 
 @dataclass(frozen=True, slots=True)
 class JevBulkHandoff:
-    """What one bulk-work agent handed back: its task, its reply, and whether it completed with a reply."""
+    """What one bulk-work agent handed back: its task and its reply, which is empty when the agent failed."""
 
     task: str
     output: str
-    completed: bool
 
     def __post_init__(self) -> None:
         JevText.require(self.task, field_name="bulk handoff task")
-        if not isinstance(self.completed, bool):
-            raise JevValidation.error("bulk handoff completed", "a bool", self.completed)
-        if not isinstance(self.output, str) or bool(self.output.strip()) is not self.completed:
-            raise JevValidation.error("bulk handoff output", "a non-blank reply when completed and an empty string when failed", self.output)
+        if not isinstance(self.output, str) or self.output != self.output.strip():
+            raise JevValidation.error("bulk handoff output", "a trimmed reply, or an empty string when the agent failed", self.output)
+
+    @property
+    def completed(self) -> bool:
+        """Whether the agent finished its task with a reply."""
+        return bool(self.output)
 
 
 @dataclass(frozen=True, slots=True)

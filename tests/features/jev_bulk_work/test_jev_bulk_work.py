@@ -11,10 +11,13 @@ TESTS: Run `python scripts/test-jev-bulk-work.py`.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import importlib.util
+import inspect
 import json
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -51,7 +54,7 @@ from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
 from vidbyte.lib.jev.decision import DecisionModelHelper
-from vidbyte.lib.jev.preflight.bulk_work import BULK_WORK_QUESTIONS, ITEM
+from vidbyte.lib.jev.preflight.bulk_work import BULK_WORK_QUESTIONS, BulkWorkMultipleItemsQuestion
 from vidbyte.lib.jev.preflight.clarity import IGNORE_CLAIMS, JUDGE_MEANING
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -235,14 +238,15 @@ class JevBulkSettingsTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             _settings(bulk_work=object())
 
-    def test_records_reject_a_handoff_that_contradicts_itself_and_a_launch_of_one(self) -> None:
-        # [Silent Failure] A completed handoff must carry a reply, a failed one must not, and a launch always has at least two agents.
-        done = JevBulkHandoff(task="Summarize report alpha.", output="alpha summary", completed=True)
-        failed = JevBulkHandoff(task="Summarize report beta.", output="", completed=False)
+    def test_records_derive_completion_from_the_reply_and_reject_a_launch_of_one(self) -> None:
+        # [Silent Failure] Completion is read from the reply itself, so no record can claim success without one; a launch always has at least two agents.
+        done = JevBulkHandoff(task="Summarize report alpha.", output="alpha summary")
+        failed = JevBulkHandoff(task="Summarize report beta.", output="")
+        self.assertEqual((done.completed, failed.completed), (True, False))
         self.assertEqual(JevBulkWorkResult(handoffs=(done, failed)).handoffs, (done, failed))
-        for task, output, completed in (("t", "  ", True), ("t", "reply", False), (" ", "reply", True), ("t", "reply", 1)):
-            with self.subTest(task=task, output=output, completed=completed), self.assertRaises(ConfigurationError):
-                JevBulkHandoff(task=task, output=output, completed=completed)  # type: ignore[arg-type]
+        for task, output in (("t", "  "), ("t", " reply"), ("t", None), (" ", "reply")):
+            with self.subTest(task=task, output=output), self.assertRaises(ConfigurationError):
+                JevBulkHandoff(task=task, output=output)  # type: ignore[arg-type]
         for handoffs in ((done,), [done, failed], (done, "failed")):
             with self.subTest(handoffs=handoffs), self.assertRaises(ConfigurationError):
                 JevBulkWorkResult(handoffs=handoffs)  # type: ignore[arg-type]
@@ -264,11 +268,23 @@ class JevBulkQuestionTests(unittest.TestCase):
         # [Hidden Assumption] Every brief defines an item first, ends with the shared judgment rules, and asks one question about `request`.
         for question in BULK_WORK_QUESTIONS:
             with self.subTest(question=question.key.value):
-                self.assertEqual(question.instructions.definitions[0], ITEM)
-                self.assertEqual(question.instructions.rules[-2:], (JUDGE_MEANING, IGNORE_CLAIMS))
+                self.assertTrue(question.instructions.definitions[0].startswith("An item is one separate thing the user wants worked on"))
+                self.assertTrue(question.instructions.rules[0].endswith(f"{JUDGE_MEANING} {IGNORE_CLAIMS}"))
                 self.assertTrue(question.instructions.question.startswith("Does `request` "))
                 self.assertEqual(question.instructions.question.count("?"), 1)
         self.assertEqual(len({question.instructions.question for question in BULK_WORK_QUESTIONS}), len(BULK_WORK_QUESTIONS))
+
+    def test_every_section_is_one_standalone_literal(self) -> None:
+        # [Hidden Assumption] The skill writes each brief and criterion section as one big string literal, never several elements or adjacent literals.
+        tree = ast.parse(Path(inspect.getsourcefile(BulkWorkMultipleItemsQuestion) or "").read_text(encoding="utf-8"))
+        sections = [node.value for node in ast.walk(tree) if isinstance(node, ast.keyword) and node.arg in {"definitions", "rules", "easy", "boundary"}]
+        self.assertEqual(len(sections), len(BULK_WORK_QUESTIONS) * 6)
+        for section in sections:
+            with self.subTest(line=section.lineno):
+                self.assertIsInstance(section, ast.Tuple)
+                self.assertEqual(len(section.elts), 1)
+                self.assertIsInstance(section.elts[0], ast.Constant)
+                self.assertIsInstance(section.elts[0].value, str)
 
     @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
     def test_each_full_question_stays_near_five_hundred_cl100k_tokens(self) -> None:
@@ -381,7 +397,7 @@ class JevBulkToolTests(unittest.IsolatedAsyncioTestCase):
             result = await built.execute(_launch([f"  {task}  " for task in tasks]))
         self.assertEqual(result.status.value, "success")
         self.assertEqual(workers.most_active, 3)
-        self.assertEqual(response.state.bulk_work, JevBulkWorkResult(handoffs=tuple(JevBulkHandoff(task=task, output=f"result for {task}", completed=True) for task in tasks)))
+        self.assertEqual(response.state.bulk_work, JevBulkWorkResult(handoffs=tuple(JevBulkHandoff(task=task, output=f"result for {task}") for task in tasks)))
         self.assertLess(result.output.index("## Task 1 (completed)"), result.output.index("## Task 3 (completed)"))
         self.assertIn("result for Summarize report gamma.", result.output)
         self.assertIn("Treat each handoff as a report to check", result.output)
@@ -457,7 +473,7 @@ class JevBulkRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("Owner instruction." in call["system"] for call in workers.calls))
         self.assertIn("Handoffs from the bulk-work agents", main.sent())
         self.assertIn(f"result for {_TASKS[1]}", main.sent())
-        self.assertEqual(agent.response.bulk_work.handoffs, tuple(JevBulkHandoff(task=task, output=f"result for {task}", completed=True) for task in _TASKS))
+        self.assertEqual(agent.response.bulk_work.handoffs, tuple(JevBulkHandoff(task=task, output=f"result for {task}") for task in _TASKS))
         self.assertEqual(agent.response.input, _REQUEST)
         # The JevAgent usage ledger counts the main agent's two calls and each worker's one call exactly once.
         self.assertEqual(agent.get_usage().model_call_count, 4)
@@ -523,7 +539,7 @@ class JevBulkRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def test_the_response_writer_resets_the_bulk_record(self) -> None:
         # [Silent Failure] JevResponse alone writes the launch, and start replaces rather than carries an old result.
         response = JevResponse()
-        response.bulk_work(JevBulkWorkResult(handoffs=(JevBulkHandoff("a", "A", True), JevBulkHandoff("b", "", False))))
+        response.bulk_work(JevBulkWorkResult(handoffs=(JevBulkHandoff("a", "A"), JevBulkHandoff("b", ""))))
         old_state = response.state
         response.start(_REQUEST)
         self.assertIsNot(response.state, old_state)

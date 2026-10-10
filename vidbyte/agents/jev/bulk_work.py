@@ -71,7 +71,7 @@ class JevBulkWorker(BasePipeline):
             output = ""
         else:
             output = reply.content.strip()
-        self.handoff = JevBulkHandoff(task=self.task, output=output, completed=bool(output))
+        self.handoff = JevBulkHandoff(task=self.task, output=output)
         if not output:
             return f"## Task {self.number} (failed)\n\n{self.task}"
         return f"## Task {self.number} (completed)\n\n{self.task}\n\n### Handoff\n\n{output}"
