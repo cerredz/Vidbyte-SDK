@@ -14,7 +14,7 @@ Primary README reference:
 
 Vidbyte SDK is the Python SDK surface for building agent workflows with tools, managed context, structured output, tracing, middleware, pipelines, validated state machines, prompt assets, evals, MCP integration, provider registries, and swappable runtimes. It is designed for developers who want to build the agent itself: the loop, tool execution, context window, trace artifact, runtime policy, and multi-agent composition.
 
-The SDK package imports as `vidbyte`. The repository currently identifies the package as version `0.2.0` and pre-release; its README says it is intentionally minimal as a public SDK namespace and does not include private Vidbyte service logic. Public docs should preserve that boundary: document the reusable developer-facing abstractions, and do not imply that proprietary Vidbyte learning models, backend data access, private scoring logic, or production platform internals ship inside this package.
+The SDK package imports as `vidbyte`. The repository currently identifies the package as version `0.2.1` and pre-release; its README says it is intentionally minimal as a public SDK namespace and does not include private Vidbyte service logic. Public docs should preserve that boundary: document the reusable developer-facing abstractions, and do not imply that proprietary Vidbyte learning models, backend data access, private scoring logic, or production platform internals ship inside this package.
 
 The core mental model is:
 

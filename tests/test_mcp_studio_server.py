@@ -20,6 +20,7 @@ import io
 import json
 import unittest
 from types import SimpleNamespace
+from typing import Literal
 from unittest import mock
 
 from tests.agent_test_support import build_test_agent
@@ -28,8 +29,11 @@ from vidbyte.mcp_server import McpStudioServer
 from vidbyte.mcp_server.server import (
     JSONRPC_METHOD_NOT_FOUND,
 )
+from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.mcp_server.server import core as server_core
+from vidbyte.tools import tool
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 
 
@@ -243,6 +247,32 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["id"], 7)
         self.assertEqual(response["result"]["serverInfo"]["name"], "vidbyte-sdk-studio")
 
+    async def test_notifications_get_no_reply_but_requests_do(self) -> None:
+        server = McpStudioServer()
+        for method in ("notifications/initialized", "notifications/bogus", "ping"):
+            self.assertIsNone(await server._dispatch({"jsonrpc": "2.0", "method": method}), method)
+        unknown = await server._dispatch({"jsonrpc": "2.0", "id": 3, "method": "notifications/bogus"})
+        self.assertEqual((unknown["id"], unknown["error"]["code"]), (3, JSONRPC_METHOD_NOT_FOUND))
+        null_id = await server._dispatch({"jsonrpc": "2.0", "id": None, "method": "bogus/method"})
+        self.assertEqual(null_id["error"]["code"], JSONRPC_METHOD_NOT_FOUND)
+
+    async def test_run_writes_nothing_for_notifications(self) -> None:
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 99}},
+            {"jsonrpc": "2.0", "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ]
+        stdin = io.BytesIO(b"".join(json.dumps(message).encode("utf-8") + b"\n" for message in messages))
+        stdout = io.BytesIO()
+        fake_sys = SimpleNamespace(platform="win32", stdin=SimpleNamespace(buffer=stdin), stdout=SimpleNamespace(buffer=stdout))
+        with mock.patch.object(server_core, "sys", fake_sys), mock.patch.object(server_core.ToolsListHandler, "handle", side_effect=[RuntimeError("boom"), {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}]):
+            await McpStudioServer().run()
+        responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
+        self.assertEqual([response["id"] for response in responses], [1, 2])
+        self.assertNotIn("error", responses[1])
+
     async def test_ping_returns_empty_result(self) -> None:
         response = await self._dispatch(McpStudioServer(), "ping", request_id=9)
         self.assertEqual(response, {"jsonrpc": "2.0", "id": 9, "result": {}})
@@ -278,6 +308,19 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(set(schemas[name]["properties"]), properties, name)
             self.assertEqual(schemas[name].get("required", []), required, name)
 
+
+    def test_tool_input_schema_keeps_derived_json_schema(self) -> None:
+        @tool
+        def tag_ticket(ticket_id: int, tags: list[str], priority: Literal["low", "high"]) -> str:
+            """Tag a support ticket."""
+            return f"{ticket_id}:{tags}:{priority}"
+
+        tagged = McpSchema.tool_spec_to_mcp_tool(tag_ticket.spec())["inputSchema"]["properties"]
+        self.assertEqual(tagged["tags"]["items"], {"type": "string"})
+        self.assertEqual(tagged["priority"]["enum"], ["low", "high"])
+        self.assertEqual(tagged["ticket_id"]["type"], "integer")
+        retrieval = McpSchema.tool_spec_to_mcp_tool(DocumentRetrievalTool().spec())["inputSchema"]["properties"]
+        self.assertNotIn("int", {prop.get("type") for prop in retrieval.values()})
 
 if __name__ == "__main__":
     unittest.main()

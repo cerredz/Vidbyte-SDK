@@ -22,6 +22,7 @@ from vidbyte.lib.jev.compute.situations import (
     FORK_AGENT_QUESTIONS,
     FRESH_AGENT_QUESTIONS,
     SUBAGENT_QUESTIONS,
+    SWARM_QUESTIONS,
 )
 
 
@@ -34,6 +35,7 @@ class JevComputeRegistry:
             JevDynamicComputeOption.FORK_AGENT: FORK_AGENT_QUESTIONS,
             JevDynamicComputeOption.SUBAGENT: SUBAGENT_QUESTIONS,
             JevDynamicComputeOption.CLONE: CLONE_QUESTIONS,
+            JevDynamicComputeOption.SWARM: SWARM_QUESTIONS,
         }
     )
     _questions_by_key: Mapping[JevComputeQuestionKey, JevComputeQuestion] = MappingProxyType(

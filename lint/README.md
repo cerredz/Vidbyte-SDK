@@ -65,6 +65,7 @@ have been reviewed. Analyzer failures are never recorded as zero.
 - `__init__.py` -- marks the repository-local lint package.
 - `run.py` -- stable CLI and application orchestration.
 - `baseline.json` -- sorted per-rule debt ceilings.
+- `pricebook_vintage_lock.json` -- C010's record of the rates each pricebook vintage stands for; written only by `python -m lint.rules.c010_pricebook_vintage_bump --refresh-lock`.
 - `mypy.ini` -- pinned staged package type-check policy.
 - `ruff.toml` -- explicit Ruff policy and repository-owned banned APIs.
 
@@ -138,6 +139,8 @@ Nested folders:
 | S060 | typed-public-seam-mappings | Public seams name their mapping shape instead of dict[str, Any] |
 | S061 | bounded-safe-path | File/archive I/O on a dynamic path is resolved and contained |
 | S062 | no-implicit-string-concatenation | Each string, including model-facing text, is one literal rather than adjacent literals |
+| S063 | gather-exceptions-classified | gather(return_exceptions=True) results are tested against BaseException, never only Exception or discarded unseen |
+| S064 | retry-overall-deadline | A retry loop that sleeps between attempts stops at one cumulative deadline or runs under asyncio.timeout |
 
 ### Agent-native rules
 
@@ -150,6 +153,7 @@ Nested folders:
 | A006 | directed-dependency-graph | Concrete imports obey cycles and documented layer boundaries |
 | A007 | operational-constants | Runtime policy values have named ownership |
 | A008 | library-stdout-boundary | Importable SDK code does not write unstructured stdout |
+| A009 | readme-size-limit | Folder READMEs stay short enough to read in full, so the @claude notes writer compacts its notes at 40,000 characters |
 
 ### SDK domain-contract rules
 
@@ -160,6 +164,16 @@ Nested folders:
 | C003 | no-dynamic-import-from-data | Runtime data cannot choose imported modules |
 | C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
 | C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
+| C006 | finite-numeric-guards | Numeric range checks reject bool, NaN, and infinities first |
+| C007 | strict-bool-switches | Configuration bool switches are real bools, never truthiness |
+| C008 | shared-validator-owner | Primitive validators live in one shared module |
+| C009 | default-model-priced | Every token-priced provider default resolves to a pricebook rate |
+| C010 | pricebook-vintage-bump | Changed rates move their pricebook vintage and refresh the lock |
+| C011 | agent-owned-usage-and-sync-twins | Model usage reaches the agent's tracker; entry classes pair run() with arun() |
+| C012 | provider-model-registry-validation | Config provider/model fields are checked against the registry and typed ModelProvider |
+| C013 | jev-decision-helper-only | Agents ask and score Jev only through DecisionModelHelper, one request per decision |
+| C014 | jev-done-check-parity | Every JevDoneCheck has its question module, keys, registry entries, handoff section, and handlers |
+| C015 | package-data-coverage | Every non-README file in the vidbyte package ships in the wheel; no README ships; no pattern is dead |
 | C016 | public-api-contract-current | contracts/sdk-public-api.json equals the generator's output for vidbyte.__all__ and the pyproject version |
 | C017 | platform-route-contract | SDK requests to Vidbyte hosts use a contract route, an accepted method, and an admitted credential |
 | C018 | canonical-api-host | Vidbyte API URLs in vidbyte/ string literals use an origin the platform contract lists as live |

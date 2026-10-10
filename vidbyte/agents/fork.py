@@ -18,17 +18,17 @@ Relations:
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.settings import AgentFallbackSettings, AgentLoopSettings
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.tools.base import _ToolWrapper
 from vidbyte.tools.catalog import Tools
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-    from vidbyte.lib.dataclasses.agents import AgentForkSettings
+    from vidbyte.lib.dataclasses.agents import AgentForkSettings, FallbackModel
 
 
 class AgentForker:
@@ -66,7 +66,8 @@ class AgentForker:
             output_schema=agent.output_schema if settings.output_schema is None else settings.output_schema,
             handoff=agent._handoff_spec if settings.handoff is None else settings.handoff,
             trace_option=settings.trace_option if settings.trace_option is not None else agent._trace_option,
-            fallback=agent._fallback_spec if settings.fallback is None else settings.fallback,
+            # Backups the parent named by bare model name keep the parent's provider, even when the child switches.
+            fallback=cls._fallback(agent, settings),
         )
         if settings.mcp if settings.inherit_mcp is None else settings.inherit_mcp:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())
@@ -92,6 +93,21 @@ class AgentForker:
         if child_provider.strip().lower() != str(agent.runner_config.provider or "").strip().lower():
             return None
         return agent.runner_config.api_key
+
+    @staticmethod
+    def _fallback(agent: BaseAgent, settings: AgentForkSettings) -> Sequence[str | FallbackModel] | AgentFallbackSettings | None:
+        # @intent fork-keeps-resolved-fallback-providers
+        # A bare backup name means "this model on the parent's provider". Re-resolving the parent's raw spec
+        # against a child on another provider would move it to a model that vendor does not serve, so a
+        # provider-switching child inherits the parent's resolved backups, each carrying only its own vendor's key.
+        if settings.fallback is not None:
+            return settings.fallback
+        child_provider = settings.provider.value if isinstance(settings.provider, ModelProvider) else str(settings.provider or "")
+        if settings.provider is None or child_provider.strip().lower() == str(agent.runner_config.provider or "").strip().lower():
+            return agent._fallback_spec
+        if agent.fallback is None:
+            return None
+        return AgentFallbackSettings(models=agent.fallback.models[1:], fallback_on=agent.fallback.fallback_on)
 
     @staticmethod
     def _loop_settings(agent: BaseAgent, settings: AgentForkSettings) -> AgentLoopSettings:

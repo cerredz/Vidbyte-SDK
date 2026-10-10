@@ -39,7 +39,7 @@ class McpClient:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "vidbyte-sdk", "version": "0.2.0"},
+                "clientInfo": {"name": "vidbyte-sdk", "version": "0.2.1"},
             },
         )
         self.initialized = True
@@ -101,6 +101,27 @@ class McpClient:
             if isinstance(item, Mapping):
                 if item.get("type") == "text":
                     parts.append(str(item.get("text", "")))
+                elif item.get("type") in ("image", "audio") and "data" in item:
+                    # @intent mcp-binary-content-stays-out-of-prompts
+                    # Image and audio blocks carry a base64 `data` payload that can run to megabytes and
+                    # that the model cannot read as text. Dumping it would flood the context window, so
+                    # only a short placeholder naming the block type and media type reaches the prompt.
+                    size = len(str(item.get("data", "")))
+                    mime = item.get("mimeType", "unknown")
+                    parts.append(f"[{item.get('type')}: {mime}, {size} base64 chars omitted]")
+                elif (
+                    item.get("type") == "resource"
+                    and isinstance(item.get("resource"), Mapping)
+                    and "blob" in item["resource"]
+                ):
+                    # @intent mcp-binary-content-stays-out-of-prompts
+                    # A binary embedded resource carries its base64 payload in `resource.blob`, so it
+                    # gets the same placeholder, keeping the uri and media type the model can act on.
+                    resource = item["resource"]
+                    size = len(str(resource.get("blob", "")))
+                    uri = resource.get("uri", "unknown")
+                    mime = resource.get("mimeType", "unknown")
+                    parts.append(f"[resource: {uri}, {mime}, {size} base64 chars omitted]")
                 else:
                     parts.append(str(item))
             else:

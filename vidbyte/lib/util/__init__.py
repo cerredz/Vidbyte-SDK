@@ -6,8 +6,9 @@ PURPOSE:
     SDK feature (agents, sessions, harnesses, or otherwise).
 
 ROLE IN CODEBASE:
-    Re-exports MathHelper from vidbyte/lib/util/math.py and
-    CredentialKeyPolicy from vidbyte/lib/util/credential_keys.py. Imported by
+    Re-exports MathHelper from vidbyte/lib/util/math.py,
+    CredentialKeyPolicy from vidbyte/lib/util/credential_keys.py, and
+    SubstringCounter from vidbyte/lib/util/text.py. Imported by
     vidbyte/agents/speed/tracker.py and any future SDK code that needs the
     same general-purpose statistics.
 
@@ -16,7 +17,8 @@ ARCHITECTURE NOTE:
     vidbyte/lib/dataclasses/__init__.py re-export their sibling modules.
 
 FUNCTION INVENTORY:
-    No functions of its own; re-exports MathHelper and CredentialKeyPolicy. See
+    No functions of its own; re-exports MathHelper, CredentialKeyPolicy, and
+    SubstringCounter. See
     vidbyte/lib/util/math.py for MathHelper's own inventory.
 
 COMMON MODIFICATION PATTERNS:
@@ -43,5 +45,6 @@ from __future__ import annotations
 
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.lib.util.math import MathHelper
+from vidbyte.lib.util.text import SubstringCounter
 
-__all__ = ["CredentialKeyPolicy", "MathHelper"]
+__all__ = ["CredentialKeyPolicy", "MathHelper", "SubstringCounter"]

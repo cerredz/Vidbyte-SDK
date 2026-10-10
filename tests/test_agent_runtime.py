@@ -777,6 +777,34 @@ class ToolActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool.executed_arguments), 2)
         self.assertEqual(result.metadata["stop_reason"], "max_tool_calls")
 
+    async def test_loop_settings_allowed_tools_refuses_calls_outside_the_gate(self) -> None:
+        """AgentLoopSettings.allowed_tools refuses an unlisted tool like a denied one, while listed tools and isDone still run."""
+        deleted: list[str] = []
+
+        @tool
+        def delete_note(note_id: str) -> str:
+            deleted.append(note_id)
+            return "deleted"
+
+        search = CountingSearchTool()
+        runtime = AgentRuntime(
+            agent_name="researcher",
+            system_prompt="Research.",
+            tools=Tools([search, delete_note]),
+            permission_policy=PermissionPolicy(),
+            config=AgentLoopSettings(allowed_tools=("counting_search",)).to_runtime_config(),
+        )
+        delete_call = FakeResponse("", {"output": [{"type": "function_call", "name": "delete_note", "arguments": '{"note_id": "n1"}'}]})
+
+        result = await self._run(runtime, [delete_call, self._search_response('{"query": "q"}'), self._done_response()])
+
+        self.assertEqual(deleted, [])
+        self.assertEqual(search.executed_arguments, [{"query": "q"}])
+        refused = next(ctx for ctx in result.metadata["tool_calls"] if ctx.tool_name == "delete_note")
+        self.assertEqual(refused.state.value, "denied")
+        self.assertEqual(refused.result.metadata["error"], "allowed_tools_denied")
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+
     async def test_denied_call_retains_its_activity(self) -> None:
         """A middleware-denied call keeps the annotation so a product can say the action was blocked."""
         tool, bound = self._annotated_search()

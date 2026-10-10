@@ -24,7 +24,7 @@ from vidbyte.lib.errors import (
     McpInitializeError,
     McpToolDiscoveryError,
 )
-from vidbyte.tools.mcp.bridge import McpToolBridge
+from vidbyte.tools.mcp.bridge import McpBridgedTool, McpToolBridge
 from vidbyte.tools.mcp.client import McpClient
 from vidbyte.tools.mcp.transport import McpStdioTransport
 from vidbyte.tools.mcp.types import McpServerConfig, McpServerHandle, McpToolPermission
@@ -64,20 +64,24 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
         except Exception as e:
             raise McpInitializeError(f"MCP server handshake failed: {e}") from e
 
-        # Map McpToolPermission to native ToolPermission
-        perm = ToolPermission.EXECUTE
-        if config.permission == McpToolPermission.READONLY:
-            perm = ToolPermission.READ
-        elif config.permission == McpToolPermission.DISABLED:
-            perm = ToolPermission.SAFE
+        # A disabled server stays connected and closable but hands the agent no tools at all.
+        # @intent mcp-disabled-server-exposes-no-runnable-tools
+        # No risk level is denied by every policy (allow_all permits them all), so the only
+        # way to guarantee a disabled server's tools never run is to never bridge them.
+        bridged_tools: tuple[McpBridgedTool, ...] = ()
+        if config.permission != McpToolPermission.DISABLED:
+            # Map the server's permission onto the native risk level that permission policies check.
+            perm = ToolPermission.EXECUTE
+            if config.permission == McpToolPermission.READONLY:
+                perm = ToolPermission.READ
 
-        registry = ToolRegistry()
-        try:
-            bridged_tools = await McpToolBridge(registry, client, permission=perm).bridge()
-        except Exception as e:
-            raise McpToolDiscoveryError(
-                f"Failed to discover remote tools from MCP server: {e}"
-            ) from e
+            registry = ToolRegistry()
+            try:
+                bridged_tools = await McpToolBridge(registry, client, permission=perm).bridge()
+            except Exception as e:
+                raise McpToolDiscoveryError(
+                    f"Failed to discover remote tools from MCP server: {e}"
+                ) from e
 
     except Exception:
         await transport.close()

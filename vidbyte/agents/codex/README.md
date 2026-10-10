@@ -15,7 +15,7 @@ Every class in this folder translates between the two sides. Each Vidbyte settin
 ## Install
 
 ```bash
-python -m pip install "vidbyte-sdk[codex]"   # pins openai-codex>=0.147.0,<0.148.0
+python -m pip install "vidbyte-sdk[codex]"   # pins openai-codex>=0.162.1,<0.163.0
 ```
 
 The extra installs the `openai-codex` Python SDK, which starts the Codex app-server. If the extra is missing, you can still construct the agent. The first `run()` then raises `CodexAgentError` with `failure_code="codex.sdk_unavailable"`.
@@ -1090,7 +1090,7 @@ Item payloads include only item types Vidbyte has reviewed. An unknown item type
 
 ## Blast Radius
 
-The public surface is re-exported from `vidbyte.agents.codex`, `vidbyte.agents`, and the root `vidbyte` namespace. The settings, request, and result records live in `vidbyte/lib/dataclasses/codex.py`. Enums live in `vidbyte/lib/enums/codex.py`, and wire constants and failure classification in `vidbyte/lib/constants/codex.py`. The adapter reuses shared layers without changing them: `vidbyte/context` for rendering, `vidbyte/tools` (`Tools`, `ToolExecutor`, `ToolsFormatter.to_codex_tool`) for tools, `vidbyte/middleware` (`MiddlewarePipeline`) for hooks, `vidbyte/agents/fallback.py` for the switch policy, `vidbyte/agents/pricing` for usage, and `vidbyte/providers/output_schema.py` for schemas. `openai-codex` is an optional dependency and is imported only inside the transport. The tool bridge touches private `openai-codex` client attributes that are valid only under the `<0.148` pin.
+The public surface is re-exported from `vidbyte.agents.codex`, `vidbyte.agents`, and the root `vidbyte` namespace. The settings, request, and result records live in `vidbyte/lib/dataclasses/codex.py`. Enums live in `vidbyte/lib/enums/codex.py`, and wire constants and failure classification in `vidbyte/lib/constants/codex.py`. The adapter reuses shared layers without changing them: `vidbyte/context` for rendering, `vidbyte/tools` (`Tools`, `ToolExecutor`, `ToolsFormatter.to_codex_tool`) for tools, `vidbyte/middleware` (`MiddlewarePipeline`) for hooks, `vidbyte/agents/fallback.py` for the switch policy, `vidbyte/agents/pricing` for usage, and `vidbyte/providers/output_schema.py` for schemas. `openai-codex` is an optional dependency and is imported only inside the transport. The tool bridge touches private `openai-codex` client attributes that are valid only under the `<0.163` pin.
 
 ## Non-Goals
 

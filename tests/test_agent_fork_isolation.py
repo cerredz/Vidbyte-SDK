@@ -403,6 +403,17 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(parent.fork(settings).runner_config.api_key, "sk-deepseek-SECRET")
 
+    def test_cross_provider_fork_keeps_parent_fallback_providers(self) -> None:
+        # @intent fork-keeps-resolved-fallback-providers: a bare DeepSeek backup must not become an Anthropic model.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-pro", api_key="sk-deepseek-SECRET", timeout_seconds=30.0, fallback=["deepseek-v4-flash"])
+
+        child = parent.fork(AgentForkSettings(provider="anthropic", model_name="claude-sonnet-4-6"))
+
+        self.assertEqual([model.identity() for model in child.fallback.models], ["anthropic/claude-sonnet-4-6", "deepseek/deepseek-v4-flash"])
+        self.assertEqual([model.api_key for model in child.fallback.models], [None, "sk-deepseek-SECRET"])
+        self.assertEqual(child.fallback.fallback_on, parent.fallback.fallback_on)
+        self.assertEqual(child.fallback.timeout_seconds, 30.0)
+
     def test_fork_max_iterations_override_inherits_remaining_parent_config(self) -> None:
         # A max_iterations delta must keep every other parent loop guardrail and the parent model-call timeout.
         tool_settings = ToolSettings(denied_tools={"delete_file"})

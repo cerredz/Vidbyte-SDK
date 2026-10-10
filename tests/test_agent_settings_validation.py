@@ -5,9 +5,10 @@ import unittest
 from pathlib import Path
 
 from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
+from vidbyte.agents.fallback import AgentFallback
 from vidbyte.agents.settings import AgentFallbackSettings
 from vidbyte.config import YamlLoader
-from vidbyte.lib.dataclasses.agents import AgentMetadata, FallbackModel
+from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, FallbackModel
 from vidbyte.lib.dataclasses.config import AgentSettings, ToolDefinition
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -52,9 +53,29 @@ class FallbackApiKeyInheritanceTests(unittest.TestCase):
                 self.assertEqual(same.api_key, "sk-openai")
                 self.assertIsNone(other.api_key)
 
+    def test_enum_provider_is_stored_and_labelled_as_its_string_value(self) -> None:
+        # A typed ModelProvider entry must not leak 'ModelProvider.ANTHROPIC' into identity() and run metadata.
+        entry = FallbackModel(provider=ModelProvider.ANTHROPIC, model="m")
+        self.assertEqual((type(entry.provider), entry.provider, entry.identity()), (str, "anthropic", "anthropic/m"))
+
     def test_explicit_fallback_model_keeps_its_own_key(self) -> None:
         explicit = FallbackModel(provider="anthropic", model="claude-z", api_key="sk-ant")
         self.assertEqual(self.resolve(explicit), (explicit,))
+
+    def test_openrouter_auto_keeps_its_full_id(self) -> None:
+        auto, slug = self.resolve("openrouter/auto", "openrouter/anthropic/claude-sonnet-5")
+        self.assertEqual((auto.provider, auto.model), ("openrouter", "openrouter/auto"))
+        self.assertEqual((slug.provider, slug.model), ("openrouter", "anthropic/claude-sonnet-5"))
+
+
+class FallbackRunnerTimeoutTests(unittest.TestCase):
+    def test_fallback_runner_inherits_the_agent_timeout(self) -> None:
+        # A backup model must get the agent's per-request timeout, not the 60-second library default.
+        config = AgentRunnerConfig(provider="deepseek", model_name="deepseek-v4-pro", api_key="k", timeout_seconds=300.0)
+        backup = FallbackModel(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-ant")
+        chain = AgentFallback.from_spec([backup], runner_config=config, agent_name="researcher")
+        self.assertEqual(chain.build_runner(1)._config.timeout_seconds, 300.0)
+
 
 def build(**overrides: object) -> AgentSettings:
     # Builds one agent settings object from the minimal valid document plus the overrides under test.
@@ -126,6 +147,16 @@ class ProviderModelValidationTests(unittest.TestCase):
             build(provider="anthropic", model_name="gpt-5.6-sol")
 
         self.assertIn("registered under provider 'openai'", str(ctx.exception))
+
+    def test_accepts_an_openrouter_vendor_slug_but_not_a_cross_provider_bare_name(self) -> None:
+        settings = build(provider="openrouter", model_name="anthropic/claude-sonnet-5")
+        self.assertEqual((settings.provider, settings.model_name), ("openrouter", "anthropic/claude-sonnet-5"))
+        self.assertEqual(build(provider="openrouter", model_name="openrouter/auto").model_name, "openrouter/auto")
+        with self.assertRaises(ConfigurationError):
+            build(provider="openrouter", model_name="meta-llama/llama-4-maverick")
+        with self.assertRaises(ConfigurationError) as ctx:
+            build(provider="deepseek", model_name="anthropic/claude-sonnet-5")
+        self.assertIn("registered under provider 'anthropic'", str(ctx.exception))
 
     def test_rejects_a_non_text_model_for_a_conversational_agent(self) -> None:
         with self.assertRaises(ConfigurationError) as ctx:
@@ -277,6 +308,33 @@ class SecretAndDepthValidationTests(unittest.TestCase):
 
         self.assertIn("must not contain YAML-held secrets", str(ctx.exception))
 
+    def test_rejects_camelcase_and_hyphenated_credential_keys_loaded_from_yaml(self) -> None:
+        # @intent yaml-secret-guard-normalizes-key-spelling
+        rejected = ("apiKey", "accessToken", "x-api-key", "clientSecret", "cookie", "bearer", "passwd", "aws_credentials")
+        with tempfile.TemporaryDirectory() as folder:
+            for key in rejected:
+                path = self._write_agent(Path(folder), key)
+                with self.subTest(key=key), self.assertRaises(ConfigurationError) as ctx:
+                    YamlLoader().load_agent(path)
+                self.assertIn("must not contain YAML-held secrets", str(ctx.exception))
+                self.assertEqual(ctx.exception.details["field"], f"agent.metadata.{key}")
+
+    def test_keeps_ordinary_keys_that_resemble_credentials_loadable(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            for key in ("author", "max_tokens", "tokenizer"):
+                with self.subTest(key=key):
+                    settings = YamlLoader().load_agent(self._write_agent(Path(folder), key))
+                    self.assertEqual(settings.metadata, {key: "value123"})
+
+    def _write_agent(self, folder: Path, key: str) -> Path:
+        # Writes a minimal agent document whose metadata holds one key under test.
+        path = folder / "agent.yaml"
+        path.write_text(
+            f"type: base\nname: researcher\nsystem_prompt: You research.\nprovider: deepseek\nmodel_name: deepseek-chat\nmetadata:\n  {key}: value123\n",
+            encoding="utf-8",
+        )
+        return path
+
     def test_rejects_an_acyclic_but_deeply_nested_document(self) -> None:
         deep: dict[str, object] = {"leaf": 1}
         for _ in range(60):
@@ -299,6 +357,38 @@ class OutputSchemaValidationTests(unittest.TestCase):
             build(output_schema={"foo": 1})
 
         self.assertIn("JSON Schema object", str(ctx.exception))
+
+    def test_loads_credential_like_field_names_from_a_yaml_output_schema(self) -> None:
+        # @intent output-schema-field-names-are-not-secrets
+        with tempfile.TemporaryDirectory() as folder:
+            for name in ("token", "auth", "refresh_token", "password_policy"):
+                with self.subTest(name=name):
+                    path = self._write_agent(Path(folder), f"output_schema:\n  type: object\n  properties:\n    {name}:\n      type: string\n  required: [{name}]\n")
+                    settings = YamlLoader().load_agent(path)
+                    self.assertEqual(settings.output_schema["properties"], {name: {"type": "string"}})
+
+    def test_still_rejects_interpolation_inside_a_yaml_output_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = self._write_agent(Path(folder), "output_schema:\n  type: object\n  properties:\n    token:\n      type: string\n      default: ${API_TOKEN}\n")
+            with self.assertRaises(ConfigurationError) as ctx:
+                YamlLoader().load_agent(path)
+
+        self.assertIn("environment interpolation", str(ctx.exception))
+
+    def test_still_rejects_credential_keys_in_yaml_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = self._write_agent(Path(folder), "metadata:\n  apiKey: value123\n")
+            with self.assertRaises(ConfigurationError) as ctx:
+                YamlLoader().load_agent(path)
+
+        self.assertIn("must not contain YAML-held secrets", str(ctx.exception))
+        self.assertEqual(ctx.exception.details["field"], "agent.metadata.apiKey")
+
+    def _write_agent(self, folder: Path, extra: str) -> Path:
+        # Writes a minimal agent document followed by the YAML block under test.
+        path = folder / "agent.yaml"
+        path.write_text(f"type: base\nname: tokenizer\nsystem_prompt: Analyze.\nprovider: deepseek\nmodel_name: deepseek-chat\n{extra}", encoding="utf-8")
+        return path
 
 
 class AgentMetadataValidationTests(unittest.TestCase):

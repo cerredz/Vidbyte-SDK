@@ -21,6 +21,17 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c003_no_dynamic_import_from_data.py` -- fixed import targets.
 - `c004_operation_pricing_rate_floor.py` -- operation pricebook magnitude floor.
 - `c005_cost_arithmetic_site_parity.py` -- reviewed cost-arithmetic locations.
+- `c006_finite_numeric_guards.py` -- bool/NaN/infinity-safe numeric range checks.
+- `c006_source_index.py` -- read-only source indexes for C006 (literals, constants, engine-built records).
+- `c007_strict_bool_switches.py` -- strict bool switches on configuration classes.
+- `c008_shared_validator_owner.py` -- one owner for primitive validators.
+- `c009_default_model_priced.py` -- provider default models resolve to a rate.
+- `c010_pricebook_vintage_bump.py` -- pricebook vintage moves with its rates (lock and refresh command).
+- `c011_agent_owned_usage_and_sync_twins.py` -- agent-owned usage recording and run()/arun() twins.
+- `c012_provider_model_registry_validation.py` -- registry-validated, enum-typed provider/model config fields.
+- `c013_jev_decision_helper_only.py` -- Jev requests and answer thresholds through DecisionModelHelper.
+- `c014_jev_done_check_parity.py` -- every done check wired through registry, handoff, and handler maps.
+- `c015_package_data_coverage.py` -- wheel package-data coverage of non-Python package files.
 - `c016_public_api_contract_current.py` -- committed SDK public-API contract matches its generator.
 - `c017_platform_route_contract.py` -- SDK requests to Vidbyte hosts match a platform-contract route, method, and access class.
 - `c018_canonical_api_host.py` -- Vidbyte API URLs in SDK code use an origin the platform contract lists as live.
@@ -86,6 +97,8 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s060_typed_public_seam_mappings.py` -- named mapping shapes at public seams.
 - `s061_bounded_safe_path.py` -- resolved, contained file/archive I/O paths.
 - `s062_no_implicit_string_concatenation.py` -- one literal per string, never adjacent literals.
+- `s063_gather_exceptions_classified.py` -- gather(return_exceptions=True) results classified against BaseException.
+- `s064_retry_overall_deadline.py` -- sleeping retry loops bounded by one cumulative deadline.
 - `a001_agent_readable_file_headers.py` -- structured SDK source headers.
 - `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
 - `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
@@ -93,6 +106,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `a006_directed_dependency_graph.py` -- concrete import cycles and layer edges.
 - `a007_operational_constants.py` -- named operational policy values.
 - `a008_library_stdout_boundary.py` -- CLI-only builtin stdout calls.
+- `a009_readme_size_limit.py` -- folder README character ceilings.
 
 ## Change Log
 
@@ -105,3 +119,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
   draft after S025-S050 landed on main concurrently; S052/S054 dropped the Ruff codes S045-S050
   already own).
 - 2026-09-25: Added S062 no-implicit-string-concatenation from PR #456 review comment 4108971007.
+- 2026-10-09: Added A009 readme-size-limit for the @claude review workflow's folder README notes.

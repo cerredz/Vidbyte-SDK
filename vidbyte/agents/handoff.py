@@ -56,12 +56,15 @@ class HandoffAgent(BaseAgent):
         # The source agent may already own provider-specific runner state and authentication; copying its cache
         # preserves that selected execution boundary. Rebuilding the runner can lose that state and make a
         # handoff fail even though the source run already succeeded with the same configured provider.
+        # The timeout and fallback chain are copied too, so a run that only succeeded on a fallback model can still hand off.
         generator = cls(
             spec,
             provider=source_agent.runner_config.provider,
             model_name=source_agent.runner_config.model_name,
             api_key=source_agent.runner_config.api_key,
             temperature=source_agent.runner_config.temperature,
+            timeout_seconds=source_agent.runner_config.timeout_seconds,
+            fallback=source_agent._fallback_spec,
         )
         generator._runner_cache.update(source_agent._runner_cache)
         return generator

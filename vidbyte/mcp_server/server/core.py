@@ -76,7 +76,7 @@ class McpStudioServer:
         self,
         *,
         name: str = "vidbyte-sdk-studio",
-        version: str = "0.2.0",
+        version: str = "0.2.1",
         agents: Mapping[str, BaseAgent] | None = None,
         tools: Sequence[BaseTool] = (),
         strategy_names: Sequence[str] = (),
@@ -137,12 +137,13 @@ class McpStudioServer:
             try:
                 response = await self._dispatch(result)
             except Exception as exc:
-                response = McpSchema.mcp_error_response(
-                    result.get("id") if isinstance(result, Mapping) else None,
-                    JSONRPC_INTERNAL_ERROR,
-                    f"Internal error: {exc}",
+                # A failed notification still gets no reply; a failed request gets an internal error.
+                response = None if "id" not in result else McpSchema.mcp_error_response(
+                    result["id"], JSONRPC_INTERNAL_ERROR, f"Internal error: {exc}",
                 )
-            self._write_response(response)
+            # Write a reply only when there is one; notifications return None.
+            if response is not None:
+                self._write_response(response)
 
     async def close(self) -> None:
         """Signals the server loop to shut down on the next iteration."""
@@ -189,17 +190,25 @@ class McpStudioServer:
             return _SKIP()
         return request
 
-    async def _dispatch(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        """Routes a JSON-RPC request to the matching handler via the handler map."""
+    async def _dispatch(self, request: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Routes a JSON-RPC request to its handler; returns None for a notification."""
         method = request.get("method")
         request_id = request.get("id")
         params = request.get("params")
+        # @intent jsonrpc-notifications-get-no-reply
+        # A message with no "id" key is a notification (an "id" of null is still a request).
+        # JSON-RPC 2.0 forbids any reply to one, even an error, and MCP rejects id-null errors.
+        is_notification = "id" not in request
 
         if not isinstance(method, str):
             return McpSchema.mcp_error_response(request_id, JSONRPC_INVALID_REQUEST, "Missing or invalid method")
 
         handler = self._handler_map.get(method)
         if handler is None:
+            # Unknown notifications such as notifications/initialized are accepted as no-ops.
+            if is_notification:
+                return None
             return McpSchema.mcp_error_response(request_id, JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}")
 
-        return await handler.handle(request_id, params)
+        response = await handler.handle(request_id, params)
+        return None if is_notification else response

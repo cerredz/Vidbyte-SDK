@@ -309,10 +309,10 @@ class FailureTranslationTests(unittest.TestCase):
             CodexFailureTranslationRequest(error=error)
         )
         polluted = dict(record.failure.details)
-        polluted["api_key_hint"] = "sk-live"
+        polluted["openai_api_key"] = "sk-live"
         from vidbyte.lib.dataclasses.failure import FailureSafety
 
-        self.assertNotIn("api_key_hint", FailureSafety.sanitize_mapping(polluted))
+        self.assertNotIn("openai_api_key", FailureSafety.sanitize_mapping(polluted))
 
     def test_rejects_an_exception_without_a_failure_code(self) -> None:
         with self.assertRaises(ConfigurationError):

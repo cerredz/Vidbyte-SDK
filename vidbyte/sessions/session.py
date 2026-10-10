@@ -165,7 +165,8 @@ class Session:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.arun(message, **options))
+            # The loop ends with this call, so the agent hands its MCP servers back before it closes.
+            return asyncio.run(self._agent._run_releasing_mcp(self.arun(message, **options)))
         raise AgentExecutionError("Session.run() cannot be called from an active event loop; use await arun().")
 
     def checkpoint(self, *, label: str = "") -> str:

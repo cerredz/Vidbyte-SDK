@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import unittest
+import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -251,6 +252,17 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             result = run(TreeTool(config).execute(ToolCall("tree", {"path": ".", "max_entries": 3})))
             self.assertEqual(result.status, ToolStatus.SUCCESS)
             self.assertEqual(len(result.output.splitlines()), 3)
+            self.assertTrue(result.metadata["truncated"])
+
+    def test_tree_not_truncated_when_entries_exactly_fill_limit(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for i in range(3):
+                run(WriteTextTool(config).execute(ToolCall("write_text", {"path": f"f{i}.txt", "content": "x"})))
+            result = run(TreeTool(config).execute(ToolCall("tree", {"path": ".", "max_entries": 3})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            self.assertEqual(len(result.output.splitlines()), 3)
+            self.assertFalse(result.metadata["truncated"])
 
     def test_list_dir_returns_empty_string_for_empty_directory(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -303,6 +315,30 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             result = run(ReadTextTool(config).execute(ToolCall("read_text", {"path": "../outside.txt"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
 
+    def test_find_pattern_escaping_root_returns_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "OUTSIDE_SECRET.txt").write_text("secret", encoding="utf-8")
+            Path(tmp, "root", "notes").mkdir(parents=True)
+            config = FileSystemToolConfig(root=str(Path(tmp, "root")))
+            absolute = str(Path(tmp, "*.txt"))
+            for pattern in ("../*", "*/../../*", "notes\\..\\..\\*", absolute):
+                result = run(FindTool(config).execute(ToolCall("find", {"pattern": pattern, "root": "."})))
+                self.assertEqual(result.status, ToolStatus.ERROR, pattern)
+                self.assertNotIn("OUTSIDE_SECRET", result.output)
+                self.assertIn("escaped the configured root", result.output)
+
+    def test_zip_destination_inside_source_is_not_archived(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            run(MakeDirTool(config).execute(ToolCall("make_dir", {"path": "notes"})))
+            run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "notes/a.md", "content": "a"})))
+            result = run(ZipTool(config).execute(ToolCall("zip", {"source": ".", "destination": "backup.zip"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            with zipfile.ZipFile(Path(tmp, "backup.zip")) as archive:
+                names = archive.namelist()
+            self.assertFalse(any(name.endswith("backup.zip") for name in names), names)
+            self.assertTrue(any(name.endswith("notes/a.md") for name in names), names)
+
     def test_write_without_allow_write_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=False)
@@ -342,6 +378,17 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "aa aa"})))
             result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "aa", "replacement": "bb"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
+
+    def test_replace_text_overlapping_matches_returns_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.go"
+            original = b"func a() {\nif x {\nfor {\n}\n}\n}\n"
+            target.write_bytes(original)
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.go", "search": "}\n}\n", "replacement": "}\n"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("exactly once", result.output)
+            self.assertEqual(target.read_bytes(), original)
 
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -7,7 +7,8 @@ Purpose:
     adversarial content in tool results drives the model to reproduce internal content.
 Architecture:
     - CanaryTripwireMiddleware: Probabilistically appends canary tokens to the
-      model-visible copy of tool results and scans model output for leaked canaries.
+      model-visible copy of tool results and scans model output and tool-call
+      arguments for leaked canaries.
       The canary ledger lives in ctx.run_state because one instance is shared by
       forked and sibling runs.
 Relations:
@@ -16,6 +17,7 @@ Relations:
 
 from __future__ import annotations
 
+import json
 import random
 
 from vidbyte.lib.dataclasses.middleware import (
@@ -43,6 +45,17 @@ class CanaryTripwireMiddleware(AgentMiddleware):
         # Starts a fresh canary ledger for this run without touching other runs sharing the instance.
         ctx.run_state[self.__class__] = {}
         return MiddlewareDecision.continue_()
+
+    async def before_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        # Scans tool-call arguments for leaked canaries before the tool runs.
+        # @intent canary-scan-covers-tool-arguments: Anthropic, Responses and Gemini runners
+        # leave response text empty on tool-call-only turns, so arguments must be scanned
+        # here or a canary exfiltrated through a tool (send_email body) runs undetected.
+        canaries = ctx.run_state.get(self.__class__)
+        if not canaries or ctx.tool_call is None:
+            return MiddlewareDecision.continue_()
+        arguments = json.dumps(ctx.tool_call.arguments, ensure_ascii=False, default=str)
+        return self._scan_for_leaked_canaries(arguments, canaries)
 
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Probabilistically injects a canary into the model-visible tool result and records it.

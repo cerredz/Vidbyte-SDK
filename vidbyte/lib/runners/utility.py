@@ -45,11 +45,16 @@ class Runner:
             key = f"{provider}/{model}" if provider else None
             if key and key in MODEL_PROVIDER_RUNNER_TYPE_MAP:
                 return MODEL_PROVIDER_RUNNER_TYPE_MAP[key]
-            if model in MODEL_RUNNER_TYPE_MAP:
-                return MODEL_RUNNER_TYPE_MAP[model]
-            for prefix, runner_type in MODEL_PREFIX_RUNNER_TYPE_MAP.items():
-                if model.startswith(prefix):
-                    return runner_type
+            # @intent vendor-slug-ids-resolve-by-bare-name
+            # OpenRouter-style ids such as 'anthropic/claude-sonnet-5' carry a vendor slug the maps
+            # do not list, so retry with the part after the last slash, as ModalityDetector does;
+            # names that match nothing either way still raise below.
+            for candidate in (model, model.rsplit("/", 1)[-1]):
+                if candidate in MODEL_RUNNER_TYPE_MAP:
+                    return MODEL_RUNNER_TYPE_MAP[candidate]
+                for prefix, runner_type in MODEL_PREFIX_RUNNER_TYPE_MAP.items():
+                    if candidate.startswith(prefix):
+                        return runner_type
             if provider:
                 raise ConfigurationError(f"No runner mapping for provider/model '{provider}/{model}'.")
             raise ConfigurationError(f"No runner mapping for model '{model}'.")
@@ -134,7 +139,11 @@ class Runner:
                     model_provider = None
                 if model_provider and (normalized_provider is None or normalized_provider == model_provider):
                     normalized_provider = model_provider
-                    normalized_model = rest
+                    # @intent openrouter-keeps-its-own-model-ids
+                    # OpenRouter's own ids such as 'openrouter/auto' include the prefix on the wire, so
+                    # only strip it when what follows is itself a vendor/model slug.
+                    if model_provider != ModelProvider.OPENROUTER.value or "/" in rest:
+                        normalized_model = rest
         model_lookup = normalized_model.lower() if normalized_model else None
         return normalized_provider, normalized_model, model_lookup
 

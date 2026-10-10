@@ -359,8 +359,9 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.stop.stopped_on("final_response"))
 
     def test_stopped_normally(self) -> None:
-        # [Silent Failure] stopped_normally True only for "final_response".
+        # [Silent Failure] stopped_normally True only for "final_response" and "is_done".
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response")).stop.stopped_normally())
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done")).stop.stopped_normally())
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_iterations")).stop.stopped_normally())
 
     def test_did_not_hit_budgets(self) -> None:
@@ -761,12 +762,16 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
     def test_efficiency_stopped_normally_within_iterations(self) -> None:
         # [Hidden Failure] stopped_normally_within_iterations requires normal stop and iteration bound.
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
+        self.assertFalse(behavior_from_probe(RunProbe(stop_reason="is_done", iteration_count=3)).efficiency.stopped_normally_within_iterations(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_iterations", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=3)).efficiency.stopped_normally_within_iterations(2))
 
     def test_efficiency_stopped_normally_within_tool_calls(self) -> None:
         # [Hidden Failure] stopped_normally_within_tool_calls requires normal stop and tool-call bound.
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
+        self.assertFalse(behavior_from_probe(RunProbe(stop_reason="is_done", tool_call_count=3)).efficiency.stopped_normally_within_tool_calls(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_tool_calls", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=3)).efficiency.stopped_normally_within_tool_calls(2))
 

@@ -137,11 +137,32 @@ class McpStdioTransport:
         self._stderr_task: asyncio.Task[None] | None = None
         self._stderr_buf = bytearray()
         self._close_lock = asyncio.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def closed(self) -> bool:
         """True after close has begun or completed."""
         return self._closed
+
+    def is_bound_to_running_loop(self) -> bool:
+        """False when the pipes were opened on an event loop that is not the one running now."""
+        if self._loop is None:
+            return True
+        try:
+            return self._loop is asyncio.get_running_loop() and not self._loop.is_closed()
+        except RuntimeError:
+            return False
+
+    def abandon(self) -> None:
+        """Mark closed and kill the child without awaiting, for when its event loop is gone."""
+        self._closed = True
+        process = self._process
+        try:
+            if process is not None and process.returncode is None:
+                process.kill()
+        except Exception:
+            pass
+        self._detach_process_state()
 
     def stderr_snapshot(self) -> str:
         """Return the retained stderr tail as UTF-8 text (replacement on errors)."""
@@ -165,6 +186,8 @@ class McpStdioTransport:
             if self._process is not None:
                 return
             child_env = build_child_env(self.env)
+            # Subprocess pipes only work on the loop that opens them, so remember which one that is.
+            self._loop = asyncio.get_running_loop()
             self._process = await asyncio.create_subprocess_exec(
                 *self.command,
                 stdin=asyncio.subprocess.PIPE,

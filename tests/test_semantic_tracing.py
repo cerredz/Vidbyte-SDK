@@ -11,6 +11,7 @@ from vidbyte import Agent, AggregateAgent, ProposerSpec, Trace, TraceController,
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
+from vidbyte.trace.profiles import safe_trace_value
 from vidbyte.trace.providers import GenericProviderTranslator, LangSmithProviderTranslator
 from vidbyte.trace.registry import TraceComponentRegistry
 from vidbyte.trace.schema import SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
@@ -125,6 +126,21 @@ class SemanticTraceProfileTests(unittest.TestCase):
         diagnostic.end_span(diagnostic_hook, output="continue")
         self.assertNotIn("middleware.hook", [event.get("name") for event in verbose_events])
         self.assertIn("middleware.hook", [event.get("name") for event in diagnostic_events])
+
+    def test_safe_trace_value_keeps_ordinary_keys_that_contain_credential_words(self) -> None:
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Verifies semantic span redaction drops credentials but keeps usage counts and ordinary arguments.
+        payload = {
+            "tool_input": {"author": "Ada", "max_tokens": 500, "title": "Hi", "api_key": "sk-REAL"},
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110},
+            "metadata": {"author_id": "u-7", "auth_token": "t-REAL", "LANGSMITH_PROJECT": "p"},
+        }
+        expected = {
+            "tool_input": {"author": "Ada", "max_tokens": 500, "title": "Hi"},
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110},
+            "metadata": {"author_id": "u-7"},
+        }
+        self.assertEqual(safe_trace_value(payload, max_chars=10000, redact=True), expected)
 
     def test_registry_rejects_duplicate_and_unknown_specs(self) -> None:
         # Verifies component registry catches duplicate and missing span specs.

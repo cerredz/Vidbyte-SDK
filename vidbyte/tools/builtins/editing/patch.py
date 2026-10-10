@@ -17,6 +17,7 @@ import difflib
 from pathlib import Path
 
 from vidbyte.lib.tools.filesystem import LineEndings
+from vidbyte.lib.util import SubstringCounter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -57,7 +58,8 @@ class PatchTool(BaseTool):
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "read_error"})
 
-        count = before.count(search_block)
+        # @intent unique-edit-counts-overlapping-matches
+        count = SubstringCounter.count_overlapping(before, search_block)
         if count == 0:
             return ToolResult.error(
                 self.name,

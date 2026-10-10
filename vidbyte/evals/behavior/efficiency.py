@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from vidbyte.evals.behavior.stop import StopBehavior
 from vidbyte.lib.dataclasses.agents import AgentStopReason
 from vidbyte.lib.dataclasses.tools import ToolCallState
 
@@ -283,8 +284,10 @@ class EfficiencyBehavior:
         return sum(1 for call in self._calls if call.state == state)
 
     def _stopped_normally(self) -> bool:
-        # Returns True if the run stopped with a final response.
-        return self._probe.stop_reason == AgentStopReason.FINAL_RESPONSE.value
+        # Returns True if the run stopped with final_response or is_done (normal completion).
+        # @intent isdone-is-a-normal-stop
+        # Reuses StopBehavior's set so both behavior groups share one definition of a normal stop.
+        return self._probe.stop_reason in StopBehavior.NORMAL_STOP_REASONS
 
 
 __all__ = ["EfficiencyBehavior"]

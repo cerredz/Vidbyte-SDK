@@ -137,6 +137,7 @@ from vidbyte.lib.errors import (
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.middleware.builtins.context_compaction import (
     ToolResultCompactionMiddleware,
@@ -594,7 +595,13 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+            catalog = self.tools
             await self._after_tool_iteration(state, messages)
+            if self.tools is not catalog:
+                # @intent a-replaced-catalog-reaches-the-next-model-call
+                # Schemas are resolved once per run, so a hook that replaced the catalog (JevRuntime adding launch_swarm)
+                # needs them resolved again; an untouched catalog keeps the schemas already resolved.
+                tool_schemas = self._resolve_tool_schemas(state.provider)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
@@ -787,7 +794,8 @@ class AgentRuntime:
 
     async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
         """Let a specialized linear runtime act between a finished tool iteration and the next model call."""
-        # Default runtimes do nothing here; a specialized runtime reads the loop state and may append to messages.
+        # Default runtimes do nothing here; a specialized runtime reads the loop state, may append to messages, and may
+        # replace self.tools with a new catalog, whose schemas the loop resolves before the next model call.
         # @intent iterations-can-be-observed-mid-run
         # A decision made while the agent works (JevRuntime's compute checkpoint) needs the live loop state after each
         # iteration's tool calls, and must run only once the middleware has let the loop continue, so it is called last.
@@ -977,8 +985,8 @@ class AgentRuntime:
     @staticmethod
     def _is_secret_trace_key(key: str) -> bool:
         # Identifies credential-like keys that must not be sent to trace providers.
-        upper = key.upper()
-        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+        # @intent trace-scrub-uses-precise-credential-keys
+        return CredentialKeyPolicy.is_secret_key(key)
 
     def _middleware_context(
         self,
@@ -1587,23 +1595,32 @@ class AgentRuntime:
         return replace(context_record, model_visible_result=visible_result)
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
-        # Applies the total tool-call budget, then ToolSettings hard budgets and deny-class rules, before local execution.
+        # Applies the total tool-call budget, then ToolSettings hard budgets, then the allowed_tools gate and ToolSettings deny-class rules, before local execution.
         if tool_is_internal:
             return None
         settings = self.config.tool_settings
         budget_stop = self._tool_settings_budget_stop(settings, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
         if budget_stop is not None:
             return budget_stop
-        if settings is None:
-            return None
-        hard_budget = settings.budget_stop(tool_name=call.tool_name, arguments=dict(call.arguments), call_contexts=call_contexts, iteration_count=iteration_count)
+        hard_budget = settings.budget_stop(tool_name=call.tool_name, arguments=dict(call.arguments), call_contexts=call_contexts, iteration_count=iteration_count) if settings is not None else None
         if hard_budget is not None:
             reason, meta = hard_budget
             return self._tool_settings_hard_budget_stop(reason, meta, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
-        denial = settings.denial(call.tool_name, self._executed_counts(call_contexts))
+        denial = self._allowed_tools_denial(call.tool_name)
+        if denial is None and settings is not None:
+            denial = settings.denial(call.tool_name, self._executed_counts(call_contexts))
         if denial is None:
             return None
         return self._apply_tool_denial(settings, call, provider, messages, call_contexts, denial, iteration_count=iteration_count, tokens_used=tokens_used)
+
+    def _allowed_tools_denial(self, tool_name: str) -> tuple[str, dict] | None:
+        # @intent allowed-tools-gate-is-enforced
+        # AgentLoopSettings.allowed_tools is a public gate that forks and restored agents inherit,
+        # so a call outside it is refused exactly like a denied tool instead of silently running.
+        allowed = self.config.allowed_tools
+        if allowed is None or tool_name in allowed:
+            return None
+        return "allowed_tools_denied", {"tool_name": tool_name, "allowed_tools": sorted(allowed)}
 
     def _tool_settings_budget_stop(self, settings: ToolSettings | None, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
         # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
@@ -1642,10 +1659,10 @@ class AgentRuntime:
         reason, meta = failure_stop
         return self._tool_settings_hard_budget_stop(reason, meta, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
-    def _apply_tool_denial(self, settings: ToolSettings, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], denial: tuple[str, dict], *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
+    def _apply_tool_denial(self, settings: ToolSettings | None, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], denial: tuple[str, dict], *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         # Aborts the run or records an in-context denial according to the on_deny policy.
         reason, meta = denial
-        if settings.aborts_on_deny:
+        if settings is not None and settings.aborts_on_deny:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
         context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta, iteration_count=iteration_count)
         call_contexts.append(context_record)
@@ -1708,6 +1725,13 @@ class AgentRuntime:
         visible = result if decision.transform is None else (decision.transform.model_visible_tool_result or result)
         if not truncate:
             return visible
+        # @intent appended-middleware-notes-survive-truncation: truncation keeps the head, so a note a
+        # middleware appended (canary watermark, loop-detection notice) would be cut off a long output.
+        # Cap only the raw part and re-attach the appended tail; replaced outputs are capped whole.
+        if visible is not result and result.output and visible.output.startswith(result.output):
+            capped = self._truncate_for_tool_settings(call, result)
+            tail = visible.output[len(result.output):]
+            return ToolResult(tool_name=visible.tool_name, status=visible.status, output=capped.output + tail, metadata={**dict(capped.metadata), **dict(visible.metadata)})
         return self._truncate_for_tool_settings(call, visible)
 
     def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
@@ -1905,6 +1929,10 @@ class AgentRuntime:
         meta = dict(transform.metadata or {})
         if "compaction" not in meta:
             return 0
+        # @intent content-rewrites-count-as-compactions
+        # Prefer the middleware's own changed flag, because an in-place rewrite keeps the message count.
+        if isinstance(meta.get("changed"), bool):
+            return 1 if meta["changed"] else 0
         before = meta.get("before_count")
         after = meta.get("after_count")
         if before is not None and after is not None:
@@ -1995,7 +2023,9 @@ def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
         upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Exact credential names and suffixes only, so author_id or max_tokens stay in the span.
+        if upper.startswith("LANGSMITH_") or CredentialKeyPolicy.is_secret_key(key_text):
             continue
         safe[key_text] = _safe_trace_value(value)
     return safe

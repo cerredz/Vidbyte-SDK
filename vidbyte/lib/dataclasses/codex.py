@@ -99,7 +99,7 @@ def _is_json_value(value: object) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class CodexClientSettings:
-    """Every process/client option accepted by ``CodexConfig`` in SDK 0.147."""
+    """Every process/client option accepted by ``CodexConfig`` in openai-codex 0.162."""
 
     codex_bin: str = ""
     launch_args_override: tuple[str, ...] = ()
@@ -108,7 +108,7 @@ class CodexClientSettings:
     env: Mapping[str, str] = field(default_factory=dict)
     client_name: str = "codex_python_sdk"
     client_title: str = "Codex Python SDK"
-    client_version: str = "0.147.0"
+    client_version: str = "0.162.1"
     experimental_api: bool = True
 
     def __post_init__(self) -> None:
@@ -183,7 +183,7 @@ class CodexSubagentSettings:
 
 @dataclass(frozen=True, slots=True)
 class CodexThreadSettings:
-    """Every thread start/resume/fork option exposed by openai-codex 0.147."""
+    """The thread start/resume/fork options adopted from openai-codex 0.147, unchanged in 0.162."""
 
     approval_mode: CodexApprovalMode = CodexApprovalMode.PROVIDER_DEFAULT
     base_instructions: str = ""
@@ -244,7 +244,7 @@ class CodexThreadSettings:
 
 @dataclass(frozen=True, slots=True)
 class CodexTurnSettings:
-    """Every per-turn override accepted by ``AsyncThread.run`` in SDK 0.147."""
+    """The per-turn overrides adopted from ``AsyncThread.run`` in 0.147, unchanged in 0.162."""
 
     approval_mode: CodexApprovalMode = CodexApprovalMode.PROVIDER_DEFAULT
     cwd: str = ""

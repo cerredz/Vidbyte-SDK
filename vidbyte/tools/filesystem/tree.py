@@ -31,15 +31,19 @@ class TreeTool(FileSystemTool):
             FileSystemPermissions.require_existing_directory(target)
             root = self._config.resolved_root()
             entries: list[str] = []
+            truncated = False
             for child in sorted(target.rglob("*"), key=lambda item: str(item).lower()):
                 relative_to_target = child.relative_to(target)
                 if len(relative_to_target.parts) > max_depth:
                     continue
+                # @intent tree-truncated-means-entries-were-cut
+                # Report truncation only when an eligible entry is actually left out, not when the
+                # folder merely holds exactly max_entries entries.
+                if len(entries) >= max_entries:
+                    truncated = True
+                    break
                 suffix = "/" if child.is_dir() else ""
                 entries.append(f"{child.relative_to(root).as_posix()}{suffix}")
-                if len(entries) >= max_entries:
-                    break
-            truncated = len(entries) >= max_entries
             return ToolResult.success(self.name, "\n".join(entries), metadata={"path": str(target), "max_depth": max_depth, "truncated": truncated})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))
