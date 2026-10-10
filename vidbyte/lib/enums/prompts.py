@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 70 static prompt assets across 28
+    Defines the stable typed identifiers for all 73 static prompt assets across 28
     JSON/Markdown-backed families. This file owns identifiers only; prompt text and
     family metadata belong under ``vidbyte/prompts/prompts/``.
 
@@ -77,6 +77,9 @@ class Prompt(str, Enum):
     JEV_CLONE_PROMPT = "jev_clone.clone_prompt"
     JEV_CLONE_RESULTS_PROMPT = "jev_clone.results_prompt"
     JEV_CONTINUATION_CONTINUE_PROMPT = "jev_continuation.continue_prompt"
+    JEV_BULK_WORK_SYSTEM_PROMPT = "jev_bulk_work.system_prompt"
+    JEV_BULK_WORK_WORKER_SYSTEM_PROMPT = "jev_bulk_work.worker_system_prompt"
+    JEV_BULK_WORK_SYNTHESIS_PROMPT = "jev_bulk_work.synthesis_prompt"
     JEV_FRESH_CONTINUATION_PROMPT = "jev_fresh_continuation.fresh_prompt"
     JEV_HANDOFF_SYSTEM_PROMPT = "jev_handoff.system_prompt"
     JEV_REVIEW_SYSTEM_PROMPT = "jev_review.system_prompt"

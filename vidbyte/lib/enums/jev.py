@@ -32,6 +32,7 @@ class JevPreflightPreset(str, Enum):
 
     CLARITY = "clarity"
     TOOL_SELECTOR = "tool_selector"
+    BULK_WORK = "bulk_work"
 
 
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
@@ -172,6 +173,23 @@ class JevScopeUnitSource(str, Enum):
     MENTIONED_BY_AGENT = "mentioned_by_agent"
 
 
+class JevBulkPlanningError(str, Enum):
+    """Stable reasons a Jev bulk plan was rejected before item execution."""
+
+    PLANNER_FAILURE = "planner_failure"
+    MALFORMED_OUTPUT = "malformed_output"
+    TOO_FEW_ITEMS = "too_few_items"
+    TOO_MANY_ITEMS = "too_many_items"
+    DUPLICATE_IDENTIFIERS = "duplicate_identifiers"
+
+
+class JevBulkItemError(str, Enum):
+    """Stable public category for an item whose worker did not return a result."""
+
+    WORKER_FAILURE = "worker_failure"
+    MISSING_RESULT = "missing_result"
+
+
 class JevCompletionStatus(str, Enum):
     """The whole-task completion status communicated by a JevAgent final answer."""
 
@@ -238,6 +256,9 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_REFERENCES = "clarity.references"
     CLARITY_SCOPE_PARTS = "clarity.scope_parts"
     CLARITY_SCOPE_SIZE = "clarity.scope_size"
+    BULK_WORK_MULTIPLE_ITEMS = "bulk_work.multiple_items"
+    BULK_WORK_SAME_OPERATION = "bulk_work.same_operation"
+    BULK_WORK_INDEPENDENT_ITEMS = "bulk_work.independent_items"
     CLARITY_COMPLETION = "clarity.completion"
     CLARITY_INFORMATION = "clarity.information"
     CLARITY_CONSTRAINTS = "clarity.constraints"
@@ -309,4 +330,4 @@ class JevComputeQuestionKey(str, Enum):
     CLONE_GOAL_DEPENDS_ON_STEP = "clone.goal_depends_on_step"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]
+__all__ = ["JevBoundaryKind", "JevBulkItemError", "JevBulkPlanningError", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

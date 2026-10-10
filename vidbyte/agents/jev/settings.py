@@ -16,6 +16,14 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_BULK_DEFAULT_MAX_ITEMS,
+    JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS,
+    JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS,
+    JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS,
+    JEV_BULK_MIN_ITEMS,
+    JEV_BULK_MIN_PARALLEL_AGENTS,
+    JEV_BULK_MIN_PLANNER_MAX_ITERATIONS,
+    JEV_BULK_MIN_PLANNER_MAX_TOKENS,
     JEV_COMPUTE_CLONES_DEFAULT,
     JEV_COMPUTE_CLONES_MAX,
     JEV_DONE_MAX_CONTINUATIONS,
@@ -53,6 +61,32 @@ from vidbyte.tools.security import PermissionPolicy
 
 
 @dataclass(frozen=True, slots=True)
+class JevBulkSettings:
+    """Validated limits for one opt-in Jev bulk-work planning and execution pass."""
+
+    max_parallel_agents: int = JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS
+    max_items: int = JEV_BULK_DEFAULT_MAX_ITEMS
+    planner_max_iterations: int = JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS
+    planner_max_tokens: int = JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS
+
+    def __post_init__(self) -> None:
+        # Rejects invalid resource bounds before JevAgent builds its planner or worker pool.
+        self._validate_limit("max_parallel_agents", JEV_BULK_MIN_PARALLEL_AGENTS)
+        self._validate_limit("max_items", JEV_BULK_MIN_ITEMS)
+        self._validate_limit("planner_max_iterations", JEV_BULK_MIN_PLANNER_MAX_ITERATIONS)
+        self._validate_limit("planner_max_tokens", JEV_BULK_MIN_PLANNER_MAX_TOKENS)
+
+    def _validate_limit(self, field_name: str, minimum: int) -> None:
+        # Requires a whole-number resource limit and excludes bool, which is an int subclass.
+        value = getattr(self, field_name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ConfigurationError(
+                f"JevBulkSettings.{field_name} must be an integer of at least {minimum}.",
+                details={"received": repr(value)},
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class JevAgentSettings:
     """Validated settings for the agent JevAgent runs by default and the specialists Jev may hand a run to instead."""
 
@@ -67,6 +101,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     agents: tuple[JevSpecialist, ...] = ()
+    bulk_work: JevBulkSettings = field(default_factory=JevBulkSettings)
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -91,6 +126,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
         if not isinstance(self.loop, AgentLoopSettings):
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
+        if not isinstance(self.bulk_work, JevBulkSettings):
+            raise ConfigurationError("JevAgentSettings.bulk_work must be a JevBulkSettings instance.")
         self._validate_agents()
 
     def _validate_agents(self) -> None:
@@ -297,4 +334,4 @@ class JevRuntimeSettings:
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
 
-__all__ = ["JevAgentSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevBulkSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
