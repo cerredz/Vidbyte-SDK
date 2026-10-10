@@ -1,7 +1,7 @@
 ---
 spec: coding-agent
 title: CodingAgent — a minimal BaseAgent with seven file-system and web tools
-status: tests-written        # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: implemented          # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-coding-agent
@@ -9,7 +9,7 @@ branch: feat/coding-agent
 base_commit: 8f23fd676d60f413e0353281dd73e60dc719407a
 created: 2026-10-10
 updated: 2026-10-10
-pr:                      # filled at S3 (draft) and finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/690   # filled at S3 (draft) and finalized at S6
 ---
 
 # Spec: CodingAgent — a minimal BaseAgent with seven file-system and web tools
