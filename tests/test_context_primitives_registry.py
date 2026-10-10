@@ -333,6 +333,20 @@ class CreateToolRegistryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manager.placement_for("text:1"), ContextWindowPlacement.TOP_OF_CONTEXT)
 
+    async def test_create_tool_treats_null_placement_as_default(self) -> None:
+        """Verify a JSON-null placement creates the primitive at end_of_context, exactly like omitting it."""
+        manager = ContextManager()
+        definition = CREATE_TOOL_REGISTRY["text"]
+        tool = CreateContextPrimitiveTool(definition, manager)
+        args = _sample_args_for_key("text")
+        args["placement"] = None
+
+        result = await tool.execute(ToolCall(tool_name=definition.tool_name, arguments=args))
+
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(result.metadata["placement"], ContextWindowPlacement.END_OF_CONTEXT.value)
+        self.assertEqual(manager.placement_for("text:1"), ContextWindowPlacement.END_OF_CONTEXT)
+
     async def test_create_tool_rejects_invalid_placement(self) -> None:
         """Verify invalid placement strings return a tool error instead of raising."""
         manager = ContextManager()
