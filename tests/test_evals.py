@@ -372,6 +372,18 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(numeric._parse_number(".5"), 0.5)
         self.assertEqual(numeric._parse_number("12345"), 12345.0)
 
+    async def test_numeric_grader_reads_scientific_notation(self) -> None:
+        # Tests that a number in scientific notation parses as one number instead of its mantissa.
+        # @intent scientific-notation-parse-as-one-number
+        numeric = NumericMatchGrader()
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=0.00001), "The rate is 1e-05 mol/s.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=1200), "Total: 1.2e3 units.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=6.02e23), "Avogadro: 6.02E23.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected="1.2e3"), "1200")).passed)
+        self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=1200), "1300")).passed)
+        self.assertEqual(numeric._parse_number("5 eggs"), 5.0)
+        self.assertEqual(numeric._parse_number("3em"), 3.0)
+
     async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
         # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
         # @intent json-bool-is-not-number
