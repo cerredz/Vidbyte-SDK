@@ -20,6 +20,7 @@ import io
 import json
 import unittest
 from types import SimpleNamespace
+from typing import Literal
 from unittest import mock
 
 from tests.agent_test_support import build_test_agent
@@ -28,8 +29,11 @@ from vidbyte.mcp_server import McpStudioServer
 from vidbyte.mcp_server.server import (
     JSONRPC_METHOD_NOT_FOUND,
 )
+from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.mcp_server.server import core as server_core
+from vidbyte.tools import tool
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 
 
@@ -278,6 +282,19 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(set(schemas[name]["properties"]), properties, name)
             self.assertEqual(schemas[name].get("required", []), required, name)
 
+
+    def test_tool_input_schema_keeps_derived_json_schema(self) -> None:
+        @tool
+        def tag_ticket(ticket_id: int, tags: list[str], priority: Literal["low", "high"]) -> str:
+            """Tag a support ticket."""
+            return f"{ticket_id}:{tags}:{priority}"
+
+        tagged = McpSchema.tool_spec_to_mcp_tool(tag_ticket.spec())["inputSchema"]["properties"]
+        self.assertEqual(tagged["tags"]["items"], {"type": "string"})
+        self.assertEqual(tagged["priority"]["enum"], ["low", "high"])
+        self.assertEqual(tagged["ticket_id"]["type"], "integer")
+        retrieval = McpSchema.tool_spec_to_mcp_tool(DocumentRetrievalTool().spec())["inputSchema"]["properties"]
+        self.assertNotIn("int", {prop.get("type") for prop in retrieval.values()})
 
 if __name__ == "__main__":
     unittest.main()
