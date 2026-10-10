@@ -14,7 +14,7 @@ started: 2026-10-10 01:32
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 01:32 | 2026-10-10 02:45 | reports/S0-scout.md, reports/S0-research.md | base_commit 278448b0; context/code-map.md (244 lines); context/provider-research.md (473 lines, 32 catalog rows) |
-| S1 spec + review | in progress | 2026-10-10 02:50 | | reports/S1-spec-author.md (spec r1 at ecf0c4b7; report at 9fb806b8); reviewer round 1 running | spec.md r1 (768 lines, 18 sections, 20 §12.3 rows, 3 new files, 6 new ModelProvider members) |
+| S1 spec + review | in progress | 2026-10-10 02:50 | | reports/S1-spec-author.md (spec r1 at ecf0c4b7; report at 9fb806b8); review round 1 SOUND WITH FIXES (0 Blocker / 2 Major / 8 Minor, reports/S1-spec-review.md at 86ad332a); author revising to r2 | spec.md r1 (768 lines, 18 sections, 20 §12.3 rows, 3 new files, 6 new ModelProvider members) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-10 01:32
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 01:33 — Ran a second S0 agent (a research scout) alongside the code scout, writing `context/provider-research.md` — the request explicitly asks for web research on 10+ providers, and a spec author should design from a sourced catalog rather than research on its own. Logged as a deviation from the playbook's "one scout".
@@ -31,6 +31,7 @@ started: 2026-10-10 01:32
 - 2026-10-10 ~01:55 — Both S0 agents were terminated by the account's session usage limit (HTTP 429, reset 02:30). Resumed both with SendMessage after the reset; no artifact was lost (nothing had been written yet).
 - 2026-10-10 02:45 — The request.md §C vocabulary "boolean / score / noul (free answer)" is wrong; both scouts independently corrected it to `JevQuestionType` = NOUL (yes/no, P(yes), no confidence) / CHOICE / SCORE. request.md is left verbatim as captured; the correction is carried in the niche facts below and in every briefing.
 - 2026-10-10 ~03:40 — The S1 reviewer was terminated by the account session usage limit (HTTP 429, reset 07:30) before writing anything; resumed with SendMessage after the reset. No artifact lost.
+- 2026-10-10 ~04:10 — S1 review round 1 returned SOUND WITH FIXES with no Blocker. R-1 (promote `resolved_model()` into the plan) and R-2 (echoed-model column in §9.1 plus a `SystemOneHost` flag) change §8.5 and §9, so per the playbook one more reviewer round scoped to §8.5/§9 and dependents follows the r2 revision, then one more author revision; the cap of 2 rounds is then reached and anything still disputed becomes a Q-n. The author was told not to set `status: approved` until that second round.
 
 ## User replies (verbatim)
 - 2026-10-10 ~01:50 — "it says the session couldnt be found on the website" (about the cloud session; answered: CLI account is vidbyte4@vidbyte.pro in org Vidbyte; not a pipeline instruction)
@@ -59,3 +60,12 @@ started: 2026-10-10 01:32
 - `tests/test_jev_usage_ledger.py` patches `vidbyte.providers.typesafe.TypeSafeProvider.run_decision`; that import path and its keyword-only signature must survive the refactor (INV-24). — *source:* S1 author
 - `gpt-6-luna` is absent from every text catalog at base, so a 0.0 output price cannot under-bill chat usage (A-16 / D-12). — *source:* S1 author
 - Lint and semgrep scan tracked files only: run `git add -A` before `python lint/run.py` or the gate skips new files. — *source:* S1 author
+- Lint success line is `SDK-LINT: PASS` (`lint/core/report.py:58`), not `AGENT-LINT: PASS`; success is exit 0 with every rule CLEAN/RATCHETED/IMPROVED. A001 only scans tracked `vidbyte/**/*.py` (`lint/core/discovery.py:56`), so tests need no 7-field header. — *source:* S1 reviewer
+- `tests/test_jev_managed_gateway.py:37` imports `_TypeSafeCallBuilder` and line 138 calls `.decision(config, request)` positionally then checks `repr(call)` hides the key; `_TypeSafeCallBuilder` is not in `typesafe.__all__` (line 502). — *source:* S1 reviewer
+- `UsageTracker._record` (`tracker.py:76-111`) prices `resolve(provider, str(response.model))`; `resolve` = exact -> `normalize_model` (strips only `<provider>/`) -> longest prefix; `JevUsage.cost_usd` returns `None` when pricing is `None`. The pricebook is keyed by request id, so hosts whose echoed `model` differs (Foundry deployment names, Cloudflare `@cf/...`) price to None unless the adapter substitutes the request model. — *source:* S1 reviewer
+- `ModalityDetector.detect_modality` returns `AUTO` for `pplx-decider-*`, `clef*`, `microsoft-decision-1`, `d1`, `sd-1`, `inception/mercury-decide` (no substring/prefix hit); `_resolve_from_environment` skips non-TEXT defaults. — *source:* S1 reviewer
+- `tests/test_model_registry.py` does not pin the `get_default_endpoint` message text; line 95 only validates each `get_supported_providers()` name. — *source:* S1 reviewer
+- `skills/jev-agent/SKILL.md:47` (not 46) is the "typesafe.py alone owns" sentence; line 46 is the stale `score_noul` line. — *source:* S1 reviewer
+- `DecisionModelRunner.arun` always passes its own config to `run_decision` (`decision.py:48`); `_config_for` (`typesafe.py:492-499`) does no provider check. — *source:* S1 reviewer
+- `model_configs.py:42` already imports `ProviderModelRegistry` at module level (no new import edge for `frozenset(ProviderModelRegistry.DECISION_DEFAULT_MODELS)`); `dataclasses/jev.py` imports only `vidbyte.lib.enums.jev` and `vidbyte.lib.errors` and must not import `model_configs` (its header line 5). — *source:* S1 reviewer
+- `docs/design/agents-md-jev-and-type-placement.md` exists and may settle where decision enums live (AGENTS.md "New JEV code" says enums go to `enums/jev.py`; `DecisionModelMode` lives in `enums/decision_model.py`). — *source:* S1 reviewer
