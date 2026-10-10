@@ -1708,6 +1708,13 @@ class AgentRuntime:
         visible = result if decision.transform is None else (decision.transform.model_visible_tool_result or result)
         if not truncate:
             return visible
+        # @intent appended-middleware-notes-survive-truncation: truncation keeps the head, so a note a
+        # middleware appended (canary watermark, loop-detection notice) would be cut off a long output.
+        # Cap only the raw part and re-attach the appended tail; replaced outputs are capped whole.
+        if visible is not result and result.output and visible.output.startswith(result.output):
+            capped = self._truncate_for_tool_settings(call, result)
+            tail = visible.output[len(result.output):]
+            return ToolResult(tool_name=visible.tool_name, status=visible.status, output=capped.output + tail, metadata={**dict(capped.metadata), **dict(visible.metadata)})
         return self._truncate_for_tool_settings(call, visible)
 
     def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
