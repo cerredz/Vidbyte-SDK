@@ -53,7 +53,7 @@ class ResumeAppendTool(_SessionBuiltinTool):
     def _perform(self, arguments: dict[str, Any]) -> ToolResult:
         # Validate scope, resolve the target checkpoint, and append its context to the bound session.
         session_id = str(arguments.get("session_id", "")).strip()
-        checkpoint_id = str(arguments.get("checkpoint_id", "")).strip() or None
+        checkpoint_id = self._optional_text(arguments, "checkpoint_id").strip() or None
         if not session_id:
             return ToolResult.error(_TOOL_NAME, "resume_append requires a session_id.")
         resolved_session_id = self._resolve_session_id(session_id)
