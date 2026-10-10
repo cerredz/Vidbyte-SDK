@@ -43,6 +43,10 @@ schema = tool_spec_to_provider_schema(lookup_metric.spec(), "openai")
 - `__init__.py`: provider factory and public adapter exports.
 - `base.py`: provider schema translation helpers.
 - `openai.py`, `anthropic.py`, `gemini.py`, `xai.py`, `openrouter.py`, `compatible.py` (DeepSeek, GLM, MiniMax, Kimi, Mistral): provider adapters.
+- `typesafe.py`: TypeSafe decision adapter; adds the managed-gateway headers and run context, `/models`, and run close on top of the System One wire.
+- `decisions.py`: shared decision plumbing: `DecisionHttpCall` (one bounded, timed, retrying call) and `DecisionFailures` (status-to-message mapping worded for each host).
+- `systemone.py`: the System One wire (`SystemOneRequest`, `SystemOneAnswers`) and `SystemOneProvider`, which serves Perplexity, OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, and Microsoft Foundry from one `HOSTS` table.
+- `openai_decisions.py`: the OpenAI Decisions wire and `OpenAIDecisionsProvider` (predicate, choice, and score questions; answers matched by name).
 - `tracing/`: provider-backed trace adapters.
 
 ## Related Layers
@@ -81,6 +85,15 @@ that contract so an adapter can be reviewed without leaving the repository.
 | OpenRouter | `openrouter.py` | `Authorization: Bearer` | OpenAI-compatible surface |
 | PlayAI | `playai.py` | vendor key header | text-to-speech |
 | Generic | `compatible.py` | `Authorization: Bearer` | any OpenAI-compatible endpoint |
+| TypeSafe | `typesafe.py` | `Authorization: Bearer` | `/systemone`, `/models`; managed gateway adds `/runs/{run_id}/close` |
+| Perplexity | `systemone.py` | `Authorization: Bearer` | `/decisions` (System One body) |
+| OpenRouter (decisions) | `systemone.py` | `Authorization: Bearer` | `/systemone`; noul questions always carry `criteria` |
+| Liquid AI | `systemone.py` | `Authorization: Bearer` | `/systemone` under `https://api.liquid.ai/decisions/v1` |
+| Baseten | `systemone.py` | `Authorization: Api-Key` | `/decisions` (Mercury Decide) |
+| meraGPT | `systemone.py` | `Authorization: Bearer` | `/systemone` |
+| Cloudflare | `systemone.py` | `Authorization: Bearer` (API token) | tenant endpoint `…/client/v4/accounts/{ACCOUNT_ID}/ai` + `/run/@cf/cloudflare/clef` |
+| Microsoft Foundry | `systemone.py` | `Authorization: Bearer` (key or Entra token) | tenant resource endpoint + `/providers/microsoft/v1/systemone` |
+| OpenAI (Decisions) | `openai_decisions.py` | `Authorization: Bearer` | `/decisions` |
 
 ## Official Provider Documentation
 
@@ -103,6 +116,21 @@ freeze model catalogs, pricing, or rate limits in this repository.
 | OpenRouter | [Quickstart](https://openrouter.ai/docs/quickstart) | [API reference](https://openrouter.ai/docs/api_reference/overview) |
 | ElevenLabs | [API reference](https://elevenlabs.io/docs/api-reference/introduction/) | [Text to speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert) |
 | PlayAI / Play | [API reference](https://docs.play.ht/reference/) | [API quickstart](https://docs.play.ht/reference/api-getting-started) |
+
+Decision providers (**retrieved:** 2026-10-10):
+
+| Provider | API overview | Contract reference |
+| --- | --- | --- |
+| TypeSafe | [Models](https://docs.typesafe.ai/models.md) | [System One API](https://docs.typesafe.ai/api.md) |
+| Perplexity | [Decisions quickstart](https://docs.perplexity.ai/docs/decisions/quickstart) | [POST /v1/decisions](https://docs.perplexity.ai/api-reference/decisions-post), [pricing](https://docs.perplexity.ai/getting-started/pricing) |
+| OpenRouter | [Jev guide](https://openrouter.ai/docs/guides/community/jev) | [System One SDK](https://openrouter.ai/docs/client-sdks/go/sdks/systemone/README) |
+| Liquid AI | [Decision models](https://docs.liquid.ai/lfm/models/decision-models) | [d1](https://docs.liquid.ai/lfm/models/d1) |
+| Baseten | [Mercury Decide](https://www.baseten.co/library/mercury-decide/) | [Auth schemes](https://docs.baseten.co/reference/inference-api/chat-completions) |
+| meraGPT | [Docs](https://meragpt.com/docs) | [Docs](https://meragpt.com/docs) |
+| Cloudflare | [Clef](https://developers.cloudflare.com/workers-ai/models/clef/) | [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) |
+| Microsoft Foundry | [Microsoft-Decision-1](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742) | [Microsoft-Decision-1](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742) |
+| OpenAI | [Decisions guide](https://developers.openai.com/api/docs/guides/decisions) | [Pricing](https://developers.openai.com/api/docs/pricing) |
+| Vercel AI Gateway | [Changelog](https://vercel.com/changelog/openai-decisions-api-now-available-on-ai-gateway) | [gpt-6-luna-decisions](https://vercel.com/ai-gateway/models/gpt-6-luna-decisions) |
 
 ### Expanded provider reading maps
 
@@ -547,8 +575,17 @@ needs per-provider cost classes rather than one shared formula.
 | OpenAI (Chat Completions) | `usage` | `prompt_tokens` | `completion_tokens` | `total_tokens` |
 | Anthropic | `usage` | `input_tokens` | `output_tokens` | — (not returned) |
 | Gemini | **`usageMetadata`** | `promptTokenCount` | `candidatesTokenCount` | `totalTokenCount` |
+| TypeSafe (System One) | `usage` | `input_tokens` | `output_tokens` | — (derived) |
+| Perplexity | `usage` | `input_tokens` | `output_tokens` | — (derived) |
+| Liquid AI | `usage` | `input_tokens` | `output_tokens` (always 0) | — (derived) |
+| Baseten | `usage` | `input_tokens` | `output_tokens` | — (derived) |
+| meraGPT | `usage` | `input_tokens` | `output_tokens` | — (derived) |
+| OpenRouter (decisions) | `usage` | `input_tokens` | `output_tokens` | — (derived); plus `cost` in USD, which wins |
+| Cloudflare | undocumented (research §3.4); parsed as System One keys | | | |
+| Microsoft Foundry | undocumented (research §3.3); parsed as System One keys | | | |
+| OpenAI (Decisions) | `usage` | `input_tokens` | `output_tokens` | — (spec A-2) |
 
-Three consequences worth stating explicitly:
+Four consequences worth stating explicitly:
 
 1. **Gemini's usage is not under `usage`.** `gemini.py` reads `parsed.get("usageMetadata")` while
    every other adapter reads `parsed.get("usage")`. A refactor that unifies the extraction path must
@@ -559,6 +596,11 @@ Three consequences worth stating explicitly:
    `prompt_tokens`/`completion_tokens`; the Responses API uses `input_tokens`/`output_tokens`.
    Because `compatible.py`, `xai.py`, and `openrouter.py` target OpenAI-*compatible* surfaces, a
    vendor behind those adapters may emit either naming depending on which OpenAI API it mirrors.
+4. **Decision calls are priced on `DecisionModelResponse.model`.** TypeSafe and Perplexity document
+   the model they echo, so the echo is the pricebook key. Every other decision host (OpenRouter,
+   Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry, OpenAI Decisions) reports the model id
+   the caller sent, because its echo is undocumented or names a deployment; key its pricing rows by
+   that request id.
 
 ### Nested Usage Details
 
@@ -612,3 +654,49 @@ something was free.
    guessing.
 4. Guard usage extraction with the `isinstance` pattern above.
 5. If the vendor requires a dated version header, pin it explicitly and note here why that value.
+
+## Decision Providers
+
+Calibrated decision models run through `DecisionModelRunner(DecisionModelConfig(provider=...))`, never
+through the text factory. There is one adapter per wire, not per vendor: `systemone.py` serves every
+System One host from its `HOSTS` table, `openai_decisions.py` serves OpenAI's Decisions API, and
+`typesafe.py` adds TypeSafe's managed gateway. Every host runs in direct mode with the caller's key;
+`VIDBYTE_MANAGED` is TypeSafe-only and is refused for any other provider at construction.
+
+```python
+from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.runners.decision import DecisionModelRunner
+
+# Key from PERPLEXITY_API_KEY; model defaults to pplx-decider-v1.1-27b.
+runner = DecisionModelRunner(DecisionModelConfig(provider=ModelProvider.PERPLEXITY))
+```
+
+- **Tenant endpoints.** Cloudflare and Microsoft Foundry have no shared base URL, so `endpoint` is
+  required and the runner raises at construction without it.
+  `DecisionModelConfig(provider=ModelProvider.CLOUDFLARE, endpoint="https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai")`
+  posts to `.../run/@cf/cloudflare/clef`.
+  `DecisionModelConfig(provider=ModelProvider.FOUNDRY, endpoint="https://<resource>.services.ai.azure.com", model="<deployment name>")`
+  posts to `.../providers/microsoft/v1/systemone`. On Foundry `model` is the deployment name: the
+  `microsoft-decision-1` pricing row applies only when the deployment carries that name, and any other
+  name records `cost_usd=None`.
+- **Vercel AI Gateway** speaks the OpenAI Decisions wire:
+  `DecisionModelConfig(provider=ModelProvider.OPENAI, endpoint="https://ai-gateway.vercel.sh/v1", api_key=<AI_GATEWAY_API_KEY>, model="openai/gpt-6-luna-decisions")`.
+  Pass `api_key` explicitly; without it the key falls back to `OPENAI_API_KEY`, which Vercel rejects (401).
+- **Self-hosted System One servers** (Laya, Strands Decider, Clef or pplx-decider weights, and other
+  servers answering `POST /v1/systemone`) go through TypeSafe's adapter:
+  `DecisionModelConfig(provider=ModelProvider.TYPESAFE, endpoint="http://<host>/v1", api_key="unused", model="<served model>")`.
+  Their records land under provider `typesafe` and the echoed model is priced against TypeSafe's
+  rows, so a server that echoes a `jev-` id shows TypeSafe's rate although your own hardware served
+  it, and any other id records `cost_usd=None`.
+- **OpenRouter** rejects a noul question without `criteria`, so its host row sends
+  `{"true": null, "false": null}` when the question has no options. `usage.cost` wins over table pricing.
+- **OpenAI predicates** have no criteria slot: a noul question whose true/false options carry
+  descriptions is refused before the call, so move the criteria into `instructions`. Structured
+  `state`, `instructions`, and descriptions are sent as JSON text.
+- **Cloudflare silently truncates** a `state` longer than Clef's 65,536-token window; the answer
+  reflects the truncated state and the SDK cannot detect it.
+- **No model list or managed runs elsewhere.** Only TypeSafe has `/models` and managed runs; on every
+  other host `alist_models()` and `aclose_run()` raise `ProviderConfigurationError` without a network call.
+- **Unpriced hosts.** Liquid AI, Baseten, and meraGPT publish no first-party price, so their calls are
+  recorded with `cost_usd=None` rather than a guessed rate.
