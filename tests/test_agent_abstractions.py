@@ -216,6 +216,13 @@ class TestCalculatorBoundedEval(unittest.IsolatedAsyncioTestCase):
         self.assertIn("name 'exp' is not permitted", (await self._run("exp(1)")).output)
         self.assertEqual((await self._run("1,000*3")).status, ToolStatus.ERROR)
 
+    async def test_scientific_notation_and_any_whitespace_are_accepted(self) -> None:
+        for expression, expected in {"2.5e-3 * 4": "0.01", "1E3 + 1": "1001.0", "2 +\n2": "4", "(4 * 3)\t/ 2": "6.0"}.items():
+            result = await self._run(expression)
+            self.assertEqual((result.status, result.output), (ToolStatus.SUCCESS, expected), expression)
+        self.assertIn("name 'x' is not permitted", (await self._run("x + 1")).output)
+        self.assertIn("exceeds the calculator bound", (await self._run("2**1e3")).output)
+
 
 class TestPrompts(unittest.TestCase):
     """Verifies JSON-backed prompt loading."""
