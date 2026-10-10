@@ -110,9 +110,12 @@ class CreateHandoffTool(BaseTool):
         normalized = {str(k): str(v) for k, v in sections.items()}
         primitive_id = self._next_primitive_id()
         instructions_parts: list[str] = []
-        if audience := str(args.get("audience", "")).strip():
+        # @intent null-optional-arg-means-default
+        # A null audience or instructions means "not given", so it must never reach the receiver as "None".
+        raw_audience, raw_extra = args.get("audience"), args.get("instructions")
+        if raw_audience is not None and (audience := str(raw_audience).strip()):
             instructions_parts.append(f"Audience: {audience}")
-        if extra := str(args.get("instructions", "")).strip():
+        if raw_extra is not None and (extra := str(raw_extra).strip()):
             instructions_parts.append(f"Instructions: {extra}")
         instructions = "\n".join(instructions_parts) or None
         return Handoff(title=title, sections=normalized, instructions=instructions, primitive_id=primitive_id)

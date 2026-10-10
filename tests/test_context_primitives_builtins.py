@@ -360,6 +360,24 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("new body", stored.to_context_text())
         self.assertNotIn("old body", stored.to_context_text())
 
+    async def test_null_primitive_type_and_title_behave_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default: null type means "text" and null title means the type default.
+        manager = ContextManager()
+        tool = ContextUpsertTool(manager)
+        call = ToolCall(
+            tool_name="context_upsert",
+            arguments={"primitive_id": "note:1", "content": "body text", "primitive_type": None, "title": None},
+        )
+
+        result = await tool.execute(call)
+
+        self.assertEqual(result.status.value, "success", result.output)
+        stored = manager.get_by_id("note:1")
+        assert stored is not None
+        self.assertIsInstance(stored, TextContextItem)
+        self.assertEqual(stored.title, "Text")
+        self.assertNotIn("None", stored.to_context_text())
+
     async def test_public_imports_accessible_from_root(self) -> None:
         from vidbyte import ContextEditTool as RootEdit
         from vidbyte import ContextListTool as RootList

@@ -78,8 +78,10 @@ class ContextUpsertTool(BaseTool):
         args = dict(call.arguments)
         primitive_id = str(args.get("primitive_id", "")).strip()
         content = str(args.get("content", ""))
-        primitive_type = str(args.get("primitive_type", "text")).strip().lower()
-        title = str(args.get("title", "")).strip()
+        # @intent null-optional-arg-means-default
+        # A null type or title means "not given": use the documented default, never the text "None".
+        primitive_type = str(self._optional_argument(call, "primitive_type", default="text")).strip().lower()
+        title = str(self._optional_argument(call, "title", default="")).strip()
 
         if primitive_type not in _SUPPORTED_TYPES:
             return ToolResult.error(
