@@ -317,21 +317,22 @@ class SyncRunMcpLoopTests(unittest.TestCase):
     def test_pipeline_run_sync_twice_reconnects_the_mcp_server_on_each_loop(self) -> None:
         agent = build_test_agent(name="worker", system_prompt="Work.", runner=McpThenDoneRunner("remote_mini"))
         agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+        config = agent._pending_mcp_configs[0]
         pipeline = SequentialPipeline([agent])
 
         pipeline.run_sync("batch 1")
         pipeline.run_sync("batch 2")
 
-        # The second batch found the first server stranded on a closed loop and reconnected on its own.
+        # Each batch connected its own server on its own loop and closed it before that loop ended.
         first, second = MockMcpStdioTransport.instances
         self.assertEqual(LoopBoundMcpTransport.served_calls, [first.loop, second.loop])
         self.assertIsNot(first.loop, second.loop)
-        self.assertTrue(first.abandoned)
-        self.assertFalse(second.abandoned)
-        # Only the live server and one copy of its tool remain attached.
-        self.assertEqual(agent.mcp_servers()[0].transport, second)
-        self.assertEqual([tool.name for tool in agent.tools].count("remote_mini"), 1)
-        self.assertEqual(agent._pending_mcp_configs, [])
+        self.assertTrue(first.closed and second.closed)
+        self.assertFalse(first.abandoned or second.abandoned)
+        # Nothing is left running, no stale tools remain, and the server waits to reconnect.
+        self.assertEqual(agent.mcp_servers(), ())
+        self.assertNotIn("remote_mini", [tool.name for tool in agent.tools])
+        self.assertEqual(agent._pending_mcp_configs, [config])
 
     def test_async_runs_on_one_loop_keep_their_mcp_connection(self) -> None:
         agent = build_test_agent(name="worker", system_prompt="Work.", runner=McpThenDoneRunner("remote_mini"))
