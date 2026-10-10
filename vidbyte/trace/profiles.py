@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.trace.schema import SpanSpec, TraceDetail
 
 _DETAIL_ORDER = {
@@ -156,8 +157,10 @@ def safe_trace_value(value: Any, *, max_chars: int = 12000, redact: bool = True)
 
 def _is_secret_key(key: str) -> bool:
     # Detects credential-like trace payload keys.
+    # @intent trace-scrub-uses-precise-credential-keys
+    # Exact credential names and suffixes only, so author_id, max_tokens, and usage counts stay in semantic spans.
     upper = key.upper()
-    return upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+    return upper.startswith("LANGSMITH_") or CredentialKeyPolicy.is_secret_key(key)
 
 
 __all__ = ["TraceComponentSettings", "TraceProfile", "safe_trace_value"]
