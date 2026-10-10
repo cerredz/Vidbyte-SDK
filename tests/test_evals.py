@@ -526,6 +526,41 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
                 os.remove(os.path.join(temp_dir, name))
             os.rmdir(temp_dir)
 
+    async def test_eval_suite_json_null_optionals_load_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default
+        # [Crash] json.dumps(asdict(case)) writes null for unset optionals, which failed the whole suite load.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "nulls.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [
+                    {"prompt": "omitted", "expected": "omitted"},
+                    {"prompt": "tags", "expected": "tags", "tags": None},
+                    {"prompt": "metadata", "expected": "metadata", "metadata": None},
+                    {"prompt": "templates", "expected": "templates", "templates": None},
+                    {"prompt": "template", "expected": "template", "template": None},
+                    {"prompt": "all", "expected": "all", "tags": None, "metadata": None, "template": None, "templates": None},
+                    {"prompt": "mixed", "expected": "Paris", "template": None, "templates": ["short_answer_fact"]},
+                ]}, f)
+            suite = EvalSuite.from_json(path)
+
+            bad_path = os.path.join(temp_dir, "bad.json")
+            with open(bad_path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [{"prompt": "q", "templates": "short_answer_fact"}]}, f)
+            with self.assertRaises(ValueError):
+                EvalSuite.from_json(bad_path)
+        finally:
+            for name in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, name))
+            os.rmdir(temp_dir)
+
+        for case in suite.cases[:6]:
+            self.assertEqual((case.tags, case.metadata, case.templates), ((), {}, ()), case.prompt)
+        self.assertEqual(len(suite.cases[6].templates), 1)
+
+        runner = EvalRunner(MockRunner("ok"), default_grader=ContainsGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(EvalSuite("nulls", suite.cases[:6]))).results), 6)
+
     async def test_eval_registry_structured_expected_roundtrip(self) -> None:
         # Tests SQLite registry persistence for structured expected payloads.
         temp_dir = tempfile.mkdtemp()

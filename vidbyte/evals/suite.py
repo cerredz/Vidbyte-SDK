@@ -44,8 +44,17 @@ class EvalSuite:
         for c in data.get("cases", []):
             # @intent tag-string-is-tag-text
             # tuple("billing") would split the tag into characters; a string is read like a CSV tags cell.
-            raw_tags = c.get("tags", [])
-            case_tags = cls._split_tag_text(raw_tags) if isinstance(raw_tags, str) else tuple(raw_tags)
+            # @intent null-optional-arg-means-default
+            # JSON null for tags or metadata (what asdict() writes for unset fields) means "not given".
+            raw_tags = c.get("tags")
+            if raw_tags is None:
+                case_tags: tuple[str, ...] = ()
+            elif isinstance(raw_tags, str):
+                case_tags = cls._split_tag_text(raw_tags)
+            else:
+                case_tags = tuple(raw_tags)
+            raw_metadata = c.get("metadata")
+            metadata = {} if raw_metadata is None else dict(raw_metadata)
             templates = cls._load_templates(c)
             cases_list.append(
                 EvalCase(
@@ -53,7 +62,7 @@ class EvalSuite:
                     expected=c.get("expected"),
                     tags=case_tags,
                     templates=templates,
-                    metadata=dict(c.get("metadata", {}))
+                    metadata=metadata
                 )
             )
         return cls(name=name, cases=cases_list)
@@ -95,8 +104,10 @@ class EvalSuite:
     @classmethod
     def _load_templates(cls, case_data: Mapping[str, Any]) -> tuple[Any, ...]:
         # Resolves JSON template or templates fields into concrete template instances.
-        has_template = "template" in case_data
-        has_templates = "templates" in case_data
+        # @intent null-optional-arg-means-default
+        # A null template or templates value is treated exactly like the key being omitted.
+        has_template = case_data.get("template") is not None
+        has_templates = case_data.get("templates") is not None
         if has_template and has_templates:
             raise ValueError("Eval case cannot define both 'template' and 'templates'.")
         if has_template:
