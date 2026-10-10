@@ -20,7 +20,7 @@ started: 2026-10-10 00:51
 | S4 adversarial review | done | 2026-10-10 | 2026-10-10 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | MERGEABLE AFTER FIXES; raw C 1B/2M/2m, V 0B/1M/5m, E 1B/4M/1m → confirmed 2 Blockers (R-1 _stop never-raises/always-closes, R-2 EC-11 test cannot fail) + 2 Majors (R-3 root_dir "", R-4 bash description); 5 Minors (R-5..R-9; R-8 layering + R-9 relative git downgraded); 0 refuted; spec status reviewed |
 | S5 repair loop | done (converged) | 2026-10-10 | 2026-10-10 | reports/S5-repair-1.md; verify-log.md | 1 iteration: R-1 @415f7c22, R-2 @a49b7dd8 (granted test), R-3 @64df91ce, R-4 @977c7d23, R-5 @15aed1e0, R-6 @388993f9, R-7 @581fc272 (granted README); R-8/R-9 follow-up; orchestrator re-ran source (2715 passed) + package + lint PASS; remote CI 38075705506 + static-policy 38075707127 success @581fc272; test diff vs S2_HEAD = exactly the 2 granted files |
 | S5 re-review | done | 2026-10-10 | 2026-10-10 | reports/S5-re-review-1.md | round 1/2: SOUND, 0B/0M/1m (R-C1: bash description sentence 5 says background process "is killed", false on Windows; spec §12.3 row 1 wording → follow-up); AC-27 3.13 half covered by reviewer stub-import probe (timeout 2.02 s, double cancel 0.81 s, is_closing=True); spec status verified |
-| S6 PR | pending | | | | |
+| S6 PR | in progress | 2026-10-10 | | reports/S6-pr-author.md; pr-body.md | PR author done @00a1c8c2: title "feat(agents): add CodingAgent, a BaseAgent with bash, file, search, and web-fetch tools", draft, base main, 2 mermaid, 4/4 check-runs green @00a1c8c2 (CI 38078804606, static 38078806048); orchestrator verified + AC-17/AC-25 proofs exist. BLOCKED on merge: mergeable=CONFLICTING (contracts/sdk-public-api.json) — main d7b25110 is 45 ahead → routed to S5 iteration 2 |
 
 ## Counters and caps
 - S2_HEAD: d158d5f6 · S3_HEAD: 4e285d91 · PR: #690 · S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
@@ -43,6 +43,8 @@ started: 2026-10-10 00:51
 - 2026-10-10 — Not acting on repair-1's observation that `ruff --select I001` flags import order in `tests/features/coding_agent/test_coding_agent_contract.py:14` and `test_coding_agent_web_fetch.py:14`: no gate scans `tests/` for I001 (S051 runs ruff on `pyproject.toml vidbyte` only, `lint/core/ruff.py:68`), it is not a confirmed finding, and it would need a test-tree grant. Mention as a trivial follow-up.
 
 - 2026-10-10 — Re-review R-C1 (Minor) not sent back into the repair loop: the skill loops only on new Blockers/Majors, and the wording comes from spec §12.3 row 1. Listed as a follow-up in the PR body with the reviewer's one-clause fix.
+
+- 2026-10-10 — Routed PR #690's merge conflict back to S5 as iteration 2 (gate: mergeability). origin/main d7b25110 is 45 commits ahead, conflicts in contracts/sdk-public-api.json, and changed vidbyte/agents/base.py, runtime.py, tools/builtins/operations/fetch.py, vidbyte/__init__.py, plus 14 new lint rules (A009, C006–C015, S063, S064) and lint/baseline.json. Resolution: merge origin/main into the branch (merge commit; rebase would need a force-push, which is forbidden), regenerate the contract, re-run lint and the full gate. Then re-review round 2/2 scoped to the merge's interaction with CodingAgent, then the S6 agent refreshes the PR body.
 
 ## User replies (verbatim)
 - (none yet during the run)
@@ -87,3 +89,5 @@ started: 2026-10-10 00:51
 - `git rev-parse --short A B` fails with "Needed a single revision" (`--short` implies `--verify`); query one ref per call. — *source:* orchestrator
 - R-1 regression check: verifier probes `probe_stop.py` / `probe_eperm_alive.py` in the session scratchpad, run with the WSL venv python; every `[CODE]` row must end `is_closing=True`. wsl.exe expands every `$NAME` in `-lc` strings. — *source:* S4 verifier / S5 repair-1
 - Known limits after R-1 (not raised): when no group member can be signalled (an `exec sudo …` leader) the timeout text still says "[command stopped: …]" while the command runs on; Python 3.11 `asyncio.wait_for` can return the inner result if a cancel lands exactly as the future completes (pre-existing, from the mandated wait_for). — *source:* S5 re-review 1
+- `gh pr checks` is always "no checks reported" for manually dispatched runs in this repo; verify with `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs`. — *source:* S6 PR author
+- The GitHub PR body may differ from committed pr-body.md (it cites runs on its own head SHA). — *source:* S6 PR author
