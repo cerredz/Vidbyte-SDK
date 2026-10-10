@@ -10,6 +10,7 @@ Architecture:
     - AgentRegistry: Local/shared memory storage registry.
     - Swappable Runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime.
     - Multi-Agent Team: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, and AgentTransfer.
+    - CodingAgent: BaseAgent preloaded with seven coding tools over one root folder.
 Relations:
     Imported by the root SDK client, evaluator harnesses, and user applications.
 Similar Files:
@@ -58,6 +59,7 @@ from vidbyte.agents.codex import (
     CodexTurnSettings,
     CodexUsageResponse,
 )
+from vidbyte.agents.coding import CodingAgent
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.agents.contracts import (
@@ -356,6 +358,7 @@ __all__ = [
     "CodexTurnSettings",
     "CodexTurnError",
     "CodexUsageResponse",
+    "CodingAgent",
     "ContinualTraceAgent",
     "HandoffAgent",
     "JevAgent",
