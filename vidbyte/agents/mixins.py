@@ -12,6 +12,7 @@ Key Functions:
     - attach_preset_mcp_server: Attaches a pre-configured popular MCP server in one line.
     - with_preset_mcp_server: Defer attaching a pre-configured popular MCP server until agent execution.
     - _run_releasing_mcp: Awaits one synchronous-entry run, then re-queues its MCP servers for the next loop.
+    - _ensure_mcp_connected: Connects pending servers and reconnects any stranded on a closed event loop.
 Relations:
     Inherited by SDK classes that attach MCP servers. Integrates with vidbyte.tools.mcp.presets.
 """
@@ -177,8 +178,22 @@ class McpAttachableMixin:
 
     async def _ensure_mcp_connected(self) -> None:
         """Called internally by execution entry points (e.g. agent/harness run)
-        to trigger connection of deferred sync-registered servers.
+        to trigger connection of deferred sync-registered servers, and to reconnect
+        servers whose connection was opened on an event loop that is no longer running.
         """
+        # @intent mcp-handles-reconnect-on-a-new-event-loop
+        # Sync wrappers (pipelines, evals, workflows) each run in a fresh asyncio.run loop, and MCP pipes die with theirs.
+        live, stale = self._split_mcp_handles_by_loop()
+        if stale:
+            # Forget the dead connections and the tools that could only fail through them.
+            self._mcp_handles[:] = live
+            self._drop_mcp_tools(stale)
+            # Stop the orphaned server processes without waiting on the loop that owned them.
+            for handle in stale:
+                self._abandon_mcp_handle(handle)
+            # Queue them to reconnect first, in their original order, on the loop running now.
+            self._pending_mcp_configs[:0] = [handle.config for handle in stale]
+        # Nothing waiting to connect means every attached server is already live on this loop.
         if not self._pending_mcp_configs:
             return
         configs = list(self._pending_mcp_configs)
@@ -240,7 +255,33 @@ class McpAttachableMixin:
             *[h.close() for h in handles],
             return_exceptions=True,
         )
+        self._drop_mcp_tools(handles)
 
+    def _split_mcp_handles_by_loop(self) -> tuple[list[McpServerHandle], list[McpServerHandle]]:
+        # Separates handles usable on the running loop from ones stranded on another or closed loop.
+        live: list[McpServerHandle] = []
+        stale: list[McpServerHandle] = []
+        for handle in self._mcp_handles:
+            is_bound = getattr(handle.transport, "is_bound_to_running_loop", None)
+            if callable(is_bound) and not is_bound():
+                stale.append(handle)
+            else:
+                live.append(handle)
+        return live, stale
+
+    @staticmethod
+    def _abandon_mcp_handle(handle: McpServerHandle) -> None:
+        # Best-effort kill of a server whose loop is gone; there is no loop left to await its close on.
+        abandon = getattr(handle.transport, "abandon", None)
+        if not callable(abandon):
+            return
+        try:
+            abandon()
+        except Exception:
+            pass
+
+    def _drop_mcp_tools(self, handles: Sequence[McpServerHandle]) -> None:
+        # Removes the given servers' bridged tools from this object's tool lists.
         bridged_tool_set = set()
         for h in handles:
             bridged_tool_set.update(h.bridged_tools)

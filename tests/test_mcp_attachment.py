@@ -10,7 +10,8 @@ Architecture:
     - MockMcpStdioTransport: Mocked stdio transport returning custom remote tool specs.
     - McpAttachmentTests: IsolatedAsyncioTestCase containing all scenarios described in the plan.
     - LoopBoundMcpTransport / SyncRunMcpLoopTests: a transport that only works on the loop it
-      started on, proving sync run() reconnects lazily instead of reusing a closed loop's pipes.
+      started on, proving sync run() and pipeline run_sync() reconnect instead of reusing a closed
+      loop's pipes, while one long-lived loop keeps its connection.
 Relations:
     - vidbyte/agents/mixins.py
     - vidbyte/agents/base.py
@@ -25,6 +26,7 @@ from unittest.mock import patch
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import BaseAgent
 from vidbyte.lib.errors import McpAttachmentError, McpInitializeError
+from vidbyte.pipelines import SequentialPipeline
 from vidbyte.tools import ToolCall, ToolPermission, Tools
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
@@ -252,6 +254,14 @@ class LoopBoundMcpTransport(MockMcpStdioTransport):
         super().__init__(command, **options)
         # Real pipes are created on, and stay bound to, the loop that opens them.
         self.loop = asyncio.get_running_loop()
+        self.abandoned = False
+
+    def is_bound_to_running_loop(self) -> bool:
+        return asyncio.get_running_loop() is self.loop and not self.loop.is_closed()
+
+    def abandon(self) -> None:
+        self.abandoned = True
+        self.closed = True
 
     async def request(self, method: str, params: dict[str, any] | None = None) -> dict[str, any]:
         if asyncio.get_running_loop() is not self.loop or self.loop.is_closed():
@@ -303,6 +313,40 @@ class SyncRunMcpLoopTests(unittest.TestCase):
         self.assertEqual(agent.mcp_servers(), ())
         self.assertNotIn("remote_mini", [tool.name for tool in agent.tools])
         self.assertEqual(agent._pending_mcp_configs, [config])
+
+    def test_pipeline_run_sync_twice_reconnects_the_mcp_server_on_each_loop(self) -> None:
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=McpThenDoneRunner("remote_mini"))
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+        pipeline = SequentialPipeline([agent])
+
+        pipeline.run_sync("batch 1")
+        pipeline.run_sync("batch 2")
+
+        # The second batch found the first server stranded on a closed loop and reconnected on its own.
+        first, second = MockMcpStdioTransport.instances
+        self.assertEqual(LoopBoundMcpTransport.served_calls, [first.loop, second.loop])
+        self.assertIsNot(first.loop, second.loop)
+        self.assertTrue(first.abandoned)
+        self.assertFalse(second.abandoned)
+        # Only the live server and one copy of its tool remain attached.
+        self.assertEqual(agent.mcp_servers()[0].transport, second)
+        self.assertEqual([tool.name for tool in agent.tools].count("remote_mini"), 1)
+        self.assertEqual(agent._pending_mcp_configs, [])
+
+    def test_async_runs_on_one_loop_keep_their_mcp_connection(self) -> None:
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=McpThenDoneRunner("remote_mini"))
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+
+        async def run_twice() -> None:
+            await agent.arun("question 1")
+            await agent.arun("question 2")
+
+        asyncio.run(run_twice())
+
+        # One long-lived loop connects once and reuses the same server for both runs.
+        (only,) = MockMcpStdioTransport.instances
+        self.assertEqual(LoopBoundMcpTransport.served_calls, [only.loop, only.loop])
+        self.assertFalse(only.abandoned)
 
 
 if __name__ == "__main__":
