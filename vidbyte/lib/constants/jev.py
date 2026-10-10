@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/constants/jev.py
 
 PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names. Cumulative obligations preserve requirements across the supplied chronological user turns. Discovered-item coverage inventories bounded recorded outputs and checks requested per-item processing.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/providers/systemone.py` and `vidbyte/providers/openai_decisions.py` read the decision-host wire paths and OpenAI Decisions type tags, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
@@ -17,6 +17,20 @@ JEV_DEFAULT_MODEL: str = "jev-latest"
 JEV_PREVIEW_MODEL: str = "jev-preview"
 JEV_SYSTEMONE_PATH: str = "/systemone"
 JEV_MODELS_PATH: str = "/models"
+
+# Wire paths of the other decision hosts, appended to each host's resolved base endpoint (read 2026-10-10).
+# https://docs.perplexity.ai/api-reference/decisions-post
+PERPLEXITY_DECISIONS_PATH: str = "/decisions"
+# https://www.baseten.co/library/mercury-decide/
+BASETEN_DECISIONS_PATH: str = "/decisions"
+# https://developers.cloudflare.com/workers-ai/models/clef/
+CLOUDFLARE_CLEF_PATH: str = "/run/@cf/cloudflare/clef"
+# https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-in-microsoft-foundry-for-decision-and-classific/4562742
+FOUNDRY_SYSTEMONE_PATH: str = "/providers/microsoft/v1/systemone"
+# https://developers.openai.com/api/docs/guides/decisions (path, the yes/no question type, and the refusal answer type)
+OPENAI_DECISIONS_PATH: str = "/decisions"
+OPENAI_DECISIONS_PREDICATE_TYPE: str = "predicate"
+OPENAI_DECISIONS_REFUSAL_TYPE: str = "refusal"
 VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/typesafe"
 VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND: str = "vidbyte_managed_credentials"
 
@@ -654,4 +668,11 @@ __all__ = [
     "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
     "JEV_COMPUTE_CLONES_DEFAULT",
     "JEV_COMPUTE_CLONES_MAX",
+    "PERPLEXITY_DECISIONS_PATH",
+    "BASETEN_DECISIONS_PATH",
+    "CLOUDFLARE_CLEF_PATH",
+    "FOUNDRY_SYSTEMONE_PATH",
+    "OPENAI_DECISIONS_PATH",
+    "OPENAI_DECISIONS_PREDICATE_TYPE",
+    "OPENAI_DECISIONS_REFUSAL_TYPE",
 ]
