@@ -1,8 +1,8 @@
 """Context Protocol Header
 
 FILE: vidbyte/agents/pricing/typesafe.py
-PURPOSE: Parses TypeSafe Jev decision usage and prices it: input tokens at the table rate, output tokens free.
-ROLE IN CODEBASE: Bound to ModelProvider.TYPESAFE through ModelProvider.usage_class, so UsageTracker.record_call prices every Jev call a model-backed tool reports.
+PURPOSE: Parses System One decision usage — TypeSafe Jev and every host bound to it in `_usage_class_map()` (Perplexity, Cloudflare, Foundry, Liquid, Baseten, meraGPT) — and prices it: input tokens at the table rate, output tokens free.
+ROLE IN CODEBASE: Bound to ModelProvider.TYPESAFE and the six other System One hosts through ModelProvider.usage_class, so UsageTracker.record_call prices every System One decision call a model-backed tool or DecisionModelRunner reports.
 ARCHITECTURE NOTE: Jev reports only input_tokens and output_tokens and has no cached-token tier; total_tokens is derived, and cost goes through the shared subset_billing_cost formula so C005 keeps cost math inside this package.
 COMMON MODIFICATION PATTERNS: Change rates in vidbyte/lib/registries/pricing.py, not here; extend parsing only when TypeSafe adds usage fields.
 KNOWN EDGE CASES: A payload with neither token field parses to None; output tokens are priced at the table's output rate, which is 0.0 for every Jev model; any cache-looking field TypeSafe might add is ignored until TypeSafe documents a cache rate.
@@ -10,7 +10,8 @@ RELATED DOCS: docs/design/jev-agent-scaffold.md, https://docs.typesafe.ai/models
 TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 
 Description:
-    JevUsage — the ProviderUsage subclass for TypeSafe's System One endpoint.
+    JevUsage — the ProviderUsage subclass for the System One endpoint served by TypeSafe and
+    the other System One hosts (Perplexity, Cloudflare, Foundry, Liquid, Baseten, meraGPT).
 Relations:
     Registered in vidbyte/lib/enums/model_provider.py; priced by
     vidbyte/lib/registries/pricing.py.
@@ -28,7 +29,7 @@ from vidbyte.lib.registries.pricing import ModelPricing
 
 @dataclass(frozen=True, slots=True)
 class JevUsage(ProviderUsage):
-    """TypeSafe Jev usage: input tokens are billed, output tokens are reported but free."""
+    """System One decision usage (TypeSafe Jev and every host bound to it in `_usage_class_map()`): input tokens are billed, output tokens are reported but free."""
 
     input_tokens: int | None = None
     output_tokens: int | None = None
