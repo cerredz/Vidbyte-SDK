@@ -225,6 +225,29 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
                 after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.KEEP_LAST_N_MESSAGES, options={"n": 10})
                 self.assertEqual(list(after), list(history))
 
+    async def test_head_tail_preview_keeps_gemini_function_response_output_head(self) -> None:
+        # [Silent Failure] The Gemini preview is cut from the real tool output, not from the functionResponse part's repr.
+        output = "# a.py\n" + "def f():\n    return 1\n" * 40
+        call = {"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {"path": "a.py"}}}]}
+        history = ({"role": "user", "parts": [{"text": "audit"}]}, call, {"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": output}}}]})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.HEAD_TAIL_TOOL_PREVIEW, options={"head_chars": 10, "tail_chars": 5})
+        self.assertEqual(list(after[:2]), list(history[:2]))
+        function_response = after[2]["parts"][0]["functionResponse"]
+        self.assertEqual(function_response["name"], "read_file")
+        self.assertTrue(function_response["response"]["output"].startswith("# a.py\ndef"))
+        self.assertLess(len(function_response["response"]["output"]), len(output))
+
+    async def test_scrub_bloat_reduces_gemini_function_response_output(self) -> None:
+        # [Silent Failure] Line-based bloat detection sees the Gemini tool output's real lines, as it does for OpenAI and Anthropic.
+        output = "header\n" + "A" * 90 + "\nline\nline\nline"
+        history = ({"role": "model", "parts": [{"functionCall": {"name": "read_file", "args": {}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "read_file", "response": {"output": output}}}]})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.MECHANICAL_BLOAT_SCRUBBER, options={"max_repeated_lines": 1})
+        scrubbed = after[1]["parts"][0]["functionResponse"]["response"]["output"]
+        self.assertIn("[scrubbed base64: 90 chars]", scrubbed)
+        self.assertEqual(scrubbed.count("line"), 1)
+        self.assertLess(len(scrubbed), len(output))
+        self.assertEqual(after[0], history[0])
+
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
         messages = (msg("user", "a"), msg("assistant", "b"))
