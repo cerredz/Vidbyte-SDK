@@ -148,6 +148,16 @@ class ProviderModelValidationTests(unittest.TestCase):
 
         self.assertIn("registered under provider 'openai'", str(ctx.exception))
 
+    def test_accepts_an_openrouter_vendor_slug_but_not_a_cross_provider_bare_name(self) -> None:
+        settings = build(provider="openrouter", model_name="anthropic/claude-sonnet-5")
+        self.assertEqual((settings.provider, settings.model_name), ("openrouter", "anthropic/claude-sonnet-5"))
+        self.assertEqual(build(provider="openrouter", model_name="openrouter/auto").model_name, "openrouter/auto")
+        with self.assertRaises(ConfigurationError):
+            build(provider="openrouter", model_name="meta-llama/llama-4-maverick")
+        with self.assertRaises(ConfigurationError) as ctx:
+            build(provider="deepseek", model_name="anthropic/claude-sonnet-5")
+        self.assertIn("registered under provider 'anthropic'", str(ctx.exception))
+
     def test_rejects_a_non_text_model_for_a_conversational_agent(self) -> None:
         with self.assertRaises(ConfigurationError) as ctx:
             build(provider="openai", model_name="dall-e-3")
