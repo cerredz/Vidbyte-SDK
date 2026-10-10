@@ -16,7 +16,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 18:10 | 2026-10-10 18:24 | reports/S0-scout.md | base_commit c07529316 |
-| S1 spec + review | running | 2026-10-10 19:20 | | reports/S1-spec-review.md | r1 reviewed: REVISE (1B/6M/7m); revision waits for backend r3 contract |
+| S1 spec + review | running | 2026-10-10 19:20 | | reports/S1-spec-review-2.md | r2 @c57d39d0 (round 1 + backend r3 contract absorbed); scoped review round 2 running |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -25,7 +25,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 18:08 — Ran the request as two linked pipelines (backend `vidbyte`, SDK `vidbyte-sdk`) — Prompt 5 names one change in each repo; one worktree cannot span two repos.
@@ -36,6 +36,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - 2026-10-10 22:45 — The reviewer was cut off by a usage-limit error and resumed with SendMessage; its report completed normally.
 - 2026-10-10 22:45 — Holding the SDK revision until backend spec r3 lands, so the author absorbs reviewer findings plus backend §9.2 r2 and r3 changes in one revision.
 - 2026-10-10 22:45 — Contract vendoring: re-vendor from the backend branch commit that regenerates the contract (C017-C020 check only repository, 40-hex commit, schema_version, generator). Backend origin/main mixes merge commits and squash merges, so if the backend PR is squash-merged the SDK must re-vendor from backend main afterwards; this is a stated merge-order note, not a gate.
+- 2026-10-10 23:50 — Launched scoped review round 2 (last allowed) — r2 changed §8, §8.5, §9, §10 and the shape of §12 and absorbed the backend r3 contract.
 
 ## User replies (verbatim)
 - none yet
@@ -64,3 +65,6 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - `raise ... from None` inside `except` still sets `__context__`, so the gateway body stays reachable via `__context__.response_excerpt`; raise after leaving the except block. — *source:* S1 reviewer
 - `extra_body` merges last: in Gemini it replaces the whole `generationConfig` (cap included); in chat dialects `max_completion_tokens` can sit beside an injected `max_tokens`. Gemini runner metadata becomes top-level `labels` (`gemini.py:164`); OpenAI forwards non-function tools unchanged (`openai.py:225-231`). — *source:* S1 reviewer
 - No 2xx constant exists; `HTTPStatus.OK <= s < HTTPStatus.MULTIPLE_CHOICES` avoids an A007 literal. `TextModelRunner` is built at `vidbyte/lib/runners/utility.py:72-74`. `tests/test_config_validation.py:24-29` asserts only the error type. — *source:* S1 reviewer
+- r2: timeout floor 630.0 s (above backend 600 s total deadline); D-17 raise pattern: `except` saves locals, raise after the block, body decoded with `json.loads` in a narrow try (no `parse_json_response`), `__context__ is None`. — *source:* S1 author r2
+- r2 phases: endpoint constant in row 15; P2 = rows 15, 6, 11, 12 in one commit with the contract copied from the backend branch row-20 commit, found with `git log -1 --format=%H feat/generative-model-gateway -- contracts/vidbyte-platform-contract.json` (backend worktree shares `C:/Users/422mi/vidbyte-repos/vidbyte/.git`); C020 ratchet in P1; §14 Ask-first if the row-20 commit is missing. — *source:* S1 author r2
+- §9.2 failure order: inner ProviderRequestError -> other Exception -> not a JSON object (any status) -> 2xx success -> `"error": true` -> relayed; catches only `Exception`, never `BaseException`. §9.2 table: `*` marks fields allowed only as false/null. spec.md is CRLF in the working tree (autocrlf=true). — *source:* S1 author r2
