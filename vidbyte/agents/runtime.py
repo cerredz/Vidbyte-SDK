@@ -137,6 +137,7 @@ from vidbyte.lib.errors import (
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.middleware.builtins.context_compaction import (
     ToolResultCompactionMiddleware,
@@ -2009,7 +2010,9 @@ def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
         upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Exact credential names and suffixes only, so author_id or max_tokens stay in the span.
+        if upper.startswith("LANGSMITH_") or CredentialKeyPolicy.is_secret_key(key_text):
             continue
         safe[key_text] = _safe_trace_value(value)
     return safe

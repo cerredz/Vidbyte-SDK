@@ -270,6 +270,24 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("LANGSMITH_API_KEY", attrs["metadata"])
         self.assertNotIn("XAI_API_KEY", attrs["metadata"])
 
+    async def test_trace_scrubbers_keep_ordinary_keys_that_contain_credential_words(self) -> None:
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Verifies both agent trace scrubbers drop credentials but keep author_id and max_tokens.
+        from vidbyte.agents.runtime import _safe_trace_mapping
+
+        metadata = {"author_id": "u-7", "max_tokens": 64, "api_key": "sk-REAL", "auth_token": "t-REAL"}
+        tracer = RecordingTracer()
+        agent = self._make_agent(tracer=tracer)
+        await agent.generate_reply(AgentInput("solve this", metadata=metadata))
+        start_metadata = tracer.traces_started[0]["attributes"]["metadata"]
+        span_metadata = _safe_trace_mapping({**metadata, "LANGSMITH_PROJECT": "p"})
+        for scrubbed in (start_metadata, span_metadata):
+            self.assertEqual(scrubbed["author_id"], "u-7")
+            self.assertEqual(scrubbed["max_tokens"], 64)
+            self.assertNotIn("api_key", scrubbed)
+            self.assertNotIn("auth_token", scrubbed)
+        self.assertNotIn("LANGSMITH_PROJECT", span_metadata)
+
 
 # ---------------------------------------------------------------------------
 # AgentRuntime span hooks tests
