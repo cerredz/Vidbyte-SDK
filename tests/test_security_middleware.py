@@ -838,6 +838,22 @@ class HoneypotToolTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             HoneypotToolMiddleware(trap_tool_names=[])
 
+    async def test_bare_string_trap_names_raises(self) -> None:
+        # [Silent Failure] ("admin_shell") is a str, not a 1-tuple; it must not become single-character traps.
+        with self.assertRaisesRegex(ValueError, "trap_tool_names must be an iterable of tool names, not a string"):
+            HoneypotToolMiddleware(trap_tool_names=("admin_shell"))
+
+    async def test_one_item_tuple_trap_still_aborts(self) -> None:
+        # [Edge Case] A real 1-tuple keeps working as one trap name.
+        mw = HoneypotToolMiddleware(trap_tool_names=("admin_shell",))
+        ctx = MiddlewareContext(
+            hook=MiddlewareHook.BEFORE_TOOL_CALL,
+            agent_name="worker",
+            tool_call=ToolCall("admin_shell"),
+        )
+        decision = await mw.before_tool_call(ctx)
+        self.assertEqual(decision.action.value, "abort_run")
+
     async def test_tool_call_none_continues(self) -> None:
         # [Hidden Assumption] ctx.tool_call=None → continue.
         mw = HoneypotToolMiddleware(trap_tool_names=["_admin"])

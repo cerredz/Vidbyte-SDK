@@ -19,6 +19,14 @@ from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDeci
 from vidbyte.middleware.base import AgentMiddleware
 
 
+def _require_tool_name_iterable(values: Iterable[str], field_name: str) -> Iterable[str]:
+    # @intent name-lists-reject-bare-strings
+    # A typo like ("wipe_db") is a str, so frozenset() would hold its characters and the policy would fail open.
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"ToolPolicyMiddleware.{field_name} must be an iterable of tool names, not a string.")
+    return values
+
+
 class ToolPolicyMiddleware(AgentMiddleware):
     """Allow or deny tool calls by tool name."""
 
@@ -29,8 +37,8 @@ class ToolPolicyMiddleware(AgentMiddleware):
         deny_tools: Iterable[str] = (),
         allow_internal_tools: bool = True,
     ) -> None:
-        self.allow_tools = None if allow_tools is None else frozenset(allow_tools)
-        self.deny_tools = frozenset(deny_tools)
+        self.allow_tools = None if allow_tools is None else frozenset(_require_tool_name_iterable(allow_tools, "allow_tools"))
+        self.deny_tools = frozenset(_require_tool_name_iterable(deny_tools, "deny_tools"))
         self.allow_internal_tools = allow_internal_tools
 
     async def before_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
