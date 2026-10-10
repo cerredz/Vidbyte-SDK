@@ -348,6 +348,14 @@ class AgentForkSettings:
             raise AgentForkConfigurationError("max_iterations must be greater than zero when provided.")
         if self.temperature is not None and not 0.0 <= self.temperature <= 2.0:
             raise AgentForkConfigurationError("temperature must be between 0 and 2 when provided.")
+        # @intent fork-drop-tools-validated-like-denied-tools
+        # A typo like ("delete_record") is a str, so the drop set would hold its characters and the child keeps the tool.
+        if isinstance(self.drop_tools, (str, bytes)):
+            raise AgentForkConfigurationError("AgentForkSettings.drop_tools must be an iterable of tool names, not a string.")
+        drop_tools = tuple(str(name).strip() for name in self.drop_tools)
+        if not all(drop_tools):
+            raise AgentForkConfigurationError("AgentForkSettings.drop_tools cannot include blank tool names.")
+        object.__setattr__(self, "drop_tools", drop_tools)
         if self.model_name is not None and not isinstance(self.model_name, str):
             raise AgentForkConfigurationError(
                 "model_name must be a single model name string; use AggregateAgent for multi-model aggregation."
