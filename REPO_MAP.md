@@ -4,19 +4,31 @@
 
 ## File Index
 
-**Root files:** `README.md` — the Layer Guide table is the authority on what each `vidbyte/` subpackage is for. `llms.txt` — the full agent-readable documentation bundle, code-heavy where this Map is code-free. `pyproject.toml` — packaging, the `[dev]` extra, and dependency pins. `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE`, `.gitignore`.
+**Root files:** `README.md` — the Layer Guide table is the authority on what each `vidbyte/` subpackage is for. `llms.txt` — the full agent-readable documentation bundle, code-heavy where this Map is code-free. `pyproject.toml` — packaging, the `[dev]` extra, and dependency pins. `CLAUDE.md` — a one-line import of `AGENTS.md`, so every Claude Code session, including a fresh install in hosted automation, loads the same rules. `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE`, `.gitignore`.
+
+### `.claude/`
+
+Configuration for the Claude Code agents that work on pull requests in hosted automation, kept apart from both the installable package and the verification gate. It defines how those agents behave when no person is watching, starting with which actions they may take without asking, because an unattended run has nobody to approve a request and denies anything not granted in advance. It also forbids every `git push`, because the workflows that run these agents push only after their own gate has passed. Interactive sessions on a developer's own machine do not load it, so nothing granted here widens what a local session may do. None of it ships to users, and none of it changes what passing means for a contribution; it only bounds what an automated agent may touch while it works on one.
 
 ### `.github/`
 
 GitHub-hosted repository configuration that governs contribution and automation, entirely separate from the installable package itself. It holds the structured intake contributors fill in when reporting a problem or proposing a feature, alongside the automated checks that run against every proposed change and the process that publishes new releases. None of it ships to end users; it only shapes how the repository is used, reviewed, and verified on GitHub. Because these checks run on every change with no exceptions, altering this configuration changes what every contribution is measured against.
 
+#### `.github/actions/`
+
+Reusable setup steps that hosted automation shares, so every job that needs the repository's development toolchain installs it the same way. It exists for the Claude Code agents that change pull requests, which have to run the repository's own verification gate before they commit, and it installs the package exactly as the verification workflows do, plus Semgrep at the static policy's pin, so an agent works in the same environment the required checks measure. It verifies nothing by itself and is not part of what passing means for a contribution. Keeping the install in one place means a toolchain change is made once rather than in every job that depends on it.
+
 #### `.github/ISSUE_TEMPLATE/`
 
 Structured forms that contributors fill in when opening a bug report or requesting a feature, rather than starting from a blank text box. They exist so incoming reports arrive with the reproduction detail and environment context that triage actually needs. This is a presentation concern specific to how the repository is used on GitHub, with no bearing on how the package itself behaves at runtime. It is a small, rarely-changed corner of the repository, useful mainly as a reminder that intake quality is a deliberate choice rather than an accident.
 
+#### `.github/prompts/`
+
+The Markdown instructions that workflows hand to coding agents, so no Python file contains a sentence addressed to a model. Every `NN-name.md` file in `review-agents/` is one review agent that runs, in number order, on each review that mentions `@claude`: `10-resolver.md` groups the review's comments and fixes them in one run, `20-preventer.md` adds a deterministic guard per comment, and `30-readme-notes.md` runs once, last, writing what each comment taught into the closing `## Notes for agents` section of the README of the folder it points into. Adding a review agent means adding one file there, whose frontmatter sets its scope. Every review prompt must have a title, Goal, Objective, Instructions, Constraints, and Output, and its first instruction must send the agent to `AGENTS.md`; `tests/test_review_agents.py` fails otherwise.
+
 #### `.github/workflows/`
 
-The automated checks and release process that run in hosted infrastructure rather than on a contributor's own machine. Every proposed change is verified across multiple versions of the language runtime, checked against a separate static-analysis policy layer, and, on release, published to the public package index. None of these checks are scoped to particular paths, so even a documentation-only change exercises the full verification and policy surface. This is the authoritative definition of what "passing" means for the repository, and it is worth reading before assuming a local check alone is sufficient.
+The automated checks and release process that run in hosted infrastructure rather than on a contributor's own machine. Every proposed change is verified across multiple versions of the language runtime, checked against a separate static-analysis policy layer, and, on release, published to the public package index. None of these checks are scoped to particular paths, so even a documentation-only change exercises the full verification and policy surface. This is the authoritative definition of what "passing" means for the repository, and it is worth reading before assuming a local check alone is sufficient. One workflow here is not a check: when a submitted review mentions `@claude`, `claude-review-agents.yml` plans tasks from the review's comments, runs each review agent as its own Claude Code session one matrix leg at a time, and lets `scripts/review_agents/` gate, commit, and push each change and post one summary comment.
 
 ### `.semgrep/`
 
@@ -38,7 +50,7 @@ One design document per feature, each walking through the problem being solved, 
 
 ### `scripts/`
 
-The project's local verification entry points, kept outside the installable package so none of them ship to end users. The primary one reproduces the full gate that automated checks run remotely, so a contributor can catch a failure before it ever reaches review. Alongside it sit many smaller, narrowly scoped verification scripts, each written next to the design document for the behavior it proves and useful for fast iteration on one subsystem at a time. One script also enforces a structural rule about where a particular kind of shared state may be written, keeping that invariant mechanical rather than advisory. None of the narrow scripts substitutes for running the full local gate before treating a change as complete.
+The project's local verification entry points, kept outside the installable package so none of them ship to end users. The primary one reproduces the full gate that automated checks run remotely, so a contributor can catch a failure before it ever reaches review. Alongside it sit many smaller, narrowly scoped verification scripts, each written next to the design document for the behavior it proves and useful for fast iteration on one subsystem at a time. One script also enforces a structural rule about where a particular kind of shared state may be written, keeping that invariant mechanical rather than advisory. None of the narrow scripts substitutes for running the full local gate before treating a change as complete. One folder here serves a workflow rather than the gate: `review_agents/` is the package `claude-review-agents.yml` calls between its agent steps, and `tests/test_review_agents.py` is its offline spec.
 
 ### `skills/`
 
@@ -361,7 +373,9 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Mid-run compute checkpoint: `JevComputeController` and `JevComputeSettings` | `vidbyte/agents/jev/compute/`; loop hook `AgentRuntime._after_tool_iteration` in `vidbyte/agents/runtime.py` |
 | Dynamic-compute recognition and the shared `{request, brief, facts, recent}` state | `JevComputeRecognizer` and `JevComputeStates` in `vidbyte/agents/jev/compute/` |
 | The CLONE launch: `JevCloneAgent` runs copies of the main agent from the verified brief | `vidbyte/agents/jev/compute/clone.py`; prompts in `vidbyte/prompts/prompts/jev_clone/` |
+| The SWARM launch: the `launch_swarm` tool, plan reading and Jev plan checks, and the `JevSwarmAgent` helpers | `vidbyte/agents/jev/compute/swarm_tool.py`, `swarm_plan.py`, and `swarm.py`; prompts in `vidbyte/prompts/prompts/jev_swarm/` |
 | Twelve fixed evidence questions per dynamic-compute option and `JevComputeRegistry` | `vidbyte/lib/jev/compute/situations.py` and `vidbyte/lib/jev/compute/compute.py` |
+| The four per-assignment SWARM plan questions and `JevSwarmPlanRegistry` | `vidbyte/lib/jev/compute/plan.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
 | Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |

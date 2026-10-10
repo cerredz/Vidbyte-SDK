@@ -15,15 +15,16 @@ from functools import partial
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.fork import AgentForker
 from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevDoneContinuation, JevFreshContinuation
-from vidbyte.agents.jev.done import JevRunState
+from vidbyte.agents.jev.done import JevRunState, JevRunStateRelation
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.lib.dataclasses.jev import JevAgentResponse
-from vidbyte.lib.enums import AgentRuntimeType, JevContinuationGate
+from vidbyte.lib.enums import AgentRuntimeType, JevContinuationGate, JevPreflightPreset
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -45,8 +46,14 @@ class JevAgent(BaseAgent):
         self._response = JevResponse()
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
         self.compute = None if runtime_settings.compute is None else JevComputeController(settings, runtime_settings.compute, runtime_settings.decision, self._response)
-        self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
-        if self.run_state is None:
+        relation_enabled = JevPreflightPreset.RUN_STATE_RELATION in self.preflight.presets
+        if relation_enabled:
+            self.run_state = JevRunStateRelation(settings, runtime_settings, self._response, self.preflight)
+        elif runtime_settings.continual.checks:
+            self.run_state = JevRunState(settings, runtime_settings, self._response)
+        else:
+            self.run_state = None
+        if self.run_state is None or not runtime_settings.continual.checks:
             self.continuation = None
         elif runtime_settings.continual.gate is JevContinuationGate.FRESH:
             fresh_agent_factory = partial(
@@ -58,7 +65,9 @@ class JevAgent(BaseAgent):
                 api_key=settings.api_key,
                 temperature=settings.temperature,
                 timeout_seconds=settings.timeout_seconds,
-                tools=settings.tools,
+                # @intent jev-children-never-steal-main-agent-tools
+                # Agent-bound builtins get unbound copies, as in a fork, so the main agent's tools stay bound to it.
+                tools=tuple(AgentForker._clone_tool(tool, None, None) for tool in settings.tools),
                 permission_policy=settings.permission_policy,
                 agent_loop_settings=settings.loop,
             )

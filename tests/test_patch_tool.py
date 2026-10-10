@@ -78,6 +78,18 @@ class PatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("Ambiguous", result.output)
 
+    async def test_overlapping_matches_are_ambiguous(self) -> None:
+        """A search block that matches at two overlapping positions is rejected and the file is unchanged."""
+        original = "func a() {\nif x {\nfor {\n}\n}\n}\n"
+        self.file.write_bytes(original.encode("utf-8"))
+        result = await PatchTool(self.root).execute(
+            ToolCall("patch_file", {"file_path": "demo.py", "search_block": "}\n}\n", "replace_block": "}\n"})
+        )
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("Ambiguous", result.output)
+        self.assertEqual(result.metadata["matches"], 2)
+        self.assertEqual(self.file.read_bytes(), original.encode("utf-8"))
+
     async def test_single_block_patch_preserves_lf_line_endings(self) -> None:
         """Patching one block leaves every other LF line ending byte-for-byte unchanged."""
         self.file.write_bytes(b"def f():\n    x = 1\n    return 2\n\nprint(f())\n")

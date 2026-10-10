@@ -16,7 +16,7 @@ body:
     attributes:
       label: Vidbyte SDK version
       description: Run python -c "from importlib.metadata import version; print(version('vidbyte-sdk'))".
-      placeholder: 0.2.0
+      placeholder: 0.2.1
     validations:
       required: true
 

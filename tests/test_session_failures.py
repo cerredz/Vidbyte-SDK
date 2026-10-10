@@ -109,6 +109,13 @@ class FailureContractsTests(unittest.TestCase):
         self.assertEqual(failure.as_dict()["code"], "action.unsafe")
         self.assertEqual(failure.as_dict()["category"], "action")
 
+    def test_failure_details_keep_non_credential_keys(self) -> None:  # [Silent Failure]
+        # @intent failure-details-use-precise-credential-keys
+        # Verify diagnostics that merely contain TOKEN or AUTH survive while real credentials are dropped.
+        details = {"tokens_used": 5, "max_tokens": 9, "author": "ana", "api_key": "sk-1", "authorization": "Bearer x", "accessToken": "t", "client_secret": "s"}
+        failure = Failure(code=FailureCode.RUNTIME_ERROR, source="probe", details=details)
+        self.assertEqual(dict(failure.details), {"tokens_used": 5, "max_tokens": 9, "author": "ana"})
+
     def test_unknown_exception_maps_to_runtime_error(self) -> None:  # [Hidden Assumption]
         # Verify arbitrary exceptions do not create dynamic vocabulary entries.
         failure = Failure.from_exception(RuntimeError("boom"))
@@ -277,6 +284,13 @@ class FailureNormalizationTests(unittest.TestCase):
         self.assertEqual(router.capture_reply(reply)[0].code, FailureCode.RUNTIME_MAX_TOKENS)
         reply2 = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "max_identical_calls"})
         self.assertEqual(router.capture_reply(reply2)[0].code, FailureCode.TOOL_IDENTICAL_CALL_LIMIT)
+
+    def test_loop_stop_failure_keeps_tokens_used(self) -> None:  # [Silent Failure]
+        # Verify the runtime's own loop-stop record keeps its token count in details.
+        reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "max_iterations", "iteration_count": 2, "tokens_used": 300})
+        failure = FailureMetadataNormalizer.from_reply(reply)[0]
+        self.assertEqual(failure.code, FailureCode.RUNTIME_MAX_ITERATIONS)
+        self.assertEqual(dict(failure.details), {"stop_reason": "max_iterations", "iteration_count": 2, "tokens_used": 300})
 
     def test_fallback_success_is_recorded_as_recovered(self) -> None:  # [Hidden Failure]
         # Verify local fallback remains the handler and Session does not route it again.

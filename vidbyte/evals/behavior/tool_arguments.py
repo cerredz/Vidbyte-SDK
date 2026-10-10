@@ -34,8 +34,11 @@ class ToolArgumentBehavior:
         # Returns the tool call contexts from the probe.
         return self._behavior.probe.tool_calls
 
-    def tool_called_with(self, name: str, **args: Any) -> bool:
+    def tool_called_with(self, name: str, /, **args: Any) -> bool:
         # Returns True if any call to name has args as a subset of its arguments.
+        # @intent tool-argument-named-name-is-checkable
+        # The tool name is positional-only so a tool argument called `name` lands in args
+        # instead of colliding with this parameter and raising TypeError.
         for c in self._calls:
             if c.tool_name != name:
                 continue
@@ -53,7 +56,7 @@ class ToolArgumentBehavior:
                 return True
         return False
 
-    def tool_never_called_with(self, name: str, **args: Any) -> bool:
+    def tool_never_called_with(self, name: str, /, **args: Any) -> bool:
         # Returns True if no call to name has args as a subset of its arguments.
         return not self.tool_called_with(name, **args)
 
