@@ -1,7 +1,7 @@
 """FILE: tests/features/decision_model_providers/test_decision_failures.py
 
 PURPOSE: Pins how decision calls fail on every adapter: the shared status table worded for the host and its env var, non-JSON bodies with a bounded excerpt, unexpected exceptions wrapped and cancellation passed through, list_models and close_run refused without a network call, the per-call config guard, SystemOneProvider construction guards, and the rule that the key never leaves the authorization header.
-ROLE IN CODEBASE: Covers spec INV-5, INV-13, INV-16, INV-17, INV-28, AC-10, AC-13, AC-19, EC-12, EC-13, EC-14, EC-20, EC-23, EC-25, EC-28, NFR-5 and FR-6, FR-11 of docs/spec/decision-model-providers/spec.md.
+ROLE IN CODEBASE: Covers spec INV-5, INV-13, INV-16, INV-17, INV-28, AC-10, AC-13, AC-19, EC-12, EC-13, EC-14, EC-20, EC-23, EC-25, EC-28, EC-32, NFR-5 and FR-6, FR-11 of docs/spec/decision-model-providers/spec.md (r8).
 ARCHITECTURE NOTE: Runner-level tests go through DecisionModelRunner; the guard and mapper tests call SystemOneProvider, OpenAIDecisionsProvider, and DecisionFailures directly, because those seams are public per spec section 8.5.
 COMMON MODIFICATION PATTERNS: A new documented status adds one row to STATUS_CASES; a new capability refusal adds one case to the list_models/close_run test.
 KNOWN EDGE CASES: A scripted ProviderRequestError without a status code stands in for a network failure or timeout; KeyboardInterrupt is not exercised because it would stop the test runner.
@@ -198,6 +198,34 @@ class CredentialHygieneTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(fx.KEY, repr(call))
         self.assertEqual(call.headers["authorization"], f"Bearer {fx.KEY}")
         self.assertEqual((call.retry_count, call.idempotency_key, call.json_body), (0, None, None))
+
+
+class R8FailureWordingTests(unittest.IsolatedAsyncioTestCase):
+    """Pins host-named failures and key hygiene for the seven providers spec r8 adds."""
+
+    async def test_r8_hosts_word_failures_with_their_own_name_and_env_var(self) -> None:
+        # [Hidden Failure] INV-13/INV-5/EC-30/EC-31/EC-38: the shared mapper names each r8 host and its own env var; the key stays in the authorization header.
+        for name, row in fx.R8_HOST_ROWS.items():
+            with self.subTest(provider=name):
+                runner, transport = fx.scripted_runner(name, fx.response({"error": "bad key"}, 401), retry_count=2, timeout_seconds=30.0)
+                with self.assertRaises(ProviderRequestError) as caught:
+                    await runner.arun(fx.customer_request())
+                self.assertEqual(caught.exception.message, _expected(row.display_name, row.env_var, 401, STATUS_CASES[0][1], "bad key"))
+                self.assertEqual((caught.exception.status_code, caught.exception.provider), (401, name.lower()))
+                sent = transport.requests[0]
+                self.assertNotIn(fx.KEY, sent["url"])
+                self.assertNotIn(fx.KEY, json.dumps(sent["json_body"]))
+                self.assertEqual([header for header, value in sent["headers"].items() if fx.KEY in value], ["authorization"])
+                self.assertNotIn(fx.KEY, caught.exception.message)
+
+    async def test_vansa_403_is_rewritten_by_the_other_status_branch(self) -> None:
+        # [Hidden Failure] EC-32/A-17: Vansa's edge answers a non-JSON 403 `error code: 1010`; the caller gets a typed error naming Vansa with the excerpt kept.
+        runner, _ = fx.scripted_runner("VANSA", fx.raw_response("error code: 1010", 403), retry_count=2, timeout_seconds=30.0)
+        with self.assertRaises(ProviderRequestError) as caught:
+            await runner.arun(fx.customer_request())
+        self.assertEqual(caught.exception.message, _expected("Vansa", "VANSA_KEY", 403, "{label} returned HTTP 403", "Provider returned invalid JSON."))
+        self.assertEqual((caught.exception.status_code, caught.exception.provider), (403, "vansa"))
+        self.assertEqual(caught.exception.details["response_excerpt"], "error code: 1010")
 
 
 if __name__ == "__main__":

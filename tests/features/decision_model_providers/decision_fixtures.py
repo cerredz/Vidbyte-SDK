@@ -3,8 +3,8 @@
 PURPOSE: Shared offline fixtures for the decision-model-providers feature pack: a scripted transport, the spec's customer request, System One and OpenAI Decisions response builders, and a keyed runner factory.
 ROLE IN CODEBASE: Imported by every test module in tests/features/decision_model_providers/; it never imports the new provider modules at import time so a missing implementation fails one test, not the whole collection.
 ARCHITECTURE NOTE: Only HttpTransport.request is replaced (ScriptedTransport); DecisionModelConfig, ProviderModelRegistry, JevAnswer validation, HttpResponseParser, pricing, and the usage ledger stay real. New ModelProvider members are resolved by name at call time with provider_member().
-COMMON MODIFICATION PATTERNS: Add a builder here when a new wire shape or host row joins the spec; keep expected URLs, env vars, and default models in HOST_ROWS so one table drives the contract and wire tests.
-KNOWN EDGE CASES: Cloudflare and Foundry have no default endpoint, so decision_config() injects a tenant endpoint for them unless the test overrides it; scripted responses that omit `model` use OMIT_MODEL rather than None.
+COMMON MODIFICATION PATTERNS: Add a builder here when a new wire shape or host row joins the spec; keep expected URLs, env vars, and default models in HOST_ROWS (the nine r6 providers) or R8_HOST_ROWS (the seven providers spec r8 adds) so one table drives the contract and wire tests; ALL_HOST_ROWS is the sixteen-row union.
+KNOWN EDGE CASES: Cloudflare and Foundry have no default endpoint, so decision_config() injects a tenant endpoint for them unless the test overrides it; scripted responses that omit `model` use OMIT_MODEL rather than None; the r8 rows sit in their own table so the S2 loops over HOST_ROWS keep their r6 scope.
 RELATED DOCS: docs/spec/decision-model-providers/spec.md sections 4, 8.5, 9.1, and 13; tests/features/decision_model_providers/FEATURE.md.
 TESTS: python -m pytest tests/features/decision_model_providers
 """
@@ -61,6 +61,19 @@ SYSTEM_ONE_DIRECT = ("PERPLEXITY", "OPENROUTER", "LIQUID", "BASETEN", "MERAGPT",
 NEW_MEMBERS = ("PERPLEXITY", "CLOUDFLARE", "FOUNDRY", "LIQUID", "BASETEN", "MERAGPT")
 TENANT_ENDPOINTS = {"CLOUDFLARE": CLOUDFLARE_TENANT, "FOUNDRY": FOUNDRY_TENANT}
 
+# Spec r8 section 9.1 (added in r7): seven more System One hosts, all Bearer, no noul criteria, served by SystemOneProvider.
+R8_HOST_ROWS: dict[str, HostRow] = {
+    "CELERIS": HostRow("CELERIS", "Celeris", "https://inference.celeris.ai/celeris-1-decision/v1", "/systemone", "Bearer", "CELERIS_API_KEY", "celeris-1-decision", False, False, "SystemOneProvider"),
+    "NACE": HostRow("NACE", "Nace.AI", "https://console.nace.ai/v1", "/systemone", "Bearer", "NACE_API_KEY", "drex-v1.5", False, False, "SystemOneProvider"),
+    "UPSTAGE": HostRow("UPSTAGE", "Upstage", "https://api.upstage.ai/v1", "/systemone", "Bearer", "UPSTAGE_API_KEY", "solar-decide", False, True, "SystemOneProvider"),
+    "INCEPTION": HostRow("INCEPTION", "Inception", "https://api.inceptionlabs.ai/v1", "/decisions", "Bearer", "INCEPTION_API_KEY", "mercury-decide", False, False, "SystemOneProvider"),
+    "HANZO": HostRow("HANZO", "Hanzo", "https://api.hanzo.ai/v1", "/decisions", "Bearer", "HANZO_API_KEY", "kai", False, False, "SystemOneProvider"),
+    "VANSA": HostRow("VANSA", "Vansa", "https://api.vansa.org/v1", "/systemone", "Bearer", "VANSA_KEY", "vansa-3.4", False, False, "SystemOneProvider"),
+    "ZOODATA": HostRow("ZOODATA", "ZooData", "https://api.zoodata.ai/v1", "/systemone", "Bearer", "ZOODATA_API_KEY", "instinct", False, True, "SystemOneProvider"),
+}
+R8_MEMBERS = tuple(R8_HOST_ROWS)
+ALL_HOST_ROWS: dict[str, HostRow] = {**HOST_ROWS, **R8_HOST_ROWS}
+
 
 class ScriptedTransport:
     """Records every request and replays scripted HTTP responses or raises scripted exceptions."""
@@ -85,8 +98,8 @@ def provider_member(name: str) -> ModelProvider:
 
 
 def expected_url(name: str) -> str:
-    # Returns the full decision URL spec section 9.1 promises for one host.
-    row = HOST_ROWS[name]
+    # Returns the full decision URL spec section 9.1 promises for one host (r6 or r8 row).
+    row = ALL_HOST_ROWS[name]
     return f"{row.base_url}{row.path}"
 
 
@@ -193,6 +206,7 @@ def sorted_json(value: Any) -> str:
 
 
 __all__ = [
+    "ALL_HOST_ROWS",
     "CLOUDFLARE_TENANT",
     "FOUNDRY_TENANT",
     "HOST_ROWS",
@@ -200,6 +214,8 @@ __all__ = [
     "KEY",
     "NEW_MEMBERS",
     "OMIT_MODEL",
+    "R8_HOST_ROWS",
+    "R8_MEMBERS",
     "STATE",
     "SYSTEM_ONE_DIRECT",
     "ScriptedTransport",

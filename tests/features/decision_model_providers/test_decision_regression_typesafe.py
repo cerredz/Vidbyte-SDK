@@ -1,7 +1,7 @@
 """FILE: tests/features/decision_model_providers/test_decision_regression_typesafe.py
 
 PURPOSE: Pins what must not change about TypeSafe while the System One pieces move into shared modules: the default runner, the shared failure template instantiated for TypeSafe, _TypeSafeCallBuilder.decision returning a header-free DecisionHttpCall, run_decision signature parity across the three adapters, JevRuntimeSettings' managed-only rule against other providers, Runner.build refusing decision providers for agents, and DecisionModelHelper over another provider's answers.
-ROLE IN CODEBASE: Covers spec INV-13, INV-21 to INV-25, AC-14, AC-15, EC-22, D-14 and NFR-7 of docs/spec/decision-model-providers/spec.md; the existing tests/test_jev_*.py files remain the byte-level pin and must pass unmodified.
+ROLE IN CODEBASE: Covers spec INV-13, INV-21 to INV-25, INV-30, AC-14, AC-15, EC-22, EC-34, D-14 and NFR-7 of docs/spec/decision-model-providers/spec.md; the existing tests/test_jev_*.py files remain the byte-level pin and must pass unmodified.
 ARCHITECTURE NOTE: Every test binds a TypeSafe expectation to a new symbol or a new provider, so it is red before the implementation and still guards the old behaviour after it.
 COMMON MODIFICATION PATTERNS: A TypeSafe message or path that the spec promises to keep gets one assertion here next to its non-TypeSafe twin.
 KNOWN EDGE CASES: The managed-gateway call carries the Idempotency-Key header; the direct call does not; both are checked on the same builder.
@@ -31,6 +31,7 @@ TYPESAFE_401 = "TypeSafe decision request failed: TypeSafe rejected the API key 
 TYPESAFE_MISMATCH = "TypeSafe answers do not match the questions sent: missing ['team'], unexpected ['extra']."
 MANAGED_ONLY = "JevRuntimeSettings.decision must use VIDBYTE_MANAGED mode; direct TypeSafe configurations are supported only with standalone DecisionModelRunner."
 DECISION_REFUSAL = "Model '{model}' is a decision model and cannot drive an agent loop; call it through DecisionModelRunner."
+BASETEN_ALIAS_REFUSAL = "Model 'mercury-decide' is registered under provider 'inception', not 'baseten'."
 VIDBYTE_KEY = "vb_live_" + "a" * 32
 
 
@@ -131,8 +132,8 @@ class AgentBoundaryTests(unittest.TestCase):
         self.assertIs(settings.decision.normalized_provider(), ModelProvider.TYPESAFE)
 
     def test_agent_settings_accept_decision_providers_but_runner_build_refuses_them(self) -> None:
-        # [Hidden Failure] EC-22/D-14: settings pass (modality AUTO); the first runner build names DecisionModelRunner instead.
-        cases = (("perplexity", "pplx-decider-v1.1-27b"), ("baseten", "mercury-decide"), ("meragpt", "sd-1"), ("cloudflare", "clef-flash"))
+        # [Hidden Failure] EC-22/D-14/EC-34: settings pass (modality AUTO); the first runner build names DecisionModelRunner instead; Baseten's bare alias is refused at settings (r8).
+        cases = (("perplexity", "pplx-decider-v1.1-27b"), ("baseten", "inception/mercury-decide"), ("inception", "mercury-decide"), ("meragpt", "sd-1"), ("cloudflare", "clef-flash"))
         for provider, model in cases:
             with self.subTest(provider=provider, model=model):
                 settings = JevAgentSettings(name="jev", system_prompt="Work carefully.", provider=provider, model_name=model)
@@ -143,6 +144,10 @@ class AgentBoundaryTests(unittest.TestCase):
                 self.assertEqual(caught.exception.details["runner_type"], "decision")
         self.assertEqual(Runner(provider=None, model_name="perplexity/pplx-decider-v1-27b").resolve_runner_type(), "decision")
         self.assertEqual(Runner(provider="foundry", model_name="microsoft-decision-2").resolve_runner_type(), "decision")
+        # [Hidden Failure] EC-34/INV-30: `mercury-decide` belongs to Inception from r8, so pairing it with Baseten fails at settings construction.
+        with self.assertRaises(ConfigurationError) as alias:
+            JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="baseten", model_name="mercury-decide")
+        self.assertEqual(alias.exception.message, BASETEN_ALIAS_REFUSAL)
 
     def test_helper_scores_noul_answers_from_any_provider(self) -> None:
         # [Silent Failure] INV-25: score_noul and noul_passes read JevAnswer records, not the provider that produced them.

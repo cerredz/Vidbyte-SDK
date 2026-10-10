@@ -1,9 +1,9 @@
 """FILE: tests/features/decision_model_providers/test_decision_config.py
 
-PURPOSE: Pins DecisionModelConfig for nine providers: the registry default fill and resolved_model(), the blank-model check, the nine-value UnsupportedProviderError message, the TypeSafe-only managed guard, tenant endpoints that must be passed explicitly, the per-provider missing-key message, explicit key and endpoint precedence, and the unchanged TypeSafe default.
+PURPOSE: Pins DecisionModelConfig for sixteen providers: the registry default fill and resolved_model(), the blank-model check, the sixteen-value UnsupportedProviderError message, the TypeSafe-only managed guard, tenant endpoints that must be passed explicitly, the per-provider missing-key message, explicit key and endpoint precedence, and the unchanged TypeSafe default.
 ROLE IN CODEBASE: Covers spec INV-1 to INV-5, INV-21, AC-7, AC-8, AC-9, AC-14, EC-1 to EC-5, EC-24 and FR-3 of docs/spec/decision-model-providers/spec.md.
 ARCHITECTURE NOTE: Synchronous and offline; DecisionModelRunner is constructed with a scripted transport that must record no request, because every failure here lands at construction.
-COMMON MODIFICATION PATTERNS: A new provider adds one HOST_ROWS entry in decision_fixtures.py and is picked up by every loop here; a new validation rule gets its own test with the exact message.
+COMMON MODIFICATION PATTERNS: An r6 provider is one HOST_ROWS entry in decision_fixtures.py and is picked up by the loops over HOST_ROWS; an r8 provider is one R8_HOST_ROWS entry and is picked up by R8ProviderConfigTests; a new validation rule gets its own test with the exact message.
 KNOWN EDGE CASES: Environment variables are patched with patch.dict; tests that must prove "no env var is read" clear the environment entirely before constructing.
 RELATED DOCS: docs/spec/decision-model-providers/spec.md sections 6.1, 6.2, 6.3, 9.3; tests/features/decision_model_providers/FEATURE.md.
 TESTS: python -m pytest tests/features/decision_model_providers/test_decision_config.py
@@ -21,7 +21,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.runners.decision import DecisionModelRunner
 
-UNSUPPORTED_MESSAGE = "DecisionModelRunner supports: baseten, cloudflare, foundry, liquid, meragpt, openai, openrouter, perplexity, typesafe."
+UNSUPPORTED_MESSAGE = "DecisionModelRunner supports: baseten, celeris, cloudflare, foundry, hanzo, inception, liquid, meragpt, nace, openai, openrouter, perplexity, typesafe, upstage, vansa, zoodata."
 MANAGED_MESSAGE = "VIDBYTE_MANAGED decision mode is available only for provider typesafe."
 NO_ENDPOINT_MESSAGE = "No default endpoint registered for provider '{provider}'. Pass endpoint explicitly with the provider's base URL."
 MISSING_KEY_MESSAGE = "Missing API key for provider {provider}. Pass api_key or set {env_var}."
@@ -59,8 +59,8 @@ class DefaultModelTests(unittest.TestCase):
 class ProviderGuardTests(unittest.TestCase):
     """Pins the provider membership check and the TypeSafe-only managed mode."""
 
-    def test_unsupported_provider_lists_the_nine_supported_values_sorted(self) -> None:
-        # [Hidden Failure] INV-1/AC-9/EC-1: the message names every supported value, and no env var is consulted first.
+    def test_unsupported_provider_lists_the_sixteen_supported_values_sorted(self) -> None:
+        # [Hidden Failure] INV-1/AC-9/EC-1: the message names every supported value (r8: sixteen), and no env var is consulted first.
         with patch.dict(os.environ, {}, clear=True):
             for provider, rejected in (("gemini", "gemini"), (ModelProvider.ANTHROPIC, "anthropic")):
                 with self.subTest(provider=rejected), self.assertRaises(UnsupportedProviderError) as caught:
@@ -155,6 +155,31 @@ class TypeSafeDefaultTests(unittest.TestCase):
         self.assertEqual(config.resolved_api_key(), fx.KEY)
         self.assertEqual(config.resolved_endpoint(), "https://proxy.example/v1")
         self.assertEqual((config.timeout_seconds, config.retry_count, config.mode), (30.0, 1, DecisionModelMode.TYPESAFE))
+
+
+class R8ProviderConfigTests(unittest.TestCase):
+    """Pins DecisionModelConfig for the seven providers spec r8 adds."""
+
+    def test_r8_providers_fill_their_default_and_name_their_own_env_var(self) -> None:
+        # [Hidden Failure] INV-2/INV-3/INV-4/INV-5/EC-5/D-19: default fill, managed refusal, the host's own env var in the missing-key message (Vansa's is VANSA_KEY), and a key-free repr.
+        with patch.dict(os.environ, {}, clear=False):
+            for row in fx.R8_HOST_ROWS.values():
+                os.environ.pop(row.env_var, None)
+            for name, row in fx.R8_HOST_ROWS.items():
+                with self.subTest(provider=name):
+                    member = fx.provider_member(name)
+                    config = fx.decision_config(name)
+                    self.assertEqual((config.model, config.resolved_model()), (row.default_model, row.default_model))
+                    self.assertIs(fx.decision_config(name, provider=name.lower()).normalized_provider(), member)
+                    self.assertNotIn(fx.KEY, repr(config))
+                    with self.assertRaises(ConfigurationError) as managed:
+                        DecisionModelConfig(provider=member, mode=DecisionModelMode.VIDBYTE_MANAGED)
+                    self.assertEqual(managed.exception.message, MANAGED_MESSAGE)
+                    transport = fx.ScriptedTransport()
+                    with self.assertRaises(ConfigurationError) as caught:
+                        DecisionModelRunner(fx.decision_config(name, api_key=None), transport=transport)
+                    self.assertEqual(caught.exception.message, MISSING_KEY_MESSAGE.format(provider=name.lower(), env_var=row.env_var))
+                    self.assertEqual(transport.requests, [])
 
 
 if __name__ == "__main__":

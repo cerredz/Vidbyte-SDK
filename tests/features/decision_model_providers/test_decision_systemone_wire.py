@@ -1,9 +1,9 @@
 """FILE: tests/features/decision_model_providers/test_decision_systemone_wire.py
 
-PURPOSE: Pins the System One wire for the eight hosts SystemOneProvider.HOSTS lists: URL, authorization scheme, byte-identical TypeSafe body, OpenRouter's always-present noul criteria, transport kwargs with a fresh idempotency key, noul/score/choice normalization, the model echo rule (INV-27), and host-named mismatch messages with billed usage.
-ROLE IN CODEBASE: Covers spec INV-5, INV-6, INV-8, INV-9, INV-14, INV-15, INV-27, AC-2, AC-3, AC-4, AC-7, AC-11, AC-18, EC-6, EC-9, EC-19, EC-24, EC-27 and NFR-4 of docs/spec/decision-model-providers/spec.md.
+PURPOSE: Pins the System One wire for the fifteen hosts SystemOneProvider.HOSTS lists (spec r8): URL, authorization scheme, byte-identical TypeSafe body, OpenRouter's always-present noul criteria, transport kwargs with a fresh idempotency key, noul/score/choice normalization, the model echo rule (INV-27), and host-named mismatch messages with billed usage.
+ROLE IN CODEBASE: Covers spec INV-5, INV-6, INV-8, INV-9, INV-14, INV-15, INV-27, AC-2, AC-3, AC-4, AC-7, AC-11, AC-18, AC-20, EC-6, EC-9, EC-19, EC-24, EC-27, EC-29 and NFR-4 of docs/spec/decision-model-providers/spec.md.
 ARCHITECTURE NOTE: Each test drives DecisionModelRunner over a ScriptedTransport; the transport's recorded kwargs are the observable wire, the returned DecisionModelResponse and the raised errors are the observable results.
-COMMON MODIFICATION PATTERNS: A new System One host adds a HOST_ROWS entry in decision_fixtures.py and is covered by every per-host loop here; a new answer kind gets its own normalization test.
+COMMON MODIFICATION PATTERNS: An r6 System One host is a HOST_ROWS entry in decision_fixtures.py and an r8 host an R8_HOST_ROWS entry; the per-host URL loop covers both tables, the R8_* tests cover the r8 rows; a new answer kind gets its own normalization test.
 KNOWN EDGE CASES: TypeSafe is in the loops so a drift between its body and another host's body is caught in the same assertion; Cloudflare and Foundry use the tenant endpoints from the fixtures.
 RELATED DOCS: docs/spec/decision-model-providers/spec.md sections 6.1, 6.2, 9.1; docs/spec/decision-model-providers/context/provider-research.md section 3; tests/features/decision_model_providers/FEATURE.md.
 TESTS: python -m pytest tests/features/decision_model_providers/test_decision_systemone_wire.py
@@ -26,6 +26,7 @@ from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.runners.decision import DecisionModelRunner
 
 SYSTEM_ONE_HOSTS = ("TYPESAFE", *fx.SYSTEM_ONE_DIRECT)
+R8_ECHO_HOSTS = ("CELERIS", "NACE", "INCEPTION", "HANZO", "VANSA")
 HEX_32 = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -38,9 +39,9 @@ class SystemOneRequestTests(unittest.IsolatedAsyncioTestCase):
     """Pins URL, authorization, and body per host."""
 
     async def test_each_host_posts_the_typesafe_body_to_its_documented_url(self) -> None:
-        # [Silent Failure] INV-5/INV-6/AC-3/AC-7: the same body reaches each host at its own URL with its own auth scheme.
-        for name in SYSTEM_ONE_HOSTS:
-            row = fx.HOST_ROWS[name]
+        # [Silent Failure] INV-5/INV-6/AC-3/AC-7/AC-20: the same body reaches each host at its own URL with its own auth scheme (r8 adds seven subtests).
+        for name in (*SYSTEM_ONE_HOSTS, *fx.R8_MEMBERS):
+            row = fx.ALL_HOST_ROWS[name]
             with self.subTest(provider=name):
                 runner, transport = fx.scripted_runner(name, fx.response(fx.systemone_body(_answers(), model=row.default_model)))
                 response = await runner.arun(fx.customer_request())
@@ -60,6 +61,32 @@ class SystemOneRequestTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("criteria", body["questions"]["refund"])
                 self.assertIs(response.provider, fx.provider_member(name))
                 self.assertEqual(set(response.answers), {"refund", "team"})
+
+    async def test_r8_hosts_read_their_own_env_var_and_send_the_typesafe_body(self) -> None:
+        # [Silent Failure] AC-20/INV-4/INV-6/D-19: with only the host's env var set, each r8 host receives the TypeSafe body byte for byte at its own URL.
+        for name, row in fx.R8_HOST_ROWS.items():
+            with self.subTest(provider=name):
+                typesafe_transport = fx.ScriptedTransport(fx.response(fx.systemone_body(_answers(), model="jev-1.13.0")))
+                await DecisionModelRunner(DecisionModelConfig(api_key=fx.KEY, model=row.default_model), transport=typesafe_transport).arun(fx.customer_request())
+                transport = fx.ScriptedTransport(fx.response(fx.systemone_body(_answers(), model=row.default_model)))
+                with patch.dict(os.environ, {row.env_var: fx.KEY}, clear=False):
+                    runner = DecisionModelRunner(DecisionModelConfig(provider=fx.provider_member(name)), transport=transport)
+                    response = await runner.arun(fx.customer_request())
+                sent = transport.requests[0]
+                self.assertEqual((sent["method"], sent["url"]), ("POST", fx.expected_url(name)))
+                self.assertEqual(sent["headers"]["authorization"], f"Bearer {fx.KEY}")
+                self.assertEqual(json.dumps(sent["json_body"]), json.dumps(typesafe_transport.requests[0]["json_body"]))
+                self.assertEqual(sent["json_body"]["model"], row.default_model)
+                self.assertIs(response.provider, fx.provider_member(name))
+                self.assertEqual([answer.question_name for answer in response.answers.values()], ["refund", "team"])
+
+    async def test_celeris_model_override_keeps_the_default_endpoint(self) -> None:
+        # [Hidden Assumption] EC-29/A-21/NG-24: Celeris's base URL embeds celeris-1-decision; the SDK never rewrites the endpoint from `model`.
+        runner, transport = fx.scripted_runner("CELERIS", fx.response(fx.systemone_body(_answers(), model="celeris-2-decision")), model="celeris-2-decision")
+        await runner.arun(fx.customer_request())
+        sent = transport.requests[0]
+        self.assertEqual(sent["url"], "https://inference.celeris.ai/celeris-1-decision/v1/systemone")
+        self.assertEqual(sent["json_body"]["model"], "celeris-2-decision")
 
     async def test_perplexity_body_is_byte_equal_to_the_typesafe_body(self) -> None:
         # [Silent Failure] AC-2: with the key from PERPLEXITY_API_KEY, the Perplexity body is the TypeSafe body for the same request.
@@ -202,6 +229,39 @@ class SystemOneAnswerTests(unittest.IsolatedAsyncioTestCase):
         )
         for name, requested, echo, expected in cases:
             with self.subTest(provider=name, echo=echo):
+                overrides = {} if requested is None else {"model": requested}
+                runner, transport = fx.scripted_runner(name, fx.response(fx.systemone_body(_answers(), model=echo)), **overrides)
+                response = await runner.arun(fx.customer_request())
+                self.assertEqual(response.model, expected)
+                self.assertEqual(transport.requests[0]["json_body"]["model"], expected)
+                self.assertEqual(response.usage, fx.USAGE)
+
+    async def test_r8_echo_hosts_report_the_echo_and_require_it(self) -> None:
+        # [Hidden Failure] EC-19/INV-27/D-17: Celeris, Nace.AI, Inception, Hanzo and Vansa document the echo, so it is the reported id and its absence is a billed error naming the host.
+        for name in R8_ECHO_HOSTS:
+            row = fx.R8_HOST_ROWS[name]
+            with self.subTest(provider=name, echo=row.default_model):
+                runner, _ = fx.scripted_runner(name, fx.response(fx.systemone_body(_answers(), model=row.default_model)))
+                self.assertEqual((await runner.arun(fx.customer_request())).model, row.default_model)
+            for missing in (fx.OMIT_MODEL, None, " "):
+                with self.subTest(provider=name, model="omitted" if missing is fx.OMIT_MODEL else repr(missing)):
+                    runner, _ = fx.scripted_runner(name, fx.response(fx.systemone_body(_answers(), model=missing)))
+                    with self.assertRaises(ProviderResponseError) as caught:
+                        await runner.arun(fx.customer_request())
+                    self.assertEqual(caught.exception.details["usage"], fx.USAGE)
+                    self.assertEqual(caught.exception.provider, name.lower())
+                    self.assertTrue(caught.exception.message.startswith(f"{row.display_name} response has no `model` string naming the version that answered; received "))
+
+    async def test_r8_request_model_hosts_report_the_request_id_and_ignore_the_echo(self) -> None:
+        # [Silent Failure] EC-19/INV-27/EC-27: Upstage and ZooData do not document a usable echo, so the request id stays the pricebook key whatever they return.
+        cases = (
+            ("UPSTAGE", None, "solar-decide-250918", "solar-decide"),
+            ("UPSTAGE", None, fx.OMIT_MODEL, "solar-decide"),
+            ("ZOODATA", None, "instinct-2026-09", "instinct"),
+            ("ZOODATA", "instinct-tuned-4b", None, "instinct-tuned-4b"),
+        )
+        for name, requested, echo, expected in cases:
+            with self.subTest(provider=name, echo="omitted" if echo is fx.OMIT_MODEL else repr(echo)):
                 overrides = {} if requested is None else {"model": requested}
                 runner, transport = fx.scripted_runner(name, fx.response(fx.systemone_body(_answers(), model=echo)), **overrides)
                 response = await runner.arun(fx.customer_request())

@@ -1,10 +1,10 @@
 """FILE: tests/features/decision_model_providers/test_decision_usage_metering.py
 
 PURPOSE: Pins what each decision call leaves in the run's usage ledger: the pricebook key and cost per host, OpenRouter's reported cost and System One usage keys, billed failures recorded once with usage, usage-free responses counted as unaccounted, nothing recorded on transport failure or cancellation, per-provider records inside one scope, and adapters that never touch the ledger.
-ROLE IN CODEBASE: Covers spec INV-10, INV-11, INV-12, INV-18, INV-19, AC-4, AC-6, AC-12, EC-17, EC-18, EC-21 and FR-5, FR-16 of docs/spec/decision-model-providers/spec.md.
+ROLE IN CODEBASE: Covers spec INV-10, INV-11, INV-12, INV-18, INV-19, INV-27, AC-4, AC-6, AC-12, EC-17, EC-18, EC-21, EC-33, EC-35, EC-37 and FR-4, FR-5, FR-16 of docs/spec/decision-model-providers/spec.md (r8).
 ARCHITECTURE NOTE: A real UsageTracker is made active with usage_ledger_scope; DecisionModelRunner.arun is the only writer, so records are read back from tracker.records and tracker.rollup().
-COMMON MODIFICATION PATTERNS: A new priced provider adds one PRICING_CASES row; a new unpriced provider adds a row whose expected cost is None.
-KNOWN EDGE CASES: Cloudflare's echo (@cf/cloudflare/clef) and OpenAI's differing echo are scripted on purpose so a record priced on the echo would show up as cost_usd None; the OpenAI usage shape is parsed by OpenAIUsage, which also reads input_tokens/output_tokens.
+COMMON MODIFICATION PATTERNS: A new priced provider adds one PRICING_CASES row; since spec r8 every decision default is priced, so no row expects cost_usd None.
+KNOWN EDGE CASES: Cloudflare's echo (@cf/cloudflare/clef) and the Upstage, ZooData and OpenAI differing echoes are scripted on purpose so a record priced on the echo would show up as cost_usd None; the OpenAI usage shape is parsed by OpenAIUsage, which also reads input_tokens/output_tokens; gpt-6-luna's tier is strict, so 272,000 input tokens bill at the base rate and 272,001 at the over-threshold rate.
 RELATED DOCS: docs/spec/decision-model-providers/spec.md sections 6.1, 6.2, 9.1; docs/design/jev-run-usage-ledger.md; tests/features/decision_model_providers/FEATURE.md.
 TESTS: python -m pytest tests/features/decision_model_providers/test_decision_usage_metering.py
 """
@@ -28,10 +28,19 @@ PRICING_CASES = (
     ("CLOUDFLARE", None, "@cf/cloudflare/clef", "clef", 0.24),
     ("CLOUDFLARE", "clef-flash", "@cf/cloudflare/clef", "clef-flash", 0.038),
     ("FOUNDRY", None, fx.OMIT_MODEL, "microsoft-decision-1", 0.042),
-    ("OPENAI", None, "decisions-2026-10-01", "gpt-6-luna", 0.10),
+    ("OPENAI", None, "decisions-2026-10-01", "gpt-6-luna", 0.20),
     ("LIQUID", None, "d1-2026-09-01", "d1", 0.04),
-    ("BASETEN", None, fx.OMIT_MODEL, "inception/mercury-decide", None),
+    ("BASETEN", None, fx.OMIT_MODEL, "inception/mercury-decide", 0.02),
     ("MERAGPT", None, fx.OMIT_MODEL, "sd-1", 0.04),
+    ("CELERIS", None, "celeris-1-decision", "celeris-1-decision", 0.04),
+    ("NACE", None, "drex-v1.5", "drex-v1.5", 0.05),
+    ("NACE", "drex-v1.0", "drex-v1.0", "drex-v1.0", 0.04),
+    ("UPSTAGE", None, "solar-decide-250918", "solar-decide", 0.10),
+    ("INCEPTION", None, "mercury-decide", "mercury-decide", 0.02),
+    ("HANZO", None, "kai", "kai", 0.021),
+    ("VANSA", None, "vansa-3.4", "vansa-3.4", 0.034),
+    ("ZOODATA", None, "instinct-2026-09", "instinct", 0.03),
+    ("ZOODATA", "instinct-dual-4b", fx.OMIT_MODEL, "instinct-dual-4b", 0.01),
 )
 
 
@@ -56,7 +65,7 @@ class PricingTests(unittest.IsolatedAsyncioTestCase):
     """Pins the pricebook key and cost each host's record carries."""
 
     async def test_every_host_is_priced_from_the_pricebook_key(self) -> None:
-        # [Silent Failure] AC-12/INV-12/INV-18/INV-27/EC-27: the record's model is the pricebook key, priced or explicitly unpriced.
+        # [Silent Failure] AC-12/INV-12/INV-18/INV-27/EC-27: the record's model is the pricebook key and, since r8, every host's call carries a cost.
         for name, requested, echo, expected_model, expected_cost in PRICING_CASES:
             with self.subTest(provider=name, model=expected_model):
                 overrides = {} if requested is None else {"model": requested}
@@ -69,10 +78,8 @@ class PricingTests(unittest.IsolatedAsyncioTestCase):
                 record = tracker.records[0]
                 self.assertEqual((record.provider, record.model, record.kind, record.failed), (name.lower(), expected_model, UsageKind.DECISION, False))
                 self.assertEqual(record.usage.input_tokens, 1_000_000)
-                if expected_cost is None:
-                    self.assertIsNone(record.cost_usd)
-                else:
-                    self.assertAlmostEqual(record.cost_usd, expected_cost)
+                self.assertIsNotNone(record.cost_usd)
+                self.assertAlmostEqual(record.cost_usd, expected_cost)
                 self.assertEqual(tracker.rollup().unaccounted_call_count, 0)
                 self.assertEqual(tracker.rollup(UsageKind.DECISION).model_call_count, 1)
 
@@ -106,6 +113,46 @@ class PricingTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(record.cost_usd, 512 * 0.04 / 1_000_000)
         self.assertEqual(tracker.rollup().cost_complete, True)
 
+    async def test_gpt_6_luna_bills_the_whole_request_at_the_over_threshold_rate_above_272000(self) -> None:
+        # [Edge Case] AC-12/EC-33/D-12: at exactly 272,000 input tokens the base rate applies; one token more bills every token at 0.20 per 1M.
+        for input_tokens, expected_cost in ((272_000, 0.0272), (272_001, 272_001 * 0.20 / 1_000_000)):
+            with self.subTest(input_tokens=input_tokens):
+                runner, _ = fx.scripted_runner("OPENAI", _success("OPENAI", "gpt-6-luna", {"input_tokens": input_tokens, "output_tokens": 0}))
+                tracker = UsageTracker()
+                with usage_ledger_scope(tracker):
+                    await runner.arun(fx.customer_request())
+                record = tracker.records[0]
+                self.assertEqual((record.model, record.usage.input_tokens), ("gpt-6-luna", input_tokens))
+                self.assertIsNotNone(record.cost_usd)
+                self.assertAlmostEqual(record.cost_usd, expected_cost)
+
+    async def test_nace_alias_requests_are_reported_and_priced_as_the_pinned_version(self) -> None:
+        # [Silent Failure] EC-35/INV-27/A-22: Nace answers an alias or a retired id with the pinned version, and that echo is the id the ledger prices.
+        for alias in ("drex-latest", "drex-v1.1"):
+            with self.subTest(model=alias):
+                runner, transport = fx.scripted_runner("NACE", _success("NACE", "drex-v1.5", MILLION_IN), model=alias)
+                tracker = UsageTracker()
+                with usage_ledger_scope(tracker):
+                    response = await runner.arun(fx.customer_request())
+                self.assertEqual(transport.requests[0]["json_body"]["model"], alias)
+                self.assertEqual(response.model, "drex-v1.5")
+                record = tracker.records[0]
+                self.assertEqual((record.provider, record.model), ("nace", "drex-v1.5"))
+                self.assertIsNotNone(record.cost_usd)
+                self.assertAlmostEqual(record.cost_usd, 0.05)
+
+    async def test_zoodata_preview_endpoint_is_priced_on_the_paid_rows(self) -> None:
+        # [Hidden Assumption] EC-37/INV-12: the SDK cannot tell ZooData's free preview host from the paid one, so the paid instinct row prices both.
+        runner, transport = fx.scripted_runner("ZOODATA", _success("ZOODATA", fx.OMIT_MODEL, MILLION_IN), endpoint="https://api.zoowork.ai/v1")
+        tracker = UsageTracker()
+        with usage_ledger_scope(tracker):
+            await runner.arun(fx.customer_request())
+        self.assertEqual(transport.requests[0]["url"], "https://api.zoowork.ai/v1/systemone")
+        record = tracker.records[0]
+        self.assertEqual((record.provider, record.model), ("zoodata", "instinct"))
+        self.assertIsNotNone(record.cost_usd)
+        self.assertAlmostEqual(record.cost_usd, 0.03)
+
 
 class LedgerBehaviourTests(unittest.IsolatedAsyncioTestCase):
     """Pins billed failures, unaccounted calls, transport failures, concurrency, and adapter neutrality."""
@@ -114,7 +161,7 @@ class LedgerBehaviourTests(unittest.IsolatedAsyncioTestCase):
         # [Hidden Failure] AC-6/INV-10/INV-11: a refusal or a mismatched answer map is still a paid call and is recorded exactly once.
         cases = (
             ("OPENAI", fx.response(fx.openai_body([{"type": "refusal", "name": "refund"}, fx.openai_choice()])), "gpt-6-luna", 0.10 * 300 / 1_000_000),
-            ("BASETEN", fx.response(fx.systemone_body({"refund": fx.systemone_noul(0.8)}, model=fx.OMIT_MODEL)), "inception/mercury-decide", None),
+            ("BASETEN", fx.response(fx.systemone_body({"refund": fx.systemone_noul(0.8)}, model=fx.OMIT_MODEL)), "inception/mercury-decide", 0.02 * 300 / 1_000_000),
             ("PERPLEXITY", fx.response(fx.systemone_body({"refund": fx.systemone_noul(0.8)}, model="pplx-decider-v1.1-27b")), "pplx-decider-v1.1-27b", 0.02 * 300 / 1_000_000),
         )
         for name, scripted, model, cost in cases:
@@ -128,10 +175,8 @@ class LedgerBehaviourTests(unittest.IsolatedAsyncioTestCase):
                 record = tracker.records[0]
                 self.assertEqual((record.provider, record.model, record.kind, record.failed), (name.lower(), model, UsageKind.DECISION, True))
                 self.assertEqual(record.usage.input_tokens, 300)
-                if cost is None:
-                    self.assertIsNone(record.cost_usd)
-                else:
-                    self.assertAlmostEqual(record.cost_usd, cost)
+                self.assertIsNotNone(record.cost_usd)
+                self.assertAlmostEqual(record.cost_usd, cost)
 
     async def test_a_response_without_usage_is_counted_unaccounted(self) -> None:
         # [Silent Failure] EC-18: the call is counted, not dropped, when a vendor omits usage.
@@ -171,13 +216,13 @@ class LedgerBehaviourTests(unittest.IsolatedAsyncioTestCase):
         by_provider = {record.provider: record for record in tracker.records}
         self.assertEqual(set(by_provider), {"perplexity", "openai"})
         self.assertAlmostEqual(by_provider["perplexity"].cost_usd, 0.02)
-        self.assertAlmostEqual(by_provider["openai"].cost_usd, 0.10)
+        self.assertAlmostEqual(by_provider["openai"].cost_usd, 0.20)
         self.assertEqual(by_provider["perplexity"].model, "pplx-decider-v1.1-27b")
         self.assertEqual(by_provider["openai"].model, "gpt-6-luna")
         rollup = tracker.rollup(UsageKind.DECISION)
         self.assertEqual(rollup.model_call_count, 2)
         self.assertTrue(rollup.cost_complete)
-        self.assertAlmostEqual(rollup.cost_usd, 0.12)
+        self.assertAlmostEqual(rollup.cost_usd, 0.22)
 
     async def test_adapters_never_touch_the_ledger(self) -> None:
         # [Hidden Assumption] INV-11/FR-16: calling an adapter directly inside a scope records nothing; only the runner meters.
