@@ -67,3 +67,19 @@
 - **S2-1 (applied; the tests' reading matches INV-8/EC-9):** rows 13 and 15 state that `SystemOneAnswers` and `OpenAIDecisionsAnswers` wrap `ConfigurationError` from `JevProbability.require` / `JevAnswer` validation into `self.error(f"{label} answer for {name!r} was malformed: {exc.message}") from exc` — what `_TypeSafeAnswerNormalizer._answer` does today (`vidbyte/providers/typesafe.py:320-321`) — so a predicate `probability` of 1.5 is a `ProviderResponseError` carrying the parsed usage. INV-8 and EC-9 gained the "malformed" clause; the §8.5 `normalize` lines carry a comment.
 - **S2-2 (applied with change; the tests' reading matches):** §8.5 and row 12 state that `message`, when given, replaces `str(exc)` in `f"{provider.value} {operation} failed with an unexpected {type(exc).__name__}: …"` and that None means `str(exc)`. Change to the coordinator's framing: the managed TypeSafe branch cannot route through `DecisionFailures.unexpected` because its label is the literal `vidbyte` (not a `ModelProvider` value) and `provider: ModelProvider` is frozen; `_TypeSafeFailures.unexpected` keeps that branch verbatim (INV-23), row 14's delegation is the direct-mode branch only, and no production caller passes `message` today (it is the test-bound seam).
 - **Sections touched:** frontmatter (`revision`); §6.1 (INV-8); §6.3 (EC-9); §8.5 (two comment lines under `unexpected`, one comment on each `normalize`); §12.3 rows 12, 13, 15; §16 (S2-1, S2-2); §17 (r4).
+
+## Revision r6 (C009/C010 pricebook gate)
+
+- **Commit:** `b17a342f98332d78dde3091e39b767ae3c63a73b` — `docs(spec): revise decision-model-providers spec (price Liquid and meraGPT per C009)`; `revision: 6`; `status: implemented` left as the orchestrator set it.
+- **Numbering:** took r6. r5 stays the S3 implementation entry, which already says the spec text did not change. Frontmatter now matches the latest §17 row.
+- **Why:** lint C009 and C010 landed on `origin/main` after `base_commit` and came in with merge `7bfe29e8`. C009 rejects empty or guessed pricing blocks for any token-priced default. C010 requires a vintage-lock refresh after any rate change.
+- **Liquid and meraGPT priced at 0.04/0.0.** The evidence is first-party (`context/pricing-recheck.md`), applied per the orchestrator ruling:
+  - Liquid `d1`: footnote of the dated d1 announcement.
+  - meraGPT `sd-1`: its own model card and pricing table, where `sd-1` is the alias of `decider-1`. This supersedes the third-party $0.03.
+- **Baseten:** stays the one unpriced default, pending the user. It is not chosen here. C009 keeps flagging it, so AC-16 waits on that decision (stated in INV-18 and Q-4).
+- **Changed:** INV-18, AC-12, EC-17, FR-4, D-10, §8.4 budget wording, the §9.1 pricing column, and the §9.1 meraGPT echo cell (`decider-1` documented; flag stays True). Also §11 (rules read, focused lint commands, C009 1 / C010 0 baselines), W-3, row 8 (values, dated comments, C009/C010 standards), the §12.3 closing sentence, §12.5 (one-time `--refresh-lock`), the §12.6 dependency line, §14 Ask-first, A-15, Q-4, the new Q-10 (`d1:free` / `decider-1` rows, default no), §16 S3-1, and §17 r6.
+- **Frozen names:** no symbol, module, enum member, signature, or message text changed.
+- **Tests that now contradict the spec** (scoped change for the test author):
+  - `test_decision_contract.py::FactoryAndPricebookTests::test_pricebook_rows_and_freshness_stamp`
+  - `test_decision_usage_metering.py::PricingTests::test_every_host_is_priced_from_the_pricebook_key`
+  - `test_decision_usage_metering.py::PricingTests::test_liquid_zero_output_tokens_price_input_only`
