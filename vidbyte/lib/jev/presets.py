@@ -19,6 +19,7 @@ from vidbyte.lib.constants.jev import (
     JEV_BULK_WORK_VETO_THRESHOLD,
     JEV_CLARITY_THRESHOLD,
     JEV_CLARITY_VETO_THRESHOLD,
+    JEV_RUN_STATE_RELATION_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevPresetDefinition
 from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
@@ -52,6 +53,11 @@ class JevPresets:
                 # One clear no fails the request, and a request with no action reports only that gap.
                 veto=JEV_CLARITY_VETO_THRESHOLD,
                 gate=JevPreflightQuestionKey.CLARITY_ACTION,
+            ),
+            JevPreflightPreset.RUN_STATE_RELATION: JevPresetDefinition(
+                preset=JevPreflightPreset.RUN_STATE_RELATION,
+                question_keys=(JevPreflightQuestionKey.RUN_STATE_RELATION,),
+                threshold=JEV_RUN_STATE_RELATION_THRESHOLD,
             ),
             JevPreflightPreset.BULK_WORK: JevPresetDefinition(
                 preset=JevPreflightPreset.BULK_WORK,

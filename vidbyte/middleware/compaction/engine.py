@@ -56,7 +56,9 @@ class ContextCompactionEngine:
     async def compact_provider_messages(self, messages: Sequence[Mapping[str, Any]], *, mode: CompactionMode | str, options: Mapping[str, Any] | None = None) -> tuple[tuple[dict[str, Any], ...], CompactionStats]:
         # Converts provider messages to ContextMessage records, compacts them, and restores dictionaries.
         selected = self._coerce_mode(mode)
-        before = tuple(self._provider_to_context_message(m, index) for index, m in enumerate(messages))
+        # Learn each Anthropic tool call's name by id first, because its tool_result blocks name the call only by that id.
+        tool_names = self._tool_use_names(messages)
+        before = tuple(self._provider_to_context_message(m, index, tool_names) for index, m in enumerate(messages))
         opts = dict(options or {})
         strategy = self._build_strategy(selected, opts)
         compacted = await strategy.compact(before)
@@ -65,9 +67,9 @@ class ContextCompactionEngine:
         restored = tuple(self._context_message_to_provider(m) for m in compacted)
         return restored, self._stats(before, compacted, selected)
 
-    def _tool_pairing_tags(self, messages: Sequence[ContextMessage]) -> tuple[tuple[str | None, frozenset[str] | None], ...]:
-        # Tags each message as a tool "call", a tool "result", or neither, with its tool-call ids when every entry carries one.
-        tags: list[tuple[str | None, frozenset[str] | None]] = []
+    def _tool_pairing_tags(self, messages: Sequence[ContextMessage]) -> tuple[tuple[str | None, frozenset[str] | None, int], ...]:
+        # Tags each message as a tool "call", a tool "result", or neither, with its tool-call ids when every entry carries one and its count of id-less Gemini function parts.
+        tags: list[tuple[str | None, frozenset[str] | None, int]] = []
         for message in messages:
             raw = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
             raw = raw if isinstance(raw, Mapping) else {}
@@ -81,25 +83,30 @@ class ContextCompactionEngine:
                 role, ids = "call", [c.get("id") if isinstance(c, Mapping) else None for c in calls] + [b.get("id") for b in blocks if b.get("type") == "tool_use"]
             else:
                 role, ids = None, []
-            tags.append((role, frozenset(str(i) for i in ids) if ids and all(i is not None for i in ids) else None))
+            keys = ("functionResponse", "function_response") if role == "result" else ("functionCall", "function_call")
+            tags.append((role, frozenset(str(i) for i in ids) if ids and all(i is not None for i in ids) else None, sum(1 for p in parts if isinstance(p, Mapping) and any(k in p for k in keys))))
         return tuple(tags)
 
-    def _repair_tool_pairing(self, messages: Sequence[ContextMessage], tags: Sequence[tuple[str | None, frozenset[str] | None]]) -> tuple[ContextMessage, ...]:
-        # Keeps a tool result only right after its call turn and drops a call turn (with its results) unless every call id was answered.
+    def _repair_tool_pairing(self, messages: Sequence[ContextMessage], tags: Sequence[tuple[str | None, frozenset[str] | None, int]]) -> tuple[ContextMessage, ...]:
+        # Keeps a tool result only right after its call turn and drops a call turn (with its results) unless every call was answered.
         kept: list[ContextMessage] = []
         call_at: int | None = None
         wanted: frozenset[str] | None = None
         answered: set[str] = set()
-        steps: list[tuple[ContextMessage | None, tuple[str | None, frozenset[str] | None]]] = [*zip(messages, tags, strict=True), (None, (None, None))]
-        for message, (role, ids) in steps:
+        calls = responses = 0
+        steps: list[tuple[ContextMessage | None, tuple[str | None, frozenset[str] | None, int]]] = [*zip(messages, tags, strict=True), (None, (None, None, 0))]
+        for message, (role, ids, parts) in steps:
             if role == "result":
                 if message is not None and call_at is not None and (wanted is None or ids is None or ids <= wanted - answered):
                     kept.append(message)
                     answered |= ids or set()
+                    responses += parts
                 continue
-            if call_at is not None and (len(kept) == call_at + 1 or (wanted is not None and answered != wanted)):
+            # @intent id-less-call-turns-must-be-fully-answered
+            # Gemini function calls carry no ids, so their response-part count must equal the call-part count; Gemini rejects a partly answered call turn.
+            if call_at is not None and (len(kept) == call_at + 1 or (wanted is not None and answered != wanted) or (wanted is None and 0 < calls != responses)):
                 del kept[call_at:]
-            call_at, wanted, answered = (len(kept) if role == "call" else None), ids, set()
+            call_at, wanted, answered, calls, responses = (len(kept) if role == "call" else None), ids, set(), parts, 0
             if message is not None:
                 kept.append(message)
         return tuple(kept)
@@ -127,8 +134,19 @@ class ContextCompactionEngine:
         return visible, stats
 
     def to_context_messages(self, messages: Sequence[Mapping[str, Any]]) -> tuple[ContextMessage, ...]:
-        # Converts provider message dictionaries into generic ContextMessage records.
-        return tuple(self._provider_to_context_message(m) for m in messages)
+        # Converts provider message dictionaries into generic ContextMessage records, naming Anthropic tool results through their call ids.
+        tool_names = self._tool_use_names(messages)
+        return tuple(self._provider_to_context_message(m, tool_names=tool_names) for m in messages)
+
+    def _tool_use_names(self, messages: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+        # Maps every Anthropic tool_use block id to its tool name across the history.
+        names: dict[str, str] = {}
+        for message in messages:
+            content = message.get("content")
+            for block in content if isinstance(content, list) else ():
+                if isinstance(block, Mapping) and block.get("type") == "tool_use" and block.get("id") is not None and block.get("name") is not None:
+                    names[str(block["id"])] = str(block["name"])
+        return names
 
     def from_context_messages(self, messages: Sequence[ContextMessage]) -> tuple[dict[str, Any], ...]:
         # Converts ContextMessage records back into provider message dictionaries.
@@ -244,13 +262,17 @@ class ContextCompactionEngine:
             return result
         return self._replace_tool_result(result, scrubbed, {"compaction": CompactionMode.MECHANICAL_BLOAT_SCRUBBER.value, **stats})
 
-    def _provider_to_context_message(self, message: Mapping[str, Any], index: int = 0) -> ContextMessage:
+    def _provider_to_context_message(self, message: Mapping[str, Any], index: int = 0, tool_names: Mapping[str, str] | None = None) -> ContextMessage:
         # Converts a provider message dictionary into a generic ContextMessage.
         raw = dict(message)
         role = str(raw.get("role", "assistant"))
         kind = self._provider_message_kind(raw)
         content = self._provider_message_content(raw)
-        return ContextMessage(role=role, content=content, kind=kind, metadata={"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": self._provider_tool_name(raw)})
+        # @intent tool-names-resolve-on-every-provider-shape
+        # Anthropic and Gemini keep tool names in content blocks and parts (a tool_result only by call id); unnamed, every per-tool strategy treats all tools as one.
+        tool_name = self._provider_tool_name(raw)
+        tool_name = self._provider_block_tool_name(raw, tool_names or {}) if tool_name is None else tool_name
+        return ContextMessage(role=role, content=content, kind=kind, metadata={"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": tool_name})
 
     def _context_message_to_provider(self, message: ContextMessage) -> dict[str, Any]:
         # Converts a compacted ContextMessage back to a provider message dictionary.
@@ -297,7 +319,16 @@ class ContextCompactionEngine:
             return "\n".join(values)
         parts = message.get("parts")
         if isinstance(parts, list):
-            return "\n".join(str(part) for part in parts)
+            # @intent gemini-parts-extract-the-text-they-write-back
+            # Write-back stores compacted text in functionResponse.response.output, so read that text here, not the part's one-line repr.
+            part_values: list[str] = []
+            for part in parts:
+                function_response = (part.get("functionResponse") or part.get("function_response")) if isinstance(part, Mapping) else None
+                response = function_response.get("response") if isinstance(function_response, Mapping) else None
+                output = response.get("output") if isinstance(response, Mapping) else None
+                text = part.get("text") if isinstance(part, Mapping) else None
+                part_values.append(output if isinstance(output, str) else text if isinstance(text, str) else str(part))
+            return "\n".join(part_values)
         return str(content or message)
 
     def _provider_message_id(self, message: Mapping[str, Any], index: int) -> str:
@@ -323,6 +354,21 @@ class ContextCompactionEngine:
                         return str(function["name"])
                     if call.get("name") is not None:
                         return str(call["name"])
+        return None
+
+    def _provider_block_tool_name(self, message: Mapping[str, Any], tool_names: Mapping[str, str]) -> str | None:
+        # Extracts tool names from Anthropic content blocks and Gemini parts, naming a tool_result through its tool_use id.
+        content, parts = message.get("content"), message.get("parts")
+        for block in content if isinstance(content, list) else ():
+            if isinstance(block, Mapping) and block.get("type") == "tool_use" and block.get("name") is not None:
+                return str(block["name"])
+            if isinstance(block, Mapping) and block.get("type") == "tool_result" and str(block.get("tool_use_id")) in tool_names:
+                return tool_names[str(block.get("tool_use_id"))]
+        for part in parts if isinstance(parts, list) else ():
+            for key in ("functionCall", "function_call", "functionResponse", "function_response"):
+                value = part.get(key) if isinstance(part, Mapping) else None
+                if isinstance(value, Mapping) and value.get("name") is not None:
+                    return str(value["name"])
         return None
 
     def _replace_provider_content(self, message: dict[str, Any], content: str) -> dict[str, Any]:

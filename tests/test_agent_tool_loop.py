@@ -9,10 +9,12 @@ from pydantic import BaseModel
 
 from vidbyte import Agent, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
-from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
+from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
+from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
 
 
 class FakeResponse:
@@ -622,3 +624,65 @@ class IsDoneObjectFinalAnswerTests(unittest.IsolatedAsyncioTestCase):
             reply = await agent.arun("task")
 
         self.assertEqual(json.loads(reply.content), {"severity": "high", "owners": ["dba"]})
+
+
+class IsDoneFalsyFinalAnswerTests(unittest.IsolatedAsyncioTestCase):
+    # @intent falsy-final-answer-is-still-an-answer
+    # A typed answer of 0, 0.0, or false is the model's real answer and must not be replaced by the "Done." placeholder.
+    async def _output(self, arguments: dict) -> str:
+        result = await IsDoneTool().execute(ToolCall(IS_DONE_TOOL_NAME, arguments))
+        return result.output
+
+    async def test_falsy_typed_final_answers_are_rendered(self) -> None:
+        for value, expected in ((0, "0"), (0.0, "0.0"), (False, "False")):
+            with self.subTest(value=value):
+                self.assertEqual(await self._output({"final_answer": value}), expected)
+
+    async def test_missing_none_or_blank_final_answer_falls_back_to_done(self) -> None:
+        for arguments in ({}, {"final_answer": None}, {"final_answer": ""}, {"final_answer": "   "}):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(await self._output(arguments), "Done.")
+
+    async def test_blank_final_answer_uses_the_answer_alias(self) -> None:
+        self.assertEqual(await self._output({"final_answer": "", "answer": "from alias"}), "from alias")
+        self.assertEqual(await self._output({"final_answer": None, "answer": 0}), "0")
+
+    async def test_zero_final_answer_is_the_agent_reply(self) -> None:
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": 0}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("what is 7-7?")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(reply.content, "0")
+
+
+class CompactionFloorTests(unittest.IsolatedAsyncioTestCase):
+    # @intent content-rewrites-count-as-compactions
+    # Clearing a tool result in place keeps the message count, yet it is still a compaction that MinCompactions must see.
+    async def _run(self, exclude_tools: tuple[str, ...]) -> tuple[object, ToolCallingRunner]:
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "a long raw tool result"
+
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "lookup", '{"q": "a"}')), *(_text_turn("answer") for _ in range(3))])
+        settings = AgentLoopSettings(output_contracts=(MinCompactions(1),), max_contract_rejections=1)
+        middleware = [MessageHistoryCompactionMiddleware.clear_tool_results_except(exclude_tools=exclude_tools)]
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=middleware, agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+        return reply, runner
+
+    async def test_content_only_rewrite_counts_as_a_compaction(self) -> None:
+        reply, runner = await self._run(exclude_tools=())
+
+        tool_messages = [m for m in runner.calls[1]["kwargs"]["messages"] if m.get("role") == "tool"]
+        self.assertEqual([m["content"] for m in tool_messages], ["[tool result cleared by compaction]"])
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertEqual(reply.content, "answer")
+
+    async def test_no_op_compaction_still_does_not_count(self) -> None:
+        reply, _ = await self._run(exclude_tools=("lookup",))
+
+        self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")

@@ -16,6 +16,7 @@ Feedback on one question applies to every question, so when you change the patte
 ## Where things live
 
 - `clarity.py` holds the clarity preset's questions.
+- `run_state_relation.py` holds the fixed relationship question for an existing run-state record.
 - `bulk_work.py` holds three separate recognition questions for multiple targets, one repeated operation, and explicit independent execution.
 - `specialist.py` holds the specialist Choice question; its options are built per run from `JevAgentSettings.agents`, with `none` always last.
 - `preflight.py` holds `JevPreflightRegistry` (`get`, `questions`, `specialists`, `validate`).

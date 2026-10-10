@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from vidbyte.harnesses.serialization import HarnessRedactor
+from vidbyte.harnesses.serialization import HarnessRedactor, HarnessSecretPolicy
 
 
 class HarnessRedactorFreeTextTests(unittest.TestCase):
@@ -67,6 +67,21 @@ class HarnessRedactorFreeTextTests(unittest.TestCase):
         redactor = HarnessRedactor()
 
         self.assertEqual(redactor.safe_error_message(text), redactor.redact(text))
+
+
+class HarnessSecretPolicyCamelCaseTests(unittest.TestCase):
+    def test_camel_case_credential_keys_are_secret(self) -> None:
+        for key in ("accessToken", "clientSecret", "privateKey", "sessionToken", "githubToken", "apiKey", "APIKey", "OAuthToken"):
+            self.assertTrue(HarnessSecretPolicy.is_secret_key(key), key)
+
+    def test_camel_case_ordinary_keys_are_not_secret(self) -> None:
+        for key in ("author", "tokenizer", "maxTokens", "promptTokenCount", "totalTokenCount", "authFlow"):
+            self.assertFalse(HarnessSecretPolicy.is_secret_key(key), key)
+
+    def test_camel_case_credential_key_is_scrubbed_from_capture(self) -> None:
+        safe = HarnessRedactor().redact({"accessToken": "tok_camel123", "maxTokens": 5})
+
+        self.assertEqual(safe, {"maxTokens": 5})
 
 
 if __name__ == "__main__":

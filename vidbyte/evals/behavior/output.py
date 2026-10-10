@@ -200,11 +200,15 @@ class OutputBehavior:
         if normalized == "url":
             return int(self.url_count())
         if normalized == "any":
+            # @intent any-style-counts-each-reference-once
+            # A markdown link also holds a URL (and maybe a [1] label), so remove whole markdown
+            # citations before counting the other styles; one linked reference counts once.
+            unlinked = self._MARKDOWN_CITATION_PATTERN.sub(" ", self._output)
             return (
-                int(self.citation_count("markdown"))
-                + int(self.citation_count("bracket"))
-                + int(self.citation_count("footnote"))
-                + int(self.citation_count("url"))
+                len(self._MARKDOWN_CITATION_PATTERN.findall(self._output))
+                + len(self._BRACKET_CITATION_PATTERN.findall(unlinked))
+                + len(self._FOOTNOTE_CITATION_PATTERN.findall(unlinked))
+                + len(self._URL_PATTERN.findall(unlinked))
             )
         raise ValueError(f"Unsupported citation style: {style}")
 

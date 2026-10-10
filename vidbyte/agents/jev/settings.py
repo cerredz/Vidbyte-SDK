@@ -26,6 +26,9 @@ from vidbyte.lib.constants.jev import (
     JEV_BULK_MIN_PLANNER_MAX_TOKENS,
     JEV_COMPUTE_CLONES_DEFAULT,
     JEV_COMPUTE_CLONES_MAX,
+    JEV_COMPUTE_SWARM_AGENTS_DEFAULT,
+    JEV_COMPUTE_SWARM_AGENTS_MAX,
+    JEV_COMPUTE_SWARM_AGENTS_MIN,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS,
     JEV_FAITHFUL_SCOPE_EXTRA_TOKENS,
@@ -276,10 +279,11 @@ class JevRunBriefSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevComputeSettings:
-    """Validated run-brief settings, enabled dynamic-compute options, and the clone count for the mid-run checkpoint.
+    """Validated run-brief settings, enabled dynamic-compute options, and the clone and swarm sizes for the mid-run checkpoint.
 
-    CLONE is opt-in because it is the one option that launches agents: add it to `dynamic_compute`, and `clones`
-    sets how many copies of the main agent its one launch per run starts.
+    CLONE and SWARM are opt-in because they launch agents. Add CLONE to `dynamic_compute`, and `clones` sets how
+    many copies of the main agent its one launch per run starts. Add SWARM, and `swarm_agents` caps how many
+    helpers the main agent may assign in the plan it submits through the one-time `launch_swarm` tool.
     """
 
     brief: JevRunBriefSettings = field(default_factory=JevRunBriefSettings)
@@ -289,6 +293,7 @@ class JevComputeSettings:
         JevDynamicComputeOption.SUBAGENT,
     )
     clones: int = JEV_COMPUTE_CLONES_DEFAULT
+    swarm_agents: int = JEV_COMPUTE_SWARM_AGENTS_DEFAULT
 
     def __post_init__(self) -> None:
         if not isinstance(self.brief, JevRunBriefSettings):
@@ -296,6 +301,8 @@ class JevComputeSettings:
         object.__setattr__(self, "dynamic_compute", JevComputeRegistry.validate(self.dynamic_compute))
         if isinstance(self.clones, bool) or not isinstance(self.clones, int) or not 1 <= self.clones <= JEV_COMPUTE_CLONES_MAX:
             raise ConfigurationError(f"JevComputeSettings.clones must be an integer from 1 through {JEV_COMPUTE_CLONES_MAX}.")
+        if isinstance(self.swarm_agents, bool) or not isinstance(self.swarm_agents, int) or not JEV_COMPUTE_SWARM_AGENTS_MIN <= self.swarm_agents <= JEV_COMPUTE_SWARM_AGENTS_MAX:
+            raise ConfigurationError(f"JevComputeSettings.swarm_agents must be an integer from {JEV_COMPUTE_SWARM_AGENTS_MIN} through {JEV_COMPUTE_SWARM_AGENTS_MAX}.")
 
 
 @dataclass(frozen=True, slots=True)

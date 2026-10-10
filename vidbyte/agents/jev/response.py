@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/response.py
 
 PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the self-review, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return, handing it the run's settled JevUsageReport. JevComputeController writes the run facts, run-brief refreshes, compute decisions, and the CLONE launch of the mid-run compute checkpoint.
+ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the self-review, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return, handing it the run's settled JevUsageReport. JevComputeController writes the run facts, run-brief refreshes, compute decisions, and the CLONE launch of the mid-run compute checkpoint, and JevSwarmTool writes the SWARM launch.
 ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
 KNOWN EDGE CASES: The run's usage is attached only when a run returns; a run that fails closed on usage raises instead. start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
@@ -34,6 +34,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunFacts,
     JevRunStateRecord,
     JevSpecialist,
+    JevSwarmResult,
     JevUsageReport,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -112,6 +113,10 @@ class JevResponse:
     def clone(self, result: JevCloneResult) -> None:
         """Record the run's one CLONE launch and the replies its clones returned."""
         self.state.clone = result
+
+    def swarm(self, result: JevSwarmResult) -> None:
+        """Record the run's one SWARM launch: the plan that ran and every helper's output."""
+        self.state.swarm = result
 
     def delegated(self, reply: AgentMessage, usage: JevUsageReport) -> AgentResult:
         """Record the chosen specialist's reply and the run's usage, returning the result with the run total."""

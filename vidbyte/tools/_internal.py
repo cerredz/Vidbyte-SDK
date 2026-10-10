@@ -32,13 +32,20 @@ class IsDoneTool(BaseTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Read the final answer, accepting the older "answer" alias, and fall back to "Done." when neither is given.
-        answer = call.arguments.get("final_answer") or call.arguments.get("answer") or "Done."
+        # Read the final answer, accepting the older "answer" alias, and fall back to "Done." only when neither is given.
+        # @intent falsy-final-answer-is-still-an-answer
+        # A typed answer such as 0, 0.0, or false is a real answer; only a missing value or blank text counts as absent.
+        candidates = (call.arguments.get("final_answer"), call.arguments.get("answer"))
+        answer = next((value for value in candidates if self._is_given(value)), "Done.")
         # @intent isdone-structured-answer-stays-json
         # Models often send a structured answer as a JSON object or array instead of an encoded string;
         # keep it as JSON text (not a Python repr) so output-schema parsing and callers can read it.
         output = json.dumps(answer, ensure_ascii=False) if isinstance(answer, (Mapping, list)) else str(answer)
         return ToolResult.success(IS_DONE_TOOL_NAME, output, metadata={"done": True})
+
+    @staticmethod
+    def _is_given(value: object) -> bool:
+        return value is not None and not (isinstance(value, str) and not value.strip())
 
 
 def with_internal_agent_tools(tools: Tools) -> Tools:
