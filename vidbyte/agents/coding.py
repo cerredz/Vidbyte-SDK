@@ -160,10 +160,16 @@ class _FetchedPagesView(_ToolWrapper):
         # model of a CodingAgent could fetch a page but never read it. Only output changes: metadata, including the
         # operation-usage annotation the runtime prices from, passes through untouched, and any non-success result is
         # returned exactly as the wrapped tool built it.
+
+        # Run the priced fetch exactly as the bare tool would.
         result = await self._tool.execute(call)
+
+        # A failure, or a result without fetched pages, reaches the model unchanged.
         payload = result.metadata.get(PricedOperationTool._PAYLOAD_KEY)
         if result.status is not ToolStatus.SUCCESS or not isinstance(payload, FetchPayload):
             return result
+
+        # Keep the provider's summary first, then add each page's final URL and full text in the order fetched.
         pages = "\n\n".join(f"{index}. {page.final_url}\n{page.content}" for index, page in enumerate(payload.pages, start=1))
         return dataclasses.replace(result, output=f"{result.output}\n\n{pages}")
 
