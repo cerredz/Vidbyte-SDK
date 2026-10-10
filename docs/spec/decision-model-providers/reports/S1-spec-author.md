@@ -50,3 +50,13 @@
 - **R-7:** `SystemOneProvider._config_for` provider check (row 13, §8.5), INV-28, EC-28, AC-19 (claimed by W-5).
 - **Other:** `SDK-LINT: PASS` (3 places); `_TypeSafeCallBuilder` pin in INV-24 and row 14; `DecisionFailures.unexpected(provider: ModelProvider)`; one `get_default_endpoint` sentence (EC-4, AC-7, FR-14, row 6); P1–P3 and dependency order rewritten; SKILL.md:47 everywhere with line 46 stated untouched; "Usage Key Divergence" rows in row 18, FR-15, §12.5.
 - **Sections changed (for the scoped round 2):** frontmatter; §6.1 (INV-2, INV-24, new INV-27/28); §6.2 (AC-7, AC-12, AC-16, new AC-19); §6.3 (EC-4, EC-19, new EC-27/28); §7 (FR-3, FR-12, FR-14, FR-15, FR-16, NFR-2); §8.1 (D-15, new D-17/18); §8.2; §8.5; §9.1; §9.4; §11 (lint literal); §12.1 (W-5); §12.2; §12.3 (rows 2, 3, 5, 6, 9, 12, 13, 14, 15, 17, 18, 20, new 21); §12.4; §12.5; §12.6; §13; §15 (A-13, Q-6, new Q-9); §16; §17.
+
+## Revision r3
+
+- **Commit:** `e5aff9a34e5bc8fde78fc0ffeec311a29179c35c` — `docs(spec): revise decision-model-providers spec r3 (S1 review round 2, approved)`; spec 799 lines, `revision: 3`, `status: approved` (review cap of two rounds reached).
+- **Dispositions:** R-11, R-12, R-13, R-14 all applied as proposed; no disputes, no new `Q-n`.
+- **R-11:** §8.5 now files `DecisionAuthScheme` under `vidbyte/lib/enums/jev.py — a JEV enum (D-18); re-exported from vidbyte.lib.enums`; §11 directory layout gained the `enums/jev.py` line between `model_provider.py` and `decision_model.py`.
+- **R-12:** INV-28 covers `SystemOneProvider` and `OpenAIDecisionsProvider`; `_config_for` added to the §8.5 OpenAI block and to row 15 (`ProviderConfigurationError(..., provider="openai")` when `normalized_provider() is not ModelProvider.OPENAI`); AC-19 gained the mirror case; EC-28 notes the shared guard.
+- **R-13:** row 2 now updates the `enums/jev.py` header (PURPOSE line 3 names `DecisionAuthScheme`; ROLE line 4 names `systemone.py` and `openai_decisions.py`); §12.5 header bullet lists `enums/jev.py`.
+- **R-14:** INV-25 restated on `config.resolved_model()`; INV-2 and D-15 list four readers (adds `TypeSafeProvider.run_decision` via the `fallback` argument to `SystemOneAnswers.model`).
+- **Sections changed in r3:** frontmatter (`status`, `revision`); §6.1 (INV-2, INV-25, INV-28); §6.2 (AC-19); §6.3 (EC-28); §8.1 (D-15); §8.5 (enum path, OpenAI `_config_for`); §11 (layout); §12.3 (rows 2, 15); §12.5; §16; §17.
