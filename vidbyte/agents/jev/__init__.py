@@ -10,16 +10,25 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py, tests/tes
 """
 
 from vidbyte.agents.jev.agent import JevAgent
+from vidbyte.agents.jev.alignment import (
+    JevAlignmentResult,
+    JevAlignmentStatus,
+    JevToolAlignmentResult,
+    JevToolAlignmentStatus,
+)
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
+    JevAlignmentSettings,
     JevComputeSettings,
     JevContinualSettings,
     JevRunBriefSettings,
     JevRuntimeSettings,
+    JevToolAlignmentSettings,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevAlignmentOutcome,
     JevAssumptionEvidence,
     JevAssumptionsReconciledEvidence,
     JevCanSimplify,
@@ -86,6 +95,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevPresetResult,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
+    JevPromptAlignmentOutcome,
     JevReportActionAlignment,
     JevReportActionAlignmentItem,
     JevRequiredAction,
@@ -110,6 +120,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeEvidence,
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeItem,
+    JevToolAlignmentOutcome,
     JevUsageReport,
 )
 from vidbyte.lib.enums.jev import (
@@ -133,6 +144,11 @@ __all__ = [
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
+    "JevAlignmentOutcome",
+    "JevAlignmentResult",
+    "JevAlignmentSettings",
+    "JevAlignmentStatus",
+    "JevPromptAlignmentOutcome",
     "JevCanSimplify",
     "JevCanSimplifyEvidence",
     "JevAssumptionEvidence",
@@ -236,6 +252,10 @@ __all__ = [
     "JevScopeUnitEvidence",
     "JevScopeUnitSource",
     "JevScopeUniverse",
+    "JevToolAlignmentOutcome",
+    "JevToolAlignmentResult",
+    "JevToolAlignmentSettings",
+    "JevToolAlignmentStatus",
     "JevSelfReviewEvidence",
     "JevSpecialist",
     "JevTargetOutcome",

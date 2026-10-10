@@ -27,12 +27,14 @@ from vidbyte.lib.dataclasses.jev import (
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevPromptAlignmentOutcome,
     JevReviewRecord,
     JevRunBrief,
     JevRunBriefUpdate,
     JevRunFacts,
     JevRunStateRecord,
     JevSpecialist,
+    JevToolAlignmentOutcome,
     JevUsageReport,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -90,6 +92,14 @@ class JevResponse:
         """Record the cumulative extra loop budget JevAgent granted to failed faithful-scope continuations."""
         for name, amount in extension.items():
             self.state.continuation_budget[name] = self.state.continuation_budget.get(name, JEV_CONTINUATION_BUDGET_INITIAL) + amount
+
+    def alignment(self, outcome: JevPromptAlignmentOutcome) -> None:
+        """Record the system-prompt alignment outcome for this run."""
+        self.state.alignment = outcome
+
+    def tool_alignment(self, outcome: JevToolAlignmentOutcome) -> None:
+        """Record the tool-settings alignment outcome for this run."""
+        self.state.tool_alignment = outcome
 
     def run_facts(self, facts: JevRunFacts | None) -> None:
         """Record the exact run facts the compute checkpoint read most recently."""

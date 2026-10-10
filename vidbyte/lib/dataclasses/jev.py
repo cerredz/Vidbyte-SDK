@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -3683,6 +3683,41 @@ class JevClarification:
         return "\n".join(blocks)
 
 
+class JevAlignmentOutcome(Protocol):
+    """Read-only common contract for Jev alignment outcomes without importing the agent layer into lib."""
+
+    @property
+    def status(self) -> str: ...
+
+    @property
+    def detail(self) -> str | None: ...
+
+
+class JevPromptAlignmentOutcome(JevAlignmentOutcome, Protocol):
+    """Read-only prompt-alignment result contract exposed on JevAgent.response."""
+
+    system_prompt: str
+    gaps: tuple[Any, ...]
+    edits: tuple[Any, ...]
+    owner_actions: tuple[str, ...]
+    probabilities: Mapping[str, float]
+    usage: Any | None
+
+
+class JevToolAlignmentOutcome(JevAlignmentOutcome, Protocol):
+    """Read-only tool-alignment result contract exposed on JevAgent.response."""
+
+    needs: tuple[Any, ...]
+    attached: tuple[Any, ...]
+    rejected: tuple[Any, ...]
+    owner_actions: tuple[str, ...]
+    provider_errors: Mapping[str, str]
+    probabilities: Mapping[str, float]
+    usage: Any | None
+
+    def summary(self) -> str: ...
+
+
 @dataclass(frozen=True, slots=True)
 class JevUsageReport:
     """One JevAgent run's usage, read from the agent's one usage ledger and priced from the SDK pricebook.
@@ -3768,6 +3803,8 @@ class JevAgentResponse:
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
     compute_decisions: list[JevComputeDecision] = field(default_factory=list)
     clone: JevCloneResult | None = None
+    alignment: JevPromptAlignmentOutcome | None = None
+    tool_alignment: JevToolAlignmentOutcome | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -4432,4 +4469,7 @@ __all__ = [
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",
+    "JevAlignmentOutcome",
+    "JevPromptAlignmentOutcome",
+    "JevToolAlignmentOutcome",
 ]

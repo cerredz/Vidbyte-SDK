@@ -8,7 +8,10 @@ from vidbyte.lib.dataclasses.context import ContextMessage
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
 from vidbyte.lib.dataclasses.tools import ToolCall as RuntimeToolCall
 from vidbyte.lib.dataclasses.tools import ToolResult as RuntimeToolResult
-from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolResultCompactionMiddleware
+from vidbyte.middleware.builtins import (
+    MessageHistoryCompactionMiddleware,
+    ToolResultCompactionMiddleware,
+)
 from vidbyte.tools.builtins.context import ContextCompactionTool
 from vidbyte.tools.types import ToolCall
 

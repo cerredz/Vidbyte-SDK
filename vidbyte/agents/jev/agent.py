@@ -15,6 +15,7 @@ from functools import partial
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.jev.alignment import JevAgentAlignment
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevDoneContinuation, JevFreshContinuation
 from vidbyte.agents.jev.done import JevRunState
@@ -64,6 +65,9 @@ class JevAgent(BaseAgent):
             self.continuation = JevFreshContinuation(self.run_state, runtime_settings.continual, self._response, fresh_agent_factory)
         else:
             self.continuation = JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+        # @intent alignment-gets-decision-from-runtime-settings
+        # Grouped agent settings carry model identity while JevRuntimeSettings owns the separate decision-model configuration.
+        self.alignment = JevAgentAlignment(settings, runtime_settings.decision) if settings.alignment.system_prompt or settings.alignment.tool_settings else None
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,
@@ -99,7 +103,7 @@ class JevAgent(BaseAgent):
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
         # Passes the runtime settings, the gate, the done checks, the continuation, the compute controller, and the response writer built at construction to each run-local JevRuntime.
-        return {"runtime_settings": self.runtime_settings, "preflight": self.preflight, "run_state": self.run_state, "continuation": self.continuation, "compute": self.compute, "response": self._response}
+        return {"runtime_settings": self.runtime_settings, "preflight": self.preflight, "run_state": self.run_state, "continuation": self.continuation, "compute": self.compute, "response": self._response, "alignment": self.alignment, "alignment_settings": self.settings.alignment}
 
 
 __all__ = ["JevAgent"]
