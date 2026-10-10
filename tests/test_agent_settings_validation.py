@@ -308,6 +308,33 @@ class SecretAndDepthValidationTests(unittest.TestCase):
 
         self.assertIn("must not contain YAML-held secrets", str(ctx.exception))
 
+    def test_rejects_camelcase_and_hyphenated_credential_keys_loaded_from_yaml(self) -> None:
+        # @intent yaml-secret-guard-normalizes-key-spelling
+        rejected = ("apiKey", "accessToken", "x-api-key", "clientSecret", "cookie", "bearer", "passwd", "aws_credentials")
+        with tempfile.TemporaryDirectory() as folder:
+            for key in rejected:
+                path = self._write_agent(Path(folder), key)
+                with self.subTest(key=key), self.assertRaises(ConfigurationError) as ctx:
+                    YamlLoader().load_agent(path)
+                self.assertIn("must not contain YAML-held secrets", str(ctx.exception))
+                self.assertEqual(ctx.exception.details["field"], f"agent.metadata.{key}")
+
+    def test_keeps_ordinary_keys_that_resemble_credentials_loadable(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            for key in ("author", "max_tokens", "tokenizer"):
+                with self.subTest(key=key):
+                    settings = YamlLoader().load_agent(self._write_agent(Path(folder), key))
+                    self.assertEqual(settings.metadata, {key: "value123"})
+
+    def _write_agent(self, folder: Path, key: str) -> Path:
+        # Writes a minimal agent document whose metadata holds one key under test.
+        path = folder / "agent.yaml"
+        path.write_text(
+            f"type: base\nname: researcher\nsystem_prompt: You research.\nprovider: deepseek\nmodel_name: deepseek-chat\nmetadata:\n  {key}: value123\n",
+            encoding="utf-8",
+        )
+        return path
+
     def test_rejects_an_acyclic_but_deeply_nested_document(self) -> None:
         deep: dict[str, object] = {"leaf": 1}
         for _ in range(60):

@@ -10,6 +10,7 @@ Purpose:
     parses YAML and each class validates its fields against the SDK's canonical sources of
     truth (ProviderModelRegistry, AgentRuntimeType, AgentType, AgentLoopSettings).
 Architecture:
+    - _YamlSecretKeyPolicy: The shared credential-key classifier widened with config-only names.
     - _ConfigValidation: Shared validation primitives (text, bounds, references, serializability)
       used by every config dataclass.
     - ToolDefinition / MiddlewareDefinition / ContextItemDefinition: A named ref plus data-only
@@ -47,14 +48,22 @@ from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.enums import AgentRuntimeType, AgentType, ModelModality
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 
 if TYPE_CHECKING:
     from vidbyte.agents.settings import AgentLoopSettings
 
-_SECRET_KEYS = frozenset(
+_CONFIG_SECRET_KEYS = frozenset(
     {"api_key", "token", "password", "passwd", "secret", "authorization", "credential", "credentials", "private_key", "access_key", "secret_key", "session_token", "cookie", "bearer"}
 )
-_SECRET_SUFFIXES = ("_api_key", "_token", "_password", "_secret", "_credential", "_credentials", "_private_key", "_access_key", "_secret_key")
+_CONFIG_SECRET_SUFFIXES = ("_api_key", "_token", "_password", "_secret", "_credential", "_credentials", "_private_key", "_access_key", "_secret_key")
+
+
+class _YamlSecretKeyPolicy(CredentialKeyPolicy):
+    """Shared credential-key classifier plus the names only the YAML guard rejects (cookie, bearer, passwd)."""
+
+    _SECRET_KEYS = CredentialKeyPolicy._SECRET_KEYS | _CONFIG_SECRET_KEYS
+    _SECRET_SUFFIXES = CredentialKeyPolicy._SECRET_SUFFIXES + _CONFIG_SECRET_SUFFIXES
 
 # Bounds that turn a plausible-but-unusable document into a load-time error naming the field.
 _MAX_NAME_CHARS = 64
@@ -205,7 +214,9 @@ class _ConfigValidation:
             cls._guard_cycle(value, field_name, ancestry)
             cls._guard_depth(field_name, depth)
             for key, item in value.items():
-                if key.strip().lower() in _SECRET_KEYS or key.strip().lower().endswith(_SECRET_SUFFIXES):
+                # @intent yaml-secret-guard-normalizes-key-spelling
+                # Classify with the shared camelCase/hyphen normalization so apiKey or x-api-key cannot bypass the guard.
+                if _YamlSecretKeyPolicy.is_secret_key(key):
                     raise cls._error("Configuration must not contain YAML-held secrets.", f"{field_name}.{key}")
                 cls._serializable(item, f"{field_name}.{key}", ancestry | {id(value)}, depth + 1)
             return
