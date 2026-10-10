@@ -71,6 +71,7 @@ from vidbyte.lib.enums.failure import (
     RuleErrorMode,
 )
 from vidbyte.lib.enums.jev import (
+    DecisionAuthScheme,
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
@@ -155,6 +156,7 @@ __all__ = [
     "CotEventEnum",
     "DefeasibleRuleApplies",
     "DocumentType",
+    "DecisionAuthScheme",
     "DecisionModelMode",
     "EquivocationFallacy",
     "FailureCode",
