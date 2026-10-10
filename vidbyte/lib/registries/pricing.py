@@ -191,15 +191,22 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     ModelProvider.FOUNDRY: {
         "microsoft-decision-1": ModelPricing(input_per_million=0.042, output_per_million=0.0),
     },
-    # Liquid AI d1 (https://docs.liquid.ai/lfm/models/d1): no first-party pricing page found on
-    # 2026-10-10; omitted rather than guessed, so cost resolves to None.
-    ModelProvider.LIQUID: {},
+    # Liquid AI d1 (System One wire), retrieved 2026-10-10 from the methodology footnote of
+    # Liquid's own d1 announcement, dated 2026-10-05 (https://www.liquid.ai/blog/d1-decision-model):
+    # $0.04 per 1M input tokens. Output tokens are always 0 (https://docs.liquid.ai/lfm/models/d1),
+    # so no output rate applies. The longest-prefix match also prices an explicit `d1:free` here.
+    ModelProvider.LIQUID: {
+        "d1": ModelPricing(input_per_million=0.04, output_per_million=0.0),
+    },
     # Baseten Mercury Decide (https://www.baseten.co/library/mercury-decide/): no first-party
     # pricing page found on 2026-10-10; omitted rather than guessed, so cost resolves to None.
     ModelProvider.BASETEN: {},
-    # meraGPT Decider 1 (https://meragpt.com/docs): no first-party pricing page found on
-    # 2026-10-10; omitted rather than guessed, so cost resolves to None.
-    ModelProvider.MERAGPT: {},
+    # meraGPT Decider 1 (System One wire), retrieved 2026-10-10 from https://meragpt.com/docs/models,
+    # https://meragpt.com/models/decider-1 and https://meragpt.com/#pricing: $0.04 / $0.00 per 1M
+    # tokens for decider-1, whose documented alias sd-1 is the id the SDK sends and records.
+    ModelProvider.MERAGPT: {
+        "sd-1": ModelPricing(input_per_million=0.04, output_per_million=0.0),
+    },
 }
 
 
