@@ -1,7 +1,7 @@
 ---
 spec: decision-model-providers
 title: Add more decision model providers beyond TypeSafe Jev
-status: tests-written      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: implemented        # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-decision-model-providers
@@ -9,7 +9,7 @@ branch: feat/decision-model-providers
 base_commit: 278448b05155cb25b0a7fb667609256a496404b2
 created: 2026-10-10
 updated: 2026-10-10
-pr:                      # filled at S3 (draft) and finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/697  # filled at S3 (draft) and finalized at S6
 ---
 
 # Spec: Add more decision model providers beyond TypeSafe Jev
