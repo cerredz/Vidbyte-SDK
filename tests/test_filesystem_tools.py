@@ -379,6 +379,17 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "aa", "replacement": "bb"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
 
+    def test_replace_text_overlapping_matches_returns_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.go"
+            original = b"func a() {\nif x {\nfor {\n}\n}\n}\n"
+            target.write_bytes(original)
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.go", "search": "}\n}\n", "replacement": "}\n"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("exactly once", result.output)
+            self.assertEqual(target.read_bytes(), original)
+
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)

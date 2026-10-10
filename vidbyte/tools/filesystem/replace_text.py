@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.tools.filesystem import FileSystemPermissions, LineEndings
+from vidbyte.lib.util import SubstringCounter
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -36,7 +37,8 @@ class ReplaceTextTool(FileSystemTool):
             content = self.backend.read_text(target, encoding=self._config.encoding)
             # Remember the file's own line endings so the edit does not rewrite every line.
             newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding))
-            count = content.count(search)
+            # @intent unique-edit-counts-overlapping-matches
+            count = SubstringCounter.count_overlapping(content, search)
             if count != 1:
                 raise ToolExecutionError(
                     "ReplaceTextTool requires the search text to appear exactly once.",
