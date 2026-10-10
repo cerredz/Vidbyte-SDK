@@ -594,7 +594,13 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+            catalog = self.tools
             await self._after_tool_iteration(state, messages)
+            if self.tools is not catalog:
+                # @intent a-replaced-catalog-reaches-the-next-model-call
+                # Schemas are resolved once per run, so a hook that replaced the catalog (JevRuntime adding launch_swarm)
+                # needs them resolved again; an untouched catalog keeps the schemas already resolved.
+                tool_schemas = self._resolve_tool_schemas(state.provider)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
@@ -787,7 +793,8 @@ class AgentRuntime:
 
     async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
         """Let a specialized linear runtime act between a finished tool iteration and the next model call."""
-        # Default runtimes do nothing here; a specialized runtime reads the loop state and may append to messages.
+        # Default runtimes do nothing here; a specialized runtime reads the loop state, may append to messages, and may
+        # replace self.tools with a new catalog, whose schemas the loop resolves before the next model call.
         # @intent iterations-can-be-observed-mid-run
         # A decision made while the agent works (JevRuntime's compute checkpoint) needs the live loop state after each
         # iteration's tool calls, and must run only once the middleware has let the loop continue, so it is called last.

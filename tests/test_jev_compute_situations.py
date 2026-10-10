@@ -102,12 +102,12 @@ def _helper(scripted: ScriptedJev) -> type:
 
 class JevComputeQuestionTests(unittest.TestCase):
     def test_registry_has_twelve_plain_questions_per_option(self) -> None:
-        self.assertEqual(OPTIONS, (JevDynamicComputeOption.FRESH_AGENT, JevDynamicComputeOption.FORK_AGENT, JevDynamicComputeOption.SUBAGENT, JevDynamicComputeOption.CLONE))
+        self.assertEqual(OPTIONS, (JevDynamicComputeOption.FRESH_AGENT, JevDynamicComputeOption.FORK_AGENT, JevDynamicComputeOption.SUBAGENT, JevDynamicComputeOption.CLONE, JevDynamicComputeOption.SWARM))
         flattened = tuple(key for option in OPTIONS for key in JevComputeRegistry.question_keys(option))
-        self.assertEqual(len(flattened), 48)
-        self.assertEqual(len(set(flattened)), 48)
+        self.assertEqual(len(flattened), 60)
+        self.assertEqual(len(set(flattened)), 60)
         questions = JevComputeRegistry.questions(OPTIONS)
-        self.assertEqual(len(questions), 48)
+        self.assertEqual(len(questions), 60)
         self.assertEqual([question.name for question in questions], [key.value for key in flattened])
         openings: list[str] = []
         for option in OPTIONS:
@@ -190,6 +190,7 @@ class JevComputeRecognitionTests(unittest.IsolatedAsyncioTestCase):
             OPTIONS[1]: [*([0.91] * 6), *([0.83] * 6)],
             OPTIONS[2]: [0.82] * 12,
             OPTIONS[3]: [0.81] * 12,
+            OPTIONS[4]: [0.80] * 12,
         }
         probabilities = {key.value: score for option in OPTIONS for key, score in zip(keys[option], scores[option])}
         means = {option: sum(scores[option]) / len(scores[option]) for option in OPTIONS}

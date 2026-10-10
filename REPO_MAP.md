@@ -373,7 +373,9 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Mid-run compute checkpoint: `JevComputeController` and `JevComputeSettings` | `vidbyte/agents/jev/compute/`; loop hook `AgentRuntime._after_tool_iteration` in `vidbyte/agents/runtime.py` |
 | Dynamic-compute recognition and the shared `{request, brief, facts, recent}` state | `JevComputeRecognizer` and `JevComputeStates` in `vidbyte/agents/jev/compute/` |
 | The CLONE launch: `JevCloneAgent` runs copies of the main agent from the verified brief | `vidbyte/agents/jev/compute/clone.py`; prompts in `vidbyte/prompts/prompts/jev_clone/` |
+| The SWARM launch: the `launch_swarm` tool, plan reading and Jev plan checks, and the `JevSwarmAgent` helpers | `vidbyte/agents/jev/compute/swarm_tool.py`, `swarm_plan.py`, and `swarm.py`; prompts in `vidbyte/prompts/prompts/jev_swarm/` |
 | Twelve fixed evidence questions per dynamic-compute option and `JevComputeRegistry` | `vidbyte/lib/jev/compute/situations.py` and `vidbyte/lib/jev/compute/compute.py` |
+| The four per-assignment SWARM plan questions and `JevSwarmPlanRegistry` | `vidbyte/lib/jev/compute/plan.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
 | Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |
