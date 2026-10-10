@@ -20,10 +20,10 @@ class TouchTool(FileSystemTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Resolve the path, optionally create parents, touch the file, and return the path.
+        # Read the create_parents flag strictly, resolve the path, optionally create parents, touch the file, and return the path.
         path = call.arguments.get("path", "")
-        create_parents = bool(call.arguments.get("create_parents", False))
         try:
+            create_parents = self._resolve_bool_argument(call, "create_parents", default=False)
             self._require_write()
             target = self._path(path)
             if create_parents:
