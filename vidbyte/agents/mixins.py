@@ -11,6 +11,7 @@ Architecture:
 Key Functions:
     - attach_preset_mcp_server: Attaches a pre-configured popular MCP server in one line.
     - with_preset_mcp_server: Defer attaching a pre-configured popular MCP server until agent execution.
+    - _run_releasing_mcp: Awaits one synchronous-entry run, then re-queues its MCP servers for the next loop.
 Relations:
     Inherited by SDK classes that attach MCP servers. Integrates with vidbyte.tools.mcp.presets.
 """
@@ -18,14 +19,16 @@ Relations:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Awaitable, Mapping, Sequence
+from typing import Any, TypeVar
 
 from vidbyte.lib.errors import McpAttachmentError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.mcp.attach import attach_mcp_server
 from vidbyte.tools.mcp.presets import McpPresetRegistry
 from vidbyte.tools.mcp.types import McpServerConfig, McpServerHandle, McpToolPermission
+
+ResultT = TypeVar("ResultT")
 
 
 class McpAttachableMixin:
@@ -185,6 +188,24 @@ class McpAttachableMixin:
         except Exception:
             self._pending_mcp_configs.extend(configs)
             raise
+
+    async def _run_releasing_mcp(self, run: Awaitable[ResultT]) -> ResultT:
+        """Await one run started by a synchronous entry point, then release its MCP servers.
+
+        The servers are closed and their configs re-queued, so the next synchronous run
+        reconnects them lazily on its own event loop.
+        """
+        # @intent sync-run-does-not-strand-mcp-on-closed-loop
+        # asyncio.run closes its loop on return, which kills any MCP pipes opened inside it.
+        try:
+            return await run
+        finally:
+            # Remember every live server's config before closing, in attach order.
+            configs = [handle.config for handle in self._mcp_handles]
+            # Close the servers while their loop is still running and drop their tools.
+            await self.close_mcp_servers()
+            # Put them back ahead of anything registered later, so order is preserved.
+            self._pending_mcp_configs[:0] = configs
 
     def mcp_servers(self) -> tuple[McpServerHandle, ...]:
         """Returns all live MCP server handles currently attached to this object."""

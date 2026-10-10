@@ -9,6 +9,8 @@ Purpose:
 Architecture:
     - MockMcpStdioTransport: Mocked stdio transport returning custom remote tool specs.
     - McpAttachmentTests: IsolatedAsyncioTestCase containing all scenarios described in the plan.
+    - LoopBoundMcpTransport / SyncRunMcpLoopTests: a transport that only works on the loop it
+      started on, proving sync run() reconnects lazily instead of reusing a closed loop's pipes.
 Relations:
     - vidbyte/agents/mixins.py
     - vidbyte/agents/base.py
@@ -240,6 +242,68 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
         card = agent.card()
         self.assertEqual(card.mcp_server_names, ("server1", "server2"))
         self.assertEqual(card.mcp_tool_names, ("remote_server1", "remote_server2"))
+
+class LoopBoundMcpTransport(MockMcpStdioTransport):
+    """Mock transport that, like real subprocess pipes, only works on the loop it started on."""
+
+    served_calls: list[asyncio.AbstractEventLoop] = []
+
+    def __init__(self, command: list[str], **options: object) -> None:
+        super().__init__(command, **options)
+        # Real pipes are created on, and stay bound to, the loop that opens them.
+        self.loop = asyncio.get_running_loop()
+
+    async def request(self, method: str, params: dict[str, any] | None = None) -> dict[str, any]:
+        if asyncio.get_running_loop() is not self.loop or self.loop.is_closed():
+            raise RuntimeError("'NoneType' object has no attribute 'send'")
+        result = await super().request(method, params)
+        if method == "tools/call":
+            LoopBoundMcpTransport.served_calls.append(self.loop)
+        return result
+
+
+class McpThenDoneRunner:
+    """Runner that calls the MCP tool once per run, then finishes."""
+
+    def __init__(self, tool_name: str) -> None:
+        self.tool_name = tool_name
+        self.turn = 0
+
+    async def arun(self, prompt: str, **kwargs: object) -> object:
+        self.turn += 1
+        if self.turn % 2:
+            item = {"type": "function_call", "name": self.tool_name, "arguments": '{"text": "hi"}', "call_id": f"call_{self.turn}"}
+        else:
+            item = {"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": f"call_{self.turn}"}
+        return type("_Resp", (), {"text": "", "raw": {"output": [item]}})()
+
+
+@patch("vidbyte.tools.mcp.attach.McpStdioTransport", LoopBoundMcpTransport)
+class SyncRunMcpLoopTests(unittest.TestCase):
+    """Sync run() owns a fresh event loop per call, so MCP servers must not outlive it."""
+
+    def setUp(self) -> None:
+        MockMcpStdioTransport.instances.clear()
+        LoopBoundMcpTransport.served_calls.clear()
+
+    def test_consecutive_sync_runs_each_reach_the_mcp_tool(self) -> None:
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=McpThenDoneRunner("remote_mini"))
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+        config = agent._pending_mcp_configs[0]
+
+        agent.run("question 1")
+        agent.run("question 2")
+
+        # Each run connected its own server on its own loop and the tool call succeeded there.
+        first, second = MockMcpStdioTransport.instances
+        self.assertEqual(LoopBoundMcpTransport.served_calls, [first.loop, second.loop])
+        self.assertIsNot(first.loop, second.loop)
+        # Nothing is left running, no stale tools remain, and the server waits to reconnect.
+        self.assertTrue(first.closed and second.closed)
+        self.assertEqual(agent.mcp_servers(), ())
+        self.assertNotIn("remote_mini", [tool.name for tool in agent.tools])
+        self.assertEqual(agent._pending_mcp_configs, [config])
+
 
 if __name__ == "__main__":
     unittest.main()
