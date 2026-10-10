@@ -7,6 +7,7 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ReflexionContextItem, TrajectoryCheckpointContextItem
 from vidbyte.lib.constants.cot_events import DEFAULT_SALVAGE
 from vidbyte.tools.builtins.cot_events import BacktrackTool, UncertaintyTool
+from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
@@ -462,6 +463,39 @@ class SharedManagerNoteIdTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(manager.get_by_id("deduce:1").conclusion, "first")
         self.assertEqual(manager.get_by_id("deduce:2").conclusion, "second")
+
+
+# ---------------------------------------------------------------------------
+# ReasoningToolInput parsing shared by the reasoning strategy tools
+# ---------------------------------------------------------------------------
+
+
+class ReasoningToolInputTests(unittest.TestCase):
+    def test_probability_rejects_non_finite_values(self) -> None:
+        for raw in ("NaN", "inf", "-inf", float("nan"), float("inf")):
+            with self.subTest(raw=raw):
+                self.assertIsNone(ReasoningToolInput.probability(raw))
+
+    def test_probability_keeps_finite_values_and_clamping(self) -> None:
+        self.assertEqual(ReasoningToolInput.probability(0.3), 0.3)
+        self.assertEqual(ReasoningToolInput.probability("0.3"), 0.3)
+        self.assertEqual(ReasoningToolInput.probability(2.5), 1.0)
+        self.assertEqual(ReasoningToolInput.probability(-1), 0.0)
+
+    def test_string_list_keeps_single_json_scalar_string(self) -> None:
+        self.assertEqual(ReasoningToolInput.string_list("2024"), ("2024",))
+        self.assertEqual(ReasoningToolInput.string_list(" true "), ("true",))
+
+    def test_string_list_keeps_raw_scalar(self) -> None:
+        self.assertEqual(ReasoningToolInput.string_list(2024), ("2024",))
+
+    def test_string_list_unchanged_for_arrays_text_objects_and_none(self) -> None:
+        self.assertEqual(ReasoningToolInput.string_list('["a","b"]'), ("a", "b"))
+        self.assertEqual(ReasoningToolInput.string_list(["a", " ", "b"]), ("a", "b"))
+        self.assertEqual(ReasoningToolInput.string_list("plain text"), ("plain text",))
+        self.assertEqual(ReasoningToolInput.string_list({"k": "v"}), ())
+        self.assertEqual(ReasoningToolInput.string_list('{"k": "v"}'), ())
+        self.assertEqual(ReasoningToolInput.string_list(None), ())
 
 
 if __name__ == "__main__":
