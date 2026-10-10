@@ -7,7 +7,7 @@ from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgen
 from vidbyte.context import ContextManager, ContextWindow, ContextWindowPlacement, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.lib.errors import AgentExecutionError, ToolRegistrationError
+from vidbyte.lib.errors import AgentExecutionError, AgentForkConfigurationError, ToolRegistrationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.tools import ToolSpec
@@ -184,6 +184,15 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(parent.tools.names(), ("keep", "drop"))
         self.assertEqual(child.tools.names(), ("keep", "add"))
+
+    async def test_agent_fork_drop_tools_rejects_bare_string_and_strips_names(self) -> None:
+        # The one-tuple typo must fail loudly, and a padded name must still drop the tool from the child.
+        with self.assertRaisesRegex(AgentForkConfigurationError, "not a string"):
+            AgentForkSettings(name="child", drop_tools=("drop"))
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("keep"), FakeTool("drop")])
+        child = parent.fork(AgentForkSettings(name="child", drop_tools=(" drop ",)))
+
+        self.assertEqual(child.tools.names(), ("keep",))
 
     async def test_agent_fork_clones_stateful_add_tools(self) -> None:
         # Stateful add_tools entries should be cloned before the child binds them.
