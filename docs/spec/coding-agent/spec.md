@@ -680,3 +680,9 @@ Secrets follow the repo's existing convention: credentials are passed explicitly
 | r1 | 2026-10-10 | S1 spec | Initial spec |
 | r2 | 2026-10-10 | S1 review round 1 | Bash always returns (one limit over read and wait, bounded wait after kill, unconditional stop); Windows git-relative lookup covers three parents; output cap 50,000 bytes; constants moved into the bash tool module (2 new files); Windows limitation stated (Q-6, A-9); wording fixes R-6 to R-8. |
 | r3 | 2026-10-10 | S1 review round 2 | `_stop` closes the subprocess transport (D-18, INV-26, AC-28); the timeout result reports truncation (D-19, AC-29); background processes must redirect both streams; A-2 scoop boundary; §8.2/§11 MCP citation corrected. Status approved. |
+| r3 | 2026-10-10 | S3 implement | All 8 §12.3 rows built in §12.6 order (`25b5260b` to `19cb42db`, plus `4c4a62ef` step comments on row 3); spec text unchanged; coding-agent pack green on Windows 3.11 and WSL 3.12, full local gate passes; draft PR #690. |
+
+**Implementation deviations (S3)**
+
+- `BashTool._spawn(executable, command)` instead of `_spawn(command)` (§12.3 row 1): `execute` passes the executable it has just checked for `None`, so mypy (S009) sees a `str` without a second check. No behavior change (`25b5260b`).
+- Row 3 has a second commit, `4c4a62ef`, that only adds step comments to `_FetchedPagesView.execute` (AGENTS.md Style 2); no code change.
