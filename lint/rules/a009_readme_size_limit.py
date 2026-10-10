@@ -1,14 +1,14 @@
 """FILE: lint/rules/a009_readme_size_limit.py
 
 PURPOSE: Defines A009, the ceiling on how long a folder README.md may grow, so an agent can still read it in full before it changes the folder.
-ROLE IN CODEBASE: Bounds the `## Notes for agents` section the @claude review workflow's notes writer appends to after every review, and forces that agent to compact the notes once a README reaches its ceiling.
+ROLE IN CODEBASE: Bounds the `## Notes for agents` section that the notes stage of the @claude workflow, .github/workflows/claude.yml, appends to after every review, and forces Claude to compact the notes once a README reaches its ceiling.
 ARCHITECTURE NOTE: Detection measures the characters of every tracked README from the shared source catalogue and never parses Markdown; the finding lands on the notes heading because that section is the part a repair compacts.
 FUNCTION INVENTORY: ReadmeSizeAnalyzer.analyze() reports READMEs over their ceiling; ReadmeSizeLimitRule.check()/explain() report and diagnose them.
 COMMON MODIFICATION PATTERNS: Lower a LEGACY_CEILINGS entry after its README shrinks, and delete the entry once the file fits under MAXIMUM_CHARACTERS; never raise one.
 WHAT NOT TO DO: Do not add a README to LEGACY_CEILINGS to make a regression pass, do not exempt more files, and do not count Markdown structure instead of characters.
 KNOWN EDGE CASES: The root README.md is the package's PyPI description and is never written by the notes workflow, so it is exempt; two folder READMEs predate the rule above 40,000 characters and keep a fixed ceiling of their own.
 RELATED DOCS: docs/design/claude-review-agents.md
-TESTS: Exercised by python lint/run.py --rule A009 and tests/test_review_agents.py.
+TESTS: Exercised by python lint/run.py --rule A009 and tests/test_readme_size_limit.py.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class ReadmeSizeLimitRule(Rule):
         target = int(finding.extra.get("target", str(ceiling - COMPACTION_HEADROOM)))
         return Diagnostic(
             what_happened=f"{finding.rel_path} is {count:,} characters long; its ceiling is {ceiling:,}. Compact it to at most {target:,} characters.",
-            why_blocked="Agents read a folder's README.md in full before they change that folder, and the notes writer of the @claude review workflow appends a note to it after every review comment in the folder. Without a ceiling those notes grow until the README costs more context than it saves. The ceiling and the compaction it forces come from docs/design/claude-review-agents.md.",
+            why_blocked="Agents read a folder's README.md in full before they change that folder, and the notes stage of the @claude workflow appends a note to it after every review comment in the folder. Without a ceiling those notes grow until the README costs more context than it saves. The ceiling and the compaction it forces come from docs/design/claude-review-agents.md.",
             how_to_fix=f"Compact the closing `{NOTES_HEADING}` section until the whole file is at most {target:,} characters, so the next notes have room before the ceiling. First drop notes whose lesson a check now enforces, then merge notes that teach the same lesson into one, then shorten the oldest notes. Leave the sections above the notes as their authors wrote them; if the file is too long even without notes, shorten the folder's documentation in a change of its own.",
             correct_examples=("vidbyte/lib/README.md - a folder README well under the ceiling.", "lint/README.md - a folder README whose sections stay short and factual."),
             will_not_work=("Raising the A009 allowance in lint/baseline.json or adding the README to LEGACY_CEILINGS; both hide growth the rule exists to stop.", "Moving the notes into a separate file the README links to; the notes exist so that an agent reads them together with the README it already reads.", "Deleting the notes section outright; it holds lessons the next change needs."),
