@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
 PURPOSE: Defines validated TypeSafe decision, preflight, and response records, continuation run-state with the required hard-part focus, expert-depth points, and ordered required-sequence stages, immutable continuation evidence containing source text, response text, and typed tool-call snapshots, handoff records with faithful-scope, expert-depth, and required-sequence evidence, output extent and count obligations, cumulative user-obligation inventories, discovered-item inventories and evidence, report/action alignment evidence, negative-coverage inspection evidence, and strict-review objections with handoff self-review evidence. It also defines the structured run-brief records: a code-owned goal, bounded event window, and append-only verified notes.
-ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through. Continuation evidence uses the canonical ToolCallContext defined in `vidbyte/lib/dataclasses/tools.py`.
+ROLE IN CODEBASE: `vidbyte/providers/systemone.py` (every System One host, TypeSafe included through `vidbyte/providers/typesafe.py`) builds TypeSafeWireRequest from JevDecisionRequest and routes each call by its SystemOneHost row, `vidbyte/providers/openai_decisions.py` builds OpenAIDecisionsWireRequest, and both build JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through. Continuation evidence uses the canonical ToolCallContext defined in `vidbyte/lib/dataclasses/tools.py`.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; problem evidence requires unique ids and exactly one reserved original-request completion item. The provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, structured payload, and provider serialization; keep bounds in vidbyte/lib/constants/jev.py. Request-derived output-count obligations belong on JevRunStateRecord; candidate output-count evidence belongs on JevHandoffRecord. Other request-derived definitions and post-run evidence belong on the corresponding run-state and handoff records. Required sequences hold only explicitly ordered request stages and keep stage ids and order stable; their event-backed evidence belongs on JevHandoffRecord. JevContinuationEvidence preserves the source and response strings and original ToolCallContext objects in typed immutable tuples; empty response strings and tuples are valid. Report/action alignment evidence is handoff-only because eligible plans and final accounts exist after work. Consequentially changed assumptions are handoff-only: retain the explicit premise, later observation, affected work, and subsequent revision for each candidate. Negative-coverage run state lists only requested inspection targets; handoff records target-matched inspection evidence separately from a clean or incomplete final-answer report. Required actions are extracted only from explicit user instructions; the run-state records their observable completion conditions and explicit predecessors, and the handoff records trace-backed success evidence.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. Scope evidence distinguishes requested members, workspace inventory, and unsupported mentions. Completion evidence is one handoff-only whole-task item. PHASE_PROGRESS is omitted when no substantive outcome stage exists; INPUT_SET_COVERAGE is omitted when no explicitly bounded input target exists. An ordered sequence is inactive when the request does not require distinct work in a specific order; ordering alone does not imply that a stage uses the preceding stage's output. Continuation evidence requires a nonblank source but preserves its original text; response strings may be empty, and the response tuple may be empty. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because concrete subclasses redeclare defaulted fields. Pydantic payload descriptions are the instructions generative agents receive; records built from those replies hold validated values, and conversion remains with the agent that requested the reply. Report/action candidates compare an explicit earlier plan with recorded execution, the final account, and request relevance; they do not turn an agent plan into a user requirement. Include a consequential assumption even when later work recovers or makes dependent work irrelevant; Jev judges whether the work was revised or became irrelevant.
@@ -58,9 +58,11 @@ from vidbyte.lib.constants.jev import (
     JEV_RUN_BRIEF_NOTE_MAX_CHARS,
     JEV_RUN_BRIEF_NOTES_MAX,
     JEV_SPECIALIST_NONE,
+    OPENAI_DECISIONS_PREDICATE_TYPE,
 )
 from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums.jev import (
+    DecisionAuthScheme,
     JevBoundaryKind,
     JevClaimKind,
     JevCompletionStatus,
@@ -410,6 +412,76 @@ class TypeSafeWireRequest:
         if not self.questions or not all(isinstance(question, TypeSafeWireQuestion) for question in self.questions.values()):
             raise JevValidation.error("wire questions", "a non-empty mapping of TypeSafeWireQuestion values", self.questions)
         object.__setattr__(self, "questions", MappingProxyType(dict(self.questions)))
+
+
+@dataclass(frozen=True, slots=True)
+class SystemOneHost:
+    """One host that serves the System One wire: its name in messages, its path, and its two wire quirks.
+
+    `noul_criteria_required` is True when the host rejects a noul question without `criteria`
+    (OpenRouter). `model_from_request` is True when the host's echoed `model` is undocumented or
+    caller-chosen, so the adapter reports the requested model id as the pricebook key instead.
+    """
+
+    display_name: str
+    path: str
+    auth_scheme: DecisionAuthScheme = DecisionAuthScheme.BEARER
+    noul_criteria_required: bool = False
+    model_from_request: bool = False
+
+    def __post_init__(self) -> None:
+        # Rejects a blank name, a path that would not join onto a base URL, a bare-string scheme, and non-bool flags.
+        if not isinstance(self.display_name, str) or not self.display_name.strip():
+            raise JevValidation.error("host display name", "a non-blank string", self.display_name)
+        if not isinstance(self.path, str) or not self.path.startswith("/"):
+            raise JevValidation.error("host path", "a string starting with '/'", self.path)
+        if not isinstance(self.auth_scheme, DecisionAuthScheme):
+            raise JevValidation.error("host auth scheme", f"a DecisionAuthScheme member {[scheme.value for scheme in DecisionAuthScheme]}", self.auth_scheme)
+        for field_name in ("noul_criteria_required", "model_from_request"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise JevValidation.error(f"host {field_name}", "a bool", getattr(self, field_name))
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAIDecisionsWireQuestion:
+    """One entry of the OpenAI Decisions `questions` array before encoding.
+
+    `type` is `predicate`, `choice`, or `score`; `instructions` is already serialized text; `options`
+    become `choices` (value = option name) or `levels` (label = option name, lowest first).
+    """
+
+    type: str
+    name: str
+    instructions: str
+    options: tuple[JevOption, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Rejects a System One type tag, blank identity text, and options that are not JevOption records.
+        allowed = (OPENAI_DECISIONS_PREDICATE_TYPE, JevQuestionType.CHOICE.value, JevQuestionType.SCORE.value)
+        if self.type not in allowed:
+            raise JevValidation.error("OpenAI wire question type", f"one of {allowed}", self.type)
+        for field_name in ("name", "instructions"):
+            if not isinstance(getattr(self, field_name), str) or not getattr(self, field_name).strip():
+                raise JevValidation.error(f"OpenAI wire question {field_name}", "a non-blank string", getattr(self, field_name))
+        if not isinstance(self.options, tuple) or not all(isinstance(option, JevOption) for option in self.options):
+            raise JevValidation.error("OpenAI wire question options", "a tuple of JevOption values", self.options)
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAIDecisionsWireRequest:
+    """The OpenAI POST /v1/decisions request body before encoding: model, input text, and ordered questions."""
+
+    model: str
+    input: str
+    questions: tuple[OpenAIDecisionsWireQuestion, ...]
+
+    def __post_init__(self) -> None:
+        # Requires non-blank model and input text and a non-empty tuple of wire questions.
+        for field_name in ("model", "input"):
+            if not isinstance(getattr(self, field_name), str) or not getattr(self, field_name).strip():
+                raise JevValidation.error(f"OpenAI wire {field_name}", "a non-blank string", getattr(self, field_name))
+        if not isinstance(self.questions, tuple) or not self.questions or not all(isinstance(question, OpenAIDecisionsWireQuestion) for question in self.questions):
+            raise JevValidation.error("OpenAI wire questions", "a non-empty tuple of OpenAIDecisionsWireQuestion values", self.questions)
 
 
 @dataclass(frozen=True, slots=True)
@@ -4432,4 +4504,7 @@ __all__ = [
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",
+    "SystemOneHost",
+    "OpenAIDecisionsWireQuestion",
+    "OpenAIDecisionsWireRequest",
 ]
