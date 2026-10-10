@@ -91,6 +91,7 @@ from vidbyte.lib.enums.jev import (
     JevScopeBreadth,
     JevScopeUnitSource,
     JevScopeUniverse,
+    JevSkillStatus,
     JevSwarmPlanQuestionKey,
 )
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
@@ -186,6 +187,7 @@ __all__ = [
     "JevScopeBreadth",
     "JevScopeUnitSource",
     "JevScopeUniverse",
+    "JevSkillStatus",
     "JevSwarmPlanQuestionKey",
     "ModalStatus",
     "ModelModality",
