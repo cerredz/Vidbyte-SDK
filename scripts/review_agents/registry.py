@@ -101,7 +101,7 @@ class AgentRegistry:
                 raise PromptContractError(f"{label}: unknown frontmatter line {line!r}")
             fields[key.strip()] = value.strip()
         if fields.get("scope", Scope.REVIEW.value) not in {scope.value for scope in Scope}:
-            raise PromptContractError(f"{label}: scope must be one of comment, review")
+            raise PromptContractError(f"{label}: scope must be one of {', '.join(scope.value for scope in Scope)}")
         if fields.get("guard", "false") not in {"true", "false"}:
             raise PromptContractError(f"{label}: guard must be true or false")
         return fields

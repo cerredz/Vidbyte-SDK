@@ -4,7 +4,7 @@ PURPOSE: Defines the validated records and enums the review-agents workflow's st
 ROLE IN CODEBASE: Every step writes these records to JSON and the next step reads them back, so each record validates itself on creation and a bad value fails where it enters, not three jobs later.
 ARCHITECTURE NOTE: These records stay here rather than in vidbyte/lib/dataclasses/ and vidbyte/lib/enums/ because the workflow tools run without the SDK installed and must never ship in the wheel; scripts/run_ci.py keeps its PipelineConfig in scripts/ for the same reason.
 COMMON MODIFICATION PATTERNS: Add a field with its __post_init__ check and its from_json reader together, and keep every enum value a plain lowercase string the JSON can carry.
-KNOWN EDGE CASES: A summary-only review becomes one comment with no path or line; TaskResult allows a commit only for a changed task.
+KNOWN EDGE CASES: A summary-only review becomes one comment with no path or line; TaskResult allows a commit only for a changed task; only a merge task may own no comments, because it settles the branch rather than a comment.
 RELATED DOCS: docs/design/claude-review-agents.md
 TESTS: tests/test_review_agents.py.
 """
@@ -19,6 +19,7 @@ from typing import Any
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _TASK_ID = re.compile(r"^[0-9]{2}-[a-z][a-z0-9-]*-[a-z0-9]+$")
 _AGENT_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 
 class Scope(enum.StrEnum):
@@ -26,6 +27,8 @@ class Scope(enum.StrEnum):
 
     COMMENT = "comment"
     REVIEW = "review"
+    # Once, before the comments, and only when the branch conflicts with its base.
+    MERGE = "merge"
 
 
 class TaskStatus(enum.StrEnum):
@@ -78,7 +81,7 @@ class ReviewComment:
 
 @dataclass(frozen=True, slots=True)
 class Review:
-    """A submitted review and the pull request it belongs to."""
+    """One round of review: every comment left since the last round, closed by the review that said @claude."""
 
     repository: str
     pull_number: int
@@ -88,6 +91,9 @@ class Review:
     base_ref: str
     summary: str
     comments: tuple[ReviewComment, ...]
+    # The round covers reviews submitted after `since`, empty for the first round, up to `through`.
+    since: str
+    through: str
 
     def __post_init__(self) -> None:
         _require(self.repository.count("/") == 1, f"Review.repository is {self.repository!r}")
@@ -95,6 +101,8 @@ class Review:
         _require(self.review_id > 0, f"Review.review_id is {self.review_id!r}")
         _require(bool(_SHA.match(self.reviewed_sha)), f"Review.reviewed_sha is {self.reviewed_sha!r}")
         _require(bool(self.head_ref and self.base_ref), "Review needs both branch names")
+        _require(self.since == "" or bool(_TIMESTAMP.match(self.since)), f"Review.since is {self.since!r}")
+        _require(bool(_TIMESTAMP.match(self.through)), f"Review.through is {self.through!r}")
         ids = [comment.id for comment in self.comments]
         _require(len(ids) == len(set(ids)), "Review.comments repeats a comment id")
 
@@ -129,22 +137,26 @@ class AgentTask:
     unit: str
     title: str
     comment_ids: tuple[int, ...]
+    scope: Scope
 
     def __post_init__(self) -> None:
         _require(bool(_TASK_ID.match(self.id)), f"AgentTask.id is {self.id!r}")
-        _require(bool(self.comment_ids), f"AgentTask {self.id} covers no comments")
+        _require(isinstance(self.scope, Scope), f"AgentTask.scope is {self.scope!r}")
+        _require(bool(self.comment_ids) or self.scope is Scope.MERGE, f"AgentTask {self.id} covers no comments")
 
 
 @dataclass(frozen=True, slots=True)
 class ReviewPlan:
-    """Everything later jobs need: the review and the ordered tasks."""
+    """Everything later jobs need: the review, the files that conflict with the base branch, and the ordered tasks."""
 
     review: Review
     tasks: tuple[AgentTask, ...]
+    conflicts: tuple[str, ...]
 
     def __post_init__(self) -> None:
         ids = [task.id for task in self.tasks]
         _require(len(ids) == len(set(ids)), "ReviewPlan.tasks repeats a task id")
+        _require(len(self.conflicts) == len(set(self.conflicts)), "ReviewPlan.conflicts repeats a path")
 
     def task(self, task_id: str) -> AgentTask:
         return next(task for task in self.tasks if task.id == task_id)
@@ -191,8 +203,8 @@ def review_from_json(data: dict[str, Any]) -> Review:
 
 
 def plan_from_json(data: dict[str, Any]) -> ReviewPlan:
-    tasks = tuple(AgentTask(**{**task, "comment_ids": tuple(task["comment_ids"])}) for task in data["tasks"])
-    return ReviewPlan(review=review_from_json(data["review"]), tasks=tasks)
+    tasks = tuple(AgentTask(**{**task, "comment_ids": tuple(task["comment_ids"]), "scope": Scope(task["scope"])}) for task in data["tasks"])
+    return ReviewPlan(review=review_from_json(data["review"]), tasks=tasks, conflicts=tuple(data["conflicts"]))
 
 
 def report_from_json(data: dict[str, Any]) -> AgentReport:

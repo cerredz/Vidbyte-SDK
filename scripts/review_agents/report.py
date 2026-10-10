@@ -2,17 +2,18 @@
 
 PURPOSE: Renders the one pull-request comment that tells the reviewer what every review agent did.
 ROLE IN CODEBASE: run.py's report step writes this comment's body, and the workflow's report job posts it with gh and fails the run when any task failed.
-ARCHITECTURE NOTE: Every planned task appears, including tasks that never reported, so an agent that silently did not run shows up as a failure instead of disappearing from the summary.
-COMMON MODIFICATION PATTERNS: A new TaskStatus or BiteVerdict needs its label in _STATUS or _BITE; keep the table one row per comment and one column per agent.
-KNOWN EDGE CASES: Summaries and details are cut to SUMMARY_LIMIT and the whole body to BODY_LIMIT, under GitHub's comment size limit; pipes in comment text are escaped for the table.
+ARCHITECTURE NOTE: Every planned task appears, including tasks that never reported, so an agent that silently did not run shows up as a failure instead of disappearing from the summary. Only a round in which every task succeeded ends with github.py's ROUND_MARKER, so the next @claude review picks up again every comment of a round that failed.
+COMMON MODIFICATION PATTERNS: A new TaskStatus or BiteVerdict needs its label in _STATUS or _BITE; keep the table one row per comment and one column per comment-handling agent; a merge task gets its own line above the table, because it owns no comments.
+KNOWN EDGE CASES: Summaries and details are cut to SUMMARY_LIMIT and the whole body to BODY_LIMIT, under GitHub's comment size limit, and the marker is added after the cut so it always survives; pipes in comment text are escaped for the table.
 RELATED DOCS: docs/design/claude-review-agents.md
 TESTS: tests/test_review_agents.py.
 """
 
 from __future__ import annotations
 
+from review_agents.github import ROUND_MARKER
 from review_agents.prompting import Markdown
-from review_agents.review_data import AgentTask, BiteVerdict, ReviewComment, ReviewPlan, TaskResult, TaskStatus
+from review_agents.review_data import AgentTask, BiteVerdict, ReviewComment, ReviewPlan, Scope, TaskResult, TaskStatus
 
 SUMMARY_LIMIT = 4000
 BODY_LIMIT = 60000
@@ -37,22 +38,36 @@ class ReportWriter:
 
     def render(self, plan: ReviewPlan, agent_names: tuple[str, ...], results: dict[str, TaskResult]) -> tuple[str, bool]:
         review = plan.review
-        # The headline: which review, on which commit, and how many comments it had.
-        lines = ["## Claude review agents", "", f"Review {review.review_id} on commit `{review.reviewed_sha[:12]}`: {len(review.comments)} comment(s)."]
+        marker = "\n" + ROUND_MARKER.format(through=review.through) + "\n"
+        # The headline: which review closed the round, on which commit, and how much it covered.
+        lines = ["## Claude review agents", "", f"Review {review.review_id} on commit `{review.reviewed_sha[:12]}`: {len(review.comments)} comment(s) {self._window(plan)}."]
         if not plan.tasks:
-            lines += ["", "The review has no comments for the agents to act on."]
-            return "\n".join(lines) + "\n", True
-        # One row per comment and one column per agent, in run order.
-        lines += ["", "| Comment | " + " | ".join(agent_names) + " |"]
-        lines.append("|---|" + "---|" * len(agent_names))
-        for comment in review.comments:
-            cells = [self._cell(plan, results, name, comment) for name in agent_names]
-            lines.append(f"| {self._comment_cell(comment)} | " + " | ".join(cells) + " |")
+            lines += ["", "There are no new comments for the agents to act on."]
+            return "\n".join(lines) + "\n" + marker, True
+        # The merge with the base branch, when one ran, comes first, as it did in the run.
+        lines += [self._merge_line(plan, task, results.get(task.id)) for task in plan.tasks if task.scope is Scope.MERGE]
+        # One row per comment and one column per comment-handling agent, in run order.
+        if review.comments:
+            lines += ["", "| Comment | " + " | ".join(agent_names) + " |"]
+            lines.append("|---|" + "---|" * len(agent_names))
+            for comment in review.comments:
+                cells = [self._cell(plan, results, name, comment) for name in agent_names]
+                lines.append(f"| {self._comment_cell(comment)} | " + " | ".join(cells) + " |")
         # Each task's own account, folded away so the table stays readable.
         lines += [self._details(task, results.get(task.id), review.repository) for task in plan.tasks]
-        body = "\n".join(lines) + "\n"
         ok = all(task.id in results and results[task.id].status is not TaskStatus.FAILED for task in plan.tasks)
-        return body[:BODY_LIMIT], ok
+        # Only a clean round moves the start of the next one past these comments.
+        body = ("\n".join(lines) + "\n")[:BODY_LIMIT]
+        return (body + marker if ok else body), ok
+
+    def _window(self, plan: ReviewPlan) -> str:
+        review = plan.review
+        return f"left since the round that ended {review.since}" if review.since else "left since the pull request opened"
+
+    def _merge_line(self, plan: ReviewPlan, task: AgentTask, result: TaskResult | None) -> str:
+        status = _STATUS[result.status] if result else "❌ did not report"
+        commit = f" `{result.commit_sha[:7]}`" if result and result.commit_sha else ""
+        return f"\nMerge of `{plan.review.base_ref}`, {len(plan.conflicts)} conflicted file(s): {status}{commit}"
 
     def _cell(self, plan: ReviewPlan, results: dict[str, TaskResult], agent: str, comment: ReviewComment) -> str:
         task = next((t for t in plan.tasks if t.agent == agent and comment.id in t.comment_ids), None)

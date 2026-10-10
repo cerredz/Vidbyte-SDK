@@ -1,0 +1,54 @@
+name: Claude review sweep
+
+# GitHub runs no workflow for a review on a pull request that conflicts with its base branch,
+# so an @claude review there would never reach the review agents. Every few minutes this job
+# looks at each conflicting pull request in the repositories CLAUDE_REVIEW_SWEEP_REPOSITORIES
+# lists, and starts claude-review-agents.yml in that repository for the newest @claude review
+# no run has handled yet. The merge-conflict agent then settles the conflicts before the other
+# agents fix the comments. See scripts/review_agents/sweep.py.
+#
+# It lives in this public repository because public repositories pay no Actions minutes, and
+# it sweeps the private ones from here with CLAUDE_REVIEW_SWEEP_TOKEN: a fine-grained token
+# with Pull requests: read and Actions: read and write on every swept repository. It only
+# calls the GitHub API; it never checks out or runs pull-request code. Without the token it
+# does nothing.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-review-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the sweeper
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/review_agents
+
+      # The repository variable lists the swept repositories, space-separated, so private
+      # repository names stay out of this public file.
+      - name: Start the agents for missed @claude reviews
+        env:
+          GH_TOKEN: ${{ secrets.CLAUDE_REVIEW_SWEEP_TOKEN }}
+          REPOSITORIES: ${{ vars.CLAUDE_REVIEW_SWEEP_REPOSITORIES || github.repository }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::CLAUDE_REVIEW_SWEEP_TOKEN is not set, so there is nothing to sweep with."
+            exit 0
+          fi
+          args=()
+          for repository in $REPOSITORIES; do
+            args+=(--repository "$repository")
+          done
+          python3 scripts/review_agents/run.py sweep "${args[@]}"

@@ -1,15 +1,26 @@
 name: Claude review agents
 
-# Runs when a reviewer submits a pull-request review whose summary mentions @claude. Every
-# prompt in .github/prompts/review-agents/ runs in file order as its own Claude Code session,
-# one matrix leg per task, so each task starts with a fresh context: the resolver once for the
-# whole review, grouping and fixing every comment; the preventer once per comment; the notes
-# writer once, last. Agents only edit files. scripts/review_agents/ runs scripts/run_ci.py,
-# commits with review trailers, verifies each guard, pushes, and posts one summary comment.
-# See docs/design/claude-review-agents.md.
+# Runs when someone with write access submits a pull-request review whose summary mentions
+# @claude. That review closes a round: every comment trusted reviewers left since the last
+# round that finished cleanly, however many reviews they arrived in, so comments added one at
+# a time with "Add single comment" are all included. Every prompt in
+# .github/prompts/review-agents/ runs in file order as its own Claude Code session, one matrix
+# leg per task, so each task starts with a fresh context: the merge-conflict resolver first,
+# only when the branch conflicts with its base; the resolver once for the whole round,
+# grouping and fixing every comment; the preventer once per comment; the notes writer once,
+# last. Agents only edit files. scripts/review_agents/ runs scripts/run_ci.py, commits with
+# review trailers, verifies each guard, pushes to the pull request's own branch, and posts one
+# summary comment. See docs/design/claude-review-agents.md.
 #
-# Process a review again by hand:
+# GitHub sends no review event while a pull request conflicts with its base branch, so
+# claude-review-sweep.yml in the Vidbyte-SDK repository starts this workflow for those reviews
+# instead, by hand-off through workflow_dispatch. Process a review again by hand the same way:
 #   gh workflow run claude-review-agents.yml -f pr=<number> -f review=<review id>
+#
+# claude-review-sweep.yml recognizes runs it has already started by this name; keep the two
+# in step with scripts/review_agents/sweep.py's RUN_NAME.
+run-name: "Claude review agents: #${{ github.event.pull_request.number || inputs.pr }} review ${{ github.event.review.id || inputs.review }}"
+
 on:
   pull_request_review:
     types: [submitted]
@@ -42,9 +53,12 @@ jobs:
   plan:
     name: Plan
     # Same-repository branches only: fork branches get no secrets and cannot be pushed to.
+    # Only people who can already push here may hand the agents instructions; anyone can
+    # review a public repository's pull requests. Starting it by hand needs write access too.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (contains(github.event.review.body, '@claude') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association) &&
       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,22 +67,32 @@ jobs:
       pull-requests: read
     outputs:
       head_ref: ${{ steps.collect.outputs.head_ref }}
+      base_ref: ${{ steps.collect.outputs.base_ref }}
+      tools_sha: ${{ steps.tools.outputs.sha }}
       tasks: ${{ steps.plan.outputs.tasks }}
       task_count: ${{ steps.plan.outputs.task_count }}
     steps:
-      # The tools and prompts come from this event's commit: the pull request merged into its
-      # base, or the dispatched branch. A branch cut before this workflow existed still works.
-      - name: Check out the event commit
+      # The tools and prompts come from the tip of the base branch, or from the dispatched
+      # branch. Not from the event commit: GitHub stops refreshing a pull request's merge
+      # commit once it conflicts, so that commit can predate the current agents, or this
+      # workflow altogether. The full history lets git preview the merge with the base branch.
+      - name: Check out the base branch
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
           persist-credentials: false
 
+      # Later jobs check out this exact commit, so the tools that write the plan read it back
+      # even if the base branch moves while the agents run.
       - name: Stage the review tools
+        id: tools
         run: |
           mkdir -p "$RUNNER_TEMP/review-tools" "$RUNNER_TEMP/review"
           cp -r scripts/review_agents .github/prompts "$RUNNER_TEMP/review-tools/"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # GitHub, not a model, says which comments the review holds.
+      # GitHub, not a model, says which comments the round holds.
       - name: Collect the review
         id: collect
         env:
@@ -78,7 +102,8 @@ jobs:
             --repository "$GITHUB_REPOSITORY" --pull "$PR_NUMBER" --review "$REVIEW_ID" \
             --out "$RUNNER_TEMP/review/review.json"
 
-      # No model plans either: every agent runs over the units its scope names.
+      # No model plans either: git says whether the branch conflicts with its base, and every
+      # agent runs over the units its scope names.
       - name: Plan the tasks
         id: plan
         run: |
@@ -110,9 +135,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.tasks) }}
     steps:
-      - name: Check out the event commit
+      # The plan job's tools and toolchain, for the same reason it read them from the base branch.
+      - name: Check out the review tools
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ needs.plan.outputs.tools_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -131,7 +158,7 @@ jobs:
           path: ${{ runner.temp }}/review
 
       # Every leg checks the branch out again, so it sees everything earlier legs pushed. The
-      # pull request may declare other dependencies than the event commit, so reinstall.
+      # pull request may declare other dependencies than the base branch, so reinstall.
       - name: Switch to the pull request branch
         id: start
         env:
@@ -140,6 +167,19 @@ jobs:
           git checkout -q -B "$HEAD_REF" "origin/$HEAD_REF"
           python -m pip install -q -e ".[dev]"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The merge agent settles a merge already in progress: git stops at the conflicted files
+      # and exits non-zero, which is expected. A conflicted pyproject.toml cannot be installed
+      # until the agent settles it, so a failed install here is only a warning.
+      - name: Start merging the base branch
+        if: matrix.merge
+        env:
+          BASE_REF: ${{ needs.plan.outputs.base_ref }}
+        run: |
+          git -c user.name=github-actions[bot] -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            merge --no-commit --no-ff "origin/$BASE_REF" || true
+          git status --short
+          python -m pip install -q -e ".[dev]" || echo "::warning::The merged dependencies did not install before the agent ran."
 
       - name: Build the task prompt
         id: prompt
@@ -165,9 +205,17 @@ jobs:
             --effort high
             --json-schema '${{ steps.prompt.outputs.schema }}'
 
-      # CLAUDE_REVIEW_PUSH_TOKEN (a fine-grained PAT with Contents: write) is optional.
-      # Without it the push uses GITHUB_TOKEN, which never triggers other workflows, so CI
-      # will not run on these commits on its own.
+      # The gate must run against the dependencies the settled merge declares; if they do not
+      # install, the gate fails and says so, so this step only warns.
+      - name: Install the merged dependencies
+        if: matrix.merge
+        run: python -m pip install -q -e ".[dev]" || echo "::warning::The merged dependencies did not install."
+
+      # CLAUDE_REVIEW_PUSH_TOKEN (a fine-grained PAT with Contents: write) is optional for
+      # comment fixes. Without it the push uses GITHUB_TOKEN, which never triggers other
+      # workflows, so CI will not run on these commits on its own. A merge that brings in the
+      # base branch's workflow changes needs it with Workflows: write as well, because
+      # GITHUB_TOKEN may not push workflow files.
       - name: Gate, commit, and push
         env:
           TASK_ID: ${{ matrix.id }}
@@ -201,9 +249,11 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - name: Check out the event commit
+      # The same tools that wrote the plan read it back.
+      - name: Check out the review tools
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ needs.plan.outputs.tools_sha }}
           persist-credentials: false
 
       - name: Download the plan
