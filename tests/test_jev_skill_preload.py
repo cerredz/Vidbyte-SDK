@@ -23,6 +23,13 @@ from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent, JevAgentSettings, JevRuntimeSettings
 from vidbyte import JevSkillStatus as RootJevSkillStatus
 from vidbyte import SkillDocument as RootSkillDocument
+from vidbyte.agents.jev.alignment.result import (
+    JevAlignmentResult,
+    JevAlignmentStatus,
+    JevToolAlignmentResult,
+    JevToolAlignmentStatus,
+    JevToolAttachment,
+)
 from vidbyte.agents.jev.alignment.skills import (
     _MAX_REQUEST_JSON_BYTES,
     _MAX_STATE_AND_QUESTION_JSON_BYTES,
@@ -140,14 +147,14 @@ def _preloader(skills: tuple[SkillDocument, ...], response: JevResponse | None =
     return JevSkillsPreload(skills=skills, decision=DecisionModelConfig(api_key="test-key"), threshold=0.5, response=response or JevResponse())
 
 
-def _agent(skills: tuple[SkillDocument | str, ...] = (), *, continual: JevContinualSettings | None = None) -> JevAgent:
+def _agent(skills: tuple[SkillDocument | str, ...] = (), *, prompt_alignment: bool = False, tool_alignment: bool = False, continual: JevContinualSettings | None = None) -> JevAgent:
     # Builds a main agent with no gate calls so each integration test can focus on runtime skill behavior.
     settings = JevAgentSettings(
         name="jev-skills-test",
         system_prompt="Agent base prompt.",
         provider=ModelProvider.OPENAI,
         model_name="gpt-4.1-mini",
-        alignment=JevAlignmentSettings(skills=skills),
+        alignment=JevAlignmentSettings(system_prompt=prompt_alignment, tool_settings=tool_alignment, skills=skills),
     )
     return JevAgent(settings, JevRuntimeSettings(preflight=(), continual=continual or JevContinualSettings()))
 
@@ -360,14 +367,22 @@ class SkillsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_response.skills.results[0].status, JevSkillStatus.SELECTED)
         self.assertEqual(agent.response.skills.results[0].status, JevSkillStatus.SKIPPED)
 
-    async def test_runtime_orders_skill_preload_before_run_state(self) -> None:
-        # [Hidden Assumption] the main request sees selected skill text, and skills are chosen before run-state setup.
+    async def test_runtime_orders_skill_preload_after_alignment_and_before_run_state(self) -> None:
+        # [Hidden Assumption] the main request sees aligned prompt/tools plus selected skill text before run-state setup.
         events: list[str] = []
         continual = JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,))
-        agent = _agent(_skills(1), continual=continual)
+        agent = _agent(_skills(1), prompt_alignment=True, tool_alignment=True, continual=continual)
         runner = CapturingGenerativeRunner(events)
         bind_test_runner(agent, runner)
         scripted = ScriptedDecisionRunner(probabilities={1: 0.9})
+
+        async def align_prompt(message: str, system_prompt: str, *, tools: tuple[str, ...] = ()) -> JevAlignmentResult:
+            events.append("prompt_alignment")
+            return JevAlignmentResult(status=JevAlignmentStatus.ALIGNED, system_prompt="Aligned prompt.")
+
+        async def align_tools(message: str, system_prompt: str, tools: object, *, scope_checked: bool = False) -> JevToolAttachment:
+            events.append("tool_alignment")
+            return JevToolAttachment(JevToolAlignmentResult(status=JevToolAlignmentStatus.NOT_NEEDED))
 
         original_preload = agent.skill_preload.run
 
@@ -378,12 +393,15 @@ class SkillsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def begin_state(message: str, prior_user_turns: Sequence[str] = ()) -> None:
             events.append("run_state")
 
+        agent.alignment.align = align_prompt
+        agent.alignment.align_tools = align_tools
         agent.skill_preload.run = preload
         agent.run_state.begin = begin_state
         with patch(_HELPER_PATH, new=_helper_class(scripted)):
             await agent.arun("Edit and verify")
 
-        self.assertEqual(events, ["skills", "run_state", "main_loop"])
+        self.assertEqual(events, ["prompt_alignment", "tool_alignment", "skills", "run_state", "main_loop"])
+        self.assertIn("Aligned prompt.", runner.systems[0])
         self.assertIn("FULL BODY 1", runner.systems[0])
 
     async def test_gate_stop_and_specialist_handoff_bypass_skill_decisions(self) -> None:

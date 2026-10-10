@@ -32,6 +32,25 @@ class JevPreflightPreset(str, Enum):
 
     CLARITY = "clarity"
     TOOL_SELECTOR = "tool_selector"
+    RUN_STATE_RELATION = "run_state_relation"
+    BULK_WORK = "bulk_work"
+
+
+class JevBulkPlanningError(str, Enum):
+    """Stable reasons a Jev bulk plan was rejected before item execution."""
+
+    PLANNER_FAILURE = "planner_failure"
+    MALFORMED_OUTPUT = "malformed_output"
+    TOO_FEW_ITEMS = "too_few_items"
+    TOO_MANY_ITEMS = "too_many_items"
+    DUPLICATE_IDENTIFIERS = "duplicate_identifiers"
+
+
+class JevBulkItemError(str, Enum):
+    """Stable public category for an item whose worker did not return a result."""
+
+    WORKER_FAILURE = "worker_failure"
+    MISSING_RESULT = "missing_result"
 
 
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
@@ -253,6 +272,10 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_CONSISTENCY = "clarity.consistency"
     CLARITY_TIME_CONTEXT = "clarity.time_context"
     CLARITY_SINGLE_READING = "clarity.single_reading"
+    RUN_STATE_RELATION = "run_state_relation"
+    BULK_WORK_MULTIPLE_ITEMS = "bulk_work.multiple_items"
+    BULK_WORK_SAME_OPERATION = "bulk_work.same_operation"
+    BULK_WORK_INDEPENDENT_ITEMS = "bulk_work.independent_items"
 
 
 class JevDynamicComputeOption(str, Enum):
@@ -317,4 +340,4 @@ class JevComputeQuestionKey(str, Enum):
     CLONE_GOAL_DEPENDS_ON_STEP = "clone.goal_depends_on_step"
 
 
-__all__ = ["JevBoundaryKind", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse", "JevSkillStatus"]
+__all__ = ["JevBoundaryKind", "JevBulkItemError", "JevBulkPlanningError", "JevClaimKind", "JevCompletionStatus", "JevComputeQuestionKey", "JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevDynamicComputeOption", "JevExerciseMode", "JevOutputExtentComparator", "JevOutputExtentUnit", "JevPreflightPreset", "JevPreflightQuestionKey", "JevProblemCheckItemType", "JevQuestionType", "JevRunBriefUpdateStatus", "JevScenarioRole", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse", "JevSkillStatus"]

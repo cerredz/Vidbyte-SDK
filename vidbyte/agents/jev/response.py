@@ -21,12 +21,14 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevBulkWorkResult,
     JevClarification,
     JevCloneResult,
     JevComputeDecision,
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
+    JevPromptAlignmentOutcome,
     JevReviewRecord,
     JevRunBrief,
     JevRunBriefUpdate,
@@ -34,6 +36,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunStateRecord,
     JevSkillsOutcome,
     JevSpecialist,
+    JevToolAlignmentOutcome,
     JevUsageReport,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -57,6 +60,10 @@ class JevResponse:
     def preflight_usage(self, usage: JevUsage | None) -> None:
         """Record the usage of the one preflight Jev call, or None when TypeSafe reported none."""
         self.state.preflight_usage = usage
+
+    def bulk_work(self, result: JevBulkWorkResult) -> None:
+        # Records the single bulk attempt, including a rejected plan used for serial fallback.
+        self.state.bulk_work = result
 
     def needs_clarification(self, clarification: JevClarification) -> None:
         """Record the questions the user must answer; their rendered text becomes the run's output."""
@@ -91,6 +98,14 @@ class JevResponse:
         """Record the cumulative extra loop budget JevAgent granted to failed faithful-scope continuations."""
         for name, amount in extension.items():
             self.state.continuation_budget[name] = self.state.continuation_budget.get(name, JEV_CONTINUATION_BUDGET_INITIAL) + amount
+
+    def alignment(self, outcome: JevPromptAlignmentOutcome) -> None:
+        """Record the system-prompt alignment outcome for this run."""
+        self.state.alignment = outcome
+
+    def tool_alignment(self, outcome: JevToolAlignmentOutcome) -> None:
+        """Record the tool-settings alignment outcome for this run."""
+        self.state.tool_alignment = outcome
 
     def skills(self, outcome: JevSkillsOutcome) -> None:
         # @intent response-never-retains-skill-content

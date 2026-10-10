@@ -10,7 +10,8 @@ TESTS: tests/test_jev_done.py.
 """
 
 from vidbyte.agents.jev.done.handoff import JevHandoff
+from vidbyte.agents.jev.done.relation import JevRunStateRelation
 from vidbyte.agents.jev.done.reviewer import JevReviewer
 from vidbyte.agents.jev.done.run_state import JevRunState
 
-__all__ = ["JevHandoff", "JevReviewer", "JevRunState"]
+__all__ = ["JevHandoff", "JevReviewer", "JevRunState", "JevRunStateRelation"]

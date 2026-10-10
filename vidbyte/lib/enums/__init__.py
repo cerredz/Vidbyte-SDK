@@ -72,6 +72,8 @@ from vidbyte.lib.enums.failure import (
 )
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
+    JevBulkItemError,
+    JevBulkPlanningError,
     JevClaimKind,
     JevCompletionStatus,
     JevComputeQuestionKey,
@@ -173,6 +175,8 @@ __all__ = [
     "IdentityVerdict",
     "ImpactLevel",
     "JevBoundaryKind",
+    "JevBulkItemError",
+    "JevBulkPlanningError",
     "JevClaimKind",
     "JevCompletionStatus",
     "JevComputeQuestionKey",

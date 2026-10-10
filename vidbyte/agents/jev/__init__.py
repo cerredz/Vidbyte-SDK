@@ -10,19 +10,32 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py, tests/tes
 """
 
 from vidbyte.agents.jev.agent import JevAgent
+from vidbyte.agents.jev.alignment import (
+    JevAlignmentResult,
+    JevAlignmentStatus,
+    JevToolAlignmentResult,
+    JevToolAlignmentStatus,
+)
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
     JevAlignmentSettings,
+    JevBulkSettings,
     JevComputeSettings,
     JevContinualSettings,
     JevRunBriefSettings,
     JevRuntimeSettings,
+    JevToolAlignmentSettings,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevAlignmentOutcome,
     JevAssumptionEvidence,
     JevAssumptionsReconciledEvidence,
+    JevBulkItemResult,
+    JevBulkPlan,
+    JevBulkPlanItem,
+    JevBulkWorkResult,
     JevCanSimplify,
     JevCanSimplifyEvidence,
     JevClaimAssertion,
@@ -87,6 +100,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevPresetResult,
     JevProblemResolutionItem,
     JevProblemsResolvedEvidence,
+    JevPromptAlignmentOutcome,
     JevReportActionAlignment,
     JevReportActionAlignmentItem,
     JevRequiredAction,
@@ -113,6 +127,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeEvidence,
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeItem,
+    JevToolAlignmentOutcome,
     JevUsageReport,
 )
 from vidbyte.lib.dataclasses.skills import (
@@ -123,6 +138,8 @@ from vidbyte.lib.dataclasses.skills import (
 )
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
+    JevBulkItemError,
+    JevBulkPlanningError,
     JevClaimKind,
     JevCompletionStatus,
     JevContinuationGate,
@@ -144,7 +161,18 @@ __all__ = [
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
+    "JevAlignmentOutcome",
+    "JevAlignmentResult",
     "JevAlignmentSettings",
+    "JevAlignmentStatus",
+    "JevPromptAlignmentOutcome",
+    "JevBulkItemError",
+    "JevBulkItemResult",
+    "JevBulkPlan",
+    "JevBulkPlanItem",
+    "JevBulkPlanningError",
+    "JevBulkSettings",
+    "JevBulkWorkResult",
     "JevCanSimplify",
     "JevCanSimplifyEvidence",
     "JevAssumptionEvidence",
@@ -251,6 +279,10 @@ __all__ = [
     "JevSkillResult",
     "JevSkillsOutcome",
     "JevSkillStatus",
+    "JevToolAlignmentOutcome",
+    "JevToolAlignmentResult",
+    "JevToolAlignmentSettings",
+    "JevToolAlignmentStatus",
     "ClaudeSkillType",
     "ClaudeSkillReference",
     "ClaudeSkillSession",

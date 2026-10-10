@@ -1,12 +1,52 @@
 """FILE: vidbyte/agents/jev/alignment/__init__.py
 
-PURPOSE: Groups JevAgent's request-time alignment capabilities; today it holds the skill preload in skills.py.
-ROLE IN CODEBASE: JevAgent imports JevSkillsPreload from vidbyte.agents.jev.alignment.skills directly, so importing this package loads nothing.
-ARCHITECTURE NOTE: Each capability keeps its own module; the package exports nothing so a capability's dependencies load only when JevAgent uses it.
-COMMON MODIFICATION PATTERNS: Add a capability as its own module and import it from JevAgent.
+PURPOSE: Exposes JevAgent's alignment capabilities: the alignment agent (prompt editing and tool alignment), their result records, and the fixed question sets.
+ROLE IN CODEBASE: vidbyte.agents.jev imports JevAgentAlignment for JevAgent and JevRuntime; applications read JevAlignmentResult from run metadata.
+ARCHITECTURE NOTE: Questions, draft rules, the edit tool, and the scout tools are internal policy; callers enable the passes with JevAgentSettings(alignment=JevAlignmentSettings(system_prompt=True, tool_settings=True)).
+COMMON MODIFICATION PATTERNS: Export a record here only when applications need to read it from run metadata.
 KNOWN EDGE CASES: Importing this package performs no Jev call and needs no credentials.
-RELATED DOCS: docs/design/jev-skills-preload.md and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_skill_preload.py.
+RELATED DOCS: docs/design/jev-agent-alignment.md and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_alignment.py.
 """
 
-__all__: list[str] = []
+from vidbyte.agents.jev.alignment.agent import JevAgentAlignment
+from vidbyte.agents.jev.alignment.questions import (
+    ALIGNMENT_QUESTIONS,
+    TOOL_QUESTIONS,
+    JevAlignmentRole,
+    JevPromptSection,
+)
+from vidbyte.agents.jev.alignment.result import (
+    JevAlignmentGap,
+    JevAlignmentResult,
+    JevAlignmentStatus,
+    JevAttachedTool,
+    JevPromptEdit,
+    JevToolAlignmentResult,
+    JevToolAlignmentStatus,
+    JevToolAttachment,
+    JevToolCandidate,
+    JevToolEffect,
+    JevToolNeed,
+    JevToolRejection,
+)
+
+__all__ = [
+    "ALIGNMENT_QUESTIONS",
+    "TOOL_QUESTIONS",
+    "JevAgentAlignment",
+    "JevAlignmentGap",
+    "JevAlignmentResult",
+    "JevAlignmentRole",
+    "JevAlignmentStatus",
+    "JevAttachedTool",
+    "JevPromptEdit",
+    "JevPromptSection",
+    "JevToolAlignmentResult",
+    "JevToolAlignmentStatus",
+    "JevToolAttachment",
+    "JevToolCandidate",
+    "JevToolEffect",
+    "JevToolNeed",
+    "JevToolRejection",
+]

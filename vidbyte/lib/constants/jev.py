@@ -84,6 +84,22 @@ JEV_CLARITY_THRESHOLD: float = 0.75
 # One clarity question with P(yes) below this fails the preset on its own, so a mean pulled up by many
 # easy yes answers cannot hide one clear no. Also a starting point, not a tuned value.
 JEV_CLARITY_VETO_THRESHOLD: float = 0.2
+# RUN_STATE_RELATION reads the existing typed record under a separate state key.
+JEV_PREFLIGHT_RUN_STATE_FIELD: str = "run_state"
+# No labeled relation set is available yet, so the initial threshold is neutral.
+JEV_RUN_STATE_RELATION_THRESHOLD: float = JEV_NOUL_YES_THRESHOLD
+# Each bulk-work question must independently reach this confidence floor.
+JEV_BULK_WORK_THRESHOLD: float = 0.75
+JEV_BULK_WORK_VETO_THRESHOLD: float = 0.75
+JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS: int = 4
+JEV_BULK_MIN_PARALLEL_AGENTS: int = 1
+JEV_BULK_DEFAULT_MAX_ITEMS: int = 32
+JEV_BULK_MIN_ITEMS: int = 2
+JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS: int = 5
+JEV_BULK_MIN_PLANNER_MAX_ITERATIONS: int = 1
+JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS: int = 16_000
+JEV_BULK_MIN_PLANNER_MAX_TOKENS: int = 1
+JEV_BULK_ITEM_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # A run the preflight gate stops reports this strategy name.
 JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
 # JevClarificationAgent limits: its loop and token budget, and the size of the structured reply it must
@@ -398,6 +414,17 @@ __all__ = [
     "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
     "JEV_CLARITY_THRESHOLD",
     "JEV_CLARITY_VETO_THRESHOLD",
+    "JEV_BULK_DEFAULT_MAX_ITEMS",
+    "JEV_BULK_DEFAULT_MAX_PARALLEL_AGENTS",
+    "JEV_BULK_DEFAULT_PLANNER_MAX_ITERATIONS",
+    "JEV_BULK_DEFAULT_PLANNER_MAX_TOKENS",
+    "JEV_BULK_ITEM_ID_PATTERN",
+    "JEV_BULK_MIN_ITEMS",
+    "JEV_BULK_MIN_PLANNER_MAX_ITERATIONS",
+    "JEV_BULK_MIN_PLANNER_MAX_TOKENS",
+    "JEV_BULK_MIN_PARALLEL_AGENTS",
+    "JEV_BULK_WORK_THRESHOLD",
+    "JEV_BULK_WORK_VETO_THRESHOLD",
     "JEV_COMPLETION_EVIDENCE_THRESHOLD",
     "JEV_CONTINUATION_BUDGET_INITIAL",
     "JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS",
@@ -604,6 +631,7 @@ __all__ = [
     "JEV_NO_RETRIES",
     "JEV_PHASE_PROGRESS_THRESHOLD",
     "JEV_PREFLIGHT_REQUEST_FIELD",
+    "JEV_PREFLIGHT_RUN_STATE_FIELD",
     "JEV_PREFLIGHT_STRATEGY_NAME",
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
@@ -618,6 +646,7 @@ __all__ = [
     "JEV_REQUIRED_SEQUENCE_THRESHOLD",
     "JEV_RUN_STATE_MAX_ITERATIONS",
     "JEV_RUN_STATE_MAX_TOKENS",
+    "JEV_RUN_STATE_RELATION_THRESHOLD",
     "JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD",
     "JEV_SCOPE_COVERAGE_THRESHOLD",
     "JEV_SELF_REVIEW_THRESHOLD",
