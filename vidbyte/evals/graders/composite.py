@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, Sequence
+from typing import TYPE_CHECKING, ClassVar, Sequence
 
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult
+
+if TYPE_CHECKING:
+    from vidbyte.evals.behavior.probe import RunProbe
+
+
+async def _grade_child(grader: BaseGrader, case: EvalCase, actual: str, probe: RunProbe | None) -> GraderResult:
+    # Hands the run probe to children that accept it, so behavior graders and nested composites see the real run.
+    if probe is not None and hasattr(grader, "agrade_with_probe"):
+        return await grader.agrade_with_probe(case, actual, probe)
+    return await grader.agrade(case, actual)
 
 
 class AllOfGrader(BaseGrader):
@@ -20,8 +30,12 @@ class AllOfGrader(BaseGrader):
         self.graders = tuple(graders)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
-        # Runs every child grader and returns the all-of aggregate result.
-        results = [await grader.agrade(case, actual) for grader in self.graders]
+        # Grades without a run probe; behavior children report their own missing-probe failure.
+        return await self.agrade_with_probe(case, actual, None)
+
+    async def agrade_with_probe(self, case: EvalCase, actual: str, probe: RunProbe | None) -> GraderResult:
+        # Runs every child grader with the run probe and returns the all-of aggregate result.
+        results = [await _grade_child(grader, case, actual, probe) for grader in self.graders]
         passed = all(result.passed for result in results)
         score = sum(result.score for result in results) / len(results)
         reason = self._format_reason(results)
@@ -45,8 +59,12 @@ class AnyOfGrader(BaseGrader):
         self.graders = tuple(graders)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
-        # Runs every child grader and returns the any-of aggregate result.
-        results = [await grader.agrade(case, actual) for grader in self.graders]
+        # Grades without a run probe; behavior children report their own missing-probe failure.
+        return await self.agrade_with_probe(case, actual, None)
+
+    async def agrade_with_probe(self, case: EvalCase, actual: str, probe: RunProbe | None) -> GraderResult:
+        # Runs every child grader with the run probe and returns the any-of aggregate result.
+        results = [await _grade_child(grader, case, actual, probe) for grader in self.graders]
         passed = any(result.passed for result in results)
         score = max(result.score for result in results)
         reason = self._format_reason(results)
@@ -76,8 +94,12 @@ class WeightedGrader(BaseGrader):
         self.threshold = threshold
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
-        # Runs child graders, computes a weighted score, and applies the threshold.
-        weighted_results = [(grader, weight, await grader.agrade(case, actual)) for grader, weight in self.weighted_graders]
+        # Grades without a run probe; behavior children report their own missing-probe failure.
+        return await self.agrade_with_probe(case, actual, None)
+
+    async def agrade_with_probe(self, case: EvalCase, actual: str, probe: RunProbe | None) -> GraderResult:
+        # Runs child graders with the run probe, computes a weighted score, and applies the threshold.
+        weighted_results = [(grader, weight, await _grade_child(grader, case, actual, probe)) for grader, weight in self.weighted_graders]
         score = sum(result.score * weight for _, weight, result in weighted_results)
         passed = score >= self.threshold
         reason = self._format_reason(weighted_results, score)

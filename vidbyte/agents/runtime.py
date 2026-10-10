@@ -77,7 +77,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -170,6 +170,8 @@ class BaseAgentRuntimeLoopState:
     model_call_count: int = 0
     tokens_used: int | None = None
     model_response: object | None = None
+    # The run's live provider conversation (the same list the loop appends to), so after_run sees it.
+    messages: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def tool_call_count(self) -> int:
@@ -301,6 +303,9 @@ class AgentRuntime:
             await self._run_inner_context_window_hook(state, message=message, provider=state.provider)
         tool_schemas = self._resolve_tool_schemas(state.provider)
         messages = self._extract_initial_messages(run_options)
+        # @intent after-hooks-see-run-conversation
+        # Keep the live conversation on the loop state so the end-of-run hooks can show it to observers like the continual trace.
+        state.messages = messages
         rejections = 0
         compaction_count = 0
         last_assistant_output: str | None = None
@@ -413,6 +418,7 @@ class AgentRuntime:
                     raise
                 handle, state.provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
+                state.messages = messages
                 fallback_index = transition.index
                 # A non-None transition proves self.fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
@@ -503,7 +509,11 @@ class AgentRuntime:
                 )
                 if state.inner_context_window_algorithm is not None:
                     messages.append(self._assistant_message(last_assistant_output))
-                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+                # @intent after-hooks-see-final-reply
+                # Observers like the continual trace must see how the run ended, but a continuation below must keep
+                # sending the model the same messages as before, so the after-hooks get a copy with the reply added.
+                finished_messages = messages if state.inner_context_window_algorithm is not None else [*messages, self._assistant_message(last_assistant_output)]
+                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=finished_messages))
                 if state.inner_context_window_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
                     continue
                 if decision.action is not MiddlewareAction.CONTINUE:
@@ -517,6 +527,8 @@ class AgentRuntime:
                     if state.inner_context_window_algorithm is None:
                         messages.append(self._assistant_message(last_assistant_output))
                     continue
+                # The run ends here, so the end-of-run hooks read the conversation including the final reply.
+                state.messages = finished_messages
                 return await self._finish_result(final, state)
 
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
@@ -530,7 +542,7 @@ class AgentRuntime:
                     return await self._finish_result(processed, state)
                 _, result = processed
                 if call.tool_name == IS_DONE_TOOL_NAME:
-                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
                     if decision.action is not MiddlewareAction.CONTINUE:
                         abort_result = self._middleware_abort_result(
                             decision,
@@ -573,7 +585,7 @@ class AgentRuntime:
             if finish_attempt_continued or contract_rejected:
                 continue
 
-            decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
+            decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
             if decision.action is not MiddlewareAction.CONTINUE:
                 result = self._middleware_abort_result(
                     decision,
@@ -787,6 +799,7 @@ class AgentRuntime:
                 MiddlewareHook.AFTER_RUN,
                 state,
                 tool_call_count=int(dict(result.metadata).get("tool_call_count", 0)),
+                provider_messages=state.messages,
             )
         )
         if decision.action is MiddlewareAction.ABORT_RUN:
@@ -1001,7 +1014,8 @@ class AgentRuntime:
             model_response=model_response if model_response is not None else state.model_response,
             model_usage=model_usage,
             error=error,
-            provider_messages=tuple(provider_messages),
+            # Copy each message so middleware reads a snapshot and can never edit the run's live conversation.
+            provider_messages=tuple(dict(message) for message in provider_messages),
             system=system,
             tool_is_internal=tool_is_internal,
             metadata=dict(metadata if metadata is not None else state.metadata),
@@ -1547,6 +1561,11 @@ class AgentRuntime:
                 break
             if after_decision.sleep_seconds:
                 await self.middleware.sleep(after_decision.sleep_seconds)
+        if after_decision.action is not MiddlewareAction.ABORT_RUN and call.tool_name != IS_DONE_TOOL_NAME:
+            # Show the model its view of the result, and remember that view on the record
+            # so later runs replay what the model saw rather than the raw, unprotected output.
+            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision)
+            context_record = self._with_model_visible_result(context_record, result, visible_result)
         state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
@@ -1555,12 +1574,17 @@ class AgentRuntime:
                 tokens_used=state.tokens_used,
                 contexts=state.call_contexts,
             )
-        if call.tool_name != IS_DONE_TOOL_NAME:
-            self._append_tool_result_message(messages, call, result, state.provider, after_decision)
         failure_stop = self._enforce_tool_settings_after_failure(context_record, tool_is_internal, state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used)
         if failure_stop is not None:
             return failure_stop
         return context_record, result
+
+    @staticmethod
+    def _with_model_visible_result(context_record: ToolCallContext, result: ToolResult, visible_result: ToolResult) -> ToolCallContext:
+        # Attaches the model-visible view only when it differs from the raw result, which the record keeps.
+        if visible_result is result:
+            return context_record
+        return replace(context_record, model_visible_result=visible_result)
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
         # Applies the total tool-call budget, then ToolSettings hard budgets and deny-class rules, before local execution.
@@ -1657,13 +1681,15 @@ class AgentRuntime:
         decision: MiddlewareDecision,
         *,
         truncate: bool = True,
-    ) -> None:
+    ) -> ToolResult:
+        # Returns the model-visible result it appended so callers can record what the model saw.
         visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
         # Provider-specific result formatting remains the single place that
         # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
         # chat messages represent tool failures.
         formatted = ToolsFormatter.format_tool_result(call, visible_result, provider)
         messages.append(dict(formatted))
+        return visible_result
 
     def _model_visible_tool_result(
         self,

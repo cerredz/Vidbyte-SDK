@@ -55,37 +55,11 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 
-class HarnessSecretPolicy:
+
+class HarnessSecretPolicy(CredentialKeyPolicy):
     """Shared key classifier for configuration rejection and capture scrubbing."""
-
-    _SECRET_KEYS = frozenset({
-        "api_key",
-        "apikey",
-        "access_token",
-        "refresh_token",
-        "token",
-        "secret",
-        "client_secret",
-        "private_key",
-        "secret_key",
-        "access_key",
-        "access_key_id",
-        "session_token",
-        "bearer_token",
-        "password",
-        "credential",
-        "credentials",
-        "authorization",
-        "auth",
-    })
-
-    @classmethod
-    def is_secret_key(cls, key: str) -> bool:
-        # Matches exact normalized credential names without misclassifying words such as author.
-        normalized = re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
-        suffixes = ("_api_key", "_private_key", "_secret_key", "_access_key", "_access_key_id", "_token", "_secret", "_password")
-        return normalized in cls._SECRET_KEYS or normalized.endswith(suffixes)
 
 
 class HarnessRedactor:

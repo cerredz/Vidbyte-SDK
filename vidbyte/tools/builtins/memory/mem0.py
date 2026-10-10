@@ -141,7 +141,10 @@ class Mem0SearchMemoryTool(BaseMemoryTool):
         if not self._ok(status):
             return ToolResult.error(self.name, self._error_output(status, data), metadata={"provider": "mem0"})
 
-        results = data.get("results", data if isinstance(data, list) else [])
+        # @intent memory-search-accepts-bare-list
+        # The backend may answer with a bare list or a {"results": [...]} object; check for the list first,
+        # because calling .get on a list fails and would hide every memory the search found.
+        results = data if isinstance(data, list) else data.get("results", [])
         return ToolResult.success(self.name, self._success_output(results), metadata={"provider": "mem0", "count": len(results)})
 
 

@@ -13,7 +13,7 @@ from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 # A reply that is one markdown fence from start to end; its body is unwrapped only when it is JSON.
-_WHOLE_FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n?(.*?)\n?[ \t]*```\s*\Z", re.DOTALL)
+_WHOLE_FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n?(.*?)\n?[ \t]*```\s*\Z", re.DOTALL | re.IGNORECASE)
 
 
 class OpenAICompatibleProvider:

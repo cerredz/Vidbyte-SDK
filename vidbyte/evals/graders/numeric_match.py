@@ -40,6 +40,8 @@ class NumericMatchGrader(BaseGrader):
             return None
         if isinstance(value, (int, float)):
             return float(value)
-        match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", str(value))
-        return float(match.group(0)) if match else None
+        # @intent grouped-thousands-parse-as-one-number
+        # Comma-grouped thousands ("1,250") read as one number; ungrouped commas ("1,2") still end the number.
+        match = re.search(r"[-+]?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d*)?|\d+(?:\.\d*)?|\.\d+)", str(value))
+        return float(match.group(0).replace(",", "")) if match else None
 

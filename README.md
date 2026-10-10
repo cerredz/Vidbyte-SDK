@@ -1365,7 +1365,7 @@ bundle = session.export()
 copy_id = sdk.harnesses.sessions.import_(store, bundle, new_id="se_copy")
 ```
 
-Importing with `new_id=` rewrites only session ids; checkpoint ids and parent links stay intact.
+Importing with `new_id=` rewrites session ids. Checkpoint ids and parent links stay intact unless the target store already holds those checkpoints (for example a copy into the same store); then the copy gets fresh checkpoint ids with parent links and head remapped.
 
 Stores are pluggable behind one `SessionStore` protocol. The local stores
 (`InMemorySessionStore`, `FileSessionStore` with atomic JSON writes) ship in

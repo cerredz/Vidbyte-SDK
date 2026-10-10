@@ -22,7 +22,7 @@ class JSONExactMatchGrader(BaseGrader):
             return GraderResult(score=0.0, passed=False, reason=f"Output is not valid JSON: {actual_error}")
         if expected_error:
             return GraderResult(score=0.0, passed=False, reason=f"Expected value is not valid JSON: {expected_error}")
-        passed = actual_value == expected_value
+        passed = self._json_equal(actual_value, expected_value)
         score = 1.0 if passed else 0.0
         reason = "JSON matched exactly." if passed else "JSON did not match expected value."
         return GraderResult(score=score, passed=passed, reason=reason)
@@ -35,6 +35,18 @@ class JSONExactMatchGrader(BaseGrader):
             except json.JSONDecodeError as exc:
                 return None, str(exc)
         return value, None
+
+    def _json_equal(self, actual: Any, expected: Any) -> bool:
+        # @intent json-bool-is-not-number
+        # JSON keeps booleans and numbers apart, but Python says True == 1, so a boolean only equals a boolean.
+        # Integers and floats stay comparable because JSON has a single number type (1 == 1.0).
+        if isinstance(actual, bool) or isinstance(expected, bool):
+            return isinstance(actual, bool) and isinstance(expected, bool) and actual == expected
+        if isinstance(actual, dict) and isinstance(expected, dict):
+            return actual.keys() == expected.keys() and all(self._json_equal(actual[key], expected[key]) for key in expected)
+        if isinstance(actual, list) and isinstance(expected, list):
+            return len(actual) == len(expected) and all(self._json_equal(a, e) for a, e in zip(actual, expected, strict=True))
+        return actual == expected
 
 
 class JSONSubsetGrader(JSONExactMatchGrader):
@@ -65,5 +77,5 @@ class JSONSubsetGrader(JSONExactMatchGrader):
             if not isinstance(actual, list) or len(expected) > len(actual):
                 return False
             return all(self._contains_subset(actual[index], value) for index, value in enumerate(expected))
-        return actual == expected
+        return self._json_equal(actual, expected)
 

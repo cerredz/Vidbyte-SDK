@@ -120,6 +120,12 @@ class CreateHandoffTool(BaseTool):
     def _next_primitive_id(self) -> str:
         """Return a stable, monotonic primitive id scoped to the bound agent's run."""
         count = len(self._agent.handoffs) + 1 if self._agent is not None else 1
+        # @intent handoff-ids-never-overwrite-registered-handoffs
+        # A forked, shared, or restored context manager can already hold handoff ids this
+        # agent never authored, so skip any id that is taken instead of replacing it.
+        manager = getattr(self._agent, "context_manager", None)
+        while manager is not None and manager.get_by_id(f"handoff:{count}") is not None:
+            count += 1
         return f"handoff:{count}"
 
     def _render_result(self, produced: Handoff) -> ToolResult:

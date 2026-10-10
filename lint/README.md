@@ -70,6 +70,7 @@ have been reviewed. Analyzer failures are never recorded as zero.
 
 Nested folders:
 
+- `contracts/` -- byte-for-byte copies of contracts other Vidbyte repositories generate, read by C017-C020.
 - `core/` -- source discovery, analyzers, rule contracts, baselines, and reports.
 - `rules/` -- one independently selectable module per S, A, or C rule.
 
@@ -164,6 +165,11 @@ Nested folders:
 | C013 | jev-decision-helper-only | Agents ask and score Jev only through DecisionModelHelper, one request per decision |
 | C014 | jev-done-check-parity | Every JevDoneCheck has its question module, keys, registry entries, handoff section, and handlers |
 | C015 | package-data-coverage | Every non-README file in the vidbyte package ships in the wheel; no README ships; no pattern is dead |
+| C016 | public-api-contract-current | contracts/sdk-public-api.json equals the generator's output for vidbyte.__all__ and the pyproject version |
+| C017 | platform-route-contract | SDK requests to Vidbyte hosts use a contract route, an accepted method, and an admitted credential |
+| C018 | canonical-api-host | Vidbyte API URLs in vidbyte/ string literals use an origin the platform contract lists as live |
+| C019 | platform-error-code-contract | Platform-family or near-miss error codes that SDK code compares, matches, maps, or defines are in the platform contract's error_codes |
+| C020 | api-key-prefix-contract | One *API_KEY_PREFIX constant in vidbyte/lib/constants/ spells the API-key prefix, equal to the platform contract's api_key_prefix; no inline or foreign copies |
 
 ## Adding a rule
 

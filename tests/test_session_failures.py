@@ -21,6 +21,7 @@ from vidbyte import (
     Failure,
     FailureCode,
     FailureDisposition,
+    FailureMetadataNormalizer,
     FailureMiddleware,
     FailurePhase,
     FailureRaisedError,
@@ -153,6 +154,38 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, ["high", "low"])
         self.assertEqual([failure.code for failure in found], [FailureCode.ACTION_WRONG_TARGET, FailureCode.ACTION_UNSAFE])
 
+    async def test_decorated_rules_keep_function_names_and_identity(self) -> None:  # [Silent Failure]
+        # Verify decorated rules report their own names and async rules can be deduplicated, run, and removed.
+        router = FailureRouter(object())
+        seen: list[str] = []
+
+        @rule(code=FailureCode.OUTPUT_INVALID, on=MiddlewareHook.AFTER_TOOL_CALL, on_match=FailureDisposition.RECORD)
+        def no_leaks(_context):
+            return None
+
+        @rule(code=FailureCode.ACTION_UNSAFE, on=MiddlewareHook.AFTER_TOOL_CALL, on_match=FailureDisposition.RECORD)
+        async def audit_async(_context):
+            await asyncio.sleep(0)
+            seen.append("audit_async")
+            return Failure(code=FailureCode.ACTION_UNSAFE, source="audit", phase="action")
+
+        @rule(code=FailureCode.ACTION_UNSAFE, on=MiddlewareHook.AFTER_TOOL_CALL, name="explicit-name")
+        async def renamed(_context):
+            return None
+
+        router.add_rule(no_leaks)
+        router.add_rule(audit_async)
+        router.add_rule(audit_async)
+        router.add_rule(renamed)
+        self.assertEqual([item.name for item in router._rules], ["no_leaks", "audit_async", "explicit-name"])
+        found = await router.evaluate("after_tool_call", object())
+        self.assertEqual(seen, ["audit_async"])
+        self.assertEqual([failure.code for failure in found], [FailureCode.ACTION_UNSAFE])
+        router.remove_rule(audit_async)
+        router.remove_rule(no_leaks)
+        router.remove_rule(renamed)
+        self.assertEqual(router._rules, [])
+
     async def test_fail_open_rule_error_records_and_continues(self) -> None:  # [Hidden Failure]
         # Verify an optional detector cannot stop the run when it crashes.
         router = FailureRouter(object())
@@ -276,8 +309,28 @@ class FailureNormalizationTests(unittest.TestCase):
         codes = {failure.code for failure in router.capture_reply(reply)}
         self.assertIn(FailureCode.TOOL_TIMEOUT, codes)
 
+    def test_contract_stop_yields_one_routable_failure(self) -> None:  # [Hidden Failure]
+        # @intent one-stop-one-routable-failure
+        # Verify a contract stop keeps only the specific output_contract record, not a runtime twin.
+        reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "contract_unsatisfied", "contract_evaluations": ({"name": "MinToolCalls", "satisfied": False},)})
+        failures = FailureMetadataNormalizer.from_reply(reply)
+        self.assertEqual([(item.code, item.source, item.status) for item in failures], [(FailureCode.CONTRACT_UNSATISFIED, "output_contract", FailureStatus.EXHAUSTED)])
+
+    def test_tool_budget_stop_yields_one_routable_failure(self) -> None:  # [Hidden Failure]
+        # Verify a tool-settings budget stop keeps only the tool_settings record.
+        reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "max_identical_calls", "tool_settings_budget": "max_identical_calls"})
+        failures = FailureMetadataNormalizer.from_reply(reply)
+        self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.TOOL_IDENTICAL_CALL_LIMIT, "tool_settings")])
+
 
 class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_contract_stop_runs_bound_handler_once(self) -> None:  # [Hidden Failure]
+        # Verify one contract stop routes to its bound recovery handler exactly once.
+        session = Session(_FakeAgent(metadata={"stop_reason": "contract_unsatisfied", "contract_evaluations": ({"name": "MinToolCalls", "satisfied": False},)}))
+        session.failures.on(FailureCode.CONTRACT_UNSATISFIED, StopRecovery(reason="contract exhausted"))
+        await session.arun("work")
+        self.assertEqual(len(session.failures.recovery_attempts), 1)
+
     async def test_session_exposes_stable_router_and_records_stop_reason(self) -> None:  # [Hidden Assumption]
         # Verify Session owns one router and captures completed reply metadata.
         agent = _FakeAgent(metadata={"stop_reason": "max_iterations"})

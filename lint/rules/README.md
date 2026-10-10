@@ -24,6 +24,11 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `c013_jev_decision_helper_only.py` -- Jev requests and answer thresholds through DecisionModelHelper.
 - `c014_jev_done_check_parity.py` -- every done check wired through registry, handoff, and handler maps.
 - `c015_package_data_coverage.py` -- wheel package-data coverage of non-Python package files.
+- `c016_public_api_contract_current.py` -- committed SDK public-API contract matches its generator.
+- `c017_platform_route_contract.py` -- SDK requests to Vidbyte hosts match a platform-contract route, method, and access class.
+- `c018_canonical_api_host.py` -- Vidbyte API URLs in SDK code use an origin the platform contract lists as live.
+- `c019_platform_error_code_contract.py` -- platform-family or near-miss error codes in SDK decision positions are exported by the platform contract.
+- `c020_api_key_prefix_contract.py` -- the Vidbyte API-key prefix is spelled once, by a constant equal to the platform contract.
 - `s001_python_correctness_foundation.py` -- Pyflakes/syntax correctness.
 - `s002_exception_cause_chaining.py` -- explicit translated causes.
 - `s003_strict_zip.py` -- explicit zip length behavior.

@@ -316,6 +316,23 @@ class ConcurrentRunContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertCountEqual(recorder.seen, ["ALICE request", "BOB request"])
         self.assertEqual(parent._active_prompt, "")
 
+    async def test_customized_agent_tool_forwards_parent_prompt(self) -> None:
+        # @intent wrapped-agent-tool-gets-parent-context
+        # A customize() view over as_tool() must still bind the parent's context getter to the wrapped AgentTool.
+        recorder = _RecordingRunner()
+        child = build_test_agent(
+            name="child",
+            system_prompt="child system",
+            runner=recorder,
+            agent_metadata=AgentMetadata(name="child", description="A test agent.", use_cases="Testing."),
+        )
+        customized = child.as_tool().customize(description="Ask the child specialist (localized).")
+        parent = build_test_agent(name="parent", system_prompt="parent system", runner=_DelegatingRunner(), tools=(customized,))
+
+        await parent.arun("CUSTOMER-ASKS refund order 991")
+
+        self.assertEqual(recorder.seen, ["CUSTOMER-ASKS refund order 991"])
+
 
 if __name__ == "__main__":
     unittest.main()
