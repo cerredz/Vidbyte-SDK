@@ -56,7 +56,9 @@ class ContextCompactionEngine:
     async def compact_provider_messages(self, messages: Sequence[Mapping[str, Any]], *, mode: CompactionMode | str, options: Mapping[str, Any] | None = None) -> tuple[tuple[dict[str, Any], ...], CompactionStats]:
         # Converts provider messages to ContextMessage records, compacts them, and restores dictionaries.
         selected = self._coerce_mode(mode)
-        before = tuple(self._provider_to_context_message(m, index) for index, m in enumerate(messages))
+        # Learn each Anthropic tool call's name by id first, because its tool_result blocks name the call only by that id.
+        tool_names = self._tool_use_names(messages)
+        before = tuple(self._provider_to_context_message(m, index, tool_names) for index, m in enumerate(messages))
         opts = dict(options or {})
         strategy = self._build_strategy(selected, opts)
         compacted = await strategy.compact(before)
@@ -132,8 +134,19 @@ class ContextCompactionEngine:
         return visible, stats
 
     def to_context_messages(self, messages: Sequence[Mapping[str, Any]]) -> tuple[ContextMessage, ...]:
-        # Converts provider message dictionaries into generic ContextMessage records.
-        return tuple(self._provider_to_context_message(m) for m in messages)
+        # Converts provider message dictionaries into generic ContextMessage records, naming Anthropic tool results through their call ids.
+        tool_names = self._tool_use_names(messages)
+        return tuple(self._provider_to_context_message(m, tool_names=tool_names) for m in messages)
+
+    def _tool_use_names(self, messages: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+        # Maps every Anthropic tool_use block id to its tool name across the history.
+        names: dict[str, str] = {}
+        for message in messages:
+            content = message.get("content")
+            for block in content if isinstance(content, list) else ():
+                if isinstance(block, Mapping) and block.get("type") == "tool_use" and block.get("id") is not None and block.get("name") is not None:
+                    names[str(block["id"])] = str(block["name"])
+        return names
 
     def from_context_messages(self, messages: Sequence[ContextMessage]) -> tuple[dict[str, Any], ...]:
         # Converts ContextMessage records back into provider message dictionaries.
@@ -249,13 +262,17 @@ class ContextCompactionEngine:
             return result
         return self._replace_tool_result(result, scrubbed, {"compaction": CompactionMode.MECHANICAL_BLOAT_SCRUBBER.value, **stats})
 
-    def _provider_to_context_message(self, message: Mapping[str, Any], index: int = 0) -> ContextMessage:
+    def _provider_to_context_message(self, message: Mapping[str, Any], index: int = 0, tool_names: Mapping[str, str] | None = None) -> ContextMessage:
         # Converts a provider message dictionary into a generic ContextMessage.
         raw = dict(message)
         role = str(raw.get("role", "assistant"))
         kind = self._provider_message_kind(raw)
         content = self._provider_message_content(raw)
-        return ContextMessage(role=role, content=content, kind=kind, metadata={"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": self._provider_tool_name(raw)})
+        # @intent tool-names-resolve-on-every-provider-shape
+        # Anthropic and Gemini keep tool names in content blocks and parts (a tool_result only by call id); unnamed, every per-tool strategy treats all tools as one.
+        tool_name = self._provider_tool_name(raw)
+        tool_name = self._provider_block_tool_name(raw, tool_names or {}) if tool_name is None else tool_name
+        return ContextMessage(role=role, content=content, kind=kind, metadata={"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": tool_name})
 
     def _context_message_to_provider(self, message: ContextMessage) -> dict[str, Any]:
         # Converts a compacted ContextMessage back to a provider message dictionary.
@@ -337,6 +354,21 @@ class ContextCompactionEngine:
                         return str(function["name"])
                     if call.get("name") is not None:
                         return str(call["name"])
+        return None
+
+    def _provider_block_tool_name(self, message: Mapping[str, Any], tool_names: Mapping[str, str]) -> str | None:
+        # Extracts tool names from Anthropic content blocks and Gemini parts, naming a tool_result through its tool_use id.
+        content, parts = message.get("content"), message.get("parts")
+        for block in content if isinstance(content, list) else ():
+            if isinstance(block, Mapping) and block.get("type") == "tool_use" and block.get("name") is not None:
+                return str(block["name"])
+            if isinstance(block, Mapping) and block.get("type") == "tool_result" and str(block.get("tool_use_id")) in tool_names:
+                return tool_names[str(block.get("tool_use_id"))]
+        for part in parts if isinstance(parts, list) else ():
+            for key in ("functionCall", "function_call", "functionResponse", "function_response"):
+                value = part.get(key) if isinstance(part, Mapping) else None
+                if isinstance(value, Mapping) and value.get("name") is not None:
+                    return str(value["name"])
         return None
 
     def _replace_provider_content(self, message: dict[str, Any], content: str) -> dict[str, Any]:
