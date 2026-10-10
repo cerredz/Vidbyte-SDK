@@ -10,7 +10,8 @@ Key Functions:
     - text: Resolves text adapters.
     - image: Resolves image adapters.
     - video: Resolves video adapters.
-    - decision: Resolves calibrated decision-model adapters (TypeSafe Jev).
+    - decision: Resolves calibrated decision-model adapters: TypeSafe Jev, the System One hosts
+      (SystemOneProvider), and OpenAI Decisions (OpenAIDecisionsProvider).
 Relations:
     Used by ModalityDetector and runner modules to obtain provider adapters for executions.
 Similar Files:
@@ -28,9 +29,11 @@ from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, KimiProv
 from vidbyte.providers.elevenlabs import ElevenLabsProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
+from vidbyte.providers.openai_decisions import OpenAIDecisionsProvider
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.playai import PlayAIProvider
 from vidbyte.providers.base import tool_spec_to_provider_schema
+from vidbyte.providers.systemone import SystemOneProvider
 from vidbyte.providers.typesafe import TypeSafeProvider
 from vidbyte.providers.xai import XAIProvider
 
@@ -85,12 +88,24 @@ class ModelProviders:
         return ModelProviders._build_embedding_provider(config, providers)
 
     @staticmethod
-    def decision(config: DecisionModelConfig) -> TypeSafeProvider:
+    def decision(config: DecisionModelConfig) -> TypeSafeProvider | SystemOneProvider | OpenAIDecisionsProvider:
         # Return a decision-capable adapter for calibrated decision-model APIs.
         # @intent decision-capability-is-its-own-factory
         # Decision models are not text models, so they get a dedicated factory and can never
-        # be selected by the text, streaming, or modality paths.
-        providers: dict[ModelProvider, type] = {ModelProvider.TYPESAFE: TypeSafeProvider}
+        # be selected by the text, streaming, or modality paths. The adapter follows the wire:
+        # TypeSafe keeps its own adapter (managed gateway, model list, run close), OpenAI speaks
+        # the Decisions wire, and every other decision host speaks System One.
+        providers: dict[ModelProvider, type] = {
+            ModelProvider.TYPESAFE: TypeSafeProvider,
+            ModelProvider.OPENAI: OpenAIDecisionsProvider,
+            ModelProvider.PERPLEXITY: SystemOneProvider,
+            ModelProvider.OPENROUTER: SystemOneProvider,
+            ModelProvider.LIQUID: SystemOneProvider,
+            ModelProvider.BASETEN: SystemOneProvider,
+            ModelProvider.MERAGPT: SystemOneProvider,
+            ModelProvider.CLOUDFLARE: SystemOneProvider,
+            ModelProvider.FOUNDRY: SystemOneProvider,
+        }
         return ModelProviders._build_provider(config.normalized_provider(), providers, capability="decision", decision_config=config)
 
     @staticmethod
@@ -159,10 +174,12 @@ __all__ = [
     "MiniMaxProvider",
     "MistralProvider",
     "ModelProviders",
+    "OpenAIDecisionsProvider",
     "OpenAIProvider",
     "OpenRouterProvider",
     "PlayAIProvider",
     "ProvidersClient",
+    "SystemOneProvider",
     "TypeSafeProvider",
     "XAIProvider",
     "get_image_provider",
