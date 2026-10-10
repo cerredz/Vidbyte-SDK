@@ -16,7 +16,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 18:10 | 2026-10-10 18:24 | reports/S0-scout.md | base_commit c07529316 |
-| S1 spec + review | running | 2026-10-10 19:20 | | reports/S1-spec-author.md | spec r1 @8ee7ed1e; review round 1 launching |
+| S1 spec + review | running | 2026-10-10 19:20 | | reports/S1-spec-review.md | r1 reviewed: REVISE (1B/6M/7m); revision waits for backend r3 contract |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -25,7 +25,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 18:08 — Ran the request as two linked pipelines (backend `vidbyte`, SDK `vidbyte-sdk`) — Prompt 5 names one change in each repo; one worktree cannot span two repos.
@@ -33,6 +33,9 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - 2026-10-10 18:08 — Appended the assistant's four substantive answers verbatim to request.md as §E — the user's "great" in Prompt 5 accepts the §E.4 proposal, so downstream agents need its exact scope table.
 - 2026-10-10 19:20 — Started this pipeline's S1 author against backend spec r1 in parallel with the backend review — most SDK design questions are independent of §9.2 details; §9.2 changes are forwarded as a revision.
 - 2026-10-10 20:40 — Launched SDK review round 1 on r1 while backend r2 is still in revision — the reviewer is told which §9.2 changes are coming; the author applies reviewer findings and backend contract changes in one revision.
+- 2026-10-10 22:45 — The reviewer was cut off by a usage-limit error and resumed with SendMessage; its report completed normally.
+- 2026-10-10 22:45 — Holding the SDK revision until backend spec r3 lands, so the author absorbs reviewer findings plus backend §9.2 r2 and r3 changes in one revision.
+- 2026-10-10 22:45 — Contract vendoring: re-vendor from the backend branch commit that regenerates the contract (C017-C020 check only repository, 40-hex commit, schema_version, generator). Backend origin/main mixes merge commits and squash merges, so if the backend PR is squash-merged the SDK must re-vendor from backend main afterwards; this is a stated merge-order note, not a gate.
 
 ## User replies (verbatim)
 - none yet
@@ -57,3 +60,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - Build headers as `bearer_headers(key)` then `headers[JEV_IDEMPOTENCY_KEY_HEADER] = ...` (the TypeSafe shape C017 accepts); pass `timeout_seconds` on the inner call (S012). No new `vb_live_` literal anywhere (C020): f-strings from `VIDBYTE_API_KEY_PREFIX`; Decision messages stay byte-identical. — *source:* S1 author
 - Re-vendoring the contract: use Git Bash, not PowerShell (`>` re-encodes bytes); the backend repo is `C:/Users/422mi/vidbyte-repos/vidbyte` (not `../vidbyte` relative to the worktree). — *source:* S1 author
 - Tests inject the transport via `TextModelRunner(..., transport=fake)`; for the agent path patch `vidbyte.lib.runners.text.HttpTransport`. `TextModelConfig.__post_init__` re-runs on every `arun` (`replace`), so AUTO mode must not read the environment there. — *source:* S1 author
+- `lint/core/platform_contract.py` checks only `source.repository`, a 40-hex `source.commit`, `schema_version`, `generator`; a contract copied from a backend branch passes C017-C020. C017 also flags Vidbyte URL literals no traced request uses, so an endpoint constant without a request is red. — *source:* S1 reviewer
+- `raise ... from None` inside `except` still sets `__context__`, so the gateway body stays reachable via `__context__.response_excerpt`; raise after leaving the except block. — *source:* S1 reviewer
+- `extra_body` merges last: in Gemini it replaces the whole `generationConfig` (cap included); in chat dialects `max_completion_tokens` can sit beside an injected `max_tokens`. Gemini runner metadata becomes top-level `labels` (`gemini.py:164`); OpenAI forwards non-function tools unchanged (`openai.py:225-231`). — *source:* S1 reviewer
+- No 2xx constant exists; `HTTPStatus.OK <= s < HTTPStatus.MULTIPLE_CHOICES` avoids an A007 literal. `TextModelRunner` is built at `vidbyte/lib/runners/utility.py:72-74`. `tests/test_config_validation.py:24-29` asserts only the error type. — *source:* S1 reviewer
