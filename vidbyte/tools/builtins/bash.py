@@ -131,8 +131,8 @@ class BashTool(BaseTool):
         # The command reaches bash as a single argv item through exec, so no second shell re-parses quotes, `$`, or `;`
         # and lint S055 holds. start_new_session makes bash the leader of its own process group, which is what lets _stop
         # kill everything the command started. stdin is the null device so a command that reads input cannot hang the call.
-        # OSError and ValueError (NUL byte, argument list too long) become a spawn_failed result naming only the exception
-        # class, because the exception text can carry paths or the command itself (S017).
+        # OSError and ValueError (removed root folder, NUL byte, argument list too long) become a spawn_failed result naming
+        # only the exception class, because the exception text can carry paths or the command itself (S017).
         try:
             return await asyncio.create_subprocess_exec(
                 executable,
@@ -145,7 +145,7 @@ class BashTool(BaseTool):
                 start_new_session=True,
             )
         except (OSError, ValueError) as exc:
-            return ToolResult.error(self.name, f"bash could not start this command ({type(exc).__name__}). Shorten the command or remove NUL characters from it.", metadata={"error": "spawn_failed"})
+            return ToolResult.error(self.name, f"bash could not start this command ({type(exc).__name__}). Check that the root folder still exists, and that the command has no NUL characters and is not too long.", metadata={"error": "spawn_failed"})
 
     async def _collect(self, process: asyncio.subprocess.Process, buffer: bytearray) -> tuple[int, int]:
         """Read the output into buffer up to the cap, count the rest, and return (bytes not kept, exit code)."""
