@@ -302,7 +302,16 @@ class ContextCompactionEngine:
             return "\n".join(values)
         parts = message.get("parts")
         if isinstance(parts, list):
-            return "\n".join(str(part) for part in parts)
+            # @intent gemini-parts-extract-the-text-they-write-back
+            # Write-back stores compacted text in functionResponse.response.output, so read that text here, not the part's one-line repr.
+            part_values: list[str] = []
+            for part in parts:
+                function_response = (part.get("functionResponse") or part.get("function_response")) if isinstance(part, Mapping) else None
+                response = function_response.get("response") if isinstance(function_response, Mapping) else None
+                output = response.get("output") if isinstance(response, Mapping) else None
+                text = part.get("text") if isinstance(part, Mapping) else None
+                part_values.append(output if isinstance(output, str) else text if isinstance(text, str) else str(part))
+            return "\n".join(part_values)
         return str(content or message)
 
     def _provider_message_id(self, message: Mapping[str, Any], index: int) -> str:
