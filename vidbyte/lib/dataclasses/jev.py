@@ -25,6 +25,8 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
+    JEV_COMPUTE_SWARM_AGENTS_MAX,
+    JEV_COMPUTE_SWARM_AGENTS_MIN,
     JEV_DELIVERABLE_ID_PATTERN,
     JEV_DISCOVERED_ITEM_SOURCE_MAX_CHARS,
     JEV_DISCOVERED_ITEM_TOTAL_SOURCE_MAX_CHARS,
@@ -58,6 +60,12 @@ from vidbyte.lib.constants.jev import (
     JEV_RUN_BRIEF_NOTE_MAX_CHARS,
     JEV_RUN_BRIEF_NOTES_MAX,
     JEV_SPECIALIST_NONE,
+    JEV_SWARM_ASSIGNMENT_ID_PATTERN,
+    JEV_SWARM_ASSIGNMENT_ID_PREFIX,
+    JEV_SWARM_FIELD_MAX_CHARS,
+    JEV_SWARM_FIRST_ASSIGNMENT,
+    JEV_SWARM_NAME_MAX_CHARS,
+    JEV_SWARM_PLAN_MAX_ATTEMPTS,
 )
 from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums.jev import (
@@ -80,6 +88,7 @@ from vidbyte.lib.enums.jev import (
     JevScopeBreadth,
     JevScopeUnitSource,
     JevScopeUniverse,
+    JevSwarmPlanQuestionKey,
 )
 from vidbyte.lib.errors import ConfigurationError
 
@@ -93,6 +102,7 @@ JevContent = str | Mapping[str, object] | tuple[object, ...]
 _API_DOCS = "https://docs.typesafe.ai/api.md"
 _DELIVERABLE_ID = re.compile(JEV_DELIVERABLE_ID_PATTERN)
 _GATE_DESCRIPTION_SENTENCE_END = re.compile(JEV_DONE_GATE_DESCRIPTION_SENTENCE_END_PATTERN)
+_SWARM_ASSIGNMENT_ID = re.compile(JEV_SWARM_ASSIGNMENT_ID_PATTERN)
 
 
 def _normalize_scope_text(value: str) -> str:
@@ -3748,6 +3758,7 @@ class JevAgentResponse:
     With mid-run compute enabled, `run_facts` holds the exact run facts read at the latest checkpoint,
     `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
     `clone` holds the run's one CLONE launch, or None when Jev never selected CLONE.
+    `swarm` holds the run's one SWARM launch, or None when no plan launched.
     """
 
     input: str = ""
@@ -3768,6 +3779,7 @@ class JevAgentResponse:
     run_brief_updates: list[JevRunBriefUpdate] = field(default_factory=list)
     compute_decisions: list[JevComputeDecision] = field(default_factory=list)
     clone: JevCloneResult | None = None
+    swarm: JevSwarmResult | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -4207,8 +4219,134 @@ class JevCloneResult:
             raise JevValidation.error("clone outputs", "a tuple of non-empty strings", self.outputs)
 
 
+@dataclass(frozen=True, slots=True)
+class JevSwarmPlanQuestion:
+    """One fixed question Jev answers about a single assignment of a SWARM plan, asked once for every assignment id."""
+
+    key: JevSwarmPlanQuestionKey
+    instructions: str
+    when_true: str
+    when_false: str
+    gap: str
+
+    def __post_init__(self) -> None:
+        # @intent plan-questions-name-their-assignment
+        # Every assignment's questions share one request, so each question must name the assignment it judges.
+        if not isinstance(self.key, JevSwarmPlanQuestionKey):
+            raise JevValidation.error("swarm plan question key", "a JevSwarmPlanQuestionKey member", self.key)
+        for field_name in ("instructions", "when_true", "when_false", "gap"):
+            JevText.require(getattr(self, field_name), field_name=f"{field_name} of swarm plan question {self.key.value!r}")
+        if "{item}" not in self.instructions:
+            raise JevValidation.error(f"instructions of swarm plan question {self.key.value!r}", "text that names the assignment through an {item} placeholder", self.instructions)
+
+    def name(self, item: str) -> str:
+        """Return the name the question about one assignment is sent under and answered by."""
+        return f"{self.key.value}.{item}"
+
+    def to_question(self, item: str) -> JevQuestion:
+        """Return the noul question Jev answers about the assignment with this id."""
+        return JevQuestion(
+            name=self.name(item),
+            question_type=JevQuestionType.NOUL,
+            instructions=self.instructions.format(item=item),
+            options=(
+                JevOption(name=JEV_NOUL_TRUE, description=self.when_true),
+                JevOption(name=JEV_NOUL_FALSE, description=self.when_false),
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JevSwarmAssignment:
+    """One unit of a SWARM plan: its code-assigned id and the six fields the main agent wrote for the helper that runs it."""
+
+    id: str
+    name: str
+    objective: str
+    inputs: str
+    deliverable: str
+    boundaries: str
+    verification: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or _SWARM_ASSIGNMENT_ID.fullmatch(self.id) is None:
+            raise JevValidation.error("swarm assignment id", f"{JEV_SWARM_ASSIGNMENT_ID_PREFIX} followed by the assignment's position", self.id)
+        _require_bounded_text(self.name, field_name=f"name of swarm assignment {self.id!r}", maximum=JEV_SWARM_NAME_MAX_CHARS)
+        for field_name in ("objective", "inputs", "deliverable", "boundaries", "verification"):
+            _require_bounded_text(getattr(self, field_name), field_name=f"{field_name} of swarm assignment {self.id!r}", maximum=JEV_SWARM_FIELD_MAX_CHARS)
+
+
+@dataclass(frozen=True, slots=True)
+class JevSwarmPlan:
+    """A validated SWARM plan: the conventions every helper shares and one assignment per unit, in the order the main agent wrote them."""
+
+    conventions: str
+    assignments: tuple[JevSwarmAssignment, ...]
+
+    def __post_init__(self) -> None:
+        # @intent a-plan-is-a-team-of-distinct-units
+        # One assignment is a subagent, not a swarm, and more than the cap is unbounded spend; ids follow plan order
+        # and names differ so every result can be matched to exactly one unit.
+        _require_bounded_text(self.conventions, field_name="swarm plan conventions", maximum=JEV_SWARM_FIELD_MAX_CHARS)
+        _require_brief_entries(self.assignments, JevSwarmAssignment, field_name="swarm plan assignments", maximum=JEV_COMPUTE_SWARM_AGENTS_MAX, minimum=JEV_COMPUTE_SWARM_AGENTS_MIN)
+        ids = tuple(assignment.id for assignment in self.assignments)
+        expected = tuple(f"{JEV_SWARM_ASSIGNMENT_ID_PREFIX}{position}" for position in range(JEV_SWARM_FIRST_ASSIGNMENT, JEV_SWARM_FIRST_ASSIGNMENT + len(ids)))
+        if ids != expected:
+            raise JevValidation.error("swarm plan assignment ids", f"{', '.join(expected)} in plan order", ", ".join(ids))
+        names = tuple(" ".join(assignment.name.split()).casefold() for assignment in self.assignments)
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise JevValidation.error("swarm plan assignment names", "a different name for every assignment", ", ".join(duplicates))
+
+
+@dataclass(frozen=True, slots=True)
+class JevSwarmOutput:
+    """What one SWARM helper returned: its assignment id and name, its reply, and whether it completed with a reply."""
+
+    id: str
+    name: str
+    content: str
+    completed: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or _SWARM_ASSIGNMENT_ID.fullmatch(self.id) is None:
+            raise JevValidation.error("swarm output id", f"{JEV_SWARM_ASSIGNMENT_ID_PREFIX} followed by the assignment's position", self.id)
+        JevText.require(self.name, field_name=f"name of swarm output {self.id!r}")
+        if not isinstance(self.completed, bool):
+            raise JevValidation.error(f"completed of swarm output {self.id!r}", "a bool", self.completed)
+        if not isinstance(self.content, str) or bool(self.content.strip()) is not self.completed:
+            raise JevValidation.error(f"content of swarm output {self.id!r}", "a non-blank reply when completed and an empty string when failed", self.content)
+
+
+@dataclass(frozen=True, slots=True)
+class JevSwarmResult:
+    """The run's one SWARM launch: the checkpoint iteration that armed it, the plan that ran, each helper's output in plan order, and the plans submitted."""
+
+    iteration: int
+    plan: JevSwarmPlan
+    outputs: tuple[JevSwarmOutput, ...]
+    attempts: int
+
+    def __post_init__(self) -> None:
+        JevCount.require(self.iteration, field_name="swarm iteration")
+        if not isinstance(self.plan, JevSwarmPlan):
+            raise JevValidation.error("swarm plan", "a JevSwarmPlan", self.plan)
+        if not isinstance(self.outputs, tuple) or not all(isinstance(output, JevSwarmOutput) for output in self.outputs):
+            raise JevValidation.error("swarm outputs", "a tuple of JevSwarmOutput values", self.outputs)
+        if tuple(output.id for output in self.outputs) != tuple(assignment.id for assignment in self.plan.assignments):
+            raise JevValidation.error("swarm outputs", "one output per plan assignment, in plan order", tuple(output.id for output in self.outputs))
+        JevCount.require(self.attempts, field_name="swarm plan attempts", minimum=JEV_SWARM_FIRST_ASSIGNMENT)
+        if self.attempts > JEV_SWARM_PLAN_MAX_ATTEMPTS:
+            raise JevValidation.error("swarm plan attempts", f"at most {JEV_SWARM_PLAN_MAX_ATTEMPTS}", self.attempts)
+
+
 __all__ = [
     "JevCloneResult",
+    "JevSwarmAssignment",
+    "JevSwarmOutput",
+    "JevSwarmPlan",
+    "JevSwarmPlanQuestion",
+    "JevSwarmResult",
     "JevCount",
     "JevRunBrief",
     "JevRunBriefAppendPayload",

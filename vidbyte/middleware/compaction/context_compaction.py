@@ -196,7 +196,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         if self.mode is CompactionMode.QUERY_RELEVANCE_FILTER and options.get("query") is None:
             options["query"] = ctx.message
         messages, stats = await self.engine.compact_provider_messages(ctx.provider_messages, mode=self.mode, options=options)
-        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "before_count": stats.before_count, "after_count": stats.after_count})
+        # @intent content-rewrites-count-as-compactions
+        # Report whether the history really changed, because modes that rewrite tool results in place keep the message count.
+        changed = messages != tuple(dict(message) for message in ctx.provider_messages)
+        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "before_count": stats.before_count, "after_count": stats.after_count, "changed": changed})
         return MiddlewareDecision.continue_(transform=transform)
 
     def _validate_options(self) -> None:

@@ -21,6 +21,8 @@ import json
 import unittest
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareContext,
@@ -405,6 +407,25 @@ class CanaryTripwireRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("VIDBYTE-CANARY-", runner.seen_tool_output)
         self.assertEqual(result.metadata.get("middleware_abort_reason"), "canary_leaked")
         self.assertEqual(sent, [])
+
+    async def test_canary_survives_tool_result_truncation(self) -> None:
+        # @intent appended-middleware-notes-survive-truncation
+        # [Silent Failure] A result_max_chars cap shorter than the tool output must not cut the canary off.
+        @tool
+        def lookup() -> str:
+            # Returns an internal document longer than the visible-output cap.
+            return "internal document " * 25
+
+        middleware = (CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7),)
+        config = AgentRuntimeConfig(tool_settings=ToolSettings(result_max_chars=120))
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), config=config, middleware=middleware)
+        context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        runner = EchoRunner(echo=True)
+        handle = RunnerHandle(runner=runner, provider="openai", invoke=invoke_echo_runner, extract_text=echo_runner_text, extract_metadata=echo_runner_metadata)
+        result = await runtime.arun("task", handle=handle, context=context)
+        self.assertIn("tool output truncated by ToolSettings", runner.seen_tool_output)
+        self.assertIn("VIDBYTE-CANARY-", runner.seen_tool_output)
+        self.assertEqual(result.metadata["middleware_abort_reason"], "canary_leaked")
 
     async def test_model_not_echoing_tool_output_finishes_normally(self) -> None:
         # [Edge Case] A model that does not repeat the canary finishes without an abort.

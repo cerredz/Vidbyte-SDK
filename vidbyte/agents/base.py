@@ -55,6 +55,7 @@ from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSc
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.base import BaseTool, _unwrap_tool
@@ -493,6 +494,7 @@ class BaseAgent(McpAttachableMixin):
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
             timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
+            fallback=state.runtime_config.get("fallback_models") or None,
             trace_option=cls._restore_trace_option(state),
             description=state.description,
             capabilities=tuple(state.capabilities),
@@ -518,6 +520,10 @@ class BaseAgent(McpAttachableMixin):
             "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
             "runner_timeout_seconds": self.runner_config.timeout_seconds,
         }
+        if self.fallback is not None:
+            # @intent resume-keeps-fallback-chain
+            # Store backups as credential-free 'provider/model' strings; keys re-resolve on restore.
+            config["fallback_models"] = [m.identity() for m in self.fallback.models[1:]]
         if isinstance(self.runtime_config_obj, ActorRuntime):
             config.update(
                 {
@@ -921,7 +927,8 @@ class BaseAgent(McpAttachableMixin):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.generate_reply(message, **options))
+            # The loop ends with this call, so hand MCP servers back to the pending list before it closes.
+            return asyncio.run(self._run_releasing_mcp(self.generate_reply(message, **options)))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
 
     def get_usage(self) -> UsageRollup:
@@ -968,7 +975,7 @@ class BaseAgent(McpAttachableMixin):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.arun_sequentially(prompts, **options))
+            return asyncio.run(self._run_releasing_mcp(self.arun_sequentially(prompts, **options)))
         raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
 
     def enqueue_prompts(self, prompts: Sequence[str]) -> int:
@@ -1381,8 +1388,9 @@ class BaseAgent(McpAttachableMixin):
 
     @staticmethod
     def _is_secret_trace_key(key: str) -> bool:
-        upper = key.upper()
-        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+        # @intent trace-scrub-uses-precise-credential-keys
+        # Exact credential names and suffixes only, so author_id or max_tokens stay in the trace.
+        return CredentialKeyPolicy.is_secret_key(key)
 
     @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
@@ -1557,7 +1565,8 @@ def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
         upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+        # @intent trace-scrub-uses-precise-credential-keys
+        if upper.startswith("LANGSMITH_") or CredentialKeyPolicy.is_secret_key(key_text):
             continue
         safe[key_text] = _safe_trace_value(value)
     return safe

@@ -154,6 +154,21 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("appears 2 times", result.output)
 
+    async def test_edit_errors_when_old_string_matches_overlapping_positions(self) -> None:
+        """Verify context_edit refuses an old string that matches at two overlapping positions."""
+        manager = ContextManager()
+        original = "func a() {\nif x {\nfor {\n}\n}\n}\n"
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content=original))
+        tool = ContextEditTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "note:1", "old_string": "}\n}\n", "new_string": "}\n"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("appears 2 times", result.output)
+        stored = manager.get_by_id("note:1")
+        assert stored is not None
+        self.assertEqual(stored.content, original)
+
     async def test_edit_replaces_unique_plan_step(self) -> None:
         """Verify context_edit can patch a unique string inside plan step tuples."""
         manager = ContextManager()
