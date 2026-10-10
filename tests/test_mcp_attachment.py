@@ -13,7 +13,8 @@ Architecture:
       started on, proving sync run() and pipeline run_sync() reconnect instead of reusing a closed
       loop's pipes, while one long-lived loop keeps its connection.
     - GatedMcpTransport / OverlappingLazyAttachTests: an attach held open by a gate, proving overlapping
-      first runs on one agent wait for the in-flight lazy attach and all see its tools.
+      first runs on one agent wait for the in-flight lazy attach and all see its tools, and that a run
+      cancelled mid-attach re-queues its servers (closing any it started) so a later run attaches them.
 Relations:
     - vidbyte/agents/mixins.py
     - vidbyte/agents/base.py
@@ -353,13 +354,16 @@ class SyncRunMcpLoopTests(unittest.TestCase):
 
 
 class GatedMcpTransport(MockMcpStdioTransport):
-    """Mock transport whose start blocks on a gate, like a slow server subprocess spawn."""
+    """Mock transport whose initialize handshake blocks on a gate, like a slow server booting."""
 
     gate: asyncio.Event
 
-    async def start(self) -> None:
-        await GatedMcpTransport.gate.wait()
-        await super().start()
+    async def request(self, method: str, params: dict[str, any] | None = None) -> dict[str, any]:
+        # The client never calls start() on its own, so hold the handshake itself open.
+        # An "ungated" server answers at once, so a batch can hold one started server while another waits.
+        if method == "initialize" and self.command[0] != "ungated":
+            await GatedMcpTransport.gate.wait()
+        return await super().request(method, params)
 
 
 class ToolsOfferedRunner:
@@ -420,6 +424,59 @@ class OverlappingLazyAttachTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(MockMcpStdioTransport.instances), 2)
         self.assertEqual(agent._pending_mcp_configs, [config])
         self.assertIsNone(agent._mcp_attach_in_flight)
+
+    async def test_cancelled_attach_requeues_its_servers_for_the_next_run(self) -> None:
+        runner = ToolsOfferedRunner()
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        agent.with_mcp_server(command=["ungated"], permission=McpToolPermission.READONLY)
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+        configs = list(agent._pending_mcp_configs)
+
+        # Cancel the first run while "mini" is still starting and "ungated" has already started.
+        first = asyncio.ensure_future(agent.arun("request 1"))
+        while len(MockMcpStdioTransport.instances) < 2:
+            await asyncio.sleep(0)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+
+        # Both servers wait to connect again in order, none is attached, and nothing started is left running.
+        self.assertEqual(agent._pending_mcp_configs, configs)
+        self.assertEqual(agent.mcp_servers(), ())
+        self.assertIsNone(agent._mcp_attach_in_flight)
+        self.assertTrue(all(inst.closed for inst in MockMcpStdioTransport.instances))
+
+        # A later run attaches both servers and is offered their tools.
+        GatedMcpTransport.gate.set()
+        await agent.arun("request 2")
+        self.assertEqual([handle.config for handle in agent.mcp_servers()], configs)
+        self.assertEqual(agent._pending_mcp_configs, [])
+        self.assertTrue({"remote_ungated", "remote_mini"} <= set(runner.offered["request 2"]))
+
+    async def test_waiting_run_attaches_after_the_in_flight_attach_is_cancelled(self) -> None:
+        runner = ToolsOfferedRunner()
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+
+        # Run 2 waits on run 1's attach; run 1 is cancelled before the server finishes starting.
+        first = asyncio.ensure_future(agent.arun("request 1"))
+        while not MockMcpStdioTransport.instances:
+            await asyncio.sleep(0)
+        second = asyncio.ensure_future(agent.arun("request 2"))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+        GatedMcpTransport.gate.set()
+        await second
+
+        # The waiting run picked up the re-queued server, attached it, and was offered its tool.
+        self.assertEqual(len(agent.mcp_servers()), 1)
+        self.assertEqual(agent._pending_mcp_configs, [])
+        self.assertIn("remote_mini", runner.offered["request 2"])
 
     async def test_sequential_first_runs_still_attach_once(self) -> None:
         GatedMcpTransport.gate.set()
