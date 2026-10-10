@@ -64,6 +64,15 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("escapes root", result.output)
 
+    async def test_grep_refuses_string_regex_flag(self) -> None:
+        """Grep refuses a stringly boolean instead of reading "false" as True."""
+        result = await GrepTool(self.root).execute(
+            ToolCall("grep", {"pattern": "expiration", "regex": "false"})
+        )
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("'regex' must be a boolean (true/false)", result.output)
+        self.assertEqual(result.metadata["error"], "invalid_argument")
+
     async def test_semantic_fallback_ranks_token_overlap(self) -> None:
         """Semantic search works without an embedding provider."""
         result = await SemanticSearchTool(str(self.root)).execute(

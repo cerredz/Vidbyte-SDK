@@ -21,11 +21,11 @@ class WriteTextTool(FileSystemTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Extract arguments, write the file, and return the resolved path on success.
+        # Extract arguments (the create_parents flag strictly), write the file, and return the resolved path on success.
         path = call.arguments.get("path", "")
         content = call.arguments.get("content", "")
-        create_parents = bool(call.arguments.get("create_parents", False))
         try:
+            create_parents = self._resolve_bool_argument(call, "create_parents", default=False)
             self._require_write()
             target = self._path(path)
             self.backend.write_text(target, content, encoding=self._config.encoding, create_parents=create_parents)

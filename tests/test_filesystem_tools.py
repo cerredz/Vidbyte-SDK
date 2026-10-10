@@ -358,6 +358,32 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             result = run(DeleteTool(config).execute(ToolCall("delete", {"path": "nope.txt"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
 
+    def test_delete_refuses_string_recursive_flag_and_keeps_directory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "reports").mkdir()
+            Path(tmp, "reports", "q1.txt").write_text("keep", encoding="utf-8")
+            result = run(DeleteTool(config).execute(ToolCall("delete", {"path": "reports", "recursive": "false"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("'recursive' must be a boolean (true/false)", result.output)
+            self.assertTrue(Path(tmp, "reports", "q1.txt").exists())
+
+    def test_make_dir_null_flags_use_documented_defaults(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            result = run(MakeDirTool(config).execute(ToolCall("make_dir", {"path": "a/b/c", "parents": None, "exist_ok": None})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertTrue(Path(tmp, "a", "b", "c").is_dir())
+
+    def test_create_parents_string_flag_is_refused_without_writing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for tool, name in ((WriteTextTool(config), "write_text"), (AppendTool(config), "append_text"), (TouchTool(config), "touch")):
+                result = run(tool.execute(ToolCall(name, {"path": "new/f.txt", "content": "x", "create_parents": "false"})))
+                self.assertEqual(result.status, ToolStatus.ERROR, name)
+                self.assertIn("'create_parents' must be a boolean (true/false)", result.output)
+            self.assertFalse(Path(tmp, "new").exists())
+
     def test_diff_without_content_or_other_path_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
