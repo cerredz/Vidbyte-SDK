@@ -101,6 +101,14 @@ class McpClient:
             if isinstance(item, Mapping):
                 if item.get("type") == "text":
                     parts.append(str(item.get("text", "")))
+                elif item.get("type") in ("image", "audio") and "data" in item:
+                    # @intent mcp-binary-content-stays-out-of-prompts
+                    # Image and audio blocks carry a base64 `data` payload that can run to megabytes and
+                    # that the model cannot read as text. Dumping it would flood the context window, so
+                    # only a short placeholder naming the block type and media type reaches the prompt.
+                    size = len(str(item.get("data", "")))
+                    mime = item.get("mimeType", "unknown")
+                    parts.append(f"[{item.get('type')}: {mime}, {size} base64 chars omitted]")
                 else:
                     parts.append(str(item))
             else:
