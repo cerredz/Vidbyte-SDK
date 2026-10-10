@@ -927,7 +927,8 @@ class BaseAgent(McpAttachableMixin):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.generate_reply(message, **options))
+            # The loop ends with this call, so hand MCP servers back to the pending list before it closes.
+            return asyncio.run(self._run_releasing_mcp(self.generate_reply(message, **options)))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
 
     def get_usage(self) -> UsageRollup:
@@ -974,7 +975,7 @@ class BaseAgent(McpAttachableMixin):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.arun_sequentially(prompts, **options))
+            return asyncio.run(self._run_releasing_mcp(self.arun_sequentially(prompts, **options)))
         raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
 
     def enqueue_prompts(self, prompts: Sequence[str]) -> int:
