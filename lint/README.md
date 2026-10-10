@@ -139,6 +139,8 @@ Nested folders:
 | S060 | typed-public-seam-mappings | Public seams name their mapping shape instead of dict[str, Any] |
 | S061 | bounded-safe-path | File/archive I/O on a dynamic path is resolved and contained |
 | S062 | no-implicit-string-concatenation | Each string, including model-facing text, is one literal rather than adjacent literals |
+| S063 | gather-exceptions-classified | gather(return_exceptions=True) results are tested against BaseException, never only Exception or discarded unseen |
+| S064 | retry-overall-deadline | A retry loop that sleeps between attempts stops at one cumulative deadline or runs under asyncio.timeout |
 
 ### Agent-native rules
 
@@ -169,6 +171,9 @@ Nested folders:
 | C010 | pricebook-vintage-bump | Changed rates move their pricebook vintage and refresh the lock |
 | C011 | agent-owned-usage-and-sync-twins | Model usage reaches the agent's tracker; entry classes pair run() with arun() |
 | C012 | provider-model-registry-validation | Config provider/model fields are checked against the registry and typed ModelProvider |
+| C013 | jev-decision-helper-only | Agents ask and score Jev only through DecisionModelHelper, one request per decision |
+| C014 | jev-done-check-parity | Every JevDoneCheck has its question module, keys, registry entries, handoff section, and handlers |
+| C015 | package-data-coverage | Every non-README file in the vidbyte package ships in the wheel; no README ships; no pattern is dead |
 | C016 | public-api-contract-current | contracts/sdk-public-api.json equals the generator's output for vidbyte.__all__ and the pyproject version |
 | C017 | platform-route-contract | SDK requests to Vidbyte hosts use a contract route, an accepted method, and an admitted credential |
 | C018 | canonical-api-host | Vidbyte API URLs in vidbyte/ string literals use an origin the platform contract lists as live |

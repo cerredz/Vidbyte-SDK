@@ -39,6 +39,9 @@ RULE_MODULES = (
     "lint.rules.c010_pricebook_vintage_bump",
     "lint.rules.c011_agent_owned_usage_and_sync_twins",
     "lint.rules.c012_provider_model_registry_validation",
+    "lint.rules.c013_jev_decision_helper_only",
+    "lint.rules.c014_jev_done_check_parity",
+    "lint.rules.c015_package_data_coverage",
     "lint.rules.c016_public_api_contract_current",
     "lint.rules.c017_platform_route_contract",
     "lint.rules.c018_canonical_api_host",
@@ -104,6 +107,8 @@ RULE_MODULES = (
     "lint.rules.s060_typed_public_seam_mappings",
     "lint.rules.s061_bounded_safe_path",
     "lint.rules.s062_no_implicit_string_concatenation",
+    "lint.rules.s063_gather_exceptions_classified",
+    "lint.rules.s064_retry_overall_deadline",
 )
 
 
