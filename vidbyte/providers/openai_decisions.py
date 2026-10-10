@@ -4,7 +4,7 @@ PURPOSE: The OpenAI Decisions wire: `OpenAIDecisionsRequest` builds and encodes 
 ROLE IN CODEBASE: `ModelProviders.decision()` builds `OpenAIDecisionsProvider` for `ModelProvider.OPENAI` and `vidbyte/lib/runners/decision.py` calls `run_decision`; the wire records come from `vidbyte/lib/dataclasses/jev.py` and the HTTP call and failure wording from `vidbyte/providers/decisions.py`.
 ARCHITECTURE NOTE: The records stay encoder-free: only `OpenAIDecisionsRequest.encode` turns a wire record into JSON, and HTTP goes through `vidbyte.lib.http` via `DecisionHttpCall`. Answers normalize onto the same JevAnswer shapes the System One wire produces, so `DecisionModelHelper` reads both alike. Imports only `vidbyte.lib` and `vidbyte.providers.decisions` (A006).
 COMMON MODIFICATION PATTERNS: When OpenAI changes the Decisions API, update the wire records, `OpenAIDecisionsRequest`, and `OpenAIDecisionsAnswers` together and extend the scripted-transport tests; wire literals belong in `vidbyte/lib/constants/jev.py`.
-KNOWN EDGE CASES: `input`, `instructions`, and option descriptions are strings on this wire, so structured content is sent as JSON text. A predicate has no criteria slot, so noul option descriptions are refused before the call rather than dropped. Answers arrive as an array in any order; a `refusal` answer, a duplicate, missing, or extra name, a wrong type, or a malformed distribution is a ProviderResponseError carrying the billed usage. Score entries without `label` use `value` as the level index. No response-level `model` echo is documented, so the response reports the requested model id, which is what the ledger prices. There is no model-list endpoint or managed run, so `list_models` and `close_run` raise.
+KNOWN EDGE CASES: `input`, `instructions`, and option descriptions are strings on this wire, so structured content is sent as JSON text. A predicate has no criteria slot, so noul option descriptions are refused before the call rather than dropped. Answers arrive as an array in any order; a `refusal` answer, a duplicate, missing, or extra name, a wrong type, or a malformed distribution is a ProviderResponseError carrying the billed usage. Score entries without `label` use `value` as the level index. No response-level `model` echo is documented, so the response reports the requested model id, which is what the ledger prices. There is no model-list endpoint or managed run, so `list_models` and `close_run` raise; the URL comes from OpenAI's direct endpoint, never `DecisionModelConfig.resolved_endpoint()`, whose managed branch points at the Vidbyte gateway (C017).
 RELATED DOCS: vidbyte/providers/README.md ("Decision providers"), docs/spec/decision-model-providers/spec.md, https://developers.openai.com/api/docs/guides/decisions.
 TESTS: tests/features/decision_model_providers/test_decision_openai_wire.py, tests/features/decision_model_providers/test_decision_failures.py, and tests/features/decision_model_providers/test_decision_usage_metering.py.
 """
@@ -48,6 +48,7 @@ from vidbyte.lib.errors import (
     ProviderResponseError,
 )
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.providers.decisions import DecisionFailures, DecisionHttpCall
 
@@ -297,7 +298,9 @@ class OpenAIDecisionsProvider:
         idempotency_key = uuid.uuid4().hex if config.retry_count > JEV_NO_RETRIES else None
         body = OpenAIDecisionsRequest.encode(OpenAIDecisionsRequest.build(config, request))
         headers = self._parser.bearer_headers(config.resolved_api_key())
-        return DecisionHttpCall(method="POST", url=f"{config.resolved_endpoint()}{OPENAI_DECISIONS_PATH}", headers=headers, timeout_seconds=config.timeout_seconds, json_body=body, retry_count=config.retry_count, idempotency_key=idempotency_key)
+        # The URL is OpenAI's endpoint (an explicit override first); managed mode is TypeSafe-only, so it never applies here.
+        endpoint = ProviderModelRegistry.resolve_endpoint(self.provider, config.endpoint)
+        return DecisionHttpCall(method="POST", url=f"{endpoint}{OPENAI_DECISIONS_PATH}", headers=headers, timeout_seconds=config.timeout_seconds, json_body=body, retry_count=config.retry_count, idempotency_key=idempotency_key)
 
 
 __all__ = ["OpenAIDecisionsAnswers", "OpenAIDecisionsProvider", "OpenAIDecisionsRequest"]

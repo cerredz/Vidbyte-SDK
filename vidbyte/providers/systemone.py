@@ -4,7 +4,7 @@ PURPOSE: The System One wire for every host that serves it: `SystemOneRequest` b
 ROLE IN CODEBASE: `ModelProviders.decision()` builds `SystemOneProvider` for the seven direct System One hosts and `vidbyte/lib/runners/decision.py` calls `run_decision`; `vidbyte/providers/typesafe.py` reuses `SystemOneRequest`, `SystemOneAnswers`, and the TypeSafe row of `SystemOneProvider.HOSTS` and adds only TypeSafe's managed gateway, model list, and run close.
 ARCHITECTURE NOTE: One adapter class serves every host; the differences live in one `SystemOneHost` row per provider (display name, path, auth scheme, and two wire quirks) defined in `vidbyte/lib/dataclasses/jev.py`. The records stay encoder-free: only `SystemOneRequest.encode` turns a wire record into JSON, and HTTP goes through `vidbyte.lib.http` via `DecisionHttpCall`. Imports only `vidbyte.lib` and `vidbyte.providers.decisions` (A006).
 COMMON MODIFICATION PATTERNS: A new System One host is a `ModelProvider` member, registry rows, a path constant in `vidbyte/lib/constants/jev.py`, and one `HOSTS` row here; set `model_from_request=True` unless the vendor documents the `model` it echoes. When the System One API changes, update the wire records, `SystemOneRequest`, and `SystemOneAnswers` together and extend the scripted-transport tests.
-KNOWN EDGE CASES: OpenRouter rejects a noul question without criteria, so its row sends `{"true": null, "false": null}`. Score answers key probabilities by level index strings and carry a weighted `score` between levels; both normalize onto level labels. Noul answers carry no confidence. A malformed answer raises ProviderResponseError carrying the billed usage. Hosts with an undocumented `model` echo report the requested model id, because the ledger prices `DecisionModelResponse.model`. No host but TypeSafe has a model list or managed runs, so `list_models` and `close_run` raise.
+KNOWN EDGE CASES: OpenRouter rejects a noul question without criteria, so its row sends `{"true": null, "false": null}`. Score answers key probabilities by level index strings and carry a weighted `score` between levels; both normalize onto level labels. Noul answers carry no confidence. A malformed answer raises ProviderResponseError carrying the billed usage. Hosts with an undocumented `model` echo report the requested model id, because the ledger prices `DecisionModelResponse.model`. No host but TypeSafe has a model list or managed runs, so `list_models` and `close_run` raise, and a managed config is refused at construction and per call; the URL comes from the host's direct endpoint, never `DecisionModelConfig.resolved_endpoint()`, whose managed branch points at the Vidbyte gateway (C017).
 RELATED DOCS: vidbyte/providers/README.md ("Decision providers"), docs/spec/decision-model-providers/spec.md, https://docs.typesafe.ai/api.md, https://docs.perplexity.ai/api-reference/decisions-post, https://www.baseten.co/library/mercury-decide/, https://developers.cloudflare.com/workers-ai/models/clef/, https://docs.liquid.ai/lfm/models/d1, https://meragpt.com/docs.
 TESTS: tests/features/decision_model_providers/test_decision_systemone_wire.py, tests/features/decision_model_providers/test_decision_failures.py, tests/features/decision_model_providers/test_decision_usage_metering.py, and tests/test_jev_agent.py.
 """
@@ -54,6 +54,7 @@ from vidbyte.lib.errors import (
     ProviderResponseError,
 )
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.providers.decisions import DecisionFailures, DecisionHttpCall
 
@@ -284,11 +285,14 @@ class SystemOneProvider:
         # Resolves the active config: the per-call one when given, else the adapter's, refusing another provider's.
         # @intent per-call-config-stays-on-this-host
         # The host row, URL, and auth scheme were bound at construction; another provider's config would post its
-        # key to this host, so it is refused before any URL or header is built.
+        # key to this host, so it is refused before any URL or header is built. A managed config is refused for the
+        # same reason: its Vidbyte key must never be posted to a vendor host.
         resolved = config or self._decision_config
         other = resolved.normalized_provider()
         if other is not self.provider:
             raise ProviderConfigurationError(f"{self._host.display_name} adapter received a config for provider '{other.value}'.", provider=self.provider.value)
+        if resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
+            raise ProviderConfigurationError("SystemOneProvider sends direct calls only; managed TypeSafe decisions go through TypeSafeProvider.", provider=self.provider.value)
         return resolved
 
     def _call(self, config: DecisionModelConfig, request: JevDecisionRequest) -> DecisionHttpCall:
@@ -301,7 +305,9 @@ class SystemOneProvider:
         key = config.resolved_api_key()
         headers = self._parser.bearer_headers(key)
         headers["authorization"] = f"{self._host.auth_scheme.value} {key}"
-        return DecisionHttpCall(method="POST", url=f"{config.resolved_endpoint()}{self._host.path}", headers=headers, timeout_seconds=config.timeout_seconds, json_body=body, retry_count=config.retry_count, idempotency_key=idempotency_key)
+        # The URL is the host's own endpoint (an explicit override first); this adapter never targets the managed Vidbyte gateway.
+        endpoint = ProviderModelRegistry.resolve_endpoint(self.provider, config.endpoint)
+        return DecisionHttpCall(method="POST", url=f"{endpoint}{self._host.path}", headers=headers, timeout_seconds=config.timeout_seconds, json_body=body, retry_count=config.retry_count, idempotency_key=idempotency_key)
 
 
 __all__ = ["SystemOneAnswers", "SystemOneProvider", "SystemOneRequest"]
