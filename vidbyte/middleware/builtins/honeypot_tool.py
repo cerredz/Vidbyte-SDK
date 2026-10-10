@@ -25,6 +25,10 @@ class HoneypotToolMiddleware(AgentMiddleware):
 
     def __init__(self, *, trap_tool_names: Iterable[str], abort_reason: str = "honeypot_triggered") -> None:
         # Validates and stores the set of trap tool names as a frozen lookup set.
+        # @intent name-lists-reject-bare-strings
+        # A typo like ("admin_shell") is a str, so frozenset() would trap its characters and the honeypot never fires.
+        if isinstance(trap_tool_names, (str, bytes)):
+            raise ValueError("HoneypotToolMiddleware.trap_tool_names must be an iterable of tool names, not a string.")
         self._traps = frozenset(trap_tool_names)
         if not self._traps:
             raise ValueError("trap_tool_names must contain at least one name.")

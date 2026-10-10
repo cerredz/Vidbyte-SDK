@@ -28,6 +28,18 @@ class FallbackEnabledValidationTests(unittest.TestCase):
         self.assertTrue(AgentFallbackSettings(models=["gpt-5.4-mini"], enabled=True).enabled)
 
 
+class FallbackModelsBareStringTests(unittest.TestCase):
+    def test_rejects_a_bare_model_name_string(self) -> None:
+        # ("deepseek-reasoner") is a str, not a 1-tuple; it must not become one-character models.
+        for value in ("deepseek-reasoner", b"deepseek-reasoner"):
+            with self.subTest(value=value), self.assertRaisesRegex(ConfigurationError, "models must be a sequence of models, not a string"):
+                AgentFallbackSettings(models=value)
+
+    def test_one_item_tuple_and_list_keep_their_single_model(self) -> None:
+        self.assertEqual(AgentFallbackSettings(models=("deepseek-reasoner",)).models, ("deepseek-reasoner",))
+        self.assertEqual(AgentFallbackSettings(models=["deepseek-reasoner"]).models, ("deepseek-reasoner",))
+
+
 
 class FallbackApiKeyInheritanceTests(unittest.TestCase):
     PRIMARY = FallbackModel(provider="openai", model="gpt-x", api_key="sk-openai", temperature=0.3)
