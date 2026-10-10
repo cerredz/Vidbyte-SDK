@@ -1,0 +1,23 @@
+{
+  "name": "Jev Bulk Work",
+  "description": "Instructions for JevAgent's BULK_WORK preset after Jev approves splitting a request: the run_bulk_work tool's model-facing descriptions, which tell the main agent how to write the tasks, the message and system prompt each fresh agent receives, the handoffs the tool returns to the main agent, and the messages for rejected tasks and a used tool.",
+  "key": "jev_bulk_work",
+  "prompts": {
+    "tool_description": {
+      "path": "tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work/tool_description.md"
+    },
+    "worker_system_prompt": {
+      "path": "worker_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work/worker_system_prompt.md"
+    },
+    "synthesis_prompt": {
+      "path": "synthesis_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work/synthesis_prompt.md"
+    },
+    "tasks_description": "The tasks, one for each agent, in the order you want their handoffs returned. Give at least {min_agents} and no more than {agents}. Write each task as complete instructions for an agent that cannot see this conversation: name the exact items it covers, what to do with them, and what result to hand back. Every item the user asked about belongs to exactly one task.",
+    "task_prompt": "# Original request\n\n{request}\n\n# Your task\n\n{task}",
+    "rejected_prompt": "The agents were not started because the tasks need a change: {problem} Fix the tasks and call the tool again, or do the work yourself.",
+    "closed_prompt": "The agents already ran for this request, so the tool will not start them again. Use the handoffs you received and finish any remaining work yourself."
+  }
+}
