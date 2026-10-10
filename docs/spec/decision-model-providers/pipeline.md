@@ -14,7 +14,7 @@ started: 2026-10-10 01:32
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 01:32 | 2026-10-10 02:45 | reports/S0-scout.md, reports/S0-research.md | base_commit 278448b0; context/code-map.md (244 lines); context/provider-research.md (473 lines, 32 catalog rows) |
-| S1 spec + review | in progress | 2026-10-10 02:50 | | reports/S1-spec-author.md (spec r1 at ecf0c4b7; report at 9fb806b8); review round 1 SOUND WITH FIXES (0 Blocker / 2 Major / 8 Minor, reports/S1-spec-review.md at 86ad332a); author revising to r2 | spec.md r1 (768 lines, 18 sections, 20 §12.3 rows, 3 new files, 6 new ModelProvider members) |
+| S1 spec + review | in progress | 2026-10-10 02:50 | | reports/S1-spec-author.md (spec r1 at ecf0c4b7; report at 9fb806b8); review round 1 SOUND WITH FIXES (0 Blocker / 2 Major / 8 Minor, reports/S1-spec-review.md at 86ad332a); author revised to r2 at a8c16e18; scoped review round 2 running | spec.md r1 (768 lines, 18 sections, 20 §12.3 rows, 3 new files, 6 new ModelProvider members) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
