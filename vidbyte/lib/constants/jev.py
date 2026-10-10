@@ -19,7 +19,9 @@ JEV_SYSTEMONE_PATH: str = "/systemone"
 JEV_MODELS_PATH: str = "/models"
 
 # Wire paths of the other decision hosts, appended to each host's resolved base endpoint (read 2026-10-10).
-# https://docs.perplexity.ai/api-reference/decisions-post
+# https://docs.perplexity.ai/api-reference/decisions-post; the same value is also the System One body path of
+# Inception (https://docs.inceptionlabs.ai/capabilities/decisions.md) and Hanzo (https://docs.hanzo.ai/docs/decisions),
+# so changing it for Perplexity re-routes those two hosts as well.
 PERPLEXITY_DECISIONS_PATH: str = "/decisions"
 # https://www.baseten.co/library/mercury-decide/
 BASETEN_DECISIONS_PATH: str = "/decisions"
