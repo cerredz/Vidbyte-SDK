@@ -688,6 +688,33 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         empty_filter = suite.filter([])
         self.assertEqual(len(empty_filter), 0)
 
+    async def test_bare_string_tags_are_one_tag(self) -> None:
+        # @intent bare-string-tag-is-one-tag
+        # [Silent Failure] set("billing") matched single letters, so a tag slice selected zero cases and passed vacuously.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "tags.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [
+                    {"prompt": "q1", "expected": "q1", "tags": "billing"},
+                    {"prompt": "q2", "expected": "q2", "tags": "billing, refunds"},
+                    {"prompt": "q3", "expected": "q3", "tags": ["math"]},
+                ]}, f)
+            suite = EvalSuite.from_json(path)
+        finally:
+            os.remove(path)
+            os.rmdir(temp_dir)
+        self.assertEqual([c.tags for c in suite.cases], [("billing",), ("billing", "refunds"), ("math",)])
+
+        self.assertEqual([c.prompt for c in suite.filter("billing")], ["q1", "q2"])
+        self.assertEqual([c.prompt for c in suite.filter(["math"])], ["q3"])
+        self.assertEqual(len(suite.filter("b")), 0)
+
+        runner = EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(suite, tags="refunds")).results), 1)
+        self.assertEqual(len((await runner.arun(suite, tags=["billing"])).results), 2)
+        self.assertEqual(len((await runner.arun(suite)).results), 3)
+
     async def test_eval_runner_with_agent_fork(self) -> None:
         # Tests EvalRunner executing suites and ensures state isolation using clone forks.
         agent = MockAgent()
