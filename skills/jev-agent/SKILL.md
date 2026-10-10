@@ -139,7 +139,7 @@ from vidbyte.lib.runners.decision import DecisionModelRunner
 runner = DecisionModelRunner(DecisionModelConfig(mode=DecisionModelMode.TYPESAFE))
 ```
 
-`DecisionModelConfig(provider=ModelProvider.PERPLEXITY)` and the other decision providers (OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry, OpenAI) work the same way in direct mode, each with its own API key and default model; see the "Decision Providers" section of `vidbyte/providers/README.md`.
+`DecisionModelConfig(provider=ModelProvider.PERPLEXITY)` and the other decision providers (OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry, Celeris, Nace.AI, Upstage, Inception, Hanzo, Vansa, ZooData, OpenAI) work the same way in direct mode, each with its own API key and default model; see the "Decision Providers" section of `vidbyte/providers/README.md`.
 
 The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it. `agent.response.done[JevDoneCheck.MULTI_PART]` reports whether every requested deliverable was shown produced in full; `agent.response.done[JevDoneCheck.SCOPE_COVERAGE]` reports whether every required group member has evidence of the requested change.
 
