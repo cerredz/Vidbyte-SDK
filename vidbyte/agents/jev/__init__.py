@@ -13,6 +13,7 @@ from vidbyte.agents.jev.agent import JevAgent
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
+    JevAlignmentSettings,
     JevComputeSettings,
     JevContinualSettings,
     JevRunBriefSettings,
@@ -105,6 +106,8 @@ from vidbyte.lib.dataclasses.jev import (
     JevSequenceStage,
     JevSequenceStageEvidence,
     JevSequenceWork,
+    JevSkillResult,
+    JevSkillsOutcome,
     JevSpecialist,
     JevTargetOutcome,
     JevTargetOutcomeEvidence,
@@ -112,6 +115,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeItem,
     JevUsageReport,
 )
+from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
@@ -127,12 +131,14 @@ from vidbyte.lib.enums.jev import (
     JevScopeBreadth,
     JevScopeUnitSource,
     JevScopeUniverse,
+    JevSkillStatus,
 )
 
 __all__ = [
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
+    "JevAlignmentSettings",
     "JevCanSimplify",
     "JevCanSimplifyEvidence",
     "JevAssumptionEvidence",
@@ -236,6 +242,10 @@ __all__ = [
     "JevScopeUnitEvidence",
     "JevScopeUnitSource",
     "JevScopeUniverse",
+    "JevSkillResult",
+    "JevSkillsOutcome",
+    "JevSkillStatus",
+    "SkillDocument",
     "JevSelfReviewEvidence",
     "JevSpecialist",
     "JevTargetOutcome",
