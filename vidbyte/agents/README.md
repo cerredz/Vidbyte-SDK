@@ -106,7 +106,7 @@ The key you pass picks the web-fetch tool: `firecrawl_api_key`, `browserbase_api
 - `bash` is not confined to `root_dir`, and it runs unsandboxed with the inherited environment. The SDK undoes nothing a tool did, so keep the folder under version control.
 - A background process must redirect both its standard output and its standard error, or the call waits for the time limit and the process is killed.
 - Each command is limited to 600 seconds and 50,000 bytes of output (the first bytes are kept). `ToolSettings.tool_timeout_seconds` and `ToolSettings.result_max_chars` remain the agent-wide controls.
-- `fork()` and `restore()` give a `BaseAgent`: restore a saved state with `BaseAgent.restore(state, tools=CodingAgent(...).tools.all())`.
+- `fork()` returns a plain `BaseAgent`. `CodingAgent.restore(state)` raises `TypeError` (no `root_dir`), so restore with `BaseAgent.restore(state, tools=CodingAgent(...).tools.all())`.
 - On Windows, `bash` needs Git for Windows, and a timed-out or cancelled command is not stopped (only Git's launcher is killed), so it may keep running after the call returns.
 
 ## Model Fallback
