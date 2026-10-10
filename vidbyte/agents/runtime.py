@@ -1920,6 +1920,10 @@ class AgentRuntime:
         meta = dict(transform.metadata or {})
         if "compaction" not in meta:
             return 0
+        # @intent content-rewrites-count-as-compactions
+        # Prefer the middleware's own changed flag, because an in-place rewrite keeps the message count.
+        if isinstance(meta.get("changed"), bool):
+            return 1 if meta["changed"] else 0
         before = meta.get("before_count")
         after = meta.get("after_count")
         if before is not None and after is not None:
