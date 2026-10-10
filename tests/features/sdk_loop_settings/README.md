@@ -27,3 +27,4 @@ It is not a home for middleware policy implementations, provider fixtures, or Je
 - 2026-10-07 - Boolean and fractional loop budgets passed validation, strings escaped as TypeError, and NaN timeouts passed - probe the constructor before testing runtime limits.
 - 2026-10-07 - Nested ToolSettings also accepted NaN and infinite per-tool timeouts; test both loop and tool-call limits.
 - 2026-10-07 - ToolErrorPolicy accepted boolean and fractional retry counts and infinite backoff parameters; include retry policy when probing settings limits.
+- 2026-10-10 - allowed_tools accepted a bare string (the ("search") one-tuple typo) and unstripped names, silently denying the intended tool - validate it like ToolSettings.denied_tools.
