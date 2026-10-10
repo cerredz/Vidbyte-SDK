@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds this preload only for nonempty `JevAlignmentSe
 ARCHITECTURE NOTE: The preload packs indexed questions into bounded TypeSafe decision requests, scores each answer independently, and records metadata plus the JevUsage total of the answered requests without storing skill text in JevAgent.response. Context replacement is immutable; runtime mutation cleanup remains JevRuntime's responsibility.
 FUNCTION INVENTORY:
     JevSkillsPreload.__init__(skills, decision, threshold, response) -> None: stores the validated run-time inputs.
-    JevSkillsPreload.run(message, context) -> BaseAgentContext: asks Jev batch by batch, records per-skill outcomes, and returns the skill-extended context.
+    JevSkillsPreload.run(message, context) -> BaseAgentContext: asks Jev about every batch concurrently, records per-skill outcomes, and returns the skill-extended context.
     JevSkillsPreload._build_batches(message) -> tuple[JevSkillBatch, ...]: greedily packs whole skills in settings order; a skill too large to send alone joins no batch.
     JevSkillsPreload._build_batch(message, indices) -> JevSkillBatch | None: builds one request, or None when it would exceed the byte bounds.
     JevSkillsPreload._score_skill(index, skill, answers) -> JevSkillResult: independently scores one fixed-index answer.
@@ -16,13 +16,14 @@ WHAT NOT TO DO:
     2. Do not interpolate caller names, descriptions, sources, or text into Jev instructions.
     3. Do not let one missing answer or failed batch erase another candidate's valid answer.
     4. Do not catch cancellation or arbitrary programming errors as provider failures.
-KNOWN EDGE CASES: A candidate that cannot fit alone is unavailable without truncation. The first failed batch stops the asking: skills already answered keep their outcome and every skill not yet answered is unavailable. An empty tuple is handled by JevAgent, which constructs no preload and makes no skill call.
+KNOWN EDGE CASES: A candidate that cannot fit alone is unavailable without truncation. All batches are asked concurrently; a failed batch leaves only its own skills unavailable, and every other batch keeps its outcome. An empty tuple is handled by JevAgent, which constructs no preload and makes no skill call.
 RELATED DOCS: `docs/design/jev-skills-preload.md`, `tests/features/jev_skills_preload/FEATURE.md`, and `skills/jev-agent/SKILL.md`.
 TESTS: `tests/test_jev_skill_preload.py` and `scripts/test-jev-skills-preload.py`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import replace
@@ -75,19 +76,24 @@ class JevSkillsPreload(JevPreload):
         # Split the skills into requests small enough for Jev. A skill too large to send even on its own joins no
         # batch, so it stays unavailable instead of being cut short.
         batches = self._build_batches(message)
+        # Ask Jev about every batch at the same time, one request per batch, so waiting does not grow with the batch count.
+        decisions = await asyncio.gather(*(DecisionModelHelper(self.decision).arun(batch.request) for batch in batches), return_exceptions=True)
         usages: list[JevUsage] = []
-        try:
-            for batch in batches:
-                # Ask Jev about every skill in this batch in one request.
-                decision = await DecisionModelHelper(self.decision).arun(batch.request)
-                # Count the tokens the request used; a reply without token counts fails like any other Jev error.
-                usages.append(JevUsage.from_decision(decision))
-                # Score each skill from its own answer, so a missing or malformed answer cannot change a sibling's outcome.
-                results.update({index: self._score_skill(index, self.skills[index - JEV_SKILL_INDEX_BASE], decision.answers) for index in batch.indices})
-        except VidbyteSdkError:
-            # Jev failed, so stop asking: skills it already answered keep their outcome, the rest stay unavailable,
-            # and the run goes on without them because skills are optional guidance.
-            pass
+        for batch, decision in zip(batches, decisions, strict=True):
+            # A Jev failure leaves only this batch's skills unavailable, and the run goes on without them because skills
+            # are optional guidance. Cancellation and programming errors are not Jev failures, so they propagate.
+            if isinstance(decision, VidbyteSdkError):
+                continue
+            if isinstance(decision, BaseException):
+                raise decision
+            # Count the tokens the request used; a reply without token counts fails like any other Jev error.
+            try:
+                usage = JevUsage.from_decision(decision)
+            except VidbyteSdkError:
+                continue
+            usages.append(usage)
+            # Score each skill from its own answer, so a missing or malformed answer cannot change a sibling's outcome.
+            results.update({index: self._score_skill(index, self.skills[index - JEV_SKILL_INDEX_BASE], decision.answers) for index in batch.indices})
         # Record every skill's outcome in settings order with the tokens the answered requests used, but never the skill text.
         self.response.skills(JevSkillsOutcome(results=tuple(results.values()), usage=JevUsage.total(usages)))
         # Add the full text of each selected skill to this run's system prompt only.

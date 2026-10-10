@@ -313,8 +313,8 @@ class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preload.response.state.skills.usage.input_tokens, sum(range(10, 10 * (successful_calls + 1), 10)))
         self.assertEqual(preload.response.state.skills.usage.output_tokens, sum(range(1, successful_calls + 1)))
 
-    async def test_batch_failure_stops_later_batches_and_fails_open(self) -> None:
-        # [Provider Outage] the first failure ends the asking, every skill stays unavailable, and the baseline context is kept.
+    async def test_batch_failure_leaves_only_its_own_skills_unavailable(self) -> None:
+        # [Provider Outage] every batch is asked at once; a failed first batch does not stop or erase the later batches.
         documents = _skills(6)
         preload = _preloader(documents)
         batches = preload._build_batches("Do this work")
@@ -324,8 +324,34 @@ class SkillsBatchTests(unittest.IsolatedAsyncioTestCase):
         with patch(_HELPER_PATH, new=_helper_class(scripted)):
             result = await preload.run("Do this work", original)
 
+        self.assertEqual(len(scripted.requests), len(batches))
+        failed_indices = set(batches[0].indices)
+        statuses = tuple(item.status for item in preload.response.state.skills.results)
+        self.assertEqual(statuses, tuple(JevSkillStatus.UNAVAILABLE if index in failed_indices else JevSkillStatus.SELECTED for index in range(1, len(documents) + 1)))
+        for index in range(1, len(documents) + 1):
+            if index in failed_indices:
+                self.assertNotIn(f"FULL BODY {index}", result.system_prompt)
+            else:
+                self.assertIn(f"FULL BODY {index}", result.system_prompt)
+        self.assertEqual(preload.response.state.skills.usage.input_tokens, sum(range(20, 10 * (len(batches) + 1), 10)))
+
+    async def test_non_sdk_error_in_a_batch_propagates(self) -> None:
+        # [Hidden Failure] gathering every batch must not turn a programming error into an unavailable skill.
+        crashing = SimpleNamespace(arun=AsyncMock(side_effect=RuntimeError("bug in the decision path")))
+        with patch(_HELPER_PATH, new=_helper_class(crashing)), self.assertRaisesRegex(RuntimeError, "bug in the decision path"):
+            await _preloader(_skills(2)).run("Do this work", BaseAgentContext(system_prompt="Base."))
+
+    async def test_failure_in_every_batch_fails_open(self) -> None:
+        # [Provider Outage] when every request fails, every skill stays unavailable and the baseline context is kept.
+        documents = _skills(6)
+        preload = _preloader(documents)
+        batches = preload._build_batches("Do this work")
+        scripted = ScriptedDecisionRunner(fail_calls=frozenset(range(1, len(batches) + 1)))
+        original = BaseAgentContext(system_prompt="Base context.")
+        with patch(_HELPER_PATH, new=_helper_class(scripted)):
+            result = await preload.run("Do this work", original)
+
         self.assertEqual(result, original)
-        self.assertEqual(len(scripted.requests), 1)
         self.assertEqual(tuple(item.status for item in preload.response.state.skills.results), (JevSkillStatus.UNAVAILABLE,) * len(documents))
         self.assertEqual(preload.response.state.skills.usage, JevUsage.total(()))
         self.assertEqual((preload.response.state.skills.usage.input_tokens, preload.response.state.skills.usage.output_tokens), (0, 0))
