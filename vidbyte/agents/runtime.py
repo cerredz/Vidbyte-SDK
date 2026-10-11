@@ -545,7 +545,9 @@ class AgentRuntime:
                 if isinstance(processed, AgentResult):
                     return await self._finish_result(processed, state)
                 _, result = processed
-                if call.tool_name == IS_DONE_TOOL_NAME:
+                # @intent denied-finish-is-not-a-finish
+                # A denied isDone is answered like any denied call and the loop continues, so its error never becomes the reply.
+                if call.tool_name == IS_DONE_TOOL_NAME and result.status.value == "success":
                     decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
                     if decision.action is not MiddlewareAction.CONTINUE:
                         abort_result = self._middleware_abort_result(
@@ -1234,9 +1236,11 @@ class AgentRuntime:
         return max(0, tool.attempts_used(call, result))
 
     @staticmethod
-    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None) -> tuple[ToolCallContext, ToolResult]:
+    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
         # Converts a deny_tool middleware decision into a denied tool-call context.
-        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata, iteration_count=iteration_count)
+        # @intent denied-internal-tool-stays-internal
+        # A middleware-denied internal tool keeps the internal marker, exactly like the permission-denied path.
+        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata, iteration_count=iteration_count, tool_is_internal=tool_is_internal)
 
     @staticmethod
     def _denied_tool_result(call: ToolCall, provider: str, *, message: str, error: str, reason: str | None, metadata: Mapping[str, Any], iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
@@ -1545,7 +1549,7 @@ class AgentRuntime:
             # attempts out of the model-visible conversation history.
             if decision.action is MiddlewareAction.DENY_TOOL:
                 denied_started_at = self.speed_tracker.now()
-                context_record, result = self._middleware_denied_tool(call, state.provider, decision, iteration_count=state.iteration_count)
+                context_record, result = self._middleware_denied_tool(call, state.provider, decision, iteration_count=state.iteration_count, tool_is_internal=tool_is_internal)
                 self.speed_tracker.record_tool_call(
                     RecordToolCallInput(
                         tool_name=call.tool_name,
@@ -1572,7 +1576,9 @@ class AgentRuntime:
                 break
             if after_decision.sleep_seconds:
                 await self.middleware.sleep(after_decision.sleep_seconds)
-        if after_decision.action is not MiddlewareAction.ABORT_RUN and call.tool_name != IS_DONE_TOOL_NAME:
+        # @intent denied-finish-is-not-a-finish
+        # Only a successful isDone is answered by the finish branch; a denied one must show the model its denial here.
+        if after_decision.action is not MiddlewareAction.ABORT_RUN and not (call.tool_name == IS_DONE_TOOL_NAME and result.status.value == "success"):
             # Show the model its view of the result, and remember that view on the record
             # so later runs replay what the model saw rather than the raw, unprotected output.
             visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision)

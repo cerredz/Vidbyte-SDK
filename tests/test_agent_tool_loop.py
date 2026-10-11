@@ -12,9 +12,10 @@ from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
-from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
+from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolPolicyMiddleware
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, ToolStatus
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
+from vidbyte.tools.security import PermissionPolicy
 
 
 class FakeResponse:
@@ -712,3 +713,48 @@ class CompactionFloorTests(unittest.IsolatedAsyncioTestCase):
         reply, _ = await self._run(exclude_tools=("lookup",))
 
         self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
+
+
+class DeniedIsDoneTests(unittest.IsolatedAsyncioTestCase):
+    # @intent denied-finish-is-not-a-finish
+    # A denied isDone is answered like any denied call and the loop continues, so the denial text never becomes the reply.
+    async def _run(self, **agent_options: object) -> tuple[object, ToolCallingRunner]:
+        @tool(permission=ToolPermission.READ)
+        def search(q: str) -> str:
+            """Search."""
+            return "hit"
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "search", '{"q": "a"}')),
+                _chat_tool_turn(("call_2", "isDone", '{"final_answer": "early"}')),
+                _text_turn("final answer in text"),
+            ]
+        )
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search], **agent_options)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+        return reply, runner
+
+    def _denial_seen_by_model(self, runner: ToolCallingRunner) -> str:
+        tool_messages = [m for m in runner.calls[2]["kwargs"]["messages"] if m.get("role") == "tool" and m.get("tool_call_id") == "call_2"]
+        self.assertEqual(len(tool_messages), 1, "the denied isDone must be answered in the model's next request")
+        return str(tool_messages[0]["content"])
+
+    async def test_permission_denied_is_done_continues_the_run(self) -> None:
+        reply, runner = await self._run(permission_policy=PermissionPolicy(allowed=frozenset({ToolPermission.READ})))
+
+        self.assertEqual(reply.content, "final answer in text")
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertIn("Permission denied", self._denial_seen_by_model(runner))
+
+    async def test_middleware_denied_is_done_continues_the_run_and_stays_internal(self) -> None:
+        reply, runner = await self._run(middleware=[ToolPolicyMiddleware(allow_tools=["search"], allow_internal_tools=False)])
+
+        self.assertEqual(reply.content, "final answer in text")
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertIn("Tool denied by middleware", self._denial_seen_by_model(runner))
+        # @intent denied-internal-tool-stays-internal
+        denied = [c for c in reply.metadata["tool_calls"] if c.tool_name == IS_DONE_TOOL_NAME]
+        self.assertEqual(len(denied), 1)
+        self.assertTrue(denied[0].metadata.get("internal"))
