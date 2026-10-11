@@ -1821,8 +1821,10 @@ class AgentRuntime:
             content=result.output,
             source=call.tool_name,
         )
+        # @intent content-update-keeps-placement
+        # Refreshing the bound slot keeps the placement the model chose with context_move; a new slot still goes to the end.
         try:
-            self.context_manager.upsert(new_primitive)
+            self.context_manager.upsert_preserving_placement(new_primitive)
         except ValueError:
             return result
         from vidbyte.tools.types import ToolResult as TR
