@@ -122,6 +122,34 @@ class MiddlewareBuiltinsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].hook, MiddlewareHook.BEFORE_RUN)
 
+    async def test_audit_log_single_hook_member_audits_only_that_hook(self) -> None:
+        # A lone MiddlewareHook is a str; it must filter to that hook, not to its characters.
+        events: list[MiddlewareEvent] = []
+        middleware = AuditLogMiddleware(events, hooks=MiddlewareHook.AFTER_RUN)
+
+        await middleware.before_run(MiddlewareContext(hook=MiddlewareHook.BEFORE_RUN, agent_name="worker"))
+        await middleware.after_run(MiddlewareContext(hook=MiddlewareHook.AFTER_RUN, agent_name="worker"))
+
+        self.assertEqual([event.hook for event in events], [MiddlewareHook.AFTER_RUN])
+
+    def test_audit_log_rejects_bare_string_hooks(self) -> None:
+        # "after_run" is a str, so a character set would silently audit nothing.
+        with self.assertRaisesRegex(ValueError, "AuditLogMiddleware.hooks must be an iterable"):
+            AuditLogMiddleware([], hooks="after_run")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "AuditLogMiddleware.hooks must be an iterable"):
+            AuditLogMiddleware([], hooks=b"after_run")  # type: ignore[arg-type]
+
+    async def test_audit_log_hook_list_still_filters(self) -> None:
+        # Verifies the list form, including plain string values, keeps filtering exactly as before.
+        for hooks in ([MiddlewareHook.AFTER_RUN], ["after_run"]):
+            events: list[MiddlewareEvent] = []
+            middleware = AuditLogMiddleware(events, hooks=hooks)  # type: ignore[arg-type]
+
+            await middleware.before_run(MiddlewareContext(hook=MiddlewareHook.BEFORE_RUN, agent_name="worker"))
+            await middleware.after_run(MiddlewareContext(hook=MiddlewareHook.AFTER_RUN, agent_name="worker"))
+
+            self.assertEqual([event.hook for event in events], [MiddlewareHook.AFTER_RUN])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -33,9 +33,15 @@ class AuditLogMiddleware(AgentMiddleware):
         self,
         sink: Callable[[MiddlewareEvent], object] | list[MiddlewareEvent],
         *,
-        hooks: Iterable[MiddlewareHook] | None = None,
+        hooks: Iterable[MiddlewareHook] | MiddlewareHook | None = None,
     ) -> None:
         self.sink = sink
+        # @intent name-lists-reject-bare-strings
+        # A lone hook is a str, so frozenset() would hold its characters and the audit trail would stay silently empty.
+        if isinstance(hooks, MiddlewareHook):
+            hooks = (hooks,)
+        elif isinstance(hooks, (str, bytes)):
+            raise ValueError("AuditLogMiddleware.hooks must be an iterable of MiddlewareHook values, not a string.")
         self.hooks = None if hooks is None else frozenset(hooks)
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
