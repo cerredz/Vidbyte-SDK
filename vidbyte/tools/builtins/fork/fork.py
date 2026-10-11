@@ -221,7 +221,9 @@ class ForkConversationTool(BaseTool):
             return None
         catalog = self._available_tools(extra_names)
         if raw_names is None:
-            selected = catalog
+            # @intent fork-extras-are-opt-in
+            # Without tool_names only the named extra toolsets join the parent's tools; a drop alone must not grant every extra.
+            selected = catalog if extra_names else self._agent.tools
         else:
             names = self._coerce_string_tuple(raw_names, "tool_names")
             selected = catalog.subset(names)
