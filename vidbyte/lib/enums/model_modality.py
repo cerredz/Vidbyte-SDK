@@ -56,6 +56,10 @@ class ModelNameModality(str, Enum):
     GPT_5_6_SOL = "text"
     GPT_5_6_TERRA = "text"
     GPT_5_6_LUNA = "text"
+    GPT_6_ASTRA = "text"
+    GPT_6_1_SOL = "text"
+    GPT_6_SOL = "text"
+    GPT_6_LUNA = "text"
 
     CLAUDE_3_5_SONNET = "text"
     CLAUDE_3_OPUS = "text"
@@ -68,6 +72,12 @@ class ModelNameModality(str, Enum):
     CLAUDE_SONNET_4_6 = "text"
     CLAUDE_SONNET_5 = "text"
     CLAUDE_FABLE_5 = "text"
+    CLAUDE_FABLE_5_1 = "text"
+    CLAUDE_MYTHOS_5_1 = "text"
+    CLAUDE_OPUS_5_5 = "text"
+    CLAUDE_SONNET_5_5 = "text"
+    CLAUDE_HAIKU_5_5 = "text"
+    CLAUDE_OPUS_5 = "text"
     CLAUDE_HAIKU_4_5 = "text"
 
     GEMINI_2_0_FLASH = "text"
@@ -75,10 +85,15 @@ class ModelNameModality(str, Enum):
     GEMINI_2_5_FLASH = "text"
     GEMINI_3_1_FLASH = "text"
     GEMINI_3_5_FLASH = "text"
+    GEMINI_3_8_FLASH = "text"
+    GEMINI_3_6_FLASH = "text"
+    GEMINI_3_5_FLASH_LITE = "text"
     GEMINI_1_5_PRO = "text"
     GEMINI_1_5_FLASH = "text"
 
     GROK_4_5 = "text"
+    GROK_4_7 = "text"
+    GROK_4_6 = "text"
     GROK_4_3 = "text"
     GROK_4 = "text"
     GROK_3 = "text"
@@ -89,9 +104,13 @@ class ModelNameModality(str, Enum):
     DEEPSEEK_V3 = "text"
     DEEPSEEK_V4_PRO = "text"
     DEEPSEEK_V4_FLASH = "text"
+    DEEPSEEK_FLASH = "text"
 
     GLM_4 = "text"
     GLM_4_FLASH = "text"
+    GLM_5_3 = "text"
+    GLM_5_3_FLASH = "text"
+    GLM_5_3_FLASHX = "text"
 
     MINIMAX_TEXT_01 = "text"
     ABAB = "text"
@@ -99,8 +118,16 @@ class ModelNameModality(str, Enum):
     MISTRAL_MEDIUM = "text"
     MISTRAL_LARGE_3 = "text"
     MISTRAL_SMALL_4 = "text"
+    MISTRAL_MEDIUM_3_5 = "text"
+    MISTRAL_LARGE_4 = "text"
+    MISTRAL_LARGE_4_0 = "text"
     KIMI_K2_6 = "text"
     KIMI_K2_7_CODE = "text"
+    MUSE_SPARK_1_3 = "text"
+    MUSE_SPARK_1_2 = "text"
+    MUSE_SPARK_1_3_CONTRIBUTOR = "text"
+    MUSE_SPARK_1_2_CONTRIBUTOR = "text"
+    MUSE_SPARK_1_1 = "text"
 
     DALL_E_2 = "image"
     DALL_E_3 = "image"
@@ -160,6 +187,10 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "gpt-5.6-sol": ModelModality.TEXT,
     "gpt-5.6-terra": ModelModality.TEXT,
     "gpt-5.6-luna": ModelModality.TEXT,
+    "gpt-6-astra": ModelModality.TEXT,
+    "gpt-6.1-sol": ModelModality.TEXT,
+    "gpt-6-sol": ModelModality.TEXT,
+    "gpt-6-luna": ModelModality.TEXT,
     "gpt-5.3-codex": ModelModality.TEXT,
     "gpt-5-pro": ModelModality.TEXT,
     "o3-pro": ModelModality.TEXT,
@@ -185,6 +216,12 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "claude-sonnet-4-5": ModelModality.TEXT,
     "claude-sonnet-4-6": ModelModality.TEXT,
     "claude-sonnet-5": ModelModality.TEXT,
+    "claude-fable-5-1": ModelModality.TEXT,
+    "claude-mythos-5-1": ModelModality.TEXT,
+    "claude-opus-5-5": ModelModality.TEXT,
+    "claude-sonnet-5-5": ModelModality.TEXT,
+    "claude-haiku-5-5": ModelModality.TEXT,
+    "claude-opus-5": ModelModality.TEXT,
     "claude-haiku-4-5": ModelModality.TEXT,
     "claude-haiku-4-5-20251001": ModelModality.TEXT,
 
@@ -199,6 +236,9 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "gemini-3.1-pro-preview": ModelModality.TEXT,
     "gemini-3.1-flash-lite": ModelModality.TEXT,
     "gemini-3.5-flash": ModelModality.TEXT,
+    "gemini-3.8-flash": ModelModality.TEXT,
+    "gemini-3.6-flash": ModelModality.TEXT,
+    "gemini-3.5-flash-lite": ModelModality.TEXT,
     "gemini-1.5-pro": ModelModality.TEXT,
     "gemini-1.5-pro-002": ModelModality.TEXT,
     "gemini-1.5-flash": ModelModality.TEXT,
@@ -213,6 +253,8 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "grok-4.3": ModelModality.TEXT,
     "grok-4.5": ModelModality.TEXT,
     "grok-4.5-latest": ModelModality.TEXT,
+    "grok-4.7": ModelModality.TEXT,
+    "grok-4.6": ModelModality.TEXT,
     "grok-build-latest": ModelModality.TEXT,
     "grok-2": ModelModality.TEXT,
     "grok-2-vision": ModelModality.TEXT,
@@ -222,6 +264,7 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "deepseek-v3": ModelModality.TEXT,
     "deepseek-v4-flash": ModelModality.TEXT,
     "deepseek-v4-pro": ModelModality.TEXT,
+    "deepseek-flash": ModelModality.TEXT,
 
     "glm-4": ModelModality.TEXT,
     "glm-4-flash": ModelModality.TEXT,
@@ -233,6 +276,9 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "glm-5-turbo": ModelModality.TEXT,
     "glm-5.1": ModelModality.TEXT,
     "glm-5.2": ModelModality.TEXT,
+    "glm-5.3": ModelModality.TEXT,
+    "glm-5.3-flash": ModelModality.TEXT,
+    "glm-5.3-flashx": ModelModality.TEXT,
 
     "minimax-text-01": ModelModality.TEXT,
     "minimax-m2": ModelModality.TEXT,
@@ -255,6 +301,11 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "kimi-k2.6": ModelModality.TEXT,
     "kimi-k2.5": ModelModality.TEXT,
     "kimi-k3": ModelModality.TEXT,
+    "muse-spark-1.3": ModelModality.TEXT,
+    "muse-spark-1.2": ModelModality.TEXT,
+    "muse-spark-1.3-contributor": ModelModality.TEXT,
+    "muse-spark-1.2-contributor": ModelModality.TEXT,
+    "muse-spark-1.1": ModelModality.TEXT,
     "kimi-k2-0905-preview": ModelModality.TEXT,
     "kimi-k2-turbo-preview": ModelModality.TEXT,
     "kimi-k2-thinking": ModelModality.TEXT,
@@ -263,6 +314,9 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "mistral-large-2512": ModelModality.TEXT,
     "mistral-large-latest": ModelModality.TEXT,
     "mistral-medium-latest": ModelModality.TEXT,
+    "mistral-medium-3-5": ModelModality.TEXT,
+    "mistral-large-4": ModelModality.TEXT,
+    "mistral-large-4-0": ModelModality.TEXT,
     "mistral-medium-2604": ModelModality.TEXT,
     "mistral-medium-2508": ModelModality.TEXT,
     "mistral-small-latest": ModelModality.TEXT,
