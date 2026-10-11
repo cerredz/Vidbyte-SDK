@@ -1280,6 +1280,21 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "success")
         self.assertEqual(store.get_meta(result.output).parent_session_id, bound.id)
 
+    async def test_fork_tool_own_session_id_keeps_bound_session_tags(self) -> None:  # [Silent Failure]
+        # @intent own-session-id-means-bound-thread
+        # Naming the bound session's own id forks it like an omitted id, so the branch keeps the session's tags.
+        store = InMemorySessionStore()
+        bound = Session(FakeAgent(), store=store, tags=("billing",))
+        await bound.arun("one")
+        tool = ForkTool(store)
+        tool.bind_session(bound)
+        result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": bound.id}))
+        self.assertEqual(result.status.value, "success")
+        meta = store.get_meta(result.output)
+        self.assertEqual(meta.parent_session_id, bound.id)
+        self.assertEqual(meta.tags, ("billing",))
+        self.assertIn(result.output, [listed.session_id for listed in store.list_sessions(tag="billing")])
+
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
         store.put(_checkpoint("secret-session", "c1"))
