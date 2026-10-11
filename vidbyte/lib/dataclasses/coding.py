@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/dataclasses/coding.py
 
-PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, and the permission policy.
-ROLE IN CODEBASE: Built by vidbyte/agents/coding.py (CodingAgent.__init__) and read by vidbyte/tools/toolsets/coding.py (CodingAgentTools); exported by the root vidbyte package.
+PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, and the context-section switches. Also defines CodingContextSectionText, one section of the CodingAgent context window.
+ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools) and by the section loaders in vidbyte/agents/coding_context/, and exported by the root vidbyte package. CodingContextSectionText is returned by each section loader and read by CodingContextWindow (vidbyte/agents/coding_context/window.py).
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
-FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy.
-COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools.
+FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; _check_context_switches checks the section switches. CodingContextSectionText.__post_init__ checks the section kind and the text fields.
+COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools. A context section with its own on/off switch adds one bool field here and one isinstance check in _check_context_switches.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
-KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools.
+KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. CodingContextSectionText does not cap its content; each loader bounds its own text.
 RELATED DOCS: docs/spec/coding-agent/spec.md; vidbyte/agents/README.md (Coding Agent)
-TESTS: tests/features/coding_agent/test_coding_agent_contract.py and tests/features/coding_agent/test_coding_agent_web_fetch.py
+TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, and tests/features/coding_agent/test_coding_agent_agents_md.py
 """
 
 from __future__ import annotations
@@ -18,12 +18,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vidbyte.lib.dataclasses.security import PermissionPolicy
+from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.errors import ConfigurationError
 
 
 @dataclass(frozen=True, slots=True)
 class CodingAgentSettings:
-    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, and the policy.
+    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, the policy, and the section switches.
 
     root_dir is typed Path | str because the record must see the raw
     value: Path("") is the current folder, so converting first would
@@ -38,6 +39,7 @@ class CodingAgentSettings:
     browserbase_api_key: str | None = field(default=None, repr=False)
     parallel_api_key: str | None = field(default=None, repr=False)
     tavily_api_key: str | None = field(default=None, repr=False)
+    load_agents: bool = True
 
     def __post_init__(self) -> None:
         # Check the root folder and keep its absolute path, so a later
@@ -50,6 +52,11 @@ class CodingAgentSettings:
 
         # Check the caller's tools and the policy every call runs under.
         self._check_tools_and_policy()
+
+        # Check the switches that turn context sections on or off: each
+        # must be a real bool, so a string such as "no" cannot turn
+        # loading on through truthiness.
+        self._check_context_switches()
 
     def _resolved_root(self) -> Path:
         """Return root_dir as an absolute path, or raise when it is not an existing directory."""
@@ -92,5 +99,48 @@ class CodingAgentSettings:
         if not isinstance(self.permission_policy, PermissionPolicy):
             raise ConfigurationError("CodingAgent permission_policy must be a PermissionPolicy.", details={"permission_policy_type": type(self.permission_policy).__name__})
 
+    def _check_context_switches(self) -> None:
+        """Raise unless every context-section switch is a real bool, not a truthy stand-in such as 1 or "yes"."""
+        if not isinstance(self.load_agents, bool):
+            raise ConfigurationError("CodingAgent load_agents must be True or False.", details={"parameter": "load_agents", "load_agents_type": type(self.load_agents).__name__})
 
-__all__ = ["CodingAgentSettings"]
+
+@dataclass(frozen=True, slots=True)
+class CodingContextSectionText:
+    """One section of a CodingAgent context window: its kind, a title, the text the model sees, and where it came from.
+
+    A section loader returns one of these, or None when it has nothing
+    to add. CodingContextWindow places it after the system prompt under
+    the primitive id section.value, in CodingContextSection order.
+    """
+
+    section: CodingContextSection
+    title: str
+    content: str
+    source: str | None = None
+
+    def __post_init__(self) -> None:
+        # Check the section kind, which decides where the text renders
+        # and which primitive id it is stored under.
+        self._check_section()
+
+        # Check the title and the text: a blank one would render an
+        # empty heading or an empty section the model cannot use.
+        self._check_text_fields()
+
+    def _check_section(self) -> None:
+        """Raise unless section is a CodingContextSection member."""
+        if not isinstance(self.section, CodingContextSection):
+            raise ConfigurationError("CodingContextSectionText section must be a CodingContextSection.", details={"field": "section", "section_type": type(self.section).__name__})
+
+    def _check_text_fields(self) -> None:
+        """Raise unless title and content are non-blank strings and source is None or a non-blank string."""
+        texts = (("title", self.title), ("content", self.content))
+        blank = [name for name, value in texts if not isinstance(value, str) or not value.strip()]
+        if self.source is not None and (not isinstance(self.source, str) or not self.source.strip()):
+            blank.append("source")
+        if blank:
+            raise ConfigurationError(f"CodingContextSectionText {', '.join(blank)} must be a non-blank string.", details={"fields": blank})
+
+
+__all__ = ["CodingAgentSettings", "CodingContextSectionText"]
