@@ -1,7 +1,7 @@
 """Tests for the five new prebuilt middleware: TokenBudgetMiddleware,
 CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
 LoopDetectionMiddleware, and CircuitBreakerMiddleware, plus the
-per-instance run state of ToolErrorPolicyMiddleware."""
+per-instance run state of ToolErrorPolicyMiddleware and TokenRateLimitMiddleware."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from vidbyte.middleware.builtins import (
     ExponentialBackoffRetryMiddleware,
     LoopDetectionMiddleware,
     TokenBudgetMiddleware,
+    TokenRateLimitMiddleware,
     ToolErrorPolicyMiddleware,
 )
 from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
@@ -84,6 +85,31 @@ async def _failed_tool_calls_before_error_abort(middleware: list[ToolErrorPolicy
             if decision.action == MiddlewareAction.ABORT_RUN:
                 return failed
     return max_calls
+
+
+class _SteppingClock:
+    """Fake monotonic clock that only moves when the test advances it."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def _hourly_rate_limit_sleeps(middleware: list[TokenRateLimitMiddleware], clock: _SteppingClock) -> list[float]:
+    """Drive rate limiters in pipeline order (25 s and 20 tokens per call) and record the hourly limiter's sleeps."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    sleeps: list[float] = []
+    for calls in range(1, 13):
+        clock.now += 25.0
+        for mw in middleware:
+            decision = await mw.before_iteration(_ctx(tokens_used=calls * 20, run_state=run_state))
+            if decision.action == MiddlewareAction.SLEEP and mw.per_seconds == 3600:
+                sleeps.append(decision.sleep_seconds)
+    return sleeps
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +292,25 @@ class TestToolErrorPolicyMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(alone, 3)
         self.assertEqual(await _failed_tool_calls_before_error_abort([team(), org()]), alone)
         self.assertEqual(await _failed_tool_calls_before_error_abort([org(), team()]), alone)
+
+
+# ---------------------------------------------------------------------------
+# TokenRateLimitMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestTokenRateLimitMiddleware(unittest.IsolatedAsyncioTestCase):
+    async def test_per_minute_limiter_does_not_weaken_per_hour_limiter(self) -> None:
+        # [Silent Failure] A plan with per-minute and per-hour quotas must still throttle on the hourly cap.
+        def stack(*windows: int) -> tuple[list[TokenRateLimitMiddleware], _SteppingClock]:
+            clock = _SteppingClock()
+            caps = {60: 1000, 3600: 50}
+            return [TokenRateLimitMiddleware(max_tokens=caps[w], per_seconds=w, clock=clock) for w in windows], clock
+
+        alone = await _hourly_rate_limit_sleeps(*stack(3600))
+        self.assertTrue(alone)
+        self.assertEqual(await _hourly_rate_limit_sleeps(*stack(60, 3600)), alone)
+        self.assertEqual(await _hourly_rate_limit_sleeps(*stack(3600, 60)), alone)
 
 
 # ---------------------------------------------------------------------------

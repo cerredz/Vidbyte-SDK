@@ -7,7 +7,8 @@ Purpose:
     a configured window threshold.
 Architecture:
     - TokenRateLimitMiddleware: Provider-usage-only rolling window limiter.
-    - _TokenRateLimitRunState: Per-run dataclass stored in MiddlewareContext.run_state.
+    - _TokenRateLimitRunState: Per-run dataclass stored in MiddlewareContext.run_state,
+      keyed by the instance.
 Relations:
     Used through vidbyte.middleware.builtins and AgentRuntime middleware hooks.
 """
@@ -17,6 +18,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
@@ -48,16 +50,18 @@ class TokenRateLimitMiddleware(AgentMiddleware):
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Initialize a fresh per-run token window in ctx.run_state."""
-        ctx.run_state[self.__class__] = _TokenRateLimitRunState(window_started=self.clock())
+        # @intent middleware-state-is-per-instance
+        # Keyed by the instance, not the class, so a per-minute limiter never resets or eats a per-hour window.
+        run_state: dict[Any, Any] = ctx.run_state
+        run_state[self] = _TokenRateLimitRunState(window_started=self.clock())
         return MiddlewareDecision.continue_()
 
     async def before_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Throttle before the next iteration when the current window is exhausted."""
         if ctx.tokens_used is None:
             return MiddlewareDecision.continue_()
-        state: _TokenRateLimitRunState = ctx.run_state.get(self.__class__) or _TokenRateLimitRunState(
-            window_started=self.clock()
-        )
+        run_state: dict[Any, Any] = ctx.run_state
+        state: _TokenRateLimitRunState = run_state.get(self) or _TokenRateLimitRunState(window_started=self.clock())
         now = self.clock()
         if now - state.window_started >= self.per_seconds:
             state.window_started = now
@@ -69,7 +73,7 @@ class TokenRateLimitMiddleware(AgentMiddleware):
         delta = max(0, ctx.tokens_used - previous)
         state.window_tokens += delta
         state.last_tokens_seen = ctx.tokens_used
-        ctx.run_state[self.__class__] = state
+        run_state[self] = state
 
         if state.window_tokens <= self.max_tokens:
             return MiddlewareDecision.continue_()
