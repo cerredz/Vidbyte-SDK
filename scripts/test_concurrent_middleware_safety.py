@@ -150,7 +150,7 @@ async def test_loop_fresh_history_each_run() -> None:
     mw = LoopDetectionMiddleware(max_repeated_calls=2, window=5)
     rs: dict = {}
     await mw.before_run(_ctx(MiddlewareHook.BEFORE_RUN, rs))
-    state: _LoopDetectionRunState = rs[LoopDetectionMiddleware]
+    state: _LoopDetectionRunState = rs[mw]
     ok = len(state.call_history) == 0
     report("loop_fresh_history_each_run", ok)
 
@@ -165,8 +165,8 @@ async def test_loop_independent_histories() -> None:
     call = ToolCall("ping", {"h": "x"})
     for _ in range(3):
         await mw.before_tool_call(_ctx(MiddlewareHook.BEFORE_TOOL_CALL, rs_a, tool_call=call))
-    state_a: _LoopDetectionRunState = rs_a[LoopDetectionMiddleware]
-    state_b: _LoopDetectionRunState = rs_b[LoopDetectionMiddleware]
+    state_a: _LoopDetectionRunState = rs_a[mw]
+    state_b: _LoopDetectionRunState = rs_b[mw]
     ok = len(state_a.call_history) == 3 and len(state_b.call_history) == 0
     report("loop_independent_histories", ok,
            f"a={len(state_a.call_history)} b={len(state_b.call_history)}")

@@ -39,6 +39,35 @@ def _ctx(**kwargs) -> MiddlewareContext:
     return MiddlewareContext(**defaults)
 
 
+async def _model_calls_before_cost_abort(middleware: list[CostBudgetMiddleware], max_iterations: int = 12) -> int:
+    """Drive cost budgets in pipeline order on one run (20 tokens per call) and count model calls before abort."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    for calls in range(max_iterations):
+        for mw in middleware:
+            decision = await mw.before_iteration(_ctx(tokens_used=calls * 20, run_state=run_state))
+            if decision.action == MiddlewareAction.ABORT_RUN:
+                return calls
+        for mw in middleware:
+            await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=(calls + 1) * 20, run_state=run_state))
+    return max_iterations
+
+
+async def _tool_calls_before_loop_abort(middleware: list[LoopDetectionMiddleware], max_calls: int = 12) -> int:
+    """Drive loop detectors in pipeline order on one run of identical fetches and count executed calls before abort."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    call = ToolCall(tool_name="fetch", arguments={"url": "https://example.com"})
+    for executed in range(max_calls):
+        for mw in middleware:
+            decision = await mw.before_tool_call(_ctx(hook=MiddlewareHook.BEFORE_TOOL_CALL, tool_call=call, run_state=run_state))
+            if decision.action == MiddlewareAction.ABORT_RUN:
+                return executed
+    return max_calls
+
+
 # ---------------------------------------------------------------------------
 # TokenBudgetMiddleware
 # ---------------------------------------------------------------------------
@@ -273,6 +302,19 @@ class TestCostBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
         await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=1000))
         self.assertAlmostEqual(mw.estimated_spend_usd, 0.002)
+
+    async def test_second_instance_does_not_change_when_strict_budget_fires(self) -> None:
+        # [Silent Failure] A lenient org budget beside a strict team budget must not overwrite the team's spend.
+        def team() -> CostBudgetMiddleware:
+            return CostBudgetMiddleware(max_spend_usd=0.0005, cost_per_million_tokens=10.0)
+
+        def org() -> CostBudgetMiddleware:
+            return CostBudgetMiddleware(max_spend_usd=100.0, cost_per_million_tokens=1.0)
+
+        alone = await _model_calls_before_cost_abort([team()])
+        self.assertEqual(alone, 3)
+        self.assertEqual(await _model_calls_before_cost_abort([team(), org()]), alone)
+        self.assertEqual(await _model_calls_before_cost_abort([org(), team()]), alone)
 
     def test_raises_on_zero_spend(self) -> None:
         # [Edge Case] Zero budget is not meaningful.
@@ -548,6 +590,19 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL, tool_call=None, run_state=self._run_state
         ))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
+
+    async def test_second_instance_does_not_change_when_strict_detector_fires(self) -> None:
+        # [Silent Failure] A second detector must not double-count the strict detector's calls.
+        def team() -> LoopDetectionMiddleware:
+            return LoopDetectionMiddleware(max_repeated_calls=4, window=10)
+
+        def org() -> LoopDetectionMiddleware:
+            return LoopDetectionMiddleware(max_repeated_calls=6, window=10)
+
+        alone = await _tool_calls_before_loop_abort([team()])
+        self.assertEqual(alone, 3)
+        self.assertEqual(await _tool_calls_before_loop_abort([team(), org()]), alone)
+        self.assertEqual(await _tool_calls_before_loop_abort([org(), team()]), alone)
 
     async def test_metadata_contains_tool_name_and_count(self) -> None:
         # [Silent Failure] Abort metadata must identify the looping tool.

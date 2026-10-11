@@ -200,8 +200,8 @@ class LoopDetectionTests(unittest.IsolatedAsyncioTestCase):
             )
 
         from vidbyte.middleware.builtins.loop_detection import _LoopDetectionRunState
-        state_a: _LoopDetectionRunState = run_state_a[LoopDetectionMiddleware]
-        state_b: _LoopDetectionRunState = run_state_b[LoopDetectionMiddleware]
+        state_a: _LoopDetectionRunState = run_state_a[mw]
+        state_b: _LoopDetectionRunState = run_state_b[mw]
         self.assertEqual(len(state_a.call_history), 2)
         self.assertEqual(len(state_b.call_history), 0)
 
