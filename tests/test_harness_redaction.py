@@ -62,6 +62,22 @@ class HarnessRedactorFreeTextTests(unittest.TestCase):
 
         self.assertEqual(HarnessRedactor().redact(record), record)
 
+    def test_quoted_key_and_auth_scheme_credentials_are_redacted(self) -> None:
+        cases = {
+            '{"url": "x", "api_key": "S3-json"}': "S3-json",
+            "{'url': 'x', 'api_key': 'S6-repr'}": "S6-repr",
+            '{"password": "S7-json", "n": 1}': "S7-json",
+            "Authorization: Bearer S5-bearer": "S5-bearer",
+            "authorization=Basic S8-basic then": "S8-basic",
+        }
+        redactor = HarnessRedactor()
+
+        for text, secret in cases.items():
+            self.assertNotIn(secret, redactor.redact(text), text)
+            self.assertNotIn(secret, redactor.safe_error_message(text), text)
+        self.assertEqual(redactor.redact('{"password": "S7-json", "n": 1}'), '{"password=<redacted>, "n": 1}')
+        self.assertEqual(redactor.redact("tokens used: 42"), "tokens used: 42")
+
     def test_error_message_scrub_matches_value_scrub(self) -> None:
         text = "Connect with api_key=sk-live-9f8e7d6c5b4a and password: hunter2 then retry"
         redactor = HarnessRedactor()
