@@ -7,9 +7,11 @@ from unittest.mock import patch
 from tests.agent_test_support import build_test_agent
 from vidbyte import tool
 from vidbyte.agents import AgentRuntime
+from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareEvent, MiddlewareHook
 from vidbyte.middleware.builtins import (
     AuditLogMiddleware,
+    ModelRetryMiddleware,
     RuntimeLimitMiddleware,
     TokenRateLimitMiddleware,
     ToolPolicyMiddleware,
@@ -34,6 +36,20 @@ class ParallelToolCallRunner:
         self.calls += 1
         calls = [("call_1", "acme"), ("call_2", "globex"), ("call_3", "initech")]
         tool_calls = [{"id": call_id, "type": "function", "function": {"name": "send_invoice", "arguments": f'{{"customer": "{customer}"}}'}} for call_id, customer in calls]
+        return SimpleNamespace(text="", raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": tool_calls}}]})
+
+
+class FlakyThenAnswerRunner:
+    # Fails with a 503 a fixed number of times, then answers through isDone.
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+
+    def run(self, prompt: str, **kwargs: object) -> SimpleNamespace:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise ProviderRequestError("503 Service Unavailable", provider="openai", status_code=503)
+        tool_calls = [{"id": "call_done", "type": "function", "function": {"name": "isDone", "arguments": '{"final_answer": "answer"}'}}]
         return SimpleNamespace(text="", raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": tool_calls}}]})
 
 
@@ -101,6 +117,24 @@ class MiddlewareBuiltinsTests(unittest.IsolatedAsyncioTestCase):
             MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="billing", tool_call=ToolCall("isDone"), tool_is_internal=True, tool_call_count=2)
         )
         self.assertEqual(is_done.action.value, "continue")
+
+
+    async def test_runtime_model_call_limit_caps_retries_inside_one_iteration(self) -> None:
+        # @intent runtime-model-call-limit-caps-every-call
+        # Three 503s then an answer under max_model_calls=2 must send two requests, not four; a run that fits the cap still answers.
+        for failures, expected_calls, expected_stop in ((3, 2, "middleware_abort"), (1, 2, "is_done")):
+            runner = FlakyThenAnswerRunner(failures)
+            middleware = [RuntimeLimitMiddleware(max_model_calls=2), ModelRetryMiddleware(max_attempts=4)]
+            agent = build_test_agent(name="saver", system_prompt="Answer.", runner=runner, middleware=middleware)
+            with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+                reply = await agent.arun("question")
+
+            self.assertEqual(runner.calls, expected_calls)
+            self.assertEqual(reply.metadata["stop_reason"], expected_stop)
+            if expected_stop == "middleware_abort":
+                self.assertEqual(reply.metadata["middleware_abort_reason"], "runtime_model_call_limit")
+            else:
+                self.assertEqual(reply.content, "answer")
 
     async def test_tool_policy_denies_denylisted_tool(self) -> None:
         middleware = ToolPolicyMiddleware(deny_tools={"danger"})
