@@ -308,6 +308,21 @@ class TestToolErrorPolicyMiddleware(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(decision.action, MiddlewareAction.RETRY)
                 self.assertEqual(decision.metadata["error"], "invalid_arguments")
 
+    async def test_refused_calls_do_not_trip_error_budget_or_abort(self) -> None:
+        # [Silent Failure] A refused call is not a tool error, so repeated denials must not trip the breaker or abort the run.
+        for kind in ("permission_denied", "middleware_denied"):
+            with self.subTest(kind=kind):
+                middleware = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_total_tool_errors=1, on_unrecoverable="abort_run"))
+                run_state: dict = {}
+                await middleware.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+                for attempt in range(3):
+                    call = ToolCall(tool_name="write_file", arguments={"attempt": attempt})
+                    result = ToolResult(tool_name="write_file", status=ToolStatus.ERROR, output="denied", metadata={"error": kind})
+                    decision = await middleware.after_tool_call(
+                        _ctx(hook=MiddlewareHook.AFTER_TOOL_CALL, tool_call=call, tool_result=result, run_state=run_state)
+                    )
+                    self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
+
 
 # ---------------------------------------------------------------------------
 # TokenRateLimitMiddleware

@@ -60,6 +60,10 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
             return MiddlewareDecision.continue_()
         state = self._state_for(ctx)
         kind = self._error_kind(ctx.tool_result.metadata)
+        # @intent refused-calls-are-not-tool-errors
+        # A call refused by policy never ran, so it neither counts toward the error budget nor aborts the run, and is never retried.
+        if kind in _DENIED_ERROR_KINDS:
+            return MiddlewareDecision.continue_()
         retryable = self._retryable(ctx.tool_result.metadata)
         state.total_errors += 1
         if self._circuit_breaker_tripped(state):
