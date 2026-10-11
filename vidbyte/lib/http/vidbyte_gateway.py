@@ -145,17 +145,16 @@ class VidbyteGatewayTransport(HttpTransport):
         timeout_seconds: float = VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS,
         **transport_options: object,
     ) -> HttpResponse:
-        # Sends the adapter's body through the gateway and returns the
-        # provider's answer, or raises a credential-safe error.
-        # @intent managed-request-reaches-only-the-gateway
-        # The adapter's vendor URL and headers are dropped, so the
-        # Vidbyte key goes only to the gateway, not in a vendor header.
+        """Send the adapter's body through the gateway and return the provider's answer, or raise a credential-safe error."""
         # Mint one key for this call; every retry of it reuses the key,
         # so the gateway answers a retry from its replay instead of
         # paying the provider again.
         idempotency_key = uuid.uuid4().hex
-        # Build the managed headers: the Vidbyte bearer key, JSON, and
-        # the key, with nothing the adapter built for its vendor.
+        # @intent managed-request-reaches-only-the-gateway
+        # Build the managed headers from the Vidbyte bearer key, JSON,
+        # and that key alone. The adapter's vendor URL and headers are
+        # dropped, so the Vidbyte key goes only to the gateway and never
+        # sits in a vendor header.
         gateway_headers = self._parser.bearer_headers(self._api_key)
         gateway_headers[JEV_IDEMPOTENCY_KEY_HEADER] = idempotency_key
         # Wrap the adapter's body, unchanged, in the envelope the

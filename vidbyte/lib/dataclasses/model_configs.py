@@ -133,13 +133,14 @@ class TextModelConfig:
         return ProviderModelRegistry.resolve_vidbyte_api_key(selected)
 
     def resolved_api_key(self) -> str:
-        # Resolve explicit keys before provider-specific environment variables.
         # @intent managed-adapters-see-only-the-placeholder-key
         # Adapters build vendor auth from this value, so in managed
         # state they get a non-secret stand-in and the Vidbyte key never
         # reaches a vendor, even when an adapter is called directly.
         if self.is_vidbyte_managed():
             return VIDBYTE_MANAGED_KEY_PLACEHOLDER
+        # Resolve explicit keys before provider-specific
+        # environment variables.
         return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
 
     def resolved_endpoint(self) -> str:

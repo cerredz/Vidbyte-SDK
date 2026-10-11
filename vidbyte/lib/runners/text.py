@@ -30,19 +30,18 @@ class TextModelRunner:
         transport: HttpTransport | None = None,
         **config_options: Any,
     ) -> None:
-        # Builds the config, checks it, and fixes how calls are sent.
-        # @intent managed-runner-is-pinned-at-construction
-        # Fixing managed mode, key, cap, and timeout once keeps a
-        # managed runner on the gateway after the environment changes;
-        # a BYOK config is left as it was, so BYOK does not change.
+        # Build the config from the arguments when none was passed.
         config = self._coerce_config(config, provider=provider, model=model, config_options=config_options)
         # Check the config before anything is sent; a managed config
         # also proves it holds a live Vidbyte key and suits the gateway.
         config.validate()
-        # Pin a managed config: explicit mode, the selected Vidbyte key,
-        # the output cap the gateway requires, and a timeout no shorter
-        # than the gateway's own upstream deadline (floor first, so a
-        # NaN timeout becomes the floor).
+        # @intent managed-runner-is-pinned-at-construction
+        # Pin a managed config once: explicit mode, the selected Vidbyte
+        # key, the output cap the gateway requires, and a timeout no
+        # shorter than the gateway's own upstream deadline (floor first,
+        # so a NaN timeout becomes the floor). This keeps a managed
+        # runner on the gateway after the environment changes; a BYOK
+        # config is left as it was, so BYOK does not change.
         self._managed = config.is_vidbyte_managed()
         if self._managed:
             config = replace(
@@ -59,11 +58,7 @@ class TextModelRunner:
         self._provider = ModelProviders.text(config)
 
     async def arun(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None) -> TextModelResponse:
-        # Async entry point; awaits the provider's HTTP call without blocking the event loop.
-        # @intent managed-calls-route-through-the-gateway-transport
-        # The adapter still builds its native request; in managed state
-        # the gateway transport replaces its vendor URL and headers, so
-        # every managed call reaches the one gateway route.
+        """Async entry point; awaits the provider's HTTP call without blocking the event loop."""
         # Add this call's tools, messages, and output format.
         call_config = replace(
             self._config,
@@ -72,8 +67,11 @@ class TextModelRunner:
             messages=tuple(dict(message) for message in messages),
             response_format=response_format,
         )
-        # Send a managed call through a gateway transport built for this
-        # call alone, so concurrent calls never share a key.
+        # @intent managed-calls-route-through-the-gateway-transport
+        # The adapter still builds its native request; in managed state
+        # a gateway transport built for this call alone replaces its
+        # vendor URL and headers, so every managed call reaches the one
+        # gateway route and concurrent calls never share a key.
         transport = self._transport
         if self._managed:
             transport = VidbyteGatewayTransport(
