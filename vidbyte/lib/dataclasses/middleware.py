@@ -75,6 +75,10 @@ class MiddlewareDecision:
     transform: MiddlewareTransform | None = None
 
     def __post_init__(self) -> None:
+        # @intent middleware-action-is-one-canonical-enum
+        # The pipeline and runtime dispatch on enum identity, so a string-spelled
+        # "deny_tool" must become the member here or the guard would fail open.
+        object.__setattr__(self, "action", MiddlewareAction(self.action))
         # Validates timing and transform constraints for middleware decisions.
         if self.sleep_seconds < 0:
             raise ValueError("sleep_seconds cannot be negative.")
