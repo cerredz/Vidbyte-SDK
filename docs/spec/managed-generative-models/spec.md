@@ -1,7 +1,7 @@
 ---
 spec: managed-generative-models
 title: Vidbyte-managed mode for generative model calls (lib layer)
-status: tests-written    # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: implemented    # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-managed-generative-models
@@ -9,7 +9,7 @@ branch: feat/managed-generative-models
 base_commit: c07529316a5325bce986f84868ecbabb3b7f3056
 created: 2026-10-10
 updated: 2026-10-10
-pr:                      # filled at S3 (draft) and finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/759                      # filled at S3 (draft) and finalized at S6
 ---
 
 # Spec: Vidbyte-managed mode for generative model calls (lib layer)
