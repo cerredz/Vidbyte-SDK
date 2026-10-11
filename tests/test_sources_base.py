@@ -136,6 +136,21 @@ class SourcesBaseTests(unittest.TestCase):
         self.assertFalse(Selection(allow=("API*",)).is_trivial)
         self.assertFalse(Selection(deny=("x",)).is_trivial)
 
+    def test_selection_list_form_matches_tuple_form(self) -> None:
+        # [Regression] Lists from YAML/JSON config normalize to tuples, so allow=["*"] stays trivial.
+        listed = Selection(allow=["*"], deny=[])
+        self.assertTrue(listed.is_trivial)
+        self.assertEqual(listed, Selection())
+        self.assertEqual(hash(listed), hash(Selection()))
+        self.assertFalse(Selection(allow=["API*"]).is_trivial)
+        self.assertFalse(Selection(deny=["x"]).matches("x"))
+
+    def test_selection_rejects_bare_string_globs(self) -> None:
+        # [Silent Failure] A bare string would become one glob per character; refuse it.
+        for kwargs in ({"allow": "Docs*"}, {"deny": "secret"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(SourceSecurityError):
+                Selection(**kwargs)
+
     def test_sha256_hex_of_empty_bytes(self) -> None:
         # [Edge Case] The empty-bytes hash is the stable known constant.
         self.assertEqual(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")

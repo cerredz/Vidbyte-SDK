@@ -21,6 +21,7 @@ from typing import Generic, TypeVar
 
 from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.enums import PinPolicy
+from vidbyte.lib.errors import SourceSecurityError
 
 T = TypeVar("T")
 
@@ -51,6 +52,20 @@ class Selection:
     allow: tuple[str, ...] = ("*",)
     deny: tuple[str, ...] = ()
     expand: bool = False
+
+    def __post_init__(self) -> None:
+        # @intent name-lists-reject-bare-strings
+        # @intent selection-globs-are-one-canonical-tuple
+        # Config from YAML/JSON passes lists; store tuples so allow=["*"] is still trivial (no expansion),
+        # and refuse a bare string, which tuple() would split into one glob per character.
+        for field_name in ("allow", "deny"):
+            value = getattr(self, field_name)
+            if isinstance(value, (str, bytes)):
+                raise SourceSecurityError(
+                    f'Selection.{field_name} must be a collection of glob patterns (e.g. ("Docs*",)), not a single string.',
+                    details={"field": field_name, "value": value},
+                )
+            object.__setattr__(self, field_name, tuple(value))
 
     def selects(self, *names: str) -> bool:
         # True when any name matches an allow glob and no name matches a deny glob.
