@@ -10,7 +10,7 @@ from vidbyte.middleware import AgentMiddleware
 from vidbyte.lib.errors import AgentExecutionError, AgentForkConfigurationError, ConfigurationError, ToolRegistrationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
-from vidbyte.tools import ToolSpec
+from vidbyte.tools import Tools, ToolSpec
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.types import ToolCallContext
 
@@ -152,6 +152,17 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.tools.names(), ("search",))
         self.assertEqual(agent.fork(AgentForkSettings(name="child")).tools.names(), ("search",))
         self.assertEqual(tuple(agent.export_state().tool_names), ("search",))
+
+    async def test_tools_catalog_inside_tool_list_is_flattened(self) -> None:
+        # A Tools catalog inside a plain tools list adds its tools, as Tools([...]) does, instead of being dropped.
+        shared = Tools([FakeTool("b"), FakeTool("c")])
+        agent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("a"), shared])
+
+        self.assertEqual(agent.tools.names(), ("a", "b", "c"))
+        self.assertEqual(agent.card().tool_names, ("a", "b", "c"))
+        forked = agent.fork(AgentForkSettings(name="child"))
+        self.assertEqual(forked.tools.names(), ("a", "b", "c"))
+        self.assertEqual(forked.card().tool_names, ("a", "b", "c"))
 
     async def test_agent_fork_preserves_middleware(self) -> None:
         middleware = FakeMiddleware()
