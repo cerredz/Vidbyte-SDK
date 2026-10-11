@@ -226,6 +226,21 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(agent.mcp_servers()), 1)
         self.assertEqual(agent.mcp_servers()[0].config.command, ("lazyserver",))
 
+    async def test_bare_string_command_is_refused_instead_of_split_into_characters(self) -> None:
+        """A bare-string command raises a clear error rather than spawning its first character."""
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner())
+
+        with self.assertRaisesRegex(ValueError, r"list of program arguments .* not a single string"):
+            agent.with_mcp_server("server")
+        self.assertEqual(agent._pending_mcp_configs, [])
+        with self.assertRaisesRegex(ValueError, r"list of program arguments .* not a single string"):
+            await agent.attach_mcp_server("server")
+        self.assertEqual(len(MockMcpStdioTransport.instances), 0)
+
+        # The list form is still accepted and stored as one argument.
+        agent.with_mcp_server(["server"])
+        self.assertEqual(agent._pending_mcp_configs[0].command, ("server",))
+
     async def test_context_manager_cleanup(self) -> None:
         """Verify context manager guarantees cleanup of all subprocess handles."""
         async with build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner()) as agent:

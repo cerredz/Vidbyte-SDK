@@ -57,6 +57,7 @@ class McpAttachableMixin:
 
         Returns self to support builder pattern.
         """
+        self._reject_bare_string_command(command)
         config = McpServerConfig(
             command=tuple(command),
             name=name,
@@ -157,6 +158,7 @@ class McpAttachableMixin:
         The subprocess and connection will be deferred and connected lazily
         before the first execution.
         """
+        self._reject_bare_string_command(command)
         self._pending_mcp_configs.append(
             McpServerConfig(
                 command=tuple(command),
@@ -167,6 +169,13 @@ class McpAttachableMixin:
             )
         )
         return self
+
+    @staticmethod
+    def _reject_bare_string_command(command: Sequence[str]) -> None:
+        # @intent name-lists-reject-bare-strings
+        # A bare string is itself a sequence, so tuple() would spawn its first character as the program.
+        if isinstance(command, (str, bytes)):
+            raise ValueError('MCP server command must be a list of program arguments (e.g. ["my-mcp-server"]), not a single string.')
 
     def with_preset_mcp_server(self, preset_name: str, *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0, extra_args: Sequence[str] | None = None) -> McpAttachableMixin:
         """Sync builder method that registers an MCP server preset configuration to connect lazily."""
