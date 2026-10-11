@@ -242,6 +242,24 @@ class ProviderToolSchemaTranslationTests(unittest.TestCase):
         self.assertEqual(schema["name"], "clear_cache")
         self.assertIn("cache_key", schema["parameters"]["properties"])
 
+    def test_gemini_schema_tells_exclusive_bounds_and_multiple_of_in_the_description(self) -> None:
+        spec = ToolSpec(
+            name="order",
+            description="Places an order.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "qty": {"type": "integer", "description": "How many.", "exclusiveMinimum": 0, "exclusiveMaximum": 11, "multipleOf": 5}
+                },
+                "required": ["qty"],
+            },
+        )
+
+        qty = tool_spec_to_provider_schema(spec, "gemini")["parameters"]["properties"]["qty"]
+
+        self.assertEqual(qty["description"], "How many. Must be greater than 0, less than 11, a multiple of 5.")
+        self.assertFalse({"exclusiveMinimum", "exclusiveMaximum", "multipleOf"} & set(qty))
+
     def test_parse_provider_tool_call_payloads(self) -> None:
         openai_calls = ToolsFormatter.parse_tool_calls(
             {"output": [{"type": "function_call", "name": "lookup", "arguments": '{"topic": "sdk"}', "call_id": "call-1"}]},
