@@ -221,8 +221,10 @@ class _CotEventToolBase(BaseTool):
 
     async def _record(self, item: Any, call: ToolCall, metadata: dict[str, Any]) -> ToolResult:
         """Upsert one primitive and convert manager validation failures into a tool result."""
+        # @intent content-update-keeps-placement
+        # A ledger update keeps the placement the model chose with context_move; a new entry still goes to the end.
         try:
-            self._manager.upsert(item)
+            self._manager.upsert_preserving_placement(item)
         except ValueError:
             return ToolResult.error(
                 call.tool_name,
