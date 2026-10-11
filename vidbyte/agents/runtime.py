@@ -504,6 +504,11 @@ class AgentRuntime:
                     self._publish_contract_evaluations(state.run_state, counters)
                     unmet = self.output_contract.unmet(counters)
                     if unmet and self.output_contract.exhausted(rejections):
+                        # @intent exhausted-reply-reaches-end-of-run-hooks
+                        # The caller gets this reply, so the end-of-run hooks must see it too, as on the accepted finish;
+                        # an empty reply is skipped because some providers reject an assistant message with no content.
+                        if last_assistant_output and last_assistant_output.strip():
+                            state.messages = [*messages, self._assistant_message(last_assistant_output)]
                         return await self._finish_result(
                             self._final_result(output=last_assistant_output or "", runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED),
                             state,
