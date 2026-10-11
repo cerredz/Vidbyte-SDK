@@ -116,6 +116,21 @@ class SourcesBaseTests(unittest.TestCase):
         self.assertEqual(fetcher.calls, 0)
         self.assertEqual(len(result.items), 1)
 
+    def test_uppercase_pin_matches_same_bytes_cold_and_warm(self) -> None:
+        # [Hidden Assumption] A hex digest is case-insensitive: an UPPERCASE pin of the right bytes loads cold and
+        # from the pinned warm cache, while changed bytes under the same pin still fail closed.
+        upper_pin = sha256_hex(_DATA).upper()
+        cache = InMemorySnapshotCache()
+        cold = DocumentSource(fetcher=InMemoryFetcher({"https://ex.com/x.md": _DATA}), cache=cache)
+        self.assertEqual(len(cold.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=upper_pin)).items), 1)
+        fetcher = CountingFetcher({})
+        warm = DocumentSource(fetcher=fetcher, cache=cache)
+        self.assertEqual(len(warm.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=upper_pin)).items), 1)
+        self.assertEqual(fetcher.calls, 0)
+        changed = DocumentSource(fetcher=InMemoryFetcher({"https://ex.com/x.md": _DATA + b"!"}))
+        with self.assertRaises(SourcePinMismatchError):
+            changed.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=upper_pin))
+
     def test_live_policy_always_refetches(self) -> None:
         # [Hidden Assumption] PinPolicy.LIVE re-fetches even with a warm cache.
         cache = InMemorySnapshotCache()
