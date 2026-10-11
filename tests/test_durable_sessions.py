@@ -1466,5 +1466,68 @@ class ProviderImportSafetyTests(unittest.TestCase):
             PostgresSessionStore(dsn="postgresql://invalid:5432/none")
 
 
+class _FakePgCursor:
+    """Cursor of the fake psycopg driver, enforcing PostgreSQL's aborted-transaction rule."""
+
+    def __init__(self, conn: _FakePgConnection) -> None:
+        self._conn = conn
+        self._row: tuple[object, ...] | None = None
+
+    def __enter__(self) -> _FakePgCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
+        # A failed statement poisons a non-autocommit transaction until it is rolled back.
+        if self._conn.aborted:
+            raise RuntimeError("current transaction is aborted, commands ignored until end of transaction block")
+        if '"missing"' in sql:
+            self._conn.aborted = not self._conn.autocommit
+            raise RuntimeError('relation "missing" does not exist')
+        if sql.startswith("INSERT INTO vidbyte_sessions"):
+            self._conn.rows[str(params[0])] = params[1]
+        elif sql.startswith("SELECT payload FROM vidbyte_sessions"):
+            self._row = (self._conn.rows[str(params[0])],) if params[0] in self._conn.rows else None
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        return self._row
+
+
+class _FakePgConnection:
+    """Connection of the fake psycopg driver; COMMIT or ROLLBACK ends an aborted transaction."""
+
+    def __init__(self, autocommit: bool) -> None:
+        self.autocommit = autocommit
+        self.aborted = False
+        self.rows: dict[str, object] = {}
+
+    def cursor(self) -> _FakePgCursor:
+        return _FakePgCursor(self)
+
+    def commit(self) -> None:
+        self.aborted = False
+
+    def rollback(self) -> None:
+        self.aborted = False
+
+
+class PostgresSessionStoreRecoveryTests(unittest.TestCase):
+    def test_failed_statement_does_not_poison_later_store_operations(self) -> None:  # [Hidden Failure]
+        # @intent postgres-store-survives-failed-statement
+        # A model querying a missing table through the row tools must not break the store's own session writes.
+        fake_psycopg = mock.MagicMock(spec=["connect"])
+        fake_psycopg.connect.side_effect = lambda dsn, autocommit=False: _FakePgConnection(autocommit)
+        with mock.patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            from vidbyte.lib.providers import PostgresSessionStore
+            store = PostgresSessionStore(dsn="postgresql://fake/db")
+        with self.assertRaises(RuntimeError):
+            store.select_rows("missing")
+        meta = SessionMeta(session_id="se", head_id=None, parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
+        store.put_meta(meta)
+        self.assertEqual(store.get_meta("se"), meta)
+
+
 if __name__ == "__main__":
     unittest.main()
