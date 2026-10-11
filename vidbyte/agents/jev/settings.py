@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_BULK_WORK_AGENTS,
+    JEV_BULK_WORK_MIN_AGENTS,
+    JEV_BULK_WORK_THRESHOLD,
     JEV_COMPUTE_CLONES_DEFAULT,
     JEV_COMPUTE_CLONES_MAX,
     JEV_COMPUTE_SWARM_AGENTS_DEFAULT,
@@ -40,7 +43,7 @@ from vidbyte.lib.constants.jev import (
     JEV_TOOL_SELECTOR_MAX_THRESHOLD,
     JEV_TOOL_SELECTOR_MIN_THRESHOLD,
 )
-from vidbyte.lib.dataclasses.jev import JevSpecialist
+from vidbyte.lib.dataclasses.jev import JevProbability, JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.enums import (
@@ -55,6 +58,20 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.tools.security import PermissionPolicy
+
+
+@dataclass(frozen=True, slots=True)
+class JevBulkSettings:
+    """The two BULK_WORK settings: how many fresh agents one approved request may split across, and the P(yes) every bulk-work question must reach."""
+
+    agents: int = JEV_BULK_WORK_AGENTS
+    threshold: float = JEV_BULK_WORK_THRESHOLD
+
+    def __post_init__(self) -> None:
+        # Rejects a team too small to split work, and a threshold that is not a probability, before JevAgent is built.
+        if isinstance(self.agents, bool) or not isinstance(self.agents, int) or self.agents < JEV_BULK_WORK_MIN_AGENTS:
+            raise ConfigurationError(f"JevBulkSettings.agents must be an integer of at least {JEV_BULK_WORK_MIN_AGENTS}.", details={"received": repr(self.agents)})
+        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name="JevBulkSettings.threshold"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +133,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     agents: tuple[JevSpecialist, ...] = ()
+    bulk_work: JevBulkSettings = field(default_factory=JevBulkSettings)
     alignment: JevAlignmentSettings = field(default_factory=JevAlignmentSettings)
 
     def __post_init__(self) -> None:
@@ -141,6 +159,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
         if not isinstance(self.loop, AgentLoopSettings):
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
+        if not isinstance(self.bulk_work, JevBulkSettings):
+            raise ConfigurationError("JevAgentSettings.bulk_work must be a JevBulkSettings instance.")
         if not isinstance(self.alignment, JevAlignmentSettings):
             raise ConfigurationError("JevAgentSettings.alignment must be a JevAlignmentSettings instance.")
         self._validate_agents()
@@ -364,4 +384,4 @@ class JevRuntimeSettings:
             raise ConfigurationError("JevRuntimeSettings.skills_threshold must be a finite probability between 0 and 1 inclusive.")
         object.__setattr__(self, "skills_threshold", float(value))
 
-__all__ = ["JevAgentSettings", "JevAlignmentSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]
+__all__ = ["JevAgentSettings", "JevAlignmentSettings", "JevBulkSettings", "JevComputeSettings", "JevContinualSettings", "JevRunBriefSettings", "JevRuntimeSettings"]

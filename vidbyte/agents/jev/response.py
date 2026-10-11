@@ -21,6 +21,7 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevBulkWorkResult,
     JevClarification,
     JevCloneResult,
     JevComputeDecision,
@@ -58,6 +59,10 @@ class JevResponse:
     def preflight_usage(self, usage: JevUsage | None) -> None:
         """Record the usage of the one preflight Jev call, or None when TypeSafe reported none."""
         self.state.preflight_usage = usage
+
+    def bulk_work(self, result: JevBulkWorkResult) -> None:
+        # Records the run's one bulk-work launch: every agent's handoff, in the order the main agent wrote the tasks.
+        self.state.bulk_work = result
 
     def needs_clarification(self, clarification: JevClarification) -> None:
         """Record the questions the user must answer; their rendered text becomes the run's output."""
