@@ -5,6 +5,7 @@ from unittest.mock import patch
 from typing import Any
 
 from tests.agent_test_support import build_test_agent
+from tests.test_agent_fork_isolation import TwoToolMcpTransport
 from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.context.handoff import EngineeringHandoff
@@ -239,6 +240,7 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertEqual(agent.captured.history, [])
         self.assertEqual(agent.captured.tools.names(), ("alpha", "gamma"))
+        self.assertEqual(agent.captured.drop_tools, ("beta",))
         self.assertEqual(agent.captured.model_name, "gpt-4.1-mini")
         self.assertEqual(agent.captured.provider, "openai")
         self.assertEqual(agent.captured.temperature, 0.4)
@@ -373,6 +375,42 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(result.status, status)
             self.assertEqual(child.events, ["run", "close"])
+
+    @patch("vidbyte.tools.mcp.attach.McpStdioTransport", TwoToolMcpTransport)
+    async def test_drop_tool_names_removes_inherited_mcp_tool_from_child(self) -> None:
+        # @intent fork-tool-drop-names-cover-inherited-mcp-tools
+        # The child reconnects the parent's MCP servers, so a dropped MCP tool came back and was offered to the child.
+        cases = (
+            ({"drop_tool_names": ["remote_calc"]}, {"lookup", "fork_conversation", "spare_calc"}),
+            ({}, {"lookup", "fork_conversation", "remote_calc", "spare_calc"}),
+        )
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                tool = ForkConversationTool()
+                agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[NamedTool("lookup"), tool])
+                await agent.attach_mcp_server(["calc"])
+                offered: list[set[str]] = []
+                real_fork = agent.fork
+
+                def fork_recording_child_tools(settings: AgentForkSettings) -> BaseAgent:
+                    # Fork for real, then record the child's tools once its MCP servers connect, before it answers.
+                    child = real_fork(settings)
+                    real_reply = child.generate_reply
+
+                    async def reply_after_recording(prompt: str) -> AgentMessage:
+                        await child._ensure_mcp_connected()
+                        offered.append({item.name for item in child.tools})
+                        return await real_reply(prompt)
+
+                    child.generate_reply = reply_after_recording  # type: ignore[method-assign]
+                    return child
+
+                with patch.object(agent, "fork", side_effect=fork_recording_child_tools):
+                    result = await tool.execute(_call(prompt="branch", **overrides))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(offered, [expected])
+                self.assertEqual({item.name for item in agent.tools}, {"lookup", "fork_conversation", "remote_calc", "spare_calc"})
 
 
 if __name__ == "__main__":
