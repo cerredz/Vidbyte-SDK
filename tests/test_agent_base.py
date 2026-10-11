@@ -325,6 +325,18 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(replies), 1)
         self.assertIn("direct:from-input", replies[0].content)
 
+    async def test_arun_sequentially_rejects_a_bare_string(self) -> None:
+        # [Silent Failure] A bare string must not become one paid model run per character
+        runner = OptionCaptureRunner()
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=runner)
+        with self.assertRaisesRegex(ValueError, "not a single string"):
+            await agent.arun_sequentially("Summarize the Q3 report")
+        self.assertEqual(runner.captured_options, [])
+        self.assertEqual(len(agent.history), 0)
+        replies = await agent.arun_sequentially(["Summarize the Q3 report"])
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(len(runner.captured_options), 1)
+
     async def test_arun_sequentially_forwards_options_to_each_call(self) -> None:
         # [Silent Failure] **options must reach every underlying generate_reply invocation
         runner = OptionCaptureRunner()
@@ -359,6 +371,19 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         await agent.arun("next")
 
         self.assertNotIn("INPUT_PLACED_PRIMITIVE", repr(runner.captured_options[-1]))
+
+
+class AgentRunSequentiallySyncTests(unittest.TestCase):
+    def test_run_sequentially_rejects_a_bare_string(self) -> None:
+        # [Silent Failure] The sync entry point refuses a bare string before any model call
+        runner = OptionCaptureRunner()
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=runner)
+        with self.assertRaisesRegex(ValueError, "not a single string"):
+            agent.run_sequentially("Summarize the Q3 report")
+        self.assertEqual(runner.captured_options, [])
+        replies = agent.run_sequentially(["Summarize the Q3 report"])
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(len(runner.captured_options), 1)
 
 
 if __name__ == "__main__":

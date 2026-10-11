@@ -30,7 +30,7 @@ def detect_wrong_target(context):
             code=FailureCode.ACTION_WRONG_TARGET,
             source="target_check",
             phase=FailurePhase.ACTION,
-            details={"tool": context.tool_call.name},
+            details={"tool": context.tool_call.tool_name},
         )
     return None
 

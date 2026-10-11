@@ -37,6 +37,16 @@ class EvalCase:
     templates: tuple[EvalTemplate | str | Mapping[str, Any], ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # @intent bare-string-tag-is-one-tag
+        # tuple-iterating "billing" yields its letters, so filter() never selects the case; read it like from_json does.
+        if isinstance(self.tags, str):
+            object.__setattr__(self, "tags", tuple(t.strip() for t in self.tags.split(",") if t.strip()))
+        # @intent bare-string-template-is-one-template
+        # The runner iterates templates, so "short_answer_fact" became "s", "h", ...; a bare string is one template name.
+        if isinstance(self.templates, str):
+            object.__setattr__(self, "templates", (self.templates,))
+
 
 @dataclass(frozen=True)
 class GraderResult:

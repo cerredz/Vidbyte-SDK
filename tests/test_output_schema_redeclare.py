@@ -4,7 +4,7 @@ PURPOSE: Prove OutputSchemaBuilder keeps each value slot in the shape of its lat
 ROLE IN CODEBASE: Drives DeclareOutputSchemaTool, AppendOutputTool and ExtendOutputSchemaTool on one shared OutputSchemaBuilder.
 ARCHITECTURE NOTE: Pure in-memory tests; no agent, runner or network.
 COMMON MODIFICATION PATTERNS: Add a case when a new declaration attribute changes how values are stored.
-KNOWN EDGE CASES: Scalar to repeated wraps a set value; repeated to scalar keeps the latest entry; empty slots reseed; a null name or description counts as omitted.
+KNOWN EDGE CASES: Scalar to repeated wraps a set value; repeated to scalar keeps the latest entry; empty slots reseed; a null name or description counts as omitted; a non-boolean repeated refuses the whole call.
 RELATED DOCS: docs/design/builtin-tool-transport-and-builder-fixes.md
 TESTS: This module; full source gate via scripts/run_ci.py.
 """
@@ -14,7 +14,9 @@ from __future__ import annotations
 import pytest
 
 from vidbyte.lib.dataclasses import ToolCall
+from vidbyte.tools import Tools
 from vidbyte.tools.builtins.output_schema import AppendOutputTool, DeclareOutputSchemaTool, ExtendOutputSchemaTool, OutputSchemaBuilder
+from vidbyte.tools.executor import ToolExecutor
 
 
 def _tools(builder: OutputSchemaBuilder) -> tuple[DeclareOutputSchemaTool, AppendOutputTool, ExtendOutputSchemaTool]:
@@ -78,3 +80,32 @@ async def test_null_field_name_and_description_are_treated_as_omitted() -> None:
         {"name": "summary", "description": "One-line recap.", "repeated": False},
     ]
     assert snapshot["values"] == {"changes": [], "summary": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["declare_output_schema", "extend_output_schema"])
+async def test_stringly_repeated_is_refused_and_declares_nothing(tool_name: str) -> None:
+    builder = OutputSchemaBuilder()
+    executor = ToolExecutor(Tools(list(_tools(builder))))
+    fields = [{"name": "summary", "repeated": False}, {"name": "verdict", "repeated": "false"}]
+
+    result = await executor.execute_call(ToolCall(tool_name, {"fields": fields}))
+
+    assert result.status.value == "error"
+    assert "Output field 'verdict': repeated must be a boolean (true/false)." in result.output
+    assert builder.snapshot()["fields"] == []
+    assert builder.is_declared() is False
+
+
+@pytest.mark.asyncio
+async def test_null_repeated_means_scalar_and_real_booleans_still_decide() -> None:
+    builder = OutputSchemaBuilder()
+    declare, append, _ = _tools(builder)
+    fields = [{"name": "verdict", "repeated": None}, {"name": "labels", "repeated": True}, {"name": "status", "repeated": False}]
+    await declare.execute(ToolCall("declare_output_schema", {"fields": fields}))
+
+    for value in ("needs info", "bug"):
+        for field in ("verdict", "labels", "status"):
+            await append.execute(ToolCall("append_output", {"field": field, "value": value}))
+
+    assert builder.snapshot()["values"] == {"verdict": "bug", "labels": ["needs info", "bug"], "status": "bug"}

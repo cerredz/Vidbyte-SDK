@@ -27,6 +27,10 @@ class TraceArtifactRenderer:
 
     def __init__(self, *, fields: Sequence[str] | None = None, max_chars: int | None = None, array_head: int | None = None, array_tail: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None, title: str = "Continual Trace") -> None:
         # Stores render bounds and validates that all numeric limits are non-negative.
+        # @intent name-lists-reject-bare-strings
+        # fields="summary" is a str, so tuple() would select its characters and the trace would render nothing.
+        if isinstance(fields, (str, bytes)):
+            raise ValueError('TraceArtifactRenderer.fields must be a list of trace field names (e.g. ["summary"]), not a single string.')
         self.fields = tuple(fields) if fields is not None else None
         self.max_chars = max_chars
         self.array_head = array_head

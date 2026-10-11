@@ -28,7 +28,7 @@ class ForkRecovery(BaseRecoveryHandler):
     def __init__(self, *, at: str | None = None, tools: Sequence[object] = (), middleware: Sequence[object] = (), policy: object | None = None, trace: object | None = None, tags: Sequence[str] = (), label: str = "failure-fork", metadata: Mapping[str, Any] | None = None, on_error: RuleErrorMode = RuleErrorMode.CLOSED) -> None:
         """Create a fork handler with explicit branch inputs and error posture."""
         super().__init__(name="fork", on_error=on_error, metadata=metadata)
-        self._fork_settings = ForkRecoverySettings(at=at, tools=tuple(tools), middleware=tuple(middleware), policy=policy, trace=trace, tags=tuple(tags), label=label)
+        self._fork_settings = ForkRecoverySettings(at=at, tools=tuple(tools), middleware=tuple(middleware), policy=policy, trace=trace, tags=tags, label=label)
 
     def recover(self, failure: Failure, *, session: object) -> RecoveryResult:
         # @intent fork-recovery-preserves-session-lineage

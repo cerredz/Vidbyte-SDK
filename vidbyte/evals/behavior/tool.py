@@ -47,11 +47,17 @@ class ToolBehavior:
 
     def called_all_tools(self, names: Sequence[str]) -> bool:
         # Returns True if every tool in names was called at least once.
+        # @intent bare-string-name-is-one-name
+        # A bare string is itself a Sequence[str]; iterating it would check single letters, so
+        # called_any_tool("delete_record") missed a real call. A bare str is one name, like ["delete_record"].
+        names = (names,) if isinstance(names, str) else names
         called_names = {c.tool_name for c in self._calls}
         return all(n in called_names for n in names)
 
     def called_any_tool(self, names: Sequence[str]) -> bool:
         # Returns True if at least one tool in names was called.
+        # @intent bare-string-name-is-one-name
+        names = (names,) if isinstance(names, str) else names
         called_names = {c.tool_name for c in self._calls}
         return any(n in called_names for n in names)
 
@@ -61,11 +67,15 @@ class ToolBehavior:
 
     def called_only_tools(self, names: Sequence[str]) -> bool:
         # Returns True if every call was to a tool in names (no extras outside the set).
+        # @intent bare-string-name-is-one-name
+        names = (names,) if isinstance(names, str) else names
         allowed = set(names)
         return all(c.tool_name in allowed for c in self._calls)
 
     def called_tools_in_order(self, names: Sequence[str]) -> bool:
         # Returns True if the call names contain names as a subsequence (order preserved).
+        # @intent bare-string-name-is-one-name
+        names = (names,) if isinstance(names, str) else names
         call_names = [c.tool_name for c in self._calls]
         idx = 0
         for target in names:

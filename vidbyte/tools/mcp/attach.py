@@ -83,7 +83,8 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
                     f"Failed to discover remote tools from MCP server: {e}"
                 ) from e
 
-    except Exception:
+    except BaseException:
+        # Stop the subprocess on failure or cancellation alike, so no half-started server is orphaned.
         await transport.close()
         raise
 

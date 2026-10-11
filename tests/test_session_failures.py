@@ -336,6 +336,18 @@ class FailureNormalizationTests(unittest.TestCase):
         failures = FailureMetadataNormalizer.from_reply(reply)
         self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.TOOL_IDENTICAL_CALL_LIMIT, "tool_settings")])
 
+    def test_middleware_abort_stop_yields_one_record(self) -> None:  # [Hidden Failure]
+        # @intent one-middleware-abort-one-record
+        # Verify one middleware abort keeps only the richer middleware record, not a runtime twin.
+        for reason, code in (("policy", FailureCode.RUNTIME_MIDDLEWARE_ABORT), ("middleware_error", FailureCode.RUNTIME_MIDDLEWARE_ERROR)):
+            event = {"action": "abort_run", "reason": reason, "middleware_name": "guard", "hook": "before_tool_call"}
+            reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "middleware_abort", "middleware": {"events": [event]}})
+            failures = FailureRouter(object()).capture_reply(reply)
+            self.assertEqual([(item.code, item.source, item.status) for item in failures], [(code, "guard", FailureStatus.TERMINAL)])
+        bare = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "middleware_abort"})
+        failures = FailureRouter(object()).capture_reply(bare)
+        self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.RUNTIME_MIDDLEWARE_ABORT, "agent_runtime")])
+
 
 class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_contract_stop_runs_bound_handler_once(self) -> None:  # [Hidden Failure]
@@ -405,6 +417,12 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertEqual(result.value._policy.value, Session.MANUAL_POLICY)
         self.assertEqual(result.value._tags, ("repair",))
+
+    def test_fork_recovery_refuses_bare_string_tags(self) -> None:  # [Hidden Assumption]
+        # Verify tags="incident" is refused instead of tagging the branch with its characters.
+        with self.assertRaisesRegex(ValueError, "ForkRecovery.tags must be a list of tag names"):
+            ForkRecovery(tags="incident")
+        self.assertEqual(ForkRecovery(tags=["incident"])._fork_settings.tags, ("incident",))
 
     async def test_raise_recovery_uses_typed_error(self) -> None:  # [Hidden Assumption]
         # Verify terminal recovery never falls back to an untyped raw exception.

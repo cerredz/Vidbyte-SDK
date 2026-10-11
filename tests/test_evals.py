@@ -431,6 +431,24 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
                     result = await grader.agrade(EvalCase(prompt="x", expected=json.dumps(expected)), json.dumps(actual))
                     self.assertTrue(result.passed)
 
+    async def test_json_graders_compare_tuples_as_json_arrays(self) -> None:
+        # Tests that an expected value written with tuples grades the same as the same value written with lists.
+        # @intent json-tuple-is-array
+        cases = [
+            (("urgent", "billing"), ["urgent", "billing"], '["urgent", "billing"]'),
+            ({"id": 7, "tags": ("urgent", "billing")}, {"id": 7, "tags": ["urgent", "billing"]}, '{"id": 7, "tags": ["urgent", "billing"]}'),
+            (("urgent", "billing"), ["urgent", "billing"], '["urgent", "refund"]'),
+            ({"flags": (True,)}, {"flags": [True]}, '{"flags": [1]}'),
+        ]
+        for grader in (JSONExactMatchGrader(), JSONSubsetGrader()):
+            for tuple_expected, list_expected, reply in cases:
+                with self.subTest(grader=grader.name, expected=tuple_expected, reply=reply):
+                    tuple_result = await grader.agrade(EvalCase(prompt="x", expected=tuple_expected), reply)
+                    list_result = await grader.agrade(EvalCase(prompt="x", expected=list_expected), reply)
+                    self.assertEqual(tuple_result.passed, list_result.passed)
+        self.assertTrue((await JSONExactMatchGrader().agrade(EvalCase(prompt="x", expected=("urgent", "billing")), '["urgent", "billing"]')).passed)
+        self.assertTrue((await JSONSubsetGrader().agrade(EvalCase(prompt="x", expected={"tags": ("urgent",)}), '{"id": 7, "tags": ["urgent", "billing"]}')).passed)
+
     async def test_template_registry_and_custom_templates(self) -> None:
         # Tests template registry resolution, validation, and custom template support.
         registry = EvalTemplateRegistry()
@@ -525,6 +543,41 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
             for name in os.listdir(temp_dir):
                 os.remove(os.path.join(temp_dir, name))
             os.rmdir(temp_dir)
+
+    async def test_eval_suite_json_null_optionals_load_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default
+        # [Crash] json.dumps(asdict(case)) writes null for unset optionals, which failed the whole suite load.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "nulls.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [
+                    {"prompt": "omitted", "expected": "omitted"},
+                    {"prompt": "tags", "expected": "tags", "tags": None},
+                    {"prompt": "metadata", "expected": "metadata", "metadata": None},
+                    {"prompt": "templates", "expected": "templates", "templates": None},
+                    {"prompt": "template", "expected": "template", "template": None},
+                    {"prompt": "all", "expected": "all", "tags": None, "metadata": None, "template": None, "templates": None},
+                    {"prompt": "mixed", "expected": "Paris", "template": None, "templates": ["short_answer_fact"]},
+                ]}, f)
+            suite = EvalSuite.from_json(path)
+
+            bad_path = os.path.join(temp_dir, "bad.json")
+            with open(bad_path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [{"prompt": "q", "templates": "short_answer_fact"}]}, f)
+            with self.assertRaises(ValueError):
+                EvalSuite.from_json(bad_path)
+        finally:
+            for name in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, name))
+            os.rmdir(temp_dir)
+
+        for case in suite.cases[:6]:
+            self.assertEqual((case.tags, case.metadata, case.templates), ((), {}, ()), case.prompt)
+        self.assertEqual(len(suite.cases[6].templates), 1)
+
+        runner = EvalRunner(MockRunner("ok"), default_grader=ContainsGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(EvalSuite("nulls", suite.cases[:6]))).results), 6)
 
     async def test_eval_registry_structured_expected_roundtrip(self) -> None:
         # Tests SQLite registry persistence for structured expected payloads.
@@ -654,6 +707,45 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res_broken.passed)
         self.assertIn("Failed to parse judge JSON", res_broken.reason)
 
+    async def test_judge_graders_read_null_fields_as_omitted(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A judge model that sends null for a field must get the same grade as one that leaves the field out.
+        case = EvalCase(prompt="2+2?", expected="4")
+        null_reply = '{"score": null, "passed": true, "reason": null}'
+        res_null = await LLMJudgeGrader(judge_runner=MockRunner(null_reply)).agrade(case, "4")
+        res_omitted = await LLMJudgeGrader(judge_runner=MockRunner('{"passed": true}')).agrade(case, "4")
+        self.assertEqual((res_null.score, res_null.passed, res_null.reason), (res_omitted.score, res_omitted.passed, res_omitted.reason))
+        self.assertEqual((res_null.score, res_null.passed, res_null.reason), (0.0, True, "Graded by LLM Judge."))
+        self.assertNotIn("None", res_null.reason)
+
+        rubric = {"accuracy": 1.0, "tone": 1.0}
+        rubric_null = '{"scores": {"accuracy": 1.0, "tone": null}, "reasons": {"accuracy": "correct", "tone": null}}'
+        rubric_omitted = '{"scores": {"accuracy": 1.0}, "reasons": {"accuracy": "correct"}}'
+        res_rubric_null = await RubricGrader(judge_runner=MockRunner(rubric_null), rubric=rubric, threshold=0.5).agrade(case, "4")
+        res_rubric_omitted = await RubricGrader(judge_runner=MockRunner(rubric_omitted), rubric=rubric, threshold=0.5).agrade(case, "4")
+        self.assertEqual(
+            (res_rubric_null.score, res_rubric_null.passed, res_rubric_null.reason),
+            (res_rubric_omitted.score, res_rubric_omitted.passed, res_rubric_omitted.reason),
+        )
+        self.assertTrue(res_rubric_null.passed)
+        self.assertAlmostEqual(res_rubric_null.score, 0.5)
+        self.assertIn("tone: No explanation. (0.0)", res_rubric_null.reason)
+        self.assertNotIn("None", res_rubric_null.reason)
+
+        # A null scores or reasons section reads like a missing one, not a parse failure.
+        res_null_sections = await RubricGrader(judge_runner=MockRunner('{"scores": null, "reasons": null}'), rubric=rubric).agrade(case, "4")
+        res_empty = await RubricGrader(judge_runner=MockRunner("{}"), rubric=rubric).agrade(case, "4")
+        self.assertEqual((res_null_sections.score, res_null_sections.passed, res_null_sections.reason), (res_empty.score, res_empty.passed, res_empty.reason))
+        self.assertNotIn("Failed to parse", res_null_sections.reason)
+
+        # Genuinely malformed values still fail closed.
+        res_bad_score = await LLMJudgeGrader(judge_runner=MockRunner('{"score": "abc", "passed": true}')).agrade(case, "4")
+        self.assertFalse(res_bad_score.passed)
+        self.assertIn("Failed to parse judge JSON", res_bad_score.reason)
+        res_bad_dim = await RubricGrader(judge_runner=MockRunner('{"scores": {"accuracy": "abc"}}'), rubric=rubric).agrade(case, "4")
+        self.assertFalse(res_bad_dim.passed)
+        self.assertIn("Failed to parse rubric response JSON", res_bad_dim.reason)
+
     async def test_agent_judge_does_not_carry_verdicts_across_cases(self) -> None:
         # Grading several cases with one BaseAgent judge must not grow its history or leak earlier verdicts.
         verdicts = [json.dumps({"score": 1.0, "passed": True, "reason": f"verdict-{i}"}) for i in range(3)]
@@ -714,6 +806,22 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await runner.arun(suite, tags="refunds")).results), 1)
         self.assertEqual(len((await runner.arun(suite, tags=["billing"])).results), 2)
         self.assertEqual(len((await runner.arun(suite)).results), 3)
+
+    async def test_eval_case_bare_string_tags_and_templates_are_one_item(self) -> None:
+        # @intent bare-string-tag-is-one-tag
+        # @intent bare-string-template-is-one-template
+        # [Silent Failure] EvalCase(tags="billing") kept letters, so filter(["billing"]) dropped it; templates="x" failed as "s".
+        case = EvalCase(prompt="q1", expected="q1", tags="billing", templates="short_answer_fact")
+        written = EvalCase(prompt="q1", expected="q1", tags=("billing",), templates=("short_answer_fact",))
+        self.assertEqual((case.tags, case.templates), (written.tags, written.templates))
+        self.assertEqual(EvalCase(prompt="q2", tags="billing, refunds").tags, ("billing", "refunds"))
+        self.assertEqual([c.prompt for c in EvalSuite("s", [case]).filter(["billing"])], ["q1"])
+
+        runner = EvalRunner(MockRunner("q1"), default_grader=ExactMatchGrader(), concurrency=1)
+        result = await runner.arun(EvalSuite("s", [case]), tags=["billing"])
+        self.assertEqual(len(result.results), 1)
+        self.assertIsNone(result.results[0].error)
+        self.assertTrue(result.results[0].grader_result.passed)
 
     async def test_eval_runner_with_agent_fork(self) -> None:
         # Tests EvalRunner executing suites and ensures state isolation using clone forks.

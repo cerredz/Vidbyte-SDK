@@ -252,6 +252,28 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.tool.called_tools_in_order(["c", "a"]))
         self.assertTrue(b.tool.called_tools_in_order([]))
 
+    def test_bare_string_name_is_one_name(self) -> None:
+        # @intent bare-string-name-is-one-name
+        # [Silent Failure] a bare string was iterated letter by letter, so a safety check missed a called tool.
+        b = behavior_from_probe(RunProbe(tool_calls=(make_call("lookup_order"), make_call("delete_record")), structured={"status": "ok", "order": {}}))
+        self.assertTrue(b.tool.called_any_tool("delete_record"))
+        self.assertFalse(b.tool.called_any_tool("refund"))
+        self.assertTrue(b.tool.called_all_tools("lookup_order"))
+        self.assertFalse(b.tool.called_all_tools("refund"))
+        self.assertTrue(b.tool.called_tools_in_order("lookup_order"))
+        self.assertFalse(b.tool.called_tools_in_order("refund"))
+        self.assertFalse(b.tool.called_only_tools("lookup_order"))
+        self.assertTrue(behavior_from_probe(RunProbe(tool_calls=(make_call("lookup_order"),))).tool.called_only_tools("lookup_order"))
+        self.assertTrue(b.output.structured_contains_keys("status"))
+        self.assertFalse(b.output.structured_contains_keys("missing"))
+        for name in ("lookup_order", "delete_record", "refund"):
+            self.assertEqual(b.tool.called_any_tool(name), b.tool.called_any_tool([name]))
+            self.assertEqual(b.tool.called_all_tools(name), b.tool.called_all_tools([name]))
+            self.assertEqual(b.tool.called_only_tools(name), b.tool.called_only_tools([name]))
+            self.assertEqual(b.tool.called_tools_in_order(name), b.tool.called_tools_in_order([name]))
+        for key in ("status", "order", "missing"):
+            self.assertEqual(b.output.structured_contains_keys(key), b.output.structured_contains_keys([key]))
+
     def test_tool_call_count(self) -> None:
         # [Silent Failure] tool_call_count returns correct count for multiple calls to same tool.
         b = behavior_from_probe(RunProbe(tool_calls=(make_call("search"), make_call("search"), make_call("read"))))

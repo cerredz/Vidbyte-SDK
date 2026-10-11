@@ -16,6 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
 from vidbyte.tools.types import ToolCall
 
@@ -96,6 +97,18 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
             for result in (grep, glob):
                 self.assertIn("src/index.js", result.output)
                 self.assertNotIn("inner", result.output)
+
+    async def test_bare_string_ignore_patterns_is_refused(self) -> None:
+        """A bare-string ignore_patterns is refused instead of ignoring its characters."""
+        (self.root / "node_modules").mkdir()
+        (self.root / "node_modules" / "vendored.py").write_text("expiration\n", encoding="utf-8")
+        with self.assertRaisesRegex(ConfigurationError, r"ignore_patterns must be a list .*not a single string"):
+            GrepTool(self.root, ignore_patterns="node_modules")
+        result = await GrepTool(self.root, ignore_patterns=["node_modules"]).execute(
+            ToolCall("grep", {"pattern": "expiration"})
+        )
+        self.assertIn("pkg/auth.py", result.output)
+        self.assertNotIn("node_modules", result.output)
 
     async def test_truncation_notice_only_when_a_hit_was_cut(self) -> None:
         """Exactly max_results hits are not truncated; one more hit is."""

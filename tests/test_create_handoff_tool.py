@@ -109,6 +109,31 @@ class CreateHandoffToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.handoffs[0].instructions, "")
         self.assertNotIn("None", result.output)
 
+    async def test_null_section_is_left_out_like_an_omitted_one(self) -> None:
+        # @intent null-optional-arg-means-default: a null section must not reach the receiver as "None".
+        null_agent, omitted_agent = StubAgent(), StubAgent()
+        null_tool, omitted_tool = CreateHandoffTool(), CreateHandoffTool()
+        null_tool.bind_agent(null_agent)
+        omitted_tool.bind_agent(omitted_agent)
+        summary = "db-1 disk at 97%, cleanup job queued"
+        null_result = await null_tool.execute(_call(title="H", sections={"Summary": summary, "Blockers": None}))
+        omitted_result = await omitted_tool.execute(_call(title="H", sections={"Summary": summary}))
+        self.assertEqual(null_result.status, ToolStatus.SUCCESS, null_result.output)
+        self.assertEqual(null_agent.handoffs[0].sections, {"Summary": summary})
+        self.assertEqual(null_agent.handoffs[0].sections, omitted_agent.handoffs[0].sections)
+        self.assertEqual(null_result.metadata["sections"], {"Summary": summary})
+        self.assertEqual(null_result.output, omitted_result.output)
+        self.assertNotIn("None", null_result.output)
+
+    async def test_error_when_every_section_is_null(self) -> None:
+        agent = StubAgent()
+        tool = CreateHandoffTool()
+        tool.bind_agent(agent)
+        result = await tool.execute(_call(title="Handoff", sections={"Summary": None, "Blockers": None}))
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("non-empty 'sections' object", result.output)
+        self.assertEqual(agent.handoffs, [])
+
     async def test_null_audience_keeps_non_null_instructions(self) -> None:
         agent = StubAgent()
         tool = CreateHandoffTool()
@@ -229,6 +254,22 @@ class BaseAgentHandoffRecordingTests(unittest.IsolatedAsyncioTestCase):
         added = CreateHandoffTool()
         other.add_tool(added)
         self.assertIs(added._agent, other)
+
+    async def test_shared_tool_records_each_agents_handoff_on_itself(self) -> None:
+        # @intent shared-bound-tool-gets-own-copy
+        # One instance given to two agents must never record the first agent's handoff on the second.
+        shared = CreateHandoffTool()
+        alpha = build_test_agent(name="alpha", system_prompt="Work.", runner=FakeRunner(), tools=[shared])
+        beta = build_test_agent(name="beta", system_prompt="Work.", runner=FakeRunner(), tools=[shared])
+        gamma = build_test_agent(name="gamma", system_prompt="Work.", runner=FakeRunner()).add_tool(shared)
+
+        for agent in (alpha, beta, gamma):
+            await agent.tools._get("create_handoff").execute(_call(title=f"{agent.name} handoff", sections={"S": "x"}))
+
+        self.assertIs(alpha.tools._get("create_handoff"), shared)
+        self.assertEqual([h.title for h in alpha.handoffs], ["alpha handoff"])
+        self.assertEqual([h.title for h in beta.handoffs], ["beta handoff"])
+        self.assertEqual([h.title for h in gamma.handoffs], ["gamma handoff"])
 
     def test_forked_agent_starts_with_empty_handoffs(self) -> None:
         agent = self._agent()

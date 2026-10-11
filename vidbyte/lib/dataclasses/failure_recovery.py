@@ -16,7 +16,7 @@ TESTS: python -m pytest -q tests/test_session_failures.py.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,11 +69,15 @@ class ForkRecoverySettings:
     middleware: tuple[object, ...] = ()
     policy: object | None = None
     trace: object | None = None
-    tags: tuple[str, ...] = ()
+    tags: Sequence[str] = ()
     label: str = DEFAULT_FORK_LABEL
 
     def __post_init__(self) -> None:
         """Coerce sequence inputs to tuples and fall back to the default label."""
+        # @intent name-lists-reject-bare-strings
+        # tags="incident" is a str, so tuple() would tag the branch with its characters and list_sessions(tag=) would never match.
+        if isinstance(self.tags, (str, bytes)):
+            raise ValueError('ForkRecovery.tags must be a list of tag names (e.g. ["incident"]), not a single string.')
         object.__setattr__(self, "tools", tuple(self.tools))
         object.__setattr__(self, "middleware", tuple(self.middleware))
         object.__setattr__(self, "tags", tuple(str(tag) for tag in self.tags))

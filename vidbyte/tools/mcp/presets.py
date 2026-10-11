@@ -403,6 +403,11 @@ class McpPresetRegistry:
                 f"Preset '{preset_name}' requires the following environment variables: {', '.join(missing_vars)}"
             )
 
+        # @intent name-lists-reject-bare-strings
+        # A bare string is itself a sequence, so extending the command would add one argument per character.
+        if isinstance(extra_args, (str, bytes)):
+            raise McpPresetConfigurationError('MCP preset extra_args must be a list of program arguments (e.g. ["--flag"]), not a single string.')
+
         cmd = list(preset.command)
         if extra_args:
             cmd.extend(extra_args)

@@ -47,6 +47,15 @@ class TraceArtifactRendererTests(unittest.TestCase):
         self.assertLess(text.index("current_status"), text.index("goal"))
         self.assertNotIn("actions_taken", text)
 
+    def test_field_subset_refuses_bare_string(self) -> None:
+        # [Silent Failure] fields="summary" would select its characters and render no trace fields at all.
+        for build in (lambda: TraceArtifactRenderer(fields="summary"), lambda: TraceReplacementCompactionMiddleware.trace_field_subset("summary", artifact=_ARTIFACT), lambda: TraceReplacementCompactionMiddleware(render={"fields": "goal"})):
+            with self.assertRaisesRegex(ValueError, r"fields must be a list of trace field names .*not a single string"):
+                build()
+        text = TraceReplacementCompactionMiddleware.trace_field_subset(["goal"])._render_trace(_ARTIFACT)
+        self.assertIn("## goal\nship it", text)
+        self.assertNotIn("current_status", text)
+
     def test_field_subset_absent_key_does_not_crash(self) -> None:
         # [Hidden Assumption] a requested field missing from the artifact is skipped.
         text = TraceArtifactRenderer(fields=["nope", "goal"]).render(_ARTIFACT)

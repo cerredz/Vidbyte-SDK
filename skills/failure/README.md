@@ -70,7 +70,7 @@ session = Session(agent)
     on_error=RuleErrorMode.CLOSED,
 )
 def forbid_production_delete(context):
-    if context.tool_call and context.tool_call.name == "delete_production":
+    if context.tool_call and context.tool_call.tool_name == "delete_production":
         return Failure(code=FailureCode.ACTION_POLICY_VIOLATION, source="policy", phase="action")
     return None
 
