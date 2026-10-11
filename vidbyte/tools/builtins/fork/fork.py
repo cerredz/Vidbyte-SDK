@@ -309,6 +309,10 @@ class ForkConversationTool(BaseTool):
             settings["compaction_trigger_tokens"] = context_window["compaction_trigger_tokens"]
         if "compaction_target_tokens" in context_window:
             settings["compaction_target_tokens"] = context_window["compaction_target_tokens"]
+        # @intent null-optional-arg-means-default
+        # A null loop field means "not given", exactly like an omitted key, so the child keeps the parent's value.
+        # An unknown field stays even when null, so the check below still refuses it.
+        settings = {field: value for field, value in settings.items() if value is not None or field not in _LOOP_SETTING_FIELDS}
         if not settings:
             return None
         values = {field: getattr(self._agent.agent_loop_settings, field, None) for field in _LOOP_SETTING_FIELDS}
