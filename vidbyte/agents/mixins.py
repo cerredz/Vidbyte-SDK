@@ -40,6 +40,8 @@ class McpAttachableMixin:
 
     _mcp_handles: list[McpServerHandle]
     _pending_mcp_configs: list[McpServerConfig]
+    # Names a fork's drop_tools removed; bridged MCP tools with these names are never attached.
+    _fork_dropped_tool_names: frozenset[str] = frozenset()
     # Set only while one run is connecting pending servers; resolved and cleared when that attach ends.
     _mcp_attach_in_flight: asyncio.Future[None] | None = None
     tools: list[BaseTool]
@@ -268,6 +270,7 @@ class McpAttachableMixin:
             name
             for handle in self._mcp_handles
             for name in handle.tool_names
+            if name not in self._fork_dropped_tool_names
         )
 
     def _mcp_configs_for_fork(self) -> tuple[McpServerConfig, ...]:
@@ -341,6 +344,9 @@ class McpAttachableMixin:
                 self._agent_tool_items = tuple(t for t in agent_tool_items if t not in bridged_tool_set)
 
     def _attach_tools(self, tools: Sequence[BaseTool]) -> None:
+        # @intent fork-drop-tools-covers-inherited-mcp-tools
+        # A forked child replays the parent's MCP servers, so a tool its fork dropped would come back on connect.
+        tools = [tool for tool in tools if tool.spec().name not in self._fork_dropped_tool_names]
         add_tool = getattr(self, "add_tool", None)
         if callable(add_tool):
             for tool in tools:

@@ -69,6 +69,8 @@ class AgentForker:
             # Backups the parent named by bare model name keep the parent's provider, even when the child switches.
             fallback=cls._fallback(agent, settings),
         )
+        # A dropped tool stays dropped for every later fork, including tools the child bridges from MCP servers.
+        child._fork_dropped_tool_names = agent._fork_dropped_tool_names | frozenset(settings.drop_tools)
         if settings.mcp if settings.inherit_mcp is None else settings.inherit_mcp:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())
         cls._copy_run_state(agent, child, settings)
