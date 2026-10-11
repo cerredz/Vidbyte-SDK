@@ -6,8 +6,9 @@ from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import ModelProvider, TextModelMode
 from vidbyte.lib.http import SyncHttpTransport
+from vidbyte.lib.registries import ProviderModelRegistry
 from vidbyte.providers import ModelProviders
 
 
@@ -23,6 +24,9 @@ class StreamingTextModelRunner:
         # Coerce config, validate provider supports streaming, then build the adapter.
         config = self._coerce_config(config, provider=provider, model=model, config_options=config_options)
         config.validate()
+        # Refuse managed state before the provider check, so the caller
+        # learns why and how to stream with their own key instead.
+        self._refuse_managed_streaming(config)
         self._validate_streaming_provider(config.normalized_provider())
         self._config = config
         self._transport = transport or SyncHttpTransport()
@@ -47,6 +51,20 @@ class StreamingTextModelRunner:
     def model_name(self) -> str:
         # Return the configured model identifier string.
         return self._config.model
+
+    def _refuse_managed_streaming(self, config: TextModelConfig) -> None:
+        # Raise UnsupportedProviderError at init time in managed state.
+        # @intent managed-streaming-is-refused-before-any-request
+        # The gateway cannot bill a stream and refuses one; refusing
+        # here sends nothing and names both ways forward.
+        if not config.is_vidbyte_managed():
+            return
+        provider = config.normalized_provider()
+        env_var = ProviderModelRegistry.get_api_key_env_var(provider)
+        raise UnsupportedProviderError(
+            f"Streaming is not available in Vidbyte-managed mode. Use TextModelRunner, or set {env_var} to stream with your own key.",
+            details={"provider": provider.value, "mode": TextModelMode.VIDBYTE_MANAGED.value},
+        )
 
     def _validate_streaming_provider(self, provider: ModelProvider) -> None:
         # Raise UnsupportedProviderError at init time when the provider cannot stream.
