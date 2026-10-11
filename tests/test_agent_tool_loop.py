@@ -651,6 +651,34 @@ class ContractRejectedPlainTextDraftTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["stop_reason"], "middleware_abort")
         self.assertEqual(len(runner.calls), 1)
 
+    async def test_exhausted_plain_text_reply_reaches_the_end_of_run_hooks(self) -> None:
+        # @intent exhausted-reply-reaches-end-of-run-hooks
+        # The reply a contract-exhausted plain-text finish returns is in the conversation the after-run hooks see.
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "hit"
+
+        captured = _CaptureAfterRunMessages()
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _text_turn("SECOND answer")])
+        settings = AgentLoopSettings(max_iterations=6, output_contracts=(MinToolCalls(1),), max_contract_rejections=1)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=[captured], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
+        self.assertEqual(reply.content, "SECOND answer")
+        self.assertIn({"role": "assistant", "content": "SECOND answer"}, captured.messages)
+
+
+class _CaptureAfterRunMessages(AgentMiddleware):
+    def __init__(self) -> None:
+        self.messages: list[dict[str, object]] = []
+
+    async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        self.messages = [dict(message) for message in ctx.provider_messages or ()]
+        return MiddlewareDecision.continue_()
+
 
 class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
     async def test_floor_equal_to_per_tool_cap_is_met_even_when_denials_abort(self) -> None:
