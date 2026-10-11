@@ -280,6 +280,16 @@ class Mem0SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertEqual(result.metadata["count"], 0)
 
+    async def test_search_non_json_503_body_reports_status(self) -> None:
+        """[Regression] a gateway HTML 503 is reported with its status, not as a JSON parse error."""
+        transport = MockTransport(503, {})
+        transport.body = "<html>Service Unavailable</html>"
+        tool = _inject_transport(Mem0SearchMemoryTool("mem0key"), transport)
+        result = await tool.execute(ToolCall("mem0_search_memory", {"query": "cats"}))
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("503", result.output)
+        self.assertEqual(json.loads(result.output)["status"], 503)
+
 
 class Mem0GetTests(unittest.IsolatedAsyncioTestCase):
 
