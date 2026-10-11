@@ -19,7 +19,8 @@ The SDK's model catalog (`vidbyte/lib/constants/runners.py`) and token pricebook
 - Add the current text models of each provider in `ModelProvider` (OpenAI, Anthropic, Gemini, xAI, DeepSeek, GLM/Z.ai, MiniMax, Kimi/Moonshot, Meta, Mistral) that the catalog lacks, to both runner maps and the modality map.
 - Give each added model a `PROVIDER_PRICING` row equal to the rate the provider charges on its own API. The comment above each row cites the provider's documentation URL.
 - Price current-lineup models that are already catalogued but have no price row: claude-fable-5, claude-mythos-5, gemini-3.1-flash-lite, kimi-k3, kimi-k2.6, and Mistral's medium/small/large aliases.
-- Correct existing rows whose first-party price changed: gpt-5.6-sol, gemini-3.6-flash, gemini-3.5-flash (now routed to 3.6 Flash), deepseek-v4-pro and deepseek-v4-flash.
+- Correct existing rows whose first-party price changed: gemini-3.5-flash (now routed to 3.6 Flash, so it bills 3.6 Flash's rate), deepseek-v4-pro and deepseek-v4-flash.
+- Price every model at its regular rate. A promotional or sale price is noted only in the row's comment, so a lapsing promotion never changes the pricebook. This covers gpt-5.6-sol, Gemini 3.8/3.6 Flash and Mistral Large 4.
 - Price Claude Haiku 5.5's 100K prompt tier correctly. Anthropic counts cache reads and writes toward that threshold.
 - Move `PRICING_AS_OF` to 2026-10-11 and refresh the C010 vintage lock.
 
@@ -43,7 +44,7 @@ The SDK's model catalog (`vidbyte/lib/constants/runners.py`) and token pricebook
   - `ModelPricingRegistry.resolve` falls back to the longest key prefix. A new model whose name extends an older key, such as `claude-sonnet-5-5` over `claude-sonnet-5` or `glm-5.3` over `glm-5`, is silently priced at the older model's rate until it gets its own row.
   - C010 requires `PRICING_AS_OF` to move whenever any rate changes. The backend persists that vintage as each resumable run's pricebook identity.
   - S014 requires the qualified and bare runner maps to stay in parity.
-  - Memory/feedback: every rate must equal the provider's own API price, with the doc URL in the comment. A promotional served price is priced as served, with the regular rate noted.
+  - Memory/feedback: every rate must equal the provider's own API price, with the doc URL in the comment. User decision (2026-10-11): every row uses the regular rate, and a promotional or sale price is noted only in the comment.
 
 ### Verified first-party sources (fetched 2026-10-11)
 
@@ -68,14 +69,14 @@ The SDK's model catalog (`vidbyte/lib/constants/runners.py`) and token pricebook
 | gpt-6-sol | 2 | 0.2 | 2.5 | 10 | >272K → 4 / 15 |
 | gpt-6.1-sol | 2 | 0.1 | 2.5 | 10 | >272K → 4 / 15 |
 | gpt-6-luna | 0.1 | 0.01 | 0.125 | 0.5 | >272K → 0.2 / 0.75 |
-| gpt-5.6-sol (promo, at least through 2026-11-21) | 4 | 0.4 | 5 | 20 | >272K → 8 / 30 |
+| gpt-5.6-sol (regular; $4 / $20 promo at least through 2026-11-21) | 5 | 0.5 | 6.25 | 30 | >272K → 10 / 45 |
 | claude-fable-5-1, claude-mythos-5-1 | 10 | 0.25 | 12.5 | 50 | none |
 | claude-opus-5-5 | 4 | 0.2 | 5 | 20 | none |
 | claude-sonnet-5-5 | 2 | 0.1 | 2.5 | 10 | none |
 | claude-haiku-5-5 | 0.1 | 0.01 | 0.125 | 0.5 | prompt >100K (all input incl. cache) → 0.5 / 2.5 |
 | claude-opus-5 | 5 | 0.5 | 6.25 | 25 | none |
 | claude-fable-5, claude-mythos-5 | 10 | 1.0 | 12.5 | 50 | none |
-| gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash (routed) | 0.75 | 0.075 | - | 3.75 | none; promo through 2026-12-31, then 1.50/0.15/7.50 |
+| gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash (routed) | 1.50 | 0.15 | - | 7.50 | none; regular rate, listed from 2027-01-01 (promo 0.75/0.075/3.75 through 2026-12-31) |
 | gemini-3.5-flash-lite | 0.30 | 0.03 | - | 2.50 | none |
 | gemini-3.1-flash-lite | 0.25 | 0.025 | - | 1.50 | none (text rate) |
 | grok-4.7, grok-4.6 | 2 | 0.5 | - | 6 | ≥200K → 4 / 12 (inclusive) |
@@ -91,7 +92,7 @@ The SDK's model catalog (`vidbyte/lib/constants/runners.py`) and token pricebook
 | mistral-medium-3-5, mistral-medium-latest | 1.5 | - | - | 7.5 | none |
 | mistral-small-2603, mistral-small-latest | 0.15 | - | - | 0.6 | none |
 | mistral-large-2512, mistral-large-latest | 0.5 | - | - | 1.5 | none |
-| mistral-large-4, mistral-large-4-0 (sale) | 0.68 | 0.07 | - | 2.09 | none; original 1.36/0.14/4.18 |
+| mistral-large-4, mistral-large-4-0 | 1.36 | 0.14 | - | 4.18 | none; regular rate (public-preview sale 0.68/0.07/2.09) |
 
 Rows re-checked and unchanged:
 - gpt-5.6-terra/luna, gpt-5.5, gpt-5.4 family;
@@ -111,7 +112,7 @@ Rows re-checked and unchanged:
 1. Each added model resolves through `ProviderModelRegistry.validate_provider_model_pair(provider, model)` under strict validation.
 2. Each added model resolves, by exact key, to a `ModelPricing` whose fields equal the table in §3. No added model resolves through a shorter sibling prefix.
 3. `ModalityDetector.detect_modality(model)` returns `TEXT` for every added model.
-4. `gpt-5.6-sol` resolves to 4 / 20 / 0.4 / 5.0, with a 272K threshold and 8 / 30 over it. Its tier metadata matches the pricing page for the standard, batch, flex and fast tiers.
+4. `gpt-5.6-sol` resolves to its regular 5 / 30 / 0.5 / 6.25, with a 272K threshold and 10 / 45 over it, as at the 2026-07-30 vintage. Its tier metadata keeps the regular standard, batch, flex and fast rates, not the current promotion.
 5. GPT-6 tier metadata (`OPENAI_GPT6_TIER_RATES`) carries the standard, batch, flex and fast rates, plus ultrafast for astra and 6.1-sol, as published.
 6. For `claude-haiku-5-5`, `AnthropicUsage.cost_usd` charges the over-threshold rates when input plus cache reads plus cache writes is over 100,000. It charges base rates at exactly 100,000.
 7. Anthropic models without a threshold still price exactly as before. The threshold change only affects rows that set `threshold_tokens`.
@@ -126,7 +127,7 @@ Rows re-checked and unchanged:
 - **Observability:** unchanged. Unpriced models still record `cost_usd=None`.
 - **Reliability:**
   - Every comment cites a first-party URL.
-  - Promotional rates name their end date and regular rate, so the next refresh knows when they lapse (gemini 2026-12-31 → 2027-01-01; gpt-5.6-sol "at least through 2026-11-21").
+  - Every row is the regular rate. A promotion or sale is named in the comment with its end date (gemini through 2026-12-31; gpt-5.6-sol "at least through 2026-11-21"), so nothing in the pricebook changes when one lapses.
 
 ---
 
@@ -151,7 +152,7 @@ response usage ──► UsageTracker ──► ModelPricingRegistry.resolve(pro
 **Key decisions:**
 1. **DeepSeek is priced at the peak rate.** The table already carries each provider's undiscounted standard rate and leaves condition-dependent discounts unmodelled (OpenAI batch/flex, Anthropic batch). DeepSeek's off-peak rate is a 50% discount that depends on the UTC hour, so the peak rate is the standard one and never under-bills. Off-peak rates are kept in `tier_rates` metadata and in the comment.
 2. **gemini-3.5-flash is priced as gemini-3.6-flash.** Google's model page says every request to it "is automatically routed to gemini-3.6-flash", and the pricing page no longer lists 3.5 Flash. Keeping 1.50/9.00 would overcharge by roughly 2x.
-3. **Promotional rates are priced as served,** with the regular rate in the comment (existing rule).
+3. **Every row uses the regular rate.** A promotional or sale price appears only in the comment (user decision, 2026-10-11).
 4. **No provider defaults change** (non-goal). A deprecated default (gemini-3.5-flash) still prices correctly through decision 2.
 
 ---
@@ -293,7 +294,7 @@ N/A. No HTTP endpoints. The public Python surface gains two exported constants, 
 - `describe('pricebook')` → `it('prices every added model with exactly the first-party rates from §3')` — [Silent Failure]
 - `describe('pricebook')` → `it('resolves each added model by its own exact key, not a shorter sibling prefix (sonnet-5-5 vs sonnet-5, glm-5.3 vs glm-5, mythos-5-1 vs mythos-5)')` — [Silent Failure]
 - `describe('pricebook')` → `it('prices a dated/versioned response id such as claude-opus-5-5-20260922 at the opus-5-5 rate')` — [Edge Case]
-- `describe('pricebook')` → `it('prices gpt-5.6-sol at the promotional 4/20 rate, and its tier metadata matches')` — [Silent Failure]
+- `describe('pricebook')` → `it('prices gpt-5.6-sol at its regular 5/30 rate, not the 4/20 promotion, and its tier metadata matches')` — [Silent Failure]
 - `describe('pricebook')` → `it('prices deepseek-v4-flash identically to deepseek-flash')` — [Hidden Assumption]
 - `describe('pricebook')` → `it('prices gemini-3.5-flash identically to gemini-3.6-flash')` — [Hidden Assumption]
 - `describe('pricebook')` → `it('applies xAI grok-4.7 high tier at exactly 200,000 input tokens (inclusive)')` — [Edge Case]
@@ -329,7 +330,7 @@ N/A. No HTTP endpoints. The public Python surface gains two exported constants, 
 
 | Dependency | Version / Endpoint | Purpose | Risk |
 |------------|--------------------|---------|------|
-| Provider pricing pages | URLs in §3 | Source of truth for rates | Prices change. Promotions lapse 2026-11-21 (gpt-5.6-sol, "at least") and 2026-12-31 (Gemini Flash). |
+| Provider pricing pages | URLs in §3 | Source of truth for rates | Prices change. Rows use regular rates, so a lapsing promotion (gpt-5.6-sol, Gemini Flash, Mistral Large 4) changes nothing. |
 | C010 vintage lock | `lint/pricebook_vintage_lock.json` | Pins rates to vintage | Must be refreshed in the same change |
 
 ---
@@ -351,7 +352,7 @@ N/A. No HTTP endpoints. The public Python surface gains two exported constants, 
 
 - [ ] DeepSeek peak vs off-peak: this ships the peak rate (decision 1). Should a later PR add time-of-day pricing, or should the table use off-peak?
 - [ ] Defaults: should `DEFAULT_PROVIDER_MODELS` move to the newest models? Candidates are gpt-6.1-sol, claude-sonnet-5-5, gemini-3.8-flash and deepseek-flash. gemini-3.5-flash is deprecated.
-- [ ] Promotion expiry: Gemini Flash rates double on 2027-01-01, and gpt-5.6-sol's promotion runs "at least through 2026-11-21". The pricebook needs a refresh at those dates.
+- [x] Promotion expiry: resolved. Rows use regular rates, so the gpt-5.6-sol (2026-11-21) and Gemini Flash (2026-12-31) promotions need no refresh when they end. While they run, recorded costs are above the amount actually charged.
 - [ ] Qwen/Alibaba and other open-weight providers: add as new providers in a separate PR?
 
 ---
@@ -366,6 +367,10 @@ N/A. No HTTP endpoints. The public Python surface gains two exported constants, 
 - What: add time windows to `ModelPricing` and a timestamp to `cost_usd`.
 - Why rejected: it is a cross-layer feature (record shape, tracker, backend billing) beyond a catalog refresh. It is listed as an open question.
 
-### Alternative 3: Remove the gemini-3.5-flash price row
+### Alternative 3: Price promotions as served
+- What: bill gpt-5.6-sol at $4 / $20, Gemini 3.8/3.6 Flash at $0.75 / $3.75 and Mistral Large 4 at its sale price.
+- Why rejected: the user chose regular rates. A served promotional rate under-reports once the promotion lapses, and each lapse would force a new pricebook vintage.
+
+### Alternative 4: Remove the gemini-3.5-flash price row
 - What: drop the deprecated model's rate.
 - Why rejected: it is the Gemini default, so C009 would fail, and runs on it would go unpriced. Pricing it as the routed model is what Google says happens.
