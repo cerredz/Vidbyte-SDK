@@ -37,7 +37,7 @@ from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.tools import ToolActivity, ToolParameter
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, TaskContextItem, TrajectoryCheckpointAlgorithm
+from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, DocumentContextItem, TaskContextItem, TextContextItem, TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
@@ -197,6 +197,30 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(context.permissions.can_read_files)
         self.assertEqual(context.context_items[0].goal, "preserve context")
         self.assertEqual(tuple(tool.name for tool in context.tools), ("isDone",))
+
+    def test_runtime_renders_each_context_item_once(self) -> None:
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Agent system.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+        )
+        manager = ContextManager()
+        manager.add(TextContextItem(title="Managed", content="MARKER-MANAGER"))
+        context = runtime.build_context(
+            "task",
+            base_context=StrategyContext(context_items=[TaskContextItem(goal="MARKER-CALLER")]),
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+            context_items=(DocumentContextItem(source="spec.md", content="MARKER-AGENT"),),
+            context_manager=manager,
+        )
+
+        system = runtime._build_system_string(context)
+        for marker in ("MARKER-AGENT", "MARKER-MANAGER", "MARKER-CALLER"):
+            self.assertEqual(system.count(marker), 1, marker)
 
     def test_runtime_builds_non_agentic_context_without_internal_tools(self) -> None:
         @tool

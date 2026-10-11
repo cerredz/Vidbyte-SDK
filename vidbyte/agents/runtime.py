@@ -259,7 +259,9 @@ class AgentRuntime:
             memory=managed_context.memory,
             permissions=managed_context.permissions,
             metadata=metadata,
-            context_items=tuple(managed_context.context_items),
+            # @intent context-items-render-once
+            # The manager's items are already folded into the typed fields above, so only the caller's own items stay here to avoid rendering them twice.
+            context_items=tuple(base_context.context_items) if base_context is not None else (),
         )
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
