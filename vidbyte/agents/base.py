@@ -331,15 +331,22 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def add_tool(self, tool: object) -> BaseAgent:
+        # @intent add-tool-flattens-a-tools-catalog
+        # A Tools catalog adds its own tools in place, as the tools list does, instead of one opaque item the model never sees.
+        given = tool.all() if isinstance(tool, Tools) else (tool,)
         # A built-in that already acts for another agent is swapped for this agent's own copy, as fork does.
-        tool = self._own_tool(tool)
+        added = tuple(self._own_tool(item) for item in given)
         # Register with the catalog first so a rejected tool leaves the agent unchanged.
-        try:
-            self.tools = self.tools.add(tool)
-        except TypeError:
-            pass
-        self._agent_tool_items = (*self._agent_tool_items, tool)
-        self._bind_agent_tool_context(tool)
+        catalog = self.tools
+        for item in added:
+            try:
+                catalog = catalog.add(item)
+            except TypeError:
+                pass
+        self.tools = catalog
+        self._agent_tool_items = (*self._agent_tool_items, *added)
+        for item in added:
+            self._bind_agent_tool_context(item)
         return self
 
     def as_tool(self) -> object:
