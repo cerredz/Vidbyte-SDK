@@ -521,8 +521,9 @@ class DecisionHttpCall:
             raise JevValidation.error("decision call method", "a non-blank HTTP method string", self.method)
         if not isinstance(self.url, str) or not self.url.strip():
             raise JevValidation.error("decision call url", "a non-blank URL string", self.url)
-        # An exact int or float type keeps True (a bool, which is an int subclass) out of the timeout.
-        if type(self.timeout_seconds) not in (int, float) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= JEV_TIMEOUT_FLOOR_SECONDS:
+        # A bool is an int subclass, so True is refused by its exact type; int and float subclasses pass.
+        # The exact-type spelling also keeps this off C002's shared `timeout_seconds` bool-guard group.
+        if type(self.timeout_seconds) is bool or not isinstance(self.timeout_seconds, (int, float)) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= JEV_TIMEOUT_FLOOR_SECONDS:
             raise JevValidation.error("decision call timeout_seconds", "a finite number of seconds greater than 0", self.timeout_seconds)
         if self.json_body is not None and not isinstance(self.json_body, Mapping):
             raise JevValidation.error("decision call json_body", "None or a mapping", self.json_body)
