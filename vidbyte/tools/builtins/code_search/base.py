@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.base import BaseTool
 
 
@@ -31,6 +32,10 @@ class BaseCodeSearchTool(BaseTool):
     ) -> None:
         """Store the resolved root and search safety settings."""
         self.root_dir = Path(root_dir).resolve()
+        # @intent name-lists-reject-bare-strings
+        # ignore_patterns="node_modules" is a str, so tuple() would ignore its characters and skip nothing.
+        if isinstance(ignore_patterns, (str, bytes)):
+            raise ConfigurationError('ignore_patterns must be a list of directory or file names (e.g. ["node_modules"]), not a single string.')
         self.ignore_patterns = tuple(
             ignore_patterns
             or (".git", "node_modules", "__pycache__", ".venv", "venv")
