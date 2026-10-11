@@ -282,8 +282,17 @@ class Session:
         source = store.get(checkpoint_id) if checkpoint_id else store.head(session_id)
         if source is None:
             raise SessionError("Cannot resume a session with no checkpoints.", details={"session_id": session_id})
+        # @intent resume-checkpoint-stays-in-its-session
+        # Refuse another session's checkpoint, as rewind() and fork(at=) do; adopt() and fork_from() are the explicit cross-session paths.
+        if checkpoint_id and source.session_id != session_id:
+            raise SessionError("Cannot resume from a checkpoint from another session.", details={"checkpoint_id": checkpoint_id})
         agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
-        return cls(agent, store=store, session_id=session_id, policy=policy, trace=trace, _existing=True)
+        session = cls(agent, store=store, session_id=session_id, policy=policy, trace=trace, _existing=True)
+        # @intent resume-checkpoint-becomes-head
+        # The agent holds this checkpoint's history, so move the live and stored head there exactly as rewind() does; the next turn then records it as its parent.
+        if checkpoint_id:
+            session.rewind(to=source.id)
+        return session
 
     @classmethod
     def continue_(cls, store: SessionStore, session_id: str, **kwargs: Any) -> "Session":

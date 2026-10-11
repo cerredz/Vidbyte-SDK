@@ -1041,6 +1041,36 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "answer-1")
         self.assertEqual(len(resumed.agent.history), 3)
 
+    async def test_resume_at_checkpoint_branches_from_that_checkpoint(self) -> None:  # [Silent Failure]
+        # Resuming at an older checkpoint must record the next turn under it, matching resume().rewind(to=).
+        store = InMemorySessionStore()
+        session = Session(build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner()), store=store)
+        await session.arun("first")
+        first = session.head
+        await session.arun("second")
+        await session.arun("third")
+
+        resumed = Session.resume(store, session.id, checkpoint_id=first)
+        self.assertEqual(resumed.head, first)
+        self.assertEqual(store.head(session.id).id, first)
+        self.assertEqual(len(resumed.agent.history), 1)
+        bind_test_runner(resumed.agent, EchoRunner())
+        await resumed.arun("branch")
+        self.assertEqual(store.get(resumed.head).parent_id, first)
+
+    async def test_resume_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
+        # Like rewind and fork(at=), resume must not splice another session's checkpoint into this one.
+        store = InMemorySessionStore()
+        own = Session(build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner()), store=store)
+        await own.arun("mine")
+        other = Session(build_test_agent(name="other", system_prompt="Work.", runner=EchoRunner()), store=store)
+        await other.arun("theirs")
+        own_head = own.head
+
+        with self.assertRaises(SessionError):
+            Session.resume(store, own.id, checkpoint_id=other.head)
+        self.assertEqual(store.head(own.id).id, own_head)
+
     async def test_file_store_parity_round_trip(self) -> None:  # [Silent Failure]
         with tempfile.TemporaryDirectory() as root:
             store = FileSessionStore(root)
