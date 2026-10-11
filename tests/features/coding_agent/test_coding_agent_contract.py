@@ -1,6 +1,6 @@
 """FILE: tests/features/coding_agent/test_coding_agent_contract.py
 
-PURPOSE: Pin CodingAgent's construction contract: its public names, a constructor that adds only root_dir, four keys, tools, and a policy default to BaseAgent's, one absolute root shared by all six root-bound tools, and fail-fast validation of everything else.
+PURPOSE: Pin CodingAgent's construction contract: its public names, a constructor that adds only root_dir, four keys, tools, a policy default, and the AGENTS.md switch with the context manager it merges to BaseAgent's, one absolute root shared by all six root-bound tools, and fail-fast validation of everything else.
 ROLE IN CODEBASE: Calls vidbyte.CodingAgent, vidbyte.agents.base.BaseAgent, and the tools in agent.tools directly; offline, with real temporary folders and, for bash, a real subprocess.
 ARCHITECTURE NOTE: "Same settings as BaseAgent" is proven differentially: a CodingAgent and a BaseAgent built from the same keywords, tools, and allow-all policy must export identical RunState snapshots.
 FUNCTION INVENTORY: test_public_names_* (AC-20); test_coding_agent_adds_only_* (INV-1, §8.5); test_*_same_state_as_* (INV-2, INV-8); test_restored_state_* (AC-21); test_caller_tools_* (AC-9); test_caller_tool_named_* (AC-8); test_base_agent_identity_errors_* (AC-10); test_root_dir_that_is_not_* (AC-11, EC-6, D-8); test_root_bound_tools_* (INV-4, EC-7).
@@ -36,6 +36,9 @@ EXPECTED_SIGNATURE = {
     "tavily_api_key": None,
     "tools": (),
     "permission_policy": None,
+    # AGENTS.md loading: the switch, and the caller's manager the coding context sections go ahead of.
+    "load_agents": True,
+    "context_manager": None,
 }
 
 # BaseAgent keywords that RunState exports, so a pass-through mistake shows up as a state difference.
