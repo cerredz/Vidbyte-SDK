@@ -15,7 +15,11 @@ class ContainsAllGrader(BaseGrader):
 
     def __init__(self, required: Sequence[str] | None = None, *, case_sensitive: bool = False) -> None:
         # Stores required terms and case sensitivity preferences.
-        self.required = tuple(required or ())
+        # @intent bare-string-term-is-one-term
+        # tuple("30 days") would split the term into characters and pass wrong answers; a bare
+        # string is one term, as in _expected_terms. None or empty still falls back to case.expected.
+        required = required or ()
+        self.required = (required,) if isinstance(required, str) else tuple(required)
         self.case_sensitive = case_sensitive
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:

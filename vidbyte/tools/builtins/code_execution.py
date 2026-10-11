@@ -163,5 +163,4 @@ class CodeExecutionTool(BaseTool):
         try:
             return str(SafePrintExpression.evaluate(inner))
         except (ToolExecutionError, ArithmeticError, ValueError, RecursionError):
-            quoted = len(inner) >= 2 and inner[0] == inner[-1] and inner[0] in ("'", '"')
-            return inner[1:-1] if quoted else inner
+            return inner

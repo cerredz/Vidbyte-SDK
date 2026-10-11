@@ -107,6 +107,10 @@ class Session:
         self._policy = CheckpointPolicy(policy)
         self._recorder = TraceRecorder(TraceCapture(trace))
         self._serializer = SessionSerializer()
+        # @intent name-lists-reject-bare-strings
+        # A typo like tags=("billing") is a str, so tuple() would store its characters and list_sessions(tag=) would never match.
+        if isinstance(tags, (str, bytes)):
+            raise SessionError("Session.tags must be an iterable of tag names, not a string.", details={"field": "tags", "value": tags})
         self._tags = tuple(tags)
         self._parent_session_id = parent_session_id
         self._head_id: str | None = None

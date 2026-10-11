@@ -40,12 +40,20 @@ def _require_boolean_enabled(value: bool) -> bool:
     return value
 
 
+def _require_model_sequence(models: Sequence[str | FallbackModel]) -> Sequence[str | FallbackModel]:
+    # @intent name-lists-reject-bare-strings
+    # A typo like ("deepseek-reasoner") is a str, so tuple() would make a chain of one-character models.
+    if isinstance(models, (str, bytes)):
+        raise ConfigurationError("AgentFallbackSettings.models must be a sequence of models, not a string.")
+    return models
+
+
 class AgentFallbackSettings:
     """Validated configuration object for an agent's ordered model fallback chain."""
 
     def __init__(self, *, models: Sequence[str | FallbackModel], fallback_on: tuple[type[BaseException], ...] | None = None, enabled: bool = True) -> None:
         # Stores the declared chain and error filter as instance attributes, then validates them immediately.
-        self.models = tuple(models)
+        self.models = tuple(_require_model_sequence(models))
         self.fallback_on = fallback_on
         self.enabled = _require_boolean_enabled(enabled)
         self._validate()

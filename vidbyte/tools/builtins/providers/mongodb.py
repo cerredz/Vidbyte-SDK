@@ -123,7 +123,7 @@ class MongoFindDocumentsTool(ProviderOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        return self._result(self.spec().name, lambda: self._store.find_documents(str(call.arguments["collection"]), dict(call.arguments.get("query") or {}), limit=int(call.arguments.get("limit", 50))))
+        return self._result(self.spec().name, lambda: self._store.find_documents(str(call.arguments["collection"]), dict(call.arguments.get("query") or {}), limit=int(self._optional_argument(call, "limit", default=50))))
 
 
 class MongoUpdateDocumentsTool(ProviderOperationTool):

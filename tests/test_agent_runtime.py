@@ -10,6 +10,8 @@ Architecture:
     - CountingSearchTool & ActivityRecordingMiddleware: Priced tool and middleware probe
       used by ToolActivityRuntimeTests.
     - ToolActivityRuntimeTests: TestCase verifying activity capture, policy inputs, and metering.
+    - NonLinearRuntimeRegressionTests: Drives BaseAgent through the MCTS and actor runtimes
+      with an offline AnswerRunner to guard against context and lifecycle drift.
 Key Functions:
     - test_inner_context_window_lifecycle_writes_to_next_system_context: Validates trajectory algorithm integration.
     - test_runtime_denies_write_tool_by_default: Validates security middleware defaults.
@@ -27,6 +29,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.lib.dataclasses.middleware import MiddlewareDecision
@@ -37,10 +40,12 @@ from vidbyte.agents.types import AgentMessage
 from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, TaskContextItem, TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.enums import ModelModality
+from vidbyte.lib.enums import AgentRuntimeType, ModelModality
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
+
+from tests.agent_test_support import build_test_agent
 
 
 class FakeResponse:
@@ -930,6 +935,48 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(timed_out_calls), 1)
         self.assertEqual(timed_out_calls[0].tool_name, "slow_tool")
 
+
+class AnswerRunner:
+    """Offline runner that returns one fixed answer for every actor or search call."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, prompt: str, **_: object) -> FakeResponse:
+        self.calls += 1
+        return FakeResponse("ANSWER", {})
+
+
+class NonLinearRuntimeRegressionTests(unittest.TestCase):
+    """Drives BaseAgent through the non-linear runtimes end to end with an offline runner."""
+
+    def _run(self, runtime: object) -> tuple[object, AnswerRunner]:
+        runner = AnswerRunner()
+        agent = build_test_agent(name="r", system_prompt="s", runtime=runtime, runner=runner)
+        return agent.run("q"), runner
+
+    def test_mcts_search_builds_context_without_crashing(self) -> None:
+        # [Regression] The search runtime used the removed strategy_metadata context field.
+        result, _ = self._run(AgentRuntimeType.MCTS_SEARCH)
+        self.assertEqual(result.content, "Branching MCTS execution complete.")
+
+    def test_actor_coordinator_returns_model_answer(self) -> None:
+        # [Regression] The actor runtime used the removed strategy_metadata context field.
+        result, runner = self._run(ActorRuntime(include_actors=[]))
+        self.assertEqual(result.content, "ANSWER")
+        self.assertEqual(runner.calls, 1)
+
+    def test_actor_default_actor_set_runs_for_each_topology(self) -> None:
+        # [Regression] The default actor list imported the removed CoderActor class.
+        for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            with self.subTest(topology=topology):
+                result, _ = self._run(ActorRuntime(topology=topology))
+                self.assertEqual(result.content, "ANSWER")
+
+    def test_actor_quiescence_does_not_complete_the_run_twice(self) -> None:
+        # [Regression] A reply that completed the run during the quiescence poll was set again.
+        result, _ = self._run(ActorRuntime(termination_mode="quiescence", include_actors=[]))
+        self.assertEqual(result.content, "ANSWER")
 
 if __name__ == "__main__":
     unittest.main()

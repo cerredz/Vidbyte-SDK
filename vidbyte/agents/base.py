@@ -58,7 +58,8 @@ from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_led
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.tools.base import BaseTool, _unwrap_tool
+from vidbyte.tools.adapters import ensure_tool
+from vidbyte.tools.base import BaseTool, _ToolWrapper, _unwrap_tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolPermission, ToolSpec
@@ -181,8 +182,11 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.agents.fallback import AgentFallback
         self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
-        self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
-        self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
+        given_tools = tools.all() if isinstance(tools, Tools) else tuple(tools)
+        # A built-in that already acts for another agent is swapped for this agent's own copy, as fork does.
+        self._agent_tool_items = tuple(self._own_tool(item) for item in given_tools)
+        unchanged = all(given is own for given, own in zip(given_tools, self._agent_tool_items, strict=True))
+        self.tools = tools if isinstance(tools, Tools) and unchanged else self._catalog_from_agent_tools(self._agent_tool_items)
         self.permission_policy = permission_policy or PermissionPolicy()
         effective_max_iterations = max_iterations if max_iterations is not None else max_tool_rounds
         self.agent_loop_settings = self._resolve_loop_settings(
@@ -314,6 +318,8 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def add_tool(self, tool: object) -> BaseAgent:
+        # A built-in that already acts for another agent is swapped for this agent's own copy, as fork does.
+        tool = self._own_tool(tool)
         # Register with the catalog first so a rejected tool leaves the agent unchanged.
         try:
             self.tools = self.tools.add(tool)
@@ -399,11 +405,12 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
         from vidbyte.tools.builtins.pause import PauseAgentTool
         from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+        from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
 
         # customize() and with_activity() views keep the wrapped tool's runtime, so bind the wrapped tool.
         tool = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
         if isinstance(tool, AgentTool):
-            tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
+            tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)), owner=self)
         if isinstance(tool, AttachMcpServerTool):
             tool.bind_agent(self)
         if isinstance(tool, CreateHandoffTool):
@@ -414,7 +421,44 @@ class BaseAgent(McpAttachableMixin):
             tool.bind_agent(self)
         if isinstance(tool, PauseAgentTool):
             tool.bind_agent(self)
+        if isinstance(tool, _SessionBuiltinTool):
+            tool.bind_owner(self)
         self._bind_session_tool(tool)
+
+    def _own_tool(self, tool: object) -> object:
+        """Return the tool, or an unbound copy of it when a binding built-in already acts for another agent."""
+        from vidbyte.tools.agent_tool import AgentTool
+        from vidbyte.tools.builtins.fork import ForkConversationTool
+        from vidbyte.tools.builtins.handoff import CreateHandoffTool
+        from vidbyte.tools.builtins.mcp import AttachMcpServerTool
+        from vidbyte.tools.builtins.pause import PauseAgentTool
+        from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+        from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
+
+        # @intent shared-bound-tool-gets-own-copy
+        # Re-binding a shared instance would make the first agent act through the second agent's state,
+        # so the second agent gets a fork-style unbound copy. AgentTool's _agent is its delegate, not its owner.
+        inner = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
+        if isinstance(inner, (AgentTool, _SessionBuiltinTool)):
+            owner: object = inner._owner
+        elif isinstance(inner, (AttachMcpServerTool, CreateHandoffTool, ForkConversationTool, RunPromptsSequentiallyTool, PauseAgentTool)):
+            owner = inner._agent
+        else:
+            return tool
+        return tool if owner is None or owner is self else self._unbound_copy(tool, inner)
+
+    @staticmethod
+    def _unbound_copy(tool: object, inner: Any) -> object:
+        # Copies the built-in unbound, as fork does, and rebuilds any customize()/with_activity() views over the copy.
+        views: list[_ToolWrapper] = []
+        while isinstance(tool, _ToolWrapper):
+            views.append(tool)
+            tool = tool.wrapped_tool
+        # A session tool's copy starts from its configured scope so it never reaches the other agent's sessions.
+        duplicate: BaseTool = inner.clone_for_agent() if hasattr(inner, "clone_for_agent") else inner.clone_for_fork()
+        for view in reversed(views):
+            duplicate = view._rewrap(duplicate)
+        return duplicate
 
     def _bind_session_tool(self, tool: object) -> None:
         # Bind a session-builtin tool to this agent's active session when one is attached, looking through tool views.
@@ -963,6 +1007,10 @@ class BaseAgent(McpAttachableMixin):
         )
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
+        # @intent name-lists-reject-bare-strings
+        # A bare string is itself a sequence, so the loop below would run one paid model call per character.
+        if isinstance(prompts, (str, bytes)):
+            raise ValueError("BaseAgent.arun_sequentially() prompts must be a list of prompts, not a single string.")
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
         results: list[AgentMessage] = []
         for prompt in prompts:
@@ -1486,9 +1534,14 @@ class BaseAgent(McpAttachableMixin):
             except Exception:
                 return tool.__class__.__name__
             name = getattr(tool_spec, "name", None)
-            if name:
-                return str(name)
-        return tool.__class__.__name__
+            return str(name) if name else tool.__class__.__name__
+        # @intent plain-function-tool-keeps-catalog-name
+        # A plain callable is named the way the catalog wraps it, so cards, registry lookups and resume checks
+        # see the name the model calls; only items the catalog rejects fall back to their class name.
+        try:
+            return ensure_tool(tool).name  # type: ignore[arg-type]
+        except TypeError:
+            return tool.__class__.__name__
 
     def _trace_tool_specs(self) -> list[dict[str, Any]]:
         """Build a list of full tool specs (name, description, parameters) for tracing."""

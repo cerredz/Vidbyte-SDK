@@ -16,6 +16,7 @@ Relations:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
@@ -64,22 +65,42 @@ class ConfusedDeputyGuardMiddleware(AgentMiddleware):
 
     def _check_arguments(self, ctx: MiddlewareContext, tool_outputs: list[str], user_message: str) -> MiddlewareDecision:
         # Scans each string argument for verbatim overlap with prior tool results.
+        # @intent deputy-scan-covers-nested-arguments: strings inside object and list
+        # arguments (send_message(message={"body": ...}), post_lines(lines=[...])) are
+        # arguments too, so injected tool text copied one level down must be checked
+        # with the same per-string rules as a top-level string, not skipped.
         for arg_name, arg_value in ctx.tool_call.arguments.items():
-            if not isinstance(arg_value, str) or len(arg_value) < self._min_arg_length:
-                continue
-            ratio = self._max_overlap_ratio(arg_value, tool_outputs)
-            # Skip text at least as attributable to the user's own message as to tool content.
-            if ratio > self._max_ratio and ratio > self._longest_common_substring_length(arg_value, user_message) / len(arg_value):
-                return MiddlewareDecision.abort(
-                    self._abort_reason,
-                    metadata={
-                        "tool_name": ctx.tool_call.tool_name,
-                        "argument_name": arg_name,
-                        "overlap_ratio": round(ratio, 4),
-                        "threshold": self._max_ratio,
-                    },
-                )
+            for text in self._string_leaves(arg_value):
+                if len(text) < self._min_arg_length:
+                    continue
+                ratio = self._max_overlap_ratio(text, tool_outputs)
+                # Skip text at least as attributable to the user's own message as to tool content.
+                if ratio > self._max_ratio and ratio > self._longest_common_substring_length(text, user_message) / len(text):
+                    return MiddlewareDecision.abort(
+                        self._abort_reason,
+                        metadata={
+                            "tool_name": ctx.tool_call.tool_name,
+                            "argument_name": arg_name,
+                            "overlap_ratio": round(ratio, 4),
+                            "threshold": self._max_ratio,
+                        },
+                    )
         return MiddlewareDecision.continue_()
+
+    @staticmethod
+    def _string_leaves(value: object) -> list[str]:
+        # Collects every string inside an argument value, walking mapping values and lists in order.
+        leaves: list[str] = []
+        pending: list[object] = [value]
+        while pending:
+            item = pending.pop(0)
+            if isinstance(item, str):
+                leaves.append(item)
+            elif isinstance(item, Mapping):
+                pending.extend(item.values())
+            elif isinstance(item, (list, tuple)):
+                pending.extend(item)
+        return leaves
 
     def _max_overlap_ratio(self, arg_value: str, tool_outputs: list[str]) -> float:
         # Returns the maximum overlap ratio between the argument and any tool result.

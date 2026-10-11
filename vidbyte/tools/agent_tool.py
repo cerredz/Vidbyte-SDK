@@ -23,13 +23,18 @@ class AgentTool(BaseTool):
         self._name = agent.agent_metadata.name
         self._description = self._build_agent_description()
         self._context_getter: Callable[[], tuple[str, list[Any]]] | None = None
+        # The parent agent whose context the getter reads; BaseAgent copies the tool rather than steal it.
+        self._owner: object | None = None
 
     def bind_context_getter(
         self,
         getter: Callable[[], tuple[str, list[Any]]],
+        *,
+        owner: object | None = None,
     ) -> None:
-        """Bind a callable that returns (active_prompt, history) at call time."""
+        """Bind a callable that returns (active_prompt, history) at call time, and the agent it reads."""
         self._context_getter = getter
+        self._owner = owner
 
     def clone_for_fork(self) -> AgentTool:
         # Returns an unbound wrapper around the same delegate agent for a forked parent.

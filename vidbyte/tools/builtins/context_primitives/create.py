@@ -79,7 +79,12 @@ class CreateContextPrimitiveTool(BaseTool):
 
     def _parse_placement(self, args: dict[str, Any]) -> ContextWindowPlacement | str:
         """Return a normalized placement enum or an error message string."""
-        placement_raw = str(args.get("placement", ContextWindowPlacement.END_OF_CONTEXT.value)).strip()
+        # @intent null-optional-arg-means-default
+        # A null placement means "not given": use the end-of-context default, never the text "None".
+        raw_placement = args.get("placement")
+        if raw_placement is None:
+            raw_placement = ContextWindowPlacement.END_OF_CONTEXT.value
+        placement_raw = str(raw_placement).strip()
         try:
             return ContextWindowPlacement(placement_raw)
         except ValueError:
