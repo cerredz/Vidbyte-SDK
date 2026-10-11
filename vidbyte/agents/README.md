@@ -85,7 +85,7 @@ reply = await agent.arun(
 
 ## Coding Agent
 
-`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool.
+`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool. By default it also shows the folder's `AGENTS.md` to the model.
 
 ```python
 from vidbyte import CodingAgent
@@ -95,6 +95,7 @@ agent = CodingAgent(
     system_prompt="Make the smallest change that fixes the task.",
     root_dir="my-project",            # an existing folder, resolved once
     firecrawl_api_key="fc-your-key",  # optional; picks the web-fetch provider
+    load_agents=True,                 # default; shows my-project/AGENTS.md to the model
     provider="openai",
     model_name="gpt-4.1",
 )
@@ -104,13 +105,22 @@ The key you pass picks the web-fetch tool: `firecrawl_api_key`, `browserbase_api
 
 The constructor gathers its own arguments into one `CodingAgentSettings` (`vidbyte/lib/dataclasses/coding.py`), which checks the root folder, the keys, the caller's tools, and the policy when it is created, so a bad argument fails before `BaseAgent` builds anything. The seven tools come from `CodingAgentTools` (`vidbyte/tools/toolsets/coding.py`), a `Tools` catalog with `authenticate_tools(settings)`, which gives the one key to its fetch provider, and `get_tools(root_dir, fetch_tool)`, which returns the seven in order.
 
+When it is built, the agent reads `<root_dir>/AGENTS.md`, or a case variant such as `agents.md` when that exact name is absent, and places the text right after the system prompt and before your message, so the model follows the rules the repository already wrote down. Parent folders are never searched. The file is read once: later edits are seen only by a new agent, and a later change of working directory changes nothing. At most 32,768 bytes are shown, cut at a whole character; a longer file ends with a line that gives the cut and the `read_lines` call that reads the rest. A missing or blank file adds nothing, while a file that is there but cannot be read, such as a folder named `AGENTS.md`, fails construction with a `ConfigurationError` naming its path. Pass `load_agents=False` to turn this off; `load_agents` must be a real `bool`.
+
+`CodingContextWindow` (`vidbyte/agents/coding_context/`) places the text and owns the order of everything a `CodingAgent` adds after the system prompt: `AGENTS.md`, then the environment context, the repository map, and setup-command results as those features land, then the content of your own `context_manager`. It never changes your manager: when a section is loaded, the agent gets a new manager with your content after the sections. Adding a section takes three steps, described in that folder's README:
+
+1. Write one loader class in its own file in `vidbyte/agents/coding_context/`, with `load(settings) -> CodingContextSectionText | None`.
+2. Return the section's reserved `CodingContextSection` member (`ENVIRONMENT`, `REPO_MAP`, or `SETUP_RESULTS`); the enum's order is the render order.
+3. Add `<Loader>.load(settings)` to the `sections` tuple in `CodingAgent.__init__`.
+
 To run one task from a terminal, use `vidbyte-sdk coding run --root-dir my-project --provider openai --model gpt-4.1 "Fix the failing test."`; it prints only the final reply. A fetch key is never a flag value: `--firecrawl-key-env NAME` (or the Browserbase, Parallel, or Tavily twin) names the environment variable that holds it.
 
 - The default policy allows every tool, including tools you add; pass `permission_policy=PermissionPolicy()` for a read-only agent.
 - `bash` is not confined to `root_dir`, and it runs unsandboxed with the inherited environment. The SDK undoes nothing a tool did, so keep the folder under version control.
 - A background process must redirect both its standard output and its standard error, or the call waits for the time limit and the process is killed.
 - Each command is limited to 600 seconds and 50,000 bytes of output (the first bytes are kept). `ToolSettings.tool_timeout_seconds` and `ToolSettings.result_max_chars` remain the agent-wide controls.
-- `fork()` returns a plain `BaseAgent`. `CodingAgent.restore(state)` raises `TypeError` (no `root_dir`), so restore with `BaseAgent.restore(state, tools=CodingAgent(...).tools.all())`.
+- `fork()` returns a plain `BaseAgent` that keeps the `AGENTS.md` section. `CodingAgent.restore(state)` raises `TypeError` (no `root_dir`), so restore with `BaseAgent.restore(state, tools=CodingAgent(...).tools.all())`, which does not bring the section back.
+- When `AGENTS.md` is loaded and you pass `context_manager`, tools bound to your manager object, such as `ContextWindowFactory` tools, write to a manager the agent no longer renders.
 - On Windows, `bash` needs Git for Windows, and a timed-out or cancelled command is not stopped (only Git's launcher is killed), so it may keep running after the call returns.
 
 ## Model Fallback
@@ -231,6 +241,7 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
+- `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
 - `types.py`: agent messages, input envelopes, cards, and specs.
 
