@@ -66,10 +66,14 @@ class GeminiProvider:
         # the prompt that provoked that exchange arrives separately and would otherwise land
         # after it, leaving the functionCall turn with nothing in front of it. Gemini rejects
         # that outright: "function call turn comes immediately after a user turn or after a
-        # function response turn". Slot the prompt in as that missing opening turn. A history
-        # whose calls are already introduced is left alone and the prompt simply appends.
+        # function response turn". Slot the prompt in as that missing opening turn. A model turn
+        # at the very start, text or call, has nothing in front of it either and gets the same
+        # treatment. A history whose model turns are already introduced is left alone and the
+        # prompt simply appends.
+        # @intent gemini-prompt-opens-a-model-led-history
+        # A rejected plain-text draft now opens this run's exchange, and Gemini refuses contents that start with a model turn.
         for index, turn in enumerate(history):
-            if not self._has_part(turn, "functionCall"):
+            if not (self._has_part(turn, "functionCall") or (index == 0 and turn.get("role") == "model")):
                 continue
             return len(history) if index and history[index - 1].get("role") == "user" else index
         return len(history)
