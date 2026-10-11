@@ -47,7 +47,9 @@ class DocumentRetrievalTool(BaseTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         query = call.arguments.get("query", "").lower()
-        top_k = call.arguments.get("top_k", 2)
+        # @intent null-optional-arg-means-default
+        # A null top_k means "not given": return the default two documents, not every match.
+        top_k = self._optional_argument(call, "top_k", default=2)
 
         # Mocked technical design library
         mock_library = [
