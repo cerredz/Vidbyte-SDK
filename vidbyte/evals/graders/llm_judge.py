@@ -110,10 +110,13 @@ class LLMJudgeGrader(BaseGrader):
         try:
             # Decode only the first JSON object so trailing prose (even with braces) cannot break the verdict.
             parsed, _ = json.JSONDecoder().raw_decode(text, start)
-            score = float(parsed.get("score", 0.0))
+            # @intent null-optional-arg-means-default
+            # Judges send null for fields they have nothing for, so a null field reads exactly like an omitted one.
+            fields = {key: value for key, value in parsed.items() if value is not None}
+            score = float(fields.get("score", 0.0))
             # Only a real true (or the string "true") passes; "false", numbers, or a missing verdict fail closed.
-            passed = self._coerce_passed(parsed.get("passed", False))
-            reason = str(parsed.get("reason", "Graded by LLM Judge."))
+            passed = self._coerce_passed(fields.get("passed", False))
+            reason = str(fields.get("reason", "Graded by LLM Judge."))
             return GraderResult(score=score, passed=passed, reason=reason)
         except Exception as exc:
             return GraderResult(score=0.0, passed=False, reason=f"Failed to parse judge JSON: {str(exc)}")

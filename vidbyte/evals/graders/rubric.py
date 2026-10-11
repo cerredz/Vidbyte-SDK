@@ -13,6 +13,7 @@ Functions:
     - _resolve_template: Fetches prompt assets or falls back to system defaults.
     - _invoke_judge: Invokes the judge runner asynchronously or synchronously.
     - _parse_response: Decodes the multidimensional JSON scores and calculates the weighted result.
+    - _without_nulls: Treats null score/reason entries as omitted so they get the default values.
 Relations:
     Related to vidbyte.evals.base (BaseGrader), vidbyte.evals.types (EvalCase, GraderResult),
     and vidbyte.prompts (fetches judgment templates).
@@ -119,8 +120,9 @@ class RubricGrader(BaseGrader):
         try:
             # Decode only the first JSON object so trailing prose (even with braces) cannot break the scores.
             parsed, _ = json.JSONDecoder().raw_decode(text, start)
-            scores = parsed.get("scores", {})
-            reasons = parsed.get("reasons", {})
+            # Judges send null for scores or reasons they have nothing for, so nulls read exactly like omitted ones.
+            scores = self._without_nulls(parsed.get("scores"))
+            reasons = self._without_nulls(parsed.get("reasons"))
             
             total_weight = sum(self.rubric.values())
             if total_weight <= 0.0:
@@ -139,3 +141,11 @@ class RubricGrader(BaseGrader):
             return GraderResult(score=final_score, passed=passed, reason=reason)
         except Exception as exc:
             return GraderResult(score=0.0, passed=False, reason=f"Failed to parse rubric response JSON: {str(exc)}")
+
+    @staticmethod
+    def _without_nulls(section: Any) -> Any:
+        # @intent null-optional-arg-means-default
+        # Drops null entries (or a null section) so they fall back to the same defaults as omitted ones.
+        if section is None:
+            return {}
+        return {key: value for key, value in section.items() if value is not None}
