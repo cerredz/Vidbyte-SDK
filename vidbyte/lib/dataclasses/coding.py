@@ -3,7 +3,7 @@
 PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, and the write_text rewrite limit.
 ROLE IN CODEBASE: Built by vidbyte/agents/coding.py (CodingAgent.__init__) and read by vidbyte/tools/toolsets/coding.py (CodingAgentTools); exported by the root vidbyte package.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
-FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; _check_max_rewrite_lines checks the rewrite limit.
+FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
 KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools.
@@ -17,6 +17,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vidbyte.lib.dataclasses.filesystem import OverwriteLineLimit
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.errors import ConfigurationError
 
@@ -52,10 +53,10 @@ class CodingAgentSettings:
         # Check the caller's tools and the policy every call runs under.
         self._check_tools_and_policy()
 
-        # Check the rewrite limit: None turns it off, and a number is
-        # the most lines an existing file may have and still be
-        # replaced whole.
-        self._check_max_rewrite_lines()
+        # Check the rewrite limit with the same rule write_text's own
+        # config uses: None turns it off, and a number is the most lines
+        # an existing file may have and still be replaced whole.
+        OverwriteLineLimit(self.max_rewrite_lines, "max_rewrite_lines")
 
     def _resolved_root(self) -> Path:
         """Return root_dir as an absolute path, or raise when it is not an existing directory."""
@@ -97,16 +98,6 @@ class CodingAgentSettings:
             raise ConfigurationError("CodingAgent tools must be a tuple.", details={"tools_type": type(self.tools).__name__})
         if not isinstance(self.permission_policy, PermissionPolicy):
             raise ConfigurationError("CodingAgent permission_policy must be a PermissionPolicy.", details={"permission_policy_type": type(self.permission_policy).__name__})
-
-    def _check_max_rewrite_lines(self) -> None:
-        """Raise unless max_rewrite_lines is None or an int of at least 1."""
-        # @intent big-existing-files-are-edited-not-rewritten
-        # True or 2.5 would quietly set a different limit than the
-        # caller meant, and 0 would refuse every existing file, so all
-        # of them fail here instead of on the first write_text call.
-        limit = self.max_rewrite_lines
-        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
-            raise ConfigurationError("CodingAgent max_rewrite_lines must be None or an int of at least 1.", details={"max_rewrite_lines": repr(limit)})
 
 
 __all__ = ["CodingAgentSettings"]

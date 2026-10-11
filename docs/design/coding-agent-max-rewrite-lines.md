@@ -58,9 +58,9 @@ The user's request, verbatim:
 
 ```
 CodingAgent(max_rewrite_lines=300)
-  -> CodingAgentSettings (checks max_rewrite_lines)
+  -> CodingAgentSettings (checks max_rewrite_lines with OverwriteLineLimit)
   -> CodingAgentTools.get_tools(root, fetch_tool, max_rewrite_lines)
-       -> FileSystemToolConfig(root, allow_write=True, max_overwrite_lines=...)  (checks it again, as a lib record)
+       -> FileSystemToolConfig(root, allow_write=True, max_overwrite_lines=...)  (same OverwriteLineLimit check)
             -> WriteTextTool.spec()     appends one sentence when set
             -> WriteTextTool.execute()  resolve path -> refusal check -> write
 ```
@@ -74,7 +74,9 @@ The tool config owns the behaviour, so any user of the filesystem tools can turn
 ### 6.1 FileSystemToolConfig
 **File:** `vidbyte/lib/dataclasses/filesystem.py` (Modified)
 
-Add the field `max_overwrite_lines: int | None = None` as the last field. Add a `__post_init__` that raises `ConfigurationError("FileSystemToolConfig max_overwrite_lines must be None or an int of at least 1.", details={"max_overwrite_lines": repr(value)})` for a `bool`, any non-`int`, or a value below 1.
+- Add the field `max_overwrite_lines: int | None = None` as the last field, and a `__post_init__` that builds `OverwriteLineLimit(self.max_overwrite_lines, "max_overwrite_lines")`.
+- Add a small record in the same module, `OverwriteLineLimit(lines: int | None, parameter: str)`, which is frozen and slotted. Its `__post_init__` raises `ConfigurationError(f"{parameter} must be None or an int of at least 1.", details={"parameter": ..., "value": repr(lines)})` for a `bool`, any non-`int`, or a value below `_MIN_OVERWRITE_LINES = 1`.
+- The record exists because lint rule C002 (duplicate-inline-bool-guard-validation) blocks the same inline check in two records. The rule's own fix is "one frozen, slotted dataclass whose `__post_init__` owns this validation, constructed at each boundary", following the `PauseDuration` precedent. Rule A007 requires the named minimum.
 
 ### 6.2 WriteTextTool
 **File:** `vidbyte/tools/filesystem/write_text.py` (Modified)
@@ -94,7 +96,7 @@ Edge cases:
 ### 6.3 CodingAgentSettings / CodingAgent / CodingAgentTools
 **Files:** `vidbyte/lib/dataclasses/coding.py`, `vidbyte/agents/coding.py`, `vidbyte/tools/toolsets/coding.py` (Modified)
 
-- `CodingAgentSettings` gets a required field, `max_rewrite_lines: int | None`, placed after `permission_policy`. A new helper, `_check_max_rewrite_lines`, raises `ConfigurationError("CodingAgent max_rewrite_lines must be None or an int of at least 1.", details={"max_rewrite_lines": repr(value)})`. The field has no default of its own: `CodingAgent` always passes it, so the 300 default appears only once, in the signature.
+- `CodingAgentSettings` gets a required field, `max_rewrite_lines: int | None`, placed after `permission_policy`. `__post_init__` checks it with `OverwriteLineLimit(self.max_rewrite_lines, "max_rewrite_lines")`, so the error names the keyword the caller used. The field has no default of its own: `CodingAgent` always passes it, so the 300 default appears only once, in the signature.
 - `CodingAgent.__init__` gets the keyword `max_rewrite_lines: int | None = 300` and passes it into the record.
 - `CodingAgentTools.get_tools(root_dir, fetch_tool, max_rewrite_lines)` passes it as `max_overwrite_lines` on the shared config.
 
@@ -110,13 +112,16 @@ Why 300: the repo has no existing line budget to align with. This is the brief's
 ### 7.2 CodingAgentSettings
 **Change type:** Modified. Adds the required field `max_rewrite_lines: int | None`. Code that builds the record directly must now pass it. Inside the repo, only `CodingAgent` builds it.
 
+### 7.3 OverwriteLineLimit
+**Change type:** New. A frozen, slotted record, `(lines: int | None, parameter: str)`, that owns the one validation rule (§6.1).
+
 No migration: these are in-memory records.
 
 ---
 
 ## 8. API Changes
 
-N/A. There are no HTTP endpoints. The Python API changes are listed in §6 and §7. No new public export is added.
+N/A. There are no HTTP endpoints. The Python API changes are listed in §6 and §7. `OverwriteLineLimit` is in the module's `__all__`, but it is not added to `vidbyte.__all__`.
 
 ---
 
@@ -191,9 +196,9 @@ N/A. No new dependencies.
 - What: wrap `write_text` in `CodingAgentTools` and leave the tool alone.
 - Why rejected: the user said "this one is changing the tool". A config field is smaller than a wrapper, and other tool users get the option too.
 
-### Alternative 2: One shared validator for both fields
-- What: a single helper or small dataclass that both records call.
-- Why rejected: the two checks are three lines each, have different field names, and give different error text. A new class or module is more code than the duplicate. It is listed here so a reviewer can ask for it.
+### Alternative 2: The same inline check in both records
+- What: put a three-line check in `FileSystemToolConfig.__post_init__` and another in `CodingAgentSettings`.
+- Why rejected: this was the first cut, and lint C002 failed it (9 → 11). The rule asks for one validated dataclass instead. Renaming the local variables would hide the duplicate from the rule without removing it.
 
 ### Alternative 3: Limit by bytes
 - What: refuse by file size instead of line count.
