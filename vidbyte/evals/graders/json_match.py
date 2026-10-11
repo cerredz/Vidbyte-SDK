@@ -44,7 +44,9 @@ class JSONExactMatchGrader(BaseGrader):
             return isinstance(actual, bool) and isinstance(expected, bool) and actual == expected
         if isinstance(actual, dict) and isinstance(expected, dict):
             return actual.keys() == expected.keys() and all(self._json_equal(actual[key], expected[key]) for key in expected)
-        if isinstance(actual, list) and isinstance(expected, list):
+        # @intent json-tuple-is-array
+        # A Python tuple serializes to the same JSON array as a list, so it must compare like one.
+        if isinstance(actual, (list, tuple)) and isinstance(expected, (list, tuple)):
             return len(actual) == len(expected) and all(self._json_equal(a, e) for a, e in zip(actual, expected, strict=True))
         return actual == expected
 
@@ -73,8 +75,9 @@ class JSONSubsetGrader(JSONExactMatchGrader):
             if not isinstance(actual, dict):
                 return False
             return all(key in actual and self._contains_subset(actual[key], value) for key, value in expected.items())
-        if isinstance(expected, list):
-            if not isinstance(actual, list) or len(expected) > len(actual):
+        if isinstance(expected, (list, tuple)):
+            # @intent json-tuple-is-array
+            if not isinstance(actual, (list, tuple)) or len(expected) > len(actual):
                 return False
             return all(self._contains_subset(actual[index], value) for index, value in enumerate(expected))
         return self._json_equal(actual, expected)

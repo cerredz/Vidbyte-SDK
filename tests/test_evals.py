@@ -431,6 +431,24 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
                     result = await grader.agrade(EvalCase(prompt="x", expected=json.dumps(expected)), json.dumps(actual))
                     self.assertTrue(result.passed)
 
+    async def test_json_graders_compare_tuples_as_json_arrays(self) -> None:
+        # Tests that an expected value written with tuples grades the same as the same value written with lists.
+        # @intent json-tuple-is-array
+        cases = [
+            (("urgent", "billing"), ["urgent", "billing"], '["urgent", "billing"]'),
+            ({"id": 7, "tags": ("urgent", "billing")}, {"id": 7, "tags": ["urgent", "billing"]}, '{"id": 7, "tags": ["urgent", "billing"]}'),
+            (("urgent", "billing"), ["urgent", "billing"], '["urgent", "refund"]'),
+            ({"flags": (True,)}, {"flags": [True]}, '{"flags": [1]}'),
+        ]
+        for grader in (JSONExactMatchGrader(), JSONSubsetGrader()):
+            for tuple_expected, list_expected, reply in cases:
+                with self.subTest(grader=grader.name, expected=tuple_expected, reply=reply):
+                    tuple_result = await grader.agrade(EvalCase(prompt="x", expected=tuple_expected), reply)
+                    list_result = await grader.agrade(EvalCase(prompt="x", expected=list_expected), reply)
+                    self.assertEqual(tuple_result.passed, list_result.passed)
+        self.assertTrue((await JSONExactMatchGrader().agrade(EvalCase(prompt="x", expected=("urgent", "billing")), '["urgent", "billing"]')).passed)
+        self.assertTrue((await JSONSubsetGrader().agrade(EvalCase(prompt="x", expected={"tags": ("urgent",)}), '{"id": 7, "tags": ["urgent", "billing"]}')).passed)
+
     async def test_template_registry_and_custom_templates(self) -> None:
         # Tests template registry resolution, validation, and custom template support.
         registry = EvalTemplateRegistry()
