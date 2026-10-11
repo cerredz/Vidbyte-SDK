@@ -6,7 +6,7 @@ The SDK accepts a model only when it is catalogued under the provider that serve
 
 ## Contract
 
-Every added model validates under its own provider, is rejected under another, appears in both runner maps as text, and resolves to its own exact price row at the rate on the provider's page. A new id that extends an older key (claude-sonnet-5-5, glm-5.3) never prices as that older key. A deprecated name that the provider routes elsewhere bills at the serving model's rate.
+Every added model validates under its own provider, is rejected under another, appears in both runner maps as text, and resolves to its own exact price row at the provider's regular rate. A promotional or sale price is never billed; it is only noted in the row's comment. A new id that extends an older key (claude-sonnet-5-5, glm-5.3) never prices as that older key. A deprecated name that the provider routes elsewhere bills at the serving model's rate.
 
 ## Actors / Callers
 
@@ -38,7 +38,7 @@ Longest-prefix lookup silently priced a missing claude-sonnet-5-5 as claude-sonn
 
 ## Historical Regressions
 
-2026-10-11: the catalog lacked every model released since July 2026, Claude Opus 5, Fable 5 and Mythos 5 had no price, GPT-5.6 Sol and Gemini 3.6 Flash still showed pre-promotion rates, and Mistral's default model resolved to no price.
+2026-10-11: the catalog lacked every model released since July 2026, Claude Opus 5, Fable 5 and Mythos 5 had no price, the deprecated Gemini 3.5 Flash still billed its old $9 output rather than the 3.6 Flash rate it now routes to, and Mistral's default model resolved to no price.
 
 ## Test Suite Map
 

@@ -66,16 +66,18 @@ PRICING_SOURCE_URL: str = "https://developers.openai.com/api/docs/pricing"
 # the threshold (xAI, "prompt >= 200k"); the default False keeps the strict ">"
 # boundary used by OpenAI, Gemini, and MiniMax.
 
-# GPT-5.6 Sol is served at a promotional rate "at least through November
-# 21, 2026" (https://developers.openai.com/api/docs/models/gpt-5.6-sol);
-# the page states no post-promotion rate. At the 2026-07-30 vintage it
-# was $5 / $0.50 / $6.25 / $30, Batch and Flex half that, Fast double.
+# GPT-5.6 Sol is priced at its regular rate. OpenAI serves it at a
+# promotional $4 / $20 "at least through November 21, 2026"
+# (https://developers.openai.com/api/docs/models/gpt-5.6-sol) and
+# states no post-promotion rate, so the regular rate is the one it
+# listed at the 2026-07-30 vintage: $5 / $0.50 / $6.25 / $30, Batch
+# and Flex half that, Fast double.
 OPENAI_GPT56_TIER_RATES: dict[str, dict[str, dict[str, float]]] = {
     "gpt-5.6-sol": {
-        "standard": {"input_per_million": 4.0, "cached_input_per_million": 0.4, "cache_write_per_million": 5.0, "output_per_million": 20.0, "long_input_per_million": 8.0, "long_cached_input_per_million": 0.8, "long_cache_write_per_million": 10.0, "long_output_per_million": 30.0},
-        "batch": {"input_per_million": 2.0, "cached_input_per_million": 0.2, "cache_write_per_million": 2.5, "output_per_million": 10.0, "long_input_per_million": 4.0, "long_cached_input_per_million": 0.4, "long_cache_write_per_million": 5.0, "long_output_per_million": 15.0},
-        "flex": {"input_per_million": 2.0, "cached_input_per_million": 0.2, "cache_write_per_million": 2.5, "output_per_million": 10.0, "long_input_per_million": 4.0, "long_cached_input_per_million": 0.4, "long_cache_write_per_million": 5.0, "long_output_per_million": 15.0},
-        "fast": {"input_per_million": 8.0, "cached_input_per_million": 0.8, "cache_write_per_million": 10.0, "output_per_million": 40.0},
+        "standard": {"input_per_million": 5.0, "cached_input_per_million": 0.5, "cache_write_per_million": 6.25, "output_per_million": 30.0, "long_input_per_million": 10.0, "long_cached_input_per_million": 1.0, "long_cache_write_per_million": 12.5, "long_output_per_million": 45.0},
+        "batch": {"input_per_million": 2.5, "cached_input_per_million": 0.25, "cache_write_per_million": 3.125, "output_per_million": 15.0, "long_input_per_million": 5.0, "long_cached_input_per_million": 0.5, "long_cache_write_per_million": 6.25, "long_output_per_million": 22.5},
+        "flex": {"input_per_million": 2.5, "cached_input_per_million": 0.25, "cache_write_per_million": 3.125, "output_per_million": 15.0, "long_input_per_million": 5.0, "long_cached_input_per_million": 0.5, "long_cache_write_per_million": 6.25, "long_output_per_million": 22.5},
+        "fast": {"input_per_million": 10.0, "cached_input_per_million": 1.0, "cache_write_per_million": 12.5, "output_per_million": 60.0},
     },
     "gpt-5.6-terra": {
         "standard": {"input_per_million": 2.0, "cached_input_per_million": 0.2, "cache_write_per_million": 2.5, "output_per_million": 12.0, "long_input_per_million": 4.0, "long_cached_input_per_million": 0.4, "long_cache_write_per_million": 5.0, "long_output_per_million": 18.0},
@@ -155,9 +157,9 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "gpt-6.1-sol": ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.1, cache_write_per_million=2.5, threshold_tokens=272_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=15.0, tier_rates=OPENAI_GPT6_TIER_RATES["gpt-6.1-sol"]),
         "gpt-6-sol": ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.2, cache_write_per_million=2.5, threshold_tokens=272_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=15.0, tier_rates=OPENAI_GPT6_TIER_RATES["gpt-6-sol"]),
         "gpt-6-luna": ModelPricing(input_per_million=0.1, output_per_million=0.5, cache_read_per_million=0.01, cache_write_per_million=0.125, threshold_tokens=272_000, input_over_threshold_per_million=0.2, output_over_threshold_per_million=0.75, tier_rates=OPENAI_GPT6_TIER_RATES["gpt-6-luna"]),
-        # Promotional rate; see OPENAI_GPT56_TIER_RATES for the regular
-        # one.
-        "gpt-5.6-sol": ModelPricing(input_per_million=4.0, output_per_million=20.0, cache_read_per_million=0.4, cache_write_per_million=5.0, threshold_tokens=272_000, input_over_threshold_per_million=8.0, output_over_threshold_per_million=30.0, tier_rates=OPENAI_GPT56_TIER_RATES["gpt-5.6-sol"]),
+        # Regular rate, not the current promotion; see
+        # OPENAI_GPT56_TIER_RATES.
+        "gpt-5.6-sol": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5, cache_write_per_million=6.25, threshold_tokens=272_000, input_over_threshold_per_million=10.0, output_over_threshold_per_million=45.0, tier_rates=OPENAI_GPT56_TIER_RATES["gpt-5.6-sol"]),
         "gpt-5.6-terra": ModelPricing(input_per_million=2.0, output_per_million=12.0, cache_read_per_million=0.2, cache_write_per_million=2.5, threshold_tokens=272_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=18.0, tier_rates=OPENAI_GPT56_TIER_RATES["gpt-5.6-terra"]),
         "gpt-5.6-luna": ModelPricing(input_per_million=0.2, output_per_million=1.2, cache_read_per_million=0.02, cache_write_per_million=0.25, threshold_tokens=272_000, input_over_threshold_per_million=0.4, output_over_threshold_per_million=1.8, tier_rates=OPENAI_GPT56_TIER_RATES["gpt-5.6-luna"]),
         "gpt-5.5": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5, threshold_tokens=272_000, input_over_threshold_per_million=10.0, output_over_threshold_per_million=45.0),
@@ -186,7 +188,8 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "claude-opus-5": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25),
         "claude-fable-5": ModelPricing(input_per_million=10.0, output_per_million=50.0, cache_read_per_million=1.0, cache_write_per_million=12.5),
         "claude-mythos-5": ModelPricing(input_per_million=10.0, output_per_million=50.0, cache_read_per_million=1.0, cache_write_per_million=12.5),
-        # Sonnet 5 keeps its $2 / $10 launch rate on the pricing page.
+        # Sonnet 5's introductory window ended 2026-08-31 and the
+        # pricing page still lists $2 / $10, its regular rate now.
         "claude-sonnet-5": ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.2, cache_write_per_million=2.5),
         "claude-sonnet-4-6": ModelPricing(input_per_million=3.0, output_per_million=15.0, cache_read_per_million=0.3, cache_write_per_million=3.75),
         "claude-sonnet-4-5": ModelPricing(input_per_million=3.0, output_per_million=15.0, cache_read_per_million=0.3, cache_write_per_million=3.75),
@@ -199,16 +202,16 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     ModelProvider.GEMINI: {
         # Paid-tier text rates from
         # https://ai.google.dev/gemini-api/docs/pricing. 3.8 and 3.6
-        # Flash are served at $0.75 / $3.75 "through December 31, 2026"
-        # and list $1.50 / $7.50 (cache $0.15) "starting January 1,
-        # 2027".
-        "gemini-3.8-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75, cache_read_per_million=0.075),
-        "gemini-3.6-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75, cache_read_per_million=0.075),
+        # Flash bill at their regular $1.50 / $7.50 (cache $0.15),
+        # listed "starting January 1, 2027"; until then Google serves
+        # a promotional $0.75 / $3.75 "through December 31, 2026".
+        "gemini-3.8-flash": ModelPricing(input_per_million=1.5, output_per_million=7.5, cache_read_per_million=0.15),
+        "gemini-3.6-flash": ModelPricing(input_per_million=1.5, output_per_million=7.5, cache_read_per_million=0.15),
         # 3.5 Flash is deprecated and "All requests to gemini-3.5-flash
-        # are automatically routed to gemini-3.6-flash", so it bills at the
-        # 3.6 Flash rate. Source:
+        # are automatically routed to gemini-3.6-flash", so it bills at
+        # the 3.6 Flash rate. Source:
         # https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash
-        "gemini-3.5-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75, cache_read_per_million=0.075),
+        "gemini-3.5-flash": ModelPricing(input_per_million=1.5, output_per_million=7.5, cache_read_per_million=0.15),
         "gemini-3.5-flash-lite": ModelPricing(input_per_million=0.3, output_per_million=2.5, cache_read_per_million=0.03),
         # Text, image, and video rate; audio input costs $0.50 (cache
         # $0.05).
@@ -285,8 +288,9 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     # Each model's page on https://docs.mistral.ai/models/ (for example
     # https://docs.mistral.ai/models/mistral-medium-3-5-26-04) lists its
     # API names and price. Medium 3.5, Small 4 and Large 3 publish no
-    # cached rate, so cached tokens bill at the input rate. Large 4 is a
-    # public preview on sale at $0.68 / $2.09, down from $1.36 / $4.18.
+    # cached rate, so cached tokens bill at the input rate. Large 4 is
+    # priced at its regular $1.36 / $4.18 (cache $0.14); the public
+    # preview is on sale at $0.68 / $2.09.
     ModelProvider.MISTRAL: {
         "mistral-medium-3-5": ModelPricing(input_per_million=1.5, output_per_million=7.5),
         "mistral-medium-latest": ModelPricing(input_per_million=1.5, output_per_million=7.5),
@@ -294,8 +298,8 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "mistral-small-latest": ModelPricing(input_per_million=0.15, output_per_million=0.6),
         "mistral-large-2512": ModelPricing(input_per_million=0.5, output_per_million=1.5),
         "mistral-large-latest": ModelPricing(input_per_million=0.5, output_per_million=1.5),
-        "mistral-large-4": ModelPricing(input_per_million=0.68, output_per_million=2.09, cache_read_per_million=0.07),
-        "mistral-large-4-0": ModelPricing(input_per_million=0.68, output_per_million=2.09, cache_read_per_million=0.07),
+        "mistral-large-4": ModelPricing(input_per_million=1.36, output_per_million=4.18, cache_read_per_million=0.14),
+        "mistral-large-4-0": ModelPricing(input_per_million=1.36, output_per_million=4.18, cache_read_per_million=0.14),
     },
     # TypeSafe Jev 1.13 (System One decision model), checked 2026-09-21 against
     # https://docs.typesafe.ai/models.md: "$42 / $0.042" per Btok / per Mtok, "Charged per

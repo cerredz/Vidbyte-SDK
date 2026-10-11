@@ -30,13 +30,14 @@ OPENAI, ANTHROPIC, GEMINI, XAI = ModelProvider.OPENAI, ModelProvider.ANTHROPIC, 
 DEEPSEEK, GLM, KIMI, META, MISTRAL = ModelProvider.DEEPSEEK, ModelProvider.GLM, ModelProvider.KIMI, ModelProvider.META, ModelProvider.MISTRAL
 
 # (input, output, cache_read, cache_write, threshold, input_over,
-# output_over, inclusive), from each provider's own page.
+# output_over, inclusive): each provider's regular rate from its own
+# page, never a promotional or sale price.
 EXPECTED_RATES: dict[tuple[ModelProvider, str], tuple[float, float, float | None, float | None, int | None, float | None, float | None, bool]] = {
     (OPENAI, "gpt-6-astra"): (10.0, 50.0, 1.0, 12.5, 272_000, 20.0, 75.0, False),
     (OPENAI, "gpt-6.1-sol"): (2.0, 10.0, 0.1, 2.5, 272_000, 4.0, 15.0, False),
     (OPENAI, "gpt-6-sol"): (2.0, 10.0, 0.2, 2.5, 272_000, 4.0, 15.0, False),
     (OPENAI, "gpt-6-luna"): (0.1, 0.5, 0.01, 0.125, 272_000, 0.2, 0.75, False),
-    (OPENAI, "gpt-5.6-sol"): (4.0, 20.0, 0.4, 5.0, 272_000, 8.0, 30.0, False),
+    (OPENAI, "gpt-5.6-sol"): (5.0, 30.0, 0.5, 6.25, 272_000, 10.0, 45.0, False),
     (ANTHROPIC, "claude-fable-5-1"): (10.0, 50.0, 0.25, 12.5, None, None, None, False),
     (ANTHROPIC, "claude-mythos-5-1"): (10.0, 50.0, 0.25, 12.5, None, None, None, False),
     (ANTHROPIC, "claude-opus-5-5"): (4.0, 20.0, 0.2, 5.0, None, None, None, False),
@@ -45,9 +46,9 @@ EXPECTED_RATES: dict[tuple[ModelProvider, str], tuple[float, float, float | None
     (ANTHROPIC, "claude-opus-5"): (5.0, 25.0, 0.5, 6.25, None, None, None, False),
     (ANTHROPIC, "claude-fable-5"): (10.0, 50.0, 1.0, 12.5, None, None, None, False),
     (ANTHROPIC, "claude-mythos-5"): (10.0, 50.0, 1.0, 12.5, None, None, None, False),
-    (GEMINI, "gemini-3.8-flash"): (0.75, 3.75, 0.075, None, None, None, None, False),
-    (GEMINI, "gemini-3.6-flash"): (0.75, 3.75, 0.075, None, None, None, None, False),
-    (GEMINI, "gemini-3.5-flash"): (0.75, 3.75, 0.075, None, None, None, None, False),
+    (GEMINI, "gemini-3.8-flash"): (1.5, 7.5, 0.15, None, None, None, None, False),
+    (GEMINI, "gemini-3.6-flash"): (1.5, 7.5, 0.15, None, None, None, None, False),
+    (GEMINI, "gemini-3.5-flash"): (1.5, 7.5, 0.15, None, None, None, None, False),
     (GEMINI, "gemini-3.5-flash-lite"): (0.3, 2.5, 0.03, None, None, None, None, False),
     (GEMINI, "gemini-3.1-flash-lite"): (0.25, 1.5, 0.025, None, None, None, None, False),
     (XAI, "grok-4.7"): (2.0, 6.0, 0.5, None, 200_000, 4.0, 12.0, True),
@@ -70,8 +71,8 @@ EXPECTED_RATES: dict[tuple[ModelProvider, str], tuple[float, float, float | None
     (MISTRAL, "mistral-small-latest"): (0.15, 0.6, None, None, None, None, None, False),
     (MISTRAL, "mistral-large-2512"): (0.5, 1.5, None, None, None, None, None, False),
     (MISTRAL, "mistral-large-latest"): (0.5, 1.5, None, None, None, None, None, False),
-    (MISTRAL, "mistral-large-4"): (0.68, 2.09, 0.07, None, None, None, None, False),
-    (MISTRAL, "mistral-large-4-0"): (0.68, 2.09, 0.07, None, None, None, None, False),
+    (MISTRAL, "mistral-large-4"): (1.36, 4.18, 0.14, None, None, None, None, False),
+    (MISTRAL, "mistral-large-4-0"): (1.36, 4.18, 0.14, None, None, None, None, False),
 }
 
 # Models this refresh adds to the runner catalog, by provider.
@@ -188,13 +189,13 @@ def test_a_versioned_response_id_prices_at_its_base_model(provider: ModelProvide
     assert _resolve(provider, versioned) is PROVIDER_PRICING[provider][base]
 
 
-def test_gpt_5_6_sol_tier_metadata_carries_the_promotional_rates() -> None:
-    # [Silent Failure] The row and its tier metadata must not disagree
-    # after the promotion.
+def test_gpt_5_6_sol_row_and_tiers_carry_the_regular_not_promotional_rate() -> None:
+    # [Silent Failure] OpenAI's $4 / $20 promotion lapses; the row and
+    # its tier metadata both keep the regular $5 / $30 rate.
     tiers = OPENAI_GPT56_TIER_RATES["gpt-5.6-sol"]
-    assert (tiers["standard"]["input_per_million"], tiers["standard"]["output_per_million"]) == (4.0, 20.0)
-    assert (tiers["batch"]["input_per_million"], tiers["flex"]["output_per_million"]) == (2.0, 10.0)
-    assert (tiers["fast"]["input_per_million"], tiers["fast"]["output_per_million"]) == (8.0, 40.0)
+    assert (tiers["standard"]["input_per_million"], tiers["standard"]["output_per_million"]) == (5.0, 30.0)
+    assert (tiers["batch"]["input_per_million"], tiers["flex"]["output_per_million"]) == (2.5, 15.0)
+    assert (tiers["fast"]["input_per_million"], tiers["fast"]["output_per_million"]) == (10.0, 60.0)
     assert _resolve(OPENAI, "gpt-5.6-sol").tier_rates is tiers
 
 
