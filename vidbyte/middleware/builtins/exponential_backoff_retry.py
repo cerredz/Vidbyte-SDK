@@ -16,6 +16,7 @@ Relations:
 from __future__ import annotations
 
 import random
+from collections.abc import Iterable
 
 from vidbyte.lib.dataclasses.middleware import (
     ExponentialBackoffRetryRunState,
@@ -35,7 +36,7 @@ class ExponentialBackoffRetryMiddleware(AgentMiddleware):
         base_seconds: float = 1.0,
         cap_seconds: float = 60.0,
         jitter: bool = True,
-        retry_on: tuple[type[BaseException], ...] | None = None,
+        retry_on: type[BaseException] | Iterable[type[BaseException]] | None = None,
     ) -> None:
         # Validates that backoff parameters form a consistent, meaningful configuration.
         if max_attempts <= 0:
@@ -48,7 +49,27 @@ class ExponentialBackoffRetryMiddleware(AgentMiddleware):
         self.base_seconds = base_seconds
         self.cap_seconds = cap_seconds
         self.jitter = jitter
-        self.retry_on = retry_on
+        # @intent retry-on-is-a-validated-tuple
+        # isinstance() only accepts a class or a tuple, so a list here used to raise inside on_model_error
+        # and fail-closed abort a run that should have retried. None still means retry everything.
+        self.retry_on = self._normalize_retry_on(retry_on)
+
+    @staticmethod
+    def _normalize_retry_on(
+        retry_on: type[BaseException] | Iterable[type[BaseException]] | None,
+    ) -> tuple[type[BaseException], ...] | None:
+        """Return retry_on as a tuple of exception classes, wrapping a single bare class."""
+        if retry_on is None:
+            return None
+        entries: tuple[object, ...] = (retry_on,)
+        if isinstance(retry_on, Iterable) and not isinstance(retry_on, (type, str)):
+            entries = tuple(retry_on)
+        checked: list[type[BaseException]] = []
+        for entry in entries:
+            if not (isinstance(entry, type) and issubclass(entry, BaseException)):
+                raise ValueError(f"retry_on entries must be exception classes, got {entry!r}.")
+            checked.append(entry)
+        return tuple(checked)
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Start a fresh attempt counter for this run without touching other runs sharing the instance."""

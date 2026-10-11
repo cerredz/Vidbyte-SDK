@@ -12,6 +12,9 @@ Architecture:
     - LoopBoundMcpTransport / SyncRunMcpLoopTests: a transport that only works on the loop it
       started on, proving sync run() and pipeline run_sync() reconnect instead of reusing a closed
       loop's pipes, while one long-lived loop keeps its connection.
+    - GatedMcpTransport / OverlappingLazyAttachTests: an attach held open by a gate, proving overlapping
+      first runs on one agent wait for the in-flight lazy attach and all see its tools, and that a run
+      cancelled mid-attach re-queues its servers (closing any it started) so a later run attaches them.
 Relations:
     - vidbyte/agents/mixins.py
     - vidbyte/agents/base.py
@@ -317,21 +320,22 @@ class SyncRunMcpLoopTests(unittest.TestCase):
     def test_pipeline_run_sync_twice_reconnects_the_mcp_server_on_each_loop(self) -> None:
         agent = build_test_agent(name="worker", system_prompt="Work.", runner=McpThenDoneRunner("remote_mini"))
         agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+        config = agent._pending_mcp_configs[0]
         pipeline = SequentialPipeline([agent])
 
         pipeline.run_sync("batch 1")
         pipeline.run_sync("batch 2")
 
-        # The second batch found the first server stranded on a closed loop and reconnected on its own.
+        # Each batch connected its own server on its own loop and closed it before that loop ended.
         first, second = MockMcpStdioTransport.instances
         self.assertEqual(LoopBoundMcpTransport.served_calls, [first.loop, second.loop])
         self.assertIsNot(first.loop, second.loop)
-        self.assertTrue(first.abandoned)
-        self.assertFalse(second.abandoned)
-        # Only the live server and one copy of its tool remain attached.
-        self.assertEqual(agent.mcp_servers()[0].transport, second)
-        self.assertEqual([tool.name for tool in agent.tools].count("remote_mini"), 1)
-        self.assertEqual(agent._pending_mcp_configs, [])
+        self.assertTrue(first.closed and second.closed)
+        self.assertFalse(first.abandoned or second.abandoned)
+        # Nothing is left running, no stale tools remain, and the server waits to reconnect.
+        self.assertEqual(agent.mcp_servers(), ())
+        self.assertNotIn("remote_mini", [tool.name for tool in agent.tools])
+        self.assertEqual(agent._pending_mcp_configs, [config])
 
     def test_async_runs_on_one_loop_keep_their_mcp_connection(self) -> None:
         agent = build_test_agent(name="worker", system_prompt="Work.", runner=McpThenDoneRunner("remote_mini"))
@@ -347,6 +351,144 @@ class SyncRunMcpLoopTests(unittest.TestCase):
         (only,) = MockMcpStdioTransport.instances
         self.assertEqual(LoopBoundMcpTransport.served_calls, [only.loop, only.loop])
         self.assertFalse(only.abandoned)
+
+
+class GatedMcpTransport(MockMcpStdioTransport):
+    """Mock transport whose initialize handshake blocks on a gate, like a slow server booting."""
+
+    gate: asyncio.Event
+
+    async def request(self, method: str, params: dict[str, any] | None = None) -> dict[str, any]:
+        # The client never calls start() on its own, so hold the handshake itself open.
+        # An "ungated" server answers at once, so a batch can hold one started server while another waits.
+        if method == "initialize" and self.command[0] != "ungated":
+            await GatedMcpTransport.gate.wait()
+        return await super().request(method, params)
+
+
+class ToolsOfferedRunner:
+    """Runner that records the tools offered to each run's first model call, then finishes."""
+
+    def __init__(self) -> None:
+        self.offered: dict[str, tuple[str, ...]] = {}
+
+    async def arun(self, prompt: str, **kwargs: object) -> object:
+        tools = kwargs.get("tools") or ()
+        self.offered.setdefault(prompt, tuple(spec["function"]["name"] for spec in tools))
+        item = {"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": f"call_{prompt}"}
+        return type("_Resp", (), {"text": "", "raw": {"output": [item]}})()
+
+
+@patch("vidbyte.tools.mcp.attach.McpStdioTransport", GatedMcpTransport)
+class OverlappingLazyAttachTests(unittest.IsolatedAsyncioTestCase):
+    """Overlapping runs on one agent must not skip a lazy MCP attach another run has in flight."""
+
+    async def asyncSetUp(self) -> None:
+        MockMcpStdioTransport.instances.clear()
+        GatedMcpTransport.gate = asyncio.Event()
+
+    async def _overlap_two_runs(self, agent: BaseAgent) -> list[object]:
+        # Start run 1 and hold its attach open, then start run 2 while that attach is still in flight.
+        first = asyncio.ensure_future(agent.arun("request 1"))
+        while not MockMcpStdioTransport.instances:
+            await asyncio.sleep(0)
+        second = asyncio.ensure_future(agent.arun("request 2"))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        GatedMcpTransport.gate.set()
+        return await asyncio.gather(first, second, return_exceptions=True)
+
+    async def test_overlapping_first_runs_both_see_the_lazily_attached_tool(self) -> None:
+        runner = ToolsOfferedRunner()
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+
+        results = await self._overlap_two_runs(agent)
+
+        self.assertFalse([r for r in results if isinstance(r, BaseException)])
+        # The server was attached exactly once, and both runs were offered its tool.
+        self.assertEqual(len(MockMcpStdioTransport.instances), 1)
+        self.assertEqual({prompt: "remote_mini" in names for prompt, names in runner.offered.items()}, {"request 1": True, "request 2": True})
+        self.assertEqual(agent._pending_mcp_configs, [])
+        self.assertIsNone(agent._mcp_attach_in_flight)
+
+    async def test_overlapping_run_retries_after_the_in_flight_attach_fails(self) -> None:
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=ToolsOfferedRunner())
+        agent.with_mcp_server(command=["fail"])
+        config = agent._pending_mcp_configs[0]
+
+        results = await self._overlap_two_runs(agent)
+
+        # Each run surfaces an attach failure: the waiting run retried once the first attach failed.
+        self.assertTrue(all(isinstance(r, McpAttachmentError) for r in results))
+        self.assertEqual(len(MockMcpStdioTransport.instances), 2)
+        self.assertEqual(agent._pending_mcp_configs, [config])
+        self.assertIsNone(agent._mcp_attach_in_flight)
+
+    async def test_cancelled_attach_requeues_its_servers_for_the_next_run(self) -> None:
+        runner = ToolsOfferedRunner()
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        agent.with_mcp_server(command=["ungated"], permission=McpToolPermission.READONLY)
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+        configs = list(agent._pending_mcp_configs)
+
+        # Cancel the first run while "mini" is still starting and "ungated" has already started.
+        first = asyncio.ensure_future(agent.arun("request 1"))
+        while len(MockMcpStdioTransport.instances) < 2:
+            await asyncio.sleep(0)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+
+        # Both servers wait to connect again in order, none is attached, and nothing started is left running.
+        self.assertEqual(agent._pending_mcp_configs, configs)
+        self.assertEqual(agent.mcp_servers(), ())
+        self.assertIsNone(agent._mcp_attach_in_flight)
+        self.assertTrue(all(inst.closed for inst in MockMcpStdioTransport.instances))
+
+        # A later run attaches both servers and is offered their tools.
+        GatedMcpTransport.gate.set()
+        await agent.arun("request 2")
+        self.assertEqual([handle.config for handle in agent.mcp_servers()], configs)
+        self.assertEqual(agent._pending_mcp_configs, [])
+        self.assertTrue({"remote_ungated", "remote_mini"} <= set(runner.offered["request 2"]))
+
+    async def test_waiting_run_attaches_after_the_in_flight_attach_is_cancelled(self) -> None:
+        runner = ToolsOfferedRunner()
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+
+        # Run 2 waits on run 1's attach; run 1 is cancelled before the server finishes starting.
+        first = asyncio.ensure_future(agent.arun("request 1"))
+        while not MockMcpStdioTransport.instances:
+            await asyncio.sleep(0)
+        second = asyncio.ensure_future(agent.arun("request 2"))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+        GatedMcpTransport.gate.set()
+        await second
+
+        # The waiting run picked up the re-queued server, attached it, and was offered its tool.
+        self.assertEqual(len(agent.mcp_servers()), 1)
+        self.assertEqual(agent._pending_mcp_configs, [])
+        self.assertIn("remote_mini", runner.offered["request 2"])
+
+    async def test_sequential_first_runs_still_attach_once(self) -> None:
+        GatedMcpTransport.gate.set()
+        runner = ToolsOfferedRunner()
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner)
+        agent.with_mcp_server(command=["mini"], permission=McpToolPermission.READONLY)
+
+        await agent.arun("request 1")
+        await agent.arun("request 2")
+
+        self.assertEqual(len(MockMcpStdioTransport.instances), 1)
+        self.assertEqual({prompt: "remote_mini" in names for prompt, names in runner.offered.items()}, {"request 1": True, "request 2": True})
 
 
 if __name__ == "__main__":

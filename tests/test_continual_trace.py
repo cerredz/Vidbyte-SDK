@@ -129,6 +129,29 @@ class UpdateTraceToolTests(unittest.IsolatedAsyncioTestCase):
         await tool.execute(_call({"meta": {"y": 2}}))
         self.assertEqual(tool.current_trace()["meta"], {"x": 1, "y": 2})
 
+    async def test_null_nested_subfield_keeps_prior_value(self) -> None:  # [Silent Failure]
+        schema = TraceSchema(
+            name="incident",
+            fields={
+                "summary": TraceField(description="One-line summary."),
+                "status": TraceField(
+                    description="Current status.",
+                    type=TraceFieldType.OBJECT,
+                    fields={
+                        "phase": TraceField(description="Phase."),
+                        "owner": TraceField(description="Owner."),
+                    },
+                ),
+            },
+        )
+        tool = UpdateTraceTool(schema)
+        await tool.execute(_call({"summary": "first", "status": {"phase": "triage", "owner": "ana"}}))
+        result = await tool.execute(_call({"summary": None, "status": {"phase": "mitigating", "owner": None}}))
+        self.assertNotEqual(result.status.value, "error", result.output)
+        trace = tool.current_trace()
+        self.assertEqual(trace["status"], {"phase": "mitigating", "owner": "ana"})
+        self.assertEqual(trace["summary"], "first")
+
     async def test_replaces_scalar_and_preserves_omitted(self) -> None:  # [Silent Failure]
         tool = UpdateTraceTool(_progress_schema())
         await tool.execute(_call({"goal": "first", "steps": ["a"]}))

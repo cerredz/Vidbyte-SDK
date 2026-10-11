@@ -13,6 +13,7 @@ from unittest import mock
 
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte import Agent
+from vidbyte.agents import AgentForkSettings
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
@@ -49,7 +50,7 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -562,6 +563,26 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(SessionStoreError, "pass new_id"):
             SessionBundleImporter(source).import_bundle(bundle)
 
+    async def test_new_id_import_rejects_existing_session_id(self) -> None:  # [Silent Failure]
+        # @intent bundle-import-never-overwrites-a-session
+        # A copy whose new_id names an existing session must fail and leave that session untouched.
+        source = InMemorySessionStore()
+        session = Session(FakeAgent(), store=source)
+        await session.arun("one")
+        bundle = SessionBundleExporter(source).export(session.id)
+        target = InMemorySessionStore()
+        other = Session(FakeAgent(), store=target)
+        await other.arun("other")
+        meta_before, history_before = target.get_meta(other.id), target.history(other.id)
+
+        with self.assertRaisesRegex(SessionStoreError, "already exists"):
+            SessionBundleImporter(target).import_bundle(bundle, new_id=other.id)
+
+        self.assertEqual(target.get_meta(other.id), meta_before)
+        self.assertEqual(target.get_meta(other.id).head_id, history_before[-1].id)
+        self.assertEqual(target.history(other.id), history_before)
+        self.assertEqual(SessionBundleImporter(target).import_bundle(bundle, new_id="se_fresh"), "se_fresh")
+
     def test_import_uses_ingest_not_put(self) -> None:  # [Hidden Failure]
         # Verify bundle import does not call the seq-reassigning put path.
         class PutFailingStore(InMemorySessionStore):
@@ -673,6 +694,14 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         session = Session(FakeAgent(), store=store, tags=("alpha",))
         self.assertIs(session.tag("beta", "alpha", "gamma"), session)
         self.assertEqual(store.get_meta(session.id).tags, ("alpha", "beta", "gamma"))
+
+    def test_bare_string_tags_rejected_at_construction(self) -> None:  # [Silent Failure]
+        # Verify tags="billing" fails loudly instead of storing ('b', 'i', ...) that list_sessions(tag=) never finds.
+        store = InMemorySessionStore()
+        with self.assertRaisesRegex(SessionError, "not a string"):
+            Session(FakeAgent(), store=store, tags="billing")
+        session = Session(FakeAgent(), store=store, tags=("billing",))
+        self.assertEqual([meta.session_id for meta in store.list_sessions(tag="billing")], [session.id])
 
     def test_usage_empty_session_returns_zero_rollup(self) -> None:  # [Edge Case]
         # Verify usage() is safe before any checkpoint exists.
@@ -1171,6 +1200,38 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.status.value, "success")
                 self.assertTrue(any("public notes" in str(message.content) for message in bound.agent.history))
 
+    async def test_checkpoint_null_optionals_checkpoint_bound_session(self) -> None:  # [Silent Failure]
+        # A JSON null session_id and label mean the defaults: the bound session and an empty label, never "None".
+        store = InMemorySessionStore()
+        bound = Session(FakeAgent(), store=store)
+        await bound.arun("mine")
+        tool = CheckpointTool(store)
+        tool.bind_session(bound)
+        result = await tool.execute(ToolCall(tool_name="checkpoint", arguments={"session_id": None, "label": None}))
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(store.get(result.output).session_id, bound.id)
+        self.assertEqual(store.get(result.output).label, "")
+
+    async def test_resume_tools_null_checkpoint_id_resumes_from_head(self) -> None:  # [Silent Failure]
+        # A JSON null checkpoint_id means the omitted default: resume from the target session's head.
+        for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
+            with self.subTest(tool=name):
+                _store, public, _hr, bound, tool = await self._resume_fixture(tool_cls)
+                result = await tool.execute(ToolCall(tool_name=name, arguments={"session_id": public.id, "checkpoint_id": None}))
+                self.assertEqual(result.status.value, "success")
+                self.assertTrue(any("public notes" in str(message.content) for message in bound.agent.history))
+
+    async def test_fork_tool_null_optionals_fork_bound_session_head(self) -> None:  # [Silent Failure]
+        # A JSON null session_id and checkpoint_id fork the bound session from its head, like omitted keys.
+        store = InMemorySessionStore()
+        bound = Session(FakeAgent(), store=store)
+        await bound.arun("one")
+        tool = ForkTool(store)
+        tool.bind_session(bound)
+        result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": None, "checkpoint_id": None}))
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(store.get_meta(result.output).parent_session_id, bound.id)
+
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
         store.put(_checkpoint("secret-session", "c1"))
@@ -1191,6 +1252,46 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         tool = SessionTool(InMemorySessionStore())
         result = await tool.execute(ToolCall(tool_name="session", arguments={"operation": "explode"}))
         self.assertEqual(result.status.value, "error")
+
+    async def test_shared_checkpoint_tool_stays_on_each_agents_own_session(self) -> None:  # [Silent Failure]
+        # @intent shared-session-tool-gets-configured-scope
+        # One instance carried by two agents checkpoints each agent's own session and never widens into the other's.
+        store = InMemorySessionStore()
+        shared = CheckpointTool(store)
+        acme = build_test_agent(name="acme", system_prompt="Work.", runner=EchoRunner(), tools=[shared])
+        acme_session = Session(acme, store=store)
+        globex = build_test_agent(name="globex", system_prompt="Work.", runner=EchoRunner(), tools=[shared.customize(description="Save progress.")])
+        globex_session = Session(globex, store=store)
+        await acme.arun("acme")
+        await globex.arun("globex")
+        acme_tool, globex_tool = acme.tools._get("checkpoint"), globex.tools._get("checkpoint")
+
+        acme_own = await acme_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "acme-draft"}))
+        globex_own = await globex_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "globex-draft"}))
+        into_globex = await acme_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "x", "session_id": globex_session.id}))
+        into_acme = await globex_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "x", "session_id": acme_session.id}))
+
+        self.assertIs(acme_tool, shared)
+        self.assertEqual(store.get(acme_own.output).session_id, acme_session.id)
+        self.assertEqual(store.get(globex_own.output).session_id, globex_session.id)
+        self.assertIn("Access denied", into_globex.output)
+        self.assertIn("Access denied", into_acme.output)
+
+    async def test_single_agent_session_tool_binds_in_place_and_fork_keeps_parent_scope(self) -> None:  # [Hidden Assumption]
+        # One agent re-bound to a new session keeps its own instance; a fork child still reaches its parent's session.
+        store = InMemorySessionStore()
+        tool = CheckpointTool(store)
+        agent = build_test_agent(name="solo", system_prompt="Work.", runner=EchoRunner(), tools=[tool])
+        first = Session(agent, store=store)
+        second = Session(agent, store=store)
+        child = agent.fork(AgentForkSettings(name="child"))
+        child_tool = child.tools._get("checkpoint")
+
+        self.assertIs(agent.tools._get("checkpoint"), tool)
+        self.assertIs(tool._session, second)
+        self.assertTrue(tool._scope.permits(first.id) and tool._scope.permits(second.id))
+        self.assertIsNot(child_tool, tool)
+        self.assertTrue(child_tool._scope.permits(second.id))
 
 
 # ---------------------------------------------------------------------------

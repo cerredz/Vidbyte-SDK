@@ -5,7 +5,7 @@ PURPOSE: Normalizes the raw model arguments shared by the ten hand-maintained re
 ROLE IN CODEBASE: Named reasoning tools call ReasoningToolInput for required fields, text, JSON collections, and bounded probabilities.
 ARCHITECTURE NOTE: The static helper class centralizes coercion without owning ToolSpecs, context-item construction, or ContextManager placement.
 COMMON MODIFICATION PATTERNS: Add a parser only for repeated input shapes and preserve each caller's existing validation/error contract.
-KNOWN EDGE CASES: JSON strings may decode to the wrong shape, mappings are not arrays, blank values are removed, and booleans are not probabilities.
+KNOWN EDGE CASES: JSON strings may decode to the wrong shape, a single JSON scalar string is one item, mappings are not arrays, blank values are removed, and booleans and non-finite numbers are not probabilities.
 RELATED DOCS: field-guide/vidbyte-sdk/class-bound-helpers.md and vidbyte/tools/README.md.
 TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
 
@@ -28,6 +28,7 @@ Relations:
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -59,16 +60,24 @@ class ReasoningToolInput:
         if raw is None:
             return ()
         if isinstance(raw, str):
+            stripped = raw.strip()
             try:
                 parsed = json.loads(raw)
             except json.JSONDecodeError:
-                stripped = raw.strip()
                 return (stripped,) if stripped else ()
+            # @intent single-json-scalar-is-one-item
+            # A single value like "2024" or "true" decodes as a JSON scalar; keep it as one item, not drop it.
+            if not isinstance(parsed, (list, Mapping)):
+                return (stripped,)
             raw = parsed
         if isinstance(raw, Mapping):
             return ()
         if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
             return tuple(str(item).strip() for item in raw if str(item).strip())
+        # @intent raw-scalar-is-one-item
+        # A raw number or boolean is a documented "single value", so it becomes one item instead of nothing.
+        if isinstance(raw, (int, float)):
+            return (str(raw),)
         return ()
 
     @staticmethod
@@ -96,6 +105,10 @@ class ReasoningToolInput:
         try:
             value = float(str(raw).strip())
         except (ValueError, TypeError):
+            return None
+        # @intent non-finite-probability-is-unparsable
+        # min(1.0, nan) is 1.0, so NaN/inf would be recorded as certainty; callers treat None as unparsable.
+        if not math.isfinite(value):
             return None
         return max(_MIN_PROBABILITY, min(_MAX_PROBABILITY, value))
 

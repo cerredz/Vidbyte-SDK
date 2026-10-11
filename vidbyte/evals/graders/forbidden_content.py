@@ -15,7 +15,9 @@ class ForbiddenContentGrader(BaseGrader):
 
     def __init__(self, forbidden: Sequence[str], *, case_sensitive: bool = False) -> None:
         # Stores forbidden terms and case sensitivity preferences.
-        self.forbidden = tuple(forbidden)
+        # @intent bare-string-term-is-one-term
+        # tuple("password") would forbid every single letter and flag clean answers; a bare string is one term.
+        self.forbidden = (forbidden,) if isinstance(forbidden, str) and forbidden else tuple(forbidden)
         self.case_sensitive = case_sensitive
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:

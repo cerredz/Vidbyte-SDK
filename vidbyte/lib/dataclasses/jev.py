@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.constants.jev import (
+    JEV_BULK_WORK_MIN_AGENTS,
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
@@ -3695,6 +3696,35 @@ class JevClarification:
 
 
 @dataclass(frozen=True, slots=True)
+class JevBulkHandoff:
+    """What one bulk-work agent handed back: its task and its reply, which is empty when the agent failed."""
+
+    task: str
+    output: str
+
+    def __post_init__(self) -> None:
+        JevText.require(self.task, field_name="bulk handoff task")
+        if not isinstance(self.output, str) or self.output != self.output.strip():
+            raise JevValidation.error("bulk handoff output", "a trimmed reply, or an empty string when the agent failed", self.output)
+
+    @property
+    def completed(self) -> bool:
+        """Whether the agent finished its task with a reply."""
+        return bool(self.output)
+
+
+@dataclass(frozen=True, slots=True)
+class JevBulkWorkResult:
+    """The run's one bulk-work launch: every agent's handoff, in the order the main agent wrote the tasks."""
+
+    handoffs: tuple[JevBulkHandoff, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.handoffs, tuple) or len(self.handoffs) < JEV_BULK_WORK_MIN_AGENTS or not all(isinstance(handoff, JevBulkHandoff) for handoff in self.handoffs):
+            raise JevValidation.error("bulk work handoffs", f"a tuple of at least {JEV_BULK_WORK_MIN_AGENTS} JevBulkHandoff records", self.handoffs)
+
+
+@dataclass(frozen=True, slots=True)
 class JevSkillResult:
     """Metadata and relevance decision for one configured skill, without its text."""
 
@@ -3843,6 +3873,7 @@ class JevAgentResponse:
     compute_decisions: list[JevComputeDecision] = field(default_factory=list)
     clone: JevCloneResult | None = None
     swarm: JevSwarmResult | None = None
+    bulk_work: JevBulkWorkResult | None = None
     skills: JevSkillsOutcome = field(default_factory=JevSkillsOutcome)
 
     @property
@@ -4634,6 +4665,8 @@ __all__ = [
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",
+    "JevBulkHandoff",
+    "JevBulkWorkResult",
     "JevSkillBatch",
     "JevSkillResult",
     "JevSkillsOutcome",

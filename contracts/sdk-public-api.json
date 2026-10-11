@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "787afabf4c733f6489eed1cfc729d75f1fb0751a", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "5d84d07edd0b8d1e254e4a03bee75f982adf6cf3", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.2.1",
   "exports": [
@@ -82,6 +82,8 @@
     "CodexClientSettings",
     "CodexContextAnchor",
     "CodexContextPlacement",
+    "CodexContractOutcome",
+    "CodexContractResult",
     "CodexFailureClass",
     "CodexFailureRecord",
     "CodexFallbackAttempt",
@@ -240,6 +242,9 @@
     "JevAssumptionEvidence",
     "JevAssumptionsReconciledEvidence",
     "JevBoundaryKind",
+    "JevBulkHandoff",
+    "JevBulkSettings",
+    "JevBulkWorkResult",
     "JevCanSimplify",
     "JevCanSimplifyEvidence",
     "JevClaimAssertion",

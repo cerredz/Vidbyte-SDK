@@ -333,6 +333,34 @@ class ConcurrentRunContextTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recorder.seen, ["CUSTOMER-ASKS refund order 991"])
 
+    async def test_shared_agent_tool_forwards_each_parents_own_prompt(self) -> None:
+        # @intent shared-bound-tool-gets-own-copy
+        # One as_tool() instance mounted on two parents must never send one parent's conversation for the other.
+        recorder = _RecordingRunner()
+        child = build_test_agent(
+            name="child",
+            system_prompt="child system",
+            runner=recorder,
+            agent_metadata=AgentMetadata(name="child", description="A test agent.", use_cases="Testing."),
+        )
+        shared = child.as_tool()
+        acme = build_test_agent(name="acme", system_prompt="acme router", runner=_DelegatingRunner(), tools=(shared,))
+        globex = build_test_agent(name="globex", system_prompt="globex router", runner=_DelegatingRunner(), tools=(shared.customize(description="Ask the child."),))
+
+        await globex.arun("GLOBEX card declined")
+        await acme.arun("ACME invoice wrong")
+
+        self.assertEqual(recorder.seen, ["GLOBEX card declined", "ACME invoice wrong"])
+        self.assertIs(acme.tools._get("child"), shared)
+        self.assertIs(acme._agent_tool_items[0], shared)
+
+    def test_single_parent_binds_its_tool_in_place(self) -> None:
+        child_tool = AgentTool(_make_agent("child"))
+        parent = build_test_agent(name="parent", system_prompt="parent system", runner=FakeRunner(), tools=(child_tool,))
+        parent.add_tool(_make_agent("other").as_tool())
+        self.assertIs(parent.tools._get("child"), child_tool)
+        self.assertIs(child_tool._owner, parent)
+
 
 if __name__ == "__main__":
     unittest.main()

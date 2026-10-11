@@ -143,6 +143,68 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([msg.content for msg in agent.captured.history], ["two", "three"])
         self.assertEqual(agent.captured.tools.names(), ("beta", "gamma"))
 
+    async def test_null_history_mode_falls_back_to_default_chain(self) -> None:
+        # A JSON-null history_mode means "not given": context_window's mode applies, else "full", never "none".
+        cases = (
+            ({"history_mode": None}, ["one", "two", "three"]),
+            ({"history_mode": None, "context_window": {"history_mode": None}}, ["one", "two", "three"]),
+            ({"history_mode": None, "context_window": {"history_mode": "none"}}, []),
+            ({"history_mode": "none"}, []),
+        )
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                agent = StubAgent()
+                tool = ForkConversationTool()
+                tool.bind_agent(agent)
+
+                result = await tool.execute(_call(prompt="branch", **overrides))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS)
+                self.assertEqual([msg.content for msg in agent.captured.history], expected)
+
+    async def test_null_last_n_falls_back_to_context_window_last_n(self) -> None:
+        # Null top-level twins behave like omitted ones, so context_window's last_n slices history; explicit values still win.
+        cases = (
+            ({}, ["two", "three"]),
+            ({"history_mode": None, "last_n": None}, ["two", "three"]),
+            ({"last_n": 1}, ["three"]),
+        )
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                agent = StubAgent()
+                tool = ForkConversationTool()
+                tool.bind_agent(agent)
+
+                result = await tool.execute(_call(prompt="branch", context_window={"history_mode": "last_n", "last_n": 2}, **overrides))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual([msg.content for msg in agent.captured.history], expected)
+
+    def test_null_context_algorithm_falls_back_to_context_window_algorithm(self) -> None:
+        # A null top-level context_algorithm must not drop context_window's algorithm; an explicit one still wins.
+        tool = ForkConversationTool()
+        tool.bind_agent(StubAgent())
+        context_window = {"algorithm": "compact_tool_outputs"}
+
+        omitted = tool._build_request({"prompt": "p", "context_window": context_window})
+        null = tool._build_request({"prompt": "p", "context_window": context_window, "context_algorithm": None})
+        explicit = tool._build_request({"prompt": "p", "context_window": context_window, "context_algorithm": "default"})
+
+        self.assertEqual(omitted["algorithm"], "compact_tool_outputs")
+        self.assertEqual(null["algorithm"], "compact_tool_outputs")
+        self.assertEqual(explicit["algorithm"], "default")
+
+    async def test_invalid_history_mode_still_returns_tool_error(self) -> None:
+        # A real but unknown history_mode keeps its actionable validation error.
+        agent = StubAgent()
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", history_mode="sideways"))
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("history_mode must be one of: full, none, last_n.", result.output)
+
     async def test_sdk_native_fork_options_translate_to_fork_kwargs(self) -> None:
         # The model-facing tool should expose Vidbyte-native fork knobs, not only generic prompt/tools/model.
         agent = StubAgent()

@@ -7,7 +7,7 @@ from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgen
 from vidbyte.context import ContextManager, ContextWindow, ContextWindowPlacement, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.lib.errors import AgentExecutionError, ToolRegistrationError
+from vidbyte.lib.errors import AgentExecutionError, AgentForkConfigurationError, ToolRegistrationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.tools import ToolSpec
@@ -185,6 +185,15 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parent.tools.names(), ("keep", "drop"))
         self.assertEqual(child.tools.names(), ("keep", "add"))
 
+    async def test_agent_fork_drop_tools_rejects_bare_string_and_strips_names(self) -> None:
+        # The one-tuple typo must fail loudly, and a padded name must still drop the tool from the child.
+        with self.assertRaisesRegex(AgentForkConfigurationError, "not a string"):
+            AgentForkSettings(name="child", drop_tools=("drop"))
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("keep"), FakeTool("drop")])
+        child = parent.fork(AgentForkSettings(name="child", drop_tools=(" drop ",)))
+
+        self.assertEqual(child.tools.names(), ("keep",))
+
     async def test_agent_fork_clones_stateful_add_tools(self) -> None:
         # Stateful add_tools entries should be cloned before the child binds them.
         parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
@@ -316,6 +325,18 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(replies), 1)
         self.assertIn("direct:from-input", replies[0].content)
 
+    async def test_arun_sequentially_rejects_a_bare_string(self) -> None:
+        # [Silent Failure] A bare string must not become one paid model run per character
+        runner = OptionCaptureRunner()
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=runner)
+        with self.assertRaisesRegex(ValueError, "not a single string"):
+            await agent.arun_sequentially("Summarize the Q3 report")
+        self.assertEqual(runner.captured_options, [])
+        self.assertEqual(len(agent.history), 0)
+        replies = await agent.arun_sequentially(["Summarize the Q3 report"])
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(len(runner.captured_options), 1)
+
     async def test_arun_sequentially_forwards_options_to_each_call(self) -> None:
         # [Silent Failure] **options must reach every underlying generate_reply invocation
         runner = OptionCaptureRunner()
@@ -350,6 +371,19 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         await agent.arun("next")
 
         self.assertNotIn("INPUT_PLACED_PRIMITIVE", repr(runner.captured_options[-1]))
+
+
+class AgentRunSequentiallySyncTests(unittest.TestCase):
+    def test_run_sequentially_rejects_a_bare_string(self) -> None:
+        # [Silent Failure] The sync entry point refuses a bare string before any model call
+        runner = OptionCaptureRunner()
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=runner)
+        with self.assertRaisesRegex(ValueError, "not a single string"):
+            agent.run_sequentially("Summarize the Q3 report")
+        self.assertEqual(runner.captured_options, [])
+        replies = agent.run_sequentially(["Summarize the Q3 report"])
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(len(runner.captured_options), 1)
 
 
 if __name__ == "__main__":

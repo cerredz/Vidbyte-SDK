@@ -22,6 +22,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from vidbyte.lib.errors import ToolExecutionError
+
 
 @dataclass(frozen=True, slots=True)
 class OutputSchemaField:
@@ -42,15 +44,13 @@ class OutputSchemaBuilder:
         self._implicit = False
 
     def declare(self, fields: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
-        # Registers the declared fields and initializes storage for each.
-        declared: list[str] = []
-        for raw in fields:
-            field = self._coerce_field(raw)
-            if field is None:
-                continue
+        # Read every entry before registering any, so one invalid entry refuses the whole call.
+        coerced = [self._coerce_field(raw) for raw in fields]
+        declared = [field for field in coerced if field is not None]
+        # Register the accepted fields and initialize storage for each.
+        for field in declared:
             self._register(field)
-            declared.append(field.name)
-        return tuple(declared)
+        return tuple(field.name for field in declared)
 
     def append(self, field_name: str, value: Any) -> str:
         # Appends to a repeated field or sets a scalar field, auto-declaring if unknown.
@@ -114,13 +114,27 @@ class OutputSchemaBuilder:
             name = raw.strip()
             return OutputSchemaField(name=name) if name else None
         if isinstance(raw, Mapping):
-            name = str(raw.get("name", "")).strip()
+            # @intent null-optional-arg-means-default
+            # Models send unset optionals as JSON null; treat a null name or description
+            # like an omitted key so str(None) never becomes the literal text "None".
+            raw_name = raw.get("name")
+            name = "" if raw_name is None else str(raw_name).strip()
             if not name:
                 return None
+            raw_description = raw.get("description")
+            # @intent boolean-tool-args-reject-stringly-truthiness
+            # bool("false") is True, so a stringly "false" would silently make the field repeated;
+            # only a real JSON boolean counts, and null or an omitted key means the default (scalar).
+            raw_repeated = raw.get("repeated")
+            if raw_repeated is not None and not isinstance(raw_repeated, bool):
+                raise ToolExecutionError(
+                    f"Output field '{name}': repeated must be a boolean (true/false).",
+                    details={"field": name, "parameter": "repeated"},
+                )
             return OutputSchemaField(
                 name=name,
-                description=str(raw.get("description", "")).strip(),
-                repeated=bool(raw.get("repeated", False)),
+                description="" if raw_description is None else str(raw_description).strip(),
+                repeated=raw_repeated is True,
             )
         return None
 

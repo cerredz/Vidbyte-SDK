@@ -362,6 +362,34 @@ class ToolCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(anthropic_call, ToolCall("echo", {"text": "hello"}))
         self.assertEqual(gemini_call, ToolCall("echo", {"text": "hello"}))
 
+    def test_tools_formatter_treats_null_arguments_as_no_arguments(self) -> None:
+        """An explicit null argument payload parses as an empty argument object."""
+        openai_call = ToolsFormatter.parse_openai_tool_call(
+            {"id": "call_r1", "function": {"name": "ping", "arguments": None}}
+        )
+        anthropic_call = ToolsFormatter.parse_anthropic_tool_call({"type": "tool_use", "name": "ping", "input": None})
+        gemini_call = ToolsFormatter.parse_gemini_tool_call({"functionCall": {"name": "ping", "args": None}})
+
+        self.assertEqual(openai_call, ToolCall("ping", {}, call_id="call_r1"))
+        self.assertEqual(anthropic_call, ToolCall("ping", {}))
+        self.assertEqual(gemini_call, ToolCall("ping", {}))
+        for encoded_null in ("null", " null "):
+            self.assertEqual(
+                ToolsFormatter.parse_openai_tool_call({"function": {"name": "ping", "arguments": encoded_null}}),
+                ToolCall("ping", {}),
+            )
+
+    def test_tools_formatter_still_rejects_non_object_arguments(self) -> None:
+        """A list argument payload still raises for every provider parser."""
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_openai_tool_call({"function": {"name": "ping", "arguments": "[1, 2]"}})
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_openai_tool_call({"function": {"name": "ping", "arguments": [1, 2]}})
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_anthropic_tool_call({"name": "ping", "input": [1, 2]})
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_gemini_tool_call({"functionCall": {"name": "ping", "args": [1, 2]}})
+
 
 class LookupOrderTool(BaseTool):
     """Tool that declares its arguments only through a raw input_schema."""
