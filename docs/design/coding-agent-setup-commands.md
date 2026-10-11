@@ -115,12 +115,12 @@ class SetupCommandsLoader:
 1. `load`: return `None` when `settings.setup_commands` is empty.
 2. Get `BashTool.find_bash()`. When it is `None`, return a section that says none of the commands ran, followed by `BashTool.not_found_message()` and each command marked "not run".
 3. For each command, in order: if an earlier one failed, add a "not run" line and start nothing. Otherwise open a `tempfile.TemporaryFile()`, call `_run`, and on a failure read `_output_tail`, then add the command's line.
-4. `_run` starts `Popen([bash, "-c", command], cwd=root, stdin=DEVNULL, stdout=output, stderr=STDOUT, start_new_session=True)` and returns `(False, "could not start (<ExceptionClass>)")` on `OSError` or `ValueError`. It then calls `wait(timeout=BASH_TIMEOUT_SECONDS)`. On `TimeoutExpired`, it kills the group (POSIX `os.killpg(pid, SIGKILL)`, or Windows `process.kill()`), ignoring `ProcessLookupError` and `PermissionError`. It then waits at most `BASH_KILL_GRACE_SECONDS` and returns `(False, "timed out after 600 s")`. Otherwise it returns `(exit_code == 0, "exit N, S.s s")`.
+4. `_run` starts `Popen([bash, "-c", command], cwd=root, stdin=DEVNULL, stdout=output, stderr=STDOUT, start_new_session=True)` and returns `(False, "could not start: <ExceptionClass>")` on `OSError` or `ValueError`. It then calls `wait(timeout=BASH_TIMEOUT_SECONDS)`. On `TimeoutExpired`, it kills the group (POSIX `os.killpg(pid, SIGKILL)`, or Windows `process.kill()`), ignoring `ProcessLookupError` and `PermissionError`. It then waits at most `BASH_KILL_GRACE_SECONDS` and returns `(False, "timed out after 600 s")`. Otherwise it returns `(exit_code == 0, "exit N, S.s s")`.
 5. `_output_tail` seeks to `max(0, size - 8192)`, decodes UTF-8 with replacement, keeps the last 30 non-trailing-blank lines, and indents each by three spaces.
 
 #### Edge Cases & Error Handling
 - **No output from a failed command.** The line reads `FAILED (...), with no output.`
-- **A command that cannot start**, such as a removed root folder or a NUL byte: `FAILED (could not start (ValueError))`. The message names only the exception class, as `BashTool` does (S017).
+- **A command that cannot start**, such as a removed root folder or a NUL byte: `FAILED (could not start: ValueError)`. The message names only the exception class, as `BashTool` does (S017).
 - **A timeout on Windows.** Only Git's launcher is killed, so the command may keep running after construction returns. This is the same limit `BashTool` documents.
 - **A setsid descendant on POSIX** survives the group kill. This is the same limit as `BashTool`.
 - **A background process the command started** (`server &`). The loader returns when bash exits and does not wait for the output to close.

@@ -96,6 +96,7 @@ agent = CodingAgent(
     root_dir="my-project",            # an existing folder, resolved once
     firecrawl_api_key="fc-your-key",  # optional; picks the web-fetch provider
     load_agents=True,                 # default; shows my-project/AGENTS.md to the model
+    setup_commands=["uv sync"],       # optional; run once in my-project before the first turn
     provider="openai",
     model_name="gpt-4.1",
 )
@@ -106,6 +107,8 @@ The key you pass picks the web-fetch tool: `firecrawl_api_key`, `browserbase_api
 The constructor gathers its own arguments into one `CodingAgentSettings` (`vidbyte/lib/dataclasses/coding.py`), which checks the root folder, the keys, the caller's tools, and the policy when it is created, so a bad argument fails before `BaseAgent` builds anything. The seven tools come from `CodingAgentTools` (`vidbyte/tools/toolsets/coding.py`), a `Tools` catalog with `authenticate_tools(settings)`, which gives the one key to its fetch provider, and `get_tools(root_dir, fetch_tool)`, which returns the seven in order.
 
 When it is built, the agent reads `<root_dir>/AGENTS.md`, or a case variant such as `agents.md` when that exact name is absent, and places the text right after the system prompt and before your message, so the model follows the rules the repository already wrote down. Parent folders are never searched. The file is read once: later edits are seen only by a new agent, and a later change of working directory changes nothing. At most 32,768 bytes are shown, cut at a whole character; a longer file ends with a line that gives the cut and the `read_lines` call that reads the rest. A missing or blank file adds nothing, while a file that is there but cannot be read, such as a folder named `AGENTS.md`, fails construction with a `ConfigurationError` naming its path. Pass `load_agents=False` to turn this off; `load_agents` must be a real `bool`.
+
+`setup_commands`, a list of command strings such as `["uv sync", "npm ci"]`, run once while the agent is built, in order, each as `bash -c <command>` in `root_dir`, so the environment is ready before the first turn. Construction waits for them, up to the bash tool's 600-second limit each. The first command that fails, times out, or cannot start stops the run, and the rest are not run. Nothing raises: the model gets a short note after the other sections, with one line per command and, for the failed one, the last 30 lines of its output (at most 8,192 bytes). Without bash, nothing runs and the note says so. A bare string such as `setup_commands="uv sync"` fails with a `ConfigurationError`. The commands are not run again by `run()`, `fork()`, or `restore()`.
 
 `CodingContextWindow` (`vidbyte/agents/coding_context/`) places the text and owns the order of everything a `CodingAgent` adds after the system prompt: `AGENTS.md`, then the environment context, the repository map, and setup-command results as those features land, then the content of your own `context_manager`. It never changes your manager: when a section is loaded, the agent gets a new manager with your content after the sections. Adding a section takes three steps, described in that folder's README:
 
