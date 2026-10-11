@@ -11,6 +11,8 @@ Key Functions:
     - cached_input_tokens: Maps cache_read_input_tokens onto the shared accessor.
     - total_prompt_tokens: Sums all three input-side buckets (Anthropic's
       input_tokens alone excludes both cache buckets).
+    - _over_threshold: Compares that full prompt, not input_tokens, with a
+      model's prompt-length tier (Claude Haiku 5.5's 100K tier).
 Relations:
     Registered in vidbyte/agents/pricing/base.py; rates from PROVIDER_PRICING.
 Similar Files:
@@ -72,6 +74,20 @@ class AnthropicUsage(ProviderUsage):
         if all(part is None for part in parts):
             return None
         return sum(part or 0 for part in parts)
+
+    def _over_threshold(self, pricing: ModelPricing) -> bool:
+        # True when the whole prompt crosses the model's prompt-length tier.
+        # @intent anthropic-tier-counts-cached-prompt
+        # Anthropic prices Haiku 5.5 by prompt length counting "all of its
+        # input tokens, including cache reads and cache writes", while
+        # input_tokens here excludes both, so a cache-heavy prompt would
+        # otherwise bill at the cheaper tier.
+        prompt_tokens = self.total_prompt_tokens
+        if pricing.threshold_tokens is None or prompt_tokens is None:
+            return False
+        if pricing.threshold_inclusive:
+            return prompt_tokens >= pricing.threshold_tokens
+        return prompt_tokens > pricing.threshold_tokens
 
     def cost_usd(self, pricing: ModelPricing | None) -> float | None:
         # Prices input, cache-write, cache-read, and output as separate buckets.
