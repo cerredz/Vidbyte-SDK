@@ -251,7 +251,9 @@ class AgentRuntime:
             metadata["modality"] = modality.value
         return BaseAgentContext(
             system_prompt=append_agentic_loop_prompt(system_prompt) if agentic_loop else system_prompt,
-            history=tuple(history) + tuple(agent_history),
+            # @intent base-context-history-reaches-the-model
+            # The caller's base context history is a context field like its memory and metadata, so it is kept, oldest turns first.
+            history=tuple(managed_context.history) + tuple(history) + tuple(agent_history),
             tools=(self.tools if agentic_loop else self.user_tools).specs(),
             file_paths=tuple(managed_context.file_paths),
             run_metadata=dict(managed_context.run_metadata),

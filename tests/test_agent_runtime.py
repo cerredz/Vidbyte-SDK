@@ -60,6 +60,17 @@ class FakeRunner:
         self.calls: list[dict] = []
 
 
+class RecordingRunner:
+    """Offline runner that records every model request and answers without tool calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def run(self, prompt: str, **kwargs: object) -> FakeResponse:
+        self.calls.append({"prompt": prompt, "kwargs": kwargs})
+        return FakeResponse("ok", {"output_text": "ok"})
+
+
 class WriteTool(BaseTool):
     def __init__(self) -> None:
         self.executed = False
@@ -221,6 +232,19 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         system = runtime._build_system_string(context)
         for marker in ("MARKER-AGENT", "MARKER-MANAGER", "MARKER-CALLER"):
             self.assertEqual(system.count(marker), 1, marker)
+
+    async def test_base_context_history_reaches_the_model_like_history_argument(self) -> None:
+        # [Regression] BaseContext(history=...) passed as context= was dropped while history= reached the model.
+        earlier = AgentMessage(sender="customer", recipient="support", content="HISTMARK order 1234 is late")
+        requests: dict[str, str] = {}
+        for form, options in (("history", {"history": [earlier]}), ("context", {"context": StrategyContext(history=(earlier,))})):
+            runner = RecordingRunner()
+            agent = build_test_agent(name="support", system_prompt="Help.", runner=runner)
+            await agent.arun("any update?", **options)
+            requests[form] = str(runner.calls)
+
+        self.assertEqual(requests["history"].count("HISTMARK"), 1)
+        self.assertEqual(requests["context"].count("HISTMARK"), 1)
 
     def test_runtime_builds_non_agentic_context_without_internal_tools(self) -> None:
         @tool
