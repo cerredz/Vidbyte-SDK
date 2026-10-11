@@ -59,7 +59,9 @@ class SessionTool(_SessionBuiltinTool):
         handler = handlers.get(operation)
         if handler is None:
             return ToolResult.error(_TOOL_NAME, f"Unknown session operation: {operation or '(none)'}.")
-        return handler(call.arguments)
+        # @intent session-tool-never-raises
+        # Run the operation so a session error, such as an unknown session id, comes back as an error result instead of raising.
+        return self._caught(_TOOL_NAME, lambda: handler(call.arguments))
 
     def _create_checkpoint(self, arguments: dict[str, Any]) -> ToolResult:
         # Write a checkpoint of the bound session and return its id.

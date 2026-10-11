@@ -1313,6 +1313,14 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("denied", result.output.lower())
 
+    async def test_read_run_unknown_session_is_error_not_raised(self) -> None:  # [Edge Case]
+        # @intent session-tool-never-raises
+        # An unknown session id comes back as an error result the model can read, like every sibling session tool.
+        tool = SessionTool(InMemorySessionStore(), scope=SessionScope.all_runs())
+        result = await tool.execute(ToolCall(tool_name="session", arguments={"operation": "read_run", "session_id": "nope"}))
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("SessionNotFoundError", result.output)
+
     async def test_read_run_returns_trace_artifact(self) -> None:  # [Silent Failure]
         store = InMemorySessionStore()
         cp = Checkpoint(id="c1", session_id="se", parent_id=None, seq=0, created_at="t", run_state=_run_state(), trace_artifact={"goal": "g"})
