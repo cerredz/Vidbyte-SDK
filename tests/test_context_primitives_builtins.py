@@ -375,6 +375,23 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("new body", stored.to_context_text())
         self.assertNotIn("old body", stored.to_context_text())
 
+    async def test_upsert_update_keeps_placement_chosen_by_context_move(self) -> None:
+        # @intent content-update-keeps-placement: rewriting a primitive's content must not undo a context_move.
+        manager = ContextManager()
+        upsert = ContextUpsertTool(manager)
+        move = ContextMoveTool(manager)
+        await upsert.execute(ToolCall(tool_name="context_upsert", arguments={"primitive_id": "plan:current", "content": "Step one", "primitive_type": "plan"}))
+        await move.execute(ToolCall(tool_name="context_move", arguments={"primitive_id": "plan:current", "placement": "top_of_context"}))
+
+        result = await upsert.execute(ToolCall(tool_name="context_upsert", arguments={"primitive_id": "plan:current", "content": "Step two", "primitive_type": "plan"}))
+
+        self.assertEqual(result.status.value, "success", result.output)
+        self.assertEqual(manager.placement_for("plan:current"), ContextWindowPlacement.TOP_OF_CONTEXT)
+        stored = manager.get_by_id("plan:current")
+        assert stored is not None
+        self.assertIn("Step two", stored.to_context_text())
+        self.assertNotIn("Step one", stored.to_context_text())
+
     async def test_null_primitive_type_and_title_behave_like_omitted(self) -> None:
         # @intent null-optional-arg-means-default: null type means "text" and null title means the type default.
         manager = ContextManager()
