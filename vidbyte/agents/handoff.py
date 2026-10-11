@@ -185,11 +185,15 @@ class HandoffAgent(BaseAgent):
         if not isinstance(raw_sections, Mapping):
             return self._empty_sections(), {}
         wanted = {title.lower(): title for title in self.spec.section_titles()}
+        # @intent null-optional-arg-means-default
+        # Models send JSON null for a section they have nothing for; read it exactly like an omitted
+        # section, so the next owner gets an empty section rather than the text "None".
+        given = {title: value for title, value in raw_sections.items() if value is not None}
         if not wanted:
-            return {str(title): self._string_value(value) for title, value in raw_sections.items()}, {}
+            return {str(title): self._string_value(value) for title, value in given.items()}, {}
         sections = self._empty_sections()
         extra: dict[str, str] = {}
-        for title, value in raw_sections.items():
+        for title, value in given.items():
             canonical = wanted.get(str(title).lower())
             if canonical is not None:
                 sections[canonical] = self._string_value(value)

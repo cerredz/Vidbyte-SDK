@@ -39,9 +39,9 @@ class GlobTool(BaseCodeSearchTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Run the glob search and return bounded relative paths."""
         pattern = str(call.arguments["pattern"])
-        subdir = str(call.arguments.get("subdir", "."))
-        max_results = max(1, min(int(call.arguments.get("max_results", 50)), 500))
-        max_chars = max(200, min(int(call.arguments.get("max_chars", 10000)), 50000))
+        subdir = str(self._optional_argument(call, "subdir", default="."))
+        max_results = max(1, min(int(self._optional_argument(call, "max_results", default=50)), 500))
+        max_chars = max(200, min(int(self._optional_argument(call, "max_chars", default=10000)), 50000))
         try:
             start = self.resolve_under_root(subdir)
         except ValueError as exc:

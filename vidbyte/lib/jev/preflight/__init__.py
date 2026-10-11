@@ -27,6 +27,7 @@ from vidbyte.lib.jev.preflight.clarity import (
     ClarityTimeContextQuestion,
 )
 from vidbyte.lib.jev.preflight.preflight import JevPreflightRegistry
+from vidbyte.lib.jev.preflight.run_state_relation import RunStateRelationQuestion
 from vidbyte.lib.jev.preflight.specialist import SpecialistQuestion
 
 __all__ = [
@@ -46,5 +47,6 @@ __all__ = [
     "ClarityTargetQuestion",
     "ClarityTimeContextQuestion",
     "JevPreflightRegistry",
+    "RunStateRelationQuestion",
     "SpecialistQuestion",
 ]

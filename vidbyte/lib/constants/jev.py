@@ -84,6 +84,17 @@ JEV_CLARITY_THRESHOLD: float = 0.75
 # One clarity question with P(yes) below this fails the preset on its own, so a mean pulled up by many
 # easy yes answers cannot hide one clear no. Also a starting point, not a tuned value.
 JEV_CLARITY_VETO_THRESHOLD: float = 0.2
+# RUN_STATE_RELATION reads the existing typed record under a separate state key.
+JEV_PREFLIGHT_RUN_STATE_FIELD: str = "run_state"
+# No labeled relation set is available yet, so the initial threshold is neutral.
+JEV_RUN_STATE_RELATION_THRESHOLD: float = JEV_NOUL_YES_THRESHOLD
+# BULK_WORK's two settings: the P(yes) every bulk-work question must reach on its own, and how many fresh
+# agents one approved request may split across.
+JEV_BULK_WORK_THRESHOLD: float = 0.75
+JEV_BULK_WORK_AGENTS: int = 4
+# Splitting work needs at least two agents; the main agent writes their tasks through this tool.
+JEV_BULK_WORK_MIN_AGENTS: int = 2
+JEV_BULK_WORK_TOOL_NAME: str = "run_bulk_work"
 # A run the preflight gate stops reports this strategy name.
 JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
 # JevClarificationAgent limits: its loop and token budget, and the size of the structured reply it must
@@ -406,6 +417,14 @@ JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
+# Skill preload. Selected skill bodies follow this heading in the run's system prompt, and relevance questions
+# are numbered from the base index. Each relevance request stays under these local UTF-8 JSON byte caps, which
+# sit below TypeSafe's token limits, so a skill is batched whole and never truncated.
+JEV_SKILLS_PROMPT_SECTION: str = "\n\n--- Caller-selected skill guidance for this request ---\n\n"
+JEV_SKILL_INDEX_BASE: int = 1
+JEV_SKILLS_MAX_REQUEST_JSON_BYTES: int = 60_000
+JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES: int = 30_000
+
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
     "JEV_CAN_SIMPLIFY_THRESHOLD",
@@ -421,6 +440,10 @@ __all__ = [
     "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
     "JEV_CLARITY_THRESHOLD",
     "JEV_CLARITY_VETO_THRESHOLD",
+    "JEV_BULK_WORK_AGENTS",
+    "JEV_BULK_WORK_MIN_AGENTS",
+    "JEV_BULK_WORK_THRESHOLD",
+    "JEV_BULK_WORK_TOOL_NAME",
     "JEV_COMPLETION_EVIDENCE_THRESHOLD",
     "JEV_CONTINUATION_BUDGET_INITIAL",
     "JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS",
@@ -627,6 +650,7 @@ __all__ = [
     "JEV_NO_RETRIES",
     "JEV_PHASE_PROGRESS_THRESHOLD",
     "JEV_PREFLIGHT_REQUEST_FIELD",
+    "JEV_PREFLIGHT_RUN_STATE_FIELD",
     "JEV_PREFLIGHT_STRATEGY_NAME",
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
@@ -641,6 +665,7 @@ __all__ = [
     "JEV_REQUIRED_SEQUENCE_THRESHOLD",
     "JEV_RUN_STATE_MAX_ITERATIONS",
     "JEV_RUN_STATE_MAX_TOKENS",
+    "JEV_RUN_STATE_RELATION_THRESHOLD",
     "JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD",
     "JEV_SCOPE_COVERAGE_THRESHOLD",
     "JEV_SELF_REVIEW_THRESHOLD",
@@ -677,6 +702,10 @@ __all__ = [
     "JEV_DYNAMIC_COMPUTE_MIN_THRESHOLD",
     "JEV_COMPUTE_CLONES_DEFAULT",
     "JEV_COMPUTE_CLONES_MAX",
+    "JEV_SKILLS_PROMPT_SECTION",
+    "JEV_SKILL_INDEX_BASE",
+    "JEV_SKILLS_MAX_REQUEST_JSON_BYTES",
+    "JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES",
     "JEV_COMPUTE_SWARM_AGENTS_DEFAULT",
     "JEV_COMPUTE_SWARM_AGENTS_MIN",
     "JEV_COMPUTE_SWARM_AGENTS_MAX",

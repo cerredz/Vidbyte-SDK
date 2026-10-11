@@ -26,6 +26,7 @@ from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts import OutputContract
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy
+from vidbyte.lib.dataclasses.agents import AllowedToolNames
 from vidbyte.lib.errors import ConfigurationError
 
 _POSITIVE_INT_FIELDS = (
@@ -75,7 +76,8 @@ class AgentLoopSettings:
         self.context_window_budget = context_window_budget
         self.compaction_trigger_tokens = compaction_trigger_tokens
         self.compaction_target_tokens = compaction_target_tokens
-        self.allowed_tools = allowed_tools
+        # AllowedToolNames rejects the ("search") one-tuple typo and strips names, so the gate cannot silently deny the intended tool.
+        self.allowed_tools = AllowedToolNames(allowed_tools).names if allowed_tools is not None else None
         self.tool_error_policy = tool_error_policy
         self.tool_settings = tool_settings
         self.max_contract_rejections = max_contract_rejections
@@ -202,6 +204,7 @@ class AgentLoopSettings:
             compaction_trigger_tokens=self.compaction_trigger_tokens,
             compaction_target_tokens=self.compaction_target_tokens,
             tool_settings=self.tool_settings,
+            allowed_tools=frozenset(self.allowed_tools) if self.allowed_tools is not None else None,
         )
 
     def __repr__(self) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unittest
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field
@@ -39,6 +40,28 @@ class _OptionalTraceModel(BaseModel):
     pages: Union[int, None] = Field(None, description="Pages sent.")  # noqa: UP007
     reviewers: list[_Owner | None] | None = Field(None, description="Reviewers.")
     ref: int | str | None = Field(None, description="Ticket id or slug.")
+
+
+class _AbstractCollectionModel(BaseModel):
+    """Trace declared with abstract collection annotations pydantic validates as JSON arrays and objects."""
+
+    blockers: Sequence[str] | None = Field(None, description="Open blockers.")
+    reviewers: Sequence[_Owner] | None = Field(None, description="Reviewers.")
+    tags: Iterable[str] | None = Field(None, description="Tags.")
+    labels: Mapping[str, str] | None = Field(None, description="Labels.")
+    digest: bytes | None = Field(None, description="Digest.")
+    summary: str | None = Field(None, description="Summary.")
+
+
+class _ConcreteCollectionModel(BaseModel):
+    """The same trace declared with concrete list and dict annotations."""
+
+    blockers: list[str] | None = Field(None, description="Open blockers.")
+    reviewers: list[_Owner] | None = Field(None, description="Reviewers.")
+    tags: list[str] | None = Field(None, description="Tags.")
+    labels: dict[str, str] | None = Field(None, description="Labels.")
+    digest: bytes | None = Field(None, description="Digest.")
+    summary: str | None = Field(None, description="Summary.")
 
 
 def _progress_schema() -> TraceSchema:
@@ -97,6 +120,18 @@ class TraceOptionTests(unittest.TestCase):
     def test_from_model_multi_type_union_stays_string(self) -> None:  # [Hidden Assumption]
         self.assertEqual(TraceSchema.from_model(_OptionalTraceModel).fields["ref"].type, TraceFieldType.STRING)
 
+    def test_from_model_abstract_collections_match_concrete(self) -> None:  # [Silent Failure]
+        abstract = TraceSchema.from_model(_AbstractCollectionModel).fields
+        concrete = TraceSchema.from_model(_ConcreteCollectionModel).fields
+        self.assertEqual({name: f.type for name, f in abstract.items()}, {name: f.type for name, f in concrete.items()})
+        self.assertEqual(abstract["blockers"].type, TraceFieldType.ARRAY)
+        self.assertEqual(abstract["tags"].type, TraceFieldType.ARRAY)
+        self.assertEqual(abstract["labels"].type, TraceFieldType.OBJECT)
+        self.assertEqual(abstract["digest"].type, TraceFieldType.STRING)
+        self.assertEqual(abstract["summary"].type, TraceFieldType.STRING)
+        self.assertEqual(abstract["reviewers"].items, concrete["reviewers"].items)
+        self.assertEqual(abstract["reviewers"].items.fields["name"].type, TraceFieldType.STRING)
+
     def test_initial_artifact_keys_all_none(self) -> None:  # [Edge Case]
         artifact = _progress_schema().initial_artifact()
         self.assertEqual(artifact, {"goal": None, "steps": None, "done": None})
@@ -128,6 +163,29 @@ class UpdateTraceToolTests(unittest.IsolatedAsyncioTestCase):
         await tool.execute(_call({"meta": {"x": 1}}))
         await tool.execute(_call({"meta": {"y": 2}}))
         self.assertEqual(tool.current_trace()["meta"], {"x": 1, "y": 2})
+
+    async def test_null_nested_subfield_keeps_prior_value(self) -> None:  # [Silent Failure]
+        schema = TraceSchema(
+            name="incident",
+            fields={
+                "summary": TraceField(description="One-line summary."),
+                "status": TraceField(
+                    description="Current status.",
+                    type=TraceFieldType.OBJECT,
+                    fields={
+                        "phase": TraceField(description="Phase."),
+                        "owner": TraceField(description="Owner."),
+                    },
+                ),
+            },
+        )
+        tool = UpdateTraceTool(schema)
+        await tool.execute(_call({"summary": "first", "status": {"phase": "triage", "owner": "ana"}}))
+        result = await tool.execute(_call({"summary": None, "status": {"phase": "mitigating", "owner": None}}))
+        self.assertNotEqual(result.status.value, "error", result.output)
+        trace = tool.current_trace()
+        self.assertEqual(trace["status"], {"phase": "mitigating", "owner": "ana"})
+        self.assertEqual(trace["summary"], "first")
 
     async def test_replaces_scalar_and_preserves_omitted(self) -> None:  # [Silent Failure]
         tool = UpdateTraceTool(_progress_schema())

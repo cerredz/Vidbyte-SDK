@@ -17,7 +17,9 @@ from types import MappingProxyType
 from vidbyte.lib.dataclasses.jev import JevPreflightQuestion, JevQuestion, JevSpecialist
 from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev.preflight.bulk_work import BULK_WORK_QUESTIONS
 from vidbyte.lib.jev.preflight.clarity import CLARITY_QUESTIONS
+from vidbyte.lib.jev.preflight.run_state_relation import RunStateRelationQuestion
 from vidbyte.lib.jev.preflight.specialist import SpecialistQuestion
 from vidbyte.lib.jev.presets import JevPresets
 
@@ -25,7 +27,9 @@ from vidbyte.lib.jev.presets import JevPresets
 class JevPreflightRegistry:
     """Registry over every fixed preflight question, keyed by JevPreflightQuestionKey."""
 
-    _questions: Mapping[JevPreflightQuestionKey, JevPreflightQuestion] = MappingProxyType({question.key: question for question in CLARITY_QUESTIONS})
+    _questions: Mapping[JevPreflightQuestionKey, JevPreflightQuestion] = MappingProxyType(
+        {question.key: question for question in (*CLARITY_QUESTIONS, RunStateRelationQuestion(), *BULK_WORK_QUESTIONS)}
+    )
     _specialist: SpecialistQuestion = SpecialistQuestion()
 
     @classmethod

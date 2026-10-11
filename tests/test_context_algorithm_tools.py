@@ -5,7 +5,9 @@ from unittest import mock
 
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ReflexionContextItem, TrajectoryCheckpointContextItem
-from vidbyte.tools.builtins.cot_events import BacktrackTool
+from vidbyte.lib.constants.cot_events import DEFAULT_SALVAGE
+from vidbyte.tools.builtins.cot_events import BacktrackTool, UncertaintyTool
+from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
@@ -218,6 +220,22 @@ class TrajectoryCheckpointToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(manager.get_by_id("trajectory_checkpoint:1"), frozen)
         self.assertEqual(manager.get_by_id("trajectory_checkpoint:2").reasoning_summary, "new")
 
+    async def test_null_title_and_feedback_match_omitted(self) -> None:
+        # @intent null-optional-arg-means-default: null title/feedback render exactly like omitted ones.
+        omitted_tool, omitted_manager = self._tool()
+        null_tool, null_manager = self._tool()
+        omitted = await omitted_tool.execute(self._call(reasoning_summary="r", trajectory="t", output="o"))
+        nulled = await null_tool.execute(
+            self._call(reasoning_summary="r", trajectory="t", output="o", title=None, feedback=None)
+        )
+        self.assertEqual(nulled.status, ToolStatus.SUCCESS, nulled.output)
+        self.assertEqual(nulled.output, omitted.output)
+        stored = null_manager.get_by_id("trajectory_checkpoint:1")
+        self.assertEqual(stored.title, omitted_manager.get_by_id("trajectory_checkpoint:1").title)
+        self.assertEqual(stored.title, "Runtime Checkpoint")
+        self.assertEqual(stored.feedback, "")
+        self.assertNotIn("None", nulled.output)
+
     async def test_rejected_upsert_returns_error(self) -> None:
         tool, _ = self._tool()
         call = self._call(reasoning_summary="r", trajectory="t", output="o")
@@ -289,6 +307,14 @@ class ReflexionToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(call)
         self.assertNotIn("Failed Attempt", result.output)
 
+    async def test_null_title_uses_default_title(self) -> None:
+        # @intent null-optional-arg-means-default: a null title means the "Reflexion Note" default.
+        tool, manager = self._tool()
+        result = await tool.execute(self._call(critique="c", correction_plan="p", title=None))
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(manager.get_by_id("reflexion:1").title, "Reflexion Note")
+        self.assertNotIn("None", result.output)
+
     async def test_two_calls_produce_distinct_primitive_ids(self) -> None:
         tool, manager = self._tool()
         base_call = self._call(critique="c", correction_plan="p")
@@ -341,6 +367,51 @@ class ReflexionToolTests(unittest.IsolatedAsyncioTestCase):
         rendered = manager.render_primitives_zone()
         self.assertIn("reflexion:1", rendered)
         self.assertIn("Reflexion Note", rendered)
+
+
+# ---------------------------------------------------------------------------
+# Null optional fields on chain-of-thought event tools
+# ---------------------------------------------------------------------------
+
+
+class CotEventNullOptionalTests(unittest.IsolatedAsyncioTestCase):
+    """@intent null-optional-arg-means-default: a null optional field behaves like the omitted key."""
+
+    async def _record(self, tool_class, tool_name: str, arguments: dict):
+        manager = ContextManager()
+        result = await tool_class(manager).execute(ToolCall(tool_name=tool_name, arguments=arguments))
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        return result, manager.get_by_id(f"{tool_name}:1")
+
+    async def test_backtrack_null_salvage_uses_default(self) -> None:
+        args = {
+            "abandoning": "path",
+            "reason": "r",
+            "evidence": "e",
+            "attempted_result": "a",
+            "replacement_plan": "p",
+            "loop_guard": "g",
+        }
+        omitted_result, omitted = await self._record(BacktrackTool, "backtrack", args)
+        null_result, nulled = await self._record(BacktrackTool, "backtrack", {**args, "salvage": None})
+        self.assertEqual(nulled.salvage, DEFAULT_SALVAGE)
+        self.assertEqual(null_result.output, omitted_result.output)
+        self.assertNotIn("None", null_result.output)
+
+    async def test_uncertainty_null_optionals_render_like_omitted(self) -> None:
+        args = {
+            "next_step": 0.7,
+            "on_track": 0.6,
+            "progress": "progressing",
+            "uncertainty_source": "s",
+            "next_action": "n",
+        }
+        nulls = {"trigger": None, "blocker": None, "reassessment_condition": None}
+        omitted_result, omitted = await self._record(UncertaintyTool, "uncertainty", args)
+        null_result, nulled = await self._record(UncertaintyTool, "uncertainty", {**args, **nulls})
+        self.assertEqual((nulled.trigger, nulled.blocker, nulled.reassessment_condition), ("", "", ""))
+        self.assertEqual(null_result.output, omitted_result.output)
+        self.assertNotIn("None", null_result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +479,39 @@ class SharedManagerNoteIdTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(manager.get_by_id("deduce:1").conclusion, "first")
         self.assertEqual(manager.get_by_id("deduce:2").conclusion, "second")
+
+
+# ---------------------------------------------------------------------------
+# ReasoningToolInput parsing shared by the reasoning strategy tools
+# ---------------------------------------------------------------------------
+
+
+class ReasoningToolInputTests(unittest.TestCase):
+    def test_probability_rejects_non_finite_values(self) -> None:
+        for raw in ("NaN", "inf", "-inf", float("nan"), float("inf")):
+            with self.subTest(raw=raw):
+                self.assertIsNone(ReasoningToolInput.probability(raw))
+
+    def test_probability_keeps_finite_values_and_clamping(self) -> None:
+        self.assertEqual(ReasoningToolInput.probability(0.3), 0.3)
+        self.assertEqual(ReasoningToolInput.probability("0.3"), 0.3)
+        self.assertEqual(ReasoningToolInput.probability(2.5), 1.0)
+        self.assertEqual(ReasoningToolInput.probability(-1), 0.0)
+
+    def test_string_list_keeps_single_json_scalar_string(self) -> None:
+        self.assertEqual(ReasoningToolInput.string_list("2024"), ("2024",))
+        self.assertEqual(ReasoningToolInput.string_list(" true "), ("true",))
+
+    def test_string_list_keeps_raw_scalar(self) -> None:
+        self.assertEqual(ReasoningToolInput.string_list(2024), ("2024",))
+
+    def test_string_list_unchanged_for_arrays_text_objects_and_none(self) -> None:
+        self.assertEqual(ReasoningToolInput.string_list('["a","b"]'), ("a", "b"))
+        self.assertEqual(ReasoningToolInput.string_list(["a", " ", "b"]), ("a", "b"))
+        self.assertEqual(ReasoningToolInput.string_list("plain text"), ("plain text",))
+        self.assertEqual(ReasoningToolInput.string_list({"k": "v"}), ())
+        self.assertEqual(ReasoningToolInput.string_list('{"k": "v"}'), ())
+        self.assertEqual(ReasoningToolInput.string_list(None), ())
 
 
 if __name__ == "__main__":

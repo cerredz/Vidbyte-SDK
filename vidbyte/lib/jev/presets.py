@@ -14,7 +14,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
-from vidbyte.lib.constants.jev import JEV_CLARITY_THRESHOLD, JEV_CLARITY_VETO_THRESHOLD
+from vidbyte.lib.constants.jev import (
+    JEV_BULK_WORK_THRESHOLD,
+    JEV_CLARITY_THRESHOLD,
+    JEV_CLARITY_VETO_THRESHOLD,
+    JEV_RUN_STATE_RELATION_THRESHOLD,
+)
 from vidbyte.lib.dataclasses.jev import JevPresetDefinition
 from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
 from vidbyte.lib.errors import ConfigurationError
@@ -47,6 +52,27 @@ class JevPresets:
                 # One clear no fails the request, and a request with no action reports only that gap.
                 veto=JEV_CLARITY_VETO_THRESHOLD,
                 gate=JevPreflightQuestionKey.CLARITY_ACTION,
+            ),
+            JevPreflightPreset.RUN_STATE_RELATION: JevPresetDefinition(
+                preset=JevPreflightPreset.RUN_STATE_RELATION,
+                question_keys=(JevPreflightQuestionKey.RUN_STATE_RELATION,),
+                threshold=JEV_RUN_STATE_RELATION_THRESHOLD,
+            ),
+            JevPreflightPreset.BULK_WORK: JevPresetDefinition(
+                preset=JevPreflightPreset.BULK_WORK,
+                question_keys=(
+                    JevPreflightQuestionKey.BULK_WORK_MULTIPLE_ITEMS,
+                    JevPreflightQuestionKey.BULK_WORK_KNOWN_ITEMS,
+                    JevPreflightQuestionKey.BULK_WORK_SAME_OPERATION,
+                    JevPreflightQuestionKey.BULK_WORK_SEPARATE_RESULTS,
+                    JevPreflightQuestionKey.BULK_WORK_INDEPENDENT_ITEMS,
+                    JevPreflightQuestionKey.BULK_WORK_SEPARATE_CHANGES,
+                    JevPreflightQuestionKey.BULK_WORK_ANY_ORDER,
+                    JevPreflightQuestionKey.BULK_WORK_SUBSTANTIAL_ITEMS,
+                ),
+                # Every question must reach the threshold on its own, so one clear no keeps the work on one agent.
+                threshold=JEV_BULK_WORK_THRESHOLD,
+                veto=JEV_BULK_WORK_THRESHOLD,
             ),
         }
     )

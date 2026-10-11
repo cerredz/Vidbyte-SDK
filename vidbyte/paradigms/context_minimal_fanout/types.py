@@ -54,12 +54,15 @@ class ContextFile:
     def from_value(cls, value: Any) -> "ContextFile | None":
         # Builds a ContextFile from a mapping or a bare path string.
         if isinstance(value, Mapping):
-            path = str(value.get("path", "")).strip()
+            path = _first_text(value, "path")
             if not path:
                 return None
-            notes = str(value.get("notes", value.get("excerpt", ""))).strip()
-            content = str(value.get("content", value.get("full_file", value.get("full_text", "")))).strip()
-            comments = value.get("model_comments", value.get("comments", ()))
+            notes = _first_text(value, "notes", "excerpt")
+            content = _first_text(value, "content", "full_file", "full_text")
+            # A null model_comments falls back to the comments alias, the same first-non-null rule as _first_text.
+            comments = value.get("model_comments")
+            if comments is None:
+                comments = value.get("comments")
             return cls(path=path, notes=notes, content=content, model_comments=_text_tuple(comments))
         text = str(value).strip()
         return cls(path=text) if text else None
@@ -94,12 +97,12 @@ class EnvironmentSummary:
         # Builds an EnvironmentSummary from either a mapping or a legacy scalar summary.
         if isinstance(value, Mapping):
             known = {"overview", "summary", "objective", "domain", "major_details", "connections", "constraints", "open_questions"}
-            overview = str(value.get("overview", value.get("summary", ""))).strip() or fallback_text.strip()
+            overview = _first_text(value, "overview", "summary") or fallback_text.strip()
             additional = {str(key): raw for key, raw in value.items() if str(key) not in known}
             return cls(
                 overview=overview,
-                objective=str(value.get("objective", "")).strip(),
-                domain=str(value.get("domain", "")).strip(),
+                objective=_first_text(value, "objective"),
+                domain=_first_text(value, "domain"),
                 major_details=_entry_tuple(value.get("major_details")),
                 connections=_entry_tuple(value.get("connections")),
                 constraints=_entry_tuple(value.get("constraints")),
@@ -258,9 +261,9 @@ class SplitPrompt:
     def from_mapping(cls, raw: Mapping[str, Any]) -> "SplitPrompt":
         # Builds one split prompt from a structured object emitted by an agent.
         return cls(
-            id=str(raw.get("id", "")),
-            title=str(raw.get("title", "")),
-            prompt=str(raw.get("prompt", "")),
+            id=_first_text(raw, "id"),
+            title=_first_text(raw, "title"),
+            prompt=_first_text(raw, "prompt"),
             owned_paths=_text_tuple(raw.get("owned_paths", ())),
             read_only_paths=_text_tuple(raw.get("read_only_paths", ())),
             commands=_text_tuple(raw.get("commands", ())),
@@ -297,8 +300,8 @@ class PromptSplitPlan:
         if len(prompts) != len(prompt_items):
             raise ConfigurationError("Every splitter prompt entry must be a structured object.")
         return cls(
-            goal=str(values.get("goal", "")),
-            global_instructions=str(values.get("global_instructions", "")),
+            goal=_first_text(values, "goal"),
+            global_instructions=_first_text(values, "global_instructions"),
             non_overlap_requirements=_text_tuple(values.get("non_overlap_requirements", ())),
             prompts=prompts,
         )
@@ -492,6 +495,15 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, Sequence):
         return tuple(str(item).strip() for item in value if str(item).strip())
     return (str(value).strip(),) if str(value).strip() else ()
+
+
+def _first_text(mapping: Mapping[str, Any], *keys: str) -> str:
+    # Returns the first non-null value among keys as stripped text, so a null reads like a missing key, never "None".
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return str(value).strip()
+    return ""
 
 
 def _render_mapping(m: Mapping[str, Any]) -> str:

@@ -17,6 +17,7 @@ from copy import copy as shallow_copy
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.types import ToolActivity, ToolCall, ToolResult, ToolSpec
 
 if TYPE_CHECKING:
@@ -93,6 +94,26 @@ class BaseTool(ABC):
         if missing:
             return f"Missing required parameters: {', '.join(missing)}"
         return None
+
+    @staticmethod
+    def _resolve_bool_argument(call: ToolCall, name: str, *, default: bool) -> bool:
+        # @intent boolean-tool-args-reject-stringly-truthiness
+        # Models sometimes send booleans as strings, and bool("false") is True, which flips an explicit
+        # "no" into "yes" on destructive tools; only a real JSON boolean counts, and null means the default.
+        value = call.arguments.get(name)
+        if value is None:
+            return default
+        if not isinstance(value, bool):
+            raise ToolExecutionError(f"'{name}' must be a boolean (true/false).", details={"parameter": name})
+        return value
+
+    @staticmethod
+    def _optional_argument(call: ToolCall, name: str, *, default: Any) -> Any:
+        # @intent null-optional-arg-means-default
+        # Models often send JSON null for an optional argument they mean to leave out; treat it exactly
+        # like an omitted key so the documented default applies instead of crashing on None.
+        value = call.arguments.get(name)
+        return default if value is None else value
 
 
 class _ToolWrapper(BaseTool, ABC):

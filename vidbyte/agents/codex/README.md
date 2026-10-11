@@ -15,7 +15,7 @@ Every class in this folder translates between the two sides. Each Vidbyte settin
 ## Install
 
 ```bash
-python -m pip install "vidbyte-sdk[codex]"   # pins openai-codex>=0.147.0,<0.148.0
+python -m pip install "vidbyte-sdk[codex]"   # pins openai-codex>=0.162.1,<0.163.0
 ```
 
 The extra installs the `openai-codex` Python SDK, which starts the Codex app-server. If the extra is missing, you can still construct the agent. The first `run()` then raises `CodexAgentError` with `failure_code="codex.sdk_unavailable"`.
@@ -1090,7 +1090,7 @@ Item payloads include only item types Vidbyte has reviewed. An unknown item type
 
 ## Blast Radius
 
-The public surface is re-exported from `vidbyte.agents.codex`, `vidbyte.agents`, and the root `vidbyte` namespace. The settings, request, and result records live in `vidbyte/lib/dataclasses/codex.py`. Enums live in `vidbyte/lib/enums/codex.py`, and wire constants and failure classification in `vidbyte/lib/constants/codex.py`. The adapter reuses shared layers without changing them: `vidbyte/context` for rendering, `vidbyte/tools` (`Tools`, `ToolExecutor`, `ToolsFormatter.to_codex_tool`) for tools, `vidbyte/middleware` (`MiddlewarePipeline`) for hooks, `vidbyte/agents/fallback.py` for the switch policy, `vidbyte/agents/pricing` for usage, and `vidbyte/providers/output_schema.py` for schemas. `openai-codex` is an optional dependency and is imported only inside the transport. The tool bridge touches private `openai-codex` client attributes that are valid only under the `<0.148` pin.
+The public surface is re-exported from `vidbyte.agents.codex`, `vidbyte.agents`, and the root `vidbyte` namespace. The settings, request, and result records live in `vidbyte/lib/dataclasses/codex.py`. Enums live in `vidbyte/lib/enums/codex.py`, and wire constants and failure classification in `vidbyte/lib/constants/codex.py`. The adapter reuses shared layers without changing them: `vidbyte/context` for rendering, `vidbyte/tools` (`Tools`, `ToolExecutor`, `ToolsFormatter.to_codex_tool`) for tools, `vidbyte/middleware` (`MiddlewarePipeline`) for hooks, `vidbyte/agents/fallback.py` for the switch policy, `vidbyte/agents/pricing` for usage, and `vidbyte/providers/output_schema.py` for schemas. `openai-codex` is an optional dependency and is imported only inside the transport. The tool bridge touches private `openai-codex` client attributes that are valid only under the `<0.163` pin.
 
 ## Non-Goals
 
@@ -1105,6 +1105,7 @@ The public surface is re-exported from `vidbyte.agents.codex`, `vidbyte.agents`,
 - `__init__.py` - Re-exports the public Codex surface: the agent, settings, input records, and enums. Keep it in step with `vidbyte/agents/__init__.py` and the root exports.
 - `agent.py` - `CodexHarnessAgent`, the facade. It translates input and context, runs middleware around the turn, walks the fallback chain, records usage and failures, and builds the `AgentMessage`. Open it to change the turn lifecycle.
 - `config.py` - `CodexVidbyteTranslator` (Vidbyte settings and input into validated Codex requests) and `CodexContentTranslator` (validated records into `openai-codex` keyword arguments). Open it to add a Codex setting.
+- `contracts.py` - `CodexContractValidator`, which rejects `AgentLoopSettings` fields and output contracts Codex cannot honor, and `CodexContractTranslator`, which builds the shared contract counters from a completed turn's items and judges each contract. Open it to count another native tool item type.
 - `context.py` - `CodexContextTranslator`. It renders `ContextManager` zones, conversation placements, unmanaged items, anchors, and metadata into turn input. Open it to translate another context surface.
 - `failures.py` - Sorts `CodexAgentError` codes into canonical `Failure` records and keeps the per-turn failure ledger. Open it for failure vocabulary changes.
 - `fallback.py` - `CodexFallbackCoordinator`. It resolves the chain, rejects providers the thread cannot reach, and overrides only the turn model for each attempt.

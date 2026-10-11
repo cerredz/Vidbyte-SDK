@@ -113,6 +113,10 @@ class ContextManager:
         """Build a deterministic id scoped to this manager and item kind."""
         kind = str(getattr(item, "kind", "context"))
         next_value = self._id_counters.get(kind, 0) + 1
+        # @intent generated-primitive-ids-never-overwrite
+        # Note tools and callers write ids in the same "<kind>:<n>" shape, so skip any id already registered.
+        while f"{kind}:{next_value}" in self._registry:
+            next_value += 1
         self._id_counters[kind] = next_value
         return f"{kind}:{next_value}"
 

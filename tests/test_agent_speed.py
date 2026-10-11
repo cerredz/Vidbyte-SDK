@@ -314,6 +314,42 @@ class AgentSpeedTrackerRollupTests(unittest.TestCase):
         efficiency = self.tracker.rollup().run_stats.parallelism_efficiency
         self.assertGreater(efficiency, 1.5)  # ~2x: two 0.02s calls finished within one 0.02s window
 
+    def test_rollup_reports_ordered_first_tool_and_result_ready_latencies(self) -> None:
+        self.tracker.record_run_start()
+        self._advance(0.01)
+        tool_started_at = self.tracker.now()
+        self._advance(0.02)
+        self.tracker.record_tool_call(RecordToolCallInput(tool_name="search", started_at=tool_started_at))
+        self.tracker.record_result_ready()
+        stats = self.tracker.rollup().run_stats
+        self.assertAlmostEqual(stats.time_to_first_tool_ms, 10.0, delta=0.5)
+        self.assertAlmostEqual(stats.time_to_result_ready_ms, 30.0, delta=0.5)
+
+    def test_rollup_first_tool_latency_is_none_when_a_later_run_start_moves_the_boundary(self) -> None:
+        # Overlapping runs share one tracker: a second run start moves the run boundary past a
+        # tool the first run already started. The rollup and archive must degrade, not raise.
+        self.tracker.record_run_start()
+        self._advance(0.01)
+        tool_started_at = self.tracker.now()
+        self._advance(0.15)
+        self.tracker.record_run_start()
+        self._advance(0.15)
+        self.tracker.record_tool_call(RecordToolCallInput(tool_name="slow", started_at=tool_started_at))
+        self.tracker.record_result_ready()
+        self.tracker.record_run_end()
+        stats = self.tracker.rollup().run_stats
+        self.assertIsNone(stats.time_to_first_tool_ms)
+        self.assertAlmostEqual(stats.time_to_result_ready_ms, 150.0, delta=0.5)
+        self.assertEqual(self.tracker.history().run_count, 1)
+
+    def test_rollup_result_ready_latency_is_none_when_it_precedes_the_run_start(self) -> None:
+        self._now = 1.0
+        self.tracker.record_run_start()
+        self._now = 0.5  # An ill-ordered boundary: result-ready reads earlier than the run start.
+        self.tracker.record_result_ready()
+        self.tracker.record_run_end()
+        self.assertIsNone(self.tracker.rollup().run_stats.time_to_result_ready_ms)
+
     def test_rollup_recording_integrity_is_corrupted_after_an_unusable_call(self) -> None:
         self.tracker.record_call(RecordModelCallInput(response=_NoProviderResponse(), dispatched_at=0.0))
         self.assertEqual(self.tracker.rollup().recording_integrity, AgentSpeedRecordingIntegrity.CORRUPTED)

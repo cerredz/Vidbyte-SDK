@@ -946,11 +946,13 @@ class UncertaintyTool(_CotEventToolBase):
             next_step=next_step,
             on_track=on_track,
             progress=progress or ProgressState.PROGRESSING.value,
-            trigger=str(args.get("trigger", "")).strip(),
+            # @intent null-optional-arg-means-default
+            # A null optional field means "not given", so it must never render as the text "None".
+            trigger=CotEventParser.optional_text(args.get("trigger")) or "",
             uncertainty_source=str(args["uncertainty_source"]).strip(),
-            blocker=str(args.get("blocker", "")).strip(),
+            blocker=CotEventParser.optional_text(args.get("blocker")) or "",
             next_action=str(args["next_action"]).strip(),
-            reassessment_condition=str(args.get("reassessment_condition", "")).strip(),
+            reassessment_condition=CotEventParser.optional_text(args.get("reassessment_condition")) or "",
         )
         return await self._record(
             item,
@@ -1116,7 +1118,8 @@ class BacktrackTool(_CotEventToolBase):
             reason=str(args["reason"]).strip(),
             evidence=str(args["evidence"]).strip(),
             attempted_result=str(args["attempted_result"]).strip(),
-            salvage=str(args.get("salvage", "")).strip() or DEFAULT_SALVAGE,
+            # @intent null-optional-arg-means-default
+            salvage=CotEventParser.optional_text(args.get("salvage")) or DEFAULT_SALVAGE,
             returnable=returnable or DEFAULT_RETURNABLE,
             replacement_plan=str(args["replacement_plan"]).strip(),
             loop_guard=str(args["loop_guard"]).strip(),

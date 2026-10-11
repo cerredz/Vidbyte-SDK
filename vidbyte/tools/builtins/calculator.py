@@ -11,6 +11,8 @@ from vidbyte.tools.builtins.code_execution import SafePrintExpression
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
 _CALCULATOR_FUNCTIONS: dict[str, Callable[..., Any]] = {"abs": abs, "round": round, "min": min, "max": max, "pow": pow}
+# A decimal number written in scientific notation, such as 2.5e-3 or 6.022E23, that does not start mid-name.
+_EXPONENT_LITERAL = re.compile(r"(?<![\w.])(?:\d+\.?\d*|\.\d+)[eE][+-]?\d+")
 
 
 class CalculatorExpression(SafePrintExpression):
@@ -69,11 +71,15 @@ class CalculatorTool(BaseTool):
         if "__" in expr:
             return ToolResult.error(self.name, "Unsafe expression: double underscores are disallowed.")
 
-        clean_expr = expr.replace(" ", "")
+        # Drop every kind of whitespace (spaces, tabs, newlines) before checking the characters.
+        clean_expr = "".join(expr.split())
         if not re.match(r"^[0-9\+\-\*\/\%\(\)\.\,a-z]+$", clean_expr, re.IGNORECASE):
             return ToolResult.error(self.name, "Unsafe expression: contains invalid math characters.")
 
-        expr_words = re.findall(r"[a-zA-Z]+", clean_expr)
+        # @intent calculator-exponents-are-not-names
+        # The "e" in 2.5e-3 is part of a number, not a name, so scientific-notation literals are
+        # removed before collecting names; the walker below still bounds what those numbers do.
+        expr_words = re.findall(r"[a-zA-Z]+", _EXPONENT_LITERAL.sub(" ", clean_expr))
         for word in expr_words:
             if word not in _CALCULATOR_FUNCTIONS:
                 return ToolResult.error(self.name, f"Unsafe expression: name '{word}' is not permitted.")

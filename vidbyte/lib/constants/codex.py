@@ -154,6 +154,22 @@ CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {
         FailureSeverity.ERROR.value,
         FailureDisposition.RAISE.value,
     ),
+    # A run option Codex cannot honor is the caller's configuration, so every model
+    # would refuse it the same way; it is raised before any turn starts.
+    FailureCode.CODEX_RUN_OPTION_UNSUPPORTED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    # Terminal until a re-prompt policy exists: the turn already ran and edited
+    # files, so retrying on another model is a policy decision, not a recovery.
+    FailureCode.CODEX_CONTRACT_UNMET.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.OUTPUT.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
 }
 # Published apart from one another so a caller can tell "no failures" from
 # "one recovered failure", and a first-attempt answer from a fallback answer.
@@ -174,9 +190,43 @@ CODEX_TOOL_CALL_METHOD = "item/tool/call"
 # The SDK answers server requests on its only reader thread, so one hung tool
 # would stall the whole turn; a bounded wait returns a failed call instead.
 CODEX_TOOL_CALL_TIMEOUT_SECONDS = 300.0
+# The three item types that represent a tool actually running. webSearch, fileChange,
+# and imageView are native capabilities rather than tool calls; counting them would
+# inflate every effort floor by an amount that varies with the prompt.
+CODEX_TOOL_ITEM_TYPES = frozenset({"commandExecution", "mcpToolCall", "dynamicToolCall"})
+CODEX_COMPACTION_ITEM_TYPE = "contextCompaction"
+CODEX_ITEM_COMPLETED_STATUS = "completed"
+CODEX_COMMAND_SUCCESS_EXIT_CODE = 0
+CODEX_MILLISECONDS_PER_SECOND = 1000
+# Counters describing a Vidbyte-owned loop. Codex owns its iterations and reports
+# neither, so a contract reading one would evaluate against zero and always fail.
+CODEX_UNOBSERVABLE_COUNTER_KEYS = frozenset({"iteration_count", "model_call_count"})
+# AgentLoopSettings fields describing an inner loop, a local tool executor, or a
+# Vidbyte-managed context window. Accepting one silently would let a caller believe
+# a bound exists that nothing enforces.
+CODEX_UNSUPPORTED_LOOP_FIELDS = (
+    "max_iterations",
+    "max_tokens",
+    "max_tool_calls",
+    "max_parallel_tool_calls",
+    "max_retries",
+    "timeout_seconds",
+    "context_window_budget",
+    "compaction_trigger_tokens",
+    "compaction_target_tokens",
+    "allowed_tools",
+    "tool_error_policy",
+    "tool_settings",
+)
+CODEX_CONTRACTS_KEY = "output_contracts"
+# One turn at a time per agent instance. A Codex thread is a single conversation,
+# so simultaneous turns against it are not a performance opportunity the provider
+# offers — and the facade's thread_id, history, and usage ledger would race.
+CODEX_MAX_CONCURRENT_TURNS = 1
 
 
 __all__ = [
+    "CODEX_MAX_CONCURRENT_TURNS",
     "CODEX_PRIMARY_CHAIN_INDEX",
     "CODEX_FIRST_ATTEMPT",
     "CODEX_MAX_TURN_FAILURES",
@@ -185,6 +235,14 @@ __all__ = [
     "CODEX_FAILURE_CLASSIFICATION",
     "CODEX_FAILURES_KEY",
     "CODEX_ANSWERING_MODEL_KEY",
+    "CODEX_UNSUPPORTED_LOOP_FIELDS",
+    "CODEX_UNOBSERVABLE_COUNTER_KEYS",
+    "CODEX_TOOL_ITEM_TYPES",
+    "CODEX_MILLISECONDS_PER_SECOND",
+    "CODEX_ITEM_COMPLETED_STATUS",
+    "CODEX_CONTRACTS_KEY",
+    "CODEX_COMPACTION_ITEM_TYPE",
+    "CODEX_COMMAND_SUCCESS_EXIT_CODE",
     "CODEX_NEXT_FORK_DEPTH",
     "CODEX_MIDDLEWARE_METADATA_KEY",
     "CODEX_PROVIDER_NAME",

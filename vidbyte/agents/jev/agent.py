@@ -16,14 +16,16 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.fork import AgentForker
+from vidbyte.agents.jev.alignment.skills import JevSkillsPreload
+from vidbyte.agents.jev.bulk_work import JevBulkWorkTool
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevDoneContinuation, JevFreshContinuation
-from vidbyte.agents.jev.done import JevRunState
+from vidbyte.agents.jev.done import JevRunState, JevRunStateRelation
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.lib.dataclasses.jev import JevAgentResponse
-from vidbyte.lib.enums import AgentRuntimeType, JevContinuationGate
+from vidbyte.lib.enums import AgentRuntimeType, JevContinuationGate, JevPreflightPreset
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -44,9 +46,17 @@ class JevAgent(BaseAgent):
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
+        # With BULK_WORK on, each run whose gate approves bulk work gets a fresh run_bulk_work tool from this constructor.
+        self.bulk_work = JevBulkWorkTool.for_agent(settings, self._response) if JevPreflightPreset.BULK_WORK in self.preflight.presets else None
         self.compute = None if runtime_settings.compute is None else JevComputeController(settings, runtime_settings.compute, runtime_settings.decision, self._response)
-        self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
-        if self.run_state is None:
+        relation_enabled = JevPreflightPreset.RUN_STATE_RELATION in self.preflight.presets
+        if relation_enabled:
+            self.run_state = JevRunStateRelation(settings, runtime_settings, self._response, self.preflight)
+        elif runtime_settings.continual.checks:
+            self.run_state = JevRunState(settings, runtime_settings, self._response)
+        else:
+            self.run_state = None
+        if self.run_state is None or not runtime_settings.continual.checks:
             self.continuation = None
         elif runtime_settings.continual.gate is JevContinuationGate.FRESH:
             fresh_agent_factory = partial(
@@ -67,6 +77,16 @@ class JevAgent(BaseAgent):
             self.continuation = JevFreshContinuation(self.run_state, runtime_settings.continual, self._response, fresh_agent_factory)
         else:
             self.continuation = JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+        self.skill_preload = (
+            JevSkillsPreload(
+                skills=settings.alignment.skills,
+                decision=runtime_settings.decision,
+                threshold=runtime_settings.skills_threshold,
+                response=self._response,
+            )
+            if settings.alignment.skills
+            else None
+        )
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,
@@ -101,8 +121,8 @@ class JevAgent(BaseAgent):
                 )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
-        # Passes the runtime settings, the gate, the done checks, the continuation, the compute controller, and the response writer built at construction to each run-local JevRuntime.
-        return {"runtime_settings": self.runtime_settings, "preflight": self.preflight, "run_state": self.run_state, "continuation": self.continuation, "compute": self.compute, "response": self._response}
+        # Passes the runtime settings, the gate, the done checks, the continuation, the compute controller, the response writer, the skill preload, and the bulk-work tool constructor built at construction to each run-local JevRuntime.
+        return {"runtime_settings": self.runtime_settings, "preflight": self.preflight, "run_state": self.run_state, "continuation": self.continuation, "compute": self.compute, "response": self._response, "skill_preload": self.skill_preload, "bulk_work": self.bulk_work}
 
 
 __all__ = ["JevAgent"]

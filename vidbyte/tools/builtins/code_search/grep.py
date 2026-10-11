@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.builtins.code_search.base import BaseCodeSearchTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -43,15 +44,17 @@ class GrepTool(BaseCodeSearchTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Run grep and return line-numbered snippets."""
         pattern = str(call.arguments["pattern"])
-        subdir = str(call.arguments.get("subdir", "."))
-        use_regex = bool(call.arguments.get("regex", False))
+        subdir = str(self._optional_argument(call, "subdir", default="."))
         extensions = self._extensions(call.arguments.get("extensions", ()))
-        context_lines = max(0, min(int(call.arguments.get("context_lines", 2)), 5))
-        max_results = max(1, min(int(call.arguments.get("max_results", 50)), 500))
-        max_chars = max(200, min(int(call.arguments.get("max_chars", 12000)), 50000))
+        context_lines = max(0, min(int(self._optional_argument(call, "context_lines", default=2)), 5))
+        max_results = max(1, min(int(self._optional_argument(call, "max_results", default=50)), 500))
+        max_chars = max(200, min(int(self._optional_argument(call, "max_chars", default=12000)), 50000))
         try:
+            use_regex = self._resolve_bool_argument(call, "regex", default=False)
             compiled = re.compile(pattern if use_regex else re.escape(pattern))
             files = tuple(self.iter_files(subdir, extensions=extensions))
+        except ToolExecutionError as exc:
+            return ToolResult.error(self.name, str(exc), metadata={"error": "invalid_argument"})
         except re.error as exc:
             return ToolResult.error(self.name, f"Invalid regex: {exc}", metadata={"error": "bad_regex"})
         except ValueError as exc:

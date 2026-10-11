@@ -134,7 +134,7 @@ class BaseActorRuntime(ABC):
             history=tuple(history) + tuple(agent_history),
             tools=self.tools.specs(),
             file_paths=tuple(managed_context.file_paths),
-            strategy_metadata=dict(managed_context.strategy_metadata),
+            run_metadata=dict(managed_context.run_metadata),
             tool_calls=(*tuple(managed_context.tool_calls), *tuple(existing_tool_calls)),
             responses=tuple(managed_context.responses),
             budget=managed_context.budget,
@@ -186,7 +186,6 @@ class BaseActorRuntime(ABC):
             if actor_classes is None:
                 from vidbyte.agents.runtimes.actor.actor import (
                     PlannerActor,
-                    CoderActor,
                     ReviewerActor,
                     GeneratorActor,
                     CriticActor,
@@ -194,7 +193,6 @@ class BaseActorRuntime(ABC):
                 )
                 actor_classes = [
                     PlannerActor,
-                    CoderActor,
                     ReviewerActor,
                     GeneratorActor,
                     CriticActor,
@@ -224,7 +222,8 @@ class BaseActorRuntime(ABC):
                 # Option B: Quiescence monitor
                 while not self._completion_future.done():
                     await asyncio.sleep(0.01)
-                    if self._check_quiescence():
+                    # An actor reply may have completed the run during the sleep; keep that first result.
+                    if not self._completion_future.done() and self._check_quiescence():
                         self._completion_future.set_result("Quiescence reached. Swarm execution completed.")
                         break
             else:

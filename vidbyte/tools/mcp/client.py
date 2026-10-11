@@ -39,7 +39,7 @@ class McpClient:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "vidbyte-sdk", "version": "0.2.0"},
+                "clientInfo": {"name": "vidbyte-sdk", "version": "0.2.1"},
             },
         )
         self.initialized = True

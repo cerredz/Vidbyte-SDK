@@ -252,6 +252,28 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.tool.called_tools_in_order(["c", "a"]))
         self.assertTrue(b.tool.called_tools_in_order([]))
 
+    def test_bare_string_name_is_one_name(self) -> None:
+        # @intent bare-string-name-is-one-name
+        # [Silent Failure] a bare string was iterated letter by letter, so a safety check missed a called tool.
+        b = behavior_from_probe(RunProbe(tool_calls=(make_call("lookup_order"), make_call("delete_record")), structured={"status": "ok", "order": {}}))
+        self.assertTrue(b.tool.called_any_tool("delete_record"))
+        self.assertFalse(b.tool.called_any_tool("refund"))
+        self.assertTrue(b.tool.called_all_tools("lookup_order"))
+        self.assertFalse(b.tool.called_all_tools("refund"))
+        self.assertTrue(b.tool.called_tools_in_order("lookup_order"))
+        self.assertFalse(b.tool.called_tools_in_order("refund"))
+        self.assertFalse(b.tool.called_only_tools("lookup_order"))
+        self.assertTrue(behavior_from_probe(RunProbe(tool_calls=(make_call("lookup_order"),))).tool.called_only_tools("lookup_order"))
+        self.assertTrue(b.output.structured_contains_keys("status"))
+        self.assertFalse(b.output.structured_contains_keys("missing"))
+        for name in ("lookup_order", "delete_record", "refund"):
+            self.assertEqual(b.tool.called_any_tool(name), b.tool.called_any_tool([name]))
+            self.assertEqual(b.tool.called_all_tools(name), b.tool.called_all_tools([name]))
+            self.assertEqual(b.tool.called_only_tools(name), b.tool.called_only_tools([name]))
+            self.assertEqual(b.tool.called_tools_in_order(name), b.tool.called_tools_in_order([name]))
+        for key in ("status", "order", "missing"):
+            self.assertEqual(b.output.structured_contains_keys(key), b.output.structured_contains_keys([key]))
+
     def test_tool_call_count(self) -> None:
         # [Silent Failure] tool_call_count returns correct count for multiple calls to same tool.
         b = behavior_from_probe(RunProbe(tool_calls=(make_call("search"), make_call("search"), make_call("read"))))
@@ -359,8 +381,9 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.stop.stopped_on("final_response"))
 
     def test_stopped_normally(self) -> None:
-        # [Silent Failure] stopped_normally True only for "final_response".
+        # [Silent Failure] stopped_normally True only for "final_response" and "is_done".
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response")).stop.stopped_normally())
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done")).stop.stopped_normally())
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_iterations")).stop.stopped_normally())
 
     def test_did_not_hit_budgets(self) -> None:
@@ -761,12 +784,16 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
     def test_efficiency_stopped_normally_within_iterations(self) -> None:
         # [Hidden Failure] stopped_normally_within_iterations requires normal stop and iteration bound.
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
+        self.assertFalse(behavior_from_probe(RunProbe(stop_reason="is_done", iteration_count=3)).efficiency.stopped_normally_within_iterations(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_iterations", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=3)).efficiency.stopped_normally_within_iterations(2))
 
     def test_efficiency_stopped_normally_within_tool_calls(self) -> None:
         # [Hidden Failure] stopped_normally_within_tool_calls requires normal stop and tool-call bound.
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
+        self.assertFalse(behavior_from_probe(RunProbe(stop_reason="is_done", tool_call_count=3)).efficiency.stopped_normally_within_tool_calls(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_tool_calls", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=3)).efficiency.stopped_normally_within_tool_calls(2))
 

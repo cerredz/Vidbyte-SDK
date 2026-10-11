@@ -10,6 +10,8 @@ Architecture:
     - CountingSearchTool & ActivityRecordingMiddleware: Priced tool and middleware probe
       used by ToolActivityRuntimeTests.
     - ToolActivityRuntimeTests: TestCase verifying activity capture, policy inputs, and metering.
+    - NonLinearRuntimeRegressionTests: Drives BaseAgent through the MCTS and actor runtimes
+      with an offline AnswerRunner to guard against context and lifecycle drift.
 Key Functions:
     - test_inner_context_window_lifecycle_writes_to_next_system_context: Validates trajectory algorithm integration.
     - test_runtime_denies_write_tool_by_default: Validates security middleware defaults.
@@ -27,6 +29,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.lib.dataclasses.middleware import MiddlewareDecision
@@ -37,10 +40,12 @@ from vidbyte.agents.types import AgentMessage
 from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, TaskContextItem, TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.enums import ModelModality
+from vidbyte.lib.enums import AgentRuntimeType, ModelModality
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
+
+from tests.agent_test_support import build_test_agent
 
 
 class FakeResponse:
@@ -777,6 +782,34 @@ class ToolActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool.executed_arguments), 2)
         self.assertEqual(result.metadata["stop_reason"], "max_tool_calls")
 
+    async def test_loop_settings_allowed_tools_refuses_calls_outside_the_gate(self) -> None:
+        """AgentLoopSettings.allowed_tools refuses an unlisted tool like a denied one, while listed tools and isDone still run."""
+        deleted: list[str] = []
+
+        @tool
+        def delete_note(note_id: str) -> str:
+            deleted.append(note_id)
+            return "deleted"
+
+        search = CountingSearchTool()
+        runtime = AgentRuntime(
+            agent_name="researcher",
+            system_prompt="Research.",
+            tools=Tools([search, delete_note]),
+            permission_policy=PermissionPolicy(),
+            config=AgentLoopSettings(allowed_tools=("counting_search",)).to_runtime_config(),
+        )
+        delete_call = FakeResponse("", {"output": [{"type": "function_call", "name": "delete_note", "arguments": '{"note_id": "n1"}'}]})
+
+        result = await self._run(runtime, [delete_call, self._search_response('{"query": "q"}'), self._done_response()])
+
+        self.assertEqual(deleted, [])
+        self.assertEqual(search.executed_arguments, [{"query": "q"}])
+        refused = next(ctx for ctx in result.metadata["tool_calls"] if ctx.tool_name == "delete_note")
+        self.assertEqual(refused.state.value, "denied")
+        self.assertEqual(refused.result.metadata["error"], "allowed_tools_denied")
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+
     async def test_denied_call_retains_its_activity(self) -> None:
         """A middleware-denied call keeps the annotation so a product can say the action was blocked."""
         tool, bound = self._annotated_search()
@@ -902,6 +935,48 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(timed_out_calls), 1)
         self.assertEqual(timed_out_calls[0].tool_name, "slow_tool")
 
+
+class AnswerRunner:
+    """Offline runner that returns one fixed answer for every actor or search call."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, prompt: str, **_: object) -> FakeResponse:
+        self.calls += 1
+        return FakeResponse("ANSWER", {})
+
+
+class NonLinearRuntimeRegressionTests(unittest.TestCase):
+    """Drives BaseAgent through the non-linear runtimes end to end with an offline runner."""
+
+    def _run(self, runtime: object) -> tuple[object, AnswerRunner]:
+        runner = AnswerRunner()
+        agent = build_test_agent(name="r", system_prompt="s", runtime=runtime, runner=runner)
+        return agent.run("q"), runner
+
+    def test_mcts_search_builds_context_without_crashing(self) -> None:
+        # [Regression] The search runtime used the removed strategy_metadata context field.
+        result, _ = self._run(AgentRuntimeType.MCTS_SEARCH)
+        self.assertEqual(result.content, "Branching MCTS execution complete.")
+
+    def test_actor_coordinator_returns_model_answer(self) -> None:
+        # [Regression] The actor runtime used the removed strategy_metadata context field.
+        result, runner = self._run(ActorRuntime(include_actors=[]))
+        self.assertEqual(result.content, "ANSWER")
+        self.assertEqual(runner.calls, 1)
+
+    def test_actor_default_actor_set_runs_for_each_topology(self) -> None:
+        # [Regression] The default actor list imported the removed CoderActor class.
+        for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            with self.subTest(topology=topology):
+                result, _ = self._run(ActorRuntime(topology=topology))
+                self.assertEqual(result.content, "ANSWER")
+
+    def test_actor_quiescence_does_not_complete_the_run_twice(self) -> None:
+        # [Regression] A reply that completed the run during the quiescence poll was set again.
+        result, _ = self._run(ActorRuntime(termination_mode="quiescence", include_actors=[]))
+        self.assertEqual(result.content, "ANSWER")
 
 if __name__ == "__main__":
     unittest.main()

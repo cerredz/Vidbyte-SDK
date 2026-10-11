@@ -136,6 +136,10 @@ class TrajectoryCheckpointTool(BaseTool):
     def _build_item(self, args: dict, primitive_id: str) -> object:
         # Constructs the TrajectoryCheckpointContextItem from validated call arguments.
         from vidbyte.context.primitives import TrajectoryCheckpointContextItem
+        # @intent null-optional-arg-means-default
+        # A null feedback or title means "not given", so it must never render as the text "None".
+        raw_feedback = args.get("feedback")
+        raw_title = args.get("title")
         return TrajectoryCheckpointContextItem(
             primitive_id=primitive_id,
             iteration=0,
@@ -144,6 +148,6 @@ class TrajectoryCheckpointTool(BaseTool):
             trajectory=str(args.get("trajectory", "")).strip(),
             output=str(args.get("output", "")).strip(),
             score=self._parse_score(args.get("score")),
-            feedback=str(args.get("feedback", "")).strip(),
-            title=str(args.get("title", "Runtime Checkpoint")).strip() or "Runtime Checkpoint",
+            feedback="" if raw_feedback is None else str(raw_feedback).strip(),
+            title=("" if raw_title is None else str(raw_title).strip()) or "Runtime Checkpoint",
         )

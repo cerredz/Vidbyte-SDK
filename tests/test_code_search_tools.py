@@ -64,6 +64,15 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("escapes root", result.output)
 
+    async def test_grep_refuses_string_regex_flag(self) -> None:
+        """Grep refuses a stringly boolean instead of reading "false" as True."""
+        result = await GrepTool(self.root).execute(
+            ToolCall("grep", {"pattern": "expiration", "regex": "false"})
+        )
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("'regex' must be a boolean (true/false)", result.output)
+        self.assertEqual(result.metadata["error"], "invalid_argument")
+
     async def test_semantic_fallback_ranks_token_overlap(self) -> None:
         """Semantic search works without an embedding provider."""
         result = await SemanticSearchTool(str(self.root)).execute(
@@ -105,3 +114,36 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Results truncated; narrow the pattern.", result.output)
             self.assertTrue(result.metadata["truncated"])
             self.assertEqual(result.metadata["count"], 3)
+
+    async def test_null_subdir_searches_from_root(self) -> None:
+        """A null subdir means the root, not a folder named "None"."""
+        cases = (
+            (GlobTool(self.root), ToolCall("glob", {"pattern": "**/*.py", "subdir": None})),
+            (GrepTool(self.root), ToolCall("grep", {"pattern": "expiration", "subdir": None})),
+            (SemanticSearchTool(str(self.root)), ToolCall("semantic_search", {"query": "jwt expiration", "subdir": None})),
+        )
+        for tool, call in cases:
+            with self.subTest(tool=type(tool).__name__):
+                result = await tool.execute(call)
+                self.assertEqual(result.status.value, "success", result.output)
+                self.assertIn("pkg/auth.py", result.output)
+
+    async def test_null_numeric_limits_behave_like_omitted(self) -> None:
+        """Null max_results, max_chars, context_lines, and max_chars_per_result use the documented defaults."""
+        cases = (
+            (GlobTool(self.root), "glob", {"pattern": "**/*.py"}, ("max_results", "max_chars")),
+            (GrepTool(self.root), "grep", {"pattern": "expiration"}, ("context_lines", "max_results", "max_chars")),
+            (
+                SemanticSearchTool(str(self.root)),
+                "semantic_search",
+                {"query": "jwt expiration"},
+                ("max_results", "max_chars_per_result", "max_chars"),
+            ),
+        )
+        for tool, name, base, nullable in cases:
+            with self.subTest(tool=name):
+                omitted = await tool.execute(ToolCall(name, dict(base)))
+                nulled = await tool.execute(ToolCall(name, {**base, **dict.fromkeys(nullable)}))
+                self.assertEqual(nulled.status.value, "success", nulled.output)
+                self.assertEqual(nulled.output, omitted.output)
+                self.assertEqual(nulled.metadata, omitted.metadata)

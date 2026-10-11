@@ -12,7 +12,8 @@ Key Functions:
     - attach_preset_mcp_server: Attaches a pre-configured popular MCP server in one line.
     - with_preset_mcp_server: Defer attaching a pre-configured popular MCP server until agent execution.
     - _run_releasing_mcp: Awaits one synchronous-entry run, then re-queues its MCP servers for the next loop.
-    - _ensure_mcp_connected: Connects pending servers and reconnects any stranded on a closed event loop.
+    - _ensure_mcp_connected: Connects pending servers and reconnects any stranded on a closed event loop;
+      a run that arrives while another run's attach is in flight waits for it instead of skipping its tools.
 Relations:
     Inherited by SDK classes that attach MCP servers. Integrates with vidbyte.tools.mcp.presets.
 """
@@ -39,6 +40,8 @@ class McpAttachableMixin:
 
     _mcp_handles: list[McpServerHandle]
     _pending_mcp_configs: list[McpServerConfig]
+    # Set only while one run is connecting pending servers; resolved and cleared when that attach ends.
+    _mcp_attach_in_flight: asyncio.Future[None] | None = None
     tools: list[BaseTool]
 
     async def attach_mcp_server(
@@ -97,14 +100,23 @@ class McpAttachableMixin:
 
         If any server fails to start or initialize, all successfully started servers
         in this batch are closed and cleaned up before raising McpAttachmentError.
+        If the batch is cancelled, the servers that already started are closed too,
+        and the cancellation propagates; no server from the batch is attached.
         """
         if not servers:
             return self
 
-        results = await asyncio.gather(
-            *[attach_mcp_server(cfg) for cfg in servers],
-            return_exceptions=True,
-        )
+        # Keep each attempt so a cancelled batch can still find the servers it already started.
+        attempts = [asyncio.ensure_future(attach_mcp_server(cfg)) for cfg in servers]
+        try:
+            results = await asyncio.gather(*attempts, return_exceptions=True)
+        except asyncio.CancelledError:
+            started = [a.result() for a in attempts if a.done() and not a.cancelled() and a.exception() is None]
+            # @intent cancelled-mcp-batch-leaves-no-untracked-server
+            # None of them was attached yet, so stop the ones that finished starting before the cancel;
+            # a close error is dropped so it cannot replace the cancellation already propagating.
+            await asyncio.gather(*[h.close() for h in started], return_exceptions=True)
+            raise
 
         handles: list[McpServerHandle] = []
         errors: list[Exception] = []
@@ -193,16 +205,31 @@ class McpAttachableMixin:
                 self._abandon_mcp_handle(handle)
             # Queue them to reconnect first, in their original order, on the loop running now.
             self._pending_mcp_configs[:0] = [handle.config for handle in stale]
-        # Nothing waiting to connect means every attached server is already live on this loop.
+        # @intent overlapping-runs-wait-for-in-flight-mcp-attach
+        # Another run on this loop may already be connecting the servers; wait for it, then look again,
+        # so this run sees their tools (or retries the attach itself if that one failed).
+        while (in_flight := self._mcp_attach_in_flight_on_running_loop()) is not None:
+            await asyncio.shield(in_flight)
+        # Nothing waiting to connect and nothing connecting means every attached server is live on this loop.
         if not self._pending_mcp_configs:
             return
         configs = list(self._pending_mcp_configs)
         self._pending_mcp_configs.clear()
+        # Mark the attach as in flight so overlapping runs wait for it instead of running without its tools.
+        attach_done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._mcp_attach_in_flight = attach_done
         try:
             await self.attach_mcp_servers(configs)
-        except Exception:
-            self._pending_mcp_configs.extend(configs)
+        except BaseException:
+            # @intent cancelled-lazy-mcp-attach-requeues-its-servers
+            # A failed or cancelled attach (say, a timeout around a run while a slow server boots) attaches
+            # none of these servers, so queue them to connect again first, in order, for the next run.
+            self._pending_mcp_configs[:0] = configs
             raise
+        finally:
+            # Release the waiting runs; the marker never outlives this loop's attach.
+            self._mcp_attach_in_flight = None
+            attach_done.set_result(None)
 
     async def _run_releasing_mcp(self, run: Awaitable[ResultT]) -> ResultT:
         """Await one run started by a synchronous entry point, then release its MCP servers.
@@ -256,6 +283,13 @@ class McpAttachableMixin:
             return_exceptions=True,
         )
         self._drop_mcp_tools(handles)
+
+    def _mcp_attach_in_flight_on_running_loop(self) -> asyncio.Future[None] | None:
+        # Returns the attach another run started on this loop, ignoring a marker left by any other loop.
+        in_flight = self._mcp_attach_in_flight
+        if in_flight is None or in_flight.done() or in_flight.get_loop() is not asyncio.get_running_loop():
+            return None
+        return in_flight
 
     def _split_mcp_handles_by_loop(self) -> tuple[list[McpServerHandle], list[McpServerHandle]]:
         # Separates handles usable on the running loop from ones stranded on another or closed loop.
