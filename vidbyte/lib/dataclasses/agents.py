@@ -7,6 +7,7 @@ Purpose:
 Architecture:
     - AgentRunnerConfig: Primitive backend configuration.
     - PauseDuration: Validated whole-number delay for BaseAgent.pause().
+    - AllowedToolNames: Validated, stripped tool names for the AgentLoopSettings.allowed_tools gate.
     - FallbackModel: One entry in an ordered agent fallback chain.
     - FallbackTransform: Rebuilt provider-derived state for a model switch.
     - AgentCard: Local agent description, capabilities, and tools.
@@ -23,7 +24,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from vidbyte.lib.errors import AgentForkConfigurationError
+from vidbyte.lib.errors import AgentForkConfigurationError, ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.configs import (
@@ -141,6 +142,24 @@ class PauseDuration:
             raise ValueError("PauseDuration.seconds must be an integer.")
         if self.seconds < 0:
             raise ValueError("PauseDuration.seconds must be non-negative.")
+
+
+@dataclass(frozen=True, slots=True)
+class AllowedToolNames:
+    """Validated tool names for the AgentLoopSettings.allowed_tools gate, stripped like ToolSettings.denied_tools."""
+
+    names: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        """Reject a bare string and blank names, and store each name stripped."""
+        # @intent allowed-tools-validated-like-denied-tools
+        # The one-tuple typo ("search") is a string whose gate would be single letters, silently denying the tool.
+        if isinstance(self.names, (str, bytes)):
+            raise ConfigurationError("AgentLoopSettings.allowed_tools must be an iterable of tool names, not a string.")
+        names = tuple(str(value).strip() for value in self.names)
+        if not all(names):
+            raise ConfigurationError("AgentLoopSettings.allowed_tools cannot include blank tool names.")
+        object.__setattr__(self, "names", names)
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,6 +348,14 @@ class AgentForkSettings:
             raise AgentForkConfigurationError("max_iterations must be greater than zero when provided.")
         if self.temperature is not None and not 0.0 <= self.temperature <= 2.0:
             raise AgentForkConfigurationError("temperature must be between 0 and 2 when provided.")
+        # @intent fork-drop-tools-validated-like-denied-tools
+        # A typo like ("delete_record") is a str, so the drop set would hold its characters and the child keeps the tool.
+        if isinstance(self.drop_tools, (str, bytes)):
+            raise AgentForkConfigurationError("AgentForkSettings.drop_tools must be an iterable of tool names, not a string.")
+        drop_tools = tuple(str(name).strip() for name in self.drop_tools)
+        if not all(drop_tools):
+            raise AgentForkConfigurationError("AgentForkSettings.drop_tools cannot include blank tool names.")
+        object.__setattr__(self, "drop_tools", drop_tools)
         if self.model_name is not None and not isinstance(self.model_name, str):
             raise AgentForkConfigurationError(
                 "model_name must be a single model name string; use AggregateAgent for multi-model aggregation."

@@ -327,6 +327,26 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await length.agrade(EvalCase(prompt="t"), "abcd")).passed)
         self.assertFalse((await length.agrade(EvalCase(prompt="t"), "abcde")).passed)
 
+    async def test_bare_string_terms_are_one_term(self) -> None:
+        # @intent bare-string-term-is-one-term
+        # [Silent Failure] tuple("30 days") split the term into characters, so a wrong answer passed.
+        case = EvalCase(prompt="t")
+        wrong = "Refunds are accepted within 14 days; call 555-0300 for help."
+        missing = await ContainsAllGrader("30 days").agrade(case, wrong)
+        self.assertFalse(missing.passed)
+        self.assertIn("['30 days']", missing.reason)
+        self.assertTrue((await ContainsAllGrader("30 days").agrade(case, "Refunds within 30 days.")).passed)
+
+        clean = await ForbiddenContentGrader("password").agrade(case, "Reset it from the account page.")
+        self.assertTrue(clean.passed, clean.reason)
+        self.assertFalse((await ForbiddenContentGrader("password").agrade(case, "Your password is hunter2.")).passed)
+
+        template = T.concise_grounded_answer(required_terms="30 days", forbidden_terms="password")
+        self.assertFalse((await template.build_grader().agrade(case, wrong)).passed)
+        self.assertTrue((await template.build_grader().agrade(case, "Refunds within 30 days.")).passed)
+        support = T.safe_customer_support(forbidden_terms="password")
+        self.assertTrue((await support.build_grader().agrade(EvalCase(prompt="t", expected="30 days"), "Refunds within 30 days.")).passed)
+
     async def test_choice_numeric_and_json_match_graders(self) -> None:
         # Tests choice extraction, numeric tolerance, and JSON exact/subset matching.
         choice = ChoiceMatchGrader(["A", "B", "C"])
@@ -371,6 +391,18 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(numeric._parse_number("+3.5"), 3.5)
         self.assertEqual(numeric._parse_number(".5"), 0.5)
         self.assertEqual(numeric._parse_number("12345"), 12345.0)
+
+    async def test_numeric_grader_reads_scientific_notation(self) -> None:
+        # Tests that a number in scientific notation parses as one number instead of its mantissa.
+        # @intent scientific-notation-parse-as-one-number
+        numeric = NumericMatchGrader()
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=0.00001), "The rate is 1e-05 mol/s.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=1200), "Total: 1.2e3 units.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=6.02e23), "Avogadro: 6.02E23.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected="1.2e3"), "1200")).passed)
+        self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=1200), "1300")).passed)
+        self.assertEqual(numeric._parse_number("5 eggs"), 5.0)
+        self.assertEqual(numeric._parse_number("3em"), 3.0)
 
     async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
         # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
@@ -493,6 +525,41 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
             for name in os.listdir(temp_dir):
                 os.remove(os.path.join(temp_dir, name))
             os.rmdir(temp_dir)
+
+    async def test_eval_suite_json_null_optionals_load_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default
+        # [Crash] json.dumps(asdict(case)) writes null for unset optionals, which failed the whole suite load.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "nulls.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [
+                    {"prompt": "omitted", "expected": "omitted"},
+                    {"prompt": "tags", "expected": "tags", "tags": None},
+                    {"prompt": "metadata", "expected": "metadata", "metadata": None},
+                    {"prompt": "templates", "expected": "templates", "templates": None},
+                    {"prompt": "template", "expected": "template", "template": None},
+                    {"prompt": "all", "expected": "all", "tags": None, "metadata": None, "template": None, "templates": None},
+                    {"prompt": "mixed", "expected": "Paris", "template": None, "templates": ["short_answer_fact"]},
+                ]}, f)
+            suite = EvalSuite.from_json(path)
+
+            bad_path = os.path.join(temp_dir, "bad.json")
+            with open(bad_path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [{"prompt": "q", "templates": "short_answer_fact"}]}, f)
+            with self.assertRaises(ValueError):
+                EvalSuite.from_json(bad_path)
+        finally:
+            for name in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, name))
+            os.rmdir(temp_dir)
+
+        for case in suite.cases[:6]:
+            self.assertEqual((case.tags, case.metadata, case.templates), ((), {}, ()), case.prompt)
+        self.assertEqual(len(suite.cases[6].templates), 1)
+
+        runner = EvalRunner(MockRunner("ok"), default_grader=ContainsGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(EvalSuite("nulls", suite.cases[:6]))).results), 6)
 
     async def test_eval_registry_structured_expected_roundtrip(self) -> None:
         # Tests SQLite registry persistence for structured expected payloads.
@@ -656,6 +723,33 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         empty_filter = suite.filter([])
         self.assertEqual(len(empty_filter), 0)
 
+    async def test_bare_string_tags_are_one_tag(self) -> None:
+        # @intent bare-string-tag-is-one-tag
+        # [Silent Failure] set("billing") matched single letters, so a tag slice selected zero cases and passed vacuously.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "tags.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [
+                    {"prompt": "q1", "expected": "q1", "tags": "billing"},
+                    {"prompt": "q2", "expected": "q2", "tags": "billing, refunds"},
+                    {"prompt": "q3", "expected": "q3", "tags": ["math"]},
+                ]}, f)
+            suite = EvalSuite.from_json(path)
+        finally:
+            os.remove(path)
+            os.rmdir(temp_dir)
+        self.assertEqual([c.tags for c in suite.cases], [("billing",), ("billing", "refunds"), ("math",)])
+
+        self.assertEqual([c.prompt for c in suite.filter("billing")], ["q1", "q2"])
+        self.assertEqual([c.prompt for c in suite.filter(["math"])], ["q3"])
+        self.assertEqual(len(suite.filter("b")), 0)
+
+        runner = EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(suite, tags="refunds")).results), 1)
+        self.assertEqual(len((await runner.arun(suite, tags=["billing"])).results), 2)
+        self.assertEqual(len((await runner.arun(suite)).results), 3)
+
     async def test_eval_runner_with_agent_fork(self) -> None:
         # Tests EvalRunner executing suites and ensures state isolation using clone forks.
         agent = MockAgent()
@@ -687,6 +781,15 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res.grader_result.passed)
         self.assertIsNotNone(res.error)
         self.assertIn("Runner crashed!", res.error)
+
+    async def test_eval_runner_rejects_concurrency_below_one(self) -> None:
+        # @intent eval-concurrency-at-least-one
+        # [Silent Failure] concurrency=0 built Semaphore(0), so every case waited forever and arun() never returned.
+        for bad in (0, -1, True):
+            with self.assertRaisesRegex(ValueError, "concurrency must be an integer of at least 1"):
+                EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=bad)
+        runner = EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(EvalSuite("suite", [EvalCase(prompt="q1")]))).results), 1)
 
     async def test_eval_registry_and_comparison(self) -> None:
         # Tests EvalRegistry persistence loop and ComparisonReport metric generation.

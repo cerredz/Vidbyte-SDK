@@ -138,8 +138,10 @@ class ConciseGroundedAnswerTemplate(EvalTemplate):
         # Stores grounded-answer checklist and length options.
         if max_chars < 0:
             raise ValueError("max_chars must be non-negative.")
-        self.required_terms = tuple(required_terms)
-        self.forbidden_terms = tuple(forbidden_terms)
+        # @intent bare-string-term-is-one-term
+        # A bare string is one term; tuple() would split it into characters before the graders see it.
+        self.required_terms = (required_terms,) if isinstance(required_terms, str) and required_terms else tuple(required_terms)
+        self.forbidden_terms = (forbidden_terms,) if isinstance(forbidden_terms, str) and forbidden_terms else tuple(forbidden_terms)
         self.max_chars = max_chars
 
     def build_grader(self) -> BaseGrader:
@@ -158,7 +160,8 @@ class SafeCustomerSupportTemplate(EvalTemplate):
         # Stores forbidden support terms and response length options.
         if max_chars < 0:
             raise ValueError("max_chars must be non-negative.")
-        self.forbidden_terms = tuple(forbidden_terms)
+        # @intent bare-string-term-is-one-term
+        self.forbidden_terms = (forbidden_terms,) if isinstance(forbidden_terms, str) and forbidden_terms else tuple(forbidden_terms)
         self.max_chars = max_chars
 
     def build_grader(self) -> BaseGrader:

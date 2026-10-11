@@ -165,6 +165,12 @@ class TestCodeExecutionSafeEval(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._run("print(x + 1)"), "x + 1")
         self.assertEqual(await self._run("print('a' * 3)"), "'a' * 3")
 
+    async def test_unsupported_quote_bounded_argument_is_echoed_verbatim(self) -> None:
+        """Text that starts and ends with a quote but is not one literal keeps its quotes."""
+        self.assertEqual(await self._run('print("Total:", 3 + 4, "rows")'), '"Total:", 3 + 4, "rows"')
+        self.assertEqual(await self._run('print("x" if 1 else "y")'), '"x" if 1 else "y"')
+        self.assertEqual(await self._run('print("rows cleaned")'), "rows cleaned")
+
     async def test_huge_exponent_is_rejected_quickly(self) -> None:
         started = time.perf_counter()
         self.assertEqual(await self._run("print(9 ** 9 ** 9)"), "9 ** 9 ** 9")
@@ -215,6 +221,13 @@ class TestCalculatorBoundedEval(unittest.IsolatedAsyncioTestCase):
         self.assertIn("double underscores", (await self._run("__import__('os')")).output)
         self.assertIn("name 'exp' is not permitted", (await self._run("exp(1)")).output)
         self.assertEqual((await self._run("1,000*3")).status, ToolStatus.ERROR)
+
+    async def test_scientific_notation_and_any_whitespace_are_accepted(self) -> None:
+        for expression, expected in {"2.5e-3 * 4": "0.01", "1E3 + 1": "1001.0", "2 +\n2": "4", "(4 * 3)\t/ 2": "6.0"}.items():
+            result = await self._run(expression)
+            self.assertEqual((result.status, result.output), (ToolStatus.SUCCESS, expected), expression)
+        self.assertIn("name 'x' is not permitted", (await self._run("x + 1")).output)
+        self.assertIn("exceeds the calculator bound", (await self._run("2**1e3")).output)
 
 
 class TestPrompts(unittest.TestCase):

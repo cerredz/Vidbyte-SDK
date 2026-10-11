@@ -376,6 +376,19 @@ class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
         d = await mw.on_model_error(self._ctx_error(ValueError()))
         self.assertEqual(d.action, MiddlewareAction.ABORT_RUN)
 
+    async def test_retry_on_accepts_list_and_bare_class_and_rejects_non_exceptions(self) -> None:
+        # [Silent Failure] A list used to raise TypeError inside on_model_error and abort the run.
+        for retry_on in ([ValueError], (ValueError,), ValueError):
+            mw = ExponentialBackoffRetryMiddleware(max_attempts=3, retry_on=retry_on, jitter=False)
+            await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
+            retried = await mw.on_model_error(self._ctx_error(ValueError("transient")))
+            skipped = await mw.on_model_error(self._ctx_error(RuntimeError("other")))
+            self.assertEqual(retried.action, MiddlewareAction.RETRY, retry_on)
+            self.assertEqual(skipped.reason, "model_error_not_retryable", retry_on)
+        for bad in (["ValueError"], [ValueError, int], "ValueError"):
+            with self.assertRaisesRegex(ValueError, "retry_on entries must be exception classes"):
+                ExponentialBackoffRetryMiddleware(retry_on=bad)
+
     async def test_resets_on_before_run(self) -> None:
         # [Hidden Failure] Attempt counter must reset between runs.
         mw = ExponentialBackoffRetryMiddleware(max_attempts=2, base_seconds=0.001, jitter=False)

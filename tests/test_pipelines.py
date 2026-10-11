@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.errors import PipelineExecutionError
 from vidbyte.pipelines import (
@@ -12,6 +14,7 @@ from vidbyte.pipelines import (
     SequentialPipeline,
 )
 from vidbyte.pipelines.parallel import PARALLEL_JOIN_SEPARATOR
+from vidbyte.tools.mcp.types import McpToolPermission
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +328,81 @@ class RunSyncTests(unittest.TestCase):
         )
         result = pipeline.run_sync("x")
         self.assertEqual(result, "reduce:map:x")
+
+
+class StubMcpTransport:
+    """Fake MCP stdio transport that offers one tool and records when it is closed."""
+
+    instances: list[StubMcpTransport] = []
+
+    def __init__(self, command: list[str], **_: object) -> None:
+        self.closed = False
+        StubMcpTransport.instances.append(self)
+
+    async def request(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+        if method == "tools/list":
+            return {"tools": [{"name": "remote_stub", "description": "Stub.", "inputSchema": {"type": "object", "properties": {}}}]}
+        return {}
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class DoneRunner:
+    """Runner whose first model turn finishes the run."""
+
+    async def arun(self, prompt: str, **_: object) -> object:
+        item = {"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "call_1"}
+        return type("_Resp", (), {"text": "", "raw": {"output": [item]}})()
+
+
+def build_mcp_agent(name: str) -> object:
+    agent = build_test_agent(name=name, system_prompt="Work.", runner=DoneRunner())
+    agent.with_mcp_server(command=[name], permission=McpToolPermission.READONLY)
+    return agent
+
+
+@patch("vidbyte.tools.mcp.attach.McpStdioTransport", StubMcpTransport)
+class RunSyncMcpReleaseTests(unittest.TestCase):
+    """run_sync owns a loop that closes on return, so no stage may keep an MCP server bound to it."""
+
+    def setUp(self) -> None:
+        StubMcpTransport.instances.clear()
+
+    def test_run_sync_releases_mcp_servers_of_every_stage_including_nested(self) -> None:
+        agents = [build_mcp_agent(name) for name in ("outer", "fanned", "routed", "reducer")]
+        configs = [list(agent._pending_mcp_configs) for agent in agents]
+        outer, fanned, routed, reducer = agents
+        nested = ParallelPipeline([fanned, ConditionalPipeline(predicate=lambda _: "go", branches={"go": routed})])
+        pipeline = SequentialPipeline([outer, MapReducePipeline(map_stages=[nested], reduce_stage=reducer)])
+
+        pipeline.run_sync("x")
+
+        # Every stage connected its server, then closed it before the loop ended and queued it again.
+        self.assertEqual(len(StubMcpTransport.instances), 4)
+        self.assertTrue(all(transport.closed for transport in StubMcpTransport.instances))
+        self.assertEqual([agent.mcp_servers() for agent in agents], [()] * 4)
+        self.assertEqual([agent._pending_mcp_configs for agent in agents], configs)
+
+
+@patch("vidbyte.tools.mcp.attach.McpStdioTransport", StubMcpTransport)
+class AsyncRunMcpKeepTests(unittest.IsolatedAsyncioTestCase):
+    """An async caller's loop outlives the run, so its stages keep their MCP connections."""
+
+    def setUp(self) -> None:
+        StubMcpTransport.instances.clear()
+
+    async def test_async_run_keeps_stage_mcp_servers_connected(self) -> None:
+        agent = build_mcp_agent("worker")
+        pipeline = SequentialPipeline([ParallelPipeline([agent])])
+
+        await pipeline.run("x")
+
+        (transport,) = StubMcpTransport.instances
+        self.assertFalse(transport.closed)
+        self.assertEqual(len(agent.mcp_servers()), 1)
+        self.assertEqual(agent._pending_mcp_configs, [])
+        await agent.close_mcp_servers()
 
 
 # ---------------------------------------------------------------------------

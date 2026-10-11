@@ -674,6 +674,14 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(session.tag("beta", "alpha", "gamma"), session)
         self.assertEqual(store.get_meta(session.id).tags, ("alpha", "beta", "gamma"))
 
+    def test_bare_string_tags_rejected_at_construction(self) -> None:  # [Silent Failure]
+        # Verify tags="billing" fails loudly instead of storing ('b', 'i', ...) that list_sessions(tag=) never finds.
+        store = InMemorySessionStore()
+        with self.assertRaisesRegex(SessionError, "not a string"):
+            Session(FakeAgent(), store=store, tags="billing")
+        session = Session(FakeAgent(), store=store, tags=("billing",))
+        self.assertEqual([meta.session_id for meta in store.list_sessions(tag="billing")], [session.id])
+
     def test_usage_empty_session_returns_zero_rollup(self) -> None:  # [Edge Case]
         # Verify usage() is safe before any checkpoint exists.
         session = Session(FakeAgent(), store=InMemorySessionStore())

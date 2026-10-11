@@ -185,8 +185,9 @@ class UpdateTraceTool(BaseTool):
         if spec.type is TraceFieldType.ARRAY:
             return self._append_unique(previous, incoming)
         if spec.type is TraceFieldType.OBJECT:
+            # A subfield sent as null counts as omitted and keeps its prior value, like a null top-level field.
             base = dict(previous) if isinstance(previous, Mapping) else {}
-            base.update(dict(incoming))
+            base.update({key: value for key, value in dict(incoming).items() if value is not None})
             return base
         return incoming
 

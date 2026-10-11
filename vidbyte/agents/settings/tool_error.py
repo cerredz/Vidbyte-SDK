@@ -72,6 +72,10 @@ class ToolErrorPolicy:
     def _normalize_retry_on(retry_on: Iterable[object] | None) -> frozenset[str]:
         if retry_on is None:
             return _DEFAULT_RETRY_ON
+        # @intent name-lists-reject-bare-strings
+        # A typo like ("timeout") is a str, so frozenset() would hold its characters and timeouts would never retry.
+        if isinstance(retry_on, (str, bytes)):
+            raise ConfigurationError("ToolErrorPolicy.retry_on must be an iterable of error kinds, not a string.")
         return frozenset(
             normalized
             for item in retry_on

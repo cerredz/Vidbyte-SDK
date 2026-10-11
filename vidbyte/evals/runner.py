@@ -39,6 +39,10 @@ class EvalRunner:
 
     def __init__(self, target: object, *, default_grader: BaseGrader, concurrency: int = 4, max_retries: int = 1) -> None:
         # Initializes the EvalRunner with an execution target, a default grader, and concurrency settings.
+        # @intent eval-concurrency-at-least-one
+        # Semaphore(0) would park every case forever, and True would silently mean one, so reject both here.
+        if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+            raise ValueError(f"EvalRunner concurrency must be an integer of at least 1, got {concurrency!r}.")
         self.target = target
         self.default_grader = default_grader
         self.concurrency = concurrency
@@ -48,8 +52,9 @@ class EvalRunner:
         # Asynchronously executes the full suite against the target and returns a compiled EvalSuiteResult.
         cases = suite.cases
         if tags:
-            target_tags = set(tags)
-            cases = tuple(c for c in cases if any(t in target_tags for t in c.tags))
+            # @intent bare-string-tag-is-one-tag
+            # Select the slice through EvalSuite.filter so tags="billing" means one tag, not its letters.
+            cases = suite.filter(tags).cases
 
         semaphore = asyncio.Semaphore(self.concurrency)
         tasks = [self._run_single_case(case, semaphore, case_index=index, suite_name=suite.name) for index, case in enumerate(cases)]

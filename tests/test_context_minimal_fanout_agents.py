@@ -14,8 +14,9 @@ from __future__ import annotations
 import unittest
 
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.paradigms import AgentRoleSettings, ContextMinimalFanoutParadigm, ContextMinimalFanoutSettings
-from vidbyte.paradigms.context_minimal_fanout.types import SplitPrompt
+from vidbyte.paradigms.context_minimal_fanout.types import EnvironmentContext, PromptSplitPlan, SplitPrompt
 from vidbyte.tools.builtins.output_schema import OutputSchemaBuilder
 
 
@@ -70,6 +71,55 @@ class ContextMinimalFanoutAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(runner.prompts), 1)
         self.assertIn("Add a feature.", runner.prompts[0])
         self.assertIn("repo uses pytest", environment.to_prompt_block())
+
+
+class SnapshotNullTextTests(unittest.TestCase):
+    """A null snapshot value reads like a missing key, never as the literal text "None"."""
+
+    def test_null_environment_keys_map_like_omitted_keys(self) -> None:
+        nulled = EnvironmentContext.from_snapshot({"values": {
+            "summary": {"overview": None, "summary": "Python service with an LRU cache", "objective": None, "domain": None},
+            "files": [{"path": "src/cache.py", "notes": None, "content": None}],
+        }})
+        omitted = EnvironmentContext.from_snapshot({"values": {
+            "summary": {"summary": "Python service with an LRU cache"},
+            "files": [{"path": "src/cache.py"}],
+        }})
+        self.assertEqual(nulled, omitted)
+        self.assertEqual(nulled.summary.overview, "Python service with an LRU cache")
+        self.assertEqual((nulled.summary.objective, nulled.summary.domain), ("", ""))
+        self.assertEqual((nulled.files[0].notes, nulled.files[0].content), ("", ""))
+        self.assertNotIn("None", nulled.to_prompt_block())
+
+    def test_null_file_path_is_skipped_and_null_falls_through_to_next_key(self) -> None:
+        environment = EnvironmentContext.from_snapshot({"values": {"files": [
+            {"path": None, "notes": "dropped"},
+            {"path": "src/api.py", "notes": None, "excerpt": "routes", "content": None, "full_text": "def route(): ..."},
+        ]}})
+        self.assertEqual([f.path for f in environment.files], ["src/api.py"])
+        self.assertEqual((environment.files[0].notes, environment.files[0].content), ("routes", "def route(): ..."))
+
+    def test_unfilled_declared_plan_field_reads_as_omitted(self) -> None:
+        prompt = {"id": "p1", "title": "Cache core", "prompt": "Refactor the cache."}
+        for values in ({"goal": "Split", "global_instructions": None, "prompts": [prompt]}, {"goal": "Split", "prompts": [prompt]}):
+            with self.assertRaisesRegex(ConfigurationError, "global_instructions cannot be empty"):
+                PromptSplitPlan.from_snapshot({"values": values})
+        with self.assertRaisesRegex(ConfigurationError, "title cannot be empty"):
+            SplitPrompt.from_mapping({"id": "p1", "title": None, "prompt": "Refactor the cache."})
+
+    def test_real_values_are_unchanged(self) -> None:
+        plan = PromptSplitPlan.from_snapshot({"values": {
+            "goal": " Split ", "global_instructions": "Keep the API stable.",
+            "prompts": [{"id": 7, "title": "Cache core", "prompt": " Refactor the cache. "}],
+        }})
+        self.assertEqual((plan.goal, plan.global_instructions), ("Split", "Keep the API stable."))
+        self.assertEqual((plan.prompts[0].id, plan.prompts[0].prompt), ("7", "Refactor the cache."))
+        environment = EnvironmentContext.from_snapshot({"values": {
+            "summary": {"overview": "Cache service", "summary": "ignored", "objective": 0},
+            "files": [{"path": "src/cache.py", "notes": "LRU impl", "content": "class Cache: ..."}],
+        }})
+        self.assertEqual((environment.summary.overview, environment.summary.objective), ("Cache service", "0"))
+        self.assertEqual((environment.files[0].notes, environment.files[0].content), ("LRU impl", "class Cache: ..."))
 
 
 if __name__ == "__main__":

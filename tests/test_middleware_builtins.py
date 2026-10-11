@@ -74,6 +74,28 @@ class MiddlewareBuiltinsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.action.value, "deny_tool")
         self.assertEqual(decision.reason, "tool_denylisted")
 
+    def test_tool_policy_rejects_bare_string_name_lists(self) -> None:
+        # ("wipe_db") is a str, not a 1-tuple; a character set would let wipe_db run.
+        with self.assertRaisesRegex(ValueError, "deny_tools must be an iterable of tool names, not a string"):
+            ToolPolicyMiddleware(deny_tools=("wipe_db"))
+        with self.assertRaisesRegex(ValueError, "allow_tools must be an iterable of tool names, not a string"):
+            ToolPolicyMiddleware(allow_tools=("search"))
+
+    async def test_tool_policy_one_item_tuple_and_list_still_apply(self) -> None:
+        deny = ToolPolicyMiddleware(deny_tools=("wipe_db",))
+        allow = ToolPolicyMiddleware(allow_tools=["search"])
+        self.assertIsNone(ToolPolicyMiddleware().allow_tools)
+
+        denied = await deny.before_tool_call(
+            MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="worker", tool_call=ToolCall("wipe_db"))
+        )
+        allowed = await allow.before_tool_call(
+            MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="worker", tool_call=ToolCall("search"))
+        )
+
+        self.assertEqual(denied.reason, "tool_denylisted")
+        self.assertEqual(allowed.action.value, "continue")
+
     async def test_tool_policy_allows_internal_tool_by_default(self) -> None:
         middleware = ToolPolicyMiddleware(allow_tools={"lookup"})
 
