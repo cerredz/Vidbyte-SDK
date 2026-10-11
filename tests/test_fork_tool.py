@@ -365,6 +365,22 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
                 self.assertEqual(agent.captured.agent_loop_settings.allowed_tools, tuple(requested))
 
+    async def test_null_loop_settings_fields_keep_parent_values(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A null allowed_tools gave the child an empty gate that denied every tool, and a null max_tokens failed the fork.
+        agent = StubAgent()
+        agent.agent_loop_settings = AgentLoopSettings(max_iterations=3, max_tokens=4000, allowed_tools=("alpha",))
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", loop_settings={"max_iterations": 2, "allowed_tools": None, "max_tokens": None}))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        settings = agent.captured.agent_loop_settings
+        self.assertEqual(settings.allowed_tools, ("alpha",))
+        self.assertEqual(settings.max_tokens, 4000)
+        self.assertEqual(settings.max_iterations, 2)
+
     async def test_depth_cap_prevents_recursive_fork_construction(self) -> None:
         # Depth cap should be checked before parent.fork is called.
         agent = StubAgent()
