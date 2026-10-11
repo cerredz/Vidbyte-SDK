@@ -72,7 +72,7 @@ def behavior_from_probe(probe: RunProbe) -> Behavior:
 
 
 class StructuredPayload(BaseModel):
-    """Pydantic payload used to verify model_dump structured traversal."""
+    """Pydantic payload used to verify pydantic structured traversal."""
 
     answer: str
     items: list[dict[str, Any]]
@@ -600,7 +600,7 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.output.structured_contains_keys(["a", "c"]))
 
     def test_structured_pydantic_model_dump(self) -> None:
-        # [Hidden Assumption] Pydantic structured objects are supported through model_dump().
+        # [Hidden Assumption] Pydantic structured objects are supported through their model fields.
         payload = StructuredPayload(answer="yes", items=[{"title": "First"}])
         b = behavior_from_probe(RunProbe(structured=payload))
         self.assertTrue(b.output.structured_field_equals("answer", "yes"))
