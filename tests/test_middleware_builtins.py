@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from tests.agent_test_support import build_test_agent
+from vidbyte import tool
+from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareEvent, MiddlewareHook
 from vidbyte.middleware.builtins import (
     AuditLogMiddleware,
@@ -18,6 +23,18 @@ class FakeClock:
 
     def __call__(self) -> float:
         return self.value
+
+
+class ParallelToolCallRunner:
+    # Answers the first model call with three invoice calls in one response, the way parallel tool calling does.
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, prompt: str, **kwargs: object) -> SimpleNamespace:
+        self.calls += 1
+        calls = [("call_1", "acme"), ("call_2", "globex"), ("call_3", "initech")]
+        tool_calls = [{"id": call_id, "type": "function", "function": {"name": "send_invoice", "arguments": f'{{"customer": "{customer}"}}'}} for call_id, customer in calls]
+        return SimpleNamespace(text="", raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": tool_calls}}]})
 
 
 class MiddlewareBuiltinsTests(unittest.IsolatedAsyncioTestCase):
@@ -59,6 +76,31 @@ class MiddlewareBuiltinsTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(decision.action.value, "abort_run")
         self.assertEqual(decision.reason, "runtime_elapsed_limit")
+
+    async def test_runtime_tool_limit_caps_calls_inside_one_model_response(self) -> None:
+        # @intent runtime-tool-limit-caps-every-call
+        # Three calls in one response under a cap of two must send two invoices, not three, like AgentLoopSettings.max_tool_calls.
+        sent: list[str] = []
+
+        @tool
+        def send_invoice(customer: str) -> str:
+            """Send the invoice."""
+            sent.append(customer)
+            return "sent"
+
+        middleware = RuntimeLimitMiddleware(max_tool_calls=2)
+        agent = build_test_agent(name="billing", system_prompt="Send invoices.", runner=ParallelToolCallRunner(), tools=[send_invoice], middleware=[middleware])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("invoice everyone")
+
+        self.assertEqual(sent, ["acme", "globex"])
+        self.assertEqual(reply.metadata["stop_reason"], "middleware_abort")
+        self.assertEqual(reply.metadata["middleware_abort_reason"], "runtime_tool_call_limit")
+        # The loop's own isDone at the cap is never blocked, since it does not spend the tool budget.
+        is_done = await middleware.before_tool_call(
+            MiddlewareContext(hook=MiddlewareHook.BEFORE_TOOL_CALL, agent_name="billing", tool_call=ToolCall("isDone"), tool_is_internal=True, tool_call_count=2)
+        )
+        self.assertEqual(is_done.action.value, "continue")
 
     async def test_tool_policy_denies_denylisted_tool(self) -> None:
         middleware = ToolPolicyMiddleware(deny_tools={"danger"})
