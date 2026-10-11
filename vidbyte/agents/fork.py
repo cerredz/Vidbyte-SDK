@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.settings import AgentFallbackSettings, AgentLoopSettings
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.runners import Runner
 from vidbyte.tools.base import _ToolWrapper
 from vidbyte.tools.catalog import Tools
 
@@ -40,6 +42,8 @@ class AgentForker:
         child_run_id = cls._run_id(agent, settings.run_id)
         # The child edits its own copy of the parent's managed context window, so branch edits never reach the parent.
         child_manager = cls._context_manager(agent, settings)
+        # Read the vendor the parent really runs on, so the key and backup checks below see a provider-prefixed model's vendor.
+        parent_provider = cls._parent_provider(agent)
         child = BaseAgent(
             name=settings.name or agent.name,
             runtime=settings.runtime if settings.runtime is not None else (agent.runtime_config_obj or agent.runtime_type),
@@ -49,7 +53,7 @@ class AgentForker:
             middleware=agent.middleware if settings.middleware is None else settings.middleware,
             system_prompt=agent.system_prompt if settings.system_prompt is None else settings.system_prompt,
             # The parent's key belongs to its own vendor, so a child on another provider resolves its own credential.
-            api_key=cls._api_key(agent, settings),
+            api_key=cls._api_key(agent, settings, parent_provider),
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
             model_name=agent.runner_config.model_name if settings.model_name is None else settings.model_name,
             temperature=agent.runner_config.temperature if settings.temperature is None else settings.temperature,
@@ -67,7 +71,7 @@ class AgentForker:
             handoff=agent._handoff_spec if settings.handoff is None else settings.handoff,
             trace_option=settings.trace_option if settings.trace_option is not None else agent._trace_option,
             # Backups the parent named by bare model name keep the parent's provider, even when the child switches.
-            fallback=cls._fallback(agent, settings),
+            fallback=cls._fallback(agent, settings, parent_provider),
         )
         # A dropped tool stays dropped for every later fork, including tools the child bridges from MCP servers.
         child._fork_dropped_tool_names = agent._fork_dropped_tool_names | frozenset(settings.drop_tools)
@@ -85,19 +89,30 @@ class AgentForker:
         return agent.context_manager.copy() if agent.context_manager is not None else None
 
     @staticmethod
-    def _api_key(agent: BaseAgent, settings: AgentForkSettings) -> str | None:
+    def _parent_provider(agent: BaseAgent) -> str:
+        # @intent fork-reads-prefixed-parent-provider
+        # A parent built as model_name="deepseek/deepseek-chat" runs on DeepSeek though its raw provider is None, so ask the
+        # runner how it resolves the pair; a provider string the runner does not know is compared as written, as before.
+        try:
+            provider, _, _ = Runner._normalize_provider_and_model(agent.runner_config.provider, agent.runner_config.model_name)
+        except ConfigurationError:
+            return str(agent.runner_config.provider or "").strip().lower()
+        return provider or ""
+
+    @staticmethod
+    def _api_key(agent: BaseAgent, settings: AgentForkSettings, parent_provider: str) -> str | None:
         # @intent fork-key-never-crosses-providers
         # Sending the parent vendor's secret to another vendor leaks it and fails auth; None lets the
         # child's provider read its own env key. Same-provider forks (or model-only overrides) keep the key.
         if settings.provider is None:
             return agent.runner_config.api_key
         child_provider = settings.provider.value if isinstance(settings.provider, ModelProvider) else str(settings.provider)
-        if child_provider.strip().lower() != str(agent.runner_config.provider or "").strip().lower():
+        if child_provider.strip().lower() != parent_provider:
             return None
         return agent.runner_config.api_key
 
     @staticmethod
-    def _fallback(agent: BaseAgent, settings: AgentForkSettings) -> Sequence[str | FallbackModel] | AgentFallbackSettings | None:
+    def _fallback(agent: BaseAgent, settings: AgentForkSettings, parent_provider: str) -> Sequence[str | FallbackModel] | AgentFallbackSettings | None:
         # @intent fork-keeps-resolved-fallback-providers
         # A bare backup name means "this model on the parent's provider". Re-resolving the parent's raw spec
         # against a child on another provider would move it to a model that vendor does not serve, so a
@@ -105,7 +120,7 @@ class AgentForker:
         if settings.fallback is not None:
             return settings.fallback
         child_provider = settings.provider.value if isinstance(settings.provider, ModelProvider) else str(settings.provider or "")
-        if settings.provider is None or child_provider.strip().lower() == str(agent.runner_config.provider or "").strip().lower():
+        if settings.provider is None or child_provider.strip().lower() == parent_provider:
             return agent._fallback_spec
         if agent.fallback is None:
             return None
