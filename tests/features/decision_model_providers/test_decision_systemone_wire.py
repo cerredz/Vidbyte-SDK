@@ -1,7 +1,7 @@
 """FILE: tests/features/decision_model_providers/test_decision_systemone_wire.py
 
 PURPOSE: Pins the System One wire for the fifteen hosts SystemOneProvider.HOSTS lists (spec r8): URL, authorization scheme, byte-identical TypeSafe body, OpenRouter's always-present noul criteria, transport kwargs with a fresh idempotency key, noul/score/choice normalization, the model echo rule (INV-27), and host-named mismatch messages with billed usage.
-ROLE IN CODEBASE: Covers spec INV-5, INV-6, INV-8, INV-9, INV-14, INV-15, INV-27, AC-2, AC-3, AC-4, AC-7, AC-11, AC-18, AC-20, EC-6, EC-9, EC-19, EC-24, EC-27, EC-29 and NFR-4 of docs/spec/decision-model-providers/spec.md.
+ROLE IN CODEBASE: Covers spec INV-5, INV-6, INV-8, INV-9, INV-14, INV-15, INV-23, INV-27, AC-2, AC-3, AC-4, AC-7, AC-11, AC-18, AC-20, EC-6, EC-9, EC-19, EC-24, EC-27, EC-29 and NFR-4 of docs/spec/decision-model-providers/spec.md.
 ARCHITECTURE NOTE: Each test drives DecisionModelRunner over a ScriptedTransport; the transport's recorded kwargs are the observable wire, the returned DecisionModelResponse and the raised errors are the observable results.
 COMMON MODIFICATION PATTERNS: An r6 System One host is a HOST_ROWS entry in decision_fixtures.py and an r8 host an R8_HOST_ROWS entry; the per-host URL loop covers both tables, the R8_* tests cover the r8 rows; a new answer kind gets its own normalization test.
 KNOWN EDGE CASES: TypeSafe is in the loops so a drift between its body and another host's body is caught in the same assertion; Cloudflare and Foundry use the tenant endpoints from the fixtures.
@@ -109,15 +109,21 @@ class SystemOneRequestTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_openrouter_always_sends_noul_criteria_while_other_hosts_keep_typesafe_behaviour(self) -> None:
         # [Hidden Failure] INV-6/EC-6/AC-4: OpenRouter rejects a noul without criteria, so nulls are sent; descriptions pass through everywhere.
+        # [Edge Case] R-1/INV-6/INV-23: a noul naming only one of true/false still sends OpenRouter both keys; other hosts keep TypeSafe's one-key criteria.
         described = fx.noul_question(options=(JevOption("true", description="refund now"), JevOption("false", description="no refund")))
+        true_only = fx.noul_question(options=(JevOption("true", description="refund now"),))
+        false_only = fx.noul_question(options=(JevOption("false"),))
         cases = (
             ("OPENROUTER", fx.noul_question(), {"true": None, "false": None}),
             ("OPENROUTER", described, {"true": "refund now", "false": "no refund"}),
+            ("OPENROUTER", true_only, {"true": "refund now", "false": None}),
+            ("OPENROUTER", false_only, {"true": None, "false": None}),
             ("PERPLEXITY", described, {"true": "refund now", "false": "no refund"}),
             ("PERPLEXITY", fx.noul_question(), None),
+            ("PERPLEXITY", true_only, {"true": "refund now"}),
         )
         for name, question, criteria in cases:
-            with self.subTest(provider=name, criteria=criteria):
+            with self.subTest(provider=name, options=tuple(option.name for option in question.options), criteria=criteria):
                 runner, transport = fx.scripted_runner(name, fx.response(fx.systemone_body({"refund": fx.systemone_noul(0.8)}, model=fx.HOST_ROWS[name].default_model)))
                 await runner.arun(fx.customer_request(question))
                 wire_question = transport.requests[0]["json_body"]["questions"]["refund"]

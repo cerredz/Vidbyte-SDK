@@ -1,7 +1,7 @@
 """FILE: tests/features/decision_model_providers/test_decision_openai_wire.py
 
 PURPOSE: Pins the OpenAI Decisions wire: the exact request body in question order, answers matched by name in any order, JSON-text serialization of structured content, refusal of noul option descriptions before any call, refusal answers, drifted answers, score label fallback, the request id as response.model, and the Vercel endpoint-override recipe.
-ROLE IN CODEBASE: Covers spec INV-7, INV-8, INV-9, INV-27, AC-5, AC-6, AC-17, EC-7, EC-8, EC-10, EC-11 and D-8, D-11 of docs/spec/decision-model-providers/spec.md.
+ROLE IN CODEBASE: Covers spec INV-7, INV-8, INV-9, INV-27, AC-5, AC-6, AC-17, EC-7, EC-8, EC-10, EC-11 and D-8, D-11 of docs/spec/decision-model-providers/spec.md, plus the duplicate-option guard of review finding R-4.
 ARCHITECTURE NOTE: DecisionModelRunner over a ScriptedTransport; the recorded json_body is compared as a whole Python object so list order (questions, choices, levels) is part of the assertion.
 COMMON MODIFICATION PATTERNS: A new OpenAI answer shape gets one normalization test and one drift test; keep literal bodies in sync with provider-research.md section 3.1.
 KNOWN EDGE CASES: OpenAI's response-level model echo is undocumented, so response.model is always the request id; predicate questions carry no choices or levels key at all.
@@ -155,6 +155,16 @@ class OpenAIAnswerTests(unittest.IsolatedAsyncioTestCase):
                 await runner.arun(fx.customer_request())
             self.assertEqual(caught.exception.details["usage"], fx.USAGE)
             self.assertEqual(caught.exception.provider, "openai")
+
+    async def test_a_choice_distribution_that_lists_an_option_twice_is_a_billed_error(self) -> None:
+        # [Silent Failure] INV-8/R-4: a repeated option would let its last probability overwrite the first and pass as a clean distribution.
+        repeated = [{"value": "billing", "probability": 0.1}, {"value": "logistics", "probability": 0.2}, {"value": "support", "probability": 0.1}, {"value": "billing", "probability": 0.7}]
+        runner, _ = fx.scripted_runner("OPENAI", fx.response(fx.openai_body([fx.openai_predicate("refund", 0.8), fx.openai_choice(probabilities=repeated)])))
+        with self.assertRaises(ProviderResponseError) as caught:
+            await runner.arun(fx.customer_request())
+        self.assertEqual(caught.exception.message, "OpenAI `probabilities` for 'team' list an option more than once.")
+        self.assertEqual(caught.exception.details["usage"], fx.USAGE)
+        self.assertEqual(caught.exception.provider, "openai")
 
     async def test_score_entries_without_labels_fall_back_to_the_value_index(self) -> None:
         # [Edge Case] EC-11/A-8: value indexes the question's levels when label is absent; neither present is a typed error.

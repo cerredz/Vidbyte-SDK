@@ -1,9 +1,9 @@
 """FILE: tests/features/decision_model_providers/test_decision_failures.py
 
-PURPOSE: Pins how decision calls fail on every adapter: the shared status table worded for the host and its env var, non-JSON bodies with a bounded excerpt, unexpected exceptions wrapped and cancellation passed through, list_models and close_run refused without a network call, the per-call config guard, SystemOneProvider construction guards, and the rule that the key never leaves the authorization header.
-ROLE IN CODEBASE: Covers spec INV-5, INV-13, INV-16, INV-17, INV-28, AC-10, AC-13, AC-19, EC-12, EC-13, EC-14, EC-20, EC-23, EC-25, EC-28, EC-32, NFR-5 and FR-6, FR-11 of docs/spec/decision-model-providers/spec.md (r8).
+PURPOSE: Pins how decision calls fail on every adapter: the shared status table worded for the host and its env var, non-JSON bodies with a bounded excerpt, unexpected exceptions wrapped and cancellation passed through, list_models and close_run refused without a network call, the per-call config guard (including the managed per-call refusal), SystemOneProvider construction guards, DecisionHttpCall field validation, and the rule that the key never leaves the authorization header.
+ROLE IN CODEBASE: Covers spec INV-5, INV-13, INV-16, INV-17, INV-24, INV-28, AC-10, AC-13, AC-19, AC-23, EC-12, EC-13, EC-14, EC-20, EC-23, EC-25, EC-28, EC-32, T-4, NFR-5 and FR-6, FR-11 of docs/spec/decision-model-providers/spec.md (r11), plus review findings R-2 and R-3.
 ARCHITECTURE NOTE: Runner-level tests go through DecisionModelRunner; the guard and mapper tests call SystemOneProvider, OpenAIDecisionsProvider, and DecisionFailures directly, because those seams are public per spec section 8.5.
-COMMON MODIFICATION PATTERNS: A new documented status adds one row to STATUS_CASES; a new capability refusal adds one case to the list_models/close_run test.
+COMMON MODIFICATION PATTERNS: A new documented status adds one row to STATUS_CASES; a new capability refusal adds one case to the list_models/close_run test; a new DecisionHttpCall rule adds one HTTP_CALL_RULES entry and its bad values to HTTP_CALL_BAD_VALUES.
 KNOWN EDGE CASES: A scripted ProviderRequestError without a status code stands in for a network failure or timeout; KeyboardInterrupt is not exercised because it would stop the test runner.
 RELATED DOCS: docs/spec/decision-model-providers/spec.md sections 6.1, 6.2, 6.3, 8.5, 10; tests/features/decision_model_providers/FEATURE.md.
 TESTS: python -m pytest tests/features/decision_model_providers/test_decision_failures.py
@@ -18,7 +18,7 @@ import unittest
 from tests.features.decision_model_providers import decision_fixtures as fx
 from vidbyte.lib.config import DecisionModelConfig, DecisionModelMode
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ProviderConfigurationError, ProviderRequestError, ProviderResponseError
+from vidbyte.lib.errors import ConfigurationError, ProviderConfigurationError, ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser
 from vidbyte.providers import ModelProviders
 
@@ -31,6 +31,30 @@ STATUS_CASES = (
     (503, "{label} is overloaded or failing (503) after 2 retries; retry after a short delay"),
     (408, "{label} timed out the request (408) after 2 retries"),
     (418, "{label} returned HTTP 418"),
+)
+MANAGED_REFUSAL = "SystemOneProvider sends direct calls only; managed TypeSafe decisions go through TypeSafeProvider."
+# Spec r11 section 12.3 row 5: the expected-value text for each DecisionHttpCall field rule (AC-23).
+HTTP_CALL_RULES = {
+    "method": "a non-blank HTTP method string",
+    "url": "a non-blank URL string",
+    "timeout_seconds": "a finite number of seconds greater than 0",
+    "json_body": "None or a mapping",
+    "retry_count": "an integer of at least 0",
+    "idempotency_key": "None or a non-blank string",
+}
+HTTP_CALL_BAD_VALUES = (
+    ("method", ""),
+    ("url", ""),
+    ("url", "  "),
+    ("timeout_seconds", 0),
+    ("timeout_seconds", -1.0),
+    ("timeout_seconds", float("inf")),
+    ("timeout_seconds", float("nan")),
+    ("timeout_seconds", True),
+    ("json_body", []),
+    ("retry_count", -1),
+    ("retry_count", True),
+    ("idempotency_key", ""),
 )
 NO_RESPONSE_REASON = "no response arrived (network failure or the 30.0s timeout elapsed); raise DecisionModelConfig.timeout_seconds or retry_count if this recurs"
 
@@ -173,6 +197,23 @@ class CapabilityAndGuardTests(unittest.IsolatedAsyncioTestCase):
         typesafe_direct = SystemOneProvider(decision_config=DecisionModelConfig(api_key=fx.KEY))
         self.assertIs(typesafe_direct.provider, ModelProvider.TYPESAFE)
 
+    async def test_system_one_provider_refuses_a_managed_per_call_config_before_any_call(self) -> None:
+        # [Hidden Failure] R-3/INV-28/EC-28/T-4: without this guard a managed per-call config posts its vb_live_ Vidbyte key to TypeSafe's direct host.
+        from vidbyte.providers.systemone import SystemOneProvider
+
+        managed = DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED, api_key="vb_live_" + "a" * 32)
+        adapter = SystemOneProvider(decision_config=DecisionModelConfig(api_key=fx.KEY))
+        transport = fx.ScriptedTransport()
+        with self.assertRaises(ProviderConfigurationError) as caught:
+            await adapter.run_decision(request=fx.customer_request(), transport=transport, config=managed)
+        self.assertEqual(caught.exception.message, MANAGED_REFUSAL)
+        self.assertEqual(caught.exception.provider, "typesafe")
+        self.assertEqual(transport.requests, [])
+        # [Hidden Assumption] spec section 17 deviation 1: the per-call refusal reuses the constructor guard's message.
+        with self.assertRaises(ProviderConfigurationError) as constructed:
+            SystemOneProvider(decision_config=managed)
+        self.assertEqual(constructed.exception.message, MANAGED_REFUSAL)
+
 
 class CredentialHygieneTests(unittest.IsolatedAsyncioTestCase):
     """Pins that the key appears only in the authorization header value."""
@@ -198,6 +239,31 @@ class CredentialHygieneTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(fx.KEY, repr(call))
         self.assertEqual(call.headers["authorization"], f"Bearer {fx.KEY}")
         self.assertEqual((call.retry_count, call.idempotency_key, call.json_body), (0, None, None))
+
+
+class DecisionHttpCallTests(unittest.TestCase):
+    """Pins the DecisionHttpCall record of spec r11: one rule per field, key-free errors, a header-free repr, one class object."""
+
+    def test_decision_http_call_validates_each_field_and_never_echoes_the_key(self) -> None:
+        # [Hidden Failure] AC-23/R-2/INV-24: a blank URL or a zero timeout must fail where the call is built, and no message or detail may carry the key in its headers.
+        import vidbyte.lib.dataclasses.jev as jev
+        from vidbyte.providers.decisions import DecisionHttpCall
+
+        valid = {"method": "POST", "url": "https://api.perplexity.ai/v1/decisions", "headers": {"authorization": f"Bearer {fx.KEY}"}, "timeout_seconds": 30.0}
+        for field, value in HTTP_CALL_BAD_VALUES:
+            with self.subTest(field=field, value=repr(value)):
+                with self.assertRaises(ConfigurationError) as caught:
+                    DecisionHttpCall(**{**valid, field: value})
+                self.assertEqual(caught.exception.message, f"Invalid Jev decision call {field}: expected {HTTP_CALL_RULES[field]}; received {type(value).__name__} {value!r}.")
+                self.assertEqual(caught.exception.details["field"], f"decision call {field}")
+                self.assertNotIn(fx.KEY, caught.exception.message)
+                self.assertNotIn(fx.KEY, repr(caught.exception.details))
+        call = DecisionHttpCall(**valid, json_body={"model": "pplx-decider-v1.1-27b"}, retry_count=2, idempotency_key="a" * 32)
+        self.assertEqual((call.method, call.retry_count, call.idempotency_key), ("POST", 2, "a" * 32))
+        self.assertNotIn("headers", repr(call))
+        self.assertNotIn(fx.KEY, repr(call))
+        # [Hidden Assumption] AC-23: the provider module re-exports the record defined in vidbyte/lib/dataclasses/jev.py; it is one class, not a copy.
+        self.assertIs(DecisionHttpCall, getattr(jev, "DecisionHttpCall", None))
 
 
 class R8FailureWordingTests(unittest.IsolatedAsyncioTestCase):
