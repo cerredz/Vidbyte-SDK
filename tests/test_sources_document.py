@@ -38,6 +38,14 @@ class DocumentSourceTests(unittest.TestCase):
         result = self._load(b"no heading here")
         self.assertEqual(result.items[0].title, "https://ex.com/x.md")
 
+    def test_leading_bom_keeps_h1_title_and_is_stripped_from_body(self) -> None:
+        # [Edge Case] A BOM-prefixed page parses like the same page without the BOM; the hash stays over raw bytes.
+        body = b"\xef\xbb\xbf# Quickstart\nbody"
+        item = self._load(body, label_untrusted=False).items[0]
+        self.assertEqual(item.title, "Quickstart")
+        self.assertEqual(item.content, "# Quickstart\nbody")
+        self.assertEqual(item.metadata["content_sha256"], sha256_hex(body))
+
     def test_non_utf8_body_fails_closed(self) -> None:
         # [Hidden Assumption] Undecodable bytes raise rather than lossily decode.
         with self.assertRaises(SourceParseError):
