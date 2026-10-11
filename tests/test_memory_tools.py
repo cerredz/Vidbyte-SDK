@@ -19,6 +19,8 @@ import unittest
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.tools.builtins.memory import (
     CogneeAddTool,
@@ -430,6 +432,17 @@ class ZepDeleteTests(unittest.IsolatedAsyncioTestCase):
         tool = _inject_transport(ZepDeleteSessionTool("zepkey"), transport)
         result = await tool.execute(ToolCall("zep_delete_session", {"session_id": "bad"}))
         self.assertEqual(result.status, ToolStatus.ERROR)
+
+    async def test_delete_session_id_stays_inside_its_path_segment(self) -> None:
+        """[Security] a model-supplied id cannot climb out of /api/v2/sessions/ and DELETE another endpoint."""
+        transport = MockTransport(200, {})
+        tool = _inject_transport(ZepDeleteSessionTool("zepkey"), transport)
+        await tool.execute(ToolCall("zep_delete_session", {"session_id": "../../admin"}))
+        self.assertEqual(httpx.URL(transport.last_call["url"]).raw_path, b"/api/v2/sessions/..%2F..%2Fadmin")
+        transport.last_call = {}
+        result = await tool.execute(ToolCall("zep_delete_session", {"session_id": ".."}))
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertEqual(transport.last_call, {})
 
 
 class CogneeAddTests(unittest.IsolatedAsyncioTestCase):
