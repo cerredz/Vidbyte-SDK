@@ -3,7 +3,7 @@
 PURPOSE: Regression tests for OutputSchemaFormatter constraint annotation.
 ROLE IN CODEBASE: Keeps unenforceable constraints out of native wire schemas at every depth.
 ARCHITECTURE NOTE: Resolves a Pydantic model, annotates it, and inspects the resulting dict.
-FUNCTION INVENTORY: OutputSchemaAnnotateTests covers anyOf branches emitted for Optional fields; OutputSchemaFencedValidateTests covers fence-tag case.
+FUNCTION INVENTORY: OutputSchemaAnnotateTests covers anyOf branches emitted for Optional fields and gt/lt exclusive bounds; OutputSchemaFencedValidateTests covers fence-tag case.
 COMMON MODIFICATION PATTERNS: Add a model per new schema shape that annotate() must traverse.
 WHAT NOT TO DO: Do not assert exact description wording; assert keys left the schema.
 KNOWN EDGE CASES: Pydantic emits Optional[X] and X | None as anyOf [X, null].
@@ -27,6 +27,11 @@ class Invoice(BaseModel):
     discount: float | None = Field(default=None, ge=0, le=1)
 
 
+class Order(BaseModel):
+    qty: int = Field(gt=0, description="Units ordered.")
+    discount: float = Field(ge=0, lt=1, description="Fractional discount.")
+
+
 class OutputSchemaAnnotateTests(unittest.TestCase):
     """Verify annotate() folds constraints at every schema depth."""
 
@@ -41,6 +46,21 @@ class OutputSchemaAnnotateTests(unittest.TestCase):
             self.assertNotIn(f'"{key}"', json.dumps(annotated))
         self.assertIn("Must be", notes["description"])
         self.assertIn("Must be", discount["description"])
+
+    def test_folds_exclusive_bounds_like_inclusive_ones(self) -> None:
+        """gt/lt bounds (exclusiveMinimum/exclusiveMaximum) leave the wire and reach the description."""
+        formatter = OutputSchemaFormatter()
+        annotated = formatter.annotate(formatter.resolve_schema(Order))
+        qty = annotated["properties"]["qty"]
+        discount = annotated["properties"]["discount"]
+
+        for node in (qty, discount):
+            for key in ("exclusiveMinimum", "exclusiveMaximum", "minimum"):
+                self.assertNotIn(key, node)
+        self.assertIn("Must be", qty["description"])
+        self.assertIn("0", qty["description"].split("Must be", 1)[1])
+        self.assertIn("0", discount["description"].split("Must be", 1)[1])
+        self.assertIn("1", discount["description"].split("Must be", 1)[1])
 
 
 class Total(BaseModel):
