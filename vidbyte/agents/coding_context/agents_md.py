@@ -14,7 +14,10 @@ TESTS: tests/features/coding_agent/test_coding_agent_agents_md.py
 from __future__ import annotations
 
 from vidbyte.agents.coding_context.root_file import RootFileLoader
-from vidbyte.lib.constants.coding import CODING_AGENTS_MD_FILE_NAME, CODING_AGENTS_MD_MAX_BYTES
+from vidbyte.lib.constants.coding import (
+    CODING_AGENTS_MD_FILE_NAME,
+    CODING_AGENTS_MD_MAX_BYTES,
+)
 from vidbyte.lib.dataclasses.coding import CodingAgentSettings
 from vidbyte.lib.enums.coding import CodingContextSection
 

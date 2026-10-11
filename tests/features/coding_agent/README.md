@@ -22,7 +22,7 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - `test_coding_agent_contract.py` checks the constructor contract: public names, the subclass surface, export and restore parity, caller tools, identity errors, and root validation and pinning.
 - `test_coding_agent_web_fetch.py` checks fetch-key selection, authentication, confinement and secrecy, and the keyed fetch view against the bare priced tool.
 - `test_coding_agent_agents_md.py` checks the loading of the root folder's AGENTS.md file end to end on the request the model receives, and `CodingContextWindow`, the shared helper later sections build on. Start here when the model does not see the repository's rules.
-- `test_coding_agent_map_md.py` checks the loading of the root folder's MAP.md file into the `coding:repo_map` section, after `AGENTS.md`. Start here when the model does not see the repository map.
+- `test_coding_agent_map_md.py` checks the loading of the root folder's MAP.md file into the repository-map section, after the AGENTS.md section. Start here when the model does not see the repository map.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop, a fetch key read only from the named environment variable, and clean failures for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` checks `BashTool`'s input and output contract: the spec, validation, streams, `cwd`, argv, stdin, spawn errors, decoding, the output cap, and the bash lookup.
 - `test_bash_tool_process_bounds.py` checks the time limit, process-group kill, cancellation and pipe cleanup on real processes. Start here for a hang or a leftover process.
