@@ -321,6 +321,38 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(settings.max_contract_rejections, 5)
                 self.assertEqual(settings.max_queued_prompts, 7)
 
+    async def test_allowed_tools_override_cannot_widen_parent_gate(self) -> None:
+        # @intent fork-tool-allowed-tools-cannot-widen-parent-gate
+        # A gated parent forked a child whose allowed_tools named a gated-out tool, and the child ran it.
+        agent = StubAgent()
+        agent.agent_loop_settings = AgentLoopSettings(max_iterations=3, allowed_tools=("alpha",))
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", loop_settings={"allowed_tools": ["beta"]}))
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("cannot widen the parent's allowed_tools gate", result.output)
+        self.assertIn("'beta'", result.output)
+        self.assertEqual(result.metadata["error_type"], "PermissionDeniedError")
+        self.assertIsNone(agent.captured)
+        self.assertEqual(agent.child.prompts, [])
+
+    async def test_allowed_tools_override_may_narrow_parent_gate_or_pick_freely_without_one(self) -> None:
+        # Narrowing within a parent gate is allowed; with no parent gate any catalog tool is still accepted.
+        cases = ((("alpha", "beta"), ["alpha"]), (None, ["beta"]))
+        for parent_gate, requested in cases:
+            with self.subTest(parent_gate=parent_gate):
+                agent = StubAgent()
+                agent.agent_loop_settings = AgentLoopSettings(max_iterations=3, allowed_tools=parent_gate)
+                tool = ForkConversationTool()
+                tool.bind_agent(agent)
+
+                result = await tool.execute(_call(prompt="branch", loop_settings={"allowed_tools": requested}))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(agent.captured.agent_loop_settings.allowed_tools, tuple(requested))
+
     async def test_depth_cap_prevents_recursive_fork_construction(self) -> None:
         # Depth cap should be checked before parent.fork is called.
         agent = StubAgent()

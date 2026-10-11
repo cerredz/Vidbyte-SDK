@@ -25,7 +25,7 @@ from vidbyte.context.handoff import EngineeringHandoff, Handoff, MinimalHandoff,
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import ConfigurationError, PermissionDeniedError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -337,9 +337,15 @@ class ForkConversationTool(BaseTool):
         }
 
     def _resolve_allowed_tools(self, raw_allowed_tools: Any) -> tuple[str, ...]:
-        # Validates the optional runtime allowed_tools gate against the selectable tool catalog.
+        # Validates the optional runtime allowed_tools gate against the selectable tool catalog and the parent's own gate.
         names = self._coerce_string_tuple(raw_allowed_tools, "allowed_tools")
         self._available_tools().subset(names)
+        # @intent fork-tool-allowed-tools-cannot-widen-parent-gate
+        # The child inherits the parent's allowed_tools gate, so an override may narrow it but never add a gated-out tool.
+        parent_gate = self._agent.agent_loop_settings.allowed_tools
+        widened = tuple(name for name in names if parent_gate is not None and name not in parent_gate)
+        if widened:
+            raise PermissionDeniedError(f"allowed_tools cannot widen the parent's allowed_tools gate: {', '.join(repr(name) for name in widened)}")
         return names
 
     def _resolve_runtime(self, raw_runtime: Any, raw_actor_runtime: Any) -> str | ActorRuntime | None:
@@ -480,7 +486,7 @@ class ForkConversationTool(BaseTool):
                         "context_window_budget": {"type": "integer", "minimum": 1, "description": "Maximum context-window token budget for the child."},
                         "compaction_trigger_tokens": {"type": "integer", "minimum": 1, "description": "Token threshold that triggers child context compaction."},
                         "compaction_target_tokens": {"type": "integer", "minimum": 1, "description": "Target token count after child context compaction."},
-                        "allowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Runtime-level allowed_tools gate for the child; each name must be in the selectable child tool catalog."},
+                        "allowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Runtime-level allowed_tools gate for the child; each name must be in the selectable child tool catalog and within the parent's own allowed_tools gate."},
                     },
                 },
                 "max_iterations": {"type": "integer", "minimum": 1, "description": "Convenience alias for loop_settings.max_iterations; cannot exceed the parent cap."},
