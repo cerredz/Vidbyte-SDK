@@ -4,7 +4,7 @@
 
 This folder checks the public promise of `vidbyte.CodingAgent` and `vidbyte.tools.builtins.BashTool`. One constructor call gives a model working file, search, shell and web-fetch tools over one root folder. Every shell call returns in bounded time with bounded output. A fetch key reaches only its own provider. The tests drive the real `BaseAgent` tool loop, real file tools, real bash processes and the real provider clients. Only the model runner and the single provider HTTP send are faked.
 
-The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclasses/coding.py` (the argument checks), `vidbyte/tools/toolsets/coding.py` (the seven tools and the keyed fetch view), `vidbyte/tools/builtins/bash.py`, `vidbyte/middleware/builtins/readonly_paths.py` (the `readonly_paths` check), and `vidbyte/cli/coding.py` (the terminal command). The file tools these tests compose belong in `vidbyte/tools/filesystem/`, the search and fetch tools in `vidbyte/tools/builtins/`, and the permission check belongs in `vidbyte/agents/runtime.py`.
+The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclasses/coding.py` (the argument checks), `vidbyte/tools/toolsets/coding.py` (the seven tools and the keyed fetch view), `vidbyte/tools/builtins/bash.py`, and `vidbyte/cli/coding.py` (the terminal command). The file tools these tests compose belong in `vidbyte/tools/filesystem/`, the search and fetch tools in `vidbyte/tools/builtins/`, and the permission check belongs in `vidbyte/agents/runtime.py`.
 
 ## Non-Goals
 
