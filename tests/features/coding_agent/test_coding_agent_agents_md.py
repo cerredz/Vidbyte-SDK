@@ -3,7 +3,7 @@
 PURPOSE: Pin CodingAgent's AGENTS.md loading and the shared coding context window: the root folder's AGENTS.md reaches the model after the system prompt and before the user message, read once, capped at 32 KiB without splitting a character, and placed ahead of the caller's own context manager without changing it.
 ROLE IN CODEBASE: Drives vidbyte.CodingAgent through BaseAgent's real run loop with the offline scripted model from conftest.py, and calls CodingContextWindow (vidbyte/agents/coding_context/window.py) and CodingContextSectionText (vidbyte/lib/dataclasses/coding.py) directly.
 ARCHITECTURE NOTE: Assertions read the system string and the prompt the scripted model actually received, so a section that is built but never rendered fails here. PromptRecorder wraps the conftest runner only to keep the user prompt, which the runner receives positionally and does not record.
-FUNCTION INVENTORY: test_agents_md_is_shown_* (FR-10); test_without_agents_md_* (byte-identical request); test_load_agents_false_* (FR-3); test_lowercase_* / test_exact_name_* / test_parent_folder_* (FR-4, FR-5); test_large_file_* / test_file_of_exactly_* (FR-8); test_blank_file_* / test_file_bytes_* (FR-8, FR-9); test_agents_md_directory_* (FR-7); test_load_agents_must_be_* (FR-2); test_caller_context_manager_* (FR-11, FR-12); test_fork_* (FR-13); test_cwd_change_* / test_edits_after_* (read once); test_window_* and test_section_record_* (the shared helper's contract, FR-11, FR-14).
+FUNCTION INVENTORY: test_agents_md_is_shown_* (FR-10); test_without_agents_md_* (byte-identical request); test_load_agents_false_* (FR-3); test_lowercase_* / test_exact_name_* / test_parent_folder_* (FR-4, FR-5); test_large_file_* / test_file_of_exactly_* (FR-8); test_blank_file_* / test_file_bytes_* (FR-8, FR-9); test_agents_md_directory_* / test_unreadable_* (FR-7); test_load_agents_must_be_* (FR-2); test_caller_context_manager_* (FR-11, FR-12); test_fork_* (FR-13); test_cwd_change_* / test_edits_after_* (read once); test_window_* and test_section_record_* (the shared helper's contract, FR-11, FR-14).
 COMMON MODIFICATION PATTERNS: A sibling section adds its own test module; extend the window tests here only when the window's contract changes.
 WHAT NOT TO DO IN THIS FILE: 1. Do not monkeypatch the loader or the window; build real files under tmp_path. 2. Do not open sockets or use real keys. 3. Do not assert private CodingAgent attributes; use the request, agent.context_manager, and agent.tools.
 KNOWN EDGE CASES: The exact-name-wins case needs a case-sensitive filesystem and is skipped elsewhere (Windows, default macOS). The truncation cases build files whose 32,768th byte falls inside a multibyte character.
@@ -245,6 +245,26 @@ def test_agents_md_directory_fails_construction_naming_the_path(coding_agent_cls
 
     assert str(broken.resolve()) in str(raised.value)
     assert raised.value.details["path"] == str(broken.resolve())
+
+
+def test_unreadable_agents_md_fails_construction_naming_the_path(coding_agent_cls, tmp_path, monkeypatch) -> None:
+    # FR-7: a permission error on a present file fails loudly; Path.open is patched so the case runs on every platform.
+    agents_md = tmp_path / "AGENTS.md"
+    _write(agents_md, RULES)
+    real_open = Path.open
+
+    def refuse_agents_md(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self.name == "AGENTS.md":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refuse_agents_md)
+    with pytest.raises(ConfigurationError) as raised:
+        _agent(coding_agent_cls, tmp_path)
+
+    assert str(agents_md.resolve()) in str(raised.value)
+    assert raised.value.details == {"path": str(agents_md.resolve()), "error": "PermissionError"}
+    assert isinstance(raised.value.__cause__, PermissionError)
 
 
 @pytest.mark.parametrize("bad", ["yes", 1, 0, None, "false"], ids=["yes", "one", "zero", "none", "false-string"])
