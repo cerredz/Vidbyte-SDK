@@ -32,7 +32,6 @@ from vidbyte.lib.dataclasses.jev import (
     JevDecisionRequest,
     JevJson,
     JevModelCard,
-    JevOption,
     JevProbability,
     JevQuestion,
     JevValidation,
@@ -69,16 +68,17 @@ class OpenAIDecisionsRequest:
         # @intent wire-shape-owned-by-provider
         # The records stay encoder-free; this is the only place the OpenAI Decisions body is shaped, so an
         # API change is a one-file edit plus its scripted-transport tests.
-        questions = tuple(OpenAIDecisionsRequest.question(question) for question in request.questions)
+        # Turn each question's instructions into text (this wire takes strings only), then shape its wire entry.
+        questions = tuple(OpenAIDecisionsRequest.question(question, instructions=OpenAIDecisionsRequest.text(question.instructions, field_name=f"instructions of question {question.name!r}")) for question in request.questions)
+        # The state becomes the `input` text the questions are asked about.
         return OpenAIDecisionsWireRequest(model=config.resolved_model(), input=OpenAIDecisionsRequest.text(request.state, field_name="state"), questions=questions)
 
     @staticmethod
-    def question(question: JevQuestion) -> OpenAIDecisionsWireQuestion:
+    def question(question: JevQuestion, *, instructions: str) -> OpenAIDecisionsWireQuestion:
         # Returns one wire question: a noul becomes an option-free predicate; choice and score carry their options.
         # @intent predicate-criteria-are-refused-not-dropped
         # A predicate has only instructions, so sending a noul whose true/false options carry criteria would
         # silently ignore the caller's rubric; the call is refused before anything is sent.
-        instructions = OpenAIDecisionsRequest.text(question.instructions, field_name=f"instructions of question {question.name!r}")
         if question.question_type is not JevQuestionType.NOUL:
             return OpenAIDecisionsWireQuestion(type=question.question_type.value, name=question.name, instructions=instructions, options=question.options)
         if any(option.description is not None for option in question.options):
@@ -102,19 +102,21 @@ class OpenAIDecisionsRequest:
         questions: list[dict[str, object]] = []
         for question in wire.questions:
             entry: dict[str, object] = {"type": question.type, "name": question.name, "instructions": question.instructions}
+            # Option descriptions are strings on this wire, so structured descriptions become JSON text first.
+            described = [(option.name, None if option.description is None else OpenAIDecisionsRequest.text(option.description, field_name=f"description of option {option.name!r}")) for option in question.options]
             if question.type == JevQuestionType.CHOICE.value:
-                entry["choices"] = [OpenAIDecisionsRequest.option(option, key="value") for option in question.options]
+                entry["choices"] = [OpenAIDecisionsRequest.option(name, description, key="value") for name, description in described]
             elif question.type == JevQuestionType.SCORE.value:
-                entry["levels"] = [OpenAIDecisionsRequest.option(option, key="label") for option in question.options]
+                entry["levels"] = [OpenAIDecisionsRequest.option(name, description, key="label") for name, description in described]
             questions.append(entry)
         return {"model": wire.model, "input": wire.input, "questions": questions}
 
     @staticmethod
-    def option(option: JevOption, *, key: str) -> dict[str, object]:
+    def option(name: str, description: str | None, *, key: str) -> dict[str, object]:
         # Returns one choice or level entry, sending a description only when the option has one.
-        if option.description is None:
-            return {key: option.name}
-        return {key: option.name, "description": OpenAIDecisionsRequest.text(option.description, field_name=f"description of option {option.name!r}")}
+        if description is None:
+            return {key: name}
+        return {key: name, "description": description}
 
 
 class OpenAIDecisionsAnswers:
@@ -138,7 +140,26 @@ class OpenAIDecisionsAnswers:
         unexpected = sorted(name for name in by_name if name not in names)
         if missing or unexpected:
             raise self.error(f"{_LABEL} answers do not match the questions sent: missing {missing}, unexpected {unexpected}.")
-        return MappingProxyType({question.name: self._answer(question, by_name[question.name]) for question in request.questions})
+        normalized: dict[str, JevAnswer] = {}
+        for question in request.questions:
+            raw = by_name[question.name]
+            # A refusal, or an answer typed differently from its question, fails the call.
+            self._require_type(question, raw)
+            try:
+                # A predicate answer carries one probability for `true`.
+                if question.question_type is JevQuestionType.NOUL:
+                    normalized[question.name] = self._predicate(question, raw)
+                    continue
+                # Choice and score answers carry a `probabilities` array: key each entry by its option (a score
+                # entry by its level label or index), then require exactly one probability per option.
+                entries = self._entries(question, raw.get("probabilities"))
+                keys = [entry.get("value") for entry in entries] if question.question_type is JevQuestionType.CHOICE else [self._level(question.option_names(), entry) for entry in entries]
+                probabilities = self._distribution(question, [(key, entry.get("probability")) for key, entry in zip(keys, entries, strict=True)])
+                normalized[question.name] = self._choice(question, raw, probabilities) if question.question_type is JevQuestionType.CHOICE else self._score(question, raw, probabilities)
+            except ConfigurationError as exc:
+                # A value our records reject (a probability of 1.5, say) is a malformed answer OpenAI still billed.
+                raise self.error(f"{_LABEL} answer for {question.name!r} was malformed: {exc.message}") from exc
+        return MappingProxyType(normalized)
 
     def error(self, message: str) -> ProviderResponseError:
         # Builds a ProviderResponseError whose details keep the usage of the call that was billed.
@@ -161,21 +182,13 @@ class OpenAIDecisionsAnswers:
             by_name[entry["name"]] = entry
         return by_name
 
-    def _answer(self, question: JevQuestion, raw: Mapping[str, Any]) -> JevAnswer:
-        # Rejects a refusal or a wrong type tag, then dispatches to the normalizer for the question's type.
+    def _require_type(self, question: JevQuestion, raw: Mapping[str, Any]) -> None:
+        # Rejects a refusal or a type tag other than the one the question was sent as.
         expected = OPENAI_DECISIONS_PREDICATE_TYPE if question.question_type is JevQuestionType.NOUL else question.question_type.value
         if raw.get("type") == OPENAI_DECISIONS_REFUSAL_TYPE:
             raise self.error(f"{_LABEL} refused question {question.name!r}.")
         if raw.get("type") != expected:
             raise self.error(f"{_LABEL} answer for {question.name!r} has type {raw.get('type')!r}, but the question was sent as {expected!r}.")
-        try:
-            if question.question_type is JevQuestionType.NOUL:
-                return self._predicate(question, raw)
-            if question.question_type is JevQuestionType.SCORE:
-                return self._score(question, raw)
-            return self._choice(question, raw)
-        except ConfigurationError as exc:
-            raise self.error(f"{_LABEL} answer for {question.name!r} was malformed: {exc.message}") from exc
 
     def _predicate(self, question: JevQuestion, raw: Mapping[str, Any]) -> JevAnswer:
         # Expands the scalar `probability` (P(true)) into the same true/false answer a System One noul produces.
@@ -183,21 +196,17 @@ class OpenAIDecisionsAnswers:
         choice = JEV_NOUL_TRUE if p_yes >= JEV_NOUL_YES_THRESHOLD else JEV_NOUL_FALSE
         return JevAnswer(question_name=question.name, question_type=question.question_type, choice=choice, probabilities={JEV_NOUL_TRUE: p_yes, JEV_NOUL_FALSE: 1.0 - p_yes}, noul=p_yes)
 
-    def _choice(self, question: JevQuestion, raw: Mapping[str, Any]) -> JevAnswer:
-        # Reads `choice`, the `probabilities` array keyed by each entry's `value`, and `confidence`.
-        entries = self._entries(question, raw.get("probabilities"))
-        probabilities = self._distribution(question, [(entry.get("value"), entry.get("probability")) for entry in entries])
+    def _choice(self, question: JevQuestion, raw: Mapping[str, Any], probabilities: dict[str, float]) -> JevAnswer:
+        # Reads `choice` and `confidence` beside the distribution already keyed by each entry's `value`.
         choice = raw.get("choice")
         if choice not in probabilities:
             raise self.error(f"{_LABEL} chose {choice!r} for {question.name!r}, outside its options {list(question.option_names())}.")
         return JevAnswer(question_name=question.name, question_type=question.question_type, choice=choice, probabilities=probabilities, confidence=raw.get("confidence"))
 
-    def _score(self, question: JevQuestion, raw: Mapping[str, Any]) -> JevAnswer:
-        # Reads the `probabilities` array keyed by level label (or by `value` as the level index), `score`, and `confidence`.
-        names = question.option_names()
-        entries = self._entries(question, raw.get("probabilities"))
-        probabilities = self._distribution(question, [(self._level(names, entry), entry.get("probability")) for entry in entries])
-        choice = max(names, key=lambda name: probabilities[name])
+    @staticmethod
+    def _score(question: JevQuestion, raw: Mapping[str, Any], probabilities: dict[str, float]) -> JevAnswer:
+        # Picks the most likely level and reads `score` and `confidence` beside the distribution keyed by level label.
+        choice = max(question.option_names(), key=lambda name: probabilities[name])
         return JevAnswer(question_name=question.name, question_type=question.question_type, choice=choice, probabilities=probabilities, confidence=raw.get("confidence"), score=raw.get("score"))
 
     def _entries(self, question: JevQuestion, raw: object) -> list[Mapping[str, Any]]:
