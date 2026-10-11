@@ -2,13 +2,15 @@
 
 ## High-Level Feature Description
 
-An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAgent` whose model can run shell commands, read, write and edit files, search files, and fetch web pages, all under one root folder. The model can act without the caller writing a policy, because the default policy allows every permission. Every bash call returns in bounded time with bounded output. A supplied fetch key picks one priced provider, and the model reads the pages it fetched. By default the root folder's `AGENTS.md` is read once, at construction, and shown to the model right after the system prompt, so the model follows the rules the repository already wrote down.
+An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAgent` whose model can run shell commands, read, write and edit files, search files, and fetch web pages, all under one root folder. The model can act without the caller writing a policy, because the default policy allows every permission. Every bash call returns in bounded time with bounded output. A supplied fetch key picks one priced provider, and the model reads the pages it fetched. By default the root folder's `AGENTS.md` is read once, at construction, and shown to the model right after the system prompt, so the model follows the rules the repository already wrote down. The root folder's `MAP.md`, a short human-written map of where things live, is shown the same way right after it, so the model can skip exploring the layout.
 
 ## Contract
 
-`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, load_agents=True, context_manager=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
+`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, load_agents=True, load_map=True, context_manager=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
 
 With `load_agents=True` (a real `bool`), the agent lists `root_dir` once and reads `AGENTS.md`, or, when that exact name is absent, the first case variant in sorted order; parent folders are never searched. At most `CODING_AGENTS_MD_MAX_BYTES` (32,768) bytes are read and decoded as UTF-8 with replacement characters, without a byte-order mark; a longer file is cut at a whole character and ends with a line giving the shown and total bytes and the `read_lines` start line for the rest. The text renders as primitive `coding:agents_md`, titled `Repository instructions (<file name>)`, after the system prompt and before the user message. A missing or blank file adds nothing; a present file that is not a readable regular file raises `ConfigurationError` naming its path. `CodingContextWindow.build(sections, context_manager)` places the sections in `CodingContextSection` order ahead of the caller's manager content, in a new manager; with no sections it returns the caller's manager, or `None`.
+
+With `load_map=True` (a real `bool`), `MAP.md` (else a case variant such as `map.md`) is read the same way, through the same `RootFileLoader` steps, capped at `CODING_MAP_MD_MAX_BYTES` (32,768), and renders as primitive `coding:repo_map`, titled `Repository map (<file name>)`, after the `AGENTS.md` section. Other names, such as `REPO_MAP.md`, are not read.
 
 `BashTool(root_dir)` runs `bash -c <command>` in `root_dir` with stdin closed and stderr merged into stdout. A success result holds the decoded output, at most `BASH_MAX_OUTPUT_BYTES` bytes followed by an omitted-byte count, and ends with `exit code: <n>`. It returns `bash_not_found`, `spawn_failed` or `timeout` errors. One time limit, `BASH_TIMEOUT_SECONDS`, covers both reading and waiting. On a timeout or a cancellation, the command's process group is killed (POSIX) or Git's launcher is killed (Windows), then the tool waits at most `BASH_KILL_GRACE_SECONDS` and closes the pipe.
 
@@ -35,7 +37,7 @@ SDK callers that construct `vidbyte.CodingAgent`, and the model inside `AgentRun
 
 ## State Transitions
 
-Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` that is not a bool, an unreadable `AGENTS.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call and starts no process; it reads at most 32,768 bytes of `AGENTS.md`. A bash call goes through these stages:
+Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` or `load_map` that is not a bool, an unreadable `AGENTS.md` or `MAP.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call and starts no process; it reads at most 32,768 bytes each of `AGENTS.md` and `MAP.md`. A bash call goes through these stages:
 
 1. Validated.
 2. Spawned.
@@ -117,6 +119,7 @@ These are the failure inventory the tests were chosen from, given as input → w
   - `load_agents="yes"` or `1` is accepted by truthiness.
   - The caller's manager is changed, or its content is dropped or rendered first.
   - `fork()` loses the section, or a later `chdir` or edit changes it.
+- **MAP.md errors.** The map renders before `AGENTS.md` or not at all; `load_map=False` still reads the folder; a lowercase `map.md` is missed; the cut splits a character or names the wrong file; a folder named `MAP.md` is skipped; `load_map="yes"` is accepted. The shared `RootFileLoader` steps are pinned by the `AGENTS.md` tests.
 - **Bash lookup errors.** On Windows the `PATH` `bash` (WSL's launcher) is chosen instead of Git's `bin/bash.exe`, or the lookup walks past three parent folders (AC-22). A missing bash breaks construction or the other tools (AC-17).
 
 ## Historical Regressions
@@ -135,6 +138,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
 - `test_coding_agent_agents_md.py` checks `AGENTS.md` loading and the shared coding context window: the position in the request, the byte-identical request without a file, the switch, case variants, the root-only lookup, the cap and the cut character, blank and undecodable files, a broken file, strict bool validation, the caller's manager, fork, read-once, and `CodingContextWindow` and `CodingContextSectionText` on their own.
+- `test_coding_agent_map_md.py` checks `MAP.md` loading: the position before the user message and after `AGENTS.md`, a missing or blank file, `map.md`, the cap and the cut character, a broken file, the switch, and strict bool validation.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
