@@ -14,6 +14,7 @@ Functions:
     - _run_single_case: Semaphore-guarded single case lifecycle runner.
     - _resolve_grader: Resolves explicit graders, templates, or the default grader.
     - _invoke_target: Dynamic invocation block mapping target execution styles (agents vs. runners).
+    - _invoke_agent_fork: Runs one case on a fresh agent fork, then closes the MCP servers that fork started.
     - _resolve_model_name: Resolves the descriptor name for the evaluated target entity.
 Relations:
     Related to vidbyte.evals.types (receives EvalSuite and outputs EvalSuiteResult) and BaseAgent.
@@ -126,14 +127,8 @@ class EvalRunner:
         target = self.target
 
         if isinstance(target, BaseAgent):
-            forked = target.fork(AgentForkSettings(name=f"{target.name}_eval"))
-            reply = await forked.arun(
-                AgentInput(prompt=case.prompt),
-                trace_metadata=self._case_trace_metadata(case, case_index=case_index, suite_name=suite_name),
-            )
-            metadata = dict(reply.metadata) if reply.metadata else {}
-            metadata["probe"] = RunProbe.from_agent(forked)
-            return str(reply.content), metadata
+            trace_metadata = self._case_trace_metadata(case, case_index=case_index, suite_name=suite_name)
+            return await self._invoke_agent_fork(target, case, trace_metadata)
 
         if hasattr(target, "arun"):
             res = await target.arun(case.prompt)
@@ -160,6 +155,19 @@ class EvalRunner:
             actual = str(res)
 
         return actual, {}
+
+    async def _invoke_agent_fork(self, target: BaseAgent, case: EvalCase, trace_metadata: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        # Runs one case on a fresh fork of the agent target and returns its content plus metadata with a run probe.
+        forked = target.fork(AgentForkSettings(name=f"{target.name}_eval"))
+        # @intent internal-forks-close-their-mcp-servers
+        # The fork reconnects the target's MCP servers for itself and nobody else holds it, so close them when its run ends.
+        try:
+            reply = await forked.arun(AgentInput(prompt=case.prompt), trace_metadata=trace_metadata)
+            metadata = dict(reply.metadata) if reply.metadata else {}
+            metadata["probe"] = RunProbe.from_agent(forked)
+            return str(reply.content), metadata
+        finally:
+            await forked.close_mcp_servers()
 
     def _case_trace_metadata(self, case: EvalCase, *, case_index: int, suite_name: str) -> dict[str, Any]:
         # Trace-only eval identifiers; intentionally not inserted into the model prompt.
