@@ -807,6 +807,22 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await runner.arun(suite, tags=["billing"])).results), 2)
         self.assertEqual(len((await runner.arun(suite)).results), 3)
 
+    async def test_eval_case_bare_string_tags_and_templates_are_one_item(self) -> None:
+        # @intent bare-string-tag-is-one-tag
+        # @intent bare-string-template-is-one-template
+        # [Silent Failure] EvalCase(tags="billing") kept letters, so filter(["billing"]) dropped it; templates="x" failed as "s".
+        case = EvalCase(prompt="q1", expected="q1", tags="billing", templates="short_answer_fact")
+        written = EvalCase(prompt="q1", expected="q1", tags=("billing",), templates=("short_answer_fact",))
+        self.assertEqual((case.tags, case.templates), (written.tags, written.templates))
+        self.assertEqual(EvalCase(prompt="q2", tags="billing, refunds").tags, ("billing", "refunds"))
+        self.assertEqual([c.prompt for c in EvalSuite("s", [case]).filter(["billing"])], ["q1"])
+
+        runner = EvalRunner(MockRunner("q1"), default_grader=ExactMatchGrader(), concurrency=1)
+        result = await runner.arun(EvalSuite("s", [case]), tags=["billing"])
+        self.assertEqual(len(result.results), 1)
+        self.assertIsNone(result.results[0].error)
+        self.assertTrue(result.results[0].grader_result.passed)
+
     async def test_eval_runner_with_agent_fork(self) -> None:
         # Tests EvalRunner executing suites and ensures state isolation using clone forks.
         agent = MockAgent()
