@@ -431,8 +431,8 @@ class TypeSafeWireRequest:
 class SystemOneHost:
     """One host that serves the System One wire: its name in messages, its path, and its two wire quirks.
 
-    `noul_criteria_required` is True when the host rejects a noul question without `criteria`
-    (OpenRouter). `model_from_request` is True when the host's echoed `model` is undocumented or
+    `noul_criteria_required` is True when the host rejects a noul question whose `criteria` lack
+    either key (OpenRouter), so it always receives both. `model_from_request` is True when the host's echoed `model` is undocumented or
     caller-chosen, so the adapter reports the requested model id as the pricebook key instead.
     """
 

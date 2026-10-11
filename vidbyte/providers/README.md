@@ -704,8 +704,8 @@ runner = DecisionModelRunner(DecisionModelConfig(provider=ModelProvider.PERPLEXI
   Their records land under provider `typesafe` and the echoed model is priced against TypeSafe's
   rows, so a server that echoes a `jev-` id shows TypeSafe's rate although your own hardware served
   it, and any other id records `cost_usd=None`.
-- **OpenRouter** rejects a noul question without `criteria`, so its host row sends
-  `{"true": null, "false": null}` when the question has no options. `usage.cost` wins over table pricing.
+- **OpenRouter** rejects a noul question whose `criteria` lack either key, so its host row always sends
+  both `true` and `false`, each with its description or null. `usage.cost` wins over table pricing.
 - **OpenAI predicates** have no criteria slot: a noul question whose true/false options carry
   descriptions is refused before the call, so move the criteria into `instructions`. Structured
   `state`, `instructions`, and descriptions are sent as JSON text.
