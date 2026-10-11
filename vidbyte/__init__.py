@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -97,6 +97,7 @@ from vidbyte.agents import (
     CodexTurnError,
     CodexTurnSettings,
     CodexUsageResponse,
+    CodingAgent,
     FinalizationContext,
     HandoffAgent,
     JevAgent,
@@ -401,6 +402,7 @@ from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
 )
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
+from vidbyte.lib.dataclasses.coding import CodingAgentSettings
 from vidbyte.lib.dataclasses.continual_trace_descriptor import (
     ContinualTraceAgentDescriptor,
 )
@@ -606,7 +608,7 @@ from vidbyte.tools.mcp import (
     McpServerHandle,
     McpToolPermission,
 )
-from vidbyte.tools.toolsets import ParadigmMinimalToolset
+from vidbyte.tools.toolsets import CodingAgentTools, ParadigmMinimalToolset
 from vidbyte.trace import (
     ActionTrace,
     CalibrationTrace,
@@ -709,6 +711,9 @@ __all__ = [
     "JudgeDecisionRecord",
     "JudgeReasonCode",
     "JudgeReportPayload",
+    "CodingAgent",
+    "CodingAgentSettings",
+    "CodingAgentTools",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
