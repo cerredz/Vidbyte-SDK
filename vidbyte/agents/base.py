@@ -270,6 +270,8 @@ class BaseAgent(McpAttachableMixin):
         # MCP Attachable State
         self._mcp_handles = []
         self._pending_mcp_configs = []
+        # Tool names a fork dropped; MCP servers this agent connects never re-add them.
+        self._fork_dropped_tool_names = frozenset()
 
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:

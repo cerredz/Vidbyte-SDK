@@ -114,6 +114,18 @@ class MockMcpStdioTransport:
         self.closed = True
 
 
+class TwoToolMcpTransport(MockMcpStdioTransport):
+    """Mock MCP transport whose server exposes two tools, so one can be dropped and the other kept."""
+
+    async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        # Adds a second spare_<server> tool beside the base remote_<server> tool.
+        result = await super().request(method, params)
+        if method == "tools/list":
+            spare = dict(result["tools"][0], name=f"spare_{self.command[0]}")
+            result = {"tools": [*result["tools"], spare]}
+        return result
+
+
 class RecordingTracer(TracerBase):
     """Minimal tracer that records root trace attributes."""
 
@@ -359,6 +371,55 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(child.mcp_servers()), 1)
         self.assertIsNot(parent.mcp_servers()[0], child.mcp_servers()[0])
         self.assertIsNot(parent.mcp_servers()[0].bridged_tools[0], child.mcp_servers()[0].bridged_tools[0])
+
+    @staticmethod
+    def _tool_names(agent: BaseAgent) -> set[str]:
+        # Names the tools the agent would offer the model.
+        return {tool.name for tool in agent.tools}
+
+    @patch("vidbyte.tools.mcp.attach.McpStdioTransport", TwoToolMcpTransport)
+    async def test_fork_drop_tools_removes_inherited_mcp_tool_after_connect(self) -> None:
+        # A dropped MCP tool stays out when the child connects and reconnects, while the server's other tool remains.
+        parent = self._agent()
+        await parent.attach_mcp_server(["calc"])
+        child = parent.fork(AgentForkSettings(name="child", drop_tools=["remote_calc"]))
+
+        await child._ensure_mcp_connected()
+        self.assertNotIn("remote_calc", self._tool_names(child))
+        self.assertIn("spare_calc", self._tool_names(child))
+        self.assertEqual(child.mcp_tool_names(), ("spare_calc",))
+
+        # A synchronous-style run releases and re-queues the server; the next connect must still leave it out.
+        await child._run_releasing_mcp(child._ensure_mcp_connected())
+        await child._ensure_mcp_connected()
+        self.assertEqual(self._tool_names(child), {"spare_calc"})
+        self.assertEqual({"remote_calc", "spare_calc"}, self._tool_names(parent))
+
+    @patch("vidbyte.tools.mcp.attach.McpStdioTransport", TwoToolMcpTransport)
+    async def test_grandchild_of_mcp_dropping_fork_also_lacks_the_tool(self) -> None:
+        # A grandchild inherits the child's drop, merged with its own drop_tools.
+        parent = self._agent()
+        await parent.attach_mcp_server(["calc"])
+        child = parent.fork(AgentForkSettings(name="child", drop_tools=["remote_calc"]))
+        await child._ensure_mcp_connected()
+
+        grandchild = child.fork(AgentForkSettings(name="grandchild"))
+        await grandchild._ensure_mcp_connected()
+        self.assertEqual(self._tool_names(grandchild), {"spare_calc"})
+
+        narrower = child.fork(AgentForkSettings(name="narrower", drop_tools=["spare_calc"]))
+        await narrower._ensure_mcp_connected()
+        self.assertEqual(self._tool_names(narrower), set())
+
+    @patch("vidbyte.tools.mcp.attach.McpStdioTransport", TwoToolMcpTransport)
+    async def test_fork_without_drop_tools_keeps_every_mcp_tool(self) -> None:
+        # Without drop_tools the child connects every tool the parent's server exposes.
+        parent = self._agent()
+        await parent.attach_mcp_server(["calc"])
+        child = parent.fork(AgentForkSettings(name="child"))
+
+        await child._ensure_mcp_connected()
+        self.assertEqual(self._tool_names(child), {"remote_calc", "spare_calc"})
 
     def test_fork_run_id_is_distinct_and_records_lineage(self) -> None:
         # Default fork run ids should differ from the parent and record lineage metadata.
