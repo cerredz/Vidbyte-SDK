@@ -212,6 +212,16 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(child.tools.names(), ("keep",))
 
+    async def test_drop_tools_reaches_a_tools_catalog_inside_the_tools_list(self) -> None:
+        # A catalog nested in the tools list is the same tools as the flat list, so drop_tools must remove from it too.
+        keep, drop, other = FakeTool("keep"), FakeTool("drop"), FakeTool("other")
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[keep, drop, other])
+        flat = parent.fork(AgentForkSettings(name="flat", tools=[keep, drop, other], drop_tools=["drop"]))
+        nested = parent.fork(AgentForkSettings(name="nested", tools=[Tools([keep, drop]), other], drop_tools=["drop"]))
+
+        self.assertEqual(nested.tools.names(), flat.tools.names())
+        self.assertNotIn("drop", nested.tools.names())
+
     async def test_agent_fork_clones_stateful_add_tools(self) -> None:
         # Stateful add_tools entries should be cloned before the child binds them.
         parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())

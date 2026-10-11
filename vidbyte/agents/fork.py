@@ -141,14 +141,21 @@ class AgentForker:
     def _tool_items(cls, agent: BaseAgent, settings: AgentForkSettings, child_manager: ContextManager | None) -> tuple[object, ...]:
         # Returns child-safe tools by removing parent MCP bridged tools, cloning bound builtins, and applying deltas.
         tools = settings.tools
-        selected = tools.all() if isinstance(tools, Tools) else (agent._agent_tool_items if tools is None else tuple(tools))
+        # @intent fork-flattens-nested-tool-catalogs
+        # A Tools catalog inside the list adds its own tools in place, as BaseAgent does, so cloning and drop_tools reach them.
+        selected = tools.all() if isinstance(tools, Tools) else (agent._agent_tool_items if tools is None else cls._flat_tools(tools))
         parent_mcp_tools = set(agent._mcp_bridged_tools_for_fork())
         child_items = [cls._clone_tool(tool, agent.context_manager, child_manager) for tool in selected if tool not in parent_mcp_tools]
-        child_items.extend(cls._clone_tool(tool, agent.context_manager, child_manager) for tool in settings.add_tools)
+        child_items.extend(cls._clone_tool(tool, agent.context_manager, child_manager) for tool in cls._flat_tools(settings.add_tools))
         if not settings.drop_tools:
             return tuple(child_items)
         dropped = {str(name) for name in settings.drop_tools}
         return tuple(tool for tool in child_items if agent._tool_name(tool) not in dropped)
+
+    @staticmethod
+    def _flat_tools(items: Sequence[object]) -> tuple[object, ...]:
+        # Spreads each Tools catalog in the list into its own tools and keeps every other item as it is.
+        return tuple(tool for item in items for tool in (item.all() if isinstance(item, Tools) else (item,)))
 
     @classmethod
     def _clone_tool(cls, tool: object, parent_manager: ContextManager | None, child_manager: ContextManager | None) -> object:
