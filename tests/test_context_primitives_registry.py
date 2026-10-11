@@ -112,6 +112,18 @@ class RegistryUpsertTests(unittest.TestCase):
         self.assertEqual(getattr(manager.get_by_id("task:1"), "goal", None), "model goal")
         self.assertEqual(getattr(manager.get_by_id("task:2"), "goal", None), "fresh goal")
 
+    def test_place_returns_the_id_the_primitive_is_stored_under(self) -> None:
+        """Verify an id carrying whitespace comes back as the exact key, so the caller can find and remove it."""
+        for place in ("place_after_system_prompt", "place_after_tools"):
+            with self.subTest(place=place):
+                manager = ContextManager()
+
+                returned = getattr(manager, place)(TextContextItem(primitive_id="plan:current\n", title="Plan", content="step 1"))
+
+                self.assertIsNotNone(manager.get_by_id(returned))
+                manager.remove_by_id(returned)
+                self.assertEqual(manager.registry_items(), ())
+
     def test_get_by_id_returns_none_for_missing_id(self) -> None:
         manager = ContextManager()
 
