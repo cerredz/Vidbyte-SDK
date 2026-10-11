@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import unittest
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,7 @@ from tests.agent_test_support import build_test_agent
 from vidbyte import Agent, AgentForkSettings, TraceOption, TraceSchema
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType
+from vidbyte.lib.enums.continual_trace import GoalSuccessVerdict
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools import BaseTool, ToolCall, ToolResult, ToolSpec
 from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware
@@ -62,6 +63,13 @@ class _ConcreteCollectionModel(BaseModel):
     labels: dict[str, str] | None = Field(None, description="Labels.")
     digest: bytes | None = Field(None, description="Digest.")
     summary: str | None = Field(None, description="Summary.")
+
+
+class _VocabularyModel(BaseModel):
+    """Trace whose fields draw from closed vocabularies."""
+
+    status: GoalSuccessVerdict | None = Field(None, description="Goal status.")
+    priority: Literal["low", "urgent"] | None = Field(None, description="Priority.")
 
 
 def _progress_schema() -> TraceSchema:
@@ -131,6 +139,16 @@ class TraceOptionTests(unittest.TestCase):
         self.assertEqual(abstract["summary"].type, TraceFieldType.STRING)
         self.assertEqual(abstract["reviewers"].items, concrete["reviewers"].items)
         self.assertEqual(abstract["reviewers"].items.fields["name"].type, TraceFieldType.STRING)
+
+    def test_from_model_keeps_enum_and_literal_vocabulary(self) -> None:  # [Silent Failure]
+        schema = TraceSchema.from_model(_VocabularyModel)
+        status, priority = schema.fields["status"], schema.fields["priority"]
+        self.assertEqual(status.type, TraceFieldType.STRING)
+        self.assertEqual(status.enum, tuple(member.value for member in GoalSuccessVerdict))
+        self.assertEqual(priority.type, TraceFieldType.STRING)
+        self.assertEqual(priority.enum, ("low", "urgent"))
+        self.assertEqual(TraceField.model_validate(priority.model_dump(mode="json", exclude_none=True)), priority)
+        self.assertIn("- priority (string, one of: low, urgent): Priority.", schema.describe_fields())
 
     def test_initial_artifact_keys_all_none(self) -> None:  # [Edge Case]
         artifact = _progress_schema().initial_artifact()
@@ -217,6 +235,17 @@ class UpdateTraceToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trace["blockers"], ["x", "y"])
         self.assertEqual(trace["owner"], {"name": "a"})
 
+    async def test_off_vocabulary_value_returns_shape_error(self) -> None:  # [Silent Failure]
+        tool = UpdateTraceTool(TraceSchema.from_model(_VocabularyModel))
+        for bad in ({"status": "angry"}, {"priority": "asap"}):
+            result = await tool.execute(_call(bad))
+            self.assertEqual(result.status.value, "error")
+            self.assertIn("output shape mismatch", result.output)
+        self.assertEqual(tool.current_trace(), {"status": None, "priority": None})
+        result = await tool.execute(_call({"status": "achieved", "priority": "urgent"}))
+        self.assertNotEqual(result.status.value, "error", result.output)
+        self.assertEqual(tool.current_trace(), {"status": "achieved", "priority": "urgent"})
+
     async def test_non_object_trace_returns_error(self) -> None:  # [Edge Case]
         tool = UpdateTraceTool(_progress_schema())
         result = await tool.execute(_call("nope"))
@@ -225,6 +254,11 @@ class UpdateTraceToolTests(unittest.IsolatedAsyncioTestCase):
     def test_input_schema_disallows_additional_properties(self) -> None:  # [Hidden Assumption]
         schema_dict = UpdateTraceTool(_progress_schema()).spec().input_schema
         self.assertFalse(schema_dict["properties"]["trace"]["additionalProperties"])
+
+    def test_input_schema_lists_vocabulary(self) -> None:  # [Silent Failure]
+        properties = UpdateTraceTool(TraceSchema.from_model(_VocabularyModel)).spec().input_schema["properties"]["trace"]["properties"]
+        self.assertEqual(properties["status"]["enum"], [member.value for member in GoalSuccessVerdict])
+        self.assertEqual(properties["priority"]["enum"], ["low", "urgent"])
 
 
 # ---------------------------------------------------------------------------
