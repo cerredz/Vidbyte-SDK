@@ -90,14 +90,17 @@ class AgentFallback:
     @staticmethod
     def _primary_model(runner_config: AgentRunnerConfig, agent_name: str) -> FallbackModel:
         # Chain index 0 is the agent's own runner identity; a chain needs a primary to fall back from.
-        if not runner_config.provider or not runner_config.model_name:
+        # @intent fallback-primary-reads-prefixed-model
+        # A primary given as 'deepseek/deepseek-chat' with no provider runs fine, so read it the way the runner does.
+        provider, model_name, _ = Runner._normalize_provider_and_model(runner_config.provider, runner_config.model_name)
+        if not provider or not model_name:
             raise ConfigurationError(
                 f"Agent {agent_name} declares a fallback chain but no provider/model_name to fall back from.",
                 details={"agent": agent_name, "provider": runner_config.provider, "model_name": runner_config.model_name},
             )
         return FallbackModel(
-            provider=runner_config.provider,
-            model=runner_config.model_name,
+            provider=provider,
+            model=model_name,
             api_key=runner_config.api_key,
             temperature=runner_config.temperature,
         )

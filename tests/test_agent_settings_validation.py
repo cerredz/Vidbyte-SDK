@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from vidbyte import Agent
 from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
 from vidbyte.agents.fallback import AgentFallback
 from vidbyte.agents.settings import AgentFallbackSettings
@@ -87,6 +88,17 @@ class FallbackRunnerTimeoutTests(unittest.TestCase):
         backup = FallbackModel(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-ant")
         chain = AgentFallback.from_spec([backup], runner_config=config, agent_name="researcher")
         self.assertEqual(chain.build_runner(1)._config.timeout_seconds, 300.0)
+
+
+class FallbackPrefixedPrimaryTests(unittest.TestCase):
+    def test_provider_prefixed_primary_model_builds_a_chain(self) -> None:
+        # @intent fallback-primary-reads-prefixed-model
+        # 'deepseek/deepseek-chat' with no provider runs on DeepSeek, so a fallback chain must read it the same way.
+        agent = Agent(**BASE, model_name="deepseek/deepseek-chat", api_key="sk-deepseek", fallback=["deepseek-reasoner", "gemini/gemini-3.5-flash"])
+        primary, bare, prefixed = agent.fallback.models
+        self.assertEqual((primary.provider, primary.model, primary.api_key), ("deepseek", "deepseek-chat", "sk-deepseek"))
+        self.assertEqual((bare.provider, bare.model, bare.api_key), ("deepseek", "deepseek-reasoner", "sk-deepseek"))
+        self.assertEqual((prefixed.provider, prefixed.model), ("gemini", "gemini-3.5-flash"))
 
 
 def build(**overrides: object) -> AgentSettings:
