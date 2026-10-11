@@ -44,7 +44,7 @@ schema = tool_spec_to_provider_schema(lookup_metric.spec(), "openai")
 - `base.py`: provider schema translation helpers.
 - `openai.py`, `anthropic.py`, `gemini.py`, `xai.py`, `openrouter.py`, `compatible.py` (DeepSeek, GLM, MiniMax, Kimi, Mistral): provider adapters.
 - `typesafe.py`: TypeSafe decision adapter; adds the managed-gateway headers and run context, `/models`, and run close on top of the System One wire.
-- `decisions.py`: shared decision plumbing: `DecisionHttpCall` (one bounded, timed, retrying call) and `DecisionFailures` (status-to-message mapping worded for each host).
+- `decisions.py`: shared decision plumbing: `DecisionTransport.send` (one bounded, timed, retrying send of a `DecisionHttpCall`, the validated record defined in `vidbyte/lib/dataclasses/jev.py` and re-exported here) and `DecisionFailures` (status-to-message mapping worded for each host).
 - `systemone.py`: the System One wire (`SystemOneRequest`, `SystemOneAnswers`) and `SystemOneProvider`, which serves Perplexity, OpenRouter, Liquid AI, Baseten, meraGPT, Cloudflare, Microsoft Foundry, Celeris, Nace.AI, Upstage, Inception, Hanzo, Vansa, and ZooData from one `HOSTS` table.
 - `openai_decisions.py`: the OpenAI Decisions wire and `OpenAIDecisionsProvider` (predicate, choice, and score questions; answers matched by name).
 - `tracing/`: provider-backed trace adapters.

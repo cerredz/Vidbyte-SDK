@@ -46,7 +46,11 @@ from vidbyte.lib.errors import (
 )
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.runners.types import DecisionModelResponse
-from vidbyte.providers.decisions import DecisionFailures, DecisionHttpCall
+from vidbyte.providers.decisions import (
+    DecisionFailures,
+    DecisionHttpCall,
+    DecisionTransport,
+)
 from vidbyte.providers.systemone import (
     SystemOneAnswers,
     SystemOneProvider,
@@ -240,7 +244,7 @@ class TypeSafeProvider:
             call = self._calls.decision(resolved, request, run_id=None if scope is None else scope.run_id)
             if scope is not None:
                 scope.used = True
-            response = await call.send(transport)
+            response = await DecisionTransport.send(call, transport)
             parsed = self._parser.parse_json_response(response, provider=_PROVIDER)
             raw_usage = parsed.get("usage")
             usage = raw_usage if isinstance(raw_usage, Mapping) else None
@@ -273,7 +277,7 @@ class TypeSafeProvider:
         resolved: DecisionModelConfig | None = None
         try:
             resolved = self._config_for(config)
-            response = await self._calls.models(resolved).send(transport)
+            response = await DecisionTransport.send(self._calls.models(resolved), transport)
             return _TypeSafeModelListNormalizer.normalize(self._parser.parse_json_response(response, provider=_PROVIDER))
         except ProviderResponseError as exc:
             if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
@@ -299,7 +303,7 @@ class TypeSafeProvider:
         resolved: DecisionModelConfig | None = None
         try:
             resolved = self._config_for(config)
-            response = await self._calls.close_run(resolved, run_id).send(transport)
+            response = await DecisionTransport.send(self._calls.close_run(resolved, run_id), transport)
             self._parser.parse_json_response(response, provider=_PROVIDER)
         except ProviderResponseError as exc:
             if resolved is not None and resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:

@@ -1,10 +1,10 @@
 """FILE: vidbyte/providers/decisions.py
 
-PURPOSE: Shared plumbing for every decision adapter: `DecisionHttpCall`, the one bounded, timed, retrying HTTP call a decision adapter sends, and `DecisionFailures`, which rewrites transport and unexpected failures into messages that name the host and the setting to fix.
-ROLE IN CODEBASE: `vidbyte/providers/typesafe.py`, `vidbyte/providers/systemone.py`, and `vidbyte/providers/openai_decisions.py` build a `DecisionHttpCall` per request and route their failures through `DecisionFailures`; `vidbyte/lib/runners/decision.py` sees only the typed errors these produce.
+PURPOSE: Shared plumbing for every decision adapter: `DecisionTransport`, which sends a `DecisionHttpCall` as the one bounded, timed, retrying HTTP call a decision adapter makes, and `DecisionFailures`, which rewrites transport and unexpected failures into messages that name the host and the setting to fix. The validated `DecisionHttpCall` record is defined in `vidbyte/lib/dataclasses/jev.py` and re-exported here.
+ROLE IN CODEBASE: `vidbyte/providers/typesafe.py`, `vidbyte/providers/systemone.py`, and `vidbyte/providers/openai_decisions.py` build a `DecisionHttpCall` (defined in `vidbyte/lib/dataclasses/jev.py`) per request, send it with `DecisionTransport.send`, and route their failures through `DecisionFailures`; `vidbyte/lib/runners/decision.py` sees only the typed errors these produce.
 ARCHITECTURE NOTE: Imports only `vidbyte.lib` (A006): constants, records, registries, errors, and `vidbyte.lib.http`, which owns the transport. The managed TypeSafe gateway's credential-safe wording stays in `typesafe.py`; this module holds the direct-mode wording every host shares.
-COMMON MODIFICATION PATTERNS: A newly documented status adds one branch to `DecisionFailures.transport_error` worded with `label`; a new transport limit is a constant in `vidbyte/lib/constants/jev.py` passed through `DecisionHttpCall.send`.
-KNOWN EDGE CASES: A `ProviderRequestError` without a status code means no response arrived (network failure or timeout). The config may be None when the failure happened before a config resolved, so the message falls back to "configured" and zero retries. `DecisionHttpCall.headers` stay out of `repr` because they carry the API key.
+COMMON MODIFICATION PATTERNS: A newly documented status adds one branch to `DecisionFailures.transport_error` worded with `label`; a new transport limit is a constant in `vidbyte/lib/constants/jev.py` passed through `DecisionTransport.send`.
+KNOWN EDGE CASES: A `ProviderRequestError` without a status code means no response arrived (network failure or timeout). The config may be None when the failure happened before a config resolved, so the message falls back to "configured" and zero retries. `DecisionHttpCall.headers` (the record in `vidbyte/lib/dataclasses/jev.py`) stay out of `repr` because they carry the API key.
 RELATED DOCS: vidbyte/providers/README.md ("Endpoint And Auth Matrix", "Decision providers"), docs/spec/decision-model-providers/spec.md, https://docs.typesafe.ai/api.md.
 TESTS: tests/features/decision_model_providers/test_decision_failures.py, tests/features/decision_model_providers/test_decision_regression_typesafe.py, tests/test_jev_agent.py, and tests/test_jev_managed_gateway.py.
 """
@@ -12,7 +12,6 @@ TESTS: tests/features/decision_model_providers/test_decision_failures.py, tests/
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from typing import Any
 
 from vidbyte.lib.constants.jev import (
@@ -27,6 +26,7 @@ from vidbyte.lib.constants.jev import (
     JEV_STATUS_UNAUTHORIZED,
     JEV_STATUS_UNPROCESSABLE,
 )
+from vidbyte.lib.dataclasses.jev import DecisionHttpCall
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
@@ -34,24 +34,16 @@ from vidbyte.lib.http import HttpResponse, HttpTransport
 from vidbyte.lib.registries.models import ProviderModelRegistry
 
 
-@dataclass(frozen=True, slots=True)
-class DecisionHttpCall:
-    """One fully resolved HTTP call to a decision host; headers stay out of repr because they carry the key."""
+class DecisionTransport:
+    """Sends a validated DecisionHttpCall with the transport policy every decision host shares."""
 
-    method: str
-    url: str
-    headers: Mapping[str, str] = field(repr=False)
-    timeout_seconds: float
-    json_body: Mapping[str, object] | None = None
-    retry_count: int = JEV_NO_RETRIES
-    idempotency_key: str | None = None
-
-    async def send(self, transport: HttpTransport) -> HttpResponse:
-        # Sends this call with the bounded body size, retry statuses, and backoff every decision host shares.
+    @staticmethod
+    async def send(call: DecisionHttpCall, transport: HttpTransport) -> HttpResponse:
+        # Sends the call with the bounded body size, retry statuses, and backoff every decision host shares.
         # @intent decision-calls-share-one-transport-policy
         # Every decision host is called with the same timeout, retry, backoff, and response-size bounds, so a
         # runaway or flaky vendor fails the same documented way whichever adapter sent the call.
-        return await transport.request(method=self.method, url=self.url, headers=self.headers, json_body=self.json_body, timeout_seconds=self.timeout_seconds, retry_count=self.retry_count, backoff_seconds=JEV_RETRY_BACKOFF_SECONDS, retry_status_codes=JEV_RETRY_STATUS_CODES, max_response_bytes=JEV_MAX_RESPONSE_BYTES, idempotency_key=self.idempotency_key)
+        return await transport.request(method=call.method, url=call.url, headers=call.headers, json_body=call.json_body, timeout_seconds=call.timeout_seconds, retry_count=call.retry_count, backoff_seconds=JEV_RETRY_BACKOFF_SECONDS, retry_status_codes=JEV_RETRY_STATUS_CODES, max_response_bytes=JEV_MAX_RESPONSE_BYTES, idempotency_key=call.idempotency_key)
 
 
 class DecisionFailures:
@@ -99,4 +91,4 @@ class DecisionFailures:
         return error
 
 
-__all__ = ["DecisionFailures", "DecisionHttpCall"]
+__all__ = ["DecisionFailures", "DecisionHttpCall", "DecisionTransport"]

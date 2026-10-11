@@ -2,7 +2,7 @@
 
 PURPOSE: The OpenAI Decisions wire: `OpenAIDecisionsRequest` builds and encodes the `{model, input, questions[]}` body (noul as `predicate`, choice with `choices`, score with `levels`), `OpenAIDecisionsAnswers` turns the `answers` array into JevAnswer records matched by `name`, and `OpenAIDecisionsProvider` sends direct decision calls to OpenAI's POST /v1/decisions (or any host that mirrors it, such as Vercel AI Gateway by endpoint override).
 ROLE IN CODEBASE: `ModelProviders.decision()` builds `OpenAIDecisionsProvider` for `ModelProvider.OPENAI` and `vidbyte/lib/runners/decision.py` calls `run_decision`; the wire records come from `vidbyte/lib/dataclasses/jev.py` and the HTTP call and failure wording from `vidbyte/providers/decisions.py`.
-ARCHITECTURE NOTE: The records stay encoder-free: only `OpenAIDecisionsRequest.encode` turns a wire record into JSON, and HTTP goes through `vidbyte.lib.http` via `DecisionHttpCall`. Answers normalize onto the same JevAnswer shapes the System One wire produces, so `DecisionModelHelper` reads both alike. Imports only `vidbyte.lib` and `vidbyte.providers.decisions` (A006).
+ARCHITECTURE NOTE: The records stay encoder-free: only `OpenAIDecisionsRequest.encode` turns a wire record into JSON, and HTTP goes through `vidbyte.lib.http` via `DecisionTransport.send`. Answers normalize onto the same JevAnswer shapes the System One wire produces, so `DecisionModelHelper` reads both alike. Imports only `vidbyte.lib` and `vidbyte.providers.decisions` (A006).
 COMMON MODIFICATION PATTERNS: When OpenAI changes the Decisions API, update the wire records, `OpenAIDecisionsRequest`, and `OpenAIDecisionsAnswers` together and extend the scripted-transport tests; wire literals belong in `vidbyte/lib/constants/jev.py`.
 KNOWN EDGE CASES: `input`, `instructions`, and option descriptions are strings on this wire, so structured content is sent as JSON text. A predicate has no criteria slot, so noul option descriptions are refused before the call rather than dropped. Answers arrive as an array in any order; a `refusal` answer, a duplicate, missing, or extra name, a wrong type, or a malformed distribution is a ProviderResponseError carrying the billed usage. Score entries without `label` use `value` as the level index. OpenAI documents a response-level `model` string without saying how it relates to the requested id, so the response reports the requested model id, which is what the ledger prices. There is no model-list endpoint or managed run, so `list_models` and `close_run` raise; the URL comes from OpenAI's direct endpoint, never `DecisionModelConfig.resolved_endpoint()`, whose managed branch points at the Vidbyte gateway (C017).
 RELATED DOCS: vidbyte/providers/README.md ("Decision providers"), docs/spec/decision-model-providers/spec.md, https://developers.openai.com/api/docs/guides/decisions.
@@ -50,7 +50,11 @@ from vidbyte.lib.errors import (
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.runners.types import DecisionModelResponse
-from vidbyte.providers.decisions import DecisionFailures, DecisionHttpCall
+from vidbyte.providers.decisions import (
+    DecisionFailures,
+    DecisionHttpCall,
+    DecisionTransport,
+)
 
 # The host name every OpenAI Decisions message carries.
 _LABEL = "OpenAI"
@@ -250,7 +254,7 @@ class OpenAIDecisionsProvider:
             # Use the per-call config when one is given (it must be an OpenAI config), else the adapter's own.
             resolved = self._config_for(config)
             # Send one POST to /decisions; the transport retries it with the same idempotency key.
-            response = await self._call(resolved, request).send(transport)
+            response = await DecisionTransport.send(self._call(resolved, request), transport)
             parsed = self._parser.parse_json_response(response, provider=self.provider.value)
             # Read the usage first, so a refused or malformed answer below still reports the billed call.
             raw_usage = parsed.get("usage")

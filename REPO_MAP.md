@@ -389,7 +389,8 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | TypeSafe-specific adapter (managed gateway headers, `/models`, run close) | `vidbyte/providers/typesafe.py` |
 | System One wire and the fourteen-host `SystemOneProvider` | `vidbyte/providers/systemone.py` |
 | OpenAI Decisions wire and `OpenAIDecisionsProvider` | `vidbyte/providers/openai_decisions.py` |
-| Shared decision HTTP call and failure mapping | `vidbyte/providers/decisions.py` |
+| Shared decision call sender and failure mapping (`DecisionTransport`, `DecisionFailures`) | `vidbyte/providers/decisions.py` |
+| Decision HTTP call record (`DecisionHttpCall`) | `vidbyte/lib/dataclasses/jev.py` |
 | Decision default models per provider | `vidbyte/lib/registries/models.py` (`DECISION_DEFAULT_MODELS`) |
 | System One usage pricing (`JevUsage`, bound to TypeSafe and the thirteen System One hosts) | `vidbyte/agents/pricing/typesafe.py` |
 | Clarification agent prompt family | `vidbyte/prompts/prompts/jev_clarification/`; key in `vidbyte/lib/enums/prompts.py` |
