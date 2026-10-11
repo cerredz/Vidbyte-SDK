@@ -8,7 +8,7 @@ Purpose:
     assumptions for all three security middleware implementations.
 Architecture:
     - CanaryTripwireTests: 12 test cases covering canary injection and leak detection.
-    - ConfusedDeputyGuardTests: 19 test cases covering overlap ratio analysis.
+    - ConfusedDeputyGuardTests: 20 test cases covering overlap ratio analysis.
     - HoneypotToolTests: 7 test cases covering trap tool detection.
     - PipelineIntegrationTests: 3 integration tests for middleware composition.
 Relations:
@@ -654,6 +654,43 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "continue")
+
+    async def test_internal_tool_output_not_recorded_as_external(self) -> None:
+        # [Hidden Failure] A rejected isDone returns the model's own draft; publishing that draft is not injection.
+        mw = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.6)
+        run_state: dict = {}
+        await mw.before_run(MiddlewareContext(hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="Write a short note.", run_state=run_state))
+        draft = "Quarterly revenue grew twelve percent on stronger subscription renewals in the northern region."
+
+        await mw.after_tool_call(
+            MiddlewareContext(
+                hook=MiddlewareHook.AFTER_TOOL_CALL,
+                agent_name="worker",
+                tool_result=ToolResult.success("isDone", draft),
+                tool_is_internal=True,
+                run_state=run_state,
+            )
+        )
+        publish_ctx = MiddlewareContext(
+            hook=MiddlewareHook.BEFORE_TOOL_CALL,
+            agent_name="worker",
+            tool_call=ToolCall("publish", {"text": draft}),
+            run_state=run_state,
+        )
+        self.assertEqual((await mw.before_tool_call(publish_ctx)).action.value, "continue")
+
+        # The same text arriving from a real external tool still trips the guard.
+        await mw.after_tool_call(
+            MiddlewareContext(
+                hook=MiddlewareHook.AFTER_TOOL_CALL,
+                agent_name="worker",
+                tool_result=ToolResult.success("fetch_page", draft),
+                run_state=run_state,
+            )
+        )
+        decision = await mw.before_tool_call(publish_ctx)
+        self.assertEqual(decision.action.value, "abort_run")
+        self.assertEqual(decision.reason, "confused_deputy_detected")
 
     async def test_no_tool_outputs_accumulated_continues(self) -> None:
         # [Hidden Failure] First tool call before any results should continue.

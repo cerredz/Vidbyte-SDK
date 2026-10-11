@@ -50,7 +50,9 @@ class ConfusedDeputyGuardMiddleware(AgentMiddleware):
 
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Accumulates tool result outputs in per-run state for subsequent overlap analysis.
-        if ctx.tool_result is not None and ctx.tool_result.output:
+        # @intent deputy-ignores-internal-tool-output: internal tools such as isDone
+        # return the model's own text, which is not external content, so it is not recorded.
+        if ctx.tool_result is not None and ctx.tool_result.output and not ctx.tool_is_internal:
             state: _ConfusedDeputyRunState = ctx.run_state.get(self.__class__) or _ConfusedDeputyRunState()
             state.tool_outputs.append(ctx.tool_result.output)
             ctx.run_state[self.__class__] = state
