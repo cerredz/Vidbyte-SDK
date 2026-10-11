@@ -9,8 +9,9 @@ Purpose:
 Architecture:
     - CostBudgetMiddleware: Accumulates token deltas from after_model_response
       and aborts in before_iteration when estimated spend exceeds max_spend_usd.
-      Per-run accumulators live in ctx.run_state (CostBudgetRunState) because one
-      instance is shared by nested and forked runs.
+      Per-run accumulators live in ctx.run_state (CostBudgetRunState), keyed by
+      the instance, because one instance is shared by nested and forked runs and
+      two differently configured instances may sit on one agent.
 Relations:
     Used through vidbyte.middleware.builtins and AgentRuntime middleware hooks.
 """
@@ -44,12 +45,15 @@ class CostBudgetMiddleware(AgentMiddleware):
 
     def estimated_spend_usd_for(self, run_state: Mapping[Any, Any]) -> float:
         """Return the estimated USD spend of the run that owns ``run_state``."""
-        state = run_state.get(self.__class__)
+        state = run_state.get(self)
         return state.estimated_spend_usd if isinstance(state, CostBudgetRunState) else 0.0
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Start fresh cost state for this run without touching other runs sharing the instance."""
-        ctx.run_state[self.__class__] = CostBudgetRunState()
+        # @intent middleware-state-is-per-instance
+        # Keyed by the instance, not the class, so a second budget with its own rate and ceiling never rewrites this one's spend.
+        run_state: dict[Any, Any] = ctx.run_state
+        run_state[self] = CostBudgetRunState()
         self._estimated_spend_usd = 0.0
         return MiddlewareDecision.continue_()
 
@@ -81,10 +85,11 @@ class CostBudgetMiddleware(AgentMiddleware):
 
     def _state_for(self, ctx: MiddlewareContext) -> CostBudgetRunState:
         # Returns the current run state, lazily creating it for direct hook tests.
-        state = ctx.run_state.get(self.__class__)
+        run_state: dict[Any, Any] = ctx.run_state
+        state = run_state.get(self)
         if not isinstance(state, CostBudgetRunState):
             state = CostBudgetRunState()
-            ctx.run_state[self.__class__] = state
+            run_state[self] = state
         return state
 
 
