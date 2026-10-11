@@ -45,7 +45,7 @@ PR #769 added `CodingContextWindow` and reserved `CodingContextSection.ENVIRONME
 
 On Windows, `BashTool._find_bash()` picks Git for Windows' `bin/bash.exe`, whose `PATH` differs from PowerShell's. Running the probe through that same executable shows the model what *its* bash will find.
 
-Measured on the author's Windows machine, the probe takes about 2.6 s, mostly in `poetry --version` (0.5 s), `npm --version` (0.3 s), `pip --version` and `docker --version` (0.2 s each). The feature pack ran in 5.3 s before this change and constructs a `CodingAgent` in about 100 tests, each with a new `tmp_path` root.
+Measured on the author's Windows machine, the probe takes about 2.6 s, mostly in `poetry --version` (0.5 s), `npm --version` (0.3 s), `pip --version` and `docker --version` (0.2 s each). The feature pack ran in 5.3 s before this change. It runs the loader for about 55 distinct `tmp_path` roots.
 
 ---
 
@@ -88,7 +88,7 @@ CodingAgent.__init__
   -> CodingContextWindow.build(sections, context_manager)
 ```
 
-**Key decision: git is read from `.git/HEAD`, not from the probe.** The brief suggested a cache keyed by bash path and root. Git is the only probe output that depends on the root. With git in the probe, every new root would pay about 2.6 s on Windows. Every test in the pack has a new root, which would add several minutes to the feature pack. Reading `.git/HEAD` (following a worktree's `gitdir:` file) is a few lines with no process. Without it, the probe depends only on bash and `PATH`, and one probe serves every agent in the process.
+**Key decision: git is read from `.git/HEAD`, not from the probe.** The brief suggested a cache keyed by bash path and root. Git is the only probe output that depends on the root. With git in the probe, every new root would pay about 2.6 s on Windows. The pack uses about 55 roots, which would add about two minutes to it. Reading `.git/HEAD` (following a worktree's `gitdir:` file) is a few lines with no process. Without it, the probe depends only on bash and `PATH`, and one probe serves every agent in the process.
 
 The probe script lives in `vidbyte/lib/constants/coding.py` with the timeout, the output cap, and the marker list. The script prints finished lines, so Python only caps, splits and appends them, and partial output survives a timeout.
 
@@ -114,7 +114,7 @@ class EnvironmentLoader:
 3. `_marker_line(root)` lists `CODING_ENVIRONMENT_PROJECT_MARKERS` that are regular files in the root.
 4. `_git_line(root)` walks the root and its parents for `.git`. A folder is used directly; a file's `gitdir:` target is followed. It reads `HEAD`: `ref: refs/heads/<b>` gives the branch, and anything else gives a detached commit.
 5. `bash = BashTool._find_bash()` and `_shell_line(bash)`.
-6. If bash exists, `_run_probe(bash, root)` returns `(text, failure)`, using the module cache. `_probe_lines(text, failure)` drops blank lines and carriage returns, and adds the failure line.
+6. If bash exists and the cache has no entry for `(bash, PATH)`, `load` opens a temporary file. `_run_probe(bash, root, output)` runs the script into that file and returns the failure reason, or `None`. `_read_output(output)` reads the file up to the cap, and the pair is cached. `_probe_lines(text, failure)` drops blank lines and carriage returns, and adds the failure line.
 7. Return the section, prefixed by one line saying the facts were gathered when the agent was built.
 
 #### Edge Cases & Error Handling
@@ -122,7 +122,7 @@ class EnvironmentLoader:
 - `subprocess.TimeoutExpired`: `subprocess.run` kills bash. The text written so far is read from the temporary file. On Windows only Git's launcher is killed, as with `BashTool`.
 - `OSError` at spawn: failure "could not start (<ExceptionClass>)".
 - A non-zero exit: failure "exited with code N", with the output kept.
-- An unreadable `.git` or `HEAD`: "inside a git repository; its branch could not be read."
+- An unreadable `.git` or `HEAD`, or a `gitdir:` value that is not a valid path: "inside a git repository; its branch could not be read."
 - `os.cpu_count()` returning `None`, or a missing `/etc/os-release`: "unknown", or the distribution is left out.
 - Results are cached even when the probe fails, so a hanging tool costs 15 s once per process, not once per agent.
 
@@ -178,7 +178,7 @@ All tests are in `test_coding_agent_environment.py`. Most fake bash by pointing 
 - `load_environment=1` and `"yes"` raise `ConfigurationError` naming the field. [Hidden Assumption]
 - A planted `SECRET_TOKEN` value never appears in the section, with the real probe. [Hidden Failure]
 - The lockfile markers that are present are listed, and absent ones and a folder named like a marker are not. [Edge Case]
-- The git line names the branch of a repository and of a worktree's `gitdir:` file, and says when the root is not in a repository. [Edge Case]
+- The git line names the branch from a subfolder of a repository and through a worktree's `gitdir:` file, and names a detached commit. A broken `gitdir:` value does not raise. [Edge Case]
 - The probe runs once for two agents with different roots, and again when `PATH` changes. [Hidden Failure]
 
 ### Integration Tests
@@ -204,6 +204,7 @@ All tests are in `test_coding_agent_environment.py`. Most fake bash by pointing 
 
 - On by default, so every `CodingAgent` now has this section. `load_environment=False` restores the old request exactly.
 - Building an agent now starts at most one bash process per process lifetime for a given bash and `PATH`.
+- Measured on Windows, the feature pack went from 5.3 s to about 10 to 11 s. The extra time is one cached real probe, one fresh real probe in the secret test, one 1-second timeout case, and the 18 new tests.
 - Rollback: revert the PR. No data or state is involved.
 
 ---
@@ -219,7 +220,7 @@ All tests are in `test_coding_agent_environment.py`. Most fake bash by pointing 
 
 ### Alternative 1: git in the probe, cache keyed by bash path and root
 - What: The brief's suggestion.
-- Why rejected: Every new root re-runs the probe, about 2.6 s on Windows, and that includes every test in the feature pack.
+- Why rejected: Every new root re-runs the probe, about 2.6 s on Windows. That covers about 55 roots in the feature pack, or about two minutes.
 
 ### Alternative 2: Reuse `BashTool.execute`
 - What: Run the script through the tool itself.

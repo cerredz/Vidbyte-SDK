@@ -141,20 +141,20 @@ def test_missing_bash_still_shows_the_python_facts_and_how_to_fix_it(tmp_path, n
 
 
 @pytest.mark.parametrize(
-    ("program", "timeout_seconds", "failure"),
+    ("program", "timeout_seconds", "printed", "failure"),
     [
-        ("import time; print('- Bash: early-fact', flush=True); time.sleep(5)", 1.0, "bash did not finish within 1 seconds"),
-        ("print('- Bash: partial-fact'); raise SystemExit(3)", 15.0, "bash exited with code 3"),
+        ("import time; print('- Bash: early-fact', flush=True); time.sleep(5)", 1.0, "- Bash: early-fact", "bash did not finish within 1 seconds"),
+        ("print('- Bash: partial-fact'); raise SystemExit(3)", 15.0, "- Bash: partial-fact", "bash exited with code 3"),
     ],
     ids=["timeout", "non-zero-exit"],
 )
-def test_failed_probe_keeps_what_it_printed_and_says_it_failed(coding_agent_cls, tmp_path, fake_bash, program, timeout_seconds, failure) -> None:
+def test_failed_probe_keeps_what_it_printed_and_says_it_failed(coding_agent_cls, tmp_path, fake_bash, program, timeout_seconds, printed, failure) -> None:
     # FR-10 hidden failure: a hanging or failing probe still gives a section with its partial output, and never raises.
     fake_bash(program, timeout_seconds)
 
     content = _shown(_agent(coding_agent_cls, tmp_path))
 
-    assert "- Bash: " in content and "-fact" in content
+    assert f"\n{printed}\n" in content
     assert content.endswith(f"- Tool probe failed: {failure}. The tool list above may be incomplete.")
     assert f"- Root folder: {tmp_path.resolve()}" in content
 
@@ -210,11 +210,12 @@ def test_project_marker_files_in_the_root_are_listed(tmp_path, no_bash, monkeypa
         ({"repo/.git/HEAD": "ref: refs/heads/feature/env\n"}, "- Git: inside a git repository, on branch feature/env."),
         ({"repo/.git": "gitdir: ../main/.git/worktrees/wt\n", "main/.git/worktrees/wt/HEAD": "ref: refs/heads/wt-branch\n"}, "- Git: inside a git repository, on branch wt-branch."),
         ({"repo/.git/HEAD": "3f2c1e0d9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e\n"}, "- Git: inside a git repository, detached at commit 3f2c1e0d9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e."),
+        ({"repo/.git": "gitdir: \0broken\n"}, "- Git: inside a git repository; its branch could not be read."),
     ],
-    ids=["branch-from-a-subfolder", "worktree-gitdir-file", "detached"],
+    ids=["branch-from-a-subfolder", "worktree-gitdir-file", "detached", "broken-gitdir"],
 )
 def test_git_line_reads_the_branch_from_git_files(tmp_path, no_bash, monkeypatch, layout, expected) -> None:
-    # FR-6 hidden assumption: the root may be a subfolder, a worktree whose .git is a file, or a detached checkout.
+    # FR-6 hidden assumption: the root may be a subfolder, a worktree whose .git is a file, a detached checkout, or a broken .git that must not raise.
     for relative, text in layout.items():
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)

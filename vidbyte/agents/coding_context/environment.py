@@ -122,7 +122,7 @@ class EnvironmentLoader:
             try:
                 git_dir = dot_git if dot_git.is_dir() else folder / dot_git.read_text(encoding="utf-8").removeprefix("gitdir:").strip()
                 head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
-            except OSError:
+            except (OSError, ValueError):
                 return "- Git: inside a git repository; its branch could not be read."
             if head.startswith("ref: refs/heads/"):
                 return f"- Git: inside a git repository, on branch {head.removeprefix('ref: refs/heads/')}."
