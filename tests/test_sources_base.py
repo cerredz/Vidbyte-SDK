@@ -8,22 +8,28 @@ Architecture:
     - CountingFetcher: Wraps InMemoryFetcher to assert network calls (no-network guarantees).
     - SourcesBaseTests: unittest.TestCase covering every substrate scenario in the test plan.
 Relations:
-    Exercises vidbyte.sources.base and vidbyte.sources._fetch.
+    Exercises vidbyte.sources.base, vidbyte.sources._fetch, and the HttpFetcher scheme guard
+    that DirectHttpFetchTool relies on.
 """
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from vidbyte.lib.errors import SourcePinMismatchError, SourceSecurityError
+from vidbyte.lib.dataclasses import ToolCall
+from vidbyte.lib.errors import SourceFetchError, SourcePinMismatchError, SourceSecurityError
+from vidbyte.lib.http.transport import SyncHttpTransport
 from vidbyte.sources import (
     ArtifactRef,
     ChainedFetcher,
     DocumentSource,
     FileFetcher,
     FileSnapshotCache,
+    HttpFetcher,
     InMemoryFetcher,
     InMemorySnapshotCache,
     NullSnapshotCache,
@@ -32,6 +38,7 @@ from vidbyte.sources import (
     UrlAllowlist,
     sha256_hex,
 )
+from vidbyte.tools.builtins.operations.fetch import DirectHttpFetchTool
 
 _DATA = b"# Title\nbody text"
 
@@ -206,6 +213,29 @@ class SourcesBaseTests(unittest.TestCase):
             source = DocumentSource(fetcher=FileFetcher(), allowlist=UrlAllowlist(allowed_schemes=("file",)))
             result = source.load(ArtifactRef(url=path.as_uri()))
             self.assertEqual(result.items[0].title, "Title")
+
+    def test_httpfetcher_refuses_file_and_schemeless_urls_before_any_request(self) -> None:
+        # [Hidden Assumption] HttpFetcher never opens a local file and only raises SourceFetchError.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "secret.md"
+            path.write_bytes(_DATA)
+            cases = ((path.as_uri(), "file"), ("docs.example.invalid/page", ""))
+            with mock.patch.object(SyncHttpTransport, "request_bytes") as request_bytes:
+                for url, scheme in cases:
+                    with self.assertRaises(SourceFetchError) as caught:
+                        HttpFetcher().fetch(url)
+                    self.assertEqual(caught.exception.details, {"url": url, "scheme": scheme})
+            request_bytes.assert_not_called()
+
+    def test_direct_http_fetch_tool_reports_fetch_failed_for_file_url(self) -> None:
+        # [Edge Case] A model-supplied file:// URL is a clean fetch_failed result, not an execution error.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "secret.md"
+            path.write_bytes(_DATA)
+            result = asyncio.run(DirectHttpFetchTool().execute(ToolCall("direct_http_fetch", {"url": path.as_uri()})))
+        self.assertEqual(result.status.value, "error")
+        self.assertEqual(result.metadata["error"], "fetch_failed")
+        self.assertNotIn("# Title", result.output)
 
 
 if __name__ == "__main__":
