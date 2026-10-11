@@ -57,9 +57,11 @@ class DeclareOutputSchemaTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Register the declared fields on the shared builder."""
         fields = self._normalize_fields(call.arguments.get("fields"))
-        if not fields:
-            return ToolResult.error(call.tool_name, "No valid fields were provided to declare.")
+        # @intent no-false-success-on-nameless-fields
+        # The builder drops entries without a usable name, so judge success by what it actually registered.
         declared = self._builder.declare(fields)
+        if not declared:
+            return ToolResult.error(call.tool_name, "No valid fields were provided to declare.")
         return ToolResult.success(call.tool_name, f"Declared output fields: {', '.join(declared)}.")
 
     @staticmethod
@@ -72,6 +74,10 @@ class DeclareOutputSchemaTool(BaseTool):
                 parsed = json.loads(raw)
             except json.JSONDecodeError:
                 return ({"name": raw},)
+            # @intent json-scalar-fields-mean-one-name
+            # A JSON-encoded name ("\"summary\"") or scalar ("2024") names one field, like bare text does.
+            if not isinstance(parsed, (Mapping, list)):
+                return ({"name": parsed if isinstance(parsed, str) else raw},)
             raw = parsed
         if isinstance(raw, Mapping):
             return (raw,)

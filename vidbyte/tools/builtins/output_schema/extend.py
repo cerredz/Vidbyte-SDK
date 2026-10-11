@@ -59,9 +59,11 @@ class ExtendOutputSchemaTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Register the additional fields on the shared builder."""
         fields = DeclareOutputSchemaTool._normalize_fields(call.arguments.get("fields"))
-        if not fields:
-            return ToolResult.error(call.tool_name, "No valid fields were provided to extend.")
+        # @intent no-false-success-on-nameless-fields
+        # The builder drops entries without a usable name, so judge success by what it actually registered.
         declared = self._builder.declare(fields)
+        if not declared:
+            return ToolResult.error(call.tool_name, "No valid fields were provided to extend.")
         return ToolResult.success(call.tool_name, f"Extended output schema with fields: {', '.join(declared)}.")
 
 
