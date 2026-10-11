@@ -24,7 +24,7 @@
 - Keep behavior byte-identical when `verify_command` is `None`, and keep `BaseAgent` unchanged for every agent with no finish review.
 
 ### Non-Goals
-- A CLI flag on `vidbyte-sdk coding run`. The field guide (Prebuilt Agents: "An SDK agent runs from Python only; never add a `vidbyte-sdk` command for it") rules this out, so it is not listed as a follow-up either.
+- Any CLI change. An SDK agent runs from its Python API only (field guide, Prebuilt Agents), so `vidbyte/cli/` is not touched and no CLI flag is listed as a follow-up.
 - Sanitizing or restricting the command. The developer writes it, not the model, so it is trusted input. The agent's `PermissionPolicy` governs the model's tool calls, not this command.
 - A configurable timeout or output cap for the command. It uses the `BASH_*` constants, as the bash tool does (spec NG-14).
 - Running verification between turns, or when the model calls `bash` itself.
@@ -67,7 +67,7 @@
 8. Exit code 0 accepts the finish, and the run ends exactly as it would have without verification (`FINAL_RESPONSE` or `IS_DONE`).
 9. A non-zero exit, a timeout, or a spawn failure rejects the finish. The model then reads `Not done yet: the verification command `<cmd>` failed (<reason>). Its output is below. Fix the problem, then finish again.` followed by a blank line and the bash tool's output. `<reason>` is `exit code N`, `it timed out`, or `bash could not start it`.
    - On the text path, the model's answer is appended as an assistant message, followed by the feedback as a user message.
-   - On the `isDone` path, the feedback becomes the `isDone` call's error result, and any later calls in the same turn are answered as skipped, as a contract rejection does.
+   - On the `isDone` path, the `isDone` call and any later calls in the same turn are answered as they are today before a continuation (`finish attempt not accepted yet; continue with the next message`), and the feedback follows as a user message. It is not the `isDone` error result, because `ToolsFormatter` cuts tool-error text to 1,000 characters, and the end of a test run's output is usually the part that matters.
 10. When the `max_verify_attempts`-th verification fails, the run ends without raising. The output is the model's last answer, and `stop_reason` is `contract_unsatisfied`.
 11. Once at least one verification has run, `metadata["verify_command"]` is `{"passed": bool, "attempts": int, "last_exit_code": int | None}`, including when the run later stops for another reason (for example `max_iterations`).
 12. The model's own `bash` calls never trigger verification and never count as attempts. A verification is not a tool call: it does not appear in `tool_call_states`, `tool_calls`, or usage.
@@ -182,11 +182,12 @@ class FinishReview:
   2. On `STOP`, return `_finish_result(self._unverified_finish_result(last_assistant_output or "", state), state)`.
   3. On `CONTINUE`, append `self._assistant_message(last_assistant_output or "")`, then `{"role": "user", "content": review.feedback}`, and `continue`.
   4. On `ACCEPT`, fall through to the existing code unchanged.
-- **`isDone` path**, after the output-contract block and before `final = ...`:
+- **`isDone` path**, after the existing lines that answer `isDone` (`finish attempt not accepted yet; continue with the next message`) and the turn's later calls, and before `_continue_finish_attempt`:
   1. The same call, with `tool_call=call` and `tool_result=result`.
   2. On `STOP`, return `_finish_result(self._unverified_finish_result(result.output or "", state), state)`.
-  3. On `CONTINUE`, answer `isDone` with `ToolResult.error(call.tool_name, review.feedback)` and answer the turn's later calls as skipped, exactly as a contract rejection does. Then set `finish_rejected = True` (renamed from `contract_rejected`, because it now covers both) and `break`.
+  3. On `CONTINUE`, append `{"role": "user", "content": review.feedback}`, set `finish_attempt_continued = True`, and `break`. This is the message order a `JevRuntime` continuation already produces at the same spot.
   4. On `ACCEPT`, nothing changes.
+  - Why not the `isDone` error result, as a contract rejection uses: `ToolsFormatter._clean_text` cuts every tool-error message to 1,000 characters, so a test run's summary at the end of its output would never reach the model. A user message is not cut. (This replaced the first draft of this section during implementation, when the output-cap test caught it.)
 - **New helper** `_unverified_finish_result(output, state) -> AgentResult` returns `self._final_result(output=output, runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED)`. This is the same shape contract exhaustion builds.
 
 #### Edge Cases & Error Handling
@@ -379,6 +380,8 @@ Everything runs offline. A scripted model plays the model turns, and the command
 - → `test_missing_bash_with_verify_command_fails_at_construction` (PATH emptied) — [Hidden Assumption]
 - → `test_finish_review_requires_feedback_to_continue` (`FinishReview.continue_with("  ")`, bad action, non-str feedback) — [Silent Failure]
 - → `test_pipeline_without_reviewers_accepts_every_finish` (empty pipeline and a middleware that overrides nothing) — [Hidden Failure]
+- → `test_pipeline_stops_at_the_first_review_that_refuses` (a later reviewer is never asked) — [Hidden Failure]
+- → `test_verifier_goes_after_the_caller_middleware_only_when_set` (and `export_state()` is unchanged by it) — [Hidden Assumption]
 
 ### Integration Tests
 These drive the real `BaseAgent` loop, real `AgentRuntime`, and real `BashTool`.
@@ -392,6 +395,8 @@ These drive the real `BaseAgent` loop, real `AgentRuntime`, and real `BashTool`.
 - **The working directory changes after construction.** Verification still runs in `root_dir`; a decoy folder with the same name is ignored. — [Hidden Assumption]
 - **The model's own `bash` calls do not trigger verification**, even when they run the same command. — [Hidden Assumption]
 - **Output contracts run first.** With `MinToolCalls(1)`, a premature `isDone` is rejected by the contract without running the command, and the command runs only after the contract passes. — [Hidden Failure]
+- **The default limit is three attempts.** — [Edge Case]
+- **Each run counts its own attempts.** A second run on the same agent starts again at one. — [Hidden Failure: per-instance counters]
 - **A plain `BaseAgent` with no finish review** finishes exactly as before on both paths: one model call, `final_response` / `is_done`, the same reply, and no extra messages. — [Hidden Failure]
 
 ### Manual / QA Test Cases
