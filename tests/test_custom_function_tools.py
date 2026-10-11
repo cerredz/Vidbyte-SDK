@@ -3,10 +3,11 @@ from __future__ import annotations
 import functools
 import json
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
+from types import MappingProxyType
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
@@ -65,6 +66,17 @@ class DailyTallyRecord:
 
 class Slots(BaseModel):
     slots: dict[int | str, str]
+
+
+class OrderOut(BaseModel):
+    id: str
+    tags: dict[str, str]
+
+
+@dataclass(frozen=True)
+class OrderRecord:
+    id: str
+    tags: Mapping[str, str]
 
 
 def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -347,6 +359,45 @@ class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(plain_result.status, ToolStatus.SUCCESS, plain_result.output)
             self.assertEqual(model_result.output, expected)
             self.assertEqual(plain_result.output, expected)
+
+    # @intent read-only-mappings-are-json-objects
+    # A MappingProxyType, as frozen records hold, must reach the model as the same JSON object a dict would.
+    async def test_read_only_mapping_serializes_as_an_object(self) -> None:
+        def bare() -> Mapping[str, int]:
+            return MappingProxyType({"n": 1})
+
+        def nested() -> dict[str, Any]:
+            return {"items": [MappingProxyType({"a": 1})], "meta": MappingProxyType({"b": MappingProxyType({"c": 2})})}
+
+        bare_result = await self._run(bare, output_schema=None)
+        nested_result = await self._run(nested, output_schema=None)
+
+        self.assertEqual(bare_result.output, '{"n": 1}')
+        self.assertEqual(nested_result.output, '{"items": [{"a": 1}], "meta": {"b": {"c": 2}}}')
+
+    async def test_frozen_record_with_read_only_mapping_passes_its_output_schema(self) -> None:
+        def get_order() -> OrderRecord:
+            return OrderRecord(id="o1", tags=MappingProxyType({"tier": "gold"}))
+
+        def get_order_dict() -> OrderRecord:
+            return OrderRecord(id="o1", tags={"tier": "gold"})
+
+        result = await self._run(get_order, output_schema=OrderOut)
+        control = await self._run(get_order_dict, output_schema=OrderOut)
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(json.loads(result.output), {"id": "o1", "tags": {"tier": "gold"}})
+        self.assertEqual(result.output, control.output)
+
+    async def test_read_only_mapping_with_enum_keys_serializes_like_the_model(self) -> None:
+        # Enum keys force the key-normalizing second pass, which must also see the proxy as an object.
+        def tally() -> dict[str, Any]:
+            return {"counts": MappingProxyType({Priority.HIGH: 3, Priority.LOW: 1})}
+
+        result = await self._run(tally, output_schema=Tally)
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(result.output, '{"counts": {"high": 3, "low": 1}}')
 
     async def test_string_keyed_dict_output_is_unchanged(self) -> None:
         def report() -> dict[str, Any]:
