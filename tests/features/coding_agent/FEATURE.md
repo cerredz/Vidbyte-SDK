@@ -2,11 +2,13 @@
 
 ## High-Level Feature Description
 
-An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAgent` whose model can run shell commands, read, write and edit files, search files, and fetch web pages, all under one root folder. The model can act without the caller writing a policy, because the default policy allows every permission. Every bash call returns in bounded time with bounded output. A supplied fetch key picks one priced provider, and the model reads the pages it fetched.
+An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAgent` whose model can run shell commands, read, write and edit files, search files, and fetch web pages, all under one root folder. The model can act without the caller writing a policy, because the default policy allows every permission. Every bash call returns in bounded time with bounded output. A supplied fetch key picks one priced provider, and the model reads the pages it fetched. With a `verify_command`, the run may not finish until that command exits with code 0.
 
 ## Contract
 
-`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
+`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, verify_command=None, max_verify_attempts=3, tools=(), permission_policy=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
+
+With `verify_command` set (a non-blank string; `max_verify_attempts` is an int of at least 1, never a bool), the agent appends one `VerifyCommandMiddleware` after the caller's middleware. At every finish attempt that the output contracts accept, a plain answer or an `isDone` call, it runs `bash -c <command>` once in `root_dir` through `BashTool`. Exit code 0 lets the run end as usual. Anything else sends the model `Not done yet: the verification command `<command>` failed (<reason>). Its output is below. Fix the problem, then finish again.` and the bash output, as a user message. The `max_verify_attempts`-th failure ends the run without raising: the output is the model's last answer and `stop_reason` is `contract_unsatisfied`. `metadata["verify_command"]` is `{"passed", "attempts", "last_exit_code"}`. With no bash, construction raises `ConfigurationError` naming `verify_command`.
 
 `BashTool(root_dir)` runs `bash -c <command>` in `root_dir` with stdin closed and stderr merged into stdout. A success result holds the decoded output, at most `BASH_MAX_OUTPUT_BYTES` bytes followed by an omitted-byte count, and ends with `exit code: <n>`. It returns `bash_not_found`, `spawn_failed` or `timeout` errors. One time limit, `BASH_TIMEOUT_SECONDS`, covers both reading and waiting. On a timeout or a cancellation, the command's process group is killed (POSIX) or Git's launcher is killed (Windows), then the tool waits at most `BASH_KILL_GRACE_SECONDS` and closes the pipe.
 
@@ -53,6 +55,9 @@ Construction either raises (bad root, bad or duplicate key, duplicate tool name,
 - A normal completion kills nothing.
 - After a timeout, the pipe is closed before the call returns.
 - `CodingAgent` adds only a constructor. Its exported state equals that of a `BaseAgent` built with the same tools and policy.
+- Without `verify_command`, the caller's middleware reaches `BaseAgent` untouched and a run makes no extra model call.
+- Only a finish attempt runs the verification command; the model's own `bash` calls never do, and the command is never a tool call in `tool_call_states`.
+- The attempt count belongs to one run, so a second run on the same agent starts again at one.
 
 ## External Dependencies
 
@@ -97,6 +102,10 @@ These are the failure inventory the tests were chosen from, given as input → w
   - Cancellation is swallowed, or the group is not killed because the shell already exited (AC-15, EC-29).
   - An unbounded wait follows the kill (INV-12).
   - The transport is left open, so `Event loop is closed` or `closed pipe` noise appears after `asyncio.run` (AC-28).
+- **Verification errors.**
+  - The run reports success although the command failed, or ends with an exception instead of the model's last answer (never-fixed cases).
+  - The feedback loses the end of the command's output, which is the part a test run puts its summary in (the output-cap case).
+  - The command runs on the model's own `bash` calls, before the output contracts, or outside `root_dir`.
 - **Bash lookup errors.** On Windows the `PATH` `bash` (WSL's launcher) is chosen instead of Git's `bin/bash.exe`, or the lookup walks past three parent folders (AC-22). A missing bash breaks construction or the other tools (AC-17).
 
 ## Historical Regressions
@@ -114,6 +123,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Identity errors.
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
+- `test_coding_agent_verify_command.py` checks `verify_command` on both finish paths: a pass on the first finish, a failure fixed after feedback, a run never fixed, no command, invalid arguments, a missing bash, the output cap, the time limit, the root after `chdir`, the model's own bash calls, contracts first, a fresh count per run, and a plain `BaseAgent`. It also checks `FinishReview` and `MiddlewarePipeline.review_finish`.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
