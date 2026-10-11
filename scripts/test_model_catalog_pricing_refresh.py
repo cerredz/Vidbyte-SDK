@@ -1,12 +1,14 @@
-"""Standalone verification script for the model catalog and pricebook refresh.
+"""FILE: scripts/test_model_catalog_pricing_refresh.py
 
-Runs every Section 10 case of docs/design/model-catalog-pricing-refresh.md:
-the tests/features/sdk_model_catalog pack (unit, integration and manual
-QA cases) and the S014, C009 and C010 lint gates. Prints PASS/FAIL per
-case with a final summary, and exits non-zero if any case fails.
-
-Usage:
-    python scripts/test_model_catalog_pricing_refresh.py
+PURPOSE: Runs every Section 10 case of the model catalog and pricebook refresh and prints PASS/FAIL per case plus an X/Y summary.
+ROLE IN CODEBASE: Provides the offline verification entry point for docs/design/model-catalog-pricing-refresh.md.
+ARCHITECTURE NOTE: Runs tests/features/sdk_model_catalog through pytest in process, then the S014, C009 and C010 lint gates as subprocesses; it never contacts a provider.
+FUNCTION INVENTORY: CaseReporter (pytest plugin collecting one outcome per case); CatalogPricingVerification.run, run_test_pack, run_lint_gate, print_outcomes, exit_code.
+COMMON MODIFICATION PATTERNS: Add new cases to the test pack, not here; add a lint rule id to LINT_GATES when the feature gains a gate.
+WHAT NOT TO DO IN THIS FILE: Do not disable pytest's terminal plugin; it supplies the assertion detail each FAIL line prints.
+KNOWN EDGE CASES: A failed import, a skipped case or a pytest session error each count as a failure, so an empty run never passes.
+RELATED DOCS: docs/design/model-catalog-pricing-refresh.md and tests/features/sdk_model_catalog/FEATURE.md.
+TESTS: Run python scripts/test_model_catalog_pricing_refresh.py; it exits non-zero when any case fails.
 """
 
 from __future__ import annotations
