@@ -1,6 +1,7 @@
 """Tests for the five new prebuilt middleware: TokenBudgetMiddleware,
 CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
-LoopDetectionMiddleware, and CircuitBreakerMiddleware."""
+LoopDetectionMiddleware, and CircuitBreakerMiddleware, plus the
+per-instance run state of ToolErrorPolicyMiddleware."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import unittest
 from types import SimpleNamespace
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.settings import ToolErrorPolicy
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseContext
@@ -17,7 +19,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHook,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
+from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult, ToolStatus
 from vidbyte.middleware.builtins import (
     CircuitBreakerMiddleware,
     CircuitState,
@@ -25,6 +27,7 @@ from vidbyte.middleware.builtins import (
     ExponentialBackoffRetryMiddleware,
     LoopDetectionMiddleware,
     TokenBudgetMiddleware,
+    ToolErrorPolicyMiddleware,
 )
 from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
 from vidbyte.middleware.builtins.token_budget import TOKEN_BUDGET_FINAL_RESPONSE_NOTICE
@@ -65,6 +68,21 @@ async def _tool_calls_before_loop_abort(middleware: list[LoopDetectionMiddleware
             decision = await mw.before_tool_call(_ctx(hook=MiddlewareHook.BEFORE_TOOL_CALL, tool_call=call, run_state=run_state))
             if decision.action == MiddlewareAction.ABORT_RUN:
                 return executed
+    return max_calls
+
+
+async def _failed_tool_calls_before_error_abort(middleware: list[ToolErrorPolicyMiddleware], max_calls: int = 12) -> int:
+    """Drive tool error policies in pipeline order on one run of always-failing calls and count failures before abort."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    for failed in range(1, max_calls + 1):
+        call = ToolCall(tool_name="fetch", arguments={"attempt": failed})
+        result = ToolResult(tool_name="fetch", status=ToolStatus.ERROR, output="boom", metadata={"error": "execution_error"})
+        for mw in middleware:
+            decision = await mw.after_tool_call(_ctx(hook=MiddlewareHook.AFTER_TOOL_CALL, tool_call=call, tool_result=result, run_state=run_state))
+            if decision.action == MiddlewareAction.ABORT_RUN:
+                return failed
     return max_calls
 
 
@@ -204,6 +222,21 @@ class TestTokenBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.transform.system, TOKEN_BUDGET_FINAL_RESPONSE_NOTICE)
         self.assertTrue(run_state["__result_metadata__"]["token_budget"]["final_response_requested"])
 
+    async def test_second_soft_budget_does_not_spend_this_ones_final_call(self) -> None:
+        # [Silent Failure] Two soft budgets exceeded in one step must each grant their own final-answer call.
+        for order in ((60, 80), (80, 60)):
+            budgets = [TokenBudgetMiddleware(max_tokens=cap, allow_final_response_over_budget=True) for cap in order]
+            run_state: dict = {}
+            for mw in budgets:
+                await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+            decisions = [
+                await mw.before_model_call(
+                    _ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL, tokens_used=90, system="base", run_state=run_state)
+                )
+                for mw in budgets
+            ]
+            self.assertEqual([d.action for d in decisions], [MiddlewareAction.CONTINUE] * 2, order)
+
     def test_raises_on_zero_max(self) -> None:
         # [Edge Case] Zero is not a meaningful ceiling.
         with self.assertRaises(ValueError):
@@ -213,6 +246,26 @@ class TestTokenBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] Negative values are not a meaningful ceiling.
         with self.assertRaises(ValueError):
             TokenBudgetMiddleware(max_tokens=-1)
+
+
+# ---------------------------------------------------------------------------
+# ToolErrorPolicyMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestToolErrorPolicyMiddleware(unittest.IsolatedAsyncioTestCase):
+    async def test_second_instance_does_not_change_when_strict_breaker_fires(self) -> None:
+        # [Silent Failure] A lenient org policy beside a strict team policy must not add to the team's error count.
+        def team() -> ToolErrorPolicyMiddleware:
+            return ToolErrorPolicyMiddleware(ToolErrorPolicy(max_total_tool_errors=3))
+
+        def org() -> ToolErrorPolicyMiddleware:
+            return ToolErrorPolicyMiddleware(ToolErrorPolicy(max_total_tool_errors=50))
+
+        alone = await _failed_tool_calls_before_error_abort([team()])
+        self.assertEqual(alone, 3)
+        self.assertEqual(await _failed_tool_calls_before_error_abort([team(), org()]), alone)
+        self.assertEqual(await _failed_tool_calls_before_error_abort([org(), team()]), alone)
 
 
 # ---------------------------------------------------------------------------
