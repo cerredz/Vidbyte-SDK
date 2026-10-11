@@ -283,6 +283,12 @@ class ToolResult:
     output: str
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Store status as the ToolStatus member even when a tool passes its plain string."""
+        # @intent tool-status-is-one-canonical-enum
+        # The runtime reads status.value and middleware compares with `is`, so "success" becomes the enum here.
+        object.__setattr__(self, "status", ToolStatus(self.status))
+
     @classmethod
     def success(
         cls,
