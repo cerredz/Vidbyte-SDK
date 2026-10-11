@@ -11,6 +11,7 @@ Architecture:
     - CompatibleProviderTests: xai/glm/minimax/deepseek route through one class.
     - PricingRegistryStrictnessTests: resolve/register take only ModelProvider.
     - AnthropicCacheRateTests: Anthropic cache buckets use the shared rate rules.
+    - FreeModelCacheRateTests: a 0.0 base input rate never divides cache rates.
     - OperationPricingTableTests: no operation rate is off by a per-1,000 factor.
 Relations:
     Exercises vidbyte/agents/pricing/*, vidbyte/lib/registries/pricing.py, and
@@ -206,6 +207,34 @@ class AnthropicCacheRateTests(unittest.TestCase):
         pricing = ModelPricing(input_per_million=3.0, output_per_million=15.0, cache_read_per_million=0.3, cache_write_per_million=0.0)
         anthropic = self._cost(pricing, ModelProvider.ANTHROPIC, {"input_tokens": 200, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 800})
         self.assertAlmostEqual(anthropic, 0.0006)
+
+
+class FreeModelCacheRateTests(unittest.TestCase):
+    # @intent free-base-rate-never-divides
+    # A free model written with explicit 0.0 cache rates prices at 0.0 and leaves the
+    # ledger intact on every usage shape, instead of dividing by its 0.0 input rate.
+
+    FREE = ModelPricing(input_per_million=0.0, output_per_million=0.0, cache_read_per_million=0.0, cache_write_per_million=0.0)
+
+    @staticmethod
+    def _meter(provider: ModelProvider, usage: dict[str, object]) -> tuple[float | None, bool]:
+        registry = ModelPricingRegistry(table={})
+        registry.register(provider, "free-model", FreeModelCacheRateTests.FREE)
+        tracker = UsageTracker(pricing=registry)
+        tracker.record_call(SimpleNamespace(provider=provider.value, model="free-model", usage=usage))
+        return tracker.rollup().cost_usd, tracker.recording_corrupted
+
+    def test_openai_free_model_with_explicit_cache_rate_prices_at_zero(self) -> None:
+        usage = {"input_tokens": 100, "output_tokens": 5, "total_tokens": 105, "input_tokens_details": {"cached_tokens": 40}}
+        self.assertEqual(self._meter(ModelProvider.OPENAI, usage), (0.0, False))
+
+    def test_chat_completions_free_model_with_explicit_cache_rate_prices_at_zero(self) -> None:
+        usage = {"prompt_tokens": 100, "completion_tokens": 5, "total_tokens": 105, "prompt_cache_hit_tokens": 40}
+        self.assertEqual(self._meter(ModelProvider.DEEPSEEK, usage), (0.0, False))
+
+    def test_anthropic_free_model_with_explicit_cache_rates_prices_at_zero(self) -> None:
+        usage = {"input_tokens": 60, "output_tokens": 5, "cache_read_input_tokens": 40, "cache_creation_input_tokens": 10}
+        self.assertEqual(self._meter(ModelProvider.ANTHROPIC, usage), (0.0, False))
 
 
 class OperationPricingTableTests(unittest.TestCase):
