@@ -2,10 +2,10 @@
 
 - **Stage:** S1 spec author
 - **Date:** 2026-10-11
-- **Spec:** `docs/spec/agent-output-connectors/spec.md`, revision r1
-- **Commit:** `6248fc96`
+- **Spec:** `docs/spec/agent-output-connectors/spec.md`, revision r2 (r1 at `6248fc96`; r2 in the commit that adds the "Revision r2" section below)
+- **Commit (r1):** `6248fc96`
 
-This stage wrote and committed only `spec.md`, plus this report, which is not committed. It created no source, test, or stub files. It ran no gate and installed nothing.
+The r1 run wrote and committed only `spec.md`; the orchestrator committed this report. The r2 run, at the end of this file, changed only `spec.md` and this report and committed both. It created no source, test, or stub files. It ran no gate and installed nothing.
 
 ## What I read
 
@@ -162,4 +162,84 @@ The user placed "the abstraction" in `agents/output/` and the provider logic in 
   - The §8.4 class count was 25 and is now 24, across 18 modules.
   - One weighted-word quote lost its original double space; it is restored.
 - **Verbatim text:** the Prompt 4 text in §0.1 is verbatim from request.md.
+- **No test cases** appear anywhere in the spec.
+
+## Revision r2 (S1 review round 1)
+
+The review (`reports/S1-spec-review.md`, commit `a028eb6d`) returned NEEDS REWORK: 1 Blocker, 5 Major, 5 Minor. I read "WHAT THE SPEC GETS RIGHT" first and kept every item on it: the delivery point and metadata identity; lowercase headers, `retry_status_codes=(429,)`, `follow_redirects=False`, and `max_response_bytes`; the Jev settings field and CodingAgent `**kwargs`; forks with `outputs=()`; credential order and masking; the error-code grammar; and the 17 root exports.
+
+### Dispositions
+
+All eleven findings are **Accepted**. None was rejected or deferred.
+
+| ID | Severity | Change |
+|---|---|---|
+| R-1 | Blocker | Re-cut at the provider boundary. `vidbyte/agents/output/` now holds the `OutputConnector` Protocol (`connector.py`), `OutputShaping` (skip rule and title/body shaping), and `OutputDispatcher` (render-or-shape, type check, `send`). `vidbyte/lib/outputs/` keeps provider work only. D-2 quotes all three Prompt 4 clauses and cites AGENTS.md Style 3, not A006. |
+| R-2 | Major | INV-9 skips any `stop_reason` outside `OUTPUT_DELIVERABLE_STOP_REASONS` (`final_response`, `is_done`). Added D-22, AC-8 (c), EC-43, and A-15. |
+| R-3 | Major | INV-16, D-7, NG-5, and EC-21 now cover only agents the SDK builds. Added EC-44 (Jev specialist, Aggregate proposer or aggregator) and EC-45 (pipeline, workflow, and MCP stages), plus README footguns. Q-8 is scope-adding and not built. |
+| R-4 | Major | `single_line` is `" ".join(text.split())[:limit]`, with no marker and no call to `truncate`. |
+| R-5 | Major | D-21 and row 7 order: parse, walk, non-blank str, prefix, then the `https://` check. |
+| R-6 | Major | §11 typecheck is S009 (mypy, baseline 350). Added a §12.4 typing line; `render` is typed in §8.5. |
+| R-7 | Minor | §12.4 A002 line now covers names used in the body, and lists the known sites. Added lines for S003 `zip(strict=True)`, S002 `raise … from`, and A007 no-literals. Added `JIRA_ADF_VERSION`. |
+| R-8 | Minor | D-17 gains criterion (f), the cut. Table (b) rows are now "Qualifies; below the cut". |
+| R-9 | Minor | The Notion body neutralizes `<mention-` (`NOTION_MENTION_TOKEN` and `_REPLACEMENT`). INV-12, AC-9 (b), EC-6, T-2, and A-6 updated. |
+| R-10 | Minor | EC-28 reworded to cover every later checkpoint and `export_state()`. A-14 withdrawn. |
+| R-11 | Minor | Docs only: a README footgun, catalog row a-6, NG-12, and EC-46. Q-9 is scope-adding and not built. |
+
+### Symbols moved or renamed
+
+Public names and the 17 root exports are unchanged. `vidbyte.agents.output` still exports 18 names.
+
+- **`OutputConnector`:** was an ABC in `lib/outputs/base.py`. It is now a `@runtime_checkable` Protocol in `agents/output/connector.py`.
+- **`OutputConnector.deliver`:** removed. Its steps now run in `OutputDispatcher.deliver` and `OutputDispatcher._deliver_one`.
+- **`_send`:** renamed to the public `send` on every connector, declared abstract on the new `BaseOutput` in `lib/outputs/base.py`.
+- **`OutputText.is_deliverable`, `.content`, `.structured_field`:** moved to `OutputShaping` in `agents/output/connector.py`.
+- **`OutputText.structured_json`:** moved to `WebhookOutput._structured_json`.
+- **`lib/outputs/content.py`:** renamed to `lib/outputs/text.py`.
+- **New names:**
+  - `OutputArguments.optional_callable`;
+  - the constants `OUTPUT_DELIVERABLE_STOP_REASONS`, `JIRA_ADF_VERSION`, `NOTION_MENTION_TOKEN`, and `NOTION_MENTION_REPLACEMENT`.
+- **§12.3 rows:** a new row 21 (`connector.py`) means the old rows 20–35 are now 20–36.
+
+### Budget after the re-cut
+
+- **Files:** 23 new (21 `.py` and 2 READMEs) and 13 modified. §8.4 equals §12.3 rows 1–23.
+- **Classes:** 26, in 19 modules (18 new, plus `lib/errors/base.py`).
+- **The one added layer piece is `BaseOutput`.** It is there so eleven connectors do not each re-implement the masked repr and render storage, which would put INV-4 at risk. It holds no agent logic.
+
+### Facts verified for r2 (beyond the review's list)
+
+- `AgentStopReason` has 17 members (`vidbyte/lib/dataclasses/agents.py:51-70`). INV-9 names the rejected-answer stops too: `contract_unsatisfied`, `finish_review_rejected`, `tool_settings_denied`, and `error`.
+- The precedent `NORMAL_STOP_REASONS` is at `vidbyte/evals/behavior/stop.py:32`.
+- Reflexion forwards the inner run's stop reason, defaulting to `final_response` (`vidbyte/context/algorithms/reflexion.py:125-131`).
+- There is no `stop_reason` under `vidbyte/agents/jev/` or `vidbyte/lib/jev/`.
+- A002 splits identifiers on `_` and `.` and matches whole words (`lint/rules/a002_intent_comments.py:69-75`). So `OutputSmtp._client` needs no `# @intent`, and r1's listing of it was dropped. `_link` (which reads `request`) and `_deliver_one` (which calls `send`) do need one.
+- A006 excludes `__init__.py` files from its graph (`a006_directed_dependency_graph.py:65-67`).
+- The Protocol precedent is `vidbyte/sessions/store.py:29-30`.
+- A `runtime_checkable` `isinstance` check passes for a connector *class* as well as an instance. That is why `OutputDispatcher.connectors` rejects `isinstance(item, type)` first (INV-21, AC-20).
+
+### New and least-sure assumptions after r2
+
+- **A-15 (new).** That no runtime marks a finished answer with a stop reason other than `final_response` or `is_done`. If one does, its replies are SKIPPED: visible in the receipts, with nothing posted.
+- **A-6 (extended).** That every Notion mention tag starts with `<mention-`.
+- The earlier least-sure list (A-1, A-2, A-3, A-5, A-7, A-11, A-13) stands.
+
+### Self-check (r2)
+
+- **Section headings** match r1 and the template. The diff shows only Python comment lines inside §8.5's code block.
+- **IDs:** no duplicates, no undefined references, and no gaps. The counts:
+
+  | ID | Count | ID | Count |
+  |---|---|---|---|
+  | G | 4 | D | 22 |
+  | NG | 12 | W | 12 |
+  | INV | 28 | T | 5 |
+  | AC | 26 | A | 15 (A-14 withdrawn) |
+  | EC | 46 | Q | 9 (0 blocking) |
+  | FR | 20 | | |
+  | NFR | 8 | | |
+
+- **Traceability:** every FR is traced, and every AC appears in a W row.
+- **Names:** they agree across §4, §8.5, §9.2, §12.3, and §16. r1 symbols appear only in the §16 rename table.
+- **Status:** `status: draft`, `revision: 2`, not approved (that comes after round 2).
 - **No test cases** appear anywhere in the spec.
