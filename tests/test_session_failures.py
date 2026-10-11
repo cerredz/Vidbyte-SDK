@@ -418,6 +418,12 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.value._policy.value, Session.MANUAL_POLICY)
         self.assertEqual(result.value._tags, ("repair",))
 
+    def test_fork_recovery_refuses_bare_string_tags(self) -> None:  # [Hidden Assumption]
+        # Verify tags="incident" is refused instead of tagging the branch with its characters.
+        with self.assertRaisesRegex(ValueError, "ForkRecovery.tags must be a list of tag names"):
+            ForkRecovery(tags="incident")
+        self.assertEqual(ForkRecovery(tags=["incident"])._fork_settings.tags, ("incident",))
+
     async def test_raise_recovery_uses_typed_error(self) -> None:  # [Hidden Assumption]
         # Verify terminal recovery never falls back to an untyped raw exception.
         router = FailureRouter(object())
