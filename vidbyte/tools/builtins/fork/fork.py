@@ -25,6 +25,7 @@ from vidbyte.context.handoff import EngineeringHandoff, Handoff, MinimalHandoff,
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -84,6 +85,10 @@ class ForkConversationTool(BaseTool):
     def __init__(self, *, allowed_models: Sequence[str] = (), extra_toolsets: Mapping[str, Tools | Sequence[object]] | None = None, max_fork_depth: int = 2) -> None:
         # Stores developer-controlled allow-lists and starts unbound until BaseAgent attaches an agent.
         self._agent: Any = None
+        # @intent name-lists-reject-bare-strings
+        # A bare string is itself a sequence, so tuple() would allow its characters and reject the one real model.
+        if isinstance(allowed_models, (str, bytes)):
+            raise ConfigurationError('ForkConversationTool.allowed_models must be a list of model names (e.g. ["deepseek-reasoner"]), not a single string.')
         self._allowed_models = tuple(str(model) for model in allowed_models)
         self._extra_toolsets = self._normalize_extra_toolsets(extra_toolsets)
         self._max_fork_depth = max_fork_depth

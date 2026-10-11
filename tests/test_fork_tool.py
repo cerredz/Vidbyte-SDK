@@ -9,6 +9,7 @@ from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.context.handoff import EngineeringHandoff
 from vidbyte.lib.config import ModelProvider
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.fork import ForkConversationTool
@@ -279,6 +280,12 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, ToolStatus.ERROR)
         self.assertIn("allowed_models", result.output)
+
+    def test_bare_string_allowed_models_is_refused(self) -> None:
+        # A bare string would split into characters and reject the one model the developer allowed.
+        with self.assertRaisesRegex(ConfigurationError, "allowed_models must be a list of model names"):
+            ForkConversationTool(allowed_models="deepseek-reasoner")
+        self.assertEqual(ForkConversationTool(allowed_models=["deepseek-reasoner"])._allowed_models, ("deepseek-reasoner",))
 
     async def test_max_iterations_cannot_exceed_parent_cap(self) -> None:
         # The child loop budget must not exceed the parent's configured max_iterations.
