@@ -50,7 +50,7 @@ class BaseMemoryTool(BaseTool):
             json_body=body,
             timeout_seconds=self._timeout,
         )
-        return response.status_code, json.loads(response.body or "{}")
+        return response.status_code, self._decode_body(response.body, keep_raw=not self._ok(response.status_code))
 
     async def _json_get(self, url: str, headers: dict[str, str], params: dict | None = None) -> tuple[int, dict]:
         # GETs url with optional query params, decodes response JSON, returns (status, parsed_dict).
@@ -62,7 +62,7 @@ class BaseMemoryTool(BaseTool):
             headers=headers,
             timeout_seconds=self._timeout,
         )
-        return response.status_code, json.loads(response.body or "{}")
+        return response.status_code, self._decode_body(response.body, keep_raw=not self._ok(response.status_code))
 
     async def _json_delete(self, url: str, headers: dict[str, str]) -> tuple[int, dict]:
         # DELETEs url and decodes the response JSON, returning (status, parsed_dict).
@@ -72,12 +72,20 @@ class BaseMemoryTool(BaseTool):
             headers=headers,
             timeout_seconds=self._timeout,
         )
-        body = response.body or "{}"
+        return response.status_code, self._decode_body(response.body, keep_raw=True)
+
+    @staticmethod
+    def _decode_body(body: str, *, keep_raw: bool) -> dict:
+        # @intent memory-tools-report-status-for-non-json-bodies
+        # A gateway error page is not JSON, so keep its text and let the tool report the HTTP status.
+        # POST and GET keep raw text only for error statuses, so a non-JSON success body still fails.
+        text = body or "{}"
         try:
-            parsed = json.loads(body)
+            return json.loads(text)
         except json.JSONDecodeError:
-            parsed = {"raw": body}
-        return response.status_code, parsed
+            if not keep_raw:
+                raise
+            return {"raw": text}
 
     def _error_output(self, status: int, body: dict) -> str:
         # Formats an HTTP error dict into a human-readable error string.
