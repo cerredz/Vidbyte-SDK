@@ -300,6 +300,17 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, options={"exclude_tools": ("audit",)})
         self.assertEqual(tuple(m.content for m in after), ("safe", "[tool result cleared by compaction]"))
 
+    async def test_name_options_accept_any_collection_of_names(self) -> None:
+        # [Silent Failure] A set, frozenset, or generator of names is that collection of names, not one stringified name that matches nothing.
+        tools = (msg("tool", "safe", "tool_result", tool_name="audit"), msg("tool", "hide", "tool_result", tool_name="search"))
+        history = (msg("user", "a", provider_index=10), msg("assistant", "b"), msg("user", "c", provider_index=12))
+        for names in ({"audit"}, frozenset({"audit"}), (n for n in ("audit",)), {"audit": 1}.keys()):
+            with self.subTest(names=type(names).__name__):
+                after, _ = await ContextCompactionEngine().compact_messages(tools, mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, options={"exclude_tools": names})
+                self.assertEqual(tuple(m.content for m in after), ("safe", "[tool result cleared by compaction]"))
+        after, _ = await ContextCompactionEngine().compact_messages(history, mode=CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, options={"message_ids": {"10", "12"}})
+        self.assertEqual(tuple(m.content for m in after), ("b",))
+
     async def test_clear_tool_results_except_keeps_excluded_tool_on_every_provider_shape(self) -> None:
         # [Silent Failure] Anthropic tool_result blocks (named through their tool_use id) and Gemini function parts resolve tool names, so the excluded tool survives as on OpenAI.
         tools = ("read_file", "web_search")
@@ -418,6 +429,15 @@ class DeterministicMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         raw = RuntimeToolResult.success("audit", "keep me")
         decision = await middleware.after_tool_call(MiddlewareContext(hook=MiddlewareHook.AFTER_TOOL_CALL, agent_name="agent", tool_call=RuntimeToolCall("audit"), tool_result=raw))
         self.assertEqual(decision.transform.model_visible_tool_result.output, "keep me")
+
+    async def test_tool_result_clear_except_accepts_a_set_of_names(self) -> None:
+        # [Silent Failure] A set of excluded names keeps the named tool visible and still clears the others.
+        middleware = ToolResultCompactionMiddleware.clear_except(exclude_tools={"audit"})
+        for name, expected in (("audit", "keep me"), ("search", "[tool result cleared by compaction]")):
+            with self.subTest(tool=name):
+                decision = await middleware.after_tool_call(MiddlewareContext(hook=MiddlewareHook.AFTER_TOOL_CALL, agent_name="agent", tool_call=RuntimeToolCall(name), tool_result=RuntimeToolResult.success(name, "keep me")))
+                visible = decision.transform.model_visible_tool_result.output if decision.transform is not None else "keep me"
+                self.assertEqual(visible, expected)
 
     async def test_tool_result_scrub_bloat_leaves_raw_unchanged(self) -> None:
         # [Silent Failure] The transformed visible result changes while the raw result object is unchanged.
