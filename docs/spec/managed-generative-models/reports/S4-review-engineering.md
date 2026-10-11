@@ -1,90 +1,102 @@
 LENS: engineering
-VERDICT: MERGEABLE AFTER FIXES — The code follows r5 on every money path and key path I probed. The one real gap is in the test pack: the S064 cumulative retry deadline (INV-10, EC-38) has no test, and five plausible bugs in it pass all 32 tests.
+VERDICT: MERGEABLE AFTER FIXES — the transport, key selection and failure mapping do what spec r5 says on every path I drove, including under a fake clock, but the r5 retry deadline has no test (three deadline mutations survive), and on a machine with `VIDBYTE_API_KEY` set, the repo's own suite now sends a real, billable gateway POST.
 
 WHAT THE IMPLEMENTATION GETS RIGHT (max 4 bullets, concrete, so nobody "fixes" what works)
-- **Raise shape.** `_send` (`vidbyte/lib/http/vidbyte_gateway.py:198-206`) keeps only the exception *type*, never the instance. Every `ProviderRequestError` is raised in `request` after all `except` blocks have closed (`:190`), so no failure path leaves the response body, the inner `response_excerpt`, or exception text reachable. The canary and key scans over `str`, `details` and the formatted traceback all pass, and the "error is truthy" mutation is caught.
-- **One key per call.** `TextModelRunner.arun` builds a new `VidbyteGatewayTransport` for each call (`vidbyte/lib/runners/text.py:77-84`), and the key is minted inside `request` (`vidbyte_gateway.py:156`). Concurrent calls therefore never share a key, and retries never change it: the "fresh key per attempt" mutation fails 4 tests. The inner `retry_count` stays at the `HttpTransport` default of 0: the `retry_count=2` mutation fails 6 tests.
-- **The deadline loop matches r5 exactly** (`vidbyte_gateway.py:168-184`). Under a fake loop clock, with every attempt answering 502 after `step` seconds:
-  - step 0 s → 3 POSTs; 300 s → 3; 600 s → 2; 629.4 s → 2; 629.5 s → 1 (boundary: `>=` stops); 629.8 s → 1.
-  - Every attempt gets the full 630.0 s.
-  - The messages count re-sends correctly (2/1/0, and "did not re-send" at 0).
-  - The `for … else` counting is correct. Do not "simplify" it.
-- **Key selection fails closed.** None of these sends a request: a malformed `VIDBYTE_API_KEY`, an `sk-` key placed in `VIDBYTE_API_KEY`, a `vb_live_` key with a custom endpoint, or a `vb_live_` key with an unmanaged provider. Adapters only ever see `VIDBYTE_MANAGED_KEY_PLACEHOLDER`. BYOK is unchanged: the AC-3 goldens pass, and the full suite is also green with `VIDBYTE_API_KEY` set in the environment.
+- `VidbyteGatewayTransport.request` (`vidbyte/lib/http/vidbyte_gateway.py:156-190`) mints one uuid4 key per call. The headers dict and the envelope are built once and reused on every attempt. The deadline is taken once from `loop.time()` before the first POST. Each attempt passes the full `timeout_seconds` with no `retry_count`, and the error is raised after every `except` block has ended. In a fake-clock run every case behaved as INV-10, INV-16 and EC-38 require: 0 s attempts gave 3 POSTs, 629.4 s attempts gave 2 POSTs over 1259.3 s, and 629.6 s gave 1 POST with "did not re-send". All attempts used one key.
+- Credential safety holds. `_send` keeps only the exception class, never the instance (`:198-206`). `_json_object` decodes in its own narrow `try`. Messages are built from the status and the shape only. Pack tests scan `str()`, `details` and the formatted traceback for a planted canary and key-shaped strings. The row-1/row-2 split, the truthiness check on `"error"`, the inner retry and a per-attempt fresh key were each mutated, and tests caught every one.
+- Key selection fails closed. `find_vidbyte_api_key` (`vidbyte/lib/registries/models.py:173-193`) only reports managed state for a key with the prefix, and fills in `VIDBYTE_API_KEY` only for the six managed providers. `resolved_api_key()` returns the placeholder in managed state (`model_configs.py:137-143`). Explicit managed mode never reads the provider env var. A Vidbyte key reached no vendor host in any path I tried, including direct adapter use and an unpinned BYOK runner after an env change.
+- BYOK stays isolated. The runner pins only managed configs (`vidbyte/lib/runners/text.py:46-54`). Each call builds its own decorator, so concurrent calls share no state (`:77-84`). `resolve_api_key` is untouched. The production `.py` diff is lib-only (AC-19), and the SDK holds no markup, fee or price constant (INV-15).
 
 FINDINGS (ranked, most severe first, max 15)
 
-R-E1 [Major] [test quality] tests/features/sdk_managed_text/test_managed_text_failures.py:94-110 (whole pack; code under test vidbyte/lib/http/vidbyte_gateway.py:169,177,182-184) — No test drives the event-loop clock, so the r5 cumulative retry deadline (INV-10, EC-38, §9.2 "Retries" and the "did not re-send" wording) is untested. The deadline branch, the per-attempt "never shortened" rule and the re-send count in messages can all break without any test failing.
-  Evidence:
-  - `grep -n deadline tests/features/sdk_managed_text/*.py` finds nothing.
-  - The pack was written against r4 (test-plan.md header: "Spec … r4"), before r5 added the deadline. Yet test-plan.md:20 lists EC-38 as covered by `test_gateway_errors_raise_credential_safe_errors_after_one_post_or_three_for_a_502`. That test never moves the clock: `BackoffRecorder` sleeps 0.
-  - I re-executed mutated module copies in place through a scratch pytest plugin (no worktree edits), then ran `MUT=<m> PYTHONPATH="$(pwd);<scratch>" python -m pytest tests/features/sdk_managed_text -q -p no:cacheprovider -p mutplug`. Each of these still reports `32 passed`:
-    - `no_deadline`: the `or loop.time() + retry_wait >= deadline` check deleted;
-    - `deadline_gt`: `>=` changed to `>`;
-    - `deadline_after_first`: the deadline re-taken after the first attempt, which allows a worst case of about 3× the timeout;
-    - `resends_off_by_one`: the `for … else` count set to `JEV_DEFAULT_RETRY_COUNT - 1`, so messages say "re-sends in this call: 1" after two re-sends;
-    - `shorten_attempt`: retry attempts given `deadline - loop.time()` instead of the full timeout, which INV-10 forbids.
-  - `shorten_attempt` survives only because of this host's clock. The assertion `self.assertEqual(request["timeout_seconds"], 630.0)` (`:110`) is meant to catch it, but `time.get_clock_info('monotonic')` here is `GetTickCount64(), resolution=0.015625`. A fast test sees `deadline - loop.time() == 630.0` exactly, so the assertion passes on Windows and would fail only on a high-resolution (Linux) clock.
-  - For contrast, the other mutations are caught: `retry_503` (2 failed), `retry_network` (2), `error_truthy` (1), `inner_retry` (6), `fresh_key_per_attempt` (4), `nan_floor_order` (1), `runner_key_placeholder` (8), `fallthrough_any_provider` (1), `env_vb_not_managed` (1).
-  Failure: Three outcomes go undetected:
-  - **The deadline check is lost.** Lint S064 sees only the comparison's shape, so the check could later be removed or moved. A slow 502 at the gateway's 600 s deadline (EC-38) would then get two re-sends instead of at most one. Each re-send forwards upstream again (the claim was released), so Vidbyte pays the provider up to 3 times and the caller waits about 32 minutes instead of about 21. The suite stays green.
-  - **The re-send count is wrong.** The error then misreports how many same-key re-sends a possibly billed call made, and §9.2 rows 3, 5 (409, 502) and 6 bind that number.
-  - **An attempt is cut short.** Its timeout fires while the gateway is still finishing a call it bills, which INV-10 exists to prevent. On Windows the pack cannot see this.
-  Smallest fix: Add one test to the pack; no existing test needs editing.
-  - Patch the gateway module's `asyncio` name with a fake clock: `patch("vidbyte.lib.http.vidbyte_gateway.asyncio", new=SimpleNamespace(get_running_loop=lambda: clock, sleep=clock.sleep))`, where the scripted inner transport advances `clock.t` by `step` on each call.
-  - Assert, for a call that answers 502 every time:
-    - step 0 → 3 POSTs with message "re-sends in this call: 2";
-    - step 600 → 2 POSTs and "re-sends in this call: 1";
-    - step 629.5 → 1 POST, no sleep, and the "did not re-send" wording (this is the exact boundary, where `>=` must stop);
-    - every attempt has `timeout_seconds == 630.0`.
-  - This kills all five surviving mutations on every platform. Then update test-plan.md:20 so EC-38 points to the new test.
-  Spec IDs: INV-10, INV-16, EC-38, D-10, §9.2 Retries and rows 3/5/6 (re-send count), AC-27 (per-attempt timeout)
+R-E1 [Major] [test quality] vidbyte/lib/http/vidbyte_gateway.py:168-184 (and tests/features/sdk_managed_text/test_managed_text_failures.py:94-110) — No test drives the event-loop clock, so the r5 cumulative deadline (INV-10, INV-16, EC-38, lint S064) can be deleted, inverted or moved without any test failing.
+  Evidence: I re-executed mutated copies of the module through a scratch pytest plugin (`-p mutplug`). Worktree files were not edited.
+    `MUT=no_deadline` (`if not answer.retryable():`, deadline check removed) → `32 passed in 0.34s`
+    `MUT=deadline_gt` (`>=` → `>`) → `32 passed in 0.31s`
+    `MUT=deadline_after_first` (deadline re-taken after the first attempt, which allows about 3× the timeout) → `32 passed in 0.31s`
+    `MUT=shorten_attempt` (retry attempt gets `deadline - loop.time()` instead of the full timeout, which INV-10 forbids) → `32 passed in 0.33s`
+    The equality at `test_managed_text_failures.py:110` (`request["timeout_seconds"] == 630.0`) catches a shortened attempt only when the clock moves between attempts. Here, `python -c "import time;print(time.get_clock_info('monotonic'))"` prints `resolution=0.015625`, so on Windows the shortened retry still reads exactly 630.0.
+    The branch that writes "the SDK did not re-send it, because the call's … s timeout left no time for another attempt" (`vidbyte_gateway.py:80-81`) is never executed by any test. Even so, test-plan.md:20 lists EC-38 as covered by `test_gateway_errors_raise_credential_safe_errors_after_one_post_or_three_for_a_502`.
+  Failure: Suppose a later edit drops `or loop.time() + retry_wait >= deadline`, or recomputes `deadline` after attempt 1, or gives each retry only the time left. A slow 502 at the gateway's 600 s deadline then gets two re-sends instead of at most one, and the worst case grows from about 21 to about 32 minutes. A shortened attempt could also time out while the gateway is still finishing a call it bills. All 32 tests stay green either way, and only S064, which is a static pattern check, would notice a missing comparison.
+  Smallest fix: Add one test to `test_managed_text_failures.py`. Patch `vidbyte.lib.http.vidbyte_gateway.asyncio` with a namespace whose `get_running_loop()` returns a fake clock and whose `sleep(d)` advances it. Use an inner transport that advances the clock by `step` on each attempt and answers 502. Then assert:
+    - step 0: 3 POSTs and waits `[0.5, 1.0]`;
+    - step 629.4: 2 POSTs, and the message says "re-sends in this call: 1";
+    - step 629.6: 1 POST, and the message says "did not re-send";
+    - every attempt records `timeout_seconds == 630.0` while the fake clock has moved.
+  My scratch script `fake_clock.py` already does this and shows the current code passes it. Update the test-plan AC-10 row so it stops claiming EC-38.
+  Spec IDs: INV-10, INV-16, EC-38, D-10 (r5), §9.2 Retries; AC-27
 
-R-E2 [Minor] [failure modes] [scope-adding] vidbyte/lib/http/vidbyte_gateway.py:201 → vidbyte/lib/http/transport.py:46 — The 630 s floor also applies to the TCP connect and pool phases, so an unreachable gateway host makes each managed call hang for 10.5 minutes before failing, even though nothing can have been billed.
-  Evidence:
-  - `_send` passes the floored `timeout_seconds` to `HttpTransport.request`, which builds `httpx.AsyncClient(timeout=timeout_seconds, …)`.
-  - `python -c "import httpx; t=httpx.Timeout(630.0); print(t.connect, t.read, t.write, t.pool)"` prints `630.0 630.0 630.0 630.0`.
-  - D-9's reason for the floor ("the gateway may still complete and bill") covers only the read phase. A request that never connected never reached Vidbyte.
-  Failure: When the gateway host blackholes packets (a firewall dropping SYNs, a broken corporate proxy, or a dead route during EC-26), every managed call blocks for up to 630 s on connect. It is then raised as row 1, whose message wrongly says Vidbyte "may already have billed the call". BYOK callers who used the 60 s default used to fail in 60 s. Agent stage timeouts of 120 s cancel first, so users see a timeout and not a cause.
-  Smallest fix: This is a follow-up outside §12.3. Let `HttpTransport.request` accept an `httpx.Timeout`, or a separate connect timeout, and have the gateway transport pass a short connect timeout with the 630 s read timeout. It needs a new constant and a change to the transport signature, neither of which the spec contains.
-  Spec IDs: INV-10 (intent), EC-26; follow-up for the user
+R-E2 [Major] [test hygiene / money path] tests/test_jev_run_state_relation.py:496-508 — With `VIDBYTE_API_KEY` set in the shell, which is true for every JevAgent developer (EC-27), running the repo's own suite now sends a live, billable POST to the production gateway with the developer's real key. At base, the same code path raised "Missing API key" and sent nothing.
+  Evidence: I wrote a scratch plugin, `-p netblock`, that blocks `httpx.AsyncClient.send`, `httpx.Client.send` and `urlopen`, and records each attempted URL.
+    `VIDBYTE_API_KEY=vb_live_zzz… python -m pytest -q -p netblock` → `3004 passed, 1 skipped in 17.74s`, with one attempt recorded: `https://vidbyte-backend.onrender.com/api/v1/models/generate  tests/test_jev_run_state_relation.py::JevRunStateRelationRuntimeTests::test_legacy_mode_keeps_per_run_begin_semantics`
+    The same test with no key → `1 passed`, and the attempt list is `[]`.
+    Captured stack: `agents/base.py:1176 _run_direct → agents/runtime.py:662 → lib/runners/text.py:86 arun → providers/openai.py:30 → lib/http/vidbyte_gateway.py:174 → lib/http/transport.py:70`. So an agent model turn in that test has no scripted runner bound to it.
+  Failure: (developer shell has `VIDBYTE_API_KEY=<real key>`, `pytest` runs) → the managed call goes out. It is billed at provider cost plus 2%, with a default 8,192-token cap, on every suite run. This breaks NFR-6 ("no network in tests"). Spec §13's environment-sensitivity note expected only changed outcomes for missing-key assertions, not network I/O. CI is safe only because it sets no key.
+  Smallest fix: Bind a `ScriptedGenerativeRunner` to the unbound agent in that test's legacy-mode setup. Alternatively, run the test under `patch.dict(os.environ, {}, clear=True)`, or pop `VIDBYTE_API_KEY`. Spec §14 says "Never modify a test file … stop and report", so the orchestrator must approve this edit. Re-run the `netblock` command and expect `[]`.
+  Spec IDs: NFR-6, EC-27, §13 (environment sensitivity)
 
-R-E3 [Minor] [observability] [scope-adding] vidbyte/lib/http/vidbyte_gateway.py:174-190 — Same-key re-sends of a possibly billed call leave no trace an operator can use: a retried success looks identical to a first-try success, and a failure gives no Idempotency-Key to correlate with the backend's replay and claim rows.
-  Evidence:
-  - `lib/http` and `lib/runners` have no logger: `grep -rn "logger\|logging.getLogger" vidbyte/lib/http/ vidbyte/lib/runners/` returns nothing.
-  - On success the transport returns the last inner response unchanged (`:186-187`), so `HttpResponse.attempts` is 1 even after 3 POSTs.
-  - The raised error carries only `provider` and `status_code` (`:190`). The 409 message says the call "may still complete and be billed", but the key needed to look up that claim is discarded.
-  Failure: A deploy-time storm of edge pages (EC-15), each re-sent twice, is invisible on the client. When a user disputes a bill after the EC-37 409 error, support cannot match the SDK's error to the backend's claim and replay row.
-  Smallest fix: This is a follow-up; INV-12 requires the `HttpResponse` to be returned unchanged, and the spec has no logging or `details` field. Two options: one `logging.getLogger(__name__).info` line per re-send giving status and attempt number (never the key or the body), and `details={"idempotency_key": key}` on managed errors. T-4 makes the key useless to another tenant, because the claim is scoped to the owner.
-  Spec IDs: n/a (follow-up for the user)
+R-E3 [Minor] [test quality] vidbyte/lib/http/vidbyte_gateway.py:182-190 — Two things in the retry loop are never asserted: that the last attempt's outcome decides the error, and that the message reports the right number of re-sends.
+  Evidence: `-p mut_first`, which raises the first attempt's failure and status instead of the last → `32 passed in 0.35s`. `MUT=resends_off_by_one` (`resends = JEV_DEFAULT_RETRY_COUNT - 1`) → `32 passed in 0.32s`. Every mixed script in the pack ends in a 200 (`test_managed_text_failures.py:207+`), and the messages are only checked against `re-?sent|retr` (`:137`, `:200`). Also, `MUT=auto_shape_unchecked`, which deletes the AUTO-state endpoint and provider check in `TextModelConfig.validate()`, → `32 passed`, because the runner's `replace()` → `__post_init__` re-check masks it. A direct `config.validate()` caller has no coverage.
+  Failure: Take a 502 followed by a 402. A bug that reports the first answer gives "gateway unavailable (HTTP 502)" instead of the wallet remedy. Or the count goes off by one, and the message says "re-sends in this call: 1" after two re-sends. Callers use that count to decide whether sending a new request risks paying twice (§9.2 row 5, the 409 case).
+  Smallest fix: Add these scripts:
+    - 502 → 422: expect `status_code == 422`, the 422 remedy and 2 POSTs;
+    - 502 → raised `ProviderRequestError(provider="http")`: expect `status_code is None` and the no-response message;
+    - 502 three times: expect `re-sends in this call: 2` in the message.
+  Also add one direct `TextModelConfig(..., endpoint=…).validate()` assertion under `VIDBYTE_API_KEY`.
+  Spec IDs: §9.2 Retries ("the last outcome is raised per its row"), §9.2 rows 3, 5 and 6 ("how many times"), AC-27, EC-7
 
-VERIFIED CLAIMS:
-1. S3 report and briefing: "pack 32 passed". HELD: `32 passed in 0.94s`.
-2. S3 report: "full suite 3004 passed, 1 skipped". HELD: `3004 passed, 1 skipped in 18.07s`. Also HELD with a valid-format `VIDBYTE_API_KEY` set in the environment (`19.49s`), so no existing test depends on that variable being unset.
-3. S3 report: "C017 0, C018 1, C019 0, C020 2, S064 4, SDK-LINT: PASS". HELD. Also S002 0, S019 5 and S008 19 are RATCHETED, and A007 (254) and S009 (345) are IMPROVED.
-4. S3 report, deadline scratch check (step 0/300 → 3 POSTs, 600 → 2, 629.8 → 1, with the re-send wording). HELD, reproduced independently with my own fake-clock probe. Extra cases also behave per r5: 629.4 → 2, 629.5 → 1 (exact `>=` boundary), 409×3 → 3 POSTs, 502 then 200 → 2 POSTs and OK, and timeout 900 with step 700 → 2. Every attempt timeout equals the floored value.
-5. AC-19 and S3 report: "production .py only under vidbyte/lib/". HELD. `git diff --name-only origin/main...a80f0660 -- '*.py'` lists 9 production files, all under `vidbyte/lib/`. Nothing changed under `vidbyte/providers/` or `vidbyte/agents/`.
-6. Test plan row AC-10, test-plan.md:20: "EC-38" covered. DOES NOT HOLD. No pack test advances the clock, and the `no_deadline` mutation survives (R-E1).
-7. Test plan row AC-27: "a timeout of 630 on each attempt" catches shortened attempts. HOLDS ONLY ON HIGH-RESOLUTION CLOCKS. The `shorten_attempt` mutation passes on this Windows host, where `resolution=0.015625` (R-E1).
-8. Spec D-10 and §9.2: "each attempt leaves the inner retry_count at 0". HELD. The code passes no `retry_count`, and `HttpTransport.request` defaults to `retry_count: int = 0`. The `inner_retry` mutation is caught by 6 tests.
-9. INV-10 and AC-9: a NaN timeout resolves to the floor. HELD. `text.py:53` is `max(VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS, config.timeout_seconds)`, and the `nan_floor_order` mutation is caught.
-10. EC-24 and AC-20: one key per call, including under concurrency. HELD. A transport is built per call (`text.py:78-84`), and the `fresh_key_per_attempt` mutation is caught by 4 tests.
-11. S3 report: "jev.py about 757 lines (< 1,000)". HELD: `wc -l` gives 757.
+R-E4 [Minor] [error handling / observability] vidbyte/lib/http/vidbyte_gateway.py:204-205, :84-85 — Row 2 throws away even the exception class. A local programming error, raised before any byte leaves the process, is therefore reported as a possible billing event with nothing to diagnose it.
+  Evidence: `except Exception: raised = Exception`. The resulting reason is "the request failed before an answer arrived, and if it reached Vidbyte it may have been billed", with `status_code=None`. `json.dumps(envelope)` runs inside `HttpTransport._send_once` (`vidbyte/lib/http/transport.py:59-62`), so a `bytes`, `datetime` or `Decimal` in `extra_body`, `metadata` or a tool schema raises `TypeError` locally. In BYOK that `TypeError` reaches the developer unchanged. The pack enforces the opaque form: `test_managed_text_failures.py:180` `self.assertNotIn("TypeError", message)`. That goes further than AC-25(a), which forbids the exception's text, not its class name.
+  Failure: Example: `extra_body={"metadata": {"t": datetime.now()}}` in managed mode → a provider-shaped error with no status and no type, suggesting a network or billing problem. The developer and the operator cannot tell it apart from a dropped connection.
+  Smallest fix: Bind `except Exception as exc` and keep only `type(exc).__name__`, which holds no body text. Put it in the row-2 reason, for example "(TypeError raised before an answer arrived)". Relax the assertion at line 180 to forbid only the exception's message. Confirm that S017 accepts `type(exc).__name__`.
+  Spec IDs: AC-25(a), EC-33, §9.2 row 2
 
-COMMANDS RUN:
-- `git rev-parse --short HEAD`: `a80f0660`. `git status --short`: empty, so the worktree is clean.
+R-E5 [Minor] [security / key-crossing] [scope-adding] vidbyte/lib/registries/models.py:162-171 — The spec blesses one configuration for text that still leaks the Vidbyte key from every other modality in the same process.
+  Evidence: `OPENAI_API_KEY=vb_live_aaa… python -c "…"` printed:
+    `text managed: True adapter key: vidbyte-managed`
+    `embedding key is vb_live: True endpoint: https://api.openai.com/v1`
+    `image key is vb_live: True endpoint: https://api.openai.com/v1`
+  Failure: A developer follows EC-5 and puts their Vidbyte key in `OPENAI_API_KEY`. Text calls are protected, but any embedding, image, video or audio call sends the `vb_live_` key to api.openai.com, a non-Vidbyte host. That is a shorter route to a leaked key than T-3 traces. This PR does not cause it: before the PR, text calls leaked the key too.
+  Smallest fix: This is a follow-up for the user. INV-18 deliberately keeps `resolve_api_key` unchanged, so the repair loop does not build it. One option is for `resolve_api_key` to refuse a key that starts with `VIDBYTE_API_KEY_PREFIX` for non-text configs, raising a `ConfigurationError` that names the key-crossing.
+  Spec IDs: T-3, INV-6 (text-scoped), INV-18, EC-5
+
+R-E6 [Minor] [failure modes] [scope-adding] vidbyte/lib/http/vidbyte_gateway.py:201 → vidbyte/lib/http/transport.py:46 — The 630 s floor also becomes the TCP connect and pool timeout. An unreachable gateway host can therefore stall a managed call far longer than BYOK's 60 s, although nothing can have been billed before a connection exists.
+  Evidence: `transport.py:46` runs `httpx.AsyncClient(timeout=timeout_seconds, …)`. `python -c "import httpx;t=httpx.Timeout(630.0);print(t.connect,t.read,t.write,t.pool)"` prints `630.0 630.0 630.0 630.0`.
+  Failure: (gateway host black-holed, or Render down at the TCP level) → each managed call waits until the OS gives up on the connection. That is roughly 21 s on Windows and roughly 127 s with Linux's default SYN retries, so the 630 s ceiling is not the usual bound. The call then raises row 1, "Vidbyte may already have billed the call", which is wrong here, because no request was sent. This partly corrects the earlier committed version of this report, which said 10.5 minutes.
+  Smallest fix: This is a follow-up and outside §12.3. One option is for the decorator to pass a split timeout, with a short connect phase and 630 s for read, through a new `HttpTransport` option.
+  Spec IDs: INV-10 (per-attempt floor), EC-26
+
+R-E7 [Minor] [observability] [scope-adding] vidbyte/lib/http/vidbyte_gateway.py:174-190 — Same-key re-sends of a call that may already be billed leave nothing an operator can use. A success after retries looks identical to a first-try success, and a failure carries no `Idempotency-Key` to match against the backend's replay and claim rows.
+  Evidence: the method returns `answer.response` unchanged and writes no log line. The raised message includes only the re-send count, and `idempotency_key` is local to `request`.
+  Failure: (a support ticket reports "billed but got an error") → no SDK-side identifier links the client error to the gateway's claim and replay records, which are keyed by (user, API key, key value).
+  Smallest fix: This is a follow-up. One option is to add the per-call `Idempotency-Key` to the managed error's `details`. It is an owner-scoped random token, not a credential.
+  Spec IDs: INV-11, T-4
+
+VERIFIED CLAIMS
+- Orchestrator/S3 "pack 32 passed": held. `32 passed in 0.94s`.
+- Orchestrator/S3 "full suite 3004 passed, 1 skipped": held. Also held with `VIDBYTE_API_KEY` set and the network blocked: `3004 passed, 1 skipped in 17.74s`. That run is what exposed R-E2.
+- S3 lint figures (C017 0, C018 1, C019 0, C020 2, S064 4, `SDK-LINT: PASS`): held. I re-ran them, and S002 0, S008 19 and S009 345 ≤ 350 also held.
+- AC-19, production `.py` only under `vidbyte/lib/`: held. `git diff --name-only origin/main...a80f0660` lists 9 production files, all under `vidbyte/lib/`.
+- S3 "option A as built": the cumulative deadline, a worst case of about 2× the timeout, a slow 502 re-sent at most once, and "did not re-send" at 629.6 s. Held in my own fake-clock run, with the same numbers as the S3 scratch check.
+- §9.2 "inner retry_count left at 0": held. No `retry_count` is passed, `HttpTransport.request` defaults to 0, and the `inner_retry` mutation fails 6 tests.
+- INV-16 "one key and one envelope per call": held. The fake clock showed `keys=1` across 3 POSTs, and the `fresh_key_per_attempt` mutation fails 4 tests.
+- INV-10 NaN → 630, floor first: held. The `nan_floor_order` mutation fails 1 test.
+- INV-15, no markup constant in the SDK: held. Grepping the code diff for markup, basis points, bps, 0.02, fee, price or cost finds only the 422 message text.
+- Test plan "AC-10 row covers EC-38": did not hold (R-E1).
+- Spec NFR-6 "no network in tests", and the §13 note that only outcomes change when a key is set: did not hold on a machine with `VIDBYTE_API_KEY` set (R-E2).
+- Test plan, implicitly "every plausible bug is caught by some test": 6 of 21 mutations survived (`no_deadline`, `deadline_gt`, `deadline_after_first`, `shorten_attempt` on Windows, `resends_off_by_one`, `mut_first`; also `auto_shape_unchecked` and `follow_redirects`). These were caught: `retry_503`, `retry_network`, `error_truthy`, `inner_retry`, `fresh_key_per_attempt`, `succeeded_ignores_body`, `row1_as_row2`, `no_placeholder`, `nan_floor_order`, `runner_key_placeholder`, `fallthrough_any_provider`, `env_vb_not_managed`, `no_429_remedy_split`. Note on `follow_redirects`: httpx drops `Authorization` on cross-origin redirects, so that surviving mutation is not reported.
+
+COMMANDS RUN
+- `git diff --stat origin/main...a80f0660` → `31 files changed, 4671 insertions(+), 21 deletions(-)`
+- `git diff --name-only origin/main...a80f0660 | grep "\.py$"` → 5 test files and 9 `vidbyte/lib/**` files
 - `PYTHONPATH=$(pwd) python -m pytest tests/features/sdk_managed_text -q -p no:cacheprovider` → `32 passed in 0.94s`
-- `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider --tb=line` → `3004 passed, 1 skipped in 18.07s`
-- `VIDBYTE_API_KEY=vb_live_zzzz…(32) PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider --tb=line` → `3004 passed, 1 skipped in 19.49s`
-- `PYTHONPATH=$(pwd) python lint/run.py` → `C017 0 0 CLEAN`, `C018 1 1 RATCHETED`, `C019 0 0 CLEAN`, `C020 2 2 RATCHETED`, `S064 4 4 RATCHETED`, `SDK-LINT: PASS`
-- Mutation sweep, one run per mutation: `MUT=<m> PYTHONPATH="$(pwd);<scratch>/s4eng" python -W ignore -m pytest tests/features/sdk_managed_text -q -p no:cacheprovider -p mutplug`. The plugin re-executes a string-patched copy of the module source in the module's own namespace; it never writes to the worktree.
-  - Survived (`32 passed`): `no_deadline`, `deadline_gt`, `deadline_after_first`, `resends_off_by_one`, `shorten_attempt`.
-  - Caught: `retry_503` → `2 failed, 30 passed`; `retry_network` → `2 failed`; `error_truthy` → `1 failed`; `inner_retry` → `6 failed`; `fresh_key_per_attempt` → `4 failed`; `nan_floor_order` → `1 failed`; `runner_key_placeholder` → `8 failed`; `fallthrough_any_provider` → `1 failed`; `env_vb_not_managed` → `1 failed`.
-- `PYTHONPATH=$(pwd) python <scratch>/s4eng/deadline_probe.py` (fake loop clock, driving `VidbyteGatewayTransport` directly):
-  - `step=0.0 POSTs=3 … (re-sends in this call: 2).`
-  - `step=600.0 POSTs=2 … (re-sends in this call: 1).`
-  - `step=629.5 POSTs=1 … the SDK did not re-send it, because the call's 630 s timeout left no time for another attempt.`
-- `python -c "import time;print(time.get_clock_info('monotonic'))"` → `implementation='GetTickCount64()', resolution=0.015625`
-- `python -c "import httpx; t=httpx.Timeout(630.0); print(...)"` → `connect 630.0 read 630.0 write 630.0 pool 630.0` (httpx 0.28.1)
-- `git diff --name-only origin/main...a80f0660 -- '*.py' | grep -v '^tests/'` → the 9 files under `vidbyte/lib/`
-- `grep -n deadline tests/features/sdk_managed_text/*.py` → no output
-- `grep -rn "logger\|logging.getLogger" vidbyte/lib/http/ vidbyte/lib/runners/` → no output
+- `PYTHONPATH=$(pwd) timeout 580 python lint/run.py` → `C017 0 0 CLEAN`, `C018 1 1 RATCHETED`, `C020 2 2 RATCHETED`, `S064 4 4 RATCHETED`, `S002 0 0 CLEAN`, `SDK-LINT: PASS` (`git status --short` empty before and after)
+- `MUT=<id> PYTHONPATH="$(pwd);<scratch>" python -m pytest tests/features/sdk_managed_text -q -p no:cacheprovider -p mutplug`, for 19 mutation ids → survivors: `no_deadline`, `deadline_gt`, `deadline_after_first`, `resends_off_by_one`, `shorten_attempt`, `auto_shape_unchecked` and `follow_redirects` (each `32 passed`). Every other id gave 1 to 8 failures.
+- `PYTHONPATH="$(pwd);<scratch>" python -m pytest tests/features/sdk_managed_text -q -p no:cacheprovider -p mut_first` → `32 passed in 0.35s`
+- `PYTHONPATH=$(pwd) python <scratch>/fake_clock.py` → `step=0.0 POSTs=3 elapsed=1.5 keys=1 … (re-sends in this call: 2)`; `step=629.4 POSTs=2 elapsed=1259.3 … (re-sends in this call: 1)`; `step=629.6 POSTs=1 … did not re-send it, because the call's 630 s timeout left no time for another attempt`; `502→422: POSTs=2 … the 422 remedy`
+- `python -c "import time;print(time.get_clock_info('monotonic'))"` → `resolution=0.015625`
+- `NETBLOCK_OUT=… VIDBYTE_API_KEY=vb_live_z… PYTHONPATH="$(pwd);<scratch>" python -m pytest -q -p no:cacheprovider -p netblock --tb=no -rf` → `3004 passed, 1 skipped in 17.74s`; one blocked attempt: `…/api/v1/models/generate tests/test_jev_run_state_relation.py::…::test_legacy_mode_keeps_per_run_begin_semantics`
+- The same test without the key, `-p netblock` → `1 passed in 0.89s`, attempts `[]`. With the key and `-p netstack`, the stack ends `text.py:86 → openai.py:30 → vidbyte_gateway.py:174 → transport.py:70`.
+- `OPENAI_API_KEY=vb_live_a… PYTHONPATH=$(pwd) python -c "…EmbeddingModelConfig/ImageModelConfig…"` → `embedding key is vb_live: True endpoint: https://api.openai.com/v1`
+
+All scratch files (`mutplug.py`, `mut_first.py`, `fake_clock.py`, `netblock.py`, `netstack.py`) are in `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/89243902-3a54-44fb-81e0-5240b0f89dfc/scratchpad/s4eng/`, outside the worktree. No worktree file other than this report was written.
