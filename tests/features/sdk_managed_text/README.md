@@ -13,6 +13,7 @@ This folder holds the feature tests for Vidbyte-managed text calls. With only `V
 - `test_managed_text_selection.py` covers key selection, explicit managed mode, the refusals managed state owes before any request, runner pinning, other modalities, the config field contract, and key hygiene.
 - `test_managed_text_wire_contract.py` covers output caps per dialect, `extra_body` passthrough, the 630 s timeout floor, and the allowed body keys per dialect.
 - `test_managed_text_failures.py` covers credential-safe errors, remedy facts, edge failures, cancellation, same-key retries, one key per call, and concurrent calls.
+- `test_managed_text_deadline.py` covers the cumulative retry deadline under a fake loop clock, the full timeout on every attempt, the re-send count in messages, the last attempt deciding the error, and direct `validate()` refusals.
 
 ## Logs
 
