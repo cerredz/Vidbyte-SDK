@@ -7,12 +7,12 @@ from unittest.mock import patch
 from tests.agent_test_support import build_test_agent
 from pydantic import BaseModel
 
-from vidbyte import Agent, OutputSchemaViolationError, tool
+from vidbyte import Agent, AgentMiddleware, MiddlewareDecision, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
-from vidbyte.lib.dataclasses.middleware import MiddlewareEvent, MiddlewareHook
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareEvent, MiddlewareHook
 from vidbyte.middleware.builtins import AuditLogMiddleware, MessageHistoryCompactionMiddleware, RuntimeLimitMiddleware, ToolPolicyMiddleware
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, ToolStatus
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
@@ -597,6 +597,11 @@ class ContractUnsatisfiedStructuredOutputTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(ctx.exception.stop_reason, "contract_unsatisfied")
 
 
+class _StopAfterFirstIteration(AgentMiddleware):
+    async def after_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        return MiddlewareDecision.abort("stop_after_first")
+
+
 class ContractRejectedPlainTextDraftTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejected_plain_text_draft_stays_before_the_feedback(self) -> None:
         # @intent contract-feedback-follows-the-rejected-draft
@@ -617,6 +622,34 @@ class ContractRejectedPlainTextDraftTests(unittest.IsolatedAsyncioTestCase):
         feedback_index = next(i for i, m in enumerate(second_request) if "You cannot finish yet" in str(m.get("content")))
         self.assertEqual(second_request[feedback_index]["role"], "user")
         self.assertEqual(second_request[feedback_index - 1], {"role": "assistant", "content": "DRAFT answer"})
+
+    async def test_rejected_plain_text_finish_still_completes_its_iteration(self) -> None:
+        # @intent rejected-finish-still-completes-its-iteration
+        # Every started iteration reports completing, and an after-iteration abort on the rejected one stops the run.
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "hit"
+
+        settings = AgentLoopSettings(output_contracts=(MinToolCalls(1),))
+        events: list[MiddlewareEvent] = []
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _chat_tool_turn(("call_1", "lookup", '{"q": "a"}')), _text_turn("final answer")])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=[AuditLogMiddleware(sink=events)], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.content, "final answer")
+        hooks = [event.hook for event in events]
+        self.assertEqual(hooks.count(MiddlewareHook.BEFORE_ITERATION), 3)
+        self.assertEqual(hooks.count(MiddlewareHook.AFTER_ITERATION), 3)
+
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _text_turn("never requested")])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=[_StopAfterFirstIteration()], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "middleware_abort")
+        self.assertEqual(len(runner.calls), 1)
 
 
 class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
