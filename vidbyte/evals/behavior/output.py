@@ -168,6 +168,9 @@ class OutputBehavior:
 
     def structured_contains_keys(self, keys: Sequence[str]) -> bool:
         # Returns True if top-level structured mapping contains every requested key.
+        # @intent bare-string-key-is-one-key
+        # Iterating a bare string would check its letters as keys; a bare str is one key, like ["status"].
+        keys = (keys,) if isinstance(keys, str) else keys
         root = self._as_mapping(self._structured)
         if root is None:
             return False
