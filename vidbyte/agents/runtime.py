@@ -428,6 +428,9 @@ class AgentRuntime:
                 )
                 continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
+            # @intent spans-never-open-under-a-closed-parent
+            # The iteration span is closed now, so the parser and tool spans below attach to the still-open run span.
+            active_trace_context = trace_context
             if isinstance(raw_result, AgentResult):
                 # state.model_response is still the PREVIOUS iteration's response here,
                 # which is exactly what this early-exit branch should report.
