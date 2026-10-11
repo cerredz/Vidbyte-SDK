@@ -164,6 +164,16 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forked.tools.names(), ("a", "b", "c"))
         self.assertEqual(forked.card().tool_names, ("a", "b", "c"))
 
+    async def test_add_tool_adds_the_tools_of_a_tools_catalog(self) -> None:
+        # add_tool(Tools([...])) adds the catalog's tools, as the tools list does, not one opaque 'Tools' item.
+        agent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("a")])
+
+        agent.add_tool(Tools([FakeTool("b"), FakeTool("c")]))
+
+        self.assertEqual(agent.tools.names(), ("a", "b", "c"))
+        self.assertEqual(agent.card().tool_names, ("a", "b", "c"))
+        self.assertNotIn("Tools", agent.card().tool_names)
+
     async def test_agent_fork_preserves_middleware(self) -> None:
         middleware = FakeMiddleware()
         replacement = FakeMiddleware()
