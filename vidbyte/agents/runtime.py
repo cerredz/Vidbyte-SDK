@@ -815,7 +815,9 @@ class AgentRuntime:
             self._middleware_context(
                 MiddlewareHook.AFTER_RUN,
                 state,
-                tool_call_count=int(dict(result.metadata).get("tool_call_count", 0)),
+                # @intent internal-tools-never-spend-the-tool-budget
+                # after_run reports the same non-internal count every other hook sees, so isDone never counts here either.
+                tool_call_count=len(self._non_internal_tool_contexts(dict(result.metadata).get("tool_calls", state.call_contexts))),
                 provider_messages=state.messages,
             )
         )

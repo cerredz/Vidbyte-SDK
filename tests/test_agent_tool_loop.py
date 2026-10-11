@@ -12,7 +12,8 @@ from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
-from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, RuntimeLimitMiddleware, ToolPolicyMiddleware
+from vidbyte.lib.dataclasses.middleware import MiddlewareEvent, MiddlewareHook
+from vidbyte.middleware.builtins import AuditLogMiddleware, MessageHistoryCompactionMiddleware, RuntimeLimitMiddleware, ToolPolicyMiddleware
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, ToolStatus
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
 from vidbyte.tools.security import PermissionPolicy
@@ -676,6 +677,30 @@ class InternalToolBudgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["stop_reason"], "is_done")
         self.assertEqual(sent, ["acme"])
         self.assertEqual(reply.content, "Invoice sent.")
+
+    async def test_after_run_tool_call_count_excludes_the_accepted_is_done(self) -> None:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # after_run sees the same non-internal count as every other hook, so the finishing isDone never adds one.
+        @tool
+        def send_invoice(customer: str) -> str:
+            """Send the invoice."""
+            return "sent"
+
+        events: list[MiddlewareEvent] = []
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "send_invoice", '{"customer": "acme"}')),
+                _chat_tool_turn(("call_2", "isDone", '{"final_answer": "Invoice sent."}')),
+            ]
+        )
+        agent = build_test_agent(name="billing", system_prompt="Send invoices.", runner=runner, tools=[send_invoice], middleware=[AuditLogMiddleware(sink=events)])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("invoice acme")
+
+        counts = {event.hook: event.metadata["tool_call_count"] for event in events}
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(counts[MiddlewareHook.AFTER_RUN], 1)
+        self.assertEqual(counts[MiddlewareHook.AFTER_RUN], counts[MiddlewareHook.AFTER_ITERATION])
 
 
 class IterationFloorAtMaxIterationsTests(unittest.IsolatedAsyncioTestCase):
