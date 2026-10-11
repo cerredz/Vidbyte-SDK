@@ -27,7 +27,7 @@
 ### Non-Goals
 - Walking parent folders or merging nested AGENTS.md files (the user narrowed this to "just read the root repo's agents.md file").
 - Re-reading AGENTS.md on each run, watching it for edits, or exposing a reload method.
-- A configurable cap, a CLI flag (`vidbyte/cli/coding.py` is not touched), or a `restore()` path that keeps the section.
+- A configurable cap, or a `restore()` path that keeps the section. The feature is used through the Python API only.
 - Implementing the environment-context, map.md, or setup-command sections. Their enum members are reserved here; their loaders are their own PRs.
 - A new primitive type with "binding instructions" wording (decided against in §14; Q-2).
 - Rebinding caller tools that write to the caller's context manager (§6.4 edge cases; Q-1).
@@ -457,7 +457,6 @@ Optional controls surfaced by self-critique. None is built in this PR.
 - [ ] **Q-2.** Should AGENTS.md render through a dedicated primitive whose text says these are the repository's binding instructions, instead of `TextContextItem`'s generic paragraph? Default: no (§14).
 - [ ] **Q-3.** Should the 32 KiB cap be configurable, or should nested/parent AGENTS.md files be merged as Codex does? Default: no; fixed constant, root only.
 - [ ] **Q-4.** Should `restore()` / session resume rebuild the section? Default: no; restore returns a plain `BaseAgent` already (spec NG-11).
-- [ ] **Q-5.** Should `vidbyte-sdk coding run` get a `--no-agents-md` flag? Default: no (the field guide records that the CLI is being removed).
 
 ---
 
