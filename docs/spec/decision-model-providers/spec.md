@@ -1,15 +1,15 @@
 ---
 spec: decision-model-providers
 title: Add more decision model providers beyond TypeSafe Jev
-status: verified             # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open              # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 11
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-decision-model-providers
 branch: feat/decision-model-providers
 base_commit: 278448b05155cb25b0a7fb667609256a496404b2
 created: 2026-10-10
-updated: 2026-10-10
-pr: https://github.com/cerredz/Vidbyte-SDK/pull/697  # filled at S3 (draft) and finalized at S6
+updated: 2026-10-11
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/697
 ---
 
 # Spec: Add more decision model providers beyond TypeSafe Jev
@@ -910,6 +910,7 @@ Rows that touch no production behaviour: 11, 18, 19, 20, 21 (row 17 now carries 
 | r10 | 2026-10-10 | S1 revision (S3 block S3-2) — tests-written | EC-34 follows D-14 and Q-5: `validate_provider_model_pair(ModelProvider.BASETEN, "mercury-decide")` raises the INV-30 ownership error, `JevAgentSettings` accepts the pair at construction (as in EC-22), and the first runner build refuses it through `_refuse_decision_runner` (runner type `decision`); §9.4 compatibility note (9) corrected the same way; row 15 also corrects the `openai_decisions.py` header's KNOWN EDGE CASES sentence on the response-level `model` echo (comment only, as O-1). No behaviour or contract name changed. |
 | r11 | 2026-10-10 | S3 implement (P5) | r7–r10 deltas built after merging origin/main (`98576b76`): seven System One providers (members, registry maps, runner catalogs, `HOSTS` rows, factory), Baseten 0.02/0.0, the `gpt-6-luna` 272K tier, the seven new pricing blocks, INV-29 price-proof comments, the C010 lock refreshed once (2026-07-30 → 2026-10-10), and the doc rows 4, 11, 15, 18, 19, 20; 87 feature tests pass; `SDK-LINT: PASS` with C009 at its Mistral baseline and C010 clean; `scripts/run_ci.py` green. Spec text unchanged (frontmatter `revision:` stays 10). Implementation deviation 1 (C017 URL resolution) still stands. |
 | r11 | 2026-10-10 | S1 revision (S4 review R-2) — reviewed | The first spec-text change after r10 (the S3 row above left the text and `revision: 10` unchanged), so the frontmatter becomes `revision: 11` as the orchestrator directed. `DecisionHttpCall` is defined in `vidbyte/lib/dataclasses/jev.py` (frozen, slotted, validated in `__post_init__`, no `vidbyte.lib.http` import), and its `send` moves to `DecisionTransport.send` in `vidbyte/providers/decisions.py`, which re-exports the record; FR-6, FR-12, D-3, §5, §8.4, §8.5, §9.2, T-3, §11, W-4, rows 5, 12, 13, 14, 15, 18, 19, and §12.4 amended; AC-23 added. `DecisionHttpCall` keeps its name and fields, and no other contract name changed. `status: reviewed`. |
+| r11 | 2026-10-11 | S6 PR | finalized for review |
 
 ### Implementation deviations
 
