@@ -99,6 +99,7 @@ def _edit_diff(self, target: Path, new_content: str) -> str:
 #### Edge Cases & Error Handling
 - A missing file is never passed in: `write_text` checks `is_file` first, and `replace_text` already requires an existing file.
 - Any other read error propagates to the tool's `except` and becomes an error result, as a failed read does today in `replace_text`.
+- `diff_text` compares text with line endings normalized. A `write_text` that changes only line endings (for example, LF text written on Windows, where the platform default is CRLF) reports `no changes`. This is accepted: the text the model wrote did not change.
 
 ### 6.2 WriteTextTool
 
@@ -154,7 +155,7 @@ Error outputs and metadata are unchanged.
 | MODIFY | `vidbyte/lib/tools/filesystem/backends/local.py` | Fix the joined last line with git's marker |
 | MODIFY | `tests/test_filesystem_tools.py` | Edit-diff tests |
 | MODIFY | `tests/features/coding_agent/test_coding_agent_acceptance.py` | Model sees the `-`/`+` lines |
-| MODIFY | `tests/features/coding_agent/FEATURE.md` | Test suite map and observable outcome |
+| MODIFY | `tests/features/coding_agent/FEATURE.md` | Failure inventory and test suite map |
 | CREATE | `scripts/test_edit_tool_diffs.py` | Phase 5 runner over the two test files |
 | CREATE | `docs/design/edit-tool-diffs.md` | This doc |
 
