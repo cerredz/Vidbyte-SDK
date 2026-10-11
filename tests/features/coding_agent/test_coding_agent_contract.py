@@ -36,6 +36,7 @@ EXPECTED_SIGNATURE = {
     "tavily_api_key": None,
     "tools": (),
     "permission_policy": None,
+    "max_rewrite_lines": 300,
 }
 
 # BaseAgent keywords that RunState exports, so a pass-through mistake shows up as a state difference.
