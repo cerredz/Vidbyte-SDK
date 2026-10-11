@@ -102,7 +102,7 @@ class TextModelConfig:
             self.resolved_vidbyte_api_key()
             return
         # A BYOK config resolves its provider key as before.
-        self.resolved_api_key()
+        ProviderModelRegistry.resolve_api_key(provider, self.api_key)
 
     def is_vidbyte_managed(self) -> bool:
         """Return True in explicit managed mode, or when AUTO selects a Vidbyte key."""
