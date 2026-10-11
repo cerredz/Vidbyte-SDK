@@ -32,6 +32,7 @@ from vidbyte import (
     Session,
     StopRecovery,
     rule,
+    tool,
 )
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
@@ -95,6 +96,19 @@ class _FailingRunner:
     def run(self, _prompt: str, **_options: object):
         # Raise an ordinary provider-boundary exception without network access.
         raise RuntimeError("runner failed")
+
+
+class _RefundCallRunner:
+    """Offline runner that asks for one refund tool call, then finishes."""
+
+    def __init__(self) -> None:
+        self.responses = [("refund", '{"amount": 900}'), ("isDone", '{"final_answer": "done"}')]
+
+    def run(self, _prompt: str, **_options: object) -> SimpleNamespace:
+        # Script one OpenAI-style tool call per model request without network access.
+        name, arguments = self.responses.pop(0)
+        call = {"id": f"call_{name}", "type": "function", "function": {"name": name, "arguments": arguments}}
+        return SimpleNamespace(text="", raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]})
 
 
 class FailureContractsTests(unittest.TestCase):
@@ -380,6 +394,36 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AgentExecutionError):
             await agent.arun("work")
         self.assertEqual(session.failures.history()[0].code, FailureCode.RUNTIME_ERROR)
+
+    async def test_in_loop_raise_rule_surfaces_typed_error(self) -> None:  # [Hidden Failure]
+        # @intent raise-disposition-reaches-the-caller
+        # Verify a matched, fail-closed crashing, or RaiseRecovery-routed rule raises FailureRaisedError, blocks the tool, and leaves one ledger record.
+        def over_limit(context):
+            return Failure(code=FailureCode.ACTION_POLICY_VIOLATION, source="refund_limit", phase=FailurePhase.ACTION)
+
+        def crashing(_context):
+            raise RuntimeError("limits service down")
+
+        raise_ = FailureDisposition.RAISE
+        cases = ((over_limit, raise_, RuleErrorMode.OPEN, FailureCode.ACTION_POLICY_VIOLATION), (crashing, raise_, RuleErrorMode.CLOSED, FailureCode.RULE_EVALUATION_FAILED), (over_limit, FailureDisposition.ROUTE, RuleErrorMode.OPEN, FailureCode.ACTION_POLICY_VIOLATION))
+        for detector, on_match, on_error, code in cases:
+            with self.subTest(detector=detector.__name__, on_match=on_match.value):
+                refunded: list[int] = []
+
+                @tool
+                def refund(amount: int) -> str:
+                    """Refund an order."""
+                    refunded.append(amount)
+                    return "refunded"
+
+                session = Session(build_test_agent(name="payments", system_prompt="Pay.", runner=_RefundCallRunner(), tools=[refund]))
+                session.failures.add_rule(rule(code=FailureCode.ACTION_POLICY_VIOLATION, on=MiddlewareHook.BEFORE_TOOL_CALL, on_match=on_match, on_error=on_error)(detector))
+                session.failures.on(FailureCode.ACTION_POLICY_VIOLATION, RaiseRecovery())
+                with self.assertRaises(FailureRaisedError) as raised:
+                    await session.arun("refund order o1")
+                self.assertEqual(refunded, [])
+                self.assertEqual([(item.code, item.status, item.disposition) for item in session.failures.history()], [(code, FailureStatus.TERMINAL, FailureDisposition.RAISE)])
+                self.assertEqual(raised.exception.failure.id, session.failures.history()[0].id)
 
     async def test_session_routes_exception_after_local_handling(self) -> None:  # [Hidden Failure]
         # Verify exception-time escalation runs once after the local agent boundary records it.

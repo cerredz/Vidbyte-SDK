@@ -364,6 +364,12 @@ class FailureRouter:
 
     def capture_exception(self, exc: BaseException, *, phase: FailurePhase = FailurePhase.RUNTIME, source: str = "session") -> Failure:
         """Record one SDK exception once, deduplicating Session and agent boundaries."""
+        # @intent raise-disposition-reaches-the-caller
+        # A FailureRaisedError carries a failure this ledger already recorded; return it rather than add a runtime.error twin.
+        raised_id = getattr(exc.failure, "id", None) if isinstance(exc, FailureRaisedError) else None
+        recorded = next((failure for failure in reversed(self._history) if raised_id is not None and failure.id == raised_id), None)
+        if recorded is not None:
+            return recorded
         exception_ids: set[int] = set()
         current: BaseException | None = exc
         while current is not None:

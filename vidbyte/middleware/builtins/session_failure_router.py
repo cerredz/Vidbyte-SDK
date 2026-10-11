@@ -8,7 +8,8 @@ ARCHITECTURE NOTE: Only type-checks against vidbyte.sessions.failure.router.Fail
     middleware without creating an import cycle between the middleware and sessions domain layers.
 COMMON MODIFICATION PATTERNS: Add a hook override here when the runtime gains a new lifecycle breakpoint;
     keep rule evaluation itself owned by FailureRouter.evaluate().
-KNOWN EDGE CASES: A matched rule with a stop/raise disposition aborts the run; every other disposition
+KNOWN EDGE CASES: A matched rule with a stop disposition aborts the run; a raise disposition's
+    FailureRaisedError propagates through MiddlewarePipeline to the caller; every other disposition
     is left to FailureRouter's own history and recovery bookkeeping.
 RELATED DOCS: docs/design/session-failure-vocabulary.md; skills/failure/README.md.
 TESTS: python -m pytest -q tests/test_session_failures.py.
