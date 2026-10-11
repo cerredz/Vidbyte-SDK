@@ -120,7 +120,6 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Identity errors.
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
-- `test_coding_agent_readonly_paths.py` checks `readonly_paths` through the loop: both edit tools denied with the file unchanged and the path and pattern named, every path spelling and a new file, case on Windows, unprotected writes and protected reads, the outside-root error unchanged, no middleware by default, construction errors, and the caller's middleware first.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
@@ -143,6 +142,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - An endless printer.
   - Closing the transport after `asyncio.run`.
   - Cancellation, both directly and through the runtime's tool timeout.
+- `test_coding_agent_readonly_paths.py` checks `readonly_paths` through the loop: both edit tools denied with the file unchanged and the path and pattern named, every path spelling and a new file, case on Windows, unprotected writes and protected reads, the outside-root error unchanged, no middleware by default, construction errors, and the caller's middleware first.
 
 Run everything with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent`.
 
