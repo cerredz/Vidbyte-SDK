@@ -181,13 +181,21 @@ class GeminiContentsOrderingTests(unittest.TestCase):
         self.assertIn("functionCall", contents[1]["parts"][0])
         self.assertEqual(contents[3]["parts"][0]["text"], "that did not match the schema")
 
+    def test_prompt_precedes_a_rejected_text_draft(self) -> None:
+        # A rejected plain-text answer is appended as an assistant turn before the contract
+        # feedback, so the exchange opens with a model turn; the prompt must still come first.
+        contents = self._contents([{"role": "assistant", "content": "draft"}, {"role": "user", "content": "feedback"}])
+        self.assertEqual([c["role"] for c in contents], ["user", "model", "user"])
+        self.assertEqual(contents[0]["parts"][0]["text"], "do the thing")
+        self.assertEqual(contents[-1]["parts"][0]["text"], "feedback")
+
     def test_openai_shaped_history_is_converted_to_parts(self) -> None:
         # Contract feedback and assistant turns are appended in the OpenAI {role, content}
         # shape, which Gemini cannot read.
         contents = self._contents([{"role": "assistant", "content": "prior answer"}])
-        self.assertEqual(contents[0]["role"], "model")
-        self.assertEqual(contents[0]["parts"][0]["text"], "prior answer")
-        self.assertNotIn("content", contents[0])
+        model_turn = next(c for c in contents if c["role"] == "model")
+        self.assertEqual(model_turn["parts"][0]["text"], "prior answer")
+        self.assertNotIn("content", model_turn)
 
 
 def _call_turn(*names: str) -> dict:
