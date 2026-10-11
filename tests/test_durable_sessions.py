@@ -1071,6 +1071,16 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             Session.resume(store, own.id, checkpoint_id=other.head)
         self.assertEqual(store.head(own.id).id, own_head)
 
+    async def test_fork_of_resumed_session_keeps_stored_tags(self) -> None:  # [Silent Failure]
+        # A resumed session is the same tagged session, so its fork must inherit the tags exactly as a fork of the original does.
+        store = InMemorySessionStore()
+        session = Session(build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner()), store=store, tags=("acme",))
+        await session.arun("first")
+
+        branch = Session.resume(store, session.id).fork()
+        self.assertEqual(store.get_meta(branch.id).tags, ("acme",))
+        self.assertIn(branch.id, [meta.session_id for meta in store.list_sessions(tag="acme")])
+
     async def test_file_store_parity_round_trip(self) -> None:  # [Silent Failure]
         with tempfile.TemporaryDirectory() as root:
             store = FileSessionStore(root)
