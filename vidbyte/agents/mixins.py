@@ -100,14 +100,23 @@ class McpAttachableMixin:
 
         If any server fails to start or initialize, all successfully started servers
         in this batch are closed and cleaned up before raising McpAttachmentError.
+        If the batch is cancelled, the servers that already started are closed too,
+        and the cancellation propagates; no server from the batch is attached.
         """
         if not servers:
             return self
 
-        results = await asyncio.gather(
-            *[attach_mcp_server(cfg) for cfg in servers],
-            return_exceptions=True,
-        )
+        # Keep each attempt so a cancelled batch can still find the servers it already started.
+        attempts = [asyncio.ensure_future(attach_mcp_server(cfg)) for cfg in servers]
+        try:
+            results = await asyncio.gather(*attempts, return_exceptions=True)
+        except asyncio.CancelledError:
+            started = [a.result() for a in attempts if a.done() and not a.cancelled() and a.exception() is None]
+            # @intent cancelled-mcp-batch-leaves-no-untracked-server
+            # None of them was attached yet, so stop the ones that finished starting before the cancel;
+            # a close error is dropped so it cannot replace the cancellation already propagating.
+            await asyncio.gather(*[h.close() for h in started], return_exceptions=True)
+            raise
 
         handles: list[McpServerHandle] = []
         errors: list[Exception] = []
@@ -211,8 +220,11 @@ class McpAttachableMixin:
         self._mcp_attach_in_flight = attach_done
         try:
             await self.attach_mcp_servers(configs)
-        except Exception:
-            self._pending_mcp_configs.extend(configs)
+        except BaseException:
+            # @intent cancelled-lazy-mcp-attach-requeues-its-servers
+            # A failed or cancelled attach (say, a timeout around a run while a slow server boots) attaches
+            # none of these servers, so queue them to connect again first, in order, for the next run.
+            self._pending_mcp_configs[:0] = configs
             raise
         finally:
             # Release the waiting runs; the marker never outlives this loop's attach.
