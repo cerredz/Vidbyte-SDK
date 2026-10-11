@@ -1020,7 +1020,9 @@ class AgentRuntime:
             message=state.message,
             iteration_count=state.iteration_count,
             model_call_count=state.model_call_count,
-            tool_call_count=tool_call_count if tool_call_count is not None else state.tool_call_count,
+            # @intent internal-tools-never-spend-the-tool-budget
+            # Middleware limits count the same non-internal calls as the runtime budget, so isDone never spends them.
+            tool_call_count=tool_call_count if tool_call_count is not None else len(self._non_internal_tool_contexts(state.call_contexts)),
             elapsed_seconds=max(0, self.middleware.clock() - state.started_at),
             tokens_used=state.tokens_used,
             agent_context=state.context,
@@ -1570,7 +1572,8 @@ class AgentRuntime:
                     tool_call=call,
                     tool_result=result,
                     tool_is_internal=tool_is_internal,
-                    tool_call_count=state.tool_call_count + 1,
+                    # Count the call that just ran only when it is developer work, matching the runtime budget.
+                    tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)) + (0 if tool_is_internal else 1),
                     metadata=self._tool_call_middleware_metadata(state.metadata, call),
                 )
             )

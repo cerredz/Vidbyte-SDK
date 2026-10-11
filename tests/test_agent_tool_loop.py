@@ -12,7 +12,7 @@ from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
-from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolPolicyMiddleware
+from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, RuntimeLimitMiddleware, ToolPolicyMiddleware
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, ToolStatus
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
 from vidbyte.tools.security import PermissionPolicy
@@ -648,6 +648,34 @@ class InternalToolBudgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(searched, ["a", "b"])
         self.assertEqual(reply.content, "done after 2 searches")
         self.assertIn("max_tool_calls: 2/3", runner.calls[-1]["kwargs"]["system"])
+
+    async def test_rejected_is_done_attempts_do_not_spend_middleware_tool_call_limit(self) -> None:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # A RuntimeLimitMiddleware cap counts the same developer calls as AgentLoopSettings.max_tool_calls.
+        sent: list[str] = []
+
+        @tool
+        def send_invoice(customer: str) -> str:
+            """Send the invoice."""
+            sent.append(customer)
+            return "sent"
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "isDone", '{"final_answer": "early 1"}')),
+                _chat_tool_turn(("call_2", "isDone", '{"final_answer": "early 2"}')),
+                _chat_tool_turn(("call_3", "send_invoice", '{"customer": "acme"}')),
+                _chat_tool_turn(("call_4", "isDone", '{"final_answer": "Invoice sent."}')),
+            ]
+        )
+        settings = AgentLoopSettings(max_iterations=8, output_contracts=(MinToolCalls(1),), max_contract_rejections=5)
+        agent = build_test_agent(name="billing", system_prompt="Send invoices.", runner=runner, tools=[send_invoice], middleware=[RuntimeLimitMiddleware(max_tool_calls=2)], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("invoice acme")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(sent, ["acme"])
+        self.assertEqual(reply.content, "Invoice sent.")
 
 
 class IterationFloorAtMaxIterationsTests(unittest.IsolatedAsyncioTestCase):
