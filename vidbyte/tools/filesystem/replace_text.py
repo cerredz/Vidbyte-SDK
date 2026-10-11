@@ -14,7 +14,7 @@ class ReplaceTextTool(FileSystemTool):
         # Declares the model-facing contract for exact-once in-place text replacement.
         return ToolSpec(
             name="replace_text",
-            description="Replace a search string that appears exactly once in a file at the given path inside the configured root.",
+            description="Replace a search string that appears exactly once in a file at the given path inside the configured root. The result shows a diff of the change.",
             parameters=(
                 ToolParameter(name="path", type="string", description="Relative path to the file."),
                 ToolParameter(name="search", type="string", description="Text to search for (must appear exactly once)."),
@@ -45,8 +45,11 @@ class ReplaceTextTool(FileSystemTool):
                     details={"matches": count, "path": str(target)},
                 )
             updated = content.replace(search, replacement, 1)
+            # Diff before writing, so the model sees which lines its
+            # edit hit, and a failed write still returns only its error.
+            change = self._edit_diff(target, updated)
             self.backend.write_text(target, updated, encoding=self._config.encoding, create_parents=False, newline=newline)
-            return ToolResult.success(self.name, str(target), metadata={"path": str(target), "replacements": 1})
+            return ToolResult.success(self.name, f"{target}\n{change}", metadata={"path": str(target), "replacements": 1})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))
 
