@@ -781,6 +781,9 @@ class BaseAgent(McpAttachableMixin):
         if not self._draining_queued_prompts:
             claimed, self._pending_prompts = self._pending_prompts, []
             token = self._run_queue_var.set(claimed)
+            # @intent queued-replies-are-per-request
+            # Like last_reply, the drained follow-up replies describe only this request, so a request that drains nothing leaves none.
+            self.last_queued_replies = []
         try:
             parent = active_usage_ledger()
             if parent is None or parent is self._usage_tracker:
