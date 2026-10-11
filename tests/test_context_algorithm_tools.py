@@ -5,8 +5,9 @@ from unittest import mock
 
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ReflexionContextItem, TrajectoryCheckpointContextItem
+from vidbyte.context.runtime import ContextWindowPlacement
 from vidbyte.lib.constants.cot_events import DEFAULT_SALVAGE
-from vidbyte.tools.builtins.cot_events import BacktrackTool, UncertaintyTool
+from vidbyte.tools.builtins.cot_events import BacktrackTool, HypothesisTool, UncertaintyTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
 from vidbyte.tools.builtins.reflexion import ReflexionTool
@@ -422,6 +423,23 @@ class CotEventNullOptionalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((nulled.trigger, nulled.blocker, nulled.reassessment_condition), ("", "", ""))
         self.assertEqual(null_result.output, omitted_result.output)
         self.assertNotIn("None", null_result.output)
+
+
+class CotLedgerPlacementTests(unittest.IsolatedAsyncioTestCase):
+    """@intent content-update-keeps-placement: a ledger update keeps the placement the model chose."""
+
+    async def test_hypothesis_update_keeps_moved_placement(self) -> None:
+        manager = ContextManager()
+        tool = HypothesisTool(manager)
+        args = {"statement": "H", "scope": "s", "basis": "b", "status": "proposed", "falsifier": "f"}
+        first = await tool.execute(ToolCall(tool_name="hypothesis", arguments=args))
+        self.assertEqual(first.status, ToolStatus.SUCCESS, first.output)
+        primitive_id = HypothesisTool.statement_primitive_id("hypothesis", "H")
+        manager.set_placement(primitive_id, ContextWindowPlacement.TOP_OF_CONTEXT)
+        second = await tool.execute(ToolCall(tool_name="hypothesis", arguments={**args, "status": "supported"}))
+        self.assertEqual(second.status, ToolStatus.SUCCESS, second.output)
+        self.assertEqual(manager.placement_for(primitive_id), ContextWindowPlacement.TOP_OF_CONTEXT)
+        self.assertEqual(manager.get_by_id(primitive_id).status, "supported")
 
 
 # ---------------------------------------------------------------------------
