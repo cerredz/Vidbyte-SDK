@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "787afabf4c733f6489eed1cfc729d75f1fb0751a", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "b7f3821a654bc52df4900a3689806ab42ac2e94a", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.2.1",
   "exports": [
@@ -82,6 +82,8 @@
     "CodexClientSettings",
     "CodexContextAnchor",
     "CodexContextPlacement",
+    "CodexContractOutcome",
+    "CodexContractResult",
     "CodexFailureClass",
     "CodexFailureRecord",
     "CodexFallbackAttempt",

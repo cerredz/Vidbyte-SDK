@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from vidbyte.agents.codex.tools import CodexToolBridge
     from vidbyte.agents.pricing.records import UsageRollup
     from vidbyte.agents.settings.fallback import AgentFallbackSettings
+    from vidbyte.agents.settings.loop import AgentLoopSettings
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.lib.dataclasses.failure import Failure
@@ -335,6 +336,7 @@ class CodexHarnessAgentSettings:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     thread_id: str = ""
     context_placements: tuple[CodexContextPlacement, ...] = ()
+    loop: AgentLoopSettings | None = None
     middleware: tuple[AgentMiddleware, ...] = ()
     fallback: AgentFallbackSettings | None = None
     tools: tuple[ToolInput, ...] = ()
@@ -385,6 +387,12 @@ class CodexHarnessAgentSettings:
         ):
             raise ConfigurationError(
                 "Codex harness agent fallback must be AgentFallbackSettings."
+            )
+        # Duck-typed for the same reason: AgentLoopSettings is orchestration-tier,
+        # and the unsupported-field audit runs in the Codex translator.
+        if self.loop is not None and not hasattr(self.loop, "output_contracts"):
+            raise ConfigurationError(
+                "Codex harness agent loop must be AgentLoopSettings."
             )
         self._validate_tools()
 
@@ -861,6 +869,70 @@ class CodexUsageTranslationRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexContractRequest:
+    """One completed turn offered to the shared output-contract counters."""
+
+    result: CodexRunResult
+    cost_usd: float | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.result, CodexRunResult):
+            raise ConfigurationError(
+                "Codex contract request result must be CodexRunResult."
+            )
+        if self.cost_usd is not None and (
+            isinstance(self.cost_usd, bool) or not isinstance(self.cost_usd, (int, float))
+        ):
+            raise ConfigurationError(
+                "Codex contract request cost_usd must be a number or None."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexContractResult:
+    """One contract's verdict against one turn's counters."""
+
+    name: str
+    satisfied: bool
+    observed: Any
+    minimum: float
+    error: str = ""
+
+    def __post_init__(self) -> None:
+        _require_text("Codex contract result", "name", self.name)
+        _require_bool("Codex contract result", "satisfied", self.satisfied)
+        _optional_text("Codex contract result", "error", self.error)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexContractOutcome:
+    """Every contract's verdict plus the counters they were judged against."""
+
+    results: tuple[CodexContractResult, ...] = ()
+    counters: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # @intent one-verdict-set-with-the-evidence-that-produced-it
+        # Publishing the counters alongside the verdicts is what lets a caller see
+        # the margin on a satisfied run, not just the failure on an unmet one.
+        if not isinstance(self.results, tuple) or any(
+            not isinstance(value, CodexContractResult) for value in self.results
+        ):
+            raise ConfigurationError(
+                "Codex contract outcome results must contain CodexContractResult values."
+            )
+        if not isinstance(self.counters, Mapping):
+            raise ConfigurationError(
+                "Codex contract outcome counters must be a mapping."
+            )
+
+    @property
+    def unmet(self) -> tuple[CodexContractResult, ...]:
+        """Return every contract this turn failed to satisfy, in declaration order."""
+        return tuple(result for result in self.results if not result.satisfied)
+
+
+@dataclass(frozen=True, slots=True)
 class CodexFailureRecord:
     """One canonical failure plus the retry class that decides what may follow it."""
 
@@ -983,6 +1055,7 @@ class CodexResultTranslationRequest:
     agent: CodexHarnessAgentSettings
     input_metadata: Mapping[str, Any]
     recipient: str
+    contracts: CodexContractOutcome | None = None
     failures: tuple[Failure, ...] = ()
     fallback_attempts: tuple[CodexFallbackAttempt, ...] = ()
     answering_model: str = ""

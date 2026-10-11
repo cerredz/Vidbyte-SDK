@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import (
     CODEX_ANSWERING_MODEL_KEY,
+    CODEX_CONTRACTS_KEY,
     CODEX_FAILURES_KEY,
     CODEX_FALLBACK_ATTEMPTS_KEY,
     CODEX_PROVIDER_NAME,
@@ -177,6 +178,10 @@ class CodexResultTranslator:
             metadata[CODEX_FALLBACK_ATTEMPTS_KEY] = request.fallback_attempts
         if request.answering_model:
             metadata[CODEX_ANSWERING_MODEL_KEY] = request.answering_model
+        # Omitted when no contracts are configured, so absent stays distinct from
+        # "configured and all satisfied", which publishes an empty results tuple.
+        if request.contracts is not None:
+            metadata[CODEX_CONTRACTS_KEY] = request.contracts
         return AgentMessage(
             sender=agent.name,
             recipient=request.recipient,
