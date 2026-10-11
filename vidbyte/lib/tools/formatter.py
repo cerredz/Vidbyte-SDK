@@ -147,6 +147,13 @@ class ToolsFormatter:
     _GEMINI_SCHEMA_MAPS: frozenset[str] = frozenset({"properties"})
     # Keywords whose value is itself a subschema (or a list of them).
     _GEMINI_SCHEMA_NODES: frozenset[str] = frozenset({"items", "anyOf"})
+    # Bounds Gemini's schema cannot carry, mapped to the clause that says them in words instead.
+    # Wording matches the output-schema fold in vidbyte/providers/output_schema.py.
+    _GEMINI_FOLDED_BOUNDS: Mapping[str, str] = {
+        "exclusiveMinimum": "greater than {value}",
+        "exclusiveMaximum": "less than {value}",
+        "multipleOf": "a multiple of {value}",
+    }
 
     @staticmethod
     def to_gemini_tool(spec: ToolSpec) -> dict[str, Any]:
@@ -177,14 +184,15 @@ class ToolsFormatter:
 
     @staticmethod
     def _gemini_node(node: Mapping[str, Any], defs: Mapping[str, Any], seen: tuple[str, ...]) -> dict[str, Any]:
-        # Expands $ref against $defs, keeps only Gemini-supported keywords and collapses
-        # list-valued types, depth-first.
+        # Expands $ref against $defs, keeps only Gemini-supported keywords, collapses
+        # list-valued types and words dropped bounds into the description, depth-first.
         kept: dict[str, Any] = {}
         for key, value in node.items():
             if key not in ToolsFormatter._GEMINI_SCHEMA_KEYWORDS:
                 continue
             kept[key] = ToolsFormatter._gemini_keyword_value(key, value, defs, seen)
         kept = ToolsFormatter._gemini_single_type(kept)
+        kept = ToolsFormatter._gemini_fold_bounds(node, kept)
         ref = node.get("$ref")
         if not isinstance(ref, str):
             return kept
@@ -228,6 +236,16 @@ class ToolsFormatter:
         elif names:
             collapsed.setdefault("anyOf", [{"type": name} for name in names])
         return collapsed
+
+    @staticmethod
+    def _gemini_fold_bounds(node: Mapping[str, Any], kept: dict[str, Any]) -> dict[str, Any]:
+        # @intent exclusive-bounds-are-bounds-too
+        # Gemini drops gt/lt/multipleOf bounds silently, so they are written into the description instead.
+        clauses = [ToolsFormatter._GEMINI_FOLDED_BOUNDS[key].format(value=value) for key, value in node.items() if key in ToolsFormatter._GEMINI_FOLDED_BOUNDS]
+        if not clauses:
+            return kept
+        description = str(kept.get("description", "")).strip()
+        return {**kept, "description": f"{description} Must be {', '.join(clauses)}.".strip()}
 
     @staticmethod
     def parse_tool_calls(raw: object, provider_or_model: str) -> tuple[ToolCall, ...]:
