@@ -156,6 +156,9 @@ class ForkConversationTool(BaseTool):
             "prompt": prompt,
             "system_prompt": self._optional_string(args.get("system_prompt")),
             "tools": self._resolve_tools(args.get("tool_names"), args.get("extra_toolset_names"), args.get("drop_tool_names")),
+            # @intent fork-tool-drop-names-cover-inherited-mcp-tools
+            # The child reconnects the parent's MCP servers, so the drop must also reach the fork itself, not just the catalog.
+            "drop_tools": self._coerce_string_tuple(args.get("drop_tool_names"), "drop_tool_names"),
             "history": self._resolve_history(history_mode, raw_last_n),
             "model": self._resolve_model(args.get("model")),
             "provider": self._resolve_provider(args.get("provider")),
@@ -183,6 +186,7 @@ class ForkConversationTool(BaseTool):
             name=request.get("name"),
             system_prompt=request.get("system_prompt"),
             tools=request.get("tools"),
+            drop_tools=request.get("drop_tools", ()),
             history=request.get("history"),
             model_name=request.get("model"),
             provider=request.get("provider"),
