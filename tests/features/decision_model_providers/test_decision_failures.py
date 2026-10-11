@@ -1,7 +1,7 @@
 """FILE: tests/features/decision_model_providers/test_decision_failures.py
 
 PURPOSE: Pins how decision calls fail on every adapter: the shared status table worded for the host and its env var, non-JSON bodies with a bounded excerpt, unexpected exceptions wrapped and cancellation passed through, list_models and close_run refused without a network call, the per-call config guard (including the managed per-call refusal), SystemOneProvider construction guards, DecisionHttpCall field validation, and the rule that the key never leaves the authorization header.
-ROLE IN CODEBASE: Covers spec INV-5, INV-13, INV-16, INV-17, INV-24, INV-28, AC-10, AC-13, AC-19, AC-23, EC-12, EC-13, EC-14, EC-20, EC-23, EC-25, EC-28, EC-32, T-4, NFR-5 and FR-6, FR-11 of docs/spec/decision-model-providers/spec.md (r11), plus review findings R-2 and R-3.
+ROLE IN CODEBASE: Covers spec INV-5, INV-13, INV-16, INV-17, INV-23, INV-24, INV-28, AC-10, AC-13, AC-19, AC-23, EC-12, EC-13, EC-14, EC-20, EC-23, EC-25, EC-28, EC-32, T-4, NFR-5 and FR-6, FR-11 of docs/spec/decision-model-providers/spec.md (r11), plus review findings R-2, R-3 and R-18.
 ARCHITECTURE NOTE: Runner-level tests go through DecisionModelRunner; the guard and mapper tests call SystemOneProvider, OpenAIDecisionsProvider, and DecisionFailures directly, because those seams are public per spec section 8.5.
 COMMON MODIFICATION PATTERNS: A new documented status adds one row to STATUS_CASES; a new capability refusal adds one case to the list_models/close_run test; a new DecisionHttpCall rule adds one HTTP_CALL_RULES entry and its bad values to HTTP_CALL_BAD_VALUES.
 KNOWN EDGE CASES: A scripted ProviderRequestError without a status code stands in for a network failure or timeout; KeyboardInterrupt is not exercised because it would stop the test runner.
@@ -264,6 +264,20 @@ class DecisionHttpCallTests(unittest.TestCase):
         self.assertNotIn(fx.KEY, repr(call))
         # [Hidden Assumption] AC-23: the provider module re-exports the record defined in vidbyte/lib/dataclasses/jev.py; it is one class, not a copy.
         self.assertIs(DecisionHttpCall, getattr(jev, "DecisionHttpCall", None))
+
+    def test_decision_http_call_accepts_int_and_float_subclass_timeouts(self) -> None:
+        # [Hidden Failure] R-18/AC-23/INV-23: row 5 rule 3 refuses a timeout only when it is a bool, not an int or float, not finite, or <= 0, so a subclass instance is valid; origin/main sent such a TypeSafe call.
+        from vidbyte.providers.decisions import DecisionHttpCall
+
+        valid = {"method": "POST", "url": "https://api.perplexity.ai/v1/decisions", "headers": {"authorization": f"Bearer {fx.KEY}"}, "timeout_seconds": 30.0}
+        for timeout in (type("Seconds", (float,), {})(30.0), type("WholeSeconds", (int,), {})(30)):
+            with self.subTest(timeout_type=type(timeout).__name__):
+                call = DecisionHttpCall(**{**valid, "timeout_seconds": timeout})
+                self.assertEqual(call.timeout_seconds, 30)
+        # [Edge Case] AC-23: bool is an int subclass but stays refused, with the same message as the AC-23 bool case.
+        with self.assertRaises(ConfigurationError) as caught:
+            DecisionHttpCall(**{**valid, "timeout_seconds": True})
+        self.assertEqual(caught.exception.message, f"Invalid Jev decision call timeout_seconds: expected {HTTP_CALL_RULES['timeout_seconds']}; received bool True.")
 
 
 class R8FailureWordingTests(unittest.IsolatedAsyncioTestCase):

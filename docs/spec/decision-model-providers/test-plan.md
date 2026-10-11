@@ -77,6 +77,7 @@ Paths below are relative to `tests/features/decision_model_providers/`. Level: *
 | R-3, INV-28, EC-28, T-4 | `CapabilityAndGuardTests.test_system_one_provider_refuses_a_managed_per_call_config_before_any_call` (S4 grant) | component | The per-call `VIDBYTE_MANAGED` refusal deleted → a managed config posts its `vb_live_` key to `api.typesafe.ai` (the verifier's mutation left the pack green) | Exact message, `provider == "typesafe"`, empty transport; the constructor guard must give the same message (spec §17 deviation 1) |
 | EC-20, D-5 | `CapabilityAndGuardTests.test_system_one_provider_construction_guards` | unit | `KeyError` on the first call for a provider without a `HOSTS` row; managed config accepted by the System One adapter | Three negative constructions with `provider` checked; two positive constructions |
 | INV-5, T-3, NFR-5 | `CredentialHygieneTests.test_key_never_leaves_the_authorization_header` | component | Key in URL, body, message, details, or `repr(DecisionHttpCall)` | Nine hosts: the placeholder key found in exactly one header and nowhere else; `DecisionHttpCall` repr scanned |
+| R-18, AC-23, INV-23 | `DecisionHttpCallTests.test_decision_http_call_accepts_int_and_float_subclass_timeouts` (S5 grant) | unit | A timeout check written as `type(value) not in (int, float)` refuses a `float` or `int` subclass instance, which row 5 rule 3 admits and TypeSafe on origin/main accepted; or a fix that admits subclasses also lets `True` through | A `Seconds(float)` of 30.0 and a `WholeSeconds(int)` of 30 must each build a call with `timeout_seconds == 30`, so a refusal fails the subtest; `True` must still raise the exact AC-23 bool message |
 | AC-23, INV-24, R-2 | `DecisionHttpCallTests.test_decision_http_call_validates_each_field_and_never_echoes_the_key` (S4 grant) | unit | A blank method or URL, a zero, negative, infinite, NaN or bool timeout, a list body, a negative or bool retry count, or a blank idempotency key accepted; an error that quotes the key; headers in `repr`; a second copy of the record in `vidbyte/providers/` | Twelve one-bad-field subtests with the exact row 5 message and `details["field"]`; the key, held in `headers`, is scanned for in every message and `details`; identity with `vidbyte.lib.dataclasses.jev.DecisionHttpCall` |
 | INV-13, INV-5, EC-30, EC-31, EC-38 | `test_decision_failures.py` → `R8FailureWordingTests.test_r8_hosts_word_failures_with_their_own_name_and_env_var` (r8 grant) | component | An r8 401 worded for another host or env var (Vansa told `VANSA_API_KEY`); the key outside the authorization header | Exact 401 message per host; URL, body, headers and message scanned for the placeholder key |
 | EC-32, A-17 | `R8FailureWordingTests.test_vansa_403_is_rewritten_by_the_other_status_branch` (r8 grant) | component | Vansa's non-JSON 403 escaping unmapped, or worded for TypeSafe; excerpt dropped | Exact other-status message, `status_code == 403`, `provider == "vansa"`, excerpt `error code: 1010` |
@@ -290,4 +291,18 @@ python -m pytest tests/features/decision_model_providers -q
 FAILED tests/features/decision_model_providers/test_decision_failures.py::DecisionHttpCallTests::test_decision_http_call_validates_each_field_and_never_echoes_the_key
 FAILED tests/features/decision_model_providers/test_decision_systemone_wire.py::SystemOneRequestTests::test_openrouter_always_sends_noul_criteria_while_other_hosts_keep_typesafe_behaviour
 2 failed, 88 passed
+```
+
+### S5 grant (R-18)
+
+This is a scoped grant from the coordinator after re-review finding R-18 (`review.md`, Major), at HEAD `58e0f41d`. Spec r11 section 12.3 row 5 rule 3 refuses a timeout only when it is a bool, not an `int` or `float`, not finite, or not greater than 0. An instance of an `int` or `float` subclass is therefore valid, and INV-23 keeps it valid because TypeSafe on origin/main accepted one. The review reports that the repaired check (`type(...) not in (int, float)`) refuses it. The pack now has 91 tests.
+
+| Test (file → name) | Finding / spec ID | Change | Status at HEAD `58e0f41d` |
+|---|---|---|---|
+| `test_decision_failures.py` → `DecisionHttpCallTests.test_decision_http_call_accepts_int_and_float_subclass_timeouts` (new) | R-18 (Major); AC-23, INV-23, spec r11 row 5 rule 3 | Two subtests that use the same field values as the other `DecisionHttpCallTests` cases:<br>• `type("Seconds", (float,), {})(30.0)`<br>• `type("WholeSeconds", (int,), {})(30)`<br>Each must build a call with `timeout_seconds == 30`. `True` must still raise `ConfigurationError` with the AC-23 message ending `received bool True.` | Red: both subtests raise `ConfigurationError` (`Invalid Jev decision call timeout_seconds: expected a finite number of seconds greater than 0; received Seconds 30.0.` and the same ending `received WholeSeconds 30.`).<br>Green: the bool check passes. |
+
+```
+python -m pytest tests/features/decision_model_providers -q
+FAILED tests/features/decision_model_providers/test_decision_failures.py::DecisionHttpCallTests::test_decision_http_call_accepts_int_and_float_subclass_timeouts
+1 failed, 90 passed
 ```
