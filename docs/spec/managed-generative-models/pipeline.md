@@ -21,11 +21,11 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | S3 implement | done | 2026-10-10 22:50 (est.) | 2026-10-10 23:36 | reports/S3-implementer.md | spec r5 b3df024d (S064 option A); P1 cc1702df..26ff83e3, P2 bbbb87a6 (contract ceabda93 blob 56d4d0b3), P3 b8a46cda 632dfcc1, P4 0bc85ac8; HEAD 573a9f5f; draft PR #759 |
 | S4 adversarial review | done | 2026-10-10 23:37 | 2026-10-11 00:29 | reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 @intent placement) + 5 Major (R-2 two-level chain; R-3 S020 README index for R-6's file; R-4 live POST from test_jev_run_state_relation.py with VIDBYTE_API_KEY set; R-5 @intent after summary comment; R-6 no test for r5 deadline/re-send count), 14 Minor; 0 refuted; orchestrator spot-checked model_configs.py:106/141, S020 1/1, A002 PASS |
 | S5 repair loop | done (converged after iteration 1) | 2026-10-11 02:39 | 2026-10-11 03:42 | reports/S5-repair-1.md | 12 fix commits 92d3d690..90459fb8 (R-1 92d3d690, R-5 23a5e87c, M-5 443ac21a, R-2 745f8efe, R-6+R-3+M-9 8eea0362, R-4 15eb286e, M-1 69ee8aaa, M-7 a6dbcd2c, M-14 028b2708, M-2 15203ae4, M-3 22a0a7ba, M-4 90459fb8); verify-log d3997ca3; orchestrator re-ran: pack 39 passed, full 3011 passed 1 skipped, SDK-LINT PASS (A002 652); no remote checks exist |
-| S5 re-review | running (round 1) | 2026-10-11 03:42 | | reports/S5-rereview.md | conformance re-reviewer launched |
-| S6 PR | pending | | | | |
+| S5 re-review | done (round 1: SOUND) | 2026-10-11 03:58 | 2026-10-11 03:57 | reports/S5-rereview.md | 0B/0M/3m; every repair confirmed; production code AST-identical outside validate (R-2) and _refuse_managed_streaming (M-1); R-2 identical over 1,944 configs; shorten_attempt killed 10/10; contract blob 56d4d0b3 matches ceabda93e |
+| S6 PR | running | 2026-10-11 03:57 | | reports/S6-pr-author.md | PR author launched |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-10 18:08 — Ran the request as two linked pipelines (backend `vidbyte`, SDK `vidbyte-sdk`) — Prompt 5 names one change in each repo; one worktree cannot span two repos.
@@ -60,6 +60,9 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - 2026-10-11 03:42 — Repair agent hit the usage limit after committing all 12 fixes (nothing pushed); resumed the SAME agent by ID, because it was stopped by an API 429 (no live copy, ListAgents showed only idle peers) and its unwritten evidence (mutant table, hypotheses) belonged in verify-log.md.
 - 2026-10-11 03:42 — Convergence accepted with 0 remote checks: automatic GitHub Actions triggers are disabled in this repo (logged earlier); not dispatching ci.yml/static-policy.yml by hand, because that spends the user's Actions minutes on workflows they disabled; local gates are the evidence and the PR body will say so.
 - 2026-10-11 03:42 — Repair open items routed: (1) AC-28 proof row and test-plan.md EC-38 pointer for the new test_managed_text_deadline.py, and (2) EC-16 text after M-1, are docs-only spec drift; the S6 author will sync them (§17 row) after the re-review. (3) The FEATURE.md M-14 reword dropped 'Nothing else is retried, including a missing response.'; sent to the re-reviewer as a focus item.
+- 2026-10-11 03:57 — Orchestrator's FEATURE.md focus item was wrong: 'Nothing else is retried, including a missing response.' is still at FEATURE.md:12; my diff view truncated lines at 260 chars. Recorded so no later agent 'restores' it.
+- 2026-10-11 03:57 — Re-review Minors carried to S6 as follow-ups (skill: only Blocker/Major re-enter the loop): R-C2 README.md:269-270 still tells gemini/xai/deepseek/kimi users to set their own key to stream (a second refusal follows), plus stale comments streaming_text.py:27-28, :58-59; smallest fix 'or, for OpenAI and Anthropic, set the provider's own key to stream'. R-C3 every deadline test uses timeout == the 630 s floor, so a deadline taken from the floor constant survives; fix is a 900 s / step 700 case expecting 2 POSTs. R-C1 production part: TESTS header vidbyte_gateway.py:9 omits test_managed_text_deadline.py.
+- 2026-10-11 03:57 — S6 grant widened, docs/spec only: the PR author may add the AC-28 row/proof in spec §6.2 naming test_managed_text_deadline.py, update EC-16's text to match M-1's message, and fix test-plan.md:3 (r4 -> r5) and test-plan.md:20 (EC-38 pointer), each noted in a §17 row. No production file, README or test file may change in S6.
 
 ## User replies (verbatim)
 - none yet
