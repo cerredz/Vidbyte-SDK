@@ -17,7 +17,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-10 18:10 | 2026-10-10 18:24 | reports/S0-scout.md | base_commit c07529316 |
 | S1 spec + review | done | 2026-10-10 19:20 | 2026-10-11 01:10 | reports/S1-spec-review-2.md | spec r4 approved @ed9f098a; 2 review rounds + orchestrator r4 |
-| S2 tests | running | 2026-10-11 01:12 | | reports/S2-test-author.md | |
+| S2 tests | done | 2026-10-11 01:12 (est.) | 2026-10-10 22:36 | reports/S2-test-author.md | 32 tests red (32 failed, orchestrator re-ran; no collection errors); area suites 69 passed; test commit 2eb7e3e5, proof 6069160f; S2_HEAD set at the status commit |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -40,6 +40,10 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - 2026-10-11 00:30 — Round-2 R-1: INV-10 rewording, an EC row, a README line and floor-first max() are in scope; changing DebateStageSettings or other agent timeouts outside vidbyte/lib/ is out of scope (stated limitation).
 - 2026-10-11 00:55 — Resolved SDK Q-7 as YES (same-key transport retries in VidbyteGatewayTransport, only on 409/502/non-JSON answers) and withdrew NG-13 — request.md §C 'idempotent replay on retries' and §E.4 'SDK retries a timed-out call and you pay twice → Reuse existing, send the header', plus the settled mirror-Jev decision (Jev retries twice with one key). Applied as r4 without a third review round (cap 2 reached); S4 reviewers check it.
 - 2026-10-11 01:10 — Q-n defaults applied (no user reply): Q-1 no key reuse across agent-runtime retries (outside lib; EC-14 limitation); Q-2 SDK-authored error messages only; Q-3 no direct-only mode; Q-4 key-crossing guards unchanged; Q-5 8,192 default cap for all six providers; Q-6 resolve_active unchanged; Q-8..Q-11 not built.
+- S2 spot-check: re-ran 'PYTHONPATH=$(pwd) python -m pytest tests/features/sdk_managed_text -q' -> '32 failed in 1.98s'; S2 spec diff touches only '| AC-n |' proof rows; S2 left its report uncommitted, orchestrator committed it.
+- Test layout: spec §13 says flat test files; S2 used the repo's tests/features/sdk_* feature-pack convention (tests/features/sdk_managed_text/ with FEATURE.md and README.md). Accepted: the repo convention outranks the spec's description of layout (AGENTS.md > spec for HOW).
+- EC-26 vs §9.2 (S2 open item): §9.2's failure-mapping rows are binding and 'the first match decides'. A FastAPI default 404 body {"detail":"Not Found"} is a non-2xx JSON object without top-level "error": true, so row 6 (relayed provider error, '<provider> returned HTTP 404 through the Vidbyte gateway', not billed) applies. EC-26's 'Vidbyte returned HTTP 404' column is illustrative; the binding fact is that the message carries HTTP 404. No new row is built. S3 records the EC-26 wording fix as a deviation in §17.
+- Clock note: S0–S2 timestamps in this file were estimates ahead of the system clock (2026-10-10 22:35 at backend S3 close); later rows use date.
 
 ## User replies (verbatim)
 - none yet
@@ -76,3 +80,10 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - SDK origin/main has moved past the base (`jev.py` 694 lines at base, 712 on origin/main); the SDK origin/main vendors contract copy b17222cd; backend main's 6dfc4d20 (agent-run routes) is not on the backend branch. mypy 2.3.1, Python 3.11.0 installed; C017 CLEAN today. — *source:* S1 reviewer round 2
 - r4: `VidbyteGatewayTransport` owns the retry loop: up to 1 + `JEV_DEFAULT_RETRY_COUNT` (3) attempts with one `Idempotency-Key` and identical envelope; each attempt is one `inner.request` with `timeout_seconds` and `idempotency_key`, `retry_count` 0; waits `n × JEV_RETRY_BACKOFF_SECONDS` via `asyncio.sleep` (patch it in `vidbyte.lib.http.vidbyte_gateway`). Retries only 409, 502, non-JSON-object answers; never 401/402/403/413/422/429, JSON 500/503, or a missing response. — *source:* S1 author r4
 - `HttpTransport.request` (`lib/http/transport.py:40-57`) retries only on `retry_status_codes`; a `RequestError` escapes on first failure; POST guard requires `idempotency_key` only when `retry_count > 0`. `JEV_DEFAULT_RETRY_COUNT = 2`, `JEV_RETRY_BACKOFF_SECONDS = 0.5`, `JEV_NO_RETRIES = 0` (`constants/jev.py:40-43`). — *source:* S1 author r4
+- Retry-wait seam: vidbyte.lib.http.vidbyte_gateway.asyncio.sleep. The module must 'import asyncio'; 'from asyncio import sleep' breaks all 10 failure tests.
+- Feature symbols are imported inside test functions so the suite collects before the feature exists; keep it that way.
+- Error messages must contain the managed provider value and, when there is one, the status number (INV-11). Endpoint refusal must contain 'endpoint'; the streaming refusal must contain 'managed', 'TextModelRunner', '<PROVIDER>_API_KEY' and have details mode 'vidbyte_managed'.
+- README section is found by a level-2..4 heading containing 'Vidbyte-managed' (or 'Vidbyte managed'); it must contain 2%, VIDBYTE_API_KEY, Idempotency-Key, maxOutputTokens, max_output_tokens, previous_response_id, 2,000,000, 8,192, 630, the six providers, stream, service tier and snake_case.
+- unittest.TestCase reserves _outcome; never name a helper _outcome.
+- SDK lint reads git ls-files: stage new files before running lint. Full lint takes about 1 minute. AC-14/AC-17 need the C020 count cut from 4 to 2.
+- Backend contract to re-vendor at SDK P2: commit ceabda93ea8f782d0d91f897c05b0ee974f2c5a3 on feat/generative-model-gateway (pushed; PR cerredz/Vidbyte#672). It lists "models.generate" and "/api/v1/models/generate". Re-check before SDK S6 that no later backend commit changed contracts/.
