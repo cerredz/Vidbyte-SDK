@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from urllib.parse import quote, urlencode
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.http.transport import HttpTransport
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolResult
@@ -47,7 +48,7 @@ class BaseMemoryTool(BaseTool):
         # An id the model chose is encoded as one path segment, so slashes or dots cannot send the request elsewhere.
         text = str(value)
         if text in ("", ".", ".."):
-            raise ValueError(f"id {text!r} cannot be used as a URL path segment")
+            raise ToolExecutionError(f"id {text!r} cannot be used as a URL path segment")
         return quote(text, safe="")
 
     async def _json_post(self, url: str, headers: dict[str, str], body: dict) -> tuple[int, dict]:
