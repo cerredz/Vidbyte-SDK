@@ -1496,7 +1496,14 @@ class BaseAgent(McpAttachableMixin):
     def _merged_context_manager(self, input_context_manager: ContextManager | None) -> ContextManager | None:
         if self.context_manager is None and input_context_manager is None:
             return None
-        manager = ContextManager()
+        # @intent context-manager-metadata-reaches-the-model
+        # Carry each manager's metadata into the merged manager, the request's over the agent's, so it still reaches the model's run metadata.
+        manager = ContextManager(
+            metadata={
+                **(dict(self.context_manager.metadata) if self.context_manager is not None else {}),
+                **(dict(input_context_manager.metadata) if input_context_manager is not None else {}),
+            }
+        )
         if self.context_manager is not None:
             manager.extend(self.context_manager.items())
         if input_context_manager is not None:
