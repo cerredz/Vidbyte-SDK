@@ -13,7 +13,7 @@ from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinI
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
-from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, ToolStatus
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
 
 
@@ -154,6 +154,32 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "Agent runtime stopped after reaching max_iterations.")
         self.assertEqual(reply.metadata["stop_reason"], "max_iterations")
         self.assertEqual(reply.metadata["iteration_count"], 1)
+
+    async def test_custom_tool_string_status_is_normalized_so_its_output_reaches_the_model(self) -> None:
+        # Regression: a ToolResult built with status="success" crashed the runtime on status.value.
+        class StockTool(BaseTool):
+            def spec(self) -> ToolSpec:
+                return ToolSpec(name="stock", description="Check stock.")
+
+            async def execute(self, call: ToolCall) -> ToolResult:
+                return ToolResult(tool_name="stock", status="success", output="sku X1 has 4 units")
+
+        runner = ToolCallingRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "stock", "arguments": "{}", "call_id": "call_1"}]}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "4"}', "call_id": "call_2"}]}),
+            ]
+        )
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[StockTool()])
+
+        reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["tool_call_states"], ("succeeded", "succeeded"))
+        tool_messages = [message for message in runner.calls[1]["kwargs"]["messages"] if message.get("role") == "tool"]
+        self.assertEqual([message.get("content") for message in tool_messages], ["sku X1 has 4 units"])
+        self.assertIs(ToolResult(tool_name="t", status="error", output="x").status, ToolStatus.ERROR)
+        with self.assertRaises(ValueError):
+            ToolResult(tool_name="t", status="ok", output="x")
 
 
 class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
