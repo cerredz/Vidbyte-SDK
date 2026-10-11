@@ -132,6 +132,44 @@ class CompatibleProviderTests(unittest.TestCase):
         assert usage is not None
         self.assertEqual(usage.cached_input_tokens, 40)
 
+    def test_reasoning_outside_completion_is_billed_as_output(self) -> None:
+        # [Silent Failure] A live grok-4.3 reply: xAI's total is prompt + completion + reasoning, and
+        # it billed cost_in_usd_ticks=8918500 (1e-10 USD each). Pricing completion_tokens alone came to
+        # about half of that charge, so budgets under-enforced on every Grok reasoning call.
+        payload = {
+            "prompt_tokens": 473,
+            "completion_tokens": 11,
+            "total_tokens": 647,
+            "prompt_tokens_details": {"cached_tokens": 128},
+            "completion_tokens_details": {"reasoning_tokens": 163},
+            "cost_in_usd_ticks": 8918500,
+        }
+        usage = ModelProvider.XAI.usage_class().from_usage_payload(payload)
+        assert usage is not None
+        self.assertEqual(usage.output_tokens, 174)
+        self.assertEqual(usage.reasoning_tokens, 163)
+        self.assertEqual(usage.total_tokens, 647)
+        pricing = ModelPricingRegistry.default().resolve(ModelProvider.XAI, "grok-4.3")
+        cost = usage.cost_usd(pricing)
+        assert cost is not None
+        self.assertAlmostEqual(cost, payload["cost_in_usd_ticks"] / 10_000_000_000, places=12)
+
+    def test_reasoning_inside_completion_is_not_added_again(self) -> None:
+        # [Silent Failure] OpenAI-style totals already count reasoning inside completion_tokens.
+        usage = ChatCompletionUsage.from_usage_payload(
+            {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150, "completion_tokens_details": {"reasoning_tokens": 30}}
+        )
+        assert usage is not None
+        self.assertEqual(usage.output_tokens, 50)
+
+    def test_reasoning_without_a_total_keeps_reported_output(self) -> None:
+        # [Hidden Assumption] Without a total the convention is unprovable, so nothing is added.
+        usage = ChatCompletionUsage.from_usage_payload(
+            {"prompt_tokens": 100, "completion_tokens": 50, "completion_tokens_details": {"reasoning_tokens": 30}}
+        )
+        assert usage is not None
+        self.assertEqual(usage.output_tokens, 50)
+
 
 class OpenRouterUsageTests(unittest.TestCase):
     def test_provider_reported_cost_wins_over_table_math(self) -> None:
