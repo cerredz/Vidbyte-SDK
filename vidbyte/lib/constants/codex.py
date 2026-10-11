@@ -154,6 +154,14 @@ CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {
         FailureSeverity.ERROR.value,
         FailureDisposition.RAISE.value,
     ),
+    # A run option Codex cannot honor is the caller's configuration, so every model
+    # would refuse it the same way; it is raised before any turn starts.
+    FailureCode.CODEX_RUN_OPTION_UNSUPPORTED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
     # Terminal until a re-prompt policy exists: the turn already ran and edited
     # files, so retrying on another model is a policy decision, not a recovery.
     FailureCode.CODEX_CONTRACT_UNMET.value: (
@@ -211,9 +219,14 @@ CODEX_UNSUPPORTED_LOOP_FIELDS = (
     "tool_settings",
 )
 CODEX_CONTRACTS_KEY = "output_contracts"
+# One turn at a time per agent instance. A Codex thread is a single conversation,
+# so simultaneous turns against it are not a performance opportunity the provider
+# offers — and the facade's thread_id, history, and usage ledger would race.
+CODEX_MAX_CONCURRENT_TURNS = 1
 
 
 __all__ = [
+    "CODEX_MAX_CONCURRENT_TURNS",
     "CODEX_PRIMARY_CHAIN_INDEX",
     "CODEX_FIRST_ATTEMPT",
     "CODEX_MAX_TURN_FAILURES",

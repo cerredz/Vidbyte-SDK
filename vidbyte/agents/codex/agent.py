@@ -22,6 +22,7 @@ from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import (
     CODEX_FIRST_ATTEMPT,
+    CODEX_MAX_CONCURRENT_TURNS,
     CODEX_MIDDLEWARE_METADATA_KEY,
     CODEX_PRIMARY_CHAIN_INDEX,
 )
@@ -78,6 +79,11 @@ class CodexHarnessAgent:
         self._transport = CodexTransport()
         self._results = CodexResultTranslator()
         self._usage = UsageTracker()
+        # Per instance, never shared: distinct agents stay concurrent in a fan-out
+        # while the same agent used twice runs its turns in sequence. A Semaphore
+        # rather than a Lock because the SDK bans asyncio.Lock and already uses
+        # Semaphore for concurrency bounds in aggregation.py and evals/runner.py.
+        self._turns = asyncio.Semaphore(CODEX_MAX_CONCURRENT_TURNS)
         self._failures = CodexFailureLedger()
         self._fallback = CodexFallbackCoordinator.build(self.settings)
         self._forks = CodexFork(self._transport)
@@ -94,78 +100,99 @@ class CodexHarnessAgent:
     async def arun(self, request: CodexAgentInput) -> AgentMessage:
         # @intent typed-native-turn-boundary
         # Execute Codex only after Vidbyte input is translated; bypassing this
-        # boundary would silently drop context or native input modalities.
-        run_input = self._translate_input(request)
-        try:
-            translated = CodexContextTranslator.translate(
-                CodexContextTranslationRequest(
-                    input=run_input,
-                    static_context=self.settings.additional_context,
-                    context_manager=self.settings.context_manager,
-                    context_placements=self.settings.context_placements,
+        # boundary would silently drop context or native input modalities. The guard
+        # spans the whole turn, not just the transport call, because the racing
+        # state — thread_id, history, last_prompt, last_reply, usage, failures — is
+        # written after the provider returns.
+        async with self._turns:
+            run_input = self._translate_input(request)
+            try:
+                translated = CodexContextTranslator.translate(
+                    CodexContextTranslationRequest(
+                        input=run_input,
+                        static_context=self.settings.additional_context,
+                        context_manager=self.settings.context_manager,
+                        context_placements=self.settings.context_placements,
+                    )
+                )
+            except Exception as exc:
+                raise CodexAgentError(
+                    "Vidbyte context could not be translated for Codex.",
+                    failure_code=FailureCode.CODEX_VIDBYTE_TRANSLATION_FAILED.value,
+                    operation="translate_context",
+                    error_type=type(exc).__name__,
+                ) from exc
+            self._usage.reset()
+            self._failures.reset()
+            boundary = CodexMiddlewareRequest(
+                agent_name=self.settings.name, prompt=translated.user_prompt
+            )
+            before_metadata = await self._middleware.before_run(boundary)
+            outcome = await self._run_turn(
+                CodexTransportRunRequest(
+                    thread_id=self.thread_id,
+                    system_prompt="\n\n".join(
+                        part
+                        for part in (
+                            self.settings.system_prompt,
+                            translated.developer_context,
+                        )
+                        if part
+                    ),
+                    prompt=translated,
+                    settings=self.settings.codex,
+                    output_schema=self._translation.output_schema,
+                    tools=self._translation.tools,
+                ),
+                boundary,
+            )
+            result = outcome.result
+            self.thread_id = result.thread_id
+            # File usage under the settings the answering attempt ran with, so a turn a
+            # fallback model answered is counted and priced as that model, not the primary.
+            CodexMetricsTranslator.record_usage(
+                CodexUsageTranslationRequest(
+                    result=result,
+                    settings=outcome.settings,
+                    tracker=self._usage,
                 )
             )
-        except Exception as exc:
+            reply = self._results.translate(
+                CodexResultTranslationRequest(
+                    result=result,
+                    agent=self.settings,
+                    input_metadata=translated.metadata,
+                    recipient=translated.recipient,
+                    usage_rollup=self._usage.rollup(),
+                    contracts=self._evaluate_contracts(result),
+                    failures=self._failures.failures,
+                    fallback_attempts=outcome.attempts,
+                    answering_model=outcome.answering_model,
+                )
+            )
+            after_metadata = await self._middleware.after_run(boundary)
+            reply = self._with_middleware_metadata(reply, before_metadata, after_metadata)
+            self.history.append(reply)
+            self.last_prompt = translated.user_prompt
+            self.last_reply = reply
+            return reply
+
+    async def generate_reply(
+        self, message: CodexAgentInput, **options: object
+    ) -> AgentMessage:
+        """Produce one reply for a caller that dispatches by this name."""
+        # @intent refuse-an-option-this-adapter-cannot-honor
+        # BasePipeline._invoke forwards whatever the caller passed to run(**options).
+        # Silently dropping context= or history= would return an answer computed
+        # without them, which reads to the caller as the setting having applied.
+        if options:
             raise CodexAgentError(
-                "Vidbyte context could not be translated for Codex.",
-                failure_code=FailureCode.CODEX_VIDBYTE_TRANSLATION_FAILED.value,
-                operation="translate_context",
-                error_type=type(exc).__name__,
-            ) from exc
-        self._usage.reset()
-        self._failures.reset()
-        boundary = CodexMiddlewareRequest(
-            agent_name=self.settings.name, prompt=translated.user_prompt
-        )
-        before_metadata = await self._middleware.before_run(boundary)
-        outcome = await self._run_turn(
-            CodexTransportRunRequest(
-                thread_id=self.thread_id,
-                system_prompt="\n\n".join(
-                    part
-                    for part in (
-                        self.settings.system_prompt,
-                        translated.developer_context,
-                    )
-                    if part
-                ),
-                prompt=translated,
-                settings=self.settings.codex,
-                output_schema=self._translation.output_schema,
-                tools=self._translation.tools,
-            ),
-            boundary,
-        )
-        result = outcome.result
-        self.thread_id = result.thread_id
-        # File usage under the settings the answering attempt ran with, so a turn a
-        # fallback model answered is counted and priced as that model, not the primary.
-        CodexMetricsTranslator.record_usage(
-            CodexUsageTranslationRequest(
-                result=result,
-                settings=outcome.settings,
-                tracker=self._usage,
+                f"CodexHarnessAgent.generate_reply does not support run options {', '.join(sorted(options))}; Codex owns its own loop, history, and context window.",
+                failure_code=FailureCode.CODEX_RUN_OPTION_UNSUPPORTED.value,
+                operation="generate_reply",
+                error_type=",".join(sorted(options)),
             )
-        )
-        reply = self._results.translate(
-            CodexResultTranslationRequest(
-                result=result,
-                agent=self.settings,
-                input_metadata=translated.metadata,
-                recipient=translated.recipient,
-                usage_rollup=self._usage.rollup(),
-                contracts=self._evaluate_contracts(result),
-                failures=self._failures.failures,
-                fallback_attempts=outcome.attempts,
-                answering_model=outcome.answering_model,
-            )
-        )
-        after_metadata = await self._middleware.after_run(boundary)
-        reply = self._with_middleware_metadata(reply, before_metadata, after_metadata)
-        self.history.append(reply)
-        self.last_prompt = translated.user_prompt
-        self.last_reply = reply
-        return reply
+        return await self.arun(message)
 
     def run(self, request: CodexAgentInput) -> AgentMessage:
         # @intent no-nested-event-loop
