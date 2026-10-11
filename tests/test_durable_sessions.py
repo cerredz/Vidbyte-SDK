@@ -13,6 +13,7 @@ from unittest import mock
 
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte import Agent
+from vidbyte.agents import AgentForkSettings
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
@@ -1251,6 +1252,46 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         tool = SessionTool(InMemorySessionStore())
         result = await tool.execute(ToolCall(tool_name="session", arguments={"operation": "explode"}))
         self.assertEqual(result.status.value, "error")
+
+    async def test_shared_checkpoint_tool_stays_on_each_agents_own_session(self) -> None:  # [Silent Failure]
+        # @intent shared-session-tool-gets-configured-scope
+        # One instance carried by two agents checkpoints each agent's own session and never widens into the other's.
+        store = InMemorySessionStore()
+        shared = CheckpointTool(store)
+        acme = build_test_agent(name="acme", system_prompt="Work.", runner=EchoRunner(), tools=[shared])
+        acme_session = Session(acme, store=store)
+        globex = build_test_agent(name="globex", system_prompt="Work.", runner=EchoRunner(), tools=[shared.customize(description="Save progress.")])
+        globex_session = Session(globex, store=store)
+        await acme.arun("acme")
+        await globex.arun("globex")
+        acme_tool, globex_tool = acme.tools._get("checkpoint"), globex.tools._get("checkpoint")
+
+        acme_own = await acme_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "acme-draft"}))
+        globex_own = await globex_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "globex-draft"}))
+        into_globex = await acme_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "x", "session_id": globex_session.id}))
+        into_acme = await globex_tool.execute(ToolCall(tool_name="checkpoint", arguments={"label": "x", "session_id": acme_session.id}))
+
+        self.assertIs(acme_tool, shared)
+        self.assertEqual(store.get(acme_own.output).session_id, acme_session.id)
+        self.assertEqual(store.get(globex_own.output).session_id, globex_session.id)
+        self.assertIn("Access denied", into_globex.output)
+        self.assertIn("Access denied", into_acme.output)
+
+    async def test_single_agent_session_tool_binds_in_place_and_fork_keeps_parent_scope(self) -> None:  # [Hidden Assumption]
+        # One agent re-bound to a new session keeps its own instance; a fork child still reaches its parent's session.
+        store = InMemorySessionStore()
+        tool = CheckpointTool(store)
+        agent = build_test_agent(name="solo", system_prompt="Work.", runner=EchoRunner(), tools=[tool])
+        first = Session(agent, store=store)
+        second = Session(agent, store=store)
+        child = agent.fork(AgentForkSettings(name="child"))
+        child_tool = child.tools._get("checkpoint")
+
+        self.assertIs(agent.tools._get("checkpoint"), tool)
+        self.assertIs(tool._session, second)
+        self.assertTrue(tool._scope.permits(first.id) and tool._scope.permits(second.id))
+        self.assertIsNot(child_tool, tool)
+        self.assertTrue(child_tool._scope.permits(second.id))
 
 
 # ---------------------------------------------------------------------------
