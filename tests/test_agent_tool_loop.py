@@ -597,6 +597,28 @@ class ContractUnsatisfiedStructuredOutputTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(ctx.exception.stop_reason, "contract_unsatisfied")
 
 
+class ContractRejectedPlainTextDraftTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rejected_plain_text_draft_stays_before_the_feedback(self) -> None:
+        # @intent contract-feedback-follows-the-rejected-draft
+        # A plain-text finish the floor rejects must reach the next request, so the model can revise what it wrote.
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "hit"
+
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _chat_tool_turn(("call_1", "lookup", '{"q": "a"}')), _text_turn("final answer")])
+        settings = AgentLoopSettings(output_contracts=(MinToolCalls(1),))
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.content, "final answer")
+        second_request = runner.calls[1]["kwargs"]["messages"]
+        feedback_index = next(i for i, m in enumerate(second_request) if "You cannot finish yet" in str(m.get("content")))
+        self.assertEqual(second_request[feedback_index]["role"], "user")
+        self.assertEqual(second_request[feedback_index - 1], {"role": "assistant", "content": "DRAFT answer"})
+
+
 class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
     async def test_floor_equal_to_per_tool_cap_is_met_even_when_denials_abort(self) -> None:
         # A per-tool cap only denies the call after the cap, so the floor is met without ever reaching the abort path.

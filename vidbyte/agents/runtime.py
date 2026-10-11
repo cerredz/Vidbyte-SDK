@@ -510,6 +510,11 @@ class AgentRuntime:
                         )
                     if unmet:
                         rejections += 1
+                        # @intent contract-feedback-follows-the-rejected-draft
+                        # The model must see what it wrote to revise it, as on the isDone path; an empty reply is skipped
+                        # because some providers reject an assistant message with no content.
+                        if last_assistant_output and last_assistant_output.strip():
+                            messages.append(self._assistant_message(last_assistant_output))
                         messages.append({"role": "user", "content": self.output_contract.feedback(unmet, counters)})
                         continue
                 final = self._final_result(
