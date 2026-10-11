@@ -25,10 +25,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         with path.open("w", encoding=encoding, newline=newline) as handle:
             handle.write(content)
 
-    def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool) -> None:
+    def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding=encoding) as handle:
+        with path.open("a", encoding=encoding, newline=newline) as handle:
             handle.write(content)
 
     def list_dir(self, path: Path) -> tuple[str, ...]:

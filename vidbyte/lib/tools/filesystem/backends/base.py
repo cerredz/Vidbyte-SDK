@@ -22,8 +22,8 @@ class BaseFileSystemBackend(ABC):
         """Write text to a scoped path; a non-None newline writes that style instead of the platform default."""
 
     @abstractmethod
-    def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool) -> None:
-        """Append text to a scoped path."""
+    def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+        """Append text to a scoped path; a non-None newline writes that style instead of the platform default."""
 
     @abstractmethod
     def list_dir(self, path: Path) -> tuple[str, ...]:
