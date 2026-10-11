@@ -689,6 +689,45 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res_broken.passed)
         self.assertIn("Failed to parse judge JSON", res_broken.reason)
 
+    async def test_judge_graders_read_null_fields_as_omitted(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A judge model that sends null for a field must get the same grade as one that leaves the field out.
+        case = EvalCase(prompt="2+2?", expected="4")
+        null_reply = '{"score": null, "passed": true, "reason": null}'
+        res_null = await LLMJudgeGrader(judge_runner=MockRunner(null_reply)).agrade(case, "4")
+        res_omitted = await LLMJudgeGrader(judge_runner=MockRunner('{"passed": true}')).agrade(case, "4")
+        self.assertEqual((res_null.score, res_null.passed, res_null.reason), (res_omitted.score, res_omitted.passed, res_omitted.reason))
+        self.assertEqual((res_null.score, res_null.passed, res_null.reason), (0.0, True, "Graded by LLM Judge."))
+        self.assertNotIn("None", res_null.reason)
+
+        rubric = {"accuracy": 1.0, "tone": 1.0}
+        rubric_null = '{"scores": {"accuracy": 1.0, "tone": null}, "reasons": {"accuracy": "correct", "tone": null}}'
+        rubric_omitted = '{"scores": {"accuracy": 1.0}, "reasons": {"accuracy": "correct"}}'
+        res_rubric_null = await RubricGrader(judge_runner=MockRunner(rubric_null), rubric=rubric, threshold=0.5).agrade(case, "4")
+        res_rubric_omitted = await RubricGrader(judge_runner=MockRunner(rubric_omitted), rubric=rubric, threshold=0.5).agrade(case, "4")
+        self.assertEqual(
+            (res_rubric_null.score, res_rubric_null.passed, res_rubric_null.reason),
+            (res_rubric_omitted.score, res_rubric_omitted.passed, res_rubric_omitted.reason),
+        )
+        self.assertTrue(res_rubric_null.passed)
+        self.assertAlmostEqual(res_rubric_null.score, 0.5)
+        self.assertIn("tone: No explanation. (0.0)", res_rubric_null.reason)
+        self.assertNotIn("None", res_rubric_null.reason)
+
+        # A null scores or reasons section reads like a missing one, not a parse failure.
+        res_null_sections = await RubricGrader(judge_runner=MockRunner('{"scores": null, "reasons": null}'), rubric=rubric).agrade(case, "4")
+        res_empty = await RubricGrader(judge_runner=MockRunner("{}"), rubric=rubric).agrade(case, "4")
+        self.assertEqual((res_null_sections.score, res_null_sections.passed, res_null_sections.reason), (res_empty.score, res_empty.passed, res_empty.reason))
+        self.assertNotIn("Failed to parse", res_null_sections.reason)
+
+        # Genuinely malformed values still fail closed.
+        res_bad_score = await LLMJudgeGrader(judge_runner=MockRunner('{"score": "abc", "passed": true}')).agrade(case, "4")
+        self.assertFalse(res_bad_score.passed)
+        self.assertIn("Failed to parse judge JSON", res_bad_score.reason)
+        res_bad_dim = await RubricGrader(judge_runner=MockRunner('{"scores": {"accuracy": "abc"}}'), rubric=rubric).agrade(case, "4")
+        self.assertFalse(res_bad_dim.passed)
+        self.assertIn("Failed to parse rubric response JSON", res_bad_dim.reason)
+
     async def test_agent_judge_does_not_carry_verdicts_across_cases(self) -> None:
         # Grading several cases with one BaseAgent judge must not grow its history or leak earlier verdicts.
         verdicts = [json.dumps({"score": 1.0, "passed": True, "reason": f"verdict-{i}"}) for i in range(3)]
