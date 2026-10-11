@@ -194,6 +194,7 @@ class FinishReview:
 - No new control-flow statement is nested deeper than the contract block's own `if`s, so S024 gains no findings.
 - With an inner context-window algorithm, a plain final answer does not end the run. Like the output contracts, the review still treats it as a finish attempt. This is documented as an edge case.
 - A `STOP` or `CONTINUE` review skips `after_iteration` on the text path, as a contract rejection does.
+- With an `output_schema`, an answer that does not match the schema still raises `OutputSchemaViolationError` (with `stop_reason` `contract_unsatisfied` after a `STOP`), exactly as after contract exhaustion. That is the schema's own rule in `BaseAgent`; the verification itself never raises.
 
 ### 6.4 `VerifyCommandMiddleware`
 
@@ -395,6 +396,7 @@ These drive the real `BaseAgent` loop, real `AgentRuntime`, and real `BashTool`.
 - **The working directory changes after construction.** Verification still runs in `root_dir`; a decoy folder with the same name is ignored. — [Hidden Assumption]
 - **The model's own `bash` calls do not trigger verification**, even when they run the same command. — [Hidden Assumption]
 - **Output contracts run first.** With `MinToolCalls(1)`, a premature `isDone` is rejected by the contract without running the command, and the command runs only after the contract passes. — [Hidden Failure]
+- **Another limit ends the run first.** With `max_iterations=2`, the run stops as `max_iterations` and `metadata["verify_command"]` still reports two failed attempts (FR11). — [Silent Failure]
 - **The default limit is three attempts.** — [Edge Case]
 - **Each run counts its own attempts.** A second run on the same agent starts again at one. — [Hidden Failure: per-instance counters]
 - **A plain `BaseAgent` with no finish review** finishes exactly as before on both paths: one model call, `final_response` / `is_done`, the same reply, and no extra messages. — [Hidden Failure]

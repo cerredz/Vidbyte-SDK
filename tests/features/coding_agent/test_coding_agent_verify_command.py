@@ -289,6 +289,21 @@ async def test_never_fixed_run_ends_unverified_after_the_last_attempt(coding_age
 
 
 @pytest.mark.asyncio
+async def test_outcome_is_reported_when_another_limit_ends_the_run(coding_agent_cls, tmp_path) -> None:
+    # The iteration limit ends the run before the attempts run out, and
+    # the result still says the command never passed.
+    loop = AgentLoopSettings(max_iterations=2)
+    runner = ReplayRunner(finish_turn("Done."), finish_turn("Done again."))
+    agent = _agent(coding_agent_cls, tmp_path, runner, verify_command=LOGGED_FAILURE, agent_loop_settings=loop)
+
+    reply = await agent.arun("Make the check pass.")
+
+    assert reply.metadata["stop_reason"] == "max_iterations"
+    assert reply.metadata["verify_command"] == {"passed": False, "attempts": 2, "last_exit_code": 1}
+    assert _verify_log(tmp_path) == ["run", "run"]
+
+
+@pytest.mark.asyncio
 async def test_default_limit_is_three_attempts(coding_agent_cls, tmp_path) -> None:
     # Without max_verify_attempts the run gets three finish attempts.
     runner = ReplayRunner(*(finish_turn("Done.") for _ in range(3)))
