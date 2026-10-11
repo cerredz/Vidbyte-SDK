@@ -168,6 +168,7 @@ Holds every model's per-token USD rates.
 #### Interface / API
 ```python
 OPENAI_GPT6_TIER_RATES: dict[str, dict[str, dict[str, float]]]   # new, exported in __all__
+DEEPSEEK_TIME_OF_DAY_RATES: dict[str, dict[str, dict[str, float]]]  # new, exported in __all__
 PRICING_AS_OF: str = "2026-10-11"
 PROVIDER_PRICING[ModelProvider.MISTRAL] = {...}                    # new provider block
 ```
@@ -176,8 +177,9 @@ PROVIDER_PRICING[ModelProvider.MISTRAL] = {...}                    # new provide
 1. Add `OPENAI_GPT6_TIER_RATES` with the same field names as `OPENAI_GPT56_TIER_RATES`. gpt-6-sol's long-context fields are derived from its model page's stated rule (2x input and cache, 1.5x output), because the "All models" table shows only short-context columns for it.
 2. Update `gpt-5.6-sol` in both the tier constant and the row.
 3. Add or modify the rows in §3, each provider block headed by a comment citing its first-party URL(s) and noting promotions, peak/off-peak or routing.
-4. Update the module docstring's Architecture list to name the new constant.
-5. Move `PRICING_AS_OF`, then run `python -m lint.rules.c010_pricebook_vintage_bump --refresh-lock`.
+4. Add `DEEPSEEK_TIME_OF_DAY_RATES` (peak and off-peak input, cached-input and output rates for `deepseek-flash` and `deepseek-v4-pro`), and attach it as `tier_rates` on the DeepSeek rows. The rows bill the peak rate, because the SDK does not know the request time in DeepSeek's billing timezone.
+5. Update the module docstring's Architecture list to name both new constants, and re-export them from `vidbyte/lib/registries/__init__.py` beside `OPENAI_GPT56_TIER_RATES`.
+6. Move `PRICING_AS_OF`, then run `python -m lint.rules.c010_pricebook_vintage_bump --refresh-lock`.
 
 #### Edge Cases & Error Handling
 - **Prefix capture:** each new model has an exact key, and tests assert exact-key equality for all of them.
@@ -231,7 +233,7 @@ Update the header's KNOWN EDGE CASES / RELATED DOCS line.
 **File(s):** `vidbyte/lib/enums/model_modality.py`, `vidbyte/lib/registries/models.py`
 **Type:** Modified
 
-- Add `ModelNameModality` members and bare `_MODEL_NAME_MODALITY_MAP` entries for the new models, following PR #301's pattern.
+- Add `ModelNameModality` members and bare `_MODEL_NAME_MODALITY_MAP` entries for the new models, following PR #301's pattern. Also add the missing entry for the already-catalogued `muse-spark-1.1`. Skip names that already have an entry, such as `mistral-small-2603`.
 - Add the GPT-6 models to `ProviderModelRegistry.OPENAI_CATALOG`.
 
 ### 6.5 Registries README
@@ -255,7 +257,7 @@ The backend persists `PRICING_AS_OF` as a run's pricebook version. Runs started 
 
 ## 8. API Changes
 
-N/A. No HTTP endpoints. The public Python surface gains one exported constant, `OPENAI_GPT6_TIER_RATES`, and the new catalogued model names.
+N/A. No HTTP endpoints. The public Python surface gains two exported constants, `OPENAI_GPT6_TIER_RATES` and `DEEPSEEK_TIME_OF_DAY_RATES`, and the new catalogued model names.
 
 ---
 
@@ -265,6 +267,7 @@ N/A. No HTTP endpoints. The public Python surface gains one exported constant, `
 |--------|-----------|--------|
 | CREATE | `docs/design/model-catalog-pricing-refresh.md` | This design doc |
 | MODIFY | `vidbyte/lib/registries/pricing.py` | New and corrected rate rows, GPT-6 tier metadata, Mistral block, vintage |
+| MODIFY | `vidbyte/lib/registries/__init__.py` | Re-export `OPENAI_GPT6_TIER_RATES` and `DEEPSEEK_TIME_OF_DAY_RATES` |
 | MODIFY | `lint/pricebook_vintage_lock.json` | C010 lock refresh for the new vintage |
 | MODIFY | `lint/baseline.json` | Ratchet C009 down after Mistral's default becomes priced (only if the rule reports IMPROVED) |
 | MODIFY | `vidbyte/agents/pricing/anthropic.py` | Prompt-length threshold counts cache buckets |
@@ -302,10 +305,15 @@ N/A. No HTTP endpoints. The public Python surface gains one exported constant, `
 - `describe('AnthropicUsage')` → `it('returns base rates when usage has no token fields at all')` — [Edge Case]
 - `describe('pricebook')` → `it('every PROVIDER_PRICING rate is finite and non-negative')` — [Hidden Failure]
 - `describe('pricebook')` → `it('the Mistral default model resolves to a price')` — [Hidden Assumption]
+- `describe('catalog')` → `it('rejects a bare gpt-6, which OpenAI does not publish')` — [Edge Case]
+- `describe('pricebook')` → `it('DeepSeek rows bill the peak rate, and off-peak metadata is exactly half')` — [Hidden Assumption]
+- `describe('pricebook')` → `it('versioned grok-4.7 and glm-5.3-flash ids price at their base rows')` — [Edge Case]
+- `describe('pricebook')` → `it('PRICING_AS_OF names this refresh')` — [Hidden Failure]
 
 ### Integration Tests
 - `UsageTracker.record_call` with a fake Anthropic-shaped response on `claude-haiku-5-5` (cache-heavy, over 100K) records the high-tier cost end to end. This catches a parser and registry mismatch that the unit tests cannot.
-- `UsageTracker.record_call` with an OpenAI-shaped response on `gpt-6.1-sol` records the 0.1 cached rate, not gpt-6-sol's 0.2. This is the silent failure if the cached field were mis-keyed.
+- `UsageTracker.record_call` with an OpenAI-shaped response on `gpt-6.1-sol` records the 0.1 cached rate, not gpt-6-sol's 0.2. This is the silent failure if the cached field were mis-keyed. The prompt stays below 272K.
+- The same call above 272K records a 0.2 cache rate, because the long-context tier doubles it.
 - Lint gates: S014 (parity), C009 (defaults priced), C010 (vintage lock).
 
 ### Manual / QA Test Cases
