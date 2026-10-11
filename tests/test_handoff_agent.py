@@ -156,6 +156,30 @@ class HandoffAgentTests(unittest.IsolatedAsyncioTestCase):
         doc = await agent.generate_handoff("digest")
         self.assertEqual(doc.metadata.get("extra_sections", {}).get("Bonus"), "extra")
 
+    async def test_null_json_section_reads_like_an_omitted_one(self) -> None:
+        # A null spec section must fill exactly like the omitted one, never as the text "None".
+        null_body = json.dumps({"sections": {"Summary": "disk cleaned", "Next Steps": None}})
+        omitted_body = json.dumps({"sections": {"Summary": "disk cleaned"}})
+        null_doc = await build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(null_body)).generate_handoff("digest")
+        omitted_doc = await build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(omitted_body)).generate_handoff("digest")
+        self.assertEqual(null_doc.sections, omitted_doc.sections)
+        self.assertEqual(null_doc.sections["Next Steps"], "")
+        self.assertNotIn("None", null_doc.to_context_text())
+
+    async def test_null_json_extra_section_adds_no_extra_sections_entry(self) -> None:
+        # A null section the spec does not name is left out, not kept as an "extra" holding "None".
+        body = json.dumps({"sections": {"Summary": "s", "Next Steps": "n", "Bonus": None}})
+        agent = build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(body))
+        doc = await agent.generate_handoff("digest")
+        self.assertNotIn("extra_sections", doc.metadata)
+        self.assertEqual(doc.sections, {"Summary": "s", "Next Steps": "n"})
+
+    def test_null_json_section_without_spec_titles_is_left_out(self) -> None:
+        # With no spec sections, every given section is kept except one sent as null.
+        agent = build_test_agent(Handoff(sections={}), agent_type=HandoffAgent, runner=HandoffRunner("x"))
+        sections = agent.parse_sections(json.dumps({"sections": {"Notes": "keep", "Risks": None}}))
+        self.assertEqual(sections, {"Notes": "keep"})
+
     def test_defaults_to_minimal_handoff(self) -> None:
         agent = build_test_agent(agent_type=HandoffAgent, runner=HandoffRunner("x"))
         self.assertIsInstance(agent.spec, MinimalHandoff)
