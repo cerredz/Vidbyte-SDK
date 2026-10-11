@@ -40,6 +40,12 @@ class FallbackModelsBareStringTests(unittest.TestCase):
         self.assertEqual(AgentFallbackSettings(models=("deepseek-reasoner",)).models, ("deepseek-reasoner",))
         self.assertEqual(AgentFallbackSettings(models=["deepseek-reasoner"]).models, ("deepseek-reasoner",))
 
+    def test_agent_rejects_a_bare_string_fallback(self) -> None:
+        # @intent agent-fallback-rejects-a-bare-string
+        # fallback="gemini/gemini-3.5-flash" must fail like the settings do, not become 23 one-letter models.
+        with self.assertRaisesRegex(ConfigurationError, "models must be a sequence of models, not a string"):
+            Agent(**BASE, provider="deepseek", model_name="deepseek-chat", api_key="k", fallback="gemini/gemini-3.5-flash")
+
 
 
 class FallbackApiKeyInheritanceTests(unittest.TestCase):

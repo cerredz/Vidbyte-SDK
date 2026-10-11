@@ -84,7 +84,9 @@ class AgentFallback:
 
         if spec is None:
             return None
-        settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=tuple(spec))
+        # @intent agent-fallback-rejects-a-bare-string
+        # Hand the spec over untouched so the settings guard sees a bare string before tuple() splits it into letters.
+        settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=spec)
         return settings.to_fallback(primary=cls._primary_model(runner_config, agent_name), timeout_seconds=runner_config.timeout_seconds)
 
     @staticmethod
