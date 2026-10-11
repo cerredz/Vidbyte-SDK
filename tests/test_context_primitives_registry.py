@@ -491,6 +491,16 @@ class PlanContextItemTests(unittest.TestCase):
         self.assertIs(RootPlan, PrimitivePlan)
 
 
+class EnvironmentContextItemTests(unittest.TestCase):
+    def test_environment_renders_na_when_no_fields_are_set(self) -> None:
+        # @intent empty-environment-renders-na
+        empty_text = EnvironmentContextItem().to_context_text()
+        populated_text = EnvironmentContextItem(os_name="Linux", cwd="/srv", shell="bash").to_context_text()
+
+        self.assertIn("Environment:\nN/A", empty_text)
+        self.assertNotIn("N/A", populated_text)
+
+
 class SplitContextRenderingTests(unittest.TestCase):
     def test_build_context_fixed_contains_system_prompt(self) -> None:
         from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
