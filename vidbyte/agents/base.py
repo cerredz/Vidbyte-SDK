@@ -182,7 +182,11 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.agents.fallback import AgentFallback
         self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
-        given_tools = tools.all() if isinstance(tools, Tools) else tuple(tools)
+        # @intent nested-tool-catalogs-are-flattened
+        # A Tools catalog inside a plain list adds its own tools in place, as Tools([...]) does, instead of being dropped.
+        given_tools = tools.all() if isinstance(tools, Tools) else tuple(
+            tool for item in tools for tool in (item.all() if isinstance(item, Tools) else (item,))
+        )
         # A built-in that already acts for another agent is swapped for this agent's own copy, as fork does.
         self._agent_tool_items = tuple(self._own_tool(item) for item in given_tools)
         unchanged = all(given is own for given, own in zip(given_tools, self._agent_tool_items, strict=True))
