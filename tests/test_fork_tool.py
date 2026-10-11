@@ -145,6 +145,18 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([msg.content for msg in agent.captured.history], ["two", "three"])
         self.assertEqual(agent.captured.tools.names(), ("beta", "gamma"))
 
+    async def test_drop_only_fork_does_not_grant_unnamed_extra_toolsets(self) -> None:
+        # @intent fork-extras-are-opt-in
+        # A drop-only fork pulled in every configured extra toolset although none was named.
+        agent = StubAgent()
+        tool = ForkConversationTool(extra_toolsets={"admin": Tools([NamedTool("delete_user")])})
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", drop_tool_names=["beta"]))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(agent.captured.tools.names(), ("alpha",))
+
     async def test_null_history_mode_falls_back_to_default_chain(self) -> None:
         # A JSON-null history_mode means "not given": context_window's mode applies, else "full", never "none".
         cases = (
