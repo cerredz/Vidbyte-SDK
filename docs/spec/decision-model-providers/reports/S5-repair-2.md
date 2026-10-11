@@ -17,6 +17,9 @@ The same four gates were green at each merge: `d1737132` (main `4e7f73fb`, `3071
 
 Lint rows that matter: `C002 9 9 RATCHETED`, `C009 1 1 RATCHETED`, `C010 0 0 CLEAN`, `S009 346 350 IMPROVED`, `S051 258 259 IMPROVED`, `S015 13 13 RATCHETED`, `A001 643 643 RATCHETED`, `A009 0 0 CLEAN`. No baseline, config or suppression was touched.
 
+## Push and PR state
+Pushed: `7ee8ebbd..ed5b4eac`, `ed5b4eac..60195fc7`, `60195fc7..b310c508`, then this log commit, all plain pushes to `feat/decision-model-providers`. `gh pr view feat/decision-model-providers --json mergeable,mergeStateStatus,isDraft` at b310c508 → `MERGEABLE`, `BLOCKED`, `isDraft: true`, with origin/main `57639080` and 0 commits behind. BLOCKED is not staleness or a conflict. The PR is a draft, and `gh api repos/cerredz/Vidbyte-SDK/branches/main/protection` requires the strict status checks `Source / Python 3.11`, `Source / Python 3.12` and `Package`, which cannot report while the owner keeps the workflows disabled (`statusCheckRollup: []`). Iteration 1 saw `BEHIND` because GitHub reports staleness first. Clearing BLOCKED is the owner's call (mark ready, run or waive the checks); no agent should trigger the workflows.
+
 ## Per finding
 
 ### R-18 (Major) — fixed @b5be5ca4
@@ -50,7 +53,8 @@ None.
 - 486e8a2e Merge origin/main into feat/decision-model-providers [gate:integration]
 - 60195fc7 docs(spec): record the second integration merge for iteration 2
 - 60d6cb60 Merge origin/main into feat/decision-model-providers [gate:integration]
-- docs(spec): record the third integration merge for iteration 2
+- b310c508 docs(spec): record the third integration merge for iteration 2
+- docs(spec): record the iteration 2 push and PR merge state
 
 ## Still open
 No confirmed finding. The follow-up Minors stay open by design and are not this iteration's to fix: R-5, R-8, R-9, R-10, R-11, R-12, R-13, R-14, R-15, R-17.

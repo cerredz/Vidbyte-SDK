@@ -62,7 +62,8 @@ Pushed: `9784a3f6..93e2bd1a  feat/decision-model-providers -> feat/decision-mode
 - 486e8a2e Merge origin/main into feat/decision-model-providers [gate:integration] (origin/main 6ce0706e)
 - 60195fc7 docs(spec): record the second integration merge for iteration 2
 - 60d6cb60 Merge origin/main into feat/decision-model-providers [gate:integration] (origin/main 57639080)
-- docs(spec): record the third integration merge for iteration 2
+- b310c508 docs(spec): record the third integration merge for iteration 2
+- docs(spec): record the iteration 2 push and PR merge state
 
 **Gate matrix out** (all at 60d6cb60, merged with origin/main 57639080, everything committed; the same four gates were also green at d1737132 (`3071 passed, 1 skipped`) and 486e8a2e (`3072 passed, 1 skipped`)):
 | Gate | Command | Result | Final lines |
@@ -73,5 +74,7 @@ Pushed: `9784a3f6..93e2bd1a  feat/decision-model-providers -> feat/decision-mode
 | full local gate | `python scripts/run_ci.py` | PASS (exit 0) | `3162 passed, 12 skipped in 21.67s` / `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
 | test-contract diffs | `git diff 3943089c HEAD -- tests/features/decision_model_providers/` and `git diff $(git merge-base origin/main HEAD) HEAD -- tests/ ':(exclude)tests/features/decision_model_providers'` (merge base is now `57639080`) | PASS (both empty) | `0` bytes each (piped to `wc -c`); `git diff origin/main HEAD -- lint/baseline.json` also `0` |
 | remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/697` | none configured (workflows disabled) | `no checks reported on the 'feat/decision-model-providers' branch` |
+
+Pushed: `7ee8ebbd..ed5b4eac`, `ed5b4eac..60195fc7`, `60195fc7..b310c508`, then this log commit, all plain pushes to `feat/decision-model-providers`. `gh pr view feat/decision-model-providers --json mergeable,mergeStateStatus,isDraft` at b310c508 → `MERGEABLE`, `BLOCKED`, `isDraft: true`, with origin/main `57639080` and 0 commits behind. BLOCKED is not staleness or a conflict. The PR is a draft, and `gh api repos/cerredz/Vidbyte-SDK/branches/main/protection` requires the strict status checks `Source / Python 3.11`, `Source / Python 3.12` and `Package`, which cannot report while the owner keeps the workflows disabled (`statusCheckRollup: []`). Iteration 1 saw `BEHIND` because GitHub reports staleness first. Clearing BLOCKED is the owner's call (mark ready, run or waive the checks); no agent should trigger the workflows.
 
 **Still open:** No confirmed finding. R-18 fixed @b5be5ca4, R-19 fixed @44dc3faf (spec). Follow-up Minors stay open by design: R-5, R-8, R-9, R-10, R-11, R-12, R-13, R-14, R-15, R-17 (see review.md).
