@@ -402,6 +402,19 @@ class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
         self.assertIn("Hint: Check cwd.", openai["content"])
         self.assertIn("Detail: traceback", openai["content"])
 
+    def test_long_error_output_reaches_every_provider_whole(self) -> None:
+        call = ToolCall("shell", call_id="call-1")
+        log = "x" * 1500 + "\nFAILED test_totals: expected 3, got 2"
+        result = ToolResult.error("shell", log, metadata={"error": "execution_error"})
+
+        openai = ToolsFormatter.format_tool_result(call, result, "openai")
+        anthropic = ToolsFormatter.format_tool_result(call, result, "anthropic")
+        gemini = ToolsFormatter.format_tool_result(call, result, "gemini")
+
+        self.assertIn(log, openai["content"])
+        self.assertIn(log, anthropic["content"][0]["content"])
+        self.assertEqual(gemini["parts"][0]["functionResponse"]["response"]["message"], log)
+
 
 class AssistantToolCallHistoryFormatterTests(unittest.TestCase):
     # ── OpenAI chat completions ──────────────────────────────────────────────
