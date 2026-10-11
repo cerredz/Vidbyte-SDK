@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from vidbyte import tool, vidbyte_tool
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.tools import ToolParameter
+from vidbyte.lib.tools.formatter import ToolsFormatter
 from vidbyte.tools import FunctionTool, ToolCall, ToolRegistry, Tools, ToolStatus
 from vidbyte.tools.security import PermissionPolicy
 
@@ -228,6 +229,23 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.ERROR)
         self.assertEqual(result.output, "cannot restart db")
         self.assertEqual(result.metadata["error_type"], "RuntimeError")
+
+    async def test_raising_function_tool_reports_execution_error_kind(self) -> None:
+        # A @tool function that raises must look like a raising BaseTool to the model and to ToolErrorPolicy.
+        @tool
+        def check_stock(sku: str) -> str:
+            """Check stock for a SKU."""
+            raise RuntimeError(f"inventory offline for {sku}")
+
+        call = ToolCall("check_stock", {"sku": "A1"})
+        result = await check_stock.execute(call)
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertEqual(result.output, "inventory offline for A1")
+        self.assertEqual(result.metadata["error"], "execution_error")
+        self.assertEqual(result.metadata["error_type"], "RuntimeError")
+        formatted = ToolsFormatter.format_tool_result(call, result, "openai")
+        self.assertIn("kind=execution_error", formatted["content"])
 
     async def test_annotated_field_metadata_reaches_schema_and_validation(self) -> None:
         # This module uses `from __future__ import annotations`, so these hints are strings too.
