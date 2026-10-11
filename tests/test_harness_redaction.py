@@ -84,5 +84,15 @@ class HarnessSecretPolicyCamelCaseTests(unittest.TestCase):
         self.assertEqual(safe, {"maxTokens": 5})
 
 
+class HarnessSecretPolicyAcronymTests(unittest.TestCase):
+    def test_acronym_camel_case_credential_keys_are_secret(self) -> None:
+        for key in ("AWSSecretKey", "AWSAccessKeyId", "MyAPIKey", "JWTToken", "APIToken", "IDToken"):
+            self.assertTrue(HarnessSecretPolicy.is_secret_key(key), key)
+
+    def test_acronym_ordinary_keys_are_not_secret(self) -> None:
+        for key in ("HTTPStatus", "URLPath", "XMLParser", "APIKeyName"):
+            self.assertFalse(HarnessSecretPolicy.is_secret_key(key), key)
+
+
 if __name__ == "__main__":
     unittest.main()
