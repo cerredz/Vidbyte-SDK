@@ -269,7 +269,7 @@ sequenceDiagram
 | EC-23 | The multi-provider grader runs with only `VIDBYTE_API_KEY` and no `provider_models` | `_resolve_from_environment` still ignores `VIDBYTE_API_KEY` | "No model providers have API keys configured in the environment." | accepted (NG-11, Q-6) |
 | EC-24 | Concurrent `arun` calls on one runner | Each call builds its own `VidbyteGatewayTransport` and mints its own key, with no shared mutable state | Independent calls | INV-16 |
 | EC-25 | The same prompt is sent twice on purpose | Two keys are sent, so both calls are answered and billed. Content-addressed keys would replay a stale answer. | Two answers | INV-16, D-10 |
-| EC-26 | The SDK is released before the backend route is deployed, or Render is down | 404, an edge page, or a network error | "Vidbyte returned HTTP 404", the edge message, or the no-response message | merge order (§15), INV-11 |
+| EC-26 | The SDK is released before the backend route is deployed, or Render is down | 404, an edge page, or a network error | For a 404 `{"detail":"Not Found"}`, the §9.2 row 6 message: "<provider> returned HTTP 404 through the Vidbyte gateway; the provider's message is withheld, and the call was not billed" (orchestrator decision, §17 deviation 1). Otherwise the edge message or the no-response message | merge order (§15), INV-11 |
 | EC-27 | A JevAgent user already has `VIDBYTE_API_KEY` set but no provider key | Text calls used to fail with a missing-key error. They now run managed and are billed at 2%. | Calls succeed, and the README states the fee | accepted behavior change (§9.4, AC-18, Q-3); the mixed case is EC-30 |
 | EC-28 | An explicit key with whitespace, such as `" key "` | Stripped before the prefix check. It has no prefix, so the config stays BYOK. | Today's behavior (`tests/test_config_validation.py:12-16`) | INV-17 |
 | EC-29 | `api.vidbyte.pro` is still `planned` | The SDK uses the live Render host | Requests succeed against the live host | D-4 |
@@ -849,7 +849,7 @@ Every phase passes the full lint gate.
 
 **Merge order.** The backend PR merges, and deploys to the onrender host, first; this PR merges after it. Backend `origin/main` mixes merge commits and squash merges. If the backend PR is merged with a merge commit, the branch commit in the Provenance row is on backend `main`, and nothing more is needed. If it is squash-merged, that commit is not on `main`, so the contract is re-vendored from backend `main` afterwards as a follow-up SDK PR with a new Provenance row.
 
-**Risk note (no change of plan).** The branch copy carries only what the backend branch has. Backend main's latest contract commit, `6dfc4d20` (agent-run routes), is not on the branch, so the vendored copy lacks those routes even after a merge-commit merge, until a later re-vendor from backend main. This is harmless today: the SDK already vendors the pre-branch content (`bbeef425`) and calls none of those routes.
+**Risk note (no change of plan).** The vendored copy, taken from backend branch commit `ceabda93` (blob `56d4d0b3`), already contains backend main's agent-run routes and four `agent_run_*` error codes (§17 deviation 2), so it does not lack them, as r3 expected it would. The SDK calls none of those routes.
 
 **Open questions** (max 5 blocking — none are blocking):
 | ID | Question | Blocking? | Default if unanswered |
