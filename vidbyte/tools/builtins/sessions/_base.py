@@ -34,7 +34,15 @@ class _SessionBuiltinTool(BaseTool):
         # Bind the store, scope (default own runs), and an unset active session.
         self._store = store
         self._scope = scope or SessionScope.own_runs()
+        # The scope as configured, before any session grants, so another agent's copy starts from it.
+        self._configured_scope = self._scope.copy()
         self._session: "Session | None" = None
+        # The agent that carries this tool; BaseAgent gives a different agent its own copy rather than re-bind it.
+        self._owner: object | None = None
+
+    def bind_owner(self, owner: object) -> None:
+        # Record the agent whose session this tool acts on.
+        self._owner = owner
 
     def bind_session(self, session: "Session") -> None:
         # Attach the active session and grant it scope access.
@@ -43,7 +51,14 @@ class _SessionBuiltinTool(BaseTool):
 
     def clone_for_fork(self) -> "_SessionBuiltinTool":
         # Return an unbound copy with its own scope so a forked agent cannot steal or widen the parent's binding.
-        return type(self)(self._store, scope=self._scope.copy())
+        clone = type(self)(self._store, scope=self._scope.copy())
+        clone._configured_scope = self._configured_scope.copy()
+        return clone
+
+    def clone_for_agent(self) -> "_SessionBuiltinTool":
+        # @intent shared-session-tool-gets-configured-scope
+        # Return an unbound copy for a sibling agent with the configured scope only, never the other agent's session grants.
+        return type(self)(self._store, scope=self._configured_scope.copy())
 
     def _denied(self, name: str, session_id: str) -> ToolResult:
         # Return a denied result for an out-of-scope session id.

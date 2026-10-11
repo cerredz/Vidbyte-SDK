@@ -404,6 +404,7 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
         from vidbyte.tools.builtins.pause import PauseAgentTool
         from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+        from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
 
         # customize() and with_activity() views keep the wrapped tool's runtime, so bind the wrapped tool.
         tool = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
@@ -419,6 +420,8 @@ class BaseAgent(McpAttachableMixin):
             tool.bind_agent(self)
         if isinstance(tool, PauseAgentTool):
             tool.bind_agent(self)
+        if isinstance(tool, _SessionBuiltinTool):
+            tool.bind_owner(self)
         self._bind_session_tool(tool)
 
     def _own_tool(self, tool: object) -> object:
@@ -429,12 +432,13 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
         from vidbyte.tools.builtins.pause import PauseAgentTool
         from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+        from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
 
         # @intent shared-bound-tool-gets-own-copy
         # Re-binding a shared instance would make the first agent act through the second agent's state,
         # so the second agent gets a fork-style unbound copy. AgentTool's _agent is its delegate, not its owner.
         inner = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
-        if isinstance(inner, AgentTool):
+        if isinstance(inner, (AgentTool, _SessionBuiltinTool)):
             owner: object = inner._owner
         elif isinstance(inner, (AttachMcpServerTool, CreateHandoffTool, ForkConversationTool, RunPromptsSequentiallyTool, PauseAgentTool)):
             owner = inner._agent
@@ -449,7 +453,8 @@ class BaseAgent(McpAttachableMixin):
         while isinstance(tool, _ToolWrapper):
             views.append(tool)
             tool = tool.wrapped_tool
-        duplicate: BaseTool = inner.clone_for_fork()
+        # A session tool's copy starts from its configured scope so it never reaches the other agent's sessions.
+        duplicate: BaseTool = inner.clone_for_agent() if hasattr(inner, "clone_for_agent") else inner.clone_for_fork()
         for view in reversed(views):
             duplicate = view._rewrap(duplicate)
         return duplicate
