@@ -78,6 +78,19 @@ class StructuredPayload(BaseModel):
     items: list[dict[str, Any]]
 
 
+class StructuredCustomer(BaseModel):
+    """Nested pydantic model used to verify structured fields resolve as themselves."""
+
+    tier: str
+
+
+class StructuredTicket(BaseModel):
+    """Pydantic payload whose fields hold nested pydantic models."""
+
+    customer: StructuredCustomer
+    tags: list[StructuredCustomer]
+
+
 class StubAgent:
     """Minimal stub mimicking BaseAgent post-run fields for RunProbe tests."""
 
@@ -592,6 +605,17 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         b = behavior_from_probe(RunProbe(structured=payload))
         self.assertTrue(b.output.structured_field_equals("answer", "yes"))
         self.assertTrue(b.output.structured_field_exists("items.0.title"))
+
+    def test_structured_pydantic_nested_model_resolves_as_itself(self) -> None:
+        # [Silent Failure] A nested pydantic field resolves to the reply's own model, not a dumped dict.
+        payload = StructuredTicket(customer=StructuredCustomer(tier="gold"), tags=[StructuredCustomer(tier="vip")])
+        b = behavior_from_probe(RunProbe(structured=payload))
+        self.assertTrue(b.output.structured_field_type("customer", StructuredCustomer))
+        self.assertTrue(b.output.structured_field_equals("customer", payload.customer))
+        self.assertTrue(b.output.structured_field_matches("customer", lambda c: c.tier == "gold"))
+        self.assertTrue(b.output.structured_field_type("tags.0", StructuredCustomer))
+        self.assertTrue(b.output.structured_field_equals("customer.tier", "gold"))
+        self.assertTrue(b.output.structured_contains_keys(["customer", "tags"]))
 
     # --- EfficiencyBehavior Category G ---
 
