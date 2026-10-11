@@ -174,7 +174,14 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
         # Reads the structured error kind with compatibility fallbacks for current metadata strings.
         data = dict(metadata or {}) if isinstance(metadata, Mapping) else {}
         raw = str(data.get("error") or data.get("error_type") or "execution_error").strip().lower()
-        aliases = {"validation": "invalid_arguments", "validation_error": "invalid_arguments"}
+        # @intent policy-error-kinds-match-the-model-visible-kind
+        # Mirrors ToolsFormatter._normalized_error_kind so retry_on matches the kind the model is shown.
+        aliases = {
+            "validation": "invalid_arguments",
+            "validation_error": "invalid_arguments",
+            "argument_error": "invalid_arguments",
+            "arguments_error": "invalid_arguments",
+        }
         return aliases.get(raw, raw or "execution_error")
 
     @staticmethod
