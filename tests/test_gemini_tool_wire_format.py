@@ -189,6 +189,21 @@ class GeminiContentsOrderingTests(unittest.TestCase):
         self.assertEqual(contents[0]["parts"][0]["text"], "do the thing")
         self.assertEqual(contents[-1]["parts"][0]["text"], "feedback")
 
+    def test_model_text_before_a_call_joins_the_call_turn(self) -> None:
+        # A context note pinned to the top of the conversation arrives as an assistant turn
+        # just before the call; Gemini rejects a call turn that follows another model turn.
+        call = {"functionCall": {"name": "t", "args": {}}}
+        contents = self._contents(
+            [
+                {"role": "assistant", "content": "pinned note"},
+                {"role": "model", "parts": [call]},
+                {"role": "user", "parts": [{"functionResponse": {"name": "t", "response": {}}}]},
+            ]
+        )
+        self.assertEqual([c["role"] for c in contents], ["user", "model", "user"])
+        self.assertEqual(contents[0]["parts"], [{"text": "do the thing"}])
+        self.assertEqual(contents[1]["parts"], [{"text": "pinned note"}, call])
+
     def test_openai_shaped_history_is_converted_to_parts(self) -> None:
         # Contract feedback and assistant turns are appended in the OpenAI {role, content}
         # shape, which Gemini cannot read.
