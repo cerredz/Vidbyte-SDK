@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/coding_context/environment.py
 
 PURPOSE: Defines EnvironmentLoader, which gathers a short block of facts about the machine into the ENVIRONMENT section of a CodingAgent's context window: the OS, the CPU, today's date and time zone, the root folder, its project marker files, its git branch, which bash the bash tool runs, and the common tools that bash finds on its PATH.
-ROLE IN CODEBASE: Called once by CodingAgent.__init__ (vidbyte/agents/coding.py) with the validated CodingAgentSettings; returns a CodingContextSectionText (vidbyte/lib/dataclasses/coding.py) that CodingContextWindow (vidbyte/agents/coding_context/window.py) places after the AGENTS.md section. Finds bash with BashTool._find_bash (vidbyte/tools/builtins/bash.py) and reads its script, limits, and marker list from vidbyte/lib/constants/coding.py.
+ROLE IN CODEBASE: Called once by CodingAgent.__init__ (vidbyte/agents/coding.py) with the validated CodingAgentSettings; returns a CodingContextSectionText (vidbyte/lib/dataclasses/coding.py) that CodingContextWindow (vidbyte/agents/coding_context/window.py) places after the AGENTS.md section. Finds bash, and the install hint when there is none, with BashTool.find_bash and BashTool.not_found_message (vidbyte/tools/builtins/bash.py), and reads its script, limits, and marker list from vidbyte/lib/constants/coding.py.
 ARCHITECTURE NOTE: Plain deterministic code with no model involvement. Everything but the tool list comes from Python and file checks; the tool list comes from one `bash -c` probe run with the bash tool's own executable, so it shows what the model's bash will find. The probe writes to a temporary file, not a pipe, so on Windows a killed launcher whose child still holds the output cannot hang the read. Its result is cached for the process by bash path and PATH; git is read from .git so the probe does not depend on the root folder.
 FUNCTION INVENTORY: EnvironmentLoader.load is the narrated main function; _host_lines gives the OS, CPU, date, and root lines; _marker_line lists the project marker files; _git_line reads the branch from .git; _shell_line says which bash runs commands; _run_probe runs the probe into a temporary file and says why it failed; _read_output reads that file up to the cap; _probe_lines turns the output into lines and adds the failure line.
 COMMON MODIFICATION PATTERNS: A new tool to report is one more name in CODING_ENVIRONMENT_PROBE_SCRIPT; a new marker file is one more name in CODING_ENVIRONMENT_PROJECT_MARKERS. A new Python-side fact is one more line in _host_lines.
@@ -62,7 +62,7 @@ class EnvironmentLoader:
 
         # Say which bash the bash tool runs. On Windows that is Git
         # Bash, and saying so stops the model writing PowerShell.
-        bash = BashTool._find_bash()
+        bash = BashTool.find_bash()
         lines.append(cls._shell_line(bash))
 
         # Ask that same bash which tools it finds on its own PATH, and
@@ -133,8 +133,7 @@ class EnvironmentLoader:
     def _shell_line(bash: str | None) -> str:
         """Return the line saying which bash runs commands, or that there is none and how to fix it."""
         if bash is None:
-            fix = "install Git for Windows" if sys.platform == "win32" else "install bash"
-            return f"- Shell: bash was not found, so the bash tool will fail; {fix}."
+            return f"- Shell: the bash tool will fail: {BashTool.not_found_message()}"
         if sys.platform == "win32":
             return f"- Shell: the bash tool runs Git Bash (MSYS) from {bash}. Write POSIX shell commands, not PowerShell or cmd. Windows paths appear as /c/Users/... inside bash."
         return f"- Shell: the bash tool runs {bash}."

@@ -58,7 +58,7 @@ class PromptRecorder:
 def fake_bash(monkeypatch: pytest.MonkeyPatch) -> Any:
     # Runs the probe with this Python interpreter in place of bash, from an empty cache; install() swaps the program it runs.
     monkeypatch.setattr(environment_module, "_PROBE_RESULTS", {})
-    monkeypatch.setattr(BashTool, "_find_bash", staticmethod(lambda: sys.executable))
+    monkeypatch.setattr(BashTool, "find_bash", staticmethod(lambda: sys.executable))
 
     def install(program: str, timeout_seconds: float = 15.0) -> None:
         monkeypatch.setattr(environment_module, "CODING_ENVIRONMENT_PROBE_SCRIPT", program)
@@ -71,7 +71,7 @@ def fake_bash(monkeypatch: pytest.MonkeyPatch) -> Any:
 @pytest.fixture
 def no_bash(monkeypatch: pytest.MonkeyPatch) -> None:
     # The host has no usable bash, as BashTool's own lookup would report.
-    monkeypatch.setattr(BashTool, "_find_bash", staticmethod(lambda: None))
+    monkeypatch.setattr(BashTool, "find_bash", staticmethod(lambda: None))
 
 
 def _agent(coding_agent_cls: type, root_dir: str | Path, **options: object) -> Any:
@@ -128,12 +128,12 @@ def test_windows_says_commands_run_in_git_bash_with_posix_syntax(tmp_path, fake_
         assert f"- Shell: the bash tool runs {sys.executable}." in content
 
 
-@pytest.mark.parametrize(("platform_name", "fix"), [("win32", "install Git for Windows"), ("linux", "install bash")])
+@pytest.mark.parametrize(("platform_name", "fix"), [("win32", "Install Git for Windows and put git on PATH"), ("linux", "Install bash and put it on PATH.")])
 def test_missing_bash_still_shows_the_python_facts_and_how_to_fix_it(tmp_path, no_bash, monkeypatch, platform_name, fix) -> None:
-    # FR-9 hidden failure: no bash never raises; the section says the bash tool will fail and keeps every other fact.
+    # FR-9 hidden failure: no bash never raises; the section says the bash tool will fail, how to fix it, and keeps every other fact.
     content = _load_as(platform_name, tmp_path, monkeypatch)
 
-    assert f"- Shell: bash was not found, so the bash tool will fail; {fix}." in content
+    assert f"- Shell: the bash tool will fail: bash was not found. {fix}" in content
     assert f"- Root folder: {tmp_path.resolve()}" in content
     assert "- Today's date: " in content
     assert "- Bash:" not in content
@@ -251,7 +251,7 @@ def test_probe_runs_once_per_bash_and_path(coding_agent_cls, tmp_path, fake_bash
     assert len(runs) == 2
 
 
-@pytest.mark.skipif(BashTool._find_bash() is None or shutil.which("git") is None, reason="needs a real bash and git on this host")
+@pytest.mark.skipif(BashTool.find_bash() is None or shutil.which("git") is None, reason="needs a real bash and git on this host")
 def test_real_bash_reports_its_version_and_git(coding_agent_cls, tmp_path) -> None:
     # Integration: the host's own bash runs the real probe script and finds git on its PATH.
     content = _shown(_agent(coding_agent_cls, tmp_path))

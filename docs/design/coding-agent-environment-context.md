@@ -35,7 +35,7 @@ The user's words:
 - No environment-variable values, no username and no hostname. The probe never prints `env`, and `uname` is called without `-n`. Paths, such as the root folder or a tool's location, can contain the home folder's name; the model already sees those paths through its tools.
 - No git status, commits or diffs; that is a different feature.
 - No CLI, no new option beyond the switch, and no per-tool configuration.
-- No change to `BashTool`'s behaviour.
+- No change to `BashTool`'s behaviour. The one change to `bash.py` is shared with #777 (see Section 6.2).
 
 ---
 
@@ -43,7 +43,7 @@ The user's words:
 
 PR #769 added `CodingContextWindow` and reserved `CodingContextSection.ENVIRONMENT` for this section. A section is one loader file in `vidbyte/agents/coding_context/` whose `load(settings)` returns a `CodingContextSectionText` or `None`, plus one entry in the `sections` tuple in `CodingAgent.__init__`. `AgentsMdLoader` is the reference loader.
 
-On Windows, `BashTool._find_bash()` picks Git for Windows' `bin/bash.exe`, whose `PATH` differs from PowerShell's. Running the probe through that same executable shows the model what *its* bash will find.
+On Windows, `BashTool.find_bash()` picks Git for Windows' `bin/bash.exe`, whose `PATH` differs from PowerShell's. Running the probe through that same executable shows the model what *its* bash will find.
 
 Measured on the author's Windows machine, the probe takes about 2.6 s, mostly in `poetry --version` (0.5 s), `npm --version` (0.3 s), `pip --version` and `docker --version` (0.2 s each). The feature pack ran in 5.3 s before this change. It runs the loader for about 55 distinct `tmp_path` roots.
 
@@ -60,7 +60,7 @@ Measured on the author's Windows machine, the probe takes about 2.6 s, mostly in
 6. It says whether the root is inside a git repository and names the branch, or the detached commit, read from `.git` with no command.
 7. It says which bash the `bash` tool runs. On Windows, the line says commands run in Git Bash (MSYS) with POSIX syntax, not PowerShell or cmd, and that Windows paths appear as `/c/Users/...` inside bash.
 8. With bash found, it runs one `bash -c <script>` in the root, with stdin closed and a 15-second limit, and shows the script's output: the bash version with `uname -srm`, then one line per tool found among git, python, python3, pip, uv, poetry, node, npm, pnpm, yarn, bun, go, cargo, java, dotnet, docker, make and gh, giving the first line of its version output and its `command -v` path.
-9. With no bash, the shell line says the bash tool will fail and how to fix it ("install Git for Windows" on Windows, "install bash" elsewhere). The other facts are still shown, and nothing raises.
+9. With no bash, the shell line says the bash tool will fail, followed by `BashTool.not_found_message()`, which says how to fix it ("Install Git for Windows ..." on Windows, "Install bash ..." elsewhere). The other facts are still shown, and nothing raises.
 10. On a probe timeout, a non-zero exit, or a failure to start, the section shows whatever the probe printed, followed by one line saying the tool probe failed and why. Nothing raises.
 11. The probe's result is cached for the process, keyed by the bash path and the `PATH` value, so later agents reuse it.
 
@@ -83,7 +83,7 @@ CodingAgent.__init__
         EnvironmentLoader.load
           host facts (platform, os, datetime)        no process
           marker files, .git/HEAD                    file checks only
-          shell line (BashTool._find_bash())         no process
+          shell line (BashTool.find_bash())         no process
           probe: bash -c SCRIPT  -> temp file        once per (bash, PATH)
   -> CodingContextWindow.build(sections, context_manager)
 ```
@@ -113,7 +113,7 @@ class EnvironmentLoader:
 2. `_host_lines(root)` returns the OS, CPU, date and root lines.
 3. `_marker_line(root)` lists `CODING_ENVIRONMENT_PROJECT_MARKERS` that are regular files in the root.
 4. `_git_line(root)` walks the root and its parents for `.git`. A folder is used directly; a file's `gitdir:` target is followed. It reads `HEAD`: `ref: refs/heads/<b>` gives the branch, and anything else gives a detached commit.
-5. `bash = BashTool._find_bash()` and `_shell_line(bash)`.
+5. `bash = BashTool.find_bash()` and `_shell_line(bash)`.
 6. If bash exists and the cache has no entry for `(bash, PATH)`, `load` opens a temporary file. `_run_probe(bash, root, output)` runs the script into that file and returns the failure reason, or `None`. `_read_output(output)` reads the file up to the cap, and the pair is cached. `_probe_lines(text, failure)` drops blank lines and carriage returns, and adds the failure line.
 7. Return the section, prefixed by one line saying the facts were gathered when the agent was built.
 
@@ -126,7 +126,14 @@ class EnvironmentLoader:
 - `os.cpu_count()` returning `None`, or a missing `/etc/os-release`: "unknown", or the distribution is left out.
 - Results are cached even when the probe fails, so a hanging tool costs 15 s once per process, not once per agent.
 
-### 6.2 Settings, constants, agent
+### 6.2 BashTool lookup, shared with #777
+
+**File(s):** `vidbyte/tools/builtins/bash.py`
+**Type:** Modified, byte-identical to sibling PR #777 (`feat/coding-agent-setup-commands`)
+
+This is a deviation from the brief, which said to reuse `BashTool._find_bash`. At the orchestrator's request, this branch takes #777's `bash.py` as it is. That version renames `_find_bash()` to the public `find_bash()` and adds `not_found_message()`, the install hint `execute` already returned. With it, loaders call no private method, and the two PRs merge cleanly. The loader calls `BashTool.find_bash()` and builds its no-bash line from `BashTool.not_found_message()` instead of writing its own hint. The tool's behaviour does not change. Its header names #777's `SetupCommandsLoader` as a reuser, which lands with #777.
+
+### 6.3 Settings, constants, agent
 
 - `vidbyte/lib/dataclasses/coding.py`: `load_environment: bool = True` and one `isinstance(..., bool)` check in `_check_context_switches`.
 - `vidbyte/lib/constants/coding.py`: `CODING_ENVIRONMENT_PROBE_TIMEOUT_SECONDS = 15.0`, `CODING_ENVIRONMENT_PROBE_MAX_BYTES = 8_192`, `CODING_ENVIRONMENT_PROJECT_MARKERS`, and `CODING_ENVIRONMENT_PROBE_SCRIPT`.
@@ -156,6 +163,7 @@ class EnvironmentLoader:
 | MODIFY | `vidbyte/lib/constants/coding.py` | Probe script, timeout, cap, markers |
 | MODIFY | `vidbyte/lib/dataclasses/coding.py` | `load_environment` field and check |
 | MODIFY | `vidbyte/agents/coding.py` | Keyword and `sections` entry |
+| MODIFY | `vidbyte/tools/builtins/bash.py` | Public `find_bash()` and `not_found_message()`, taken verbatim from #777 |
 | MODIFY | `vidbyte/agents/coding_context/README.md`, `vidbyte/agents/README.md` | Document the section |
 | CREATE | `tests/features/coding_agent/test_coding_agent_environment.py` | Feature tests |
 | MODIFY | `tests/features/coding_agent/test_coding_agent_contract.py` | `EXPECTED_SIGNATURE` gains `load_environment` |
@@ -167,7 +175,7 @@ class EnvironmentLoader:
 
 ## 10. Testing Plan
 
-All tests are in `test_coding_agent_environment.py`. Most fake bash by pointing `BashTool._find_bash` at `sys.executable` and patching the probe script to a short Python program, so the real `subprocess.run`, temporary-file and timeout path runs on every OS. Each test resets the probe cache.
+All tests are in `test_coding_agent_environment.py`. Most fake bash by pointing `BashTool.find_bash` at `sys.executable` and patching the probe script to a short Python program, so the real `subprocess.run`, temporary-file and timeout path runs on every OS. Each test resets the probe cache.
 
 ### Unit Tests
 - The section renders after `AGENTS.md` and before the user message, with the OS, the date, the root and the tools the fake bash reported, in the request the model receives. [Silent Failure]
@@ -182,12 +190,12 @@ All tests are in `test_coding_agent_environment.py`. Most fake bash by pointing 
 - The probe runs once for two agents with different roots, and again when `PATH` changes. [Hidden Failure]
 
 ### Integration Tests
-- One real-bash test, skipped when `BashTool._find_bash()` finds none: the section has the bash version, `git` among the tools when git exists, and no failure line.
+- One real-bash test, skipped when `BashTool.find_bash()` finds none: the section has the bash version, `git` among the tools when git exists, and no failure line.
 - Existing tests that assert an exact request or no context manager pass `load_environment=False`, and each one is listed in the PR.
 
 ### Manual / QA Test Cases
 1. On Windows with Git for Windows, build `CodingAgent(root_dir=".")` and print `agent.context_manager.get_by_id("coding:environment").content`. Then the Git Bash line and the tool list are shown. [Hidden Assumption]
-2. Uninstall or hide Git, then build again. Then the "install Git for Windows" line is shown, and nothing raises. [Hidden Failure]
+2. Uninstall or hide Git, then build again. Then the "Install Git for Windows" line is shown, and nothing raises. [Hidden Failure]
 
 ---
 
