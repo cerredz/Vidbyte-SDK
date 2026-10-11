@@ -2,16 +2,16 @@
 
 ## Folder Description / Intent
 
-This folder checks the public promise of `vidbyte.CodingAgent` and `vidbyte.tools.builtins.BashTool`. One constructor call gives a model working file, search, shell and web-fetch tools over one root folder. Every shell call returns in bounded time with bounded output. A fetch key reaches only its own provider. The tests drive the real `BaseAgent` tool loop, real file tools, real bash processes and the real provider clients. Only the model runner and the single provider HTTP send are faked.
+This folder checks the public promise of `vidbyte.CodingAgent` and `vidbyte.tools.builtins.BashTool`. One constructor call gives a model working file, search, shell and web-fetch tools over one root folder. Every shell call returns in bounded time with bounded output. A fetch key reaches only its own provider. The root folder's `AGENTS.md` reaches the model right after the system prompt. The tests drive the real `BaseAgent` tool loop, real file tools, real bash processes and the real provider clients. Only the model runner and the single provider HTTP send are faked.
 
-The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclasses/coding.py` (the argument checks), `vidbyte/tools/toolsets/coding.py` (the seven tools and the keyed fetch view), `vidbyte/tools/builtins/bash.py`, and `vidbyte/cli/coding.py` (the terminal command). The file tools these tests compose belong in `vidbyte/tools/filesystem/`, the search and fetch tools in `vidbyte/tools/builtins/`, and the permission check belongs in `vidbyte/agents/runtime.py`.
+The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclasses/coding.py` (the argument checks), `vidbyte/tools/toolsets/coding.py` (the seven tools and the keyed fetch view), `vidbyte/tools/builtins/bash.py`, `vidbyte/cli/coding.py` (the terminal command), and `vidbyte/agents/coding_context/` (the `AGENTS.md` loader and the coding context window, with its order in `vidbyte/lib/enums/coding.py` and its cap in `vidbyte/lib/constants/coding.py`). The file tools these tests compose belong in `vidbyte/tools/filesystem/`, the search and fetch tools in `vidbyte/tools/builtins/`, and the permission check belongs in `vidbyte/agents/runtime.py`.
 
 ## Non-Goals
 
 - Do not test the file, search or fetch tools' own behaviour here. Their existing test modules under `tests/` own it.
 - Do not add sandboxing, allow-lists or configurable bash limits. The spec defers them (Q-2 to Q-6).
 - Do not make live provider calls or use real keys. `conftest.py` fakes `HttpTransport._send_once`.
-- Do not test `fork` or non-linear runtimes. `tests/test_agent_fork_isolation.py` and the runtime tests own them.
+- Do not test `fork` isolation or non-linear runtimes. `tests/test_agent_fork_isolation.py` and the runtime tests own them. Only the `AGENTS.md` section surviving `fork()` is tested here, because it is this feature's promise.
 
 ## File Index
 
@@ -21,6 +21,7 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - `test_coding_agent_acceptance.py` checks the end-to-end runs through the agent loop. Start here for a caller-visible regression.
 - `test_coding_agent_contract.py` checks the constructor contract: public names, the subclass surface, export and restore parity, caller tools, identity errors, and root validation and pinning.
 - `test_coding_agent_web_fetch.py` checks fetch-key selection, authentication, confinement and secrecy, and the keyed fetch view against the bare priced tool.
+- `test_coding_agent_agents_md.py` checks the loading of the root folder's AGENTS.md file end to end on the request the model receives, and `CodingContextWindow`, the shared helper later sections build on. Start here when the model does not see the repository's rules.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop, a fetch key read only from the named environment variable, and clean failures for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` checks `BashTool`'s input and output contract: the spec, validation, streams, `cwd`, argv, stdin, spawn errors, decoding, the output cap, and the bash lookup.
 - `test_bash_tool_process_bounds.py` checks the time limit, process-group kill, cancellation and pipe cleanup on real processes. Start here for a hang or a leftover process.
@@ -28,3 +29,4 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 ## Logs
 
 - 2026-10-10 - The pack was written red before implementation from spec r3 - every test fails at import until `vidbyte/agents/coding.py` and `vidbyte/tools/builtins/bash.py` exist.
+- 2026-10-11 - `AGENTS.md` loading and the shared coding context window were added (`test_coding_agent_agents_md.py`); `test_coding_agent_contract.py`'s `EXPECTED_SIGNATURE` gained `load_agents` and `context_manager`.
