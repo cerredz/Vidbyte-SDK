@@ -1242,6 +1242,24 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.get(result.output).session_id, bound.id)
         self.assertEqual(store.get(result.output).label, "")
 
+    async def test_checkpoint_own_session_id_stays_on_bound_head_chain(self) -> None:  # [Silent Failure]
+        # @intent own-session-id-means-bound-thread
+        # Naming the bound session by id or tag checkpoints like omitting it, so the label is the head the next turn descends from.
+        for identifier in ("id", "tag"):
+            with self.subTest(identifier=identifier):
+                store = InMemorySessionStore()
+                bound = Session(FakeAgent(), store=store, tags=("mine",))
+                await bound.arun("one")
+                tool = CheckpointTool(store)
+                tool.bind_session(bound)
+                target = bound.id if identifier == "id" else "mine"
+                result = await tool.execute(ToolCall(tool_name="checkpoint", arguments={"session_id": target, "label": "pre-migrate"}))
+                self.assertEqual(result.status.value, "success")
+                self.assertEqual(result.output, bound.head)
+                self.assertEqual(store.get(result.output).label, "pre-migrate")
+                following = bound.checkpoint()
+                self.assertEqual(store.get(following).parent_id, result.output)
+
     async def test_resume_tools_null_checkpoint_id_resumes_from_head(self) -> None:  # [Silent Failure]
         # A JSON null checkpoint_id means the omitted default: resume from the target session's head.
         for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
