@@ -131,6 +131,9 @@ class ToolSpec:
             raise ValueError("ToolSpec.name cannot be empty")
         if not self.description.strip():
             raise ValueError("ToolSpec.description cannot be empty")
+        # @intent tool-permission-is-one-canonical-enum
+        # Denials and prompts read permission.value, so the plain "execute" spelling becomes the enum here.
+        object.__setattr__(self, "permission", ToolPermission(self.permission))
 
     def required_parameter_names(self) -> tuple[str, ...]:
         """Return the names of parameters that must be supplied in calls."""
