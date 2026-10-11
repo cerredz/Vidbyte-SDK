@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md, docs/design/jev-gateway-live-host.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-agent-scaffold.py, and tests/test_jev_done.py.
 """
 
@@ -17,7 +17,9 @@ JEV_DEFAULT_MODEL: str = "jev-latest"
 JEV_PREVIEW_MODEL: str = "jev-preview"
 JEV_SYSTEMONE_PATH: str = "/systemone"
 JEV_MODELS_PATH: str = "/models"
-VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/typesafe"
+# The managed gateway must sit on a host the platform contract marks `live`; `api.vidbyte.pro` is
+# still `planned` and does not resolve, so managed checks sent there all failed as unavailable.
+VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://vidbyte-backend.onrender.com/api/v1/models/typesafe"
 VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND: str = "vidbyte_managed_credentials"
 
 # Documented vendor limits (https://docs.typesafe.ai/api.md#question-types).
