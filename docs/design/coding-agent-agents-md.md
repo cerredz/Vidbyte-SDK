@@ -110,6 +110,16 @@ Every run: AgentRuntime._build_system_string
 then the user message (the conversation)
 ```
 
+### Adding a section (the contract for the sibling PRs)
+
+The environment-context, map.md, and setup-command features each add one section. Each takes exactly three things, and no file this PR adds changes:
+
+1. **One loader class in its own file**, `vidbyte/agents/coding_context/<section>.py`, with `@classmethod load(cls, settings: CodingAgentSettings) -> CodingContextSectionText | None`. It reads what it needs from the validated settings (including its own switch), does its work once, bounds its own text, and returns `None` when there is nothing to add. Copy the shape of `agents_md.py`: A001 header, narrated `load`, one level of helpers.
+2. **Its reserved enum member**: return `CodingContextSectionText(section=CodingContextSection.ENVIRONMENT | REPO_MAP | SETUP_RESULTS, title=..., content=..., source=...)`. The enum already declares the member and its position, so it does not change.
+3. **One line in `CodingAgent.__init__`**: import the loader from its module and add `<Loader>.load(settings)` to the `sections` tuple. The tuple's order does not matter; the enum decides the render order.
+
+A section's own on/off switch belongs to that feature, not to this helper: a keyword on `CodingAgent`, a `bool` field on `CodingAgentSettings`, and one `isinstance(..., bool)` check in `CodingAgentSettings._check_context_switches`. The same steps are in `vidbyte/agents/coding_context/README.md` and the "Coding Agent" section of `vidbyte/agents/README.md`.
+
 **Key decisions.** (a) The section order is an enum, not a list in code: a sibling uses its reserved member and never reorders anything. (b) The enum value is the primitive id, so there is no id-building code to keep in sync. (c) `TextContextItem` is reused rather than adding a primitive (§14). (d) The window copies the caller's manager instead of editing it, so one manager shared by several agents never gains another agent's AGENTS.md. (e) The loader takes the whole `CodingAgentSettings` record, so every loader has the same one-argument shape and reads its own switch from it. (f) The new package lives in the agents layer, because sibling loaders need tools and process code (setup commands) that the context layer may not import without a cycle.
 
 ---
@@ -394,6 +404,7 @@ All tests are offline: the scripted tool-calling model from `conftest.py` (wrapp
 - agent → `it adds no section for an empty, whitespace-only, or BOM-plus-whitespace file` — [Edge Case]
 - agent → `it decodes invalid UTF-8 with replacement characters` — [Hidden Failure]
 - agent → `it raises ConfigurationError naming the path when AGENTS.md is a directory` — [Hidden Failure]
+- agent → `it raises ConfigurationError naming the path, chained from the PermissionError, when AGENTS.md cannot be opened` (`Path.open` patched, so it runs on every platform) — [Hidden Failure]
 - settings → `load_agents "yes", 1, 0, None, "false" raise ConfigurationError naming load_agents` — [Hidden Assumption]
 - agent → `a caller context_manager's placed primitives render after AGENTS.md, its unmanaged items still reach the body, and the caller's manager is unchanged after construction and a run` — [Hidden Failure]
 - agent → `fork() keeps the AGENTS.md section` — [Hidden Failure]
