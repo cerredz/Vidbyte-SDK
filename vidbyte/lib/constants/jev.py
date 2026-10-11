@@ -62,6 +62,9 @@ JEV_IDEMPOTENCY_KEY_HEADER: str = "Idempotency-Key"
 VIDBYTE_API_KEY_PREFIX: str = "vb_live_"
 VIDBYTE_API_KEY_PATTERN: str = rf"{re.escape(VIDBYTE_API_KEY_PREFIX)}[A-Za-z0-9_-]{{32,}}"
 VIDBYTE_API_KEY_ENV_VAR: str = "VIDBYTE_API_KEY"
+# The one generative route, on the contract's live host (C018), which
+# every managed text call posts to whatever its provider.
+VIDBYTE_GENERATIVE_GATEWAY_ENDPOINT: str = "https://vidbyte-backend.onrender.com/api/v1/models/generate"
 # The six providers the generative gateway dispatches (backend 9.2.8).
 VIDBYTE_MANAGED_TEXT_PROVIDERS: frozenset[ModelProvider] = frozenset({
     ModelProvider.OPENAI,
