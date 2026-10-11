@@ -687,6 +687,10 @@ from vidbyte.lib.runners.decision import DecisionModelRunner
 runner = DecisionModelRunner(DecisionModelConfig(provider=ModelProvider.PERPLEXITY))
 ```
 
+- **Keys.** Without `api_key`, each host reads its own variable: `TYPESAFE_API_KEY`, `PERPLEXITY_API_KEY`,
+  `OPENROUTER_API_KEY`, `LIQUID_API_KEY`, `BASETEN_API_KEY`, `MERAGPT_API_KEY`, `CLOUDFLARE_API_TOKEN`,
+  `FOUNDRY_API_KEY`, `CELERIS_API_KEY`, `NACE_API_KEY`, `UPSTAGE_API_KEY`, `INCEPTION_API_KEY`,
+  `HANZO_API_KEY`, `VANSA_KEY`, `ZOODATA_API_KEY`, or `OPENAI_API_KEY`; a 401 names the one to check.
 - **Tenant endpoints.** Cloudflare and Microsoft Foundry have no shared base URL, so `endpoint` is
   required and the runner raises at construction without it.
   `DecisionModelConfig(provider=ModelProvider.CLOUDFLARE, endpoint="https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai")`
