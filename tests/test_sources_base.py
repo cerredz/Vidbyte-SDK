@@ -79,6 +79,18 @@ class SourcesBaseTests(unittest.TestCase):
         with self.assertRaises(SourceSecurityError):
             DocumentSource(fetcher=spoof, allowlist=allow).load(ArtifactRef(url="https://good.com@evil.com/x.md"))
 
+    def test_allowlist_rejects_bare_string_schemes_and_hosts(self) -> None:
+        # [Silent Failure] A bare string made `in` a substring test ("http" in "https"), failing open.
+        with self.assertRaisesRegex(SourceSecurityError, r"UrlAllowlist\.allowed_schemes must be a collection"):
+            UrlAllowlist(allowed_schemes="https")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(SourceSecurityError, r"UrlAllowlist\.allowed_hosts must be a collection"):
+            UrlAllowlist(allowed_hosts="docs.acme.dev")  # type: ignore[arg-type]
+        allow = UrlAllowlist(allowed_schemes=("https",), allowed_hosts=frozenset({"docs.acme.dev"}))
+        for refused in ("http://docs.acme.dev/x", "https://acme.dev/x"):
+            with self.assertRaises(SourceSecurityError):
+                allow.check(refused)
+        allow.check("https://docs.acme.dev/x")
+
     def test_size_guard_rejects_oversized_body(self) -> None:
         # [Edge Case] A body larger than max_bytes fails closed with nothing cached.
         fetcher = InMemoryFetcher({"https://ex.com/big.md": b"x" * 100})
