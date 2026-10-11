@@ -102,8 +102,10 @@ class ContextManager:
     def _place(self, item: ContextItem, placement: ContextWindowPlacement) -> str:
         """Upsert a primitive at a placement, generating a stable id when missing."""
         # Lets callers add a fresh primitive without minting their own ids.
-        primitive_id = str(getattr(item, "primitive_id", "") or "").strip()
-        if not primitive_id:
+        primitive_id = str(getattr(item, "primitive_id", "") or "")
+        # @intent place-returns-the-stored-id
+        # The caller manages the primitive by the returned id, so it must be the exact key upsert stored.
+        if not primitive_id.strip():
             primitive_id = self._generate_primitive_id(item)
             item = self._with_primitive_id(item, primitive_id)
         self.upsert(item, placement=placement)
