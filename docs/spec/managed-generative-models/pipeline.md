@@ -20,7 +20,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | S2 tests | done | 2026-10-11 01:12 (est.) | 2026-10-10 22:36 | reports/S2-test-author.md | 32 tests red (32 failed, orchestrator re-ran; no collection errors); area suites 69 passed; test commit 2eb7e3e5, proof 6069160f; S2_HEAD set at the status commit |
 | S3 implement | done | 2026-10-10 22:50 (est.) | 2026-10-10 23:36 | reports/S3-implementer.md | spec r5 b3df024d (S064 option A); P1 cc1702df..26ff83e3, P2 bbbb87a6 (contract ceabda93 blob 56d4d0b3), P3 b8a46cda 632dfcc1, P4 0bc85ac8; HEAD 573a9f5f; draft PR #759 |
 | S4 adversarial review | done | 2026-10-10 23:37 | 2026-10-11 00:29 | reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 @intent placement) + 5 Major (R-2 two-level chain; R-3 S020 README index for R-6's file; R-4 live POST from test_jev_run_state_relation.py with VIDBYTE_API_KEY set; R-5 @intent after summary comment; R-6 no test for r5 deadline/re-send count), 14 Minor; 0 refuted; orchestrator spot-checked model_configs.py:106/141, S020 1/1, A002 PASS |
-| S5 repair loop | running (iteration 1) | 2026-10-11 00:29 | | reports/S5-repair-1.md | repair agent launched |
+| S5 repair loop | running (iteration 1, relaunched) | 2026-10-11 02:38 | | reports/S5-repair-1.md | first repair agent (launched 00:29) died in a Claude Code restart with no commits or edits; fresh agent launched, same briefing |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -56,6 +56,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - 2026-10-11 00:29 — Granted, narrowly, for M-14: the repair agent may reword the one contract bullet at tests/features/sdk_managed_text/FEATURE.md:12 so it states the r5 cumulative deadline (spec r5, S064 option A). It is prose describing behaviour the spec already changed, not an assertion. No other FEATURE.md line may change.
 - 2026-10-11 00:29 — Not granted: M-10's fix (relaxing the assertion at test_managed_text_failures.py:180) edits an S2 assertion; it stays a follow-up for the PR body.
 - 2026-10-11 00:29 — Minors in scope for repair iteration 1 (verifier tagged trivial): M-1, M-2, M-3, M-4, M-5, M-7, M-9, plus M-14 under the grant above. M-6, M-8, M-10, M-11, M-12, M-13 are follow-ups (budget, S2 edits, or scope-adding).
+- 2026-10-11 02:38 — Claude Code restarted while repair iteration 1 was running; the worktree was clean at 8856bfa2 (no edits, no verify-log.md, no push), so a FRESH agent was launched with the same briefing; the iteration counter stays 1/8 because the dead agent changed nothing.
 
 ## User replies (verbatim)
 - none yet
