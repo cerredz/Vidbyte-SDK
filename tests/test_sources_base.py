@@ -98,6 +98,23 @@ class SourcesBaseTests(unittest.TestCase):
                 allow.check(refused)
         allow.check("https://docs.acme.dev/x")
 
+    def test_allowlist_config_is_case_insensitive(self) -> None:
+        # [Hidden Assumption] Hosts and schemes are case-insensitive, so a capitalized policy still admits its own
+        # lowercase URLs, an unlisted host is still refused, and the default https-only allowlist is unchanged.
+        for allow in (
+            UrlAllowlist(allowed_hosts=frozenset({"Docs.Acme.dev"})),
+            UrlAllowlist(allowed_schemes=("HTTPS",), allowed_hosts=frozenset({"docs.acme.dev"})),
+        ):
+            allow.check("https://docs.acme.dev/llms.txt")
+            with self.assertRaises(SourceSecurityError):
+                allow.check("https://evil.example/llms.txt")
+        default = UrlAllowlist()
+        self.assertEqual(default.allowed_schemes, ("https",))
+        self.assertIsNone(default.allowed_hosts)
+        default.check("https://docs.acme.dev/llms.txt")
+        with self.assertRaises(SourceSecurityError):
+            default.check("http://docs.acme.dev/llms.txt")
+
     def test_size_guard_rejects_oversized_body(self) -> None:
         # [Edge Case] A body larger than max_bytes fails closed with nothing cached.
         fetcher = InMemoryFetcher({"https://ex.com/big.md": b"x" * 100})
