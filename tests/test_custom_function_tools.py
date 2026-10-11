@@ -5,7 +5,7 @@ import json
 import unittest
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Annotated, Any
 
@@ -48,6 +48,23 @@ class Ticket(BaseModel):
 class TicketRecord:
     priority: Priority
     due: datetime
+
+
+class Tally(BaseModel):
+    counts: dict[Priority, int]
+
+
+class DailyTally(BaseModel):
+    by_day: dict[date, int]
+
+
+@dataclass
+class DailyTallyRecord:
+    by_day: dict[date, int]
+
+
+class Slots(BaseModel):
+    slots: dict[int | str, str]
 
 
 def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -296,6 +313,48 @@ class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
         for result in results:
             self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
             self.assertEqual(result.output, '{"due": "2026-10-09T15:00:00", "priority": "high"}')
+
+    async def test_non_string_dict_keys_serialize_like_the_model(self) -> None:
+        # json.dumps never passes keys to default=, so Enum, date, and mixed int/str keys once degraded to a repr.
+        def tally_model() -> Tally:
+            return Tally(counts={Priority.HIGH: 3, Priority.LOW: 1})
+
+        def tally_dict() -> dict[str, Any]:
+            return {"counts": {Priority.HIGH: 3, Priority.LOW: 1}}
+
+        def daily_model() -> DailyTally:
+            return DailyTally(by_day={date(2026, 1, 2): 4})
+
+        def daily_record() -> DailyTallyRecord:
+            return DailyTallyRecord(by_day={date(2026, 1, 2): 4})
+
+        def slots_model() -> Slots:
+            return Slots(slots={1: "bolts", "top": "nuts"})
+
+        def slots_dict() -> dict[str, Any]:
+            return {"slots": {1: "bolts", "top": "nuts"}}
+
+        cases = [
+            (tally_model, tally_dict, Tally, '{"counts": {"high": 3, "low": 1}}'),
+            (daily_model, daily_record, DailyTally, '{"by_day": {"2026-01-02": 4}}'),
+            (slots_model, slots_dict, Slots, '{"slots": {"1": "bolts", "top": "nuts"}}'),
+        ]
+
+        for model_func, plain_func, schema, expected in cases:
+            model_result = await self._run(model_func, output_schema=schema)
+            plain_result = await self._run(plain_func, output_schema=schema)
+
+            self.assertEqual(plain_result.status, ToolStatus.SUCCESS, plain_result.output)
+            self.assertEqual(model_result.output, expected)
+            self.assertEqual(plain_result.output, expected)
+
+    async def test_string_keyed_dict_output_is_unchanged(self) -> None:
+        def report() -> dict[str, Any]:
+            return {"b": [1, 2.5, None], "a": {"z": True}}
+
+        result = await self._run(report, output_schema=None)
+
+        self.assertEqual(result.output, '{"a": {"z": true}, "b": [1, 2.5, null]}')
 
     async def test_wrong_shape_still_fails_its_output_schema(self) -> None:
         def quote() -> Passenger:

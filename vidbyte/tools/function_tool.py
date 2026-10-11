@@ -153,7 +153,14 @@ def _stringify_output(value: object) -> str:
         return value
     try:
         return json.dumps(value, default=_json_default, sort_keys=True)
-    except TypeError:
+    except (TypeError, ValueError):
+        pass
+    # @intent tool-model-output-is-json
+    # default= never sees dict keys, so Enum/date keys and mixed int/str keys raise above; normalize keys the way
+    # the equivalent model's JSON mode does, falling back to str() per leaf, and to a repr only if that still fails.
+    try:
+        return json.dumps(to_jsonable_python(value, by_alias=False, fallback=str), sort_keys=True)
+    except (TypeError, ValueError):
         return str(value)
 
 
