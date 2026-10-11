@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vidbyte.lib.enums import Platform
-from vidbyte.lib.errors import ToolExecutionError
+from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 
 if TYPE_CHECKING:
     from vidbyte.lib.tools.filesystem.backends.base import BaseFileSystemBackend
@@ -32,6 +32,17 @@ class FileSystemToolConfig:
     encoding: str = "utf-8"
     platform: Platform | str = Platform.LOCAL
     backend: BaseFileSystemBackend | None = None
+    max_overwrite_lines: int | None = None
+
+    def __post_init__(self) -> None:
+        # @intent big-existing-files-are-edited-not-rewritten
+        # None means write_text may replace any existing file. A number
+        # is the most lines an existing file may have and still be
+        # replaced whole, so it must be a real whole number of at least
+        # one; True or 2.5 would quietly set a different limit.
+        limit = self.max_overwrite_lines
+        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
+            raise ConfigurationError("FileSystemToolConfig max_overwrite_lines must be None or an int of at least 1.", details={"max_overwrite_lines": repr(limit)})
 
     def normalized_platform(self) -> Platform:
         try:
