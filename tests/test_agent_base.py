@@ -7,7 +7,7 @@ from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgen
 from vidbyte.context import ContextManager, ContextWindow, ContextWindowPlacement, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.lib.errors import AgentExecutionError, AgentForkConfigurationError, ToolRegistrationError
+from vidbyte.lib.errors import AgentExecutionError, AgentForkConfigurationError, ConfigurationError, ToolRegistrationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.tools import ToolSpec
@@ -107,6 +107,13 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         reply = await agent.generate_reply("task")
         self.assertIn("direct:task", reply.content)
         self.assertEqual(reply.metadata["runner_type"], "text")
+
+    async def test_bare_string_capabilities_is_rejected(self) -> None:
+        # [Silent Failure] A bare string must not reach the manager roster as one capability per character
+        with self.assertRaisesRegex(ConfigurationError, "BaseAgent.capabilities must be a list"):
+            build_test_agent(name="worker", system_prompt="S.", runner=EchoRunner(), capabilities="web research")
+        agent = build_test_agent(name="worker", system_prompt="S.", runner=EchoRunner(), capabilities=["web research"])
+        self.assertEqual(agent.card().capabilities, ("web research",))
 
     async def test_runner_config_tool_helpers_and_fork(self) -> None:
         tool = FakeTool()
