@@ -8,7 +8,7 @@ Gate set (from context/code-map.md §1, run from the worktree root in this order
 | 2 | Area suite | `python -m pytest tests/test_jev_agent.py tests/test_jev_managed_gateway.py tests/test_jev_managed_runs.py tests/test_jev_usage_ledger.py tests/test_jev_preflight.py tests/test_jev_done.py tests/test_model_registry.py tests/test_agent_pricing.py tests/test_embedding_runner.py tests/test_agent_settings_validation.py -q` | local |
 | 3 | SDK lint | `python lint/run.py` (scans tracked files only: stage or commit new code first; only REGRESSED matters, IMPROVED counts are noisy) | local |
 | 4 | Full local gate (gate of record, AGENTS.md) | `python scripts/run_ci.py` (compileall, lint, full pytest, package stage) | local |
-| 5 | Test-contract diffs (must print nothing) | `git diff 90ed9a29 HEAD -- tests/features/decision_model_providers/` and `git diff $(git merge-base origin/main HEAD) HEAD -- tests/ ':(exclude)tests/features/decision_model_providers'` | local |
+| 5 | Test-contract diffs (must print nothing) | `git diff 3943089c HEAD -- tests/features/decision_model_providers/` (latest test grant, R-18; iteration 1 used `90ed9a29`) and `git diff $(git merge-base origin/main HEAD) HEAD -- tests/ ':(exclude)tests/features/decision_model_providers'` | local |
 | 6 | Remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/697` | remote: none configured; every `.github/workflows/` file is `workflow_dispatch`-only and disabled by the owner, so do not trigger or wait |
 
 ## Iteration 1 — 2026-10-10 — agent report: reports/S5-repair-1.md
@@ -46,3 +46,27 @@ Gate set (from context/code-map.md §1, run from the worktree root in this order
 Pushed: `9784a3f6..93e2bd1a  feat/decision-model-providers -> feat/decision-model-providers`. `gh pr view 697 --json mergeable,mergeStateStatus` → `MERGEABLE`, `BEHIND` (origin/main moved; S6 merges, as briefed).
 
 **Still open:** No confirmed finding. Follow-up Minors stay open by design: R-5, R-8, R-9, R-10, R-11, R-12, R-13, R-14, R-15, R-17 (see review.md).
+
+## Iteration 2 — 2026-10-10 — agent report: reports/S5-repair-2.md
+**Defects in:** R-18 (Major, `DecisionHttpCall` refused `int`/`float` subclass timeouts that spec r11 row 5 rule 3 admits; INV-23, AC-23). R-19 (Minor, spec-only, already fixed by `44dc3faf`). `[gate:integration]`: origin/main was 33 commits ahead (`7be96284` → `4e7f73fb`). Failing gate at 3943089c: feature pack `1 failed, 90 passed` (`DecisionHttpCallTests::test_decision_http_call_accepts_int_and_float_subclass_timeouts`, both subtests: `... received Seconds 30.0.` / `... received WholeSeconds 30.`).
+
+**Hypotheses and attempts:**
+- R-18, H1 (worked first try): at `vidbyte/lib/dataclasses/jev.py` rule 3 (line 525 before the merge, 527 after), `type(self.timeout_seconds) is bool or not isinstance(self.timeout_seconds, (int, float))` in place of `type(...) not in (int, float)`; the finite and `> JEV_TIMEOUT_FLOOR_SECONDS` checks and the message are unchanged. The comment now says why bool is checked by exact type (it is an int subclass) and that this spelling keeps the line out of C002's `timeout_seconds` group. Reproducer red → green; `C002 9 9 RATCHETED`. Probe: `True`, `0`, `inf`, `nan`, `'30'` keep the AC-23 message; `Seconds(30.0)`, `WholeSeconds(30)`, `30`, `0.5` construct.
+- Considered and not tried, with reasons: `isinstance(self.timeout_seconds, bool)` (exhausted in iteration 1: C002 10/9); coercing with `float(...)` (changes the stored value and type, which row 5 does not ask for); a shared `JevSeconds.require`-style helper (a new class breaks the §8.4 budget of 13/13; a new function with one caller is an overcomplication smell).
+- Integration: `git merge --no-ff origin/main` → merge commit `d1737132`, no conflicts (main does not touch `lint/`, `pyproject.toml` or the pricebook). No gate broke after the merge, so no `[gate:*]` fix commit was needed and C010 needed no `--refresh-lock`. Lint deltas versus iteration 1 all come from main and none is REGRESSED: S009 349 → 345 (improved), S051 257 → 258 of 259. The S051 +1 is not this branch's: `ruff --select I001,UP006,UP007,UP035,UP045` over every `vidbyte/` file the branch changes finds 3 I001s (`lib/enums/model_provider.py`, `lib/registries/models.py`, `providers/__init__.py`), and the same 3 exist in origin/main's copies (`git show origin/main:<f> | python -m ruff check --config lint/ruff.toml --stdin-filename <f> -`). Watch it: S051 has one unit of headroom left.
+
+**Changes:**
+- b5be5ca4 fix(lib): accept int and float subclass timeouts in DecisionHttpCall [R-18]
+- d1737132 Merge origin/main into feat/decision-model-providers [gate:integration]
+
+**Gate matrix out** (all at d1737132, the merged tree, everything committed):
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (feature pack) | `python -m pytest tests/features/decision_model_providers -q` | PASS (91) | `...................  [100%]` / `91 passed in 1.12s` |
+| area suite | `python -m pytest tests/test_jev_agent.py tests/test_jev_managed_gateway.py tests/test_jev_managed_runs.py tests/test_jev_usage_ledger.py tests/test_jev_preflight.py tests/test_jev_done.py tests/test_model_registry.py tests/test_agent_pricing.py tests/test_embedding_runner.py tests/test_agent_settings_validation.py -q` | PASS (406) | `406 passed in 2.46s` |
+| lint | `python lint/run.py` | PASS (exit 0, 0 REGRESSED) | `S063 RATCHETED: 4 known finding(s).` / `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` (C002 9/9, C009 1/1, C010 0, S009 345/350, S051 258/259, S015 13/13, A001 643/643, A009 0) |
+| full local gate | `python scripts/run_ci.py` | PASS (exit 0) | `3071 passed, 1 skipped in 16.15s` / `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| test-contract diffs | `git diff 3943089c HEAD -- tests/features/decision_model_providers/` and `git diff $(git merge-base origin/main HEAD) HEAD -- tests/ ':(exclude)tests/features/decision_model_providers'` (merge base is now `4e7f73fb`) | PASS (both empty) | `0` bytes each (piped to `wc -c`); `git diff origin/main HEAD -- lint/baseline.json` also `0` |
+| remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/697` | none configured (workflows disabled) | `no checks reported on the 'feat/decision-model-providers' branch` |
+
+**Still open:** No confirmed finding. R-18 fixed @b5be5ca4, R-19 fixed @44dc3faf (spec). Follow-up Minors stay open by design: R-5, R-8, R-9, R-10, R-11, R-12, R-13, R-14, R-15, R-17 (see review.md).
