@@ -516,6 +516,13 @@ class AgentRuntime:
                         if last_assistant_output and last_assistant_output.strip():
                             messages.append(self._assistant_message(last_assistant_output))
                         messages.append({"role": "user", "content": self.output_contract.feedback(unmet, counters)})
+                        # @intent rejected-finish-still-completes-its-iteration
+                        # A rejected answer still ends this iteration, so the after-iteration hooks run and may stop the run,
+                        # exactly as they do for a rejected isDone.
+                        decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
+                        if decision.action is not MiddlewareAction.CONTINUE:
+                            abort_result = self._middleware_abort_result(decision, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+                            return await self._finish_result(abort_result, state)
                         continue
                 final = self._final_result(
                     output=last_assistant_output,
