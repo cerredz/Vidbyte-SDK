@@ -450,6 +450,9 @@ class ToolsFormatter:
         response: dict[str, Any] = {"error": parts["kind"], "message": parts["message"], "status": "error"}
         if parts.get("hint"):
             response["hint"] = parts["hint"]
+        # @intent gemini-error-forwards-detail Gemini's structured response must carry the same detail the text envelope does.
+        if parts.get("detail"):
+            response["detail"] = parts["detail"]
         if parts.get("retryable") is not None:
             response["retryable"] = parts["retryable"]
         return response

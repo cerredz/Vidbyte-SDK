@@ -327,6 +327,19 @@ class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
         self.assertEqual(response["hint"], "Wait and retry.")
         self.assertTrue(response["retryable"])
 
+    def test_gemini_error_forwards_author_detail(self) -> None:
+        call = ToolCall("validate_rows", call_id="fn-1")
+        result = ToolResult.error(
+            "validate_rows",
+            "Validation failed.",
+            metadata={"error": "invalid_arguments", "detail": "row 7: price must be positive"},
+        )
+
+        formatted = ToolsFormatter.format_tool_result(call, result, "gemini")
+        response = formatted["parts"][0]["functionResponse"]["response"]
+
+        self.assertEqual(response["detail"], "row 7: price must be positive")
+
     def test_openai_error_encodes_envelope_in_content(self) -> None:
         call = ToolCall("lookup", call_id="call-1")
         result = ToolResult.error("lookup", "bad args", metadata={"error_type": "validation", "retryable": "false"})
