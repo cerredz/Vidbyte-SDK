@@ -515,6 +515,30 @@ class AgentKwargsTests(unittest.TestCase):
         self.assertEqual(settings.output_schema["type"], "object")
 
 
+class HarnessAgentParamsTests(unittest.TestCase):
+    def test_harness_agent_params_reach_settings_and_the_built_agent(self) -> None:
+        # @intent harness-params-are-agent-hyperparameters
+        with tempfile.TemporaryDirectory() as folder:
+            loader = YamlLoader()
+            spec = loader.load_harness(self._write_harness(Path(folder), "params: {temperature: 0.2, max_tokens: 4096, custom_knob: 1}"))
+            settings = loader.load_harness_agent(spec, "planner")
+            agent = loader.build_agent(settings)
+            override = loader.load_harness_agent(loader.load_harness(self._write_harness(Path(folder), "temperature: 0.5\n    params: {temperature: 0.2}")), "planner")
+
+        self.assertEqual(settings.temperature, 0.2)
+        self.assertEqual(agent.runner_config.temperature, 0.2)
+        self.assertEqual(override.temperature, 0.5)
+
+    def _write_harness(self, folder: Path, extra: str) -> Path:
+        # Writes a one-agent harness document whose planner entry ends with the YAML under test.
+        path = folder / "harness.yaml"
+        path.write_text(
+            f"schema_version: 1\nharness:\n  type: research-swarm\nagents:\n  - name: planner\n    provider: deepseek\n    model: deepseek-chat\n    system_prompt: Plan.\n    {extra}\n",
+            encoding="utf-8",
+        )
+        return path
+
+
 class SystemPromptFileContainmentTests(unittest.TestCase):
     def test_loads_a_prompt_from_a_neighbouring_file(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
