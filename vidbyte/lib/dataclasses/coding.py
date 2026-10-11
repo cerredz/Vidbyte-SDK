@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/coding.py
 
-PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, and the context-section switches. Also defines CodingContextSectionText, one section of the CodingAgent context window.
+PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, and the context-section switches (load_agents, load_environment). Also defines CodingContextSectionText, one section of the CodingAgent context window.
 ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools) and by the section loaders in vidbyte/agents/coding_context/, and exported by the root vidbyte package. CodingContextSectionText is returned by each section loader and read by CodingContextWindow (vidbyte/agents/coding_context/window.py).
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
 FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; _check_context_switches checks the section switches. CodingContextSectionText.__post_init__ checks the section kind and the text fields.
@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
 KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. CodingContextSectionText does not cap its content; each loader bounds its own text.
 RELATED DOCS: docs/spec/coding-agent/spec.md; vidbyte/agents/README.md (Coding Agent)
-TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, and tests/features/coding_agent/test_coding_agent_agents_md.py
+TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_agents_md.py, and tests/features/coding_agent/test_coding_agent_environment.py
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ class CodingAgentSettings:
     parallel_api_key: str | None = field(default=None, repr=False)
     tavily_api_key: str | None = field(default=None, repr=False)
     load_agents: bool = True
+    load_environment: bool = True
 
     def __post_init__(self) -> None:
         # Check the root folder and keep its absolute path, so a later
@@ -103,6 +104,8 @@ class CodingAgentSettings:
         """Raise unless every context-section switch is a real bool, not a truthy stand-in such as 1 or "yes"."""
         if not isinstance(self.load_agents, bool):
             raise ConfigurationError("CodingAgent load_agents must be True or False.", details={"parameter": "load_agents", "load_agents_type": type(self.load_agents).__name__})
+        if not isinstance(self.load_environment, bool):
+            raise ConfigurationError("CodingAgent load_environment must be True or False.", details={"parameter": "load_environment", "load_environment_type": type(self.load_environment).__name__})
 
 
 @dataclass(frozen=True, slots=True)

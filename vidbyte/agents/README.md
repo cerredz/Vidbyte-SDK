@@ -85,7 +85,7 @@ reply = await agent.arun(
 
 ## Coding Agent
 
-`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool. By default it also shows the folder's `AGENTS.md` to the model.
+`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool. By default it also shows the folder's `AGENTS.md` and a short block of environment facts to the model.
 
 ```python
 from vidbyte import CodingAgent
@@ -96,6 +96,7 @@ agent = CodingAgent(
     root_dir="my-project",            # an existing folder, resolved once
     firecrawl_api_key="fc-your-key",  # optional; picks the web-fetch provider
     load_agents=True,                 # default; shows my-project/AGENTS.md to the model
+    load_environment=True,            # default; shows the OS, date, shell, and tools to the model
     provider="openai",
     model_name="gpt-4.1",
 )
@@ -106,6 +107,8 @@ The key you pass picks the web-fetch tool: `firecrawl_api_key`, `browserbase_api
 The constructor gathers its own arguments into one `CodingAgentSettings` (`vidbyte/lib/dataclasses/coding.py`), which checks the root folder, the keys, the caller's tools, and the policy when it is created, so a bad argument fails before `BaseAgent` builds anything. The seven tools come from `CodingAgentTools` (`vidbyte/tools/toolsets/coding.py`), a `Tools` catalog with `authenticate_tools(settings)`, which gives the one key to its fetch provider, and `get_tools(root_dir, fetch_tool)`, which returns the seven in order.
 
 When it is built, the agent reads `<root_dir>/AGENTS.md`, or a case variant such as `agents.md` when that exact name is absent, and places the text right after the system prompt and before your message, so the model follows the rules the repository already wrote down. Parent folders are never searched. The file is read once: later edits are seen only by a new agent, and a later change of working directory changes nothing. At most 32,768 bytes are shown, cut at a whole character; a longer file ends with a line that gives the cut and the `read_lines` call that reads the rest. A missing or blank file adds nothing, while a file that is there but cannot be read, such as a folder named `AGENTS.md`, fails construction with a `ConfigurationError` naming its path. Pass `load_agents=False` to turn this off; `load_agents` must be a real `bool`.
+
+The agent also shows an environment section after `AGENTS.md`: the OS and version, the CPU and its core count, today's date and time zone, the root folder, the lockfiles and build files in it, and whether it is in a git repository and on which branch. It says which bash the `bash` tool runs; on Windows that is Git Bash, so the section tells the model to write POSIX commands, not PowerShell. One `bash -c` probe, run with that same bash in the root folder, lists the common tools bash finds on its own `PATH` (git, python, node, cargo, and so on) with the first line of each version. The probe runs once per process for a given bash and `PATH`, with a 15-second limit. No bash, a timeout, or a failing probe never raises: the section says what failed and keeps every other fact. No environment-variable value, user name, or host name is shown. Pass `load_environment=False` to turn this off; it must be a real `bool`.
 
 `CodingContextWindow` (`vidbyte/agents/coding_context/`) places the text and owns the order of everything a `CodingAgent` adds after the system prompt: `AGENTS.md`, then the environment context, the repository map, and setup-command results as those features land, then the content of your own `context_manager`. It never changes your manager: when a section is loaded, the agent gets a new manager with your content after the sections. Adding a section takes three steps, described in that folder's README:
 

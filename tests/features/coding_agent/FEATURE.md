@@ -2,13 +2,15 @@
 
 ## High-Level Feature Description
 
-An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAgent` whose model can run shell commands, read, write and edit files, search files, and fetch web pages, all under one root folder. The model can act without the caller writing a policy, because the default policy allows every permission. Every bash call returns in bounded time with bounded output. A supplied fetch key picks one priced provider, and the model reads the pages it fetched. By default the root folder's `AGENTS.md` is read once, at construction, and shown to the model right after the system prompt, so the model follows the rules the repository already wrote down.
+An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAgent` whose model can run shell commands, read, write and edit files, search files, and fetch web pages, all under one root folder. The model can act without the caller writing a policy, because the default policy allows every permission. Every bash call returns in bounded time with bounded output. A supplied fetch key picks one priced provider, and the model reads the pages it fetched. By default the root folder's `AGENTS.md` is read once, at construction, and shown to the model right after the system prompt, so the model follows the rules the repository already wrote down. Right after it comes a short block of environment facts, so the model knows the OS, today's date, which bash it gets, and which tools that bash finds.
 
 ## Contract
 
-`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, load_agents=True, context_manager=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
+`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, load_agents=True, load_environment=True, context_manager=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
 
 With `load_agents=True` (a real `bool`), the agent lists `root_dir` once and reads `AGENTS.md`, or, when that exact name is absent, the first case variant in sorted order; parent folders are never searched. At most `CODING_AGENTS_MD_MAX_BYTES` (32,768) bytes are read and decoded as UTF-8 with replacement characters, without a byte-order mark; a longer file is cut at a whole character and ends with a line giving the shown and total bytes and the `read_lines` start line for the rest. The text renders as primitive `coding:agents_md`, titled `Repository instructions (<file name>)`, after the system prompt and before the user message. A missing or blank file adds nothing; a present file that is not a readable regular file raises `ConfigurationError` naming its path. `CodingContextWindow.build(sections, context_manager)` places the sections in `CodingContextSection` order ahead of the caller's manager content, in a new manager; with no sections it returns the caller's manager, or `None`.
+
+With `load_environment=True` (a real `bool`), the agent renders primitive `coding:environment`, titled `Environment`, after `coding:agents_md`. It holds the OS, CPU, date and time zone, root path, the project marker files in the root, and the git branch read from `.git`; a shell line naming the bash `BashTool` would run (on Windows: Git Bash, POSIX syntax, not PowerShell); and the output of one `bash -c CODING_ENVIRONMENT_PROBE_SCRIPT` run in the root with stdin closed, a 15-second limit, and output read from a temporary file up to 8 KiB. The probe is cached per bash path and `PATH`. No bash, a timeout, a non-zero exit, or a spawn error never raises; the section keeps what it has and says what failed.
 
 `BashTool(root_dir)` runs `bash -c <command>` in `root_dir` with stdin closed and stderr merged into stdout. A success result holds the decoded output, at most `BASH_MAX_OUTPUT_BYTES` bytes followed by an omitted-byte count, and ends with `exit code: <n>`. It returns `bash_not_found`, `spawn_failed` or `timeout` errors. One time limit, `BASH_TIMEOUT_SECONDS`, covers both reading and waiting. On a timeout or a cancellation, the command's process group is killed (POSIX) or Git's launcher is killed (Windows), then the tool waits at most `BASH_KILL_GRACE_SECONDS` and closes the pipe.
 
@@ -35,7 +37,7 @@ SDK callers that construct `vidbyte.CodingAgent`, and the model inside `AgentRun
 
 ## State Transitions
 
-Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` that is not a bool, an unreadable `AGENTS.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call and starts no process; it reads at most 32,768 bytes of `AGENTS.md`. A bash call goes through these stages:
+Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` that is not a bool, an unreadable `AGENTS.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call; it reads at most 32,768 bytes of `AGENTS.md`, and it starts at most one bash probe per process for a given bash and `PATH`, none with `load_environment=False`. A bash call goes through these stages:
 
 1. Validated.
 2. Spawned.
@@ -117,6 +119,14 @@ These are the failure inventory the tests were chosen from, given as input → w
   - `load_agents="yes"` or `1` is accepted by truthiness.
   - The caller's manager is changed, or its content is dropped or rendered first.
   - `fork()` loses the section, or a later `chdir` or edit changes it.
+- **Environment errors.**
+  - An environment-variable value, such as a token, is shown to the model.
+  - No bash, a hanging tool, or a failing probe raises and breaks construction, or drops the facts already gathered.
+  - On Windows the model is not told its shell is Git Bash, and writes PowerShell.
+  - A pipe held by a child of Git's launcher hangs construction after a timeout.
+  - `load_environment=False` still starts a process, or `load_environment="yes"` is accepted.
+  - The probe runs again for every agent, or a cached probe answers for a different `PATH`.
+  - A worktree's `.git` file or a detached checkout gives the wrong git line.
 - **Bash lookup errors.** On Windows the `PATH` `bash` (WSL's launcher) is chosen instead of Git's `bin/bash.exe`, or the lookup walks past three parent folders (AC-22). A missing bash breaks construction or the other tools (AC-17).
 
 ## Historical Regressions
@@ -135,6 +145,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
 - `test_coding_agent_agents_md.py` checks `AGENTS.md` loading and the shared coding context window: the position in the request, the byte-identical request without a file, the switch, case variants, the root-only lookup, the cap and the cut character, blank and undecodable files, a broken file, strict bool validation, the caller's manager, fork, read-once, and `CodingContextWindow` and `CodingContextSectionText` on their own.
+- `test_coding_agent_environment.py` checks the environment section: its position and facts in the request, the Windows Git Bash line, no bash, a timed-out or failing probe, the switch and its strict bool, a planted secret, marker files, git branches (subfolder, worktree, detached), the probe cache, and one run of the host's real bash.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
