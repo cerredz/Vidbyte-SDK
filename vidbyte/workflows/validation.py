@@ -206,7 +206,13 @@ class AgentValidator(Generic[StateT, VerdictT]):
         # Runs one isolated verifier call and maps only a revalidated model verdict.
         agent = self._resolve_agent(context)
         prompt = self._prompt_builder(context)
-        reply = await self._run_agent(agent, prompt)
+        # @intent internal-forks-close-their-mcp-servers
+        # A fork made here starts its own MCP servers on its first run, so close them once that run ends, fails, or times out.
+        try:
+            reply = await self._run_agent(agent, prompt)
+        finally:
+            if self._fresh_fork:
+                await agent.close_mcp_servers()
         structured = reply.metadata.get("structured")
         if structured is None:
             raise ValueError("Verifier reply did not include metadata['structured'].")
