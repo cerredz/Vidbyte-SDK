@@ -69,8 +69,7 @@ class TextModelConfig:
     mode: TextModelMode = TextModelMode.AUTO
 
     def __post_init__(self) -> None:
-        # Rejects a mode that is not the enum, and what explicit managed
-        # mode can never serve, as soon as the config is built.
+        """Reject a mode that is not the enum, and what explicit managed mode can never serve, as soon as the config is built."""
         # @intent text-mode-shape-fails-at-construction
         # AUTO reads no environment here: TextModelRunner rebuilds
         # the config on every call, so validate() settles AUTO once.
@@ -94,20 +93,19 @@ class TextModelConfig:
         self._validate_positive_int(self.max_output_tokens, field_name="max_output_tokens")
         self._validate_positive_float(self.timeout_seconds, field_name="timeout_seconds")
         provider = self.normalized_provider()
-        # A managed config must suit the gateway and hold a live
-        # Vidbyte key; a BYOK config resolves its key as before.
         # @intent managed-state-is-checked-before-any-request
-        # The Vidbyte key must never follow a caller URL or reach a
-        # provider the gateway does not serve.
+        # A managed config must suit the gateway and hold a live Vidbyte
+        # key, because that key must never follow a caller URL or reach
+        # a provider the gateway does not serve.
         if self.is_vidbyte_managed():
             self._require_managed_shape(provider)
             self.resolved_vidbyte_api_key()
             return
+        # A BYOK config resolves its provider key as before.
         self.resolved_api_key()
 
     def is_vidbyte_managed(self) -> bool:
-        # True in explicit managed mode, or when AUTO selects a
-        # Vidbyte key.
+        """Return True in explicit managed mode, or when AUTO selects a Vidbyte key."""
         # @intent vidbyte-key-selection-decides-managed-state
         # The fall-through keeps a provider key the caller holds on
         # BYOK, so only a selected Vidbyte key bills through Vidbyte.
@@ -116,8 +114,7 @@ class TextModelConfig:
         return ProviderModelRegistry.find_vidbyte_api_key(self.provider, self.api_key) is not None
 
     def resolved_vidbyte_api_key(self) -> str:
-        # Returns the checked live Vidbyte key this config's managed
-        # calls send to the gateway.
+        """Return the checked live Vidbyte key this config's managed calls send to the gateway."""
         # @intent explicit-managed-mode-never-reads-the-provider-key
         # Explicit managed mode takes only api_key or VIDBYTE_API_KEY,
         # so a provider key in the environment is never sent; AUTO takes
@@ -153,8 +150,7 @@ class TextModelConfig:
             raise ConfigurationError("model must be non-empty.")
 
     def _require_managed_shape(self, provider: ModelProvider) -> None:
-        # Refuses a custom endpoint and any provider the gateway does
-        # not serve, before a managed call can send the Vidbyte key.
+        """Refuse a custom endpoint and any provider the gateway does not serve, before a managed call can send the Vidbyte key."""
         # @intent managed-key-stays-on-the-gateway
         # The bearer key must never follow a caller URL or go to a
         # vendor the gateway cannot bill.

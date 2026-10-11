@@ -53,7 +53,7 @@ class StreamingTextModelRunner:
         return self._config.model
 
     def _refuse_managed_streaming(self, config: TextModelConfig) -> None:
-        # Raise UnsupportedProviderError at init time in managed state.
+        """Raise UnsupportedProviderError at init time in managed state."""
         # @intent managed-streaming-is-refused-before-any-request
         # The gateway cannot bill a stream and refuses one; refusing
         # here sends nothing and names both ways forward.

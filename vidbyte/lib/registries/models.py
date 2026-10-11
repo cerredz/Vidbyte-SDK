@@ -172,13 +172,12 @@ class ProviderModelRegistry:
 
     @classmethod
     def find_vidbyte_api_key(cls, provider: ModelProvider | str, explicit_key: str | None) -> str | None:
-        # Returns the Vidbyte key the text key fall-through selects, or
-        # None when the call stays on the caller's own provider key.
+        """Return the Vidbyte key the text key fall-through selects, or None when the call stays on the caller's own provider key."""
         # @intent byok-key-wins-and-vidbyte-key-fills-in-last
-        # A provider key the caller holds keeps that provider unbilled,
-        # so steps 1-2 are managed only for a Vidbyte-prefixed key.
-        # VIDBYTE_API_KEY fills in only for a provider the gateway
-        # serves.
+        # A provider key the caller holds keeps that provider
+        # unbilled, so steps 1-2 are managed only for a
+        # Vidbyte-prefixed key, and VIDBYTE_API_KEY fills in
+        # only for a provider the gateway serves.
         if explicit_key is not None and not isinstance(explicit_key, str):
             return None
         explicit = (explicit_key or "").strip()
@@ -194,8 +193,7 @@ class ProviderModelRegistry:
 
     @classmethod
     def resolve_vidbyte_api_key(cls, explicit_key: str | None) -> str:
-        # Returns the live Vidbyte key a managed call sends: the
-        # explicit key, otherwise VIDBYTE_API_KEY, both stripped.
+        """Return the live Vidbyte key a managed call sends: the explicit key, otherwise VIDBYTE_API_KEY, both stripped."""
         # @intent managed-key-is-a-checked-live-vidbyte-key
         # The gateway admits only live keys, so a missing or malformed
         # key fails here, before any request, with the messages the

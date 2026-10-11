@@ -60,7 +60,7 @@ class _GatewayAnswer:
         return status is not None and self.body is not None and HTTPStatus.OK <= status < HTTPStatus.MULTIPLE_CHOICES
 
     def retryable(self) -> bool:
-        # True for a 409, a 502, or an answer that is not a JSON object.
+        """Return True for a 409, a 502, or an answer that is not a JSON object."""
         # @intent only-answers-the-gateway-replays-are-retried
         # A same-key retry is answered from the gateway's replay, so it
         # never pays twice; a missing answer is not one of them, because
@@ -71,7 +71,7 @@ class _GatewayAnswer:
         return self.body is None or status in (HTTPStatus.CONFLICT, HTTPStatus.BAD_GATEWAY)
 
     def failure_reason(self, provider: ModelProvider, timeout_seconds: float, resends: int) -> str:
-        # Words why this attempt failed, from its status and shape only.
+        """Explain why this attempt failed, from its status and shape only."""
         # @intent managed-failures-never-echo-a-response-body
         # Gateway and vendor bodies can reflect the bearer key, so every
         # reason is written by the SDK and no body text is ever copied.
@@ -91,7 +91,7 @@ class _GatewayAnswer:
         return f"{relayed}; {retried}" if status in (HTTPStatus.CONFLICT, HTTPStatus.BAD_GATEWAY) else relayed
 
     def gateway_reason(self, status: int, retried: str) -> str:
-        # Looks up the remedy for one gateway error status.
+        """Look up the remedy for one gateway error status."""
         # @intent gateway-status-names-its-remedy
         # The gateway's own error code is body text, so the remedy comes
         # from the status alone, which is all the caller needs to act.
@@ -189,7 +189,7 @@ class VidbyteGatewayTransport(HttpTransport):
         raise ProviderRequestError(f"Vidbyte managed {self._provider.value} request failed: {reason}.", provider="vidbyte", status_code=answer.status())
 
     async def _send(self, *, envelope: Mapping[str, object], headers: Mapping[str, str], idempotency_key: str, timeout_seconds: float) -> _GatewayAnswer:
-        # Makes one POST to the gateway and records what came back.
+        """Make one POST to the gateway and record what came back."""
         # @intent one-gateway-attempt-records-no-exception
         # Only the kind of exception is kept, never the instance, so no
         # response excerpt or exception text can reach the raised error;
