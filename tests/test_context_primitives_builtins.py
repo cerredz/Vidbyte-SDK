@@ -226,6 +226,21 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("Invalid placement", result.output)
 
+    async def test_recite_refuses_slot_id_equal_to_source_id(self) -> None:
+        """Verify context_recite never upserts its copy over the source primitive."""
+        manager = ContextManager()
+        manager.upsert(PlanContextItem(primitive_id="plan:current", title="Plan", steps=("step A",)), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
+        tool = ContextReciteTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_recite", arguments={"primitive_id": "plan:current", "slot_id": "plan:current"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("slot_id must differ", result.output)
+        stored = manager.get_by_id("plan:current")
+        assert stored is not None
+        self.assertEqual(stored.title, "Plan")
+        self.assertEqual(manager.placement_for("plan:current"), ContextWindowPlacement.TOP_OF_CONTEXT)
+
     async def test_context_window_tools_returns_create_and_management_tools(self) -> None:
         """Verify the factory returns generated create tools plus management tools."""
         manager = ContextManager()
