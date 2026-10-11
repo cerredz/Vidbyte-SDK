@@ -40,7 +40,8 @@ class BashTool(BaseTool):
     """Runs one bash command per call in a fresh process started in the root folder."""
 
     def __init__(self, root_dir: str | Path) -> None:
-        # Resolves the root and the bash executable once; a missing bash is reported per call, never raised here.
+        # Resolves the root and the bash executable once; a missing bash
+        # is reported per call, never raised here.
         self.root_dir = Path(root_dir).resolve()
         self._executable = self._find_bash()
 
@@ -48,10 +49,14 @@ class BashTool(BaseTool):
     def _find_bash() -> str | None:
         """Return the bash executable this platform should run, or None when there is none."""
         # @intent windows-bash-is-git-for-windows
-        # On Windows the bash found on PATH is often the WSL launcher (System32 or WindowsApps), which fails when WSL is
-        # not set up, or Git's usr/bin/bash.exe, which cannot find ls or grep when Python was started from PowerShell.
-        # Only Git for Windows' bin/bash.exe, one or two folders above the resolved git, is trusted there; searching three
-        # parents covers git in cmd/, bin/, and mingw64/bin/. Falling back to the PATH bash would bring the WSL failure back.
+        # On Windows the bash found on PATH is often the WSL launcher
+        # (System32 or WindowsApps), which fails when WSL is not set up,
+        # or Git's usr/bin/bash.exe, which cannot find ls or grep when
+        # Python was started from PowerShell. Only Git for Windows'
+        # bin/bash.exe, one or two folders above the resolved git, is
+        # trusted there; searching three parents covers git in cmd/,
+        # bin/, and mingw64/bin/. Falling back to the PATH bash would
+        # bring the WSL failure back.
         if sys.platform != "win32":
             return shutil.which("bash")
         git = shutil.which("git")
@@ -94,23 +99,27 @@ class BashTool(BaseTool):
         """Run one command and return its output and exit code, or a classified error."""
         command = str(call.arguments["command"])
 
-        # Without a usable bash there is nothing to run, so tell the model how the developer can fix it.
+        # Without a usable bash there is nothing to run, so tell the
+        # model how the developer can fix it.
         executable = self._executable
         if executable is None:
             hint = "Install Git for Windows and put git on PATH; this tool runs the bin/bash.exe that Git for Windows installs." if sys.platform == "win32" else "Install bash and put it on PATH."
             return ToolResult.error(self.name, f"bash was not found. {hint}", metadata={"error": "bash_not_found"})
 
-        # Start bash in the root folder; a command the operating system refuses to start comes back as an error result.
+        # Start bash in the root folder; a command the operating system
+        # refuses to start comes back as an error result.
         process = await self._spawn(executable, command)
         if isinstance(process, ToolResult):
             return process
 
-        # Read the output and wait for the exit under one time limit, so a command that never ends cannot hang the run.
+        # Read the output and wait for the exit under one time limit, so
+        # a command that never ends cannot hang the run.
         buffer = bytearray()
         try:
             omitted, exit_code = await asyncio.wait_for(self._collect(process, buffer), BASH_TIMEOUT_SECONDS)
         except TimeoutError:
-            # At the limit, stop the command and show the model what it printed so far, and whether that was cut.
+            # At the limit, stop the command and show the model what it
+            # printed so far, and whether that was cut.
             await self._stop(process)
             truncated = len(buffer) >= BASH_MAX_OUTPUT_BYTES
             marker = f"\n[output truncated at {BASH_MAX_OUTPUT_BYTES:,} bytes]" if truncated else ""
@@ -118,21 +127,24 @@ class BashTool(BaseTool):
             text = buffer.decode("utf-8", errors="replace")
             return ToolResult.error(self.name, text + marker + stopped, metadata={"error": "timeout", "truncated": truncated})
         except asyncio.CancelledError:
-            # A cancelled call still stops the command before the cancellation moves on.
+            # A cancelled call still stops the command before the
+            # cancellation moves on.
             await self._stop(process)
             raise
 
-        # The command finished on its own: report its output and exit code, and kill nothing.
+        # The command finished on its own: report its output and exit
+        # code, and kill nothing.
         return self._render(buffer, omitted, exit_code)
 
     async def _spawn(self, executable: str, command: str) -> asyncio.subprocess.Process | ToolResult:
         """Start `bash -c command` in the root folder, or return a spawn_failed result."""
         # @intent argv-exec-in-its-own-session
-        # The command reaches bash as a single argv item through exec, so no second shell re-parses quotes, `$`, or `;`
-        # and lint S055 holds. start_new_session makes bash the leader of its own process group, which is what lets _stop
-        # kill everything the command started. stdin is the null device so a command that reads input cannot hang the call.
-        # OSError and ValueError (removed root folder, NUL byte, argument list too long) become a spawn_failed result naming
-        # only the exception class, because the exception text can carry paths or the command itself (S017).
+        # The command reaches bash as a single argv item through exec,
+        # so no second shell re-parses quotes, `$`, or `;` and lint S055
+        # holds. start_new_session makes bash the leader of its own
+        # process group, which is what lets _stop kill everything the
+        # command started. stdin is the null device so a command that
+        # reads input cannot hang the call.
         try:
             return await asyncio.create_subprocess_exec(
                 executable,
@@ -145,15 +157,23 @@ class BashTool(BaseTool):
                 start_new_session=True,
             )
         except (OSError, ValueError) as exc:
+            # A removed root folder, a NUL byte, or an argument list
+            # that is too long becomes a spawn_failed result naming only
+            # the exception class, because the exception text can carry
+            # paths or the command itself (S017).
             return ToolResult.error(self.name, f"bash could not start this command ({type(exc).__name__}). Check that the root folder still exists, and that the command has no NUL characters and is not too long.", metadata={"error": "spawn_failed"})
 
     async def _collect(self, process: asyncio.subprocess.Process, buffer: bytearray) -> tuple[int, int]:
         """Read the output into buffer up to the cap, count the rest, and return (bytes not kept, exit code)."""
         # @intent one-limit-over-reading-and-waiting
-        # Reading to the end of the output and waiting for the exit run as one step, so the caller's single wait_for bounds
-        # both: a command that closes its output and keeps running would otherwise block process.wait() for as long as it
-        # runs. Only the first BASH_MAX_OUTPUT_BYTES are kept; everything after is still read and counted so the command is
-        # never blocked on a full pipe and memory stays bounded. The read loop holds no numeric literal (A007).
+        # Reading to the end of the output and waiting for the exit run
+        # as one step, so the caller's single wait_for bounds both: a
+        # command that closes its output and keeps running would
+        # otherwise block process.wait() for as long as it runs. Only
+        # the first BASH_MAX_OUTPUT_BYTES are kept; everything after is
+        # still read and counted so the command is never blocked on a
+        # full pipe and memory stays bounded. The read loop holds no
+        # numeric literal (A007).
         omitted = 0
         output = process.stdout
         while output is not None and (chunk := await output.read(BASH_READ_CHUNK_BYTES)):
@@ -165,28 +185,41 @@ class BashTool(BaseTool):
     async def _stop(self, process: asyncio.subprocess.Process) -> None:
         """Kill the command, wait at most BASH_KILL_GRACE_SECONDS for the exit, and close the subprocess transport."""
         # @intent stop-kills-waits-briefly-and-closes-the-pipe
-        # Runs only on timeout or cancellation, never after a normal completion, and never raises, because an exception
-        # here would replace a propagating CancelledError. On POSIX the group is killed even when bash itself has already
-        # exited, since a background child can still hold the output; ProcessLookupError means the group is already empty,
-        # and PermissionError means no member may be signalled (for example a root-owned sudo leader), so the stop moves on
-        # instead of failing. On Windows only Git's launcher can be killed. The wait after the kill is bounded because a
-        # process the kill cannot reach (a setsid descendant, the command behind Git's launcher) keeps the pipe open, and
-        # Python 3.12+ waits for the pipe. Closing the transport in finally releases the parent's end of the pipe even when
-        # a second cancellation lands during the wait; without it a long-lived service leaks one pipe per timed-out command
-        # and asyncio.run reports "Event loop is closed" at shutdown. close() kills a direct child that is still running and
-        # lets that PermissionError through, so it is tolerated there too. getattr keeps mypy clean and degrades to that
-        # documented leak on a Python without the private attribute instead of raising.
+        # Runs only on timeout or cancellation, never after a normal
+        # completion, and never raises, because an exception here would
+        # replace a propagating CancelledError.
         try:
+            # On POSIX, kill the whole group even when bash itself has
+            # already exited, since a background child can still hold
+            # the output. ProcessLookupError means the group is already
+            # empty, and PermissionError means no member may be
+            # signalled (for example a root-owned sudo leader), so the
+            # stop moves on. On Windows only Git's launcher can be
+            # killed.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 if sys.platform != "win32":
                     os.killpg(process.pid, signal.SIGKILL)
                 elif process.returncode is None:
                     process.kill()
+            # Bound the wait after the kill: a process the kill cannot
+            # reach (a setsid descendant, the command behind Git's
+            # launcher) keeps the pipe open, and Python 3.12+ waits for
+            # the pipe.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(process.wait(), BASH_KILL_GRACE_SECONDS)
         finally:
+            # Release the parent's end of the pipe even when a second
+            # cancellation lands during the wait; without it a
+            # long-lived service leaks one pipe per timed-out command
+            # and asyncio.run reports "Event loop is closed" at
+            # shutdown. getattr keeps mypy clean and degrades to that
+            # leak on a Python without the private attribute instead of
+            # raising.
             transport = getattr(process, "_transport", None)
             if transport is not None:
+                # close() kills a direct child that is still running and
+                # lets that PermissionError through, so tolerate it
+                # here.
                 with contextlib.suppress(PermissionError):
                     transport.close()
 

@@ -88,6 +88,7 @@ print(catalog.provider_schemas("openai"))
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
 - `builtins/`: a minimal subprocess bash tool, code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
+- `toolsets/`: pre-assembled tool catalogs, including `CodingAgentTools`, the seven tools a `CodingAgent` starts with.
 
 ## Cooperative Pause
 
@@ -120,8 +121,9 @@ its own. A successful call returns two channels on one result: `output` holds a
 compact summary for the model's context window, and
 `metadata["operation_payload"]` holds the typed `SearchPayload` or
 `FetchPayload` the application consumes, each record keeping its undecoded
-vendor mapping under `raw`. `CodingAgent` wraps its keyed fetch tool so that
-`output` also carries each fetched page's text.
+vendor mapping under `raw`. `CodingAgentTools` (`toolsets/coding.py`) wraps a
+`CodingAgent`'s keyed fetch tool so that `output` also carries each fetched
+page's text.
 
 Billing is attempt-accurate. A tool declares `units` and `attempts` in
 `metadata["operation_usage"]`, and the runtime records one priced operation per

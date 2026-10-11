@@ -10,7 +10,8 @@ Architecture:
     - ReturningArgumentParser converts argparse exits into integer return codes.
     - main(argv) returns an exit code for in-process tests and console scripts.
 Relations:
-    First subcommand group is vidbyte.cli.skills, wrapping vidbyte.skills.Skills.
+    Subcommand groups are vidbyte.cli.skills, wrapping vidbyte.skills.Skills,
+    and vidbyte.cli.coding, running vidbyte.agents.coding.CodingAgent.
 """
 
 from __future__ import annotations
@@ -88,9 +89,10 @@ class VidbyteCli:
 
     def _register_subcommand_groups(self, subparsers: argparse._SubParsersAction[Any]) -> None:
         # Registers first-party command groups using an explicit growable list.
-        from vidbyte.cli import skills
+        from vidbyte.cli import coding, skills
 
         skills.register(subparsers)
+        coding.register(subparsers)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

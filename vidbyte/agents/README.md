@@ -102,6 +102,10 @@ agent = CodingAgent(
 
 The key you pass picks the web-fetch tool: `firecrawl_api_key`, `browserbase_api_key`, `parallel_api_key`, or `tavily_api_key`, at most one; with none, it is `direct_http_fetch`. Keys are never read from the environment. On a `CodingAgent`, a keyed fetch returns each page's text in `output`, after the provider's summary.
 
+The constructor gathers its own arguments into one `CodingAgentSettings` (`vidbyte/lib/dataclasses/coding.py`), which checks the root folder, the keys, the caller's tools, and the policy when it is created, so a bad argument fails before `BaseAgent` builds anything. The seven tools come from `CodingAgentTools` (`vidbyte/tools/toolsets/coding.py`), a `Tools` catalog with `authenticate_tools(settings)`, which gives the one key to its fetch provider, and `get_tools(root_dir, fetch_tool)`, which returns the seven in order.
+
+To run one task from a terminal, use `vidbyte-sdk coding run --root-dir my-project --provider openai --model gpt-4.1 "Fix the failing test."`; it prints only the final reply. A fetch key is never a flag value: `--firecrawl-key-env NAME` (or the Browserbase, Parallel, or Tavily twin) names the environment variable that holds it.
+
 - The default policy allows every tool, including tools you add; pass `permission_policy=PermissionPolicy()` for a read-only agent.
 - `bash` is not confined to `root_dir`, and it runs unsandboxed with the inherited environment. The SDK undoes nothing a tool did, so keep the folder under version control.
 - A background process must redirect both its standard output and its standard error, or the call waits for the time limit and the process is killed.
@@ -226,7 +230,7 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
-- `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder.
+- `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
 - `types.py`: agent messages, input envelopes, cards, and specs.
 
