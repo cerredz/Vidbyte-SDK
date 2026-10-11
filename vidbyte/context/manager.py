@@ -190,6 +190,10 @@ class ContextManager:
         if not dataclasses.is_dataclass(source):
             raise ValueError(f"Primitive '{primitive_id}' is not a dataclass and cannot be recited.")
         target_id = (slot_id or "").strip() or f"recite:{primitive_id}"
+        # @intent recite-never-overwrites-its-source
+        # A slot equal to the source id would upsert the copy over the source, moving and retitling it.
+        if target_id == primitive_id:
+            raise ValueError(f"slot_id must differ from the source primitive id '{primitive_id}'; omit it to use 'recite:{primitive_id}'.")
         replace_kwargs: dict[str, Any] = {"primitive_id": target_id, "primitive_frozen": False}
         field_names = {f.name for f in dataclasses.fields(source)}
         if "title" in field_names:
