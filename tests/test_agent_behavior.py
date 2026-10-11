@@ -781,6 +781,16 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_tool_calls")).efficiency.did_not_stop_on_budget())
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_tokens")).efficiency.did_not_stop_on_budget())
 
+    def test_efficiency_did_not_stop_on_budget_covers_timeout_and_tool_settings_budgets(self) -> None:
+        # [Hidden Assumption] the wall-clock timeout and ToolSettings hard budgets are budget stops too.
+        # @intent budget-stop-covers-every-runtime-budget
+        for reason in ("timeout", "max_calls_per_iteration", "max_identical_calls", "sliding_window_max_calls", "max_consecutive_failures", "max_error_calls"):
+            with self.subTest(reason=reason):
+                self.assertFalse(behavior_from_probe(RunProbe(stop_reason=reason)).efficiency.did_not_stop_on_budget())
+        for reason in ("final_response", "is_done", "middleware_abort"):
+            with self.subTest(reason=reason):
+                self.assertTrue(behavior_from_probe(RunProbe(stop_reason=reason)).efficiency.did_not_stop_on_budget())
+
     def test_efficiency_stopped_normally_within_iterations(self) -> None:
         # [Hidden Failure] stopped_normally_within_iterations requires normal stop and iteration bound.
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
