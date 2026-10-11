@@ -58,6 +58,7 @@ from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_led
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
+from vidbyte.tools.adapters import ensure_tool
 from vidbyte.tools.base import BaseTool, _ToolWrapper, _unwrap_tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
@@ -1533,9 +1534,14 @@ class BaseAgent(McpAttachableMixin):
             except Exception:
                 return tool.__class__.__name__
             name = getattr(tool_spec, "name", None)
-            if name:
-                return str(name)
-        return tool.__class__.__name__
+            return str(name) if name else tool.__class__.__name__
+        # @intent plain-function-tool-keeps-catalog-name
+        # A plain callable is named the way the catalog wraps it, so cards, registry lookups and resume checks
+        # see the name the model calls; only items the catalog rejects fall back to their class name.
+        try:
+            return ensure_tool(tool).name  # type: ignore[arg-type]
+        except TypeError:
+            return tool.__class__.__name__
 
     def _trace_tool_specs(self) -> list[dict[str, Any]]:
         """Build a list of full tool specs (name, description, parameters) for tracing."""
