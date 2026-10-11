@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import types
 import typing
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -169,7 +169,9 @@ class TraceSchema:
         target = origin if origin is not None else annotation
         if isinstance(target, type) and issubclass(target, BaseModel):
             return TraceField(description=description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(target, depth=depth + _CHILD_DEPTH_STEP))
-        if origin in (list, tuple, set, frozenset):
+        # @intent abstract-collection-trace-field-is-array
+        # Pydantic validates abstract collections (Sequence, Iterable, AbstractSet, ...) as JSON arrays, so they map like list rather than falling through to string.
+        if isinstance(origin, type) and issubclass(origin, Iterable) and not issubclass(origin, (str, bytes, bytearray, Mapping)):
             item_args = tuple(cls._unwrap_optional(arg) for arg in typing.get_args(annotation))
             item_field = cls._item_field_from_args(item_args, depth=depth)
             return TraceField(description=description, type=TraceFieldType.ARRAY, items=item_field)
@@ -210,10 +212,10 @@ class TraceSchema:
                 return TraceFieldType.NUMBER
             if issubclass(target, str):
                 return TraceFieldType.STRING
-            if issubclass(target, (list, tuple, set, frozenset)):
-                return TraceFieldType.ARRAY
             if issubclass(target, Mapping):
                 return TraceFieldType.OBJECT
+            if issubclass(target, Iterable) and not issubclass(target, (bytes, bytearray)):
+                return TraceFieldType.ARRAY
         return TraceFieldType.STRING
 
 
