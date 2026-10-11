@@ -26,6 +26,21 @@ class UrlAllowlist:
     allowed_schemes: tuple[str, ...] = ("https",)
     allowed_hosts: frozenset[str] | None = None
 
+    def __post_init__(self) -> None:
+        # @intent name-lists-reject-bare-strings
+        # @intent url-allowlist-never-substring-matches
+        # A bare string would turn check()'s `in` into a substring test ("http" in "https"),
+        # so the allowlist would fail open; refuse it here instead.
+        for field_name, value, example in (
+            ("allowed_schemes", self.allowed_schemes, 'scheme names (e.g. ("https",))'),
+            ("allowed_hosts", self.allowed_hosts, 'host names (e.g. frozenset({"docs.example.com"}))'),
+        ):
+            if isinstance(value, (str, bytes)):
+                raise SourceSecurityError(
+                    f"UrlAllowlist.{field_name} must be a collection of {example}, not a single string.",
+                    details={"field": field_name, "value": value},
+                )
+
     def check(self, url: str) -> None:
         # Raises SourceSecurityError when scheme/host are not permitted.
         parsed = urlparse(url)
