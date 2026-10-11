@@ -336,6 +336,18 @@ class FailureNormalizationTests(unittest.TestCase):
         failures = FailureMetadataNormalizer.from_reply(reply)
         self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.TOOL_IDENTICAL_CALL_LIMIT, "tool_settings")])
 
+    def test_middleware_abort_stop_yields_one_record(self) -> None:  # [Hidden Failure]
+        # @intent one-middleware-abort-one-record
+        # Verify one middleware abort keeps only the richer middleware record, not a runtime twin.
+        for reason, code in (("policy", FailureCode.RUNTIME_MIDDLEWARE_ABORT), ("middleware_error", FailureCode.RUNTIME_MIDDLEWARE_ERROR)):
+            event = {"action": "abort_run", "reason": reason, "middleware_name": "guard", "hook": "before_tool_call"}
+            reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "middleware_abort", "middleware": {"events": [event]}})
+            failures = FailureRouter(object()).capture_reply(reply)
+            self.assertEqual([(item.code, item.source, item.status) for item in failures], [(code, "guard", FailureStatus.TERMINAL)])
+        bare = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "middleware_abort"})
+        failures = FailureRouter(object()).capture_reply(bare)
+        self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.RUNTIME_MIDDLEWARE_ABORT, "agent_runtime")])
+
 
 class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_contract_stop_runs_bound_handler_once(self) -> None:  # [Hidden Failure]
