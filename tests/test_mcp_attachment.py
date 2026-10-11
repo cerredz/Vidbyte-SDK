@@ -32,6 +32,7 @@ from vidbyte.lib.errors import McpAttachmentError, McpInitializeError
 from vidbyte.pipelines import SequentialPipeline
 from vidbyte.tools import ToolCall, ToolPermission, Tools
 from vidbyte.tools.executor import ToolExecutor
+from vidbyte.tools.mcp.presets import McpPresetConfigurationError, McpPresetRegistry
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
 from vidbyte.tools.security import PermissionPolicy
 
@@ -240,6 +241,24 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
         # The list form is still accepted and stored as one argument.
         agent.with_mcp_server(["server"])
         self.assertEqual(agent._pending_mcp_configs[0].command, ("server",))
+
+    async def test_bare_string_preset_extra_args_are_refused_instead_of_split_into_characters(self) -> None:
+        """A bare-string preset extra_args raises a clear error rather than adding one argument per character."""
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner())
+        preset_command = McpPresetRegistry.get("duckduckgo").command
+
+        with self.assertRaisesRegex(McpPresetConfigurationError, r"extra_args must be a list of program arguments .* not a single string"):
+            McpPresetRegistry.build_config("duckduckgo", extra_args="--flag")
+        with self.assertRaisesRegex(McpPresetConfigurationError, r"extra_args must be a list of program arguments .* not a single string"):
+            agent.with_preset_mcp_server("duckduckgo", extra_args="--flag")
+        self.assertEqual(agent._pending_mcp_configs, [])
+        with self.assertRaisesRegex(McpPresetConfigurationError, r"extra_args must be a list of program arguments .* not a single string"):
+            await agent.attach_preset_mcp_server("duckduckgo", extra_args="--flag")
+        self.assertEqual(len(MockMcpStdioTransport.instances), 0)
+
+        # The list form still appends each argument unchanged.
+        agent.with_preset_mcp_server("duckduckgo", extra_args=["--flag"])
+        self.assertEqual(agent._pending_mcp_configs[0].command, (*preset_command, "--flag"))
 
     async def test_context_manager_cleanup(self) -> None:
         """Verify context manager guarantees cleanup of all subprocess handles."""
