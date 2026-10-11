@@ -107,6 +107,7 @@ The constructor gathers its own arguments into one `CodingAgentSettings` (`vidby
 To run one task from a terminal, use `vidbyte-sdk coding run --root-dir my-project --provider openai --model gpt-4.1 "Fix the failing test."`; it prints only the final reply. A fetch key is never a flag value: `--firecrawl-key-env NAME` (or the Browserbase, Parallel, or Tavily twin) names the environment variable that holds it.
 
 - The default policy allows every tool, including tools you add; pass `permission_policy=PermissionPolicy()` for a read-only agent.
+- `write_text` refuses to replace an existing file with more than `max_rewrite_lines` lines (300 by default), so the model edits big files with `replace_text` instead of rewriting them from memory. New files and `replace_text` are not limited, and the `write_text` description tells the model the limit. Pass `max_rewrite_lines=None` to turn it off. The limit is `FileSystemToolConfig.max_overwrite_lines` on the tool itself.
 - `bash` is not confined to `root_dir`, and it runs unsandboxed with the inherited environment. The SDK undoes nothing a tool did, so keep the folder under version control.
 - A background process must redirect both its standard output and its standard error, or the call waits for the time limit and the process is killed.
 - Each command is limited to 600 seconds and 50,000 bytes of output (the first bytes are kept). `ToolSettings.tool_timeout_seconds` and `ToolSettings.result_max_chars` remain the agent-wide controls.
