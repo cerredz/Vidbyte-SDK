@@ -31,7 +31,7 @@ from vidbyte.sessions.contracts import (
     TraceCapture,
 )
 from vidbyte.lib.errors import AgentExecutionError
-from vidbyte.sessions.errors import SessionError
+from vidbyte.sessions.errors import SessionError, SessionNotFoundError
 from vidbyte.sessions.failure import Failure, FailurePhase, FailureRouter
 from vidbyte.sessions.portable import SessionBundleExporter
 from vidbyte.sessions.serialization import SessionSerializer
@@ -117,6 +117,7 @@ class Session:
         self._failures = FailureRouter(self)
         if _existing:
             self._adopt_existing_head()
+            self._adopt_existing_tags()
         else:
             self._write_initial_meta()
         self._bind_session_tools()
@@ -356,6 +357,15 @@ class Session:
         # Point this session at the stored head when resuming an existing session.
         existing = self._store.head(self._session_id)
         self._head_id = existing.id if existing is not None else None
+
+    def _adopt_existing_tags(self) -> None:
+        # Take the tags recorded in the stored meta when resuming an existing session.
+        # @intent resumed-session-keeps-its-tags
+        # resume() rebuilds the same tagged session, so fork() must still copy its stored tags onto every branch.
+        try:
+            self._tags = tuple(self._store.get_meta(self._session_id).tags)
+        except SessionNotFoundError:
+            return
 
     def _session_latency(self) -> float | None:
         # Return checkpoint wall-clock span in seconds, or None when unavailable.
