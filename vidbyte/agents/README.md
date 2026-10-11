@@ -85,7 +85,7 @@ reply = await agent.arun(
 
 ## Coding Agent
 
-`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool. By default it also shows the folder's `AGENTS.md` to the model.
+`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool. By default it also shows the folder's `AGENTS.md` to the model, and keeps its own progress notes file.
 
 ```python
 from vidbyte import CodingAgent
@@ -96,6 +96,7 @@ agent = CodingAgent(
     root_dir="my-project",            # an existing folder, resolved once
     firecrawl_api_key="fc-your-key",  # optional; picks the web-fetch provider
     load_agents=True,                 # default; shows my-project/AGENTS.md to the model
+    progress_notes=True,              # default; keeps my-project/.vidbyte/progress.md
     provider="openai",
     model_name="gpt-4.1",
 )
@@ -107,7 +108,9 @@ The constructor gathers its own arguments into one `CodingAgentSettings` (`vidby
 
 When it is built, the agent reads `<root_dir>/AGENTS.md`, or a case variant such as `agents.md` when that exact name is absent, and places the text right after the system prompt and before your message, so the model follows the rules the repository already wrote down. Parent folders are never searched. The file is read once: later edits are seen only by a new agent, and a later change of working directory changes nothing. At most 32,768 bytes are shown, cut at a whole character; a longer file ends with a line that gives the cut and the `read_lines` call that reads the rest. A missing or blank file adds nothing, while a file that is there but cannot be read, such as a folder named `AGENTS.md`, fails construction with a `ConfigurationError` naming its path. Pass `load_agents=False` to turn this off; `load_agents` must be a real `bool`.
 
-`CodingContextWindow` (`vidbyte/agents/coding_context/`) places the text and owns the order of everything a `CodingAgent` adds after the system prompt: `AGENTS.md`, then the environment context, the repository map, and setup-command results as those features land, then the content of your own `context_manager`. It never changes your manager: when a section is loaded, the agent gets a new manager with your content after the sections. Adding a section takes three steps, described in that folder's README:
+The agent also keeps its own notes file, `<root_dir>/.vidbyte/progress.md`, so a second run picks up where the first stopped. When it is built, the agent creates the file from a short template (Done, Next, Decisions) if it is missing, and creates `.vidbyte/.gitignore` holding `*` so git never sees the folder; your own `.gitignore` is never touched. Neither file is ever overwritten. The notes, capped at 32,768 bytes, are shown last among the sections, after a short instruction to read them first and to update them with `write_text` or `replace_text` after each meaningful step. They are read once, when the agent is built. If the root folder cannot be written, for example a read-only checkout, the agent gets no notes section and construction still succeeds. Pass `progress_notes=False` to turn this off; nothing is then created. `progress_notes` must be a real `bool`.
+
+`CodingContextWindow` (`vidbyte/agents/coding_context/`) places the text and owns the order of everything a `CodingAgent` adds after the system prompt: `AGENTS.md`, then the environment context, the repository map, and setup-command results as those features land, then the progress notes, then the content of your own `context_manager`. It never changes your manager: when a section is loaded, the agent gets a new manager with your content after the sections. Adding a section takes three steps, described in that folder's README:
 
 1. Write one loader class in its own file in `vidbyte/agents/coding_context/`, with `load(settings) -> CodingContextSectionText | None`.
 2. Return the section's reserved `CodingContextSection` member (`ENVIRONMENT`, `REPO_MAP`, or `SETUP_RESULTS`); the enum's order is the render order.

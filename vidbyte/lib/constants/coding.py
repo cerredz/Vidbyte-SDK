@@ -35,11 +35,7 @@ CODING_PROGRESS_NOTES_MAX_BYTES = 32_768
 CODING_PROGRESS_NOTES_TEMPLATE = "# Progress notes\n\n## Done\n\n## Next\n\n## Decisions\n"
 
 # Shown to the model above the notes.
-CODING_PROGRESS_NOTES_INSTRUCTION = (
-    "This is your own notes file for this repository. It is kept between runs and is never committed. Read it before you start.\n"
-    "After each meaningful step, update .vidbyte/progress.md with write_text or replace_text: what is done, what is next, and any decisions.\n"
-    "Keep it short."
-)
+CODING_PROGRESS_NOTES_INSTRUCTION = "This is your own notes file for this repository. It is kept between runs and is never committed. Read it before you start.\nAfter each meaningful step, update .vidbyte/progress.md with write_text or replace_text: what is done, what is next, and any decisions.\nKeep it short."
 
 # Shown after notes cut at the cap.
 CODING_PROGRESS_NOTES_TRUNCATION_NOTE = "[The notes were cut at 32 KiB. Read the rest of .vidbyte/progress.md with read_lines, then shorten it.]"

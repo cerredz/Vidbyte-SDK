@@ -10,6 +10,8 @@ An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAge
 
 With `load_agents=True` (a real `bool`), the agent lists `root_dir` once and reads `AGENTS.md`, or, when that exact name is absent, the first case variant in sorted order; parent folders are never searched. At most `CODING_AGENTS_MD_MAX_BYTES` (32,768) bytes are read and decoded as UTF-8 with replacement characters, without a byte-order mark; a longer file is cut at a whole character and ends with a line giving the shown and total bytes and the `read_lines` start line for the rest. The text renders as primitive `coding:agents_md`, titled `Repository instructions (<file name>)`, after the system prompt and before the user message. A missing or blank file adds nothing; a present file that is not a readable regular file raises `ConfigurationError` naming its path. `CodingContextWindow.build(sections, context_manager)` places the sections in `CodingContextSection` order ahead of the caller's manager content, in a new manager; with no sections it returns the caller's manager, or `None`.
 
+With `progress_notes=True` (the default, a real `bool`), construction creates `<root>/.vidbyte/progress.md` from `CODING_PROGRESS_NOTES_TEMPLATE` and `<root>/.vidbyte/.gitignore` holding `*`, each only when missing, and never overwrites either. The notes, at most `CODING_PROGRESS_NOTES_MAX_BYTES` (32,768) bytes, render as primitive `coding:progress_notes`, the last section, titled `Progress notes (.vidbyte/progress.md)`, after `CODING_PROGRESS_NOTES_INSTRUCTION`; a longer file is cut and followed by `CODING_PROGRESS_NOTES_TRUNCATION_NOTE`. Any `OSError` while creating or reading them gives no section and no error. `progress_notes=False` creates and reads nothing.
+
 `BashTool(root_dir)` runs `bash -c <command>` in `root_dir` with stdin closed and stderr merged into stdout. A success result holds the decoded output, at most `BASH_MAX_OUTPUT_BYTES` bytes followed by an omitted-byte count, and ends with `exit code: <n>`. It returns `bash_not_found`, `spawn_failed` or `timeout` errors. One time limit, `BASH_TIMEOUT_SECONDS`, covers both reading and waiting. On a timeout or a cancellation, the command's process group is killed (POSIX) or Git's launcher is killed (Windows), then the tool waits at most `BASH_KILL_GRACE_SECONDS` and closes the pipe.
 
 ## Actors / Callers
@@ -35,7 +37,7 @@ SDK callers that construct `vidbyte.CodingAgent`, and the model inside `AgentRun
 
 ## State Transitions
 
-Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` that is not a bool, an unreadable `AGENTS.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call and starts no process; it reads at most 32,768 bytes of `AGENTS.md`. A bash call goes through these stages:
+Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` or `progress_notes` that is not a bool, an unreadable `AGENTS.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call and starts no process; it reads at most 32,768 bytes of `AGENTS.md` and of `.vidbyte/progress.md`, and creates only the two notes files, when they are missing. A bash call goes through these stages:
 
 1. Validated.
 2. Spawned.
@@ -117,6 +119,7 @@ These are the failure inventory the tests were chosen from, given as input → w
   - `load_agents="yes"` or `1` is accepted by truthiness.
   - The caller's manager is changed, or its content is dropped or rendered first.
   - `fork()` loses the section, or a later `chdir` or edit changes it.
+- **Progress notes errors.** The last run's notes or a changed `.vidbyte/.gitignore` are overwritten. Git lists `.vidbyte/`, or the user's root `.gitignore` is edited. The notes render before another section, or never reach the model. A notes edit made in one run is not shown to the next agent. A read-only root fails construction. `progress_notes=False` still creates the folder. A truthy stand-in flips the switch. A file over the cap crashes or shows a split character.
 - **Bash lookup errors.** On Windows the `PATH` `bash` (WSL's launcher) is chosen instead of Git's `bin/bash.exe`, or the lookup walks past three parent folders (AC-22). A missing bash breaks construction or the other tools (AC-17).
 
 ## Historical Regressions
@@ -135,6 +138,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
 - `test_coding_agent_agents_md.py` checks `AGENTS.md` loading and the shared coding context window: the position in the request, the byte-identical request without a file, the switch, case variants, the root-only lookup, the cap and the cut character, blank and undecodable files, a broken file, strict bool validation, the caller's manager, fork, read-once, and `CodingContextWindow` and `CodingContextSectionText` on their own.
+- `test_coding_agent_progress_notes.py` checks progress notes: a fresh root, existing notes and `.gitignore` kept, git status clean, the cross-run edit with `replace_text`, a root that cannot be written, the switch, strict bool validation, and the cap.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
