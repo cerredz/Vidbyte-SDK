@@ -492,7 +492,10 @@ class ToolsFormatter:
         # Preserve ToolResult.output whenever it exists so execution failures stay
         # fully visible to the next model turn. safe_message remains only a
         # compatibility fallback for older structured-error payloads with no output.
-        cleaned = ToolsFormatter._clean_text(output)
+        # @intent tool-error-output-is-never-cut
+        # The output is the failure itself (a test log, a traceback), so like a successful
+        # output it is only capped by ToolSettings.result_max_chars, never by the metadata limit.
+        cleaned = str(output or "").strip()
         return cleaned or ToolsFormatter._clean_text(metadata.get("safe_message")) or "Tool failed."
 
     @staticmethod
