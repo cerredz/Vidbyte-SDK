@@ -9,7 +9,7 @@ Architecture:
     - TokenBudgetMiddleware: Reads ctx.tokens_used and aborts when >= max_tokens,
       or injects one final-answer notice when soft overrun is enabled.
     - _TokenBudgetRunState: Tracks whether the final-answer notice was already
-      requested for the current run.
+      requested for the current run, keyed by the instance in ctx.run_state.
 Relations:
     Used through vidbyte.middleware.builtins and AgentRuntime middleware hooks.
 """
@@ -17,6 +17,7 @@ Relations:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
 from vidbyte.middleware.base import AgentMiddleware
@@ -46,7 +47,10 @@ class TokenBudgetMiddleware(AgentMiddleware):
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Initializes fresh per-run token budget state for this middleware instance.
-        ctx.run_state[self.__class__] = _TokenBudgetRunState()
+        # @intent middleware-state-is-per-instance
+        # Keyed by the instance, not the class, so a second budget never spends this one's final-answer call.
+        run_state: dict[Any, Any] = ctx.run_state
+        run_state[self] = _TokenBudgetRunState()
         return MiddlewareDecision.continue_()
 
     async def before_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
@@ -80,10 +84,11 @@ class TokenBudgetMiddleware(AgentMiddleware):
 
     def _state_for(self, ctx: MiddlewareContext) -> _TokenBudgetRunState:
         # Returns the current run state, lazily creating it for direct hook tests.
-        state = ctx.run_state.get(self.__class__)
+        run_state: dict[Any, Any] = ctx.run_state
+        state = run_state.get(self)
         if not isinstance(state, _TokenBudgetRunState):
             state = _TokenBudgetRunState()
-            ctx.run_state[self.__class__] = state
+            run_state[self] = state
         return state
 
     def _budget_metadata(self, tokens_used: int, *, final_response_requested: bool = False) -> dict[str, object]:
