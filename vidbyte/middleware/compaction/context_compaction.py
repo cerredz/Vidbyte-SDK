@@ -340,8 +340,8 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
 
     @classmethod
     def trace_field_subset(cls, fields: Sequence[str], **kw: Any) -> "TraceReplacementCompactionMiddleware":
-        # Renders only the named trace fields, in order.
-        render = {**dict(kw.pop("render", {})), "fields": tuple(fields)}
+        # Renders only the named trace fields, in order; the renderer refuses a bare-string field name at init.
+        render = {**dict(kw.pop("render", {})), "fields": fields}
         return cls(render=render, **kw)
 
     # Family E — freshness presets
