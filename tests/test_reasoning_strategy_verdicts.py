@@ -1,3 +1,14 @@
+"""FILE: tests/test_reasoning_strategy_verdicts.py
+
+PURPOSE: Proves reasoning-strategy object bullets keep a false verdict instead of dropping it.
+ROLE IN CODEBASE: Regression test for _render_object_bullets in vidbyte/context/primitives/reasoning_strategies.py.
+ARCHITECTURE NOTE: Builds frozen primitives directly and asserts on their model-visible rendering; no tools or agents.
+COMMON MODIFICATION PATTERNS: Add a case here when another object-array key carries a boolean or numeric verdict.
+KNOWN EDGE CASES: Blank text is still skipped, while False renders as "False".
+RELATED DOCS: vidbyte/context/primitives/README.md.
+TESTS: python -m pytest tests/test_reasoning_strategy_verdicts.py
+"""
+
 from __future__ import annotations
 
 import unittest
