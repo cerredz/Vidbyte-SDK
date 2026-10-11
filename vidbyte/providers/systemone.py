@@ -230,6 +230,8 @@ class SystemOneProvider:
         ModelProvider.VANSA: SystemOneHost(display_name="Vansa", path=JEV_SYSTEMONE_PATH),
         ModelProvider.ZOODATA: SystemOneHost(display_name="ZooData", path=JEV_SYSTEMONE_PATH, model_from_request=True),
     })
+    # The one refusal both managed-config guards raise, so construction and per-call refusals read alike.
+    _MANAGED_REFUSAL: ClassVar[str] = "SystemOneProvider sends direct calls only; managed TypeSafe decisions go through TypeSafeProvider."
 
     provider: ModelProvider
 
@@ -239,13 +241,14 @@ class SystemOneProvider:
         # The adapter's identity (provider, path, auth scheme, wire quirks) comes from its config, so a missing
         # config, a provider without a System One row, or a managed config fails here, not as a KeyError on the first call.
         if decision_config is None:
+            # No config means no provider to name yet, so the error names the adapter ("systemone" is not a ModelProvider value).
             raise ProviderConfigurationError("SystemOneProvider requires a DecisionModelConfig: pass decision_config= to the adapter.", provider="systemone")
         provider = decision_config.normalized_provider()
         host = self.HOSTS.get(provider)
         if host is None:
             raise ProviderConfigurationError(f"SystemOneProvider has no System One host row for provider '{provider.value}'; build its adapter with ModelProviders.decision().", provider=provider.value)
         if decision_config.mode is DecisionModelMode.VIDBYTE_MANAGED:
-            raise ProviderConfigurationError("SystemOneProvider sends direct calls only; managed TypeSafe decisions go through TypeSafeProvider.", provider=provider.value)
+            raise ProviderConfigurationError(self._MANAGED_REFUSAL, provider=provider.value)
         self.provider = provider
         self._host = host
         self._decision_config = decision_config
@@ -306,7 +309,7 @@ class SystemOneProvider:
         if other is not self.provider:
             raise ProviderConfigurationError(f"{self._host.display_name} adapter received a config for provider '{other.value}'.", provider=self.provider.value)
         if resolved.mode is DecisionModelMode.VIDBYTE_MANAGED:
-            raise ProviderConfigurationError("SystemOneProvider sends direct calls only; managed TypeSafe decisions go through TypeSafeProvider.", provider=self.provider.value)
+            raise ProviderConfigurationError(self._MANAGED_REFUSAL, provider=self.provider.value)
         return resolved
 
     def _call(self, config: DecisionModelConfig, request: JevDecisionRequest) -> DecisionHttpCall:
