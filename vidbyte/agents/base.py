@@ -226,6 +226,13 @@ class BaseAgent(McpAttachableMixin):
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
         self.description = description or "General purpose agent."
+        # @intent name-lists-reject-bare-strings
+        # A bare string is itself a sequence, so tuple() would hand the manager one capability per character.
+        if isinstance(capabilities, (str, bytes)):
+            raise ConfigurationError(
+                "BaseAgent.capabilities must be a list of capability names, not a single string.",
+                details={"agent": name, "capabilities_type": type(capabilities).__name__},
+            )
         self.capabilities = tuple(capabilities)
         self.agent_metadata = agent_metadata or AgentMetadata()
         self.context_items = tuple(context_items)
