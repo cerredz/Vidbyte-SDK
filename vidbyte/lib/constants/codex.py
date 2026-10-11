@@ -36,6 +36,7 @@ CODEX_UNSUPPORTED_MIDDLEWARE_HOOKS = frozenset(
         "before_tool_call",
         "after_tool_call",
         "after_iteration",
+        "review_finish",
     }
 )
 # MiddlewarePipeline.metadata() already nests events and event_count under this

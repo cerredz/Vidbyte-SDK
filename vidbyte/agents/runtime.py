@@ -104,6 +104,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentIterationSnapshot,
     AgentRuntimeConfig,
     AgentStopReason,
+    FinishReviewAction,
 )
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.middleware import (
@@ -500,6 +501,19 @@ class AgentRuntime:
                         rejections += 1
                         messages.append({"role": "user", "content": self.output_contract.feedback(unmet, counters)})
                         continue
+                # @intent review-finish-after-contracts
+                # A middleware, such as CodingAgent's verification
+                # command, may refuse the finish: the model then
+                # reads its own answer and the feedback, or the run
+                # ends unverified with that answer. It runs after
+                # the contracts, so an answer they reject never
+                # costs a review.
+                review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state))
+                if review.action is FinishReviewAction.STOP:
+                    return await self._finish_result(self._unverified_finish_result(last_assistant_output or "", state), state)
+                if review.action is FinishReviewAction.CONTINUE:
+                    messages.extend((self._assistant_message(last_assistant_output or ""), {"role": "user", "content": review.feedback}))
+                    continue
                 final = self._final_result(
                     output=last_assistant_output,
                     runner_metadata=runner_metadata,
@@ -578,6 +592,19 @@ class AgentRuntime:
                     # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
                     self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, "finish attempt not accepted yet; continue with the next message", metadata={"error": "finish_not_accepted"}), state.provider, MiddlewareDecision.continue_())
                     self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
+                    # The same middleware review as a plain final
+                    # answer. Its feedback follows the isDone answer
+                    # as a user message, as a continuation's does,
+                    # because the formatter cuts tool-error text to
+                    # 1,000 characters and the end of a test run's
+                    # output is usually the part that matters.
+                    review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state, tool_call=call, tool_result=result))
+                    if review.action is FinishReviewAction.STOP:
+                        return await self._finish_result(self._unverified_finish_result(result.output or "", state), state)
+                    if review.action is FinishReviewAction.CONTINUE:
+                        messages.append({"role": "user", "content": review.feedback})
+                        finish_attempt_continued = True
+                        break
                     if await self._continue_finish_attempt(final, state, messages):
                         finish_attempt_continued = True
                         break
@@ -783,6 +810,12 @@ class AgentRuntime:
         published = run_state.get(AgentRuntimeStateKey.RESULT_METADATA.value)
         base = dict(published) if isinstance(published, Mapping) else {}
         run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
+
+    def _unverified_finish_result(self, output: str, state: BaseAgentRuntimeLoopState) -> AgentResult:
+        """Build the result of a finish a middleware review refused for good: the model's answer, stopped as CONTRACT_UNSATISFIED."""
+        # Same shape as output-contract exhaustion, so callers and
+        # the session failure router read one stop reason for both.
+        return self._final_result(output=output, runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED)
 
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
         """Let a specialized linear runtime send a normal finish attempt back to work with feedback."""

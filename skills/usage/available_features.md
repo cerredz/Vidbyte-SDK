@@ -89,7 +89,7 @@ Use middleware for cross-cutting concerns that should not be part of the model's
 
 ### Lifecycle Hooks
 
-Each hook receives a read-only `MiddlewareContext` and returns a `MiddlewareDecision`. There are nine hooks across the run:
+Each hook receives a read-only `MiddlewareContext` and returns a `MiddlewareDecision`, except `review_finish`, which returns a `FinishReview`. There are ten hooks across the run:
 
 | Hook | When Called |
 |------|------------|
@@ -102,6 +102,7 @@ Each hook receives a read-only `MiddlewareContext` and returns a `MiddlewareDeci
 | `after_tool_call` | After a tool returns or is denied |
 | `after_iteration` | After each loop iteration |
 | `after_run` | Before the final result is returned |
+| `review_finish` | At each finish attempt the output contracts accepted; `FinishReview.accept()`, `continue_with(feedback)`, or `stop(feedback)` |
 
 Decisions: `MiddlewareDecision.continue_()`, `abort(reason)`, `deny_tool(reason)` (in `before_tool_call`), `retry(reason)` (in `on_model_error`), and `sleep(seconds)`.
 

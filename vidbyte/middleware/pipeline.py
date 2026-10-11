@@ -9,6 +9,8 @@ Purpose:
 Architecture:
     - MiddlewarePipeline: Runs middleware hooks in configured order.
     - hook_invocations: Captures elapsed time and outcome for diagnostic tracing.
+    - review_finish: Returns the first FinishReview that does not accept a
+      finish attempt; it is not a decision hook and records no events.
 Relations:
     Used by vidbyte.agents.runtime, which turns hook invocations into diagnostic
     semantic spans before the enclosing agent trace closes.
@@ -22,6 +24,7 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
+from vidbyte.lib.dataclasses.agents import FinishReview, FinishReviewAction
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
     MiddlewareContext,
@@ -86,6 +89,20 @@ class MiddlewarePipeline:
 
     async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         return await self._run(MiddlewareHook.AFTER_RUN, ctx)
+
+    async def review_finish(self, ctx: MiddlewareContext) -> FinishReview:
+        """Ask each middleware in order to review a finish attempt; the first review that does not accept it decides."""
+        # @intent first-refusal-decides-the-finish
+        # A finish review is not a decision hook, so there is nothing
+        # to merge: the first middleware that refuses the finish
+        # decides, and later reviewers, which may run a slow command,
+        # never start. It records no events; a reviewer reports
+        # through result metadata, and its exceptions propagate.
+        for middleware in self.middleware:
+            review = await middleware.review_finish(ctx)
+            if review.action is not FinishReviewAction.ACCEPT:
+                return review
+        return FinishReview.accept()
 
     def metadata(self) -> dict[str, Any]:
         """Return bounded serializable metadata for final agent results."""
