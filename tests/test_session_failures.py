@@ -337,6 +337,18 @@ class FailureNormalizationTests(unittest.TestCase):
         codes = {failure.code for failure in router.capture_reply(reply)}
         self.assertIn(FailureCode.TOOL_TIMEOUT, codes)
 
+    def test_legacy_argument_error_kinds_record_arguments_invalid(self) -> None:  # [Silent Failure]
+        # @intent ledger-tool-error-kinds-match-the-model-visible-kind
+        # Verify every form the model is shown as invalid_arguments reaches the ledger as that code.
+        forms = ({"error": "validation"}, {"error": "argument_error"}, {"error": "arguments_error"}, {"error": "Validation_Error"}, {"error_type": "validation"})
+        for form in forms:
+            with self.subTest(form=form):
+                reply = AgentMessage(sender="a", recipient="o", content="done", metadata={"tool_calls": (SimpleNamespace(result=SimpleNamespace(metadata=form)),)})
+                failures = FailureMetadataNormalizer.from_reply(reply)
+                self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.TOOL_ARGUMENTS_INVALID, "tool_runtime")])
+        success = AgentMessage(sender="a", recipient="o", content="done", metadata={"tool_calls": (SimpleNamespace(result=SimpleNamespace(metadata={"source": "cache"})),)})
+        self.assertEqual(FailureMetadataNormalizer.from_reply(success), ())
+
     def test_contract_stop_yields_one_routable_failure(self) -> None:  # [Hidden Failure]
         # @intent one-stop-one-routable-failure
         # Verify a contract stop keeps only the specific output_contract record, not a runtime twin.
