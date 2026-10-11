@@ -144,6 +144,13 @@ def test_every_added_model_is_detected_as_text(provider: ModelProvider, model: s
     assert ModalityDetector.detect_modality(model) is ModelModality.TEXT
 
 
+@pytest.mark.parametrize(("provider", "model"), sorted(EXPECTED_RATES, key=lambda item: (item[0].value, item[1])))
+def test_every_priced_refresh_model_passes_strict_validation(provider: ModelProvider, model: str) -> None:
+    # [Hidden Failure] A price row for a model strict validation rejects
+    # can never be billed, so every row this refresh pins is reachable.
+    ProviderModelRegistry.validate_provider_model_pair(provider, model)
+
+
 def test_every_added_catalog_model_has_an_expected_rate() -> None:
     # [Hidden Assumption] No model is catalogued by this refresh without
     # a pinned first-party price.

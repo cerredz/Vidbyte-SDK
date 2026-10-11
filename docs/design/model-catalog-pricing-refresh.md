@@ -31,6 +31,7 @@ The SDK's model catalog (`vidbyte/lib/constants/runners.py`) and token pricebook
 - Separate 1-hour cache-write pricing for Anthropic and Kimi. The single `cache_write_per_million` stays the 5-minute rate, as today.
 - Models that are subscription-only, verification-only with no documented API price, or deprecated: MiniMax-M3.1-Flash-Preview (M Plan only), gpt-5.6-cyber and gpt-rosalind-* (trusted access), devstral-2512 (deprecated) and gemini-3.7-flash (deprecated, routed).
 - Bumping the backend's SDK pin. That belongs to the backend repo.
+- Image, video, audio and embedding models. The SDK prices none of its 47 catalogued non-text models, and `PROVIDER_PRICING` has no per-image or per-second unit. So a new media model could not get the correct price the request asks for until a media pricing path exists.
 
 ---
 
@@ -306,6 +307,7 @@ N/A. No HTTP endpoints. The public Python surface gains two exported constants, 
 - `describe('pricebook')` → `it('every PROVIDER_PRICING rate is finite and non-negative')` — [Hidden Failure]
 - `describe('pricebook')` → `it('the Mistral default model resolves to a price')` — [Hidden Assumption]
 - `describe('catalog')` → `it('rejects a bare gpt-6, which OpenAI does not publish')` — [Edge Case]
+- `describe('catalog')` → `it('every model this refresh prices, including already-catalogued ones such as kimi-k3, passes strict validation')` — [Hidden Failure]
 - `describe('pricebook')` → `it('DeepSeek rows bill the peak rate, and off-peak metadata is exactly half')` — [Hidden Assumption]
 - `describe('pricebook')` → `it('versioned grok-4.7 and glm-5.3-flash ids price at their base rows')` — [Edge Case]
 - `describe('pricebook')` → `it('PRICING_AS_OF names this refresh')` — [Hidden Failure]
