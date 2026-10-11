@@ -37,6 +37,7 @@ class AgentRuntimeStateKey(str, Enum):
 
     ITERATION_OUTPUTS = "__iteration_outputs__"
     RESULT_METADATA = "__result_metadata__"
+    MODEL_CALL_COUNT = "__model_call_count__"
 
 
 class AgentRuntimeType(str, Enum):
