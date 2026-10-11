@@ -293,6 +293,21 @@ class TestToolErrorPolicyMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await _failed_tool_calls_before_error_abort([team(), org()]), alone)
         self.assertEqual(await _failed_tool_calls_before_error_abort([org(), team()]), alone)
 
+    async def test_legacy_argument_error_kinds_retry_as_invalid_arguments(self) -> None:
+        # [Silent Failure] The model sees kind=invalid_arguments for these names, so retry_on=("invalid_arguments",) must retry them.
+        for legacy in ("argument_error", "arguments_error"):
+            with self.subTest(legacy=legacy):
+                middleware = ToolErrorPolicyMiddleware(
+                    ToolErrorPolicy(retry_on=("invalid_arguments",), max_retries_per_tool_call=1, retry_backoff_base_seconds=0)
+                )
+                call = ToolCall(tool_name="fetch", arguments={}, call_id="fc_fetch")
+                result = ToolResult(tool_name="fetch", status=ToolStatus.ERROR, output="bad args", metadata={"error": legacy})
+                decision = await middleware.after_tool_call(
+                    _ctx(hook=MiddlewareHook.AFTER_TOOL_CALL, tool_call=call, tool_result=result, metadata={"tool_permission": "read"}, run_state={})
+                )
+                self.assertEqual(decision.action, MiddlewareAction.RETRY)
+                self.assertEqual(decision.metadata["error"], "invalid_arguments")
+
 
 # ---------------------------------------------------------------------------
 # TokenRateLimitMiddleware
