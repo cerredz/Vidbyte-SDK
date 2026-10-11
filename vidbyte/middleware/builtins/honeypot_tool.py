@@ -29,7 +29,11 @@ class HoneypotToolMiddleware(AgentMiddleware):
         # A typo like ("admin_shell") is a str, so frozenset() would trap its characters and the honeypot never fires.
         if isinstance(trap_tool_names, (str, bytes)):
             raise ValueError("HoneypotToolMiddleware.trap_tool_names must be an iterable of tool names, not a string.")
-        self._traps = frozenset(trap_tool_names)
+        # @intent tool-policy-names-normalized-like-tool-settings
+        # A padded " export_all_users" from a split config string would never match, so the trap stays disarmed.
+        self._traps = frozenset(str(name).strip() for name in trap_tool_names)
+        if not all(self._traps):
+            raise ValueError("HoneypotToolMiddleware.trap_tool_names cannot include blank tool names.")
         if not self._traps:
             raise ValueError("trap_tool_names must contain at least one name.")
         self._abort_reason = abort_reason
