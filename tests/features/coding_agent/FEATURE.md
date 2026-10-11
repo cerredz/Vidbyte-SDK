@@ -75,6 +75,7 @@ These are the failure inventory the tests were chosen from, given as input → w
   - The client falls back to the provider's environment variable (INV-6).
   - Construction makes a network call (INV-18).
 - **Fetch view errors.** The model sees only the "Fetched N page(s)" summary and never the page text (AC-7). The view changes the schema or metadata, so the bill differs from the bare tool's (AC-7, INV-16, INV-20).
+- **Edit report errors.** The diff from `write_text` or `replace_text` is built but never reaches the model's tool message, so the model cannot see what its edit changed.
 - **Tool list errors.** A caller tool silently shadows a built-in tool (AC-8). Caller tools are reordered or dropped (AC-9).
 - **Subclass errors.** `CodingAgent` overrides `BaseAgent` behaviour, or adds state that changes `export_state` (INV-1, INV-2). `restore` reports a tool mismatch or loses allow-all (AC-21).
 - **Bash spawn errors.**
@@ -105,7 +106,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
 
 ## Test Suite Map
 
-- `test_coding_agent_acceptance.py` checks the caller-visible promise end to end through `BaseAgent`'s loop: the spec snippet, the default policy, a read-only policy, a keyed fetch shown and billed, and a missing bash.
+- `test_coding_agent_acceptance.py` checks the caller-visible promise end to end through `BaseAgent`'s loop: the spec snippet, the default policy, the edit diffs the model sees, a read-only policy, a keyed fetch shown and billed, and a missing bash.
 - `test_coding_agent_contract.py` checks the following:
   - The public names.
   - The constructor-only subclass and its signature.
