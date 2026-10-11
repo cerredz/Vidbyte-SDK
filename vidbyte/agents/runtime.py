@@ -426,6 +426,8 @@ class AgentRuntime:
                 )
                 if transition is None:
                     raise
+                # The failed model's attempts were real provider requests, so the next model counts on from them.
+                state.model_call_count = state.run_state.get(AgentRuntimeStateKey.MODEL_CALL_COUNT.value, state.model_call_count)
                 handle, state.provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
                 state.messages = messages
@@ -674,6 +676,9 @@ class AgentRuntime:
             compaction_count += self._compaction_event_delta(decision)
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
             state.model_call_count += 1
+            # @intent model-call-count-survives-fallback-switch
+            # A failed model's error escapes without returning this count, so it is published for _arun_once's fallback switch to keep.
+            state.run_state[AgentRuntimeStateKey.MODEL_CALL_COUNT.value] = state.model_call_count
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
