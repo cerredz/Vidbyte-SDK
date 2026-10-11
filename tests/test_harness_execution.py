@@ -4,6 +4,8 @@ PURPOSE:
     Regression tests for Harness.execute() run identity: overlapping
     executions on one harness instance each keep their own run_id, tag their
     own sessions with it, and report only those sessions in their manifest.
+    A non-finite score() is treated as no label: the trajectory is still
+    written to a file sink with reward None.
 
 ROLE IN CODEBASE:
     Exercises vidbyte/harnesses/execution.py, the run lifecycle that assigns a
@@ -31,11 +33,14 @@ TESTS: python -m pytest tests/test_harness_execution.py
 from __future__ import annotations
 
 import asyncio
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any
 
 from tests.agent_test_support import build_test_agent
-from vidbyte.harnesses import Harness, HarnessConfigurationError, InMemoryTrajectorySink
+from vidbyte.harnesses import FileTrajectorySink, Harness, HarnessConfigurationError, InMemoryTrajectorySink
 
 CONFIG = {"schema_version": 1, "harness": {"type": "triage"}, "agents": [{"name": "triager"}]}
 
@@ -48,6 +53,15 @@ class _Triage(Harness):
         session = self.session(build_test_agent(name="triager", system_prompt="Triage.", runner=object()))
         await asyncio.sleep(0.01)   # yield so the other execution starts before this one finishes
         return {"session": session.id, "run_id": self.run_id}
+
+
+class _NonFiniteScoreTriage(_Triage):
+    def __init__(self, *args: Any, score_value: float, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._score_value = score_value
+
+    async def score(self, request: Any, output: Any) -> float:
+        return self._score_value   # e.g. a mean over an empty set of checks
 
 
 async def _two_overlapping_trials(harness: Harness) -> list[Any]:
@@ -78,6 +92,20 @@ class HarnessOverlappingExecutionTests(unittest.TestCase):
         self.assertIsNone(harness.run_id)
         with self.assertRaises(HarnessConfigurationError):
             harness.session(build_test_agent(name="late", system_prompt="Late.", runner=object()))
+
+
+class HarnessNonFiniteScoreTests(unittest.TestCase):
+    def test_non_finite_score_keeps_the_trajectory_with_no_reward(self) -> None:
+        for score_value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(score=score_value), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "trajectories.jsonl"
+                harness = _NonFiniteScoreTriage(sink=FileTrajectorySink(path), collect=True, score_value=score_value).load(CONFIG)
+
+                asyncio.run(harness.execute({"q": "A"}))
+
+                lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+                self.assertEqual(len(lines), 1)
+                self.assertIsNone(json.loads(lines[0])["reward"])
 
 
 if __name__ == "__main__":
