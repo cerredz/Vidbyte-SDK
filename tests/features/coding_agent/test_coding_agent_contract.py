@@ -39,6 +39,8 @@ EXPECTED_SIGNATURE = {
     # AGENTS.md loading: the switch, and the caller's manager the coding context sections go ahead of.
     "load_agents": True,
     "context_manager": None,
+    # Setup commands: run once at construction; empty runs nothing.
+    "setup_commands": (),
 }
 
 # BaseAgent keywords that RunState exports, so a pass-through mistake shows up as a state difference.
