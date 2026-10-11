@@ -144,7 +144,9 @@ N/A - no HTTP endpoints. The Python API gains the `CodingAgent(progress_notes: b
 | MODIFY | `vidbyte/agents/README.md` | Document the switch and the read-only behavior |
 | CREATE | `tests/features/coding_agent/test_coding_agent_progress_notes.py` | Feature tests |
 | MODIFY | `tests/features/coding_agent/test_coding_agent_contract.py` | `EXPECTED_SIGNATURE` gains `progress_notes` |
-| MODIFY | Existing coding-agent tests that assert an exact request | Pass `progress_notes=False` (see the PR body) |
+| MODIFY | `tests/features/coding_agent/test_coding_agent_agents_md.py` | `test_without_agents_md_the_request_equals_a_plain_base_agents`, `test_load_agents_false_shows_no_agents_md`, `test_load_agents_false_never_touches_the_file`, `test_parent_folder_agents_md_is_not_searched`, and `test_blank_file_adds_no_section` assert no context manager or no primitives zone, so they pass `progress_notes=False` |
+| MODIFY | `tests/features/coding_agent/test_coding_agent_acceptance.py` | `test_caller_read_only_policy_denies_bash_and_write_without_side_effects` asserts an empty root, so it passes `progress_notes=False` |
+| MODIFY | `tests/features/coding_agent/test_coding_agent_contract.py` | `test_coding_agent_exports_the_same_state_as_an_equivalent_base_agent` compares `context_summary` with a manager-less `BaseAgent`, so it passes `progress_notes=False` |
 | MODIFY | `tests/features/coding_agent/FEATURE.md`, `README.md` | Pack index |
 | CREATE | `scripts/test-coding-agent-progress-notes.py` | Thin Phase-5 runner |
 
@@ -191,6 +193,8 @@ All of these are optional and none is built:
 - [ ] Q-4 (optional): refresh the section during a run after the agent edits the file?
 - [ ] Q-5 (optional): commit the notes, or clean them up when a task finishes?
 - [ ] Q-6 (optional): on a read-only root where both files already exist, the section is still shown. Should the loader check writability explicitly?
+- [ ] Q-7 (optional): an agent built with a policy that denies WRITE (`permission_policy=PermissionPolicy()`) still gets `.vidbyte/` created at construction, but it cannot update the notes. Should notes be skipped under such a policy?
+- [ ] Q-8 (optional): vidbyte-cli's task board also writes to `.vidbyte/` in the project folder (`.vidbyte/task-board`). The `*` ignore hides those checkpoints from git too. Is that wanted, or should the notes live in their own subfolder?
 
 ---
 
