@@ -283,7 +283,8 @@ claude = TextModelRunner(  # managed even when ANTHROPIC_API_KEY is also set
 - **Retries:** when the gateway answers 409 or 502, or Vidbyte's hosting edge
   answers with a page that is not a JSON object, the SDK sends the call again,
   up to two more times. Each retry carries the same `Idempotency-Key`, so the
-  gateway answers it from its saved result and a retry is never billed twice.
+  gateway normally answers it from its saved result instead of billing it
+  again; only an outage of the gateway's replay store can bill a retry twice.
 - **Retry deadline:** retries stop when the call's own timeout (630 s at the
   minimum), counted from its first request, has no time left for the next
   wait. Each attempt still gets its full timeout, so the worst case for one
