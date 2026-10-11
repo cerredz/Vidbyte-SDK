@@ -148,6 +148,20 @@ class SourcesBaseTests(unittest.TestCase):
         with self.assertRaises(SourcePinMismatchError):
             changed.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=upper_pin))
 
+    def test_string_pin_policy_is_served_from_pinned_warm_cache(self) -> None:
+        # [Silent Failure] A manifest's pin: "pinned" equals PinPolicy.PINNED, so it must hit the pinned warm cache
+        # with zero network I/O instead of silently re-fetching; an unknown spelling fails loudly at construction.
+        pin = sha256_hex(_DATA)
+        ref = ArtifactRef(url="https://ex.com/x.md", expected_hash=pin, pin="pinned")  # type: ignore[arg-type]
+        self.assertIs(ref.pin, PinPolicy.PINNED)
+        cache = InMemorySnapshotCache()
+        cache.put(pin, _DATA)
+        fetcher = CountingFetcher({})
+        self.assertEqual(len(DocumentSource(fetcher=fetcher, cache=cache).load(ref).items), 1)
+        self.assertEqual(fetcher.calls, 0)
+        with self.assertRaises(ValueError):
+            ArtifactRef(url="https://ex.com/x.md", pin="pinnned")  # type: ignore[arg-type]
+
     def test_live_policy_always_refetches(self) -> None:
         # [Hidden Assumption] PinPolicy.LIVE re-fetches even with a warm cache.
         cache = InMemorySnapshotCache()

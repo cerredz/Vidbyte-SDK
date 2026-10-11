@@ -50,6 +50,10 @@ class ArtifactRef:
         # the pin in the lowercase form sha256_hex() produces; a blank pin is left untouched so it fails exactly as before.
         if isinstance(self.expected_hash, str) and self.expected_hash.strip():
             object.__setattr__(self, "expected_hash", self.expected_hash.strip().lower())
+        # @intent pin-policy-is-one-canonical-enum
+        # A manifest's `pin: pinned` equals PinPolicy.PINNED but is not that member, so the identity-gated pinned
+        # cache would skip it; store the member itself, and let an unknown spelling fail here with ValueError.
+        object.__setattr__(self, "pin", PinPolicy(self.pin))
 
 
 @dataclass(frozen=True, slots=True)
