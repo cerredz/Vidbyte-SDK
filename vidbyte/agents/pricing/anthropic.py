@@ -85,7 +85,9 @@ class AnthropicUsage(ProviderUsage):
         cache_write_rate = pricing.cache_write_per_million
         if cache_write_rate is None:
             cache_write_rate = input_rate
-        else:
+        # @intent free-base-rate-never-divides
+        # A 0.0 base input rate (a free model) leaves the tier ratio undefined, so its cache rate applies unscaled.
+        elif pricing.input_per_million != 0.0:
             cache_write_rate = cache_write_rate * (input_rate / pricing.input_per_million)
         return (
             (self.input_tokens or 0) * input_rate
