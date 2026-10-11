@@ -255,6 +255,22 @@ class BaseAgentHandoffRecordingTests(unittest.IsolatedAsyncioTestCase):
         other.add_tool(added)
         self.assertIs(added._agent, other)
 
+    async def test_shared_tool_records_each_agents_handoff_on_itself(self) -> None:
+        # @intent shared-bound-tool-gets-own-copy
+        # One instance given to two agents must never record the first agent's handoff on the second.
+        shared = CreateHandoffTool()
+        alpha = build_test_agent(name="alpha", system_prompt="Work.", runner=FakeRunner(), tools=[shared])
+        beta = build_test_agent(name="beta", system_prompt="Work.", runner=FakeRunner(), tools=[shared])
+        gamma = build_test_agent(name="gamma", system_prompt="Work.", runner=FakeRunner()).add_tool(shared)
+
+        for agent in (alpha, beta, gamma):
+            await agent.tools._get("create_handoff").execute(_call(title=f"{agent.name} handoff", sections={"S": "x"}))
+
+        self.assertIs(alpha.tools._get("create_handoff"), shared)
+        self.assertEqual([h.title for h in alpha.handoffs], ["alpha handoff"])
+        self.assertEqual([h.title for h in beta.handoffs], ["beta handoff"])
+        self.assertEqual([h.title for h in gamma.handoffs], ["gamma handoff"])
+
     def test_forked_agent_starts_with_empty_handoffs(self) -> None:
         agent = self._agent()
         agent.record_handoff(MinimalHandoff(primitive_id="handoff:1"))
