@@ -234,13 +234,16 @@ class AgentRuntime:
         """Build the minimal context window passed into direct runners and strategies."""
         del message
         system_prompt = base_context.system_prompt if base_context and base_context.system_prompt else self.system_prompt
-        manager = ContextManager()
+        # @intent context-manager-metadata-reaches-the-model
+        # Seed the rebuilt manager with the caller's manager metadata, so the folded context carries it after the base context's own metadata.
+        manager = ContextManager(metadata=context_manager.metadata if context_manager is not None else {})
         if context_manager is not None:
             manager.extend(context_manager.items())
         manager.extend(context_items)
         managed_context = manager.to_context(base_context)
+        # Agent metadata and this call's metadata still win over the base context and manager metadata.
         metadata = {
-            **(dict(base_context.metadata) if base_context else {}),
+            **dict(managed_context.metadata),
             **dict(agent_metadata),
             **dict(input_metadata or {}),
         }

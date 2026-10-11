@@ -379,6 +379,21 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("INPUT_PLACED_PRIMITIVE", repr(runner.captured_options[-1]))
 
+    async def test_context_manager_metadata_reaches_the_model(self) -> None:
+        # [Silent Failure] ContextManager(metadata=...) must reach the model's run metadata, the request's manager over the agent's
+        runner = OptionCaptureRunner()
+        agent_manager = ContextManager(metadata={"tenant": "AGENT-TENANT", "region": "AGENT-REGION"})
+        agent = build_test_agent(name="ctx", system_prompt="S.", runner=runner, context_manager=agent_manager)
+
+        await agent.arun("first")
+        await agent.arun(AgentInput(prompt="second", context_manager=ContextManager(metadata={"tenant": "REQUEST-TENANT"})))
+
+        first, second = repr(runner.captured_options[0]), repr(runner.captured_options[1])
+        self.assertIn("AGENT-TENANT", first)
+        self.assertIn("REQUEST-TENANT", second)
+        self.assertNotIn("AGENT-TENANT", second)
+        self.assertIn("AGENT-REGION", second)
+
 
 class AgentRunSequentiallySyncTests(unittest.TestCase):
     def test_run_sequentially_rejects_a_bare_string(self) -> None:
