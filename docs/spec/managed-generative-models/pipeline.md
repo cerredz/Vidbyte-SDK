@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-managed-generative-models
 branch: feat/managed-generative-models
 base_commit: c07529316a5325bce986f84868ecbabb3b7f3056
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/759
 until: none
 started: 2026-10-10 18:10
 ---
@@ -18,8 +18,8 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | S0 worktree + capture + recon | done | 2026-10-10 18:10 | 2026-10-10 18:24 | reports/S0-scout.md | base_commit c07529316 |
 | S1 spec + review | done | 2026-10-10 19:20 | 2026-10-11 01:10 | reports/S1-spec-review-2.md | spec r4 approved @ed9f098a; 2 review rounds + orchestrator r4 |
 | S2 tests | done | 2026-10-11 01:12 (est.) | 2026-10-10 22:36 | reports/S2-test-author.md | 32 tests red (32 failed, orchestrator re-ran; no collection errors); area suites 69 passed; test commit 2eb7e3e5, proof 6069160f; S2_HEAD set at the status commit |
-| S3 implement | running (resumed after BLOCKED) | 2026-10-10 22:50 (est.) | | reports/S3-implementer.md | P1 done cc1702df..26ff83e3 (C020 4->2); blocked at P2 row 6 on lint S064; P2+P3 prototype on local-only branch wip/managed-generative-models-s3-prototype @05618483 |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-10 22:50 (est.) | 2026-10-10 23:36 | reports/S3-implementer.md | spec r5 b3df024d (S064 option A); P1 cc1702df..26ff83e3, P2 bbbb87a6 (contract ceabda93 blob 56d4d0b3), P3 b8a46cda 632dfcc1, P4 0bc85ac8; HEAD 573a9f5f; draft PR #759 |
+| S4 adversarial review | running | 2026-10-10 23:36 | | reports/S4-review-{conformance,conventions,engineering}.md | three reviewers launched |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -48,6 +48,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - GitHub Actions automatic triggers are disabled in the SDK repo too (ci.yml, static-policy.yml, etc. are workflow_dispatch only). Local gates are the only proof.
 - Global semgrep 1.170.1 crashes on import because the global mcp package is 2.x. Built an isolated venv at <scratchpad>/semgrep-venv (semgrep==1.170.1, mcp<2; no global change). Its semgrep.exe still shells out to the global pysemgrep, so call the venv's pysemgrep.exe directly: '<scratchpad>/semgrep-venv/Scripts/pysemgrep.exe scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte --metrics=off' -> 'Ran 1 rule on 871 files: 0 findings.' on e91cf822.
 - S3 BLOCKED answered by the orchestrator (no user question needed): lint S064 (retry-overall-deadline, added to SDK main by #600 after base c07529316; arrived via merge e91cf822) rejects the D-10 sleeping retry loop. Chose option A: one cumulative deadline per call, deadline = loop.time() + timeout_seconds (already max(630, configured)); before each retry wait, stop re-sending when loop.time() + wait >= deadline; each attempt keeps its full timeout. Sources: AGENTS.md/pipeline 'never raise a baseline' and S064's own WILL NOT WORK list exclude option B; option C games the rule; the same-key-retry design (Q-7) was an orchestrator default, not a user decision, and A keeps its purpose (same key, no double charge). Worst case drops from ~32 to ~21 min; a slow 502 gets at most one re-send. Spec binding text (D-10, INV-10, INV-16, §9.2 Retries, EC-38, AC-18) is revised by the implementer as r5 with a §17 row citing this decision; messages state the actual re-send count; README row 14 follows A.
+- S3 spot-check (orchestrator re-ran): pack '32 passed in 1.02s'; full '3004 passed, 1 skipped in 15.68s'; 'SDK-LINT: PASS' with S064 4/4; tests/, vidbyte/providers, vidbyte/agents diff vs e91cf822 empty; baseline diff only C020 4->2; vendored contract blob 56d4d0b3 equals backend ceabda93e blob, no BOM; production .py changes all under vidbyte/lib/; PR #759 draft with [WIP] title; spec status implemented, revision 5; wip branch deleted.
 
 ## User replies (verbatim)
 - none yet
@@ -94,3 +95,4 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - SDK gate set: (a) PYTHONPATH=$(pwd) python -m pytest tests/features/sdk_managed_text -q; (b) PYTHONPATH=$(pwd) python -m pytest -q (full); (c) python lint/run.py until SDK-LINT: PASS (stage new files first: lint reads git ls-files); (d) PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source, then python scripts/run_ci.py --stage package with no PYTHONPATH; (e) semgrep via the scratch venv's pysemgrep.exe (scans tracked files only: commit first). Never pip install -e or any global install.
 - S064 complies when the retry loop (or an in-module function it calls) makes an ordered comparison with a clock-derived value (loop.time(), time.monotonic()), or sits inside an asyncio.timeout block of its own function; a per-attempt wait_for is not a cumulative deadline.
 - A007 flags numeric literals in statements naming retry/timeout tokens, including range(N + 1). S051/I001 flags over-long single-line imports (wrap the jev constants import in runners/text.py). tests/test_mcp_stdio_transport.py flaked once under full-suite load and passes alone (unrelated).
+- SDK spec is now r5 (S064 cumulative retry deadline). The README AC-18 test ends the section at any line starting with '# ', including comments in code blocks. The branch's own change set is git diff e91cf822..HEAD (the AC-19 command from c0752931 also lists the main merge).
