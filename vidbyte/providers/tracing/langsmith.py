@@ -80,7 +80,10 @@ class LangSmithTracer(TracerBase):
         # Runs a LangSmith client call and optionally fails in strict verification mode.
         try:
             fn(*args, **kwargs)
-            self._last_error = None
+            # @intent flush-keeps-delivery-error
+            # A successful flush only drains the client queue, so it must not erase a run update error recorded just before it.
+            if action != "flush":
+                self._last_error = None
         except Exception as exc:
             self._record_error(exc)
             if self._strict:

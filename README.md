@@ -29,6 +29,23 @@ access remain outside this package.
 - Typed state-machine workflows with validation gates, conditional branches, cycles, retries, and declared jumps.
 - Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
 
+## JevAgent continuation checks
+
+`JevAgent` can run named done checks whenever its main agent attempts to finish. Enable whole-task completion evidence alongside other checks through `JevContinualSettings.checks`:
+
+```python
+from vidbyte import JevContinualSettings, JevDoneCheck, JevRuntimeSettings
+
+runtime_settings = JevRuntimeSettings(
+    continual=JevContinualSettings(
+        checks=(JevDoneCheck.COMPLETION_EVIDENCE,),
+        max_continuations=2,
+    ),
+)
+```
+
+`COMPLETION_EVIDENCE` checks whether the final answer's overall complete, incomplete, or blocked status matches the requested outcomes and observations in the run. An unqualified final answer implies completion, even when it does not say “done.” Honest incomplete or blocked reports can pass when the run evidence supports them. The final answer's own claim that external work happened does not count as evidence for that work. The result is available as `agent.response.done[JevDoneCheck.COMPLETION_EVIDENCE]`; if Jev cannot evaluate it, the check fails open.
+
 ## Layer Guide
 
 | Layer | Role |
@@ -63,10 +80,10 @@ Install the latest alpha from PyPI:
 pip install vidbyte-sdk
 ```
 
-Pin the first public release when reproducibility matters:
+Pin a release when reproducibility matters:
 
 ```bash
-pip install vidbyte-sdk==0.1.0
+pip install vidbyte-sdk==0.2.1
 ```
 
 Verify the installed distribution and prompt assets:
@@ -194,6 +211,38 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
+### JevAgent assumption reconciliation
+
+JevAgent continuation checks are opt-in. `ASSUMPTIONS_RECONCILED` adds a finish check for explicit, consequential assumptions that later run evidence changes; it asks whether dependent work was revisited, including whether the work became irrelevant. It does not treat an unverified premise, a plan change alone, or a tool error as a qualifying assumption.
+
+```python
+from vidbyte import (
+    JevAgent,
+    JevAgentSettings,
+    JevContinualSettings,
+    JevDoneCheck,
+    JevRuntimeSettings,
+)
+
+agent = JevAgent(
+    JevAgentSettings(
+        name="researcher",
+        system_prompt="Work from observed evidence and report your conclusions.",
+        provider="openai",
+        model_name="gpt-4.1",
+    ),
+    JevRuntimeSettings(
+        continual=JevContinualSettings(
+            checks=(JevDoneCheck.ASSUMPTIONS_RECONCILED,),
+            max_continuations=2,
+        ),
+    ),
+)
+
+reply = agent.run("Inspect the available source and summarize the result.")
+print(agent.response.done[JevDoneCheck.ASSUMPTIONS_RECONCILED])
+```
+
 ### Codex Harness Agent
 
 Install the optional Codex integration when Codex should own the inner coding-agent loop while Vidbyte supplies the agent-facing configuration and result contract:
@@ -242,7 +291,40 @@ print(reply.structured)
 print(reply.codex.thread_id, reply.codex.usage.total_tokens)
 ```
 
-`CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, middleware, tool, or durable-session semantics.
+For a use-case cookbook covering input shapes, settings, structured output, tools, middleware, context, threads, forks, subagents, fallback, usage, errors, and composition, see [`vidbyte/agents/codex/README.md`](vidbyte/agents/codex/README.md).
+
+`CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, custom tools, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, per-tool middleware, or durable-session semantics.
+
+#### Custom tools
+
+Pass `BaseTool` instances, `@tool` functions, or plain callables, in any mix, as a tuple. Codex registers them as dynamic tools when the thread starts. Each call the model makes runs your Python in the agent's own process, through the same `ToolExecutor` and `PermissionPolicy` the direct runtime uses.
+
+```python
+from vidbyte import CodexHarnessAgent, CodexHarnessAgentSettings, tool
+from vidbyte.tools.security import PermissionPolicy
+
+
+@tool
+def lookup_order(order_id: str) -> str:
+    """Return the shipping status for one order."""
+    return orders.status(order_id)
+
+
+agent = CodexHarnessAgent(
+    CodexHarnessAgentSettings(
+        name="support",
+        system_prompt="Answer order questions with the available tools.",
+        tools=(lookup_order, RefundTool()),  # RefundTool is any BaseTool subclass
+        tool_permission_policy=PermissionPolicy.allow_all(),
+    )
+)
+```
+
+- Tool names must match `^[A-Za-z0-9_-]+$`, be at most 128 characters, and not be `mcp` or start with `mcp__`. Names are checked when the agent is constructed.
+- The default policy runs only SAFE and READ tools. A denied call goes back to the model as a failed result.
+- Codex fixes a thread's tool definitions when the thread starts, so resuming a saved `thread_id` or forking keeps that thread's original tools.
+- Tool calls within one run execute one at a time. A call still running after 300 seconds is cancelled and reported to the model as failed.
+- Tools require `codex.client.experimental_api=True`, which is the default, because dynamic tools are an experimental Codex app-server field.
 
 Context is rendered from the live `ContextManager` on every `run`/`arun`, using
 each primitive's complete renderer without an extra adapter wrapper or truncation.
@@ -1283,7 +1365,7 @@ bundle = session.export()
 copy_id = sdk.harnesses.sessions.import_(store, bundle, new_id="se_copy")
 ```
 
-Importing with `new_id=` rewrites only session ids; checkpoint ids and parent links stay intact.
+Importing with `new_id=` rewrites session ids. Checkpoint ids and parent links stay intact unless the target store already holds those checkpoints (for example a copy into the same store); then the copy gets fresh checkpoint ids with parent links and head remapped.
 
 Stores are pluggable behind one `SessionStore` protocol. The local stores
 (`InMemorySessionStore`, `FileSessionStore` with atomic JSON writes) ship in

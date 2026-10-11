@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
+from vidbyte.middleware.builtins.limit_validation import positive_integer, positive_real
 
 
 @dataclass
@@ -40,13 +41,9 @@ class TokenRateLimitMiddleware(AgentMiddleware):
         per_seconds: float,
         clock: Callable[[], float] | None = None,
     ) -> None:
-        # Validates and stores configuration only; no per-run state on the instance.
-        if max_tokens <= 0:
-            raise ValueError("max_tokens must be greater than zero.")
-        if per_seconds <= 0:
-            raise ValueError("per_seconds must be greater than zero.")
-        self.max_tokens = max_tokens
-        self.per_seconds = per_seconds
+        # Stores validated configuration only; no per-run state on the instance.
+        self.max_tokens = positive_integer(max_tokens, "max_tokens")
+        self.per_seconds = positive_real(per_seconds, "per_seconds")
         self.clock = clock or time.monotonic
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
@@ -64,8 +61,9 @@ class TokenRateLimitMiddleware(AgentMiddleware):
         now = self.clock()
         if now - state.window_started >= self.per_seconds:
             state.window_started = now
+            # Keep last_tokens_seen: tokens_used is cumulative, so the new window
+            # must count only tokens spent since the previous observation.
             state.window_tokens = 0
-            state.last_tokens_seen = None
 
         previous = state.last_tokens_seen or 0
         delta = max(0, ctx.tokens_used - previous)

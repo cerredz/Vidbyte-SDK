@@ -134,22 +134,48 @@ class ToolSpec:
 
     def required_parameter_names(self) -> tuple[str, ...]:
         """Return the names of parameters that must be supplied in calls."""
-        return tuple(parameter.name for parameter in self.parameters if parameter.required)
+        if self.parameters or not isinstance(self.input_schema, Mapping):
+            return tuple(parameter.name for parameter in self.parameters if parameter.required)
+        # @intent input-schema-tool-contract
+        # A tool declared only by input_schema sends that schema to the provider, so its
+        # required list is the call contract validate_call must enforce before execute().
+        required = self.input_schema.get("required")
+        if not isinstance(required, (list, tuple)):
+            return ()
+        return tuple(name for name in required if isinstance(name, str))
 
     def to_prompt_str(self) -> str:
         """Render compact tool documentation inside a tool XML block."""
         lines = ["<tool>", f"Tool: {self.name}", f"Description: {self.description}"]
-        if self.parameters:
+        # Describe the same arguments the provider schema advertises, typed or raw.
+        parameter_lines = self._parameter_lines(frozenset(self.required_parameter_names()))
+        if parameter_lines:
             lines.append("Parameters:")
-            for parameter in self.parameters:
-                required = "required" if parameter.required else "optional"
-                lines.append(
-                    f"- {parameter.name} ({parameter.type}, {required}): {parameter.description}"
-                )
+            lines.extend(parameter_lines)
         else:
             lines.append("Parameters: none")
         lines.extend((f"Permission: {self.permission.value}", "</tool>"))
         return "\n".join(lines)
+
+    def _parameter_lines(self, required_names: frozenset[str]) -> list[str]:
+        # Typed parameters win; otherwise list input_schema properties without ever raising.
+        if self.parameters:
+            return [
+                f"- {item.name} ({item.type}, {'required' if item.required else 'optional'}): {item.description}"
+                for item in self.parameters
+            ]
+        # @intent input-schema-tool-contract
+        properties = self.input_schema.get("properties") if isinstance(self.input_schema, Mapping) else None
+        if not isinstance(properties, Mapping):
+            return []
+        lines = []
+        for name, prop in properties.items():
+            prop = prop if isinstance(prop, Mapping) else {}
+            kind = prop.get("type") if isinstance(prop.get("type"), str) else "any"
+            description = prop.get("description") if isinstance(prop.get("description"), str) else ""
+            required = "required" if name in required_names else "optional"
+            lines.append(f"- {name} ({kind}, {required}): {description}")
+        return lines
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +338,9 @@ class ToolCallContext:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     iteration_count: int | None = None
     activity: ToolCallActivity | None = None
+    # What the model was shown instead of `result` (truncated, redacted, or a primitive
+    # reference); None when the model saw `result` itself. `result` always stays raw.
+    model_visible_result: ToolResult | None = None
 
     @property
     def name(self) -> str:

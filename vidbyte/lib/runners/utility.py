@@ -10,6 +10,7 @@ from vidbyte.lib.constants import (
     MODEL_RUNNER_TYPE_MAP,
     PROVIDER_DEFAULT_RUNNER_TYPE_MAP,
     RUNNER_TYPE_AUDIO,
+    RUNNER_TYPE_DECISION,
     RUNNER_TYPE_EMBEDDING,
     RUNNER_TYPE_IMAGE,
     RUNNER_TYPE_TEXT,
@@ -44,11 +45,16 @@ class Runner:
             key = f"{provider}/{model}" if provider else None
             if key and key in MODEL_PROVIDER_RUNNER_TYPE_MAP:
                 return MODEL_PROVIDER_RUNNER_TYPE_MAP[key]
-            if model in MODEL_RUNNER_TYPE_MAP:
-                return MODEL_RUNNER_TYPE_MAP[model]
-            for prefix, runner_type in MODEL_PREFIX_RUNNER_TYPE_MAP.items():
-                if model.startswith(prefix):
-                    return runner_type
+            # @intent vendor-slug-ids-resolve-by-bare-name
+            # OpenRouter-style ids such as 'anthropic/claude-sonnet-5' carry a vendor slug the maps
+            # do not list, so retry with the part after the last slash, as ModalityDetector does;
+            # names that match nothing either way still raise below.
+            for candidate in (model, model.rsplit("/", 1)[-1]):
+                if candidate in MODEL_RUNNER_TYPE_MAP:
+                    return MODEL_RUNNER_TYPE_MAP[candidate]
+                for prefix, runner_type in MODEL_PREFIX_RUNNER_TYPE_MAP.items():
+                    if candidate.startswith(prefix):
+                        return runner_type
             if provider:
                 raise ConfigurationError(f"No runner mapping for provider/model '{provider}/{model}'.")
             raise ConfigurationError(f"No runner mapping for model '{model}'.")
@@ -61,6 +67,7 @@ class Runner:
         if not self.provider or not self.model_name:
             raise ConfigurationError("Runner.build() requires both provider and model_name.")
         runner_type = self.resolve_runner_type()
+        self._refuse_decision_runner(runner_type)
         config_options = self._config_options_for(runner_type)
         if runner_type == RUNNER_TYPE_TEXT:
             from vidbyte.lib.runners.text import TextModelRunner
@@ -78,6 +85,18 @@ class Runner:
             from vidbyte.lib.runners.embedding import EmbeddingModelRunner
             return EmbeddingModelRunner(EmbeddingModelConfig(provider=self.provider, model=self.model_name, **config_options), transport=transport)
         raise ConfigurationError(f"Unsupported runner type: {runner_type!r}.")
+
+    def _refuse_decision_runner(self, runner_type: str) -> None:
+        # Raises for decision models, which answer structured questions and cannot drive an agent loop.
+        # @intent decision-models-never-run-the-agent-loop
+        # jev-latest is catalogued so validation knows TypeSafe owns it, but an agent loop
+        # needs generated text; failing here names the right entry points instead of a
+        # confusing provider error deep inside the first model call.
+        if runner_type == RUNNER_TYPE_DECISION:
+            raise ConfigurationError(
+                f"Model '{self.model_name}' is a decision model and cannot drive an agent loop; call it through DecisionModelRunner.",
+                details={"provider": self.provider, "model": self.model_name, "runner_type": runner_type},
+            )
 
     def _config_options_for(self, runner_type: str) -> dict[str, Any]:
         # Filter primitive options to fields supported by the target config dataclass.
@@ -120,7 +139,11 @@ class Runner:
                     model_provider = None
                 if model_provider and (normalized_provider is None or normalized_provider == model_provider):
                     normalized_provider = model_provider
-                    normalized_model = rest
+                    # @intent openrouter-keeps-its-own-model-ids
+                    # OpenRouter's own ids such as 'openrouter/auto' include the prefix on the wire, so
+                    # only strip it when what follows is itself a vendor/model slug.
+                    if model_provider != ModelProvider.OPENROUTER.value or "/" in rest:
+                        normalized_model = rest
         model_lookup = normalized_model.lower() if normalized_model else None
         return normalized_provider, normalized_model, model_lookup
 

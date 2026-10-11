@@ -449,6 +449,40 @@ class AgentSpeedValidationError(AgentSpeedError):
         )
 
 
+class UsageAccountingError(VidbyteSdkError):
+    """Raised when an agent that fails closed on usage could not record or price part of its run's usage."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Populate the usage-accounting diagnostic packet from message/details alone."""
+        super().__init__(message, details=details)
+        self.error_kind = "usage_accounting"
+        self.expected = "Every model call in the run recorded once and priced from the SDK pricebook."
+        self.actual = message
+        self.safe_runtime_details = dict(self.details)
+        self.likely_causes = (
+            "A model's response reported no usage the SDK could parse.",
+            "A model that answered is missing from the SDK pricebook (vidbyte/lib/registries/pricing.py).",
+            "An internal error occurred while recording, pricing, or merging usage.",
+        )
+        self.repair_approaches = (
+            "Inspect safe_runtime_details for the failure reasons and the unpriced provider/model pairs.",
+            "Add the missing model to PROVIDER_PRICING, or fix the usage parser for that provider.",
+        )
+        self.related_docs = ("https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/jev-run-usage-ledger.md",)
+        self.relevant_tests = ("tests/test_jev_usage_ledger.py",)
+
+
 class SourceError(VidbyteSdkError):
     """Base class for all artifact-source loader failures."""
 

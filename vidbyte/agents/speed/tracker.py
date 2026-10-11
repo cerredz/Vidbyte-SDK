@@ -417,7 +417,8 @@ class AgentSpeedTracker:
                 [float(call.input_tokens or AGENT_SPEED_ZERO_COUNT) for call in prompt_records],
                 [_ttft_seconds(call) for call in prompt_records],
             ),
-            retry_count_total=sum(call.retry_count for call in calls),
+            # Each retry attempt is one record with a positive ordinal; summing ordinals over-counts.
+            retry_count_total=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.retry_count > AGENT_SPEED_ZERO_COUNT),
             fallback_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if (call.fallback_index or AGENT_SPEED_ZERO_COUNT) > AGENT_SPEED_ZERO_COUNT),
             cancelled_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled),
             cancellation_rate=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled) / len(calls),
@@ -552,7 +553,8 @@ class AgentSpeedTracker:
             prompt_tokens_per_second=MathHelper.weighted_rate_or_none([float(call.input_tokens or AGENT_SPEED_ZERO_COUNT) for call in prompt_calls], [_ttft_seconds(call) for call in prompt_calls]),
             input_tokens_total=_sum_ints(call.input_tokens for call in calls),
             output_tokens_total=_sum_ints(call.output_tokens for call in calls),
-            retry_count_total=sum(call.retry_count for call in calls),
+            # Each retry attempt is one record with a positive ordinal; summing ordinals over-counts.
+            retry_count_total=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.retry_count > AGENT_SPEED_ZERO_COUNT),
             fallback_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if (call.fallback_index or AGENT_SPEED_ZERO_COUNT) > AGENT_SPEED_ZERO_COUNT),
             cancelled_call_count=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled),
             cancellation_rate=sum(AGENT_SPEED_FIRST_INDEX for call in calls if call.cancelled) / len(calls),
@@ -605,8 +607,8 @@ class AgentSpeedTracker:
             cold_start_overhead_ms=self._cold_start_overhead_ms(calls),
             framework_overhead_ms=(max(AGENT_SPEED_ZERO_SECONDS, total_duration_ms - active_seconds * AGENT_SPEED_MILLISECONDS_PER_SECOND) if total_duration_ms is not None and active_seconds is not None else None),
             parallelism_efficiency=(sum(call.duration_ms for call in tool_calls) / (tool_union_seconds * AGENT_SPEED_MILLISECONDS_PER_SECOND) if len(tool_calls) >= AGENT_SPEED_MIN_PARALLEL_CALLS and tool_union_seconds and tool_union_seconds > AGENT_SPEED_ZERO_SECONDS else None),
-            time_to_first_tool_ms=((first_tool - self._run_started_at) * AGENT_SPEED_MILLISECONDS_PER_SECOND if first_tool is not None and self._run_started_at is not None else None),
-            time_to_result_ready_ms=((self._result_ready_at - self._run_started_at) * AGENT_SPEED_MILLISECONDS_PER_SECOND if self._result_ready_at is not None and self._run_started_at is not None else None),
+            time_to_first_tool_ms=self._ms_since_run_start(first_tool),
+            time_to_result_ready_ms=self._ms_since_run_start(self._result_ready_at),
             active_work_ms=(active_seconds * AGENT_SPEED_MILLISECONDS_PER_SECOND if active_seconds is not None else None),
             overlap_ms=(max(AGENT_SPEED_ZERO_SECONDS, (child_seconds - active_seconds) * AGENT_SPEED_MILLISECONDS_PER_SECOND) if child_seconds is not None and active_seconds is not None else None),
             max_concurrency=MathHelper.max_concurrency(tool_intervals),
@@ -623,6 +625,14 @@ class AgentSpeedTracker:
         if self._run_started_at is None or self._run_completed_at is None or self._run_completed_at < self._run_started_at:
             return None
         return (self._run_completed_at - self._run_started_at) * AGENT_SPEED_MILLISECONDS_PER_SECOND
+
+    def _ms_since_run_start(self, instant: float | None) -> float | None:
+        # Return None while either boundary is unavailable or the instant precedes the run start.
+        # An overlapping run on the same agent moves the shared run start past an in-flight
+        # instant; a negative latency would fail RunSpeedStats validation and the user's run.
+        if instant is None or self._run_started_at is None or instant < self._run_started_at:
+            return None
+        return (instant - self._run_started_at) * AGENT_SPEED_MILLISECONDS_PER_SECOND
 
     @staticmethod
     def _cold_start_overhead_ms(calls: tuple[CallSpeedRecord, ...]) -> float | None:

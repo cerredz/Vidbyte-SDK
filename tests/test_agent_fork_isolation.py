@@ -1,19 +1,37 @@
 from __future__ import annotations
 
+import json
+import os
 import unittest
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from pydantic import BaseModel
+
 from tests.agent_test_support import build_test_agent
-from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
+from vidbyte.agents import AgentForkSettings, AgentLoopSettings, AgentMessage, BaseAgent, MinToolCalls, ToolErrorPolicy, ToolSettings
+from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
+from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools.agent_tool import AgentTool
+from vidbyte.tools.builtins.context_primitives import context_window_tools
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
+from vidbyte.sessions import InMemorySessionStore
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool
-from vidbyte.tools.types import ToolCall
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+from vidbyte.tools.builtins.sessions import CheckpointTool
+from vidbyte.tools.base import _ToolWrapper, _unwrap_tool
+from vidbyte.tools.types import ToolActivity, ToolCall, ToolStatus
 from vidbyte.trace.continual import ActionTrace
+
+
+class _QueueActivity(BaseModel):
+    """Activity annotation used to wrap a bound builtin in a with_activity() view."""
+
+    reason: str
 
 
 class DoneRunner:
@@ -24,6 +42,23 @@ class DoneRunner:
         class _Resp:
             text = ""
             raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "reply:{prompt}"}}'}]}
+        return _Resp()
+
+
+class ScriptedToolRunner:
+    """Offline runner that replays one scripted list of tool calls per model turn."""
+
+    def __init__(self, turns: list[list[tuple[str, dict[str, object]]]]) -> None:
+        # Stores the remaining turns; parent and forked child consume the same script in order.
+        self.turns = list(turns)
+
+    async def arun(self, prompt: str, **_: object) -> object:
+        # Emits the next scripted function calls as a Responses-style payload.
+        calls = self.turns.pop(0)
+
+        class _Resp:
+            text = ""
+            raw = {"output": [{"type": "function_call", "name": name, "arguments": json.dumps(args), "call_id": f"fc_{index}"} for index, (name, args) in enumerate(calls)]}
         return _Resp()
 
 
@@ -183,6 +218,108 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parent_history[0].content, "parent history")
         self.assertEqual(child_history[0].content, "child history")
 
+    async def test_fork_clones_run_prompts_sequentially_binding(self) -> None:
+        # @intent fork-keeps-parent-prompt-queue
+        # The parent's run_prompts_sequentially tool must keep queuing on the parent after a fork.
+        parent_tool = RunPromptsSequentiallyTool()
+        parent = self._agent(tools=[parent_tool])
+        child = parent.fork(AgentForkSettings(name="child"))
+        child_tool = _tool_of_type(child, RunPromptsSequentiallyTool)
+
+        self.assertIsNot(parent_tool, child_tool)
+        await parent_tool.execute(_call("run_prompts_sequentially", prompts=["parent next"]))
+        await child_tool.execute(_call("run_prompts_sequentially", prompts=["child next"]))
+
+        self.assertEqual(parent._queued_prompts, ["parent next"])
+        self.assertEqual(child._queued_prompts, ["child next"])
+
+    async def test_customized_run_prompts_sequentially_is_bound(self) -> None:
+        # @intent wrapped-builtin-binds-to-owner
+        # A customize() view must not hide the wrapped builtin from the owning agent's binding.
+        wrapped = RunPromptsSequentiallyTool().customize(description="Queue follow-up prompts (localized).")
+        agent = self._agent(tools=[wrapped])
+
+        result = await wrapped.execute(_call("run_prompts_sequentially", prompts=["next"]))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(agent._queued_prompts, ["next"])
+
+    async def test_fork_clones_customized_bound_tool(self) -> None:
+        # @intent fork-clones-wrapped-builtin
+        # A fork must clone the tool inside a customize()/with_activity() view and bind the copy to the child.
+        description = "Queue follow-up prompts (localized)."
+        parent_tool = RunPromptsSequentiallyTool().customize(description=description).with_activity(
+            ToolActivity(schema=_QueueActivity, description="Why you are queuing.")
+        )
+        parent = self._agent(tools=[parent_tool])
+        child = parent.fork(AgentForkSettings(name="child"))
+        child_tool = _tool_of_type(child, _ToolWrapper)
+
+        self.assertIsNot(child_tool, parent_tool)
+        self.assertIsNot(_unwrap_tool(child_tool), _unwrap_tool(parent_tool))
+        self.assertEqual(child_tool.spec().description, description)
+        self.assertEqual(child_tool.spec().activity, parent_tool.spec().activity)
+        await _unwrap_tool(parent_tool).execute(_call("run_prompts_sequentially", prompts=["parent next"]))
+        await _unwrap_tool(child_tool).execute(_call("run_prompts_sequentially", prompts=["child next"]))
+        self.assertEqual(parent._queued_prompts, ["parent next"])
+        self.assertEqual(child._queued_prompts, ["child next"])
+
+    async def test_fork_isolates_context_manager_and_rebinds_context_tools(self) -> None:
+        # @intent fork-isolates-context-manager
+        # A child run that edits primitives through its tools must change only its own copy of the context window.
+        done = ("isDone", {"final_answer": "done"})
+        runner = ScriptedToolRunner([
+            [("context_create_text", {"primitive_id": "notes", "content": "parent notes"})],
+            [done],
+            [("context_remove", {"primitive_id": "notes"})],
+            [("context_create_text", {"primitive_id": "scratch", "content": "child scratch"})],
+            [done],
+        ])
+        manager = ContextManager()
+        parent = build_test_agent(name="parent", system_prompt="Work.", runner=runner, tools=list(context_window_tools(manager)), context_manager=manager)
+        await parent.arun("parent task")
+        child = parent.fork(AgentForkSettings(name="child"))
+
+        self.assertIsNot(child.context_manager, parent.context_manager)
+        self.assertEqual([pid for pid, _ in child.context_manager.registry_items()], ["notes"])
+        await child.arun("child task")
+
+        self.assertEqual(runner.turns, [])
+        self.assertEqual([pid for pid, _ in parent.context_manager.registry_items()], ["notes"])
+        self.assertEqual([pid for pid, _ in child.context_manager.registry_items()], ["scratch"])
+
+    def test_fork_context_manager_override_is_used_as_is_by_context_tools(self) -> None:
+        # @intent fork-rebinds-context-tools
+        # An explicit child manager is not copied, and parent-bound context tools write to it instead of the parent.
+        manager = ContextManager()
+        override = ContextManager()
+        parent = self._agent(tools=list(context_window_tools(manager)))
+        parent.context_manager = manager
+        child = parent.fork(AgentForkSettings(name="child", context_manager=override))
+
+        self.assertIs(child.context_manager, override)
+        self.assertTrue(all(tool._manager is override for tool in child._agent_tool_items))
+        self.assertTrue(all(tool._manager is manager for tool in parent._agent_tool_items))
+
+    async def test_fork_clones_session_tool_binding_and_scope(self) -> None:
+        # @intent fork-keeps-parent-session-tool-binding
+        # After fork + child.persist(), the parent's session tool must stay on the parent's session and scope.
+        store = InMemorySessionStore()
+        parent_tool = CheckpointTool(store)
+        parent = self._agent(tools=[parent_tool])
+        parent_session = parent.persist(store=store)
+        child = parent.fork(AgentForkSettings(name="child"))
+        child_session = child.persist(store=store)
+        child_tool = _tool_of_type(child, CheckpointTool)
+
+        self.assertIsNot(parent_tool, child_tool)
+        self.assertIsNot(parent_tool._scope, child_tool._scope)
+        self.assertIs(parent_tool._session, parent_session)
+        self.assertIs(child_tool._session, child_session)
+        self.assertFalse(parent_tool._scope.permits(child_session.id))
+        result = await parent_tool.execute(_call("checkpoint", label="parent"))
+        self.assertEqual(store.get(result.output.strip()).session_id, parent_session.id)
+
     def test_fork_preserves_pending_mcp_configs(self) -> None:
         # Lazy MCP configs should be copied to child pending configs without live handles.
         parent = self._agent()
@@ -241,6 +378,61 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(child.runner_config.run_id, "child-run")
         self.assertEqual(child.metadata["fork_child_run_id"], "child-run")
+
+    def test_cross_provider_fork_does_not_inherit_parent_api_key(self) -> None:
+        # @intent fork-key-never-crosses-providers: a DeepSeek key must never be sent to OpenAI.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-openai-ENV"}):
+            for provider in ("openai", ModelProvider.OPENAI):
+                child = parent.fork(AgentForkSettings(provider=provider, model_name="gpt-5.4-mini"))
+                self.assertIsNone(child.runner_config.api_key)
+                self.assertEqual(child.runner_config.provider, "openai")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(child.runner_config.provider, child.runner_config.api_key), "sk-openai-ENV")
+        self.assertEqual(parent.runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_same_provider_fork_keeps_parent_api_key(self) -> None:
+        # Staying on the parent's provider, including model-only overrides, keeps the parent's explicit key.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+
+        for settings in (
+            AgentForkSettings(),
+            AgentForkSettings(model_name="deepseek-v4-pro"),
+            AgentForkSettings(provider="deepseek", model_name="deepseek-v4-pro"),
+            AgentForkSettings(provider=ModelProvider.DEEPSEEK),
+        ):
+            self.assertEqual(parent.fork(settings).runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_cross_provider_fork_keeps_parent_fallback_providers(self) -> None:
+        # @intent fork-keeps-resolved-fallback-providers: a bare DeepSeek backup must not become an Anthropic model.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-pro", api_key="sk-deepseek-SECRET", timeout_seconds=30.0, fallback=["deepseek-v4-flash"])
+
+        child = parent.fork(AgentForkSettings(provider="anthropic", model_name="claude-sonnet-4-6"))
+
+        self.assertEqual([model.identity() for model in child.fallback.models], ["anthropic/claude-sonnet-4-6", "deepseek/deepseek-v4-flash"])
+        self.assertEqual([model.api_key for model in child.fallback.models], [None, "sk-deepseek-SECRET"])
+        self.assertEqual(child.fallback.fallback_on, parent.fallback.fallback_on)
+        self.assertEqual(child.fallback.timeout_seconds, 30.0)
+
+    def test_fork_max_iterations_override_inherits_remaining_parent_config(self) -> None:
+        # A max_iterations delta must keep every other parent loop guardrail and the parent model-call timeout.
+        tool_settings = ToolSettings(denied_tools={"delete_file"})
+        error_policy = ToolErrorPolicy(max_retries_per_tool_call=1)
+        contract = MinToolCalls(1)
+        loop = AgentLoopSettings(max_iterations=10, max_queued_prompts=2, tool_settings=tool_settings, tool_error_policy=error_policy, output_contracts=[contract], max_contract_rejections=5)
+        parent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), agent_loop_settings=loop, timeout_seconds=12.5)
+
+        child = parent.fork(AgentForkSettings(max_iterations=3))
+        child_loop = child.agent_loop_settings
+
+        self.assertEqual(child_loop.max_iterations, 3)
+        self.assertIs(child_loop.tool_settings, tool_settings)
+        self.assertIs(child_loop.tool_error_policy, error_policy)
+        self.assertEqual(child_loop.output_contracts, (contract,))
+        self.assertEqual(child_loop.max_queued_prompts, 2)
+        self.assertEqual(child_loop.max_contract_rejections, 5)
+        self.assertEqual(child.runner_config.timeout_seconds, 12.5)
+        self.assertEqual(parent.fork().runner_config.timeout_seconds, 12.5)
 
     def test_fork_trace_option_override_matches_docs(self) -> None:
         # fork(trace_option=...) should set the child continual trace option as documented.

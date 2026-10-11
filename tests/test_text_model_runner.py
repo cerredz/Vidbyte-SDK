@@ -51,6 +51,54 @@ class TextModelRunnerTests(unittest.TestCase):
         self.assertEqual(transport.requests[0]["json_body"]["input"], "Hello")
         self.assertEqual(transport.requests[0]["json_body"]["instructions"], "System")
 
+    def test_openai_responses_translates_chat_tool_history_into_items(self) -> None:
+        transport = FakeTransport({"output_text": "ok"})
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        history = [
+            {"role": "user", "content": "task"},
+            {
+                "role": "assistant",
+                "content": "Checking.",
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": '{"q": "a"}'}}],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "lookup", "content": "found"},
+            {"type": "function_call_output", "call_id": "call_0", "output": "kept"},
+        ]
+
+        runner.run("Next", messages=history)
+
+        self.assertEqual(
+            transport.requests[0]["json_body"]["input"],
+            [
+                {"role": "user", "content": "task"},
+                {"role": "assistant", "content": "Checking."},
+                {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": '{"q": "a"}'},
+                {"type": "function_call_output", "call_id": "call_1", "output": "found"},
+                {"type": "function_call_output", "call_id": "call_0", "output": "kept"},
+                {"role": "user", "content": "Next"},
+            ],
+        )
+
+    def test_openai_responses_flattens_nested_function_tools(self) -> None:
+        # @intent responses-function-tools-are-flat
+        # Responses rejects the Chat Completions nested function shape with 400 "Missing required parameter: 'tools[0].name'".
+        transport = FakeTransport({"output_text": "ok"})
+        parameters = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        tools = [
+            {"type": "function", "function": {"name": "lookup", "description": "Find it.", "parameters": parameters}},
+            {"type": "web_search"},
+        ]
+
+        runner.run("Hello", tools=tools, tool_choice={"type": "function", "function": {"name": "lookup"}})
+
+        body = transport.requests[0]["json_body"]
+        self.assertEqual(
+            body["tools"],
+            [{"type": "function", "name": "lookup", "description": "Find it.", "parameters": parameters}, {"type": "web_search"}],
+        )
+        self.assertEqual(body["tool_choice"], {"type": "function", "name": "lookup"})
+
     def test_anthropic_messages_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"content": [{"type": "text", "text": "ok"}]})
         runner = TextModelRunner(

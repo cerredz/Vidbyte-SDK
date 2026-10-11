@@ -99,6 +99,48 @@ class CreateHandoffToolTests(unittest.IsolatedAsyncioTestCase):
         # Handoff coerces instructions=None to "" via DEFAULT_INSTRUCTIONS
         self.assertEqual(agent.handoffs[0].instructions, "")
 
+    async def test_null_audience_and_instructions_behave_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default: a null optional must not reach the receiver as "None".
+        agent = StubAgent()
+        tool = CreateHandoffTool()
+        tool.bind_agent(agent)
+        result = await tool.execute(_call(title="H", sections={"A": "v"}, audience=None, instructions=None))
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertEqual(agent.handoffs[0].instructions, "")
+        self.assertNotIn("None", result.output)
+
+    async def test_null_section_is_left_out_like_an_omitted_one(self) -> None:
+        # @intent null-optional-arg-means-default: a null section must not reach the receiver as "None".
+        null_agent, omitted_agent = StubAgent(), StubAgent()
+        null_tool, omitted_tool = CreateHandoffTool(), CreateHandoffTool()
+        null_tool.bind_agent(null_agent)
+        omitted_tool.bind_agent(omitted_agent)
+        summary = "db-1 disk at 97%, cleanup job queued"
+        null_result = await null_tool.execute(_call(title="H", sections={"Summary": summary, "Blockers": None}))
+        omitted_result = await omitted_tool.execute(_call(title="H", sections={"Summary": summary}))
+        self.assertEqual(null_result.status, ToolStatus.SUCCESS, null_result.output)
+        self.assertEqual(null_agent.handoffs[0].sections, {"Summary": summary})
+        self.assertEqual(null_agent.handoffs[0].sections, omitted_agent.handoffs[0].sections)
+        self.assertEqual(null_result.metadata["sections"], {"Summary": summary})
+        self.assertEqual(null_result.output, omitted_result.output)
+        self.assertNotIn("None", null_result.output)
+
+    async def test_error_when_every_section_is_null(self) -> None:
+        agent = StubAgent()
+        tool = CreateHandoffTool()
+        tool.bind_agent(agent)
+        result = await tool.execute(_call(title="Handoff", sections={"Summary": None, "Blockers": None}))
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("non-empty 'sections' object", result.output)
+        self.assertEqual(agent.handoffs, [])
+
+    async def test_null_audience_keeps_non_null_instructions(self) -> None:
+        agent = StubAgent()
+        tool = CreateHandoffTool()
+        tool.bind_agent(agent)
+        await tool.execute(_call(title="H", sections={"A": "v"}, audience=None, instructions="Be concise"))
+        self.assertEqual(agent.handoffs[0].instructions, "Instructions: Be concise")
+
     async def test_primitive_id_increments_across_calls(self) -> None:
         agent = StubAgent()
         tool = CreateHandoffTool()
@@ -213,6 +255,22 @@ class BaseAgentHandoffRecordingTests(unittest.IsolatedAsyncioTestCase):
         other.add_tool(added)
         self.assertIs(added._agent, other)
 
+    async def test_shared_tool_records_each_agents_handoff_on_itself(self) -> None:
+        # @intent shared-bound-tool-gets-own-copy
+        # One instance given to two agents must never record the first agent's handoff on the second.
+        shared = CreateHandoffTool()
+        alpha = build_test_agent(name="alpha", system_prompt="Work.", runner=FakeRunner(), tools=[shared])
+        beta = build_test_agent(name="beta", system_prompt="Work.", runner=FakeRunner(), tools=[shared])
+        gamma = build_test_agent(name="gamma", system_prompt="Work.", runner=FakeRunner()).add_tool(shared)
+
+        for agent in (alpha, beta, gamma):
+            await agent.tools._get("create_handoff").execute(_call(title=f"{agent.name} handoff", sections={"S": "x"}))
+
+        self.assertIs(alpha.tools._get("create_handoff"), shared)
+        self.assertEqual([h.title for h in alpha.handoffs], ["alpha handoff"])
+        self.assertEqual([h.title for h in beta.handoffs], ["beta handoff"])
+        self.assertEqual([h.title for h in gamma.handoffs], ["gamma handoff"])
+
     def test_forked_agent_starts_with_empty_handoffs(self) -> None:
         agent = self._agent()
         agent.record_handoff(MinimalHandoff(primitive_id="handoff:1"))
@@ -239,6 +297,17 @@ class CreateHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("handoff:1", listing.output)
         self.assertIn("handoff:2", listing.output)
         self.assertIn("(handoff)", listing.output)
+
+    async def test_new_handoff_never_overwrites_one_already_in_the_registry(self) -> None:
+        manager = ContextManager()
+        alpha = build_test_agent(name="alpha", system_prompt="Work.", runner=FakeRunner(), context_manager=manager, tools=[CreateHandoffTool()])
+        beta = build_test_agent(name="beta", system_prompt="Work.", runner=FakeRunner(), context_manager=manager, tools=[CreateHandoffTool()])
+        await alpha.tools._get("create_handoff").execute(_call(title="alpha handoff", sections={"S": "a"}))
+        result = await beta.tools._get("create_handoff").execute(_call(title="beta handoff", sections={"S": "b"}))
+
+        self.assertEqual(result.metadata["primitive_id"], "handoff:2")
+        self.assertEqual(manager.get_by_id("handoff:1").title, "alpha handoff")
+        self.assertEqual(manager.get_by_id("handoff:2").title, "beta handoff")
 
 
 if __name__ == "__main__":

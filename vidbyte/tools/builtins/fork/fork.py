@@ -125,14 +125,26 @@ class ForkConversationTool(BaseTool):
         if not prompt:
             raise ValueError("fork_conversation requires a non-empty 'prompt'.")
         context_window = self._optional_mapping(args.get("context_window"), "context_window")
-        history_mode = str(args.get("history_mode", context_window.get("history_mode", "full"))).strip() or "full"
+        # @intent null-optional-arg-means-default
+        # A null top-level history_mode, last_n, or context_algorithm means "not given", exactly like an omitted
+        # key: each falls back to its context_window twin. History mode then defaults to "full", never "none".
+        raw_history_mode = args.get("history_mode")
+        if raw_history_mode is None:
+            raw_history_mode = context_window.get("history_mode")
+        raw_last_n = args.get("last_n")
+        if raw_last_n is None:
+            raw_last_n = context_window.get("last_n")
+        raw_algorithm = args.get("context_algorithm")
+        if raw_algorithm is None:
+            raw_algorithm = context_window.get("algorithm")
+        history_mode = "full" if raw_history_mode is None else (str(raw_history_mode).strip() or "full")
         if history_mode not in _HISTORY_MODES:
             raise ValueError("history_mode must be one of: full, none, last_n.")
         request = {
             "prompt": prompt,
             "system_prompt": self._optional_string(args.get("system_prompt")),
             "tools": self._resolve_tools(args.get("tool_names"), args.get("extra_toolset_names"), args.get("drop_tool_names")),
-            "history": self._resolve_history(history_mode, args.get("last_n", context_window.get("last_n"))),
+            "history": self._resolve_history(history_mode, raw_last_n),
             "model": self._resolve_model(args.get("model")),
             "provider": self._resolve_provider(args.get("provider")),
             "temperature": self._resolve_temperature(args.get("temperature")),
@@ -141,7 +153,7 @@ class ForkConversationTool(BaseTool):
             "purpose": self._optional_string(args.get("purpose")),
             "metadata": self._resolve_metadata(args.get("metadata")),
             "runtime": self._resolve_runtime(args.get("runtime"), args.get("actor_runtime")),
-            "algorithm": self._resolve_context_algorithm(args.get("context_algorithm", context_window.get("algorithm"))),
+            "algorithm": self._resolve_context_algorithm(raw_algorithm),
             "handoff": self._resolve_handoff(args.get("handoff")),
             "output_schema": self._resolve_json_object(args.get("output_schema"), "output_schema"),
             "include_run_state": self._resolve_bool(args.get("include_run_state"), default=False, field_name="include_run_state"),
@@ -295,7 +307,18 @@ class ForkConversationTool(BaseTool):
         parent_limit = self._agent.agent_loop_settings.max_iterations
         if requested is not None and parent_limit is not None and requested > parent_limit:
             raise ValueError(f"max_iterations cannot exceed the parent cap of {parent_limit}.")
-        return AgentLoopSettings(**values)
+        return AgentLoopSettings(**values, **self._inherited_guardrails())
+
+    def _inherited_guardrails(self) -> dict[str, Any]:
+        # Carries the parent's non-overridable guardrails so loop overrides cannot drop denied tools or contracts.
+        parent = self._agent.agent_loop_settings
+        return {
+            "tool_settings": parent.tool_settings,
+            "tool_error_policy": parent.tool_error_policy,
+            "output_contracts": parent.output_contracts,
+            "max_contract_rejections": parent.max_contract_rejections,
+            "max_queued_prompts": parent.max_queued_prompts,
+        }
 
     def _resolve_allowed_tools(self, raw_allowed_tools: Any) -> tuple[str, ...]:
         # Validates the optional runtime allowed_tools gate against the selectable tool catalog.
@@ -412,7 +435,7 @@ class ForkConversationTool(BaseTool):
                 },
                 "context_algorithm": {"type": "string", "enum": list(_CONTEXT_ALGORITHM_PRESETS), "description": "Direct ContextWindow preset override for the child. Prefer context_window.algorithm when grouping context edits."},
                 "model": {"type": "string", "description": "Optional model_name override. The value must appear in the developer-configured allowed_models list."},
-                "provider": {"type": "string", "enum": [provider.value for provider in ModelProvider], "description": "Optional Vidbyte ModelProvider override. API keys and credentials are still inherited and are never model-controlled."},
+                "provider": {"type": "string", "enum": [provider.value for provider in ModelProvider], "description": "Optional Vidbyte ModelProvider override. Credentials are never model-controlled: the parent's API key is inherited only on the same provider, and a different provider uses its own configured key."},
                 "temperature": {"type": "number", "minimum": 0, "maximum": 2, "description": "Optional child runner temperature override."},
                 "runtime": {"type": "string", "enum": [runtime.value for runtime in AgentRuntimeType], "description": "Optional AgentRuntimeType override, such as linear, mcts_search, actor_model_p2p, or actor_model_broadcast."},
                 "actor_runtime": {

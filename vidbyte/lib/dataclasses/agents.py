@@ -7,11 +7,13 @@ Purpose:
 Architecture:
     - AgentRunnerConfig: Primitive backend configuration.
     - PauseDuration: Validated whole-number delay for BaseAgent.pause().
+    - AllowedToolNames: Validated, stripped tool names for the AgentLoopSettings.allowed_tools gate.
     - FallbackModel: One entry in an ordered agent fallback chain.
     - FallbackTransform: Rebuilt provider-derived state for a model switch.
     - AgentCard: Local agent description, capabilities, and tools.
     - AgentMessage: Actor-to-actor message payload.
     - AgentSpec: Construction-friendly agent settings block.
+    - FinishReview: Accept, continue, or stop decision for one runtime finish attempt.
 Relations:
     Used by vidbyte.agents.base, vidbyte.agents.registry, and orchestration strategies.
 """
@@ -22,7 +24,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from vidbyte.lib.errors import AgentForkConfigurationError
+from vidbyte.lib.errors import AgentForkConfigurationError, ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.configs import (
@@ -64,7 +66,39 @@ class AgentStopReason(str, Enum):
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     CONTRACT_UNSATISFIED = "contract_unsatisfied"
+    FINISH_REVIEW_REJECTED = "finish_review_rejected"
     ERROR = "error"
+
+
+class FinishReviewAction(str, Enum):
+    """What a runtime does with a finish attempt after reviewing it."""
+
+    ACCEPT = "accept"
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+@dataclass(frozen=True, slots=True)
+class FinishReview:
+    """Outcome of AgentRuntime.review_finish_attempt for one proposed final answer."""
+
+    action: FinishReviewAction = FinishReviewAction.ACCEPT
+    feedback: str = ""
+
+    @classmethod
+    def accept(cls) -> "FinishReview":
+        """Let the run finish with the proposed answer."""
+        return cls()
+
+    @classmethod
+    def continue_with(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and send feedback back into the same loop."""
+        return cls(action=FinishReviewAction.CONTINUE, feedback=feedback)
+
+    @classmethod
+    def stop(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and end the run with FINISH_REVIEW_REJECTED."""
+        return cls(action=FinishReviewAction.STOP, feedback=feedback)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +112,7 @@ class AgentRuntimeConfig:
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
     tool_settings: "ToolSettings | None" = None
+    allowed_tools: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         """Validate optional budget values."""
@@ -107,6 +142,24 @@ class PauseDuration:
             raise ValueError("PauseDuration.seconds must be an integer.")
         if self.seconds < 0:
             raise ValueError("PauseDuration.seconds must be non-negative.")
+
+
+@dataclass(frozen=True, slots=True)
+class AllowedToolNames:
+    """Validated tool names for the AgentLoopSettings.allowed_tools gate, stripped like ToolSettings.denied_tools."""
+
+    names: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        """Reject a bare string and blank names, and store each name stripped."""
+        # @intent allowed-tools-validated-like-denied-tools
+        # The one-tuple typo ("search") is a string whose gate would be single letters, silently denying the tool.
+        if isinstance(self.names, (str, bytes)):
+            raise ConfigurationError("AgentLoopSettings.allowed_tools must be an iterable of tool names, not a string.")
+        names = tuple(str(value).strip() for value in self.names)
+        if not all(names):
+            raise ConfigurationError("AgentLoopSettings.allowed_tools cannot include blank tool names.")
+        object.__setattr__(self, "names", names)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +207,11 @@ class FallbackModel:
     temperature: float | None = None
 
     def __post_init__(self) -> None:
-        """Reject entries that do not name both a provider and a model."""
+        """Normalize an enum provider to its string value and reject blank provider or model names."""
+        # @intent fallback-provider-is-a-plain-string
+        # A ModelProvider member would otherwise render as 'ModelProvider.ANTHROPIC' in identity() and run metadata.
+        if isinstance(self.provider, Enum):
+            object.__setattr__(self, "provider", self.provider.value)
         if not str(self.provider).strip():
             raise ValueError("FallbackModel.provider cannot be empty")
         if not str(self.model).strip():
@@ -291,6 +348,14 @@ class AgentForkSettings:
             raise AgentForkConfigurationError("max_iterations must be greater than zero when provided.")
         if self.temperature is not None and not 0.0 <= self.temperature <= 2.0:
             raise AgentForkConfigurationError("temperature must be between 0 and 2 when provided.")
+        # @intent fork-drop-tools-validated-like-denied-tools
+        # A typo like ("delete_record") is a str, so the drop set would hold its characters and the child keeps the tool.
+        if isinstance(self.drop_tools, (str, bytes)):
+            raise AgentForkConfigurationError("AgentForkSettings.drop_tools must be an iterable of tool names, not a string.")
+        drop_tools = tuple(str(name).strip() for name in self.drop_tools)
+        if not all(drop_tools):
+            raise AgentForkConfigurationError("AgentForkSettings.drop_tools cannot include blank tool names.")
+        object.__setattr__(self, "drop_tools", drop_tools)
         if self.model_name is not None and not isinstance(self.model_name, str):
             raise AgentForkConfigurationError(
                 "model_name must be a single model name string; use AggregateAgent for multi-model aggregation."

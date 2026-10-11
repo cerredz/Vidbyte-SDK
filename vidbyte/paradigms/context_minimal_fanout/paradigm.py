@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from vidbyte.agents import BaseAgent
+from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.middleware.builtins import CostBudgetMiddleware, TokenBudgetMiddleware
 from vidbyte.paradigms.base import ParadigmHarness
 from vidbyte.paradigms.context_minimal_fanout.prompts import ContextMinimalFanoutPrompts
@@ -71,7 +72,6 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         agent = BaseAgent(
             name=settings.context.name,
             system_prompt=settings.context.system_prompt or self._prompts.for_role("context"),
-            runner=settings.context.runner,
             tools=tools,
             middleware=middleware,
             api_key=settings.context.api_key,
@@ -81,6 +81,7 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
             metadata={"role": "context"},
             **dict(settings.context.agent_options),
         )
+        self._bind_role_runner(agent, settings.context)
         reply = await agent.arun(self._build_context_message(prompt))
         return EnvironmentContext.from_snapshot(builder.snapshot(), fallback_text=reply.content)
 
@@ -132,10 +133,9 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         # Constructs a splitter/adversarial planning agent with output-schema tools.
         tools = (*self._read_only_toolset(settings), *role_settings.tools, *self._output_schema_tools(builder))
         middleware = self._with_budget_middleware(role_settings.middleware, role_settings.max_tokens, settings)
-        return BaseAgent(
+        agent = BaseAgent(
             name=role_settings.name,
             system_prompt=role_settings.system_prompt or self._prompts.for_role(role),
-            runner=role_settings.runner,
             tools=tools,
             middleware=middleware,
             api_key=role_settings.api_key,
@@ -145,15 +145,15 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
             metadata={"role": role},
             **dict(role_settings.agent_options),
         )
+        return self._bind_role_runner(agent, role_settings)
 
     def _build_implementation_agent(self, split_prompt: SplitPrompt, settings: ContextMinimalFanoutSettings) -> BaseAgent:
         # Constructs a fresh implementation agent for one split prompt.
         tools = (*self._implementation_toolset(settings), *settings.implementation.tools)
         middleware = self._with_budget_middleware(settings.implementation.middleware, settings.implementation.max_tokens, settings)
-        return BaseAgent(
+        agent = BaseAgent(
             name=f"{settings.implementation.name}-{split_prompt.id}",
             system_prompt=settings.implementation.system_prompt or self._prompts.for_role("implementation"),
-            runner=settings.implementation.runner,
             tools=tools,
             middleware=middleware,
             api_key=settings.implementation.api_key,
@@ -163,6 +163,16 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
             metadata={"role": "implementation", "split_prompt_id": split_prompt.id},
             **dict(settings.implementation.agent_options),
         )
+        return self._bind_role_runner(agent, settings.implementation)
+
+    def _bind_role_runner(self, agent: BaseAgent, role_settings: AgentRoleSettings) -> BaseAgent:
+        # Uses a caller-supplied runner in place of the one inferred from provider and model.
+        # @intent supplied-role-runner-is-honoured
+        # BaseAgent no longer takes a runner argument, so a pre-built runner is seeded into its
+        # runner cache, the same way the SDK hands a source agent's runner to a trace agent.
+        if role_settings.runner is not None:
+            agent._runner_cache[RUNNER_TYPE_TEXT] = role_settings.runner
+        return agent
 
     def _read_only_toolset(self, settings: ContextMinimalFanoutSettings) -> tuple[object, ...]:
         # Builds the read-only minimal toolset for planning agents when enabled.

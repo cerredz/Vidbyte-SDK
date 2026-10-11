@@ -75,19 +75,18 @@ def rule(*, code: FailureCode, on: MiddlewareHook, on_match: FailureDisposition 
     descriptor = FailureRule(callback=lambda _context: None, code=FailureCode.from_value(code), on=MiddlewareHook(on), on_match=FailureDisposition(on_match), on_error=RuleErrorMode(on_error), priority=priority, name=name)
 
     def decorate(callback: _RuleFunction) -> _RuleFunction:
-        # Store a callback-bound descriptor so registration remains explicitly Session-scoped.
-        bound = FailureRule(callback=callback, code=descriptor.code, on=descriptor.on, on_match=descriptor.on_match, on_error=descriptor.on_error, priority=descriptor.priority, name=descriptor.name)
+        # Choose the object the caller keeps: the callback itself, or a thin wrapper for coroutine functions.
+        decorated: Any = callback
         if inspect.iscoroutinefunction(callback):
             @wraps(callback)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 return await callback(*args, **kwargs)
 
-            wrapper_any = cast(Any, async_wrapper)
-            wrapper_any.__vidbyte_failure_rule__ = bound
-            return cast(_RuleFunction, async_wrapper)
-        callback_any = cast(Any, callback)
-        callback_any.__vidbyte_failure_rule__ = bound
-        return callback
+            decorated = async_wrapper
+        # Bind the descriptor to that same object so add_rule and remove_rule match it by identity,
+        # and pass the caller's own name so an omitted name falls back to the function's name.
+        decorated.__vidbyte_failure_rule__ = FailureRule(callback=decorated, code=descriptor.code, on=descriptor.on, on_match=descriptor.on_match, on_error=descriptor.on_error, priority=descriptor.priority, name=name)
+        return cast(_RuleFunction, decorated)
 
     return decorate
 

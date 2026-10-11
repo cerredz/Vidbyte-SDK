@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins._note_ids import next_free_counter
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
 
 if TYPE_CHECKING:
@@ -119,6 +120,7 @@ class TrajectoryCheckpointTool(BaseTool):
 
     def _next_primitive_id(self) -> str:
         # Generates a stable, unique primitive ID based on the instance counter.
+        self._counter = next_free_counter(self._manager, "trajectory_checkpoint", self._counter)
         return f"trajectory_checkpoint:{self._counter}"
 
     def _parse_score(self, raw: str | None) -> float | None:
@@ -134,6 +136,10 @@ class TrajectoryCheckpointTool(BaseTool):
     def _build_item(self, args: dict, primitive_id: str) -> object:
         # Constructs the TrajectoryCheckpointContextItem from validated call arguments.
         from vidbyte.context.primitives import TrajectoryCheckpointContextItem
+        # @intent null-optional-arg-means-default
+        # A null feedback or title means "not given", so it must never render as the text "None".
+        raw_feedback = args.get("feedback")
+        raw_title = args.get("title")
         return TrajectoryCheckpointContextItem(
             primitive_id=primitive_id,
             iteration=0,
@@ -142,6 +148,6 @@ class TrajectoryCheckpointTool(BaseTool):
             trajectory=str(args.get("trajectory", "")).strip(),
             output=str(args.get("output", "")).strip(),
             score=self._parse_score(args.get("score")),
-            feedback=str(args.get("feedback", "")).strip(),
-            title=str(args.get("title", "Runtime Checkpoint")).strip() or "Runtime Checkpoint",
+            feedback="" if raw_feedback is None else str(raw_feedback).strip(),
+            title=("" if raw_title is None else str(raw_title).strip()) or "Runtime Checkpoint",
         )

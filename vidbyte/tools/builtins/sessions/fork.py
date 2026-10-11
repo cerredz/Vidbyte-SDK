@@ -49,8 +49,8 @@ class ForkTool(_SessionBuiltinTool):
 
     def _perform(self, arguments: dict[str, Any]) -> ToolResult:
         # Resolve the source checkpoint and branch a new session from it.
-        checkpoint_id = str(arguments.get("checkpoint_id", "")).strip() or None
-        session_id = str(arguments.get("session_id", "")).strip()
+        checkpoint_id = self._optional_text(arguments, "checkpoint_id").strip() or None
+        session_id = self._optional_text(arguments, "session_id").strip()
         if not session_id:
             return self._fork_bound(checkpoint_id)
         resolved_session_id = self._resolve_session_id(session_id)
@@ -69,6 +69,8 @@ class ForkTool(_SessionBuiltinTool):
 
     def _fork_other(self, session_id: str, checkpoint_id: str | None) -> ToolResult:
         # Fork another session's checkpoint (or its head) into a new session via Session.fork_from.
+        if checkpoint_id is not None and self._store.get(checkpoint_id).session_id != session_id:
+            return ToolResult.error(_TOOL_NAME, f"Checkpoint {checkpoint_id} does not belong to session {session_id}.")
         source_id = checkpoint_id or self._target_head_id(session_id)
         if source_id is None:
             return ToolResult.error(_TOOL_NAME, f"Unknown or empty session: {session_id}.")

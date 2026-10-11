@@ -41,6 +41,10 @@ class SessionScope:
         # Unrestricted scope (use with caution; bypasses isolation).
         return SessionScope(all_runs=True)
 
+    def copy(self) -> "SessionScope":
+        # Return an independent scope with the same allowlist and all-runs override.
+        return SessionScope(allow_ids=tuple(self._allow_ids), all_runs=self._all_runs)
+
     def allow(self, session_id: str) -> None:
         # Add a session id to the allowlist.
         self._allow_ids.add(session_id)

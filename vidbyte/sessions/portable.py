@@ -21,9 +21,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from vidbyte.sessions.contracts import SESSION_SCHEMA_VERSION, Checkpoint, SessionMeta
-from vidbyte.sessions.errors import SessionNotFoundError, SessionSerializationError, SessionStoreError, SessionVersionError
+from vidbyte.sessions.errors import CheckpointNotFoundError, SessionNotFoundError, SessionSerializationError, SessionStoreError, SessionVersionError
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
 
@@ -74,7 +75,7 @@ class SessionBundleExporter:
 
 
 class SessionBundleImporter:
-    """Parses a portable zip bundle and ingests its records verbatim into a store."""
+    """Parses a portable zip bundle and ingests its records into a store, re-iding copies as needed."""
 
     def __init__(self, store: SessionStore, serializer: SessionSerializer | None = None) -> None:
         # Bind the target store and serializer used for every imported record.
@@ -84,10 +85,16 @@ class SessionBundleImporter:
     def import_bundle(self, bundle: bytes, *, new_id: str | None = None) -> str:
         # Parse, optionally re-id, and ingest the bundle, returning the final session id.
         meta, checkpoints = self._read_bundle(bundle)
+        # @intent bundle-import-never-overwrites-a-session
+        # Refuse when the id the import would land on is taken, whether it is the bundle's own id or the copy's new_id.
+        self._assert_session_absent(meta.session_id if new_id is None else new_id)
         if new_id is not None:
             meta, checkpoints = self._rewrite_session_id(meta, checkpoints, new_id)
-        else:
-            self._assert_session_absent(meta.session_id)
+            # @intent bundle-copy-never-shares-checkpoint-ids
+            # Checkpoint ids are store-wide keys, so a copy landing in a store that already holds
+            # them gets fresh ids; otherwise it would overwrite or shadow the original's checkpoints.
+            if self._any_checkpoint_exists(checkpoints):
+                meta, checkpoints = self._mint_checkpoint_ids(meta, checkpoints)
         self._store.ingest(meta, checkpoints)
         return meta.session_id
 
@@ -153,16 +160,33 @@ class SessionBundleImporter:
 
     @staticmethod
     def _rewrite_session_id(meta: SessionMeta, checkpoints: Sequence[Checkpoint], new_id: str) -> tuple[SessionMeta, list[Checkpoint]]:
-        # Rewrite only the session_id fields, preserving checkpoint ids and links.
+        # Rewrite the session_id fields; checkpoint ids are re-minted separately only on collision.
         return replace(meta, session_id=new_id), [replace(checkpoint, session_id=new_id) for checkpoint in checkpoints]
 
+    def _any_checkpoint_exists(self, checkpoints: Sequence[Checkpoint]) -> bool:
+        # Report whether the target store already holds any of these checkpoint ids.
+        for checkpoint in checkpoints:
+            try:
+                self._store.get(checkpoint.id)
+            except CheckpointNotFoundError:
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _mint_checkpoint_ids(meta: SessionMeta, checkpoints: Sequence[Checkpoint]) -> tuple[SessionMeta, list[Checkpoint]]:
+        # Give every checkpoint a fresh id and remap in-bundle parent links and the head pointer to match.
+        fresh = {checkpoint.id: f"ck_{uuid4().hex}" for checkpoint in checkpoints}
+        remapped = [replace(checkpoint, id=fresh[checkpoint.id], parent_id=fresh.get(checkpoint.parent_id, checkpoint.parent_id)) for checkpoint in checkpoints]
+        return replace(meta, head_id=fresh.get(meta.head_id, meta.head_id)), remapped
+
     def _assert_session_absent(self, session_id: str) -> None:
-        # Raise before same-id import would overwrite an existing session record.
+        # Raise before an import would overwrite an existing session record under the id it lands on.
         try:
             self._store.get_meta(session_id)
         except SessionNotFoundError:
             return
-        raise SessionStoreError("Session already exists; pass new_id= to import as a copy.", details={"session_id": session_id})
+        raise SessionStoreError("Session already exists; pass new_id= with an unused session id to import as a copy.", details={"session_id": session_id})
 
 
 def _now() -> str:

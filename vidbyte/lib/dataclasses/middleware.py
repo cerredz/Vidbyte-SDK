@@ -12,6 +12,8 @@ Architecture:
     - MiddlewareContext: Read-only runtime facts visible to middleware.
     - MiddlewareEvent: Bounded metadata record emitted for decisions and exceptions.
     - MiddlewareHookInvocation: Diagnostic record for every pipeline hook invocation.
+    - CostBudgetRunState / ExponentialBackoffRetryRunState: Mutable per-run
+      builtin middleware state stored in MiddlewareContext.run_state.
 Relations:
     Used by vidbyte.middleware and vidbyte.agents.runtime. Invocation records feed
     semantic diagnostic traces without expanding consumer-facing result metadata.
@@ -209,7 +211,25 @@ class MiddlewareHookInvocation:
             raise ValueError("duration_seconds cannot be negative.")
 
 
+@dataclass(slots=True)
+class CostBudgetRunState:
+    """Per-run token and spend accumulators for CostBudgetMiddleware."""
+
+    accumulated_tokens: int = 0
+    last_tokens_seen: int | None = None
+    estimated_spend_usd: float = 0.0
+
+
+@dataclass(slots=True)
+class ExponentialBackoffRetryRunState:
+    """Per-run model-error attempt counter for ExponentialBackoffRetryMiddleware."""
+
+    attempts: int = 0
+
+
 __all__ = [
+    "CostBudgetRunState",
+    "ExponentialBackoffRetryRunState",
     "MiddlewareAction",
     "MiddlewareContext",
     "MiddlewareDecision",

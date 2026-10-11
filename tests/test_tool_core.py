@@ -10,6 +10,7 @@ Architecture:
     - ToolActivityTests: Binding, validation, and argument-separation tests.
     - ToolCustomizationTests: Dataclass validation, immutable description overrides, and wrapper composition.
     - ToolCoreTests: Registry, spec rendering, validation, and execution tests.
+    - InputSchemaToolContractTests: Prompt docs and required checks for input_schema-only tools.
 Relations:
     Related to vidbyte.tools.types, base, activity, customization, registry, and executor.
 """
@@ -28,6 +29,7 @@ from vidbyte.tools import (
     ToolCall,
     ToolExecutor,
     ToolParameter,
+    ToolPermission,
     ToolRegistry,
     ToolResult,
     ToolSpec,
@@ -359,3 +361,115 @@ class ToolCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(openai_call, ToolCall("echo", {"text": "hello"}))
         self.assertEqual(anthropic_call, ToolCall("echo", {"text": "hello"}))
         self.assertEqual(gemini_call, ToolCall("echo", {"text": "hello"}))
+
+    def test_tools_formatter_treats_null_arguments_as_no_arguments(self) -> None:
+        """An explicit null argument payload parses as an empty argument object."""
+        openai_call = ToolsFormatter.parse_openai_tool_call(
+            {"id": "call_r1", "function": {"name": "ping", "arguments": None}}
+        )
+        anthropic_call = ToolsFormatter.parse_anthropic_tool_call({"type": "tool_use", "name": "ping", "input": None})
+        gemini_call = ToolsFormatter.parse_gemini_tool_call({"functionCall": {"name": "ping", "args": None}})
+
+        self.assertEqual(openai_call, ToolCall("ping", {}, call_id="call_r1"))
+        self.assertEqual(anthropic_call, ToolCall("ping", {}))
+        self.assertEqual(gemini_call, ToolCall("ping", {}))
+        for encoded_null in ("null", " null "):
+            self.assertEqual(
+                ToolsFormatter.parse_openai_tool_call({"function": {"name": "ping", "arguments": encoded_null}}),
+                ToolCall("ping", {}),
+            )
+
+    def test_tools_formatter_still_rejects_non_object_arguments(self) -> None:
+        """A list argument payload still raises for every provider parser."""
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_openai_tool_call({"function": {"name": "ping", "arguments": "[1, 2]"}})
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_openai_tool_call({"function": {"name": "ping", "arguments": [1, 2]}})
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_anthropic_tool_call({"name": "ping", "input": [1, 2]})
+        with self.assertRaises(ValueError):
+            ToolsFormatter.parse_gemini_tool_call({"functionCall": {"name": "ping", "args": [1, 2]}})
+
+
+class LookupOrderTool(BaseTool):
+    """Tool that declares its arguments only through a raw input_schema."""
+
+    def __init__(self) -> None:
+        """Record every argument mapping the tool actually executes against."""
+        self.executed_arguments: list[dict] = []
+
+    def spec(self) -> ToolSpec:
+        """Return a spec with no typed parameters, only an input_schema."""
+        return ToolSpec(
+            name="lookup_order",
+            description="Look up an order.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "order_id": {"type": "string", "description": "Order id."},
+                    "verbose": {"type": "boolean"},
+                    "extra": {},
+                },
+                "required": ["order_id"],
+            },
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        """Return the supplied order id."""
+        self.executed_arguments.append(dict(call.arguments))
+        return ToolResult.success(self.name, str(call.arguments.get("order_id")))
+
+
+class InputSchemaToolContractTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies input_schema-only tools are documented and validated like the provider schema."""
+
+    def test_prompt_lists_input_schema_properties(self) -> None:
+        """The system-prompt docs list the same arguments the native schema advertises."""
+        # @intent input-schema-tool-contract
+        rendered = LookupOrderTool().spec().to_prompt_str()
+        self.assertNotIn("Parameters: none", rendered)
+        self.assertIn(
+            "Parameters:\n- order_id (string, required): Order id.\n- verbose (boolean, optional): \n- extra (any, optional): \nPermission: safe",
+            rendered,
+        )
+
+    def test_required_names_come_from_input_schema(self) -> None:
+        """Required names fall back to input_schema when no typed parameters exist."""
+        self.assertEqual(LookupOrderTool().spec().required_parameter_names(), ("order_id",))
+
+    async def test_executor_rejects_missing_input_schema_argument(self) -> None:
+        """A call omitting a schema-required field never reaches execute()."""
+        registry = ToolRegistry()
+        tool = LookupOrderTool()
+        registry.register(tool)
+        result = await ToolExecutor(registry).execute_call(ToolCall("lookup_order", {}))
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("Missing required parameters: order_id", result.output)
+        self.assertEqual(tool.executed_arguments, [])
+
+    def test_malformed_input_schema_never_raises(self) -> None:
+        """Non-mapping properties and non-list required degrade to no parameters."""
+        for schema in ({"properties": ["x"], "required": "x"}, {"properties": {"x": "bad"}, "required": [1, "x"]}, {}):
+            spec = ToolSpec(name="odd", description="Odd schema.", input_schema=schema)
+            spec.to_prompt_str()
+            spec.required_parameter_names()
+        self.assertIn("Parameters: none", ToolSpec(name="odd", description="d", input_schema={"properties": []}).to_prompt_str())
+        self.assertEqual(ToolSpec(name="odd", description="d", input_schema={"required": "x"}).required_parameter_names(), ())
+        bad_property = ToolSpec(name="odd", description="d", input_schema={"properties": {"x": "bad"}, "required": [1, "x"]})
+        self.assertIn("- x (any, required): ", bad_property.to_prompt_str())
+        self.assertEqual(bad_property.required_parameter_names(), ("x",))
+
+    def test_typed_parameters_render_unchanged(self) -> None:
+        """Specs with typed parameters keep their exact previous rendering."""
+        spec = ToolSpec(
+            name="echo",
+            description="Echo input.",
+            parameters=(ToolParameter("text", "string", "Text."), ToolParameter("n", "integer", "Count.", required=False)),
+            permission=ToolPermission.READ,
+            input_schema={"type": "object", "properties": {"ignored": {"type": "string"}}, "required": ["ignored"]},
+        )
+        self.assertEqual(
+            spec.to_prompt_str(),
+            "<tool>\nTool: echo\nDescription: Echo input.\nParameters:\n- text (string, required): Text.\n- n (integer, optional): Count.\nPermission: read\n</tool>",
+        )
+        self.assertEqual(spec.required_parameter_names(), ("text",))

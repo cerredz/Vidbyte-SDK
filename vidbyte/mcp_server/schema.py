@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from vidbyte.lib.tools.formatter import ToolsFormatter
 from vidbyte.tools.types import ToolParameter, ToolResult, ToolSpec
 
 
@@ -27,19 +28,12 @@ class McpSchema:
     @staticmethod
     def tool_spec_to_mcp_tool(spec: ToolSpec) -> dict[str, Any]:
         """Convert a single SDK ToolSpec into an MCP tools/list entry dict."""
-        input_schema: dict[str, Any] = {"type": "object", "properties": {}}
-        required: list[str] = []
-        for param in spec.parameters:
-            prop: dict[str, Any] = {}
-            if param.type:
-                prop["type"] = param.type
-            if param.description:
-                prop["description"] = param.description
-            input_schema["properties"][param.name] = prop
-            if param.required:
-                required.append(param.name)
-        if required:
-            input_schema["required"] = required
+        # @intent mcp-input-schema-matches-provider-schema
+        # MCP clients validate and fill arguments from inputSchema, so it must be the
+        # same JSON Schema providers receive: the full derived schema (array items,
+        # enums, nested models) with SDK aliases such as "int" normalized. Activity
+        # annotations are an agent-loop concern and stay out of the MCP schema.
+        input_schema = ToolsFormatter.input_schema(spec)
         return {
             "name": spec.name,
             "description": spec.description,

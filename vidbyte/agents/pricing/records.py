@@ -6,11 +6,13 @@ Purpose:
     Gives the runtime, middleware, and agent API stable typed shapes for one
     priced model call (UsageRecord) and a whole run (UsageRollup).
 Architecture:
-    - UsageRecord: One model call with its provider-native usage and USD cost.
+    - UsageRecord: One model call with its provider-native usage, USD cost, the
+      kind of model that made it, and whether the call failed after being billed.
     - OperationUsageRecord: One priced search/fetch operation and its USD cost.
     - UsageRecordingIntegrity: Whether metering itself stayed intact for a run.
     - UsageRollup: The per-call and per-operation ledgers plus None-aware totals,
-      including a run-level cache hit rate.
+      including a run-level cache hit rate and the count of calls whose usage
+      could not be recorded.
 Relations:
     Built by vidbyte/agents/pricing/tracker.py; surfaced on
     AgentMessage.metadata["usage_rollup"] and BaseAgent.get_usage().
@@ -24,6 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from vidbyte.agents.pricing.base import ProviderUsage
+from vidbyte.lib.enums.usage import UsageKind
 
 
 class UsageRecordingIntegrity(str, Enum):
@@ -35,13 +38,19 @@ class UsageRecordingIntegrity(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class UsageRecord:
-    """One priced model call: provider-native usage plus its USD cost or None."""
+    """One priced model call: provider-native usage plus its USD cost or None.
+
+    `kind` says whether a generative or a decision model made the call, and `failed` is True for a call the
+    provider billed but that then failed, so its usage counts even though no answer came back.
+    """
 
     call_index: int
     provider: str
     model: str
     usage: ProviderUsage
     cost_usd: float | None = None
+    kind: UsageKind = UsageKind.GENERATIVE
+    failed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +67,12 @@ class OperationUsageRecord:
 
 @dataclass(frozen=True, slots=True)
 class UsageRollup:
-    """Whole-run usage ledger; cost_complete is False when any call is unpriced."""
+    """Whole-run usage ledger; cost_complete is False when any call is unpriced.
+
+    `unaccounted_call_count` counts model calls that reached the ledger but left no record (no parseable usage,
+    an unknown provider, or an internal parse or pricing error). Like `recording_integrity`, it describes the
+    whole ledger, including in a rollup filtered to one UsageKind.
+    """
 
     calls: tuple[UsageRecord, ...] = field(default_factory=tuple)
     model_call_count: int = 0
@@ -72,6 +86,7 @@ class UsageRollup:
     operations: tuple[OperationUsageRecord, ...] = field(default_factory=tuple)
     operation_count: int = 0
     recording_integrity: UsageRecordingIntegrity = UsageRecordingIntegrity.INTACT
+    unaccounted_call_count: int = 0
 
 
 __all__ = [

@@ -52,12 +52,19 @@ class HandoffAgent(BaseAgent):
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, spec: Handoff) -> "HandoffAgent":
         """Build a handoff agent that reuses a source agent's runner and provider configuration."""
+        # @intent handoff-reuses-the-selected-runner
+        # The source agent may already own provider-specific runner state and authentication; copying its cache
+        # preserves that selected execution boundary. Rebuilding the runner can lose that state and make a
+        # handoff fail even though the source run already succeeded with the same configured provider.
+        # The timeout and fallback chain are copied too, so a run that only succeeded on a fallback model can still hand off.
         generator = cls(
             spec,
             provider=source_agent.runner_config.provider,
             model_name=source_agent.runner_config.model_name,
             api_key=source_agent.runner_config.api_key,
             temperature=source_agent.runner_config.temperature,
+            timeout_seconds=source_agent.runner_config.timeout_seconds,
+            fallback=source_agent._fallback_spec,
         )
         generator._runner_cache.update(source_agent._runner_cache)
         return generator
@@ -178,11 +185,15 @@ class HandoffAgent(BaseAgent):
         if not isinstance(raw_sections, Mapping):
             return self._empty_sections(), {}
         wanted = {title.lower(): title for title in self.spec.section_titles()}
+        # @intent null-optional-arg-means-default
+        # Models send JSON null for a section they have nothing for; read it exactly like an omitted
+        # section, so the next owner gets an empty section rather than the text "None".
+        given = {title: value for title, value in raw_sections.items() if value is not None}
         if not wanted:
-            return {str(title): self._string_value(value) for title, value in raw_sections.items()}, {}
+            return {str(title): self._string_value(value) for title, value in given.items()}, {}
         sections = self._empty_sections()
         extra: dict[str, str] = {}
-        for title, value in raw_sections.items():
+        for title, value in given.items():
             canonical = wanted.get(str(title).lower())
             if canonical is not None:
                 sections[canonical] = self._string_value(value)

@@ -17,6 +17,7 @@ from vidbyte.context import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts import Prompts
+from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent
 
 
 def _is_done_response(final_answer: str) -> "FakeResponse":
@@ -155,6 +156,30 @@ class HandoffAgentTests(unittest.IsolatedAsyncioTestCase):
         doc = await agent.generate_handoff("digest")
         self.assertEqual(doc.metadata.get("extra_sections", {}).get("Bonus"), "extra")
 
+    async def test_null_json_section_reads_like_an_omitted_one(self) -> None:
+        # A null spec section must fill exactly like the omitted one, never as the text "None".
+        null_body = json.dumps({"sections": {"Summary": "disk cleaned", "Next Steps": None}})
+        omitted_body = json.dumps({"sections": {"Summary": "disk cleaned"}})
+        null_doc = await build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(null_body)).generate_handoff("digest")
+        omitted_doc = await build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(omitted_body)).generate_handoff("digest")
+        self.assertEqual(null_doc.sections, omitted_doc.sections)
+        self.assertEqual(null_doc.sections["Next Steps"], "")
+        self.assertNotIn("None", null_doc.to_context_text())
+
+    async def test_null_json_extra_section_adds_no_extra_sections_entry(self) -> None:
+        # A null section the spec does not name is left out, not kept as an "extra" holding "None".
+        body = json.dumps({"sections": {"Summary": "s", "Next Steps": "n", "Bonus": None}})
+        agent = build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(body))
+        doc = await agent.generate_handoff("digest")
+        self.assertNotIn("extra_sections", doc.metadata)
+        self.assertEqual(doc.sections, {"Summary": "s", "Next Steps": "n"})
+
+    def test_null_json_section_without_spec_titles_is_left_out(self) -> None:
+        # With no spec sections, every given section is kept except one sent as null.
+        agent = build_test_agent(Handoff(sections={}), agent_type=HandoffAgent, runner=HandoffRunner("x"))
+        sections = agent.parse_sections(json.dumps({"sections": {"Notes": "keep", "Risks": None}}))
+        self.assertEqual(sections, {"Notes": "keep"})
+
     def test_defaults_to_minimal_handoff(self) -> None:
         agent = build_test_agent(agent_type=HandoffAgent, runner=HandoffRunner("x"))
         self.assertIsInstance(agent.spec, MinimalHandoff)
@@ -234,6 +259,36 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(doc, ResearchHandoff)
         self.assertEqual(doc.sections["Question"], "q")
 
+    async def test_handoff_by_plain_agent_generates_on_that_agents_runner(self) -> None:
+        agent = self._agent("primary output")
+        await agent.generate_reply("task")
+        cheap_runner = HandoffRunner(_ENGINEERING_BODY)
+        cheap = build_test_agent(name="cheap", system_prompt="Summarize.", runner=cheap_runner)
+        doc = await agent.handoff(EngineeringHandoff(), by=cheap)
+        self.assertIsInstance(doc, EngineeringHandoff)
+        self.assertEqual(doc.sections["Next Steps"], "Deploy.")
+        self.assertGreater(cheap_runner.calls, 0)
+
+    async def test_handoff_explicit_spec_overrides_handoff_agent_default_spec(self) -> None:
+        agent = self._agent("primary output")
+        await agent.generate_reply("task")
+        generator_runner = HandoffRunner(_ENGINEERING_BODY)
+        generator = build_test_agent(agent_type=HandoffAgent, runner=generator_runner)
+        doc = await agent.handoff(EngineeringHandoff(), by=generator)
+        self.assertIsInstance(doc, EngineeringHandoff)
+        self.assertEqual(doc.sections["Objective"], "Ship the feature.")
+        self.assertGreater(generator_runner.calls, 0)
+        self.assertIsInstance(generator.spec, MinimalHandoff)
+
+    async def test_handoff_by_handoff_agent_without_spec_uses_it_unchanged(self) -> None:
+        agent = self._agent("primary output", handoff=EngineeringHandoff())
+        custom_runner = HandoffRunner("## Question\nq\n## Findings\nf")
+        custom = build_test_agent(ResearchHandoff(), agent_type=HandoffAgent, runner=custom_runner)
+        doc = await agent.handoff(by=custom)
+        # The source agent's own auto-handoff spec must not replace the supplied generator's spec.
+        self.assertIsInstance(doc, ResearchHandoff)
+        self.assertGreater(custom_runner.calls, 0)
+
     def test_fork_propagates_handoff_spec(self) -> None:
         agent = self._agent("x", handoff=EngineeringHandoff())
         child = agent.fork(AgentForkSettings(name="child"))
@@ -246,6 +301,15 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
         before = runner.calls
         await agent.handoff(EngineeringHandoff())
         self.assertGreater(runner.calls, before)
+
+    def test_side_agents_keep_source_fallback_chain_and_timeout(self) -> None:
+        # A source run that only succeeded on a fallback model must leave its side agents able to reach that model too.
+        source = BaseAgent(name="eng", system_prompt="Engineer.", provider="deepseek", model_name="deepseek-v4-pro", api_key="k", timeout_seconds=12.5, fallback=["anthropic/claude-sonnet-4-6"])
+        side_agents = (HandoffAgent.from_source_agent(source, EngineeringHandoff()), ContinualTraceAgent.from_source_agent(source, ActionTrace))
+        for side in side_agents:
+            self.assertIs(side._fallback_spec, source._fallback_spec)
+            self.assertEqual([model.model for model in side.fallback.models], [model.model for model in source.fallback.models])
+            self.assertEqual(side.runner_config.timeout_seconds, 12.5)
 
 
 class HandoffPromptCatalogTests(unittest.TestCase):

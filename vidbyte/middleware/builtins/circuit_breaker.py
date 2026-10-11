@@ -5,7 +5,8 @@ Description:
 Purpose:
     Lets developers protect against sustained model failures by short-circuiting
     model calls when error rate exceeds a rolling-window threshold, then
-    recovering gradually through a half-open probe phase.
+    recovering gradually through a half-open probe phase. A probe that never
+    reports an outcome expires after recovery_timeout so HALF_OPEN cannot wedge.
 Architecture:
     - CircuitState: CLOSED / OPEN / HALF_OPEN state enum.
     - CircuitBreakerMiddleware: Tracks errors in a rolling window (CLOSED),
@@ -64,6 +65,7 @@ class CircuitBreakerMiddleware(AgentMiddleware):
         self._error_timestamps: list[float] = []
         self._opened_at: float | None = None
         self._half_open_calls: int = 0
+        self._half_open_started_at: float | None = None
 
     @property
     def state(self) -> CircuitState:
@@ -104,6 +106,7 @@ class CircuitBreakerMiddleware(AgentMiddleware):
         if self._opened_at is not None and now - self._opened_at >= self.recovery_timeout:
             self._state = CircuitState.HALF_OPEN
             self._half_open_calls = 1  # the transition call itself counts as the first probe
+            self._half_open_started_at = now
             return MiddlewareDecision.continue_()
         return MiddlewareDecision.abort(
             "circuit_open",
@@ -114,7 +117,15 @@ class CircuitBreakerMiddleware(AgentMiddleware):
         )
 
     def _handle_half_open_state(self) -> MiddlewareDecision:
-        """Allow calls up to the probe limit, blocking further ones until resolution."""
+        """Allow calls up to the probe limit, blocking further ones until resolution or expiry."""
+        now = self.clock()
+        started_at = self._half_open_started_at
+        probe_window_expired = started_at is not None and now - started_at >= self.recovery_timeout
+        if self._half_open_calls >= self.half_open_max_calls and probe_window_expired:
+            # The outstanding probes never reported back (cancelled or aborted), so start a fresh window.
+            self._half_open_calls = 1
+            self._half_open_started_at = now
+            return MiddlewareDecision.continue_()
         if self._half_open_calls >= self.half_open_max_calls:
             return MiddlewareDecision.abort(
                 "circuit_half_open_limit",
@@ -140,6 +151,7 @@ class CircuitBreakerMiddleware(AgentMiddleware):
         """Move to OPEN state and record the time the circuit opened."""
         self._state = CircuitState.OPEN
         self._opened_at = self.clock()
+        self._half_open_started_at = None
 
     def _transition_to_closed(self) -> None:
         """Move to CLOSED state and reset all error tracking."""
@@ -147,6 +159,7 @@ class CircuitBreakerMiddleware(AgentMiddleware):
         self._error_timestamps = []
         self._opened_at = None
         self._half_open_calls = 0
+        self._half_open_started_at = None
 
 
 __all__ = ["CircuitBreakerMiddleware", "CircuitState"]

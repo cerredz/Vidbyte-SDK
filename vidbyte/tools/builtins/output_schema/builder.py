@@ -22,6 +22,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from vidbyte.lib.errors import ToolExecutionError
+
 
 @dataclass(frozen=True, slots=True)
 class OutputSchemaField:
@@ -42,15 +44,13 @@ class OutputSchemaBuilder:
         self._implicit = False
 
     def declare(self, fields: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
-        # Registers the declared fields and initializes storage for each.
-        declared: list[str] = []
-        for raw in fields:
-            field = self._coerce_field(raw)
-            if field is None:
-                continue
+        # Read every entry before registering any, so one invalid entry refuses the whole call.
+        coerced = [self._coerce_field(raw) for raw in fields]
+        declared = [field for field in coerced if field is not None]
+        # Register the accepted fields and initialize storage for each.
+        for field in declared:
             self._register(field)
-            declared.append(field.name)
-        return tuple(declared)
+        return tuple(field.name for field in declared)
 
     def append(self, field_name: str, value: Any) -> str:
         # Appends to a repeated field or sets a scalar field, auto-declaring if unknown.
@@ -89,10 +89,23 @@ class OutputSchemaBuilder:
         return not any(self._values.values())
 
     def _register(self, field: OutputSchemaField) -> None:
-        # Stores a field declaration and seeds its value slot when new.
+        # Stores a field declaration and keeps its value slot in the declared shape.
+        previous = self._fields.get(field.name)
         self._fields[field.name] = field
         if field.name not in self._values:
             self._values[field.name] = [] if field.repeated else None
+            return
+        if previous is None or previous.repeated == field.repeated:
+            return
+        # @intent redeclared-field-value-matches-its-new-shape
+        # A field re-declared with a different shape must not keep the old-shape value,
+        # or the next append breaks. Scalar to repeated wraps a set value so it is kept;
+        # repeated to scalar keeps the latest entry, matching last-write-wins for scalars.
+        current = self._values[field.name]
+        if field.repeated:
+            self._values[field.name] = [] if current is None else [current]
+        else:
+            self._values[field.name] = current[-1] if current else None
 
     @staticmethod
     def _coerce_field(raw: Mapping[str, Any] | str) -> OutputSchemaField | None:
@@ -101,13 +114,27 @@ class OutputSchemaBuilder:
             name = raw.strip()
             return OutputSchemaField(name=name) if name else None
         if isinstance(raw, Mapping):
-            name = str(raw.get("name", "")).strip()
+            # @intent null-optional-arg-means-default
+            # Models send unset optionals as JSON null; treat a null name or description
+            # like an omitted key so str(None) never becomes the literal text "None".
+            raw_name = raw.get("name")
+            name = "" if raw_name is None else str(raw_name).strip()
             if not name:
                 return None
+            raw_description = raw.get("description")
+            # @intent boolean-tool-args-reject-stringly-truthiness
+            # bool("false") is True, so a stringly "false" would silently make the field repeated;
+            # only a real JSON boolean counts, and null or an omitted key means the default (scalar).
+            raw_repeated = raw.get("repeated")
+            if raw_repeated is not None and not isinstance(raw_repeated, bool):
+                raise ToolExecutionError(
+                    f"Output field '{name}': repeated must be a boolean (true/false).",
+                    details={"field": name, "parameter": "repeated"},
+                )
             return OutputSchemaField(
                 name=name,
-                description=str(raw.get("description", "")).strip(),
-                repeated=bool(raw.get("repeated", False)),
+                description="" if raw_description is None else str(raw_description).strip(),
+                repeated=raw_repeated is True,
             )
         return None
 

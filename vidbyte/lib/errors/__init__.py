@@ -64,6 +64,7 @@ from vidbyte.lib.errors.base import (
     TaskLedgerError,
     TracerConfigurationError,
     UnsupportedProviderError,
+    UsageAccountingError,
     VidbyteSdkError,
 )
 
@@ -110,5 +111,6 @@ __all__ = [
     "TaskLedgerError",
     "TracerConfigurationError",
     "UnsupportedProviderError",
+    "UsageAccountingError",
     "VidbyteSdkError",
 ]

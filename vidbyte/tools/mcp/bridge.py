@@ -15,6 +15,7 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
 from vidbyte.tools.base import BaseTool
@@ -41,12 +42,18 @@ class McpBridgedTool(BaseTool):
 
     def spec(self) -> ToolSpec:
         """Convert MCP JSON Schema metadata into a native ToolSpec."""
+        remote_schema = self.remote_tool.input_schema
         return ToolSpec(
             name=self.remote_tool.name,
             description=self.remote_tool.description,
-            parameters=self._parameters(self.remote_tool.input_schema),
+            # Keep the flat argument list so required-argument checks and prompt text work as before.
+            parameters=self._parameters(remote_schema),
             permission=self.permission,
             metadata={"source": "mcp"},
+            # @intent mcp-bridge-keeps-remote-input-schema
+            # Send the server's own schema to the model, because the flat argument list
+            # drops array items, enums, and nested objects that providers need to see.
+            input_schema=self._input_schema(remote_schema),
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
@@ -58,6 +65,17 @@ class McpBridgedTool(BaseTool):
             output=result.output,
             metadata=dict(result.metadata),
         )
+
+    def _input_schema(self, schema: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Return a private copy of a usable remote object schema, or None to use the flat list."""
+        if not isinstance(schema, Mapping) or schema.get("type", "object") != "object":
+            return None
+        properties = schema.get("properties")
+        if not isinstance(properties, Mapping) or not all(isinstance(name, str) for name in properties):
+            return None
+        copied = deepcopy(dict(schema))
+        copied["type"] = "object"
+        return copied
 
     def _parameters(self, schema: Mapping[str, Any]) -> tuple[ToolParameter, ...]:
         """Translate basic JSON Schema properties into ToolParameter values."""

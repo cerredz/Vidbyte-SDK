@@ -42,6 +42,7 @@ class ModelProvider(str, Enum):
     OPENROUTER = "openrouter"
     ELEVENLABS = "elevenlabs"
     PLAYAI = "playai"
+    TYPESAFE = "typesafe"
 
     def usage_class(self) -> type[ProviderUsage] | None:
         # Resolves this provider's token-usage parser class, or None when the
@@ -55,8 +56,9 @@ def _usage_class_map() -> dict[ModelProvider, type[ProviderUsage]]:
     # pricing import is deferred to call time so this low-level enum module never
     # imports the higher-level agents.pricing package at load, avoiding both an
     # import cycle and a layering inversion. Compatible providers (xAI, DeepSeek,
-    # GLM, MiniMax, Kimi, Meta, Mistral) share the chat-completions usage shape.
-    from vidbyte.agents.pricing import AnthropicUsage, ChatCompletionUsage, GeminiUsage, OpenAIUsage, OpenRouterUsage
+    # GLM, MiniMax, Kimi, Meta, Mistral) share the chat-completions usage shape;
+    # TypeSafe (Jev) reports its own input/output-only decision usage shape.
+    from vidbyte.agents.pricing import AnthropicUsage, ChatCompletionUsage, GeminiUsage, JevUsage, OpenAIUsage, OpenRouterUsage
 
     return {
         ModelProvider.OPENAI: OpenAIUsage,
@@ -70,6 +72,7 @@ def _usage_class_map() -> dict[ModelProvider, type[ProviderUsage]]:
         ModelProvider.META: ChatCompletionUsage,
         ModelProvider.MISTRAL: ChatCompletionUsage,
         ModelProvider.OPENROUTER: OpenRouterUsage,
+        ModelProvider.TYPESAFE: JevUsage,
     }
 
 

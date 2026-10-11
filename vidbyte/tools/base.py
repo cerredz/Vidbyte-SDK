@@ -13,12 +13,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from copy import copy as shallow_copy
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.types import ToolActivity, ToolCall, ToolResult, ToolSpec
 
 if TYPE_CHECKING:
+    from vidbyte.context.manager import ContextManager
     from vidbyte.lib.dataclasses.tools import ToolCustomization
 
 _EMPTY_PARAMETER_DESCRIPTIONS: Mapping[str, str] = MappingProxyType({})
@@ -37,6 +40,16 @@ class BaseTool(ABC):
         from vidbyte.tools.activity import ActivityToolFormatter
 
         return ActivityToolFormatter.bind(self, activity)
+
+    def rebind_context_manager(self, old: ContextManager | None, new: ContextManager | None) -> "BaseTool":
+        """Return a copy writing to ``new`` when this tool writes to the ``old`` context manager, else this tool."""
+        # @intent fork-rebinds-context-tools
+        # Manager-bound builtins keep their manager in _manager; a fork branch must write to its own copy.
+        if old is None or new is None or new is old or getattr(self, "_manager", None) is not old:
+            return self
+        clone = shallow_copy(self)
+        setattr(clone, "_manager", new)
+        return clone
 
     # @intent description-only-tool-view
     # Applications may adapt the language a model sees for local terminology,
@@ -82,6 +95,26 @@ class BaseTool(ABC):
             return f"Missing required parameters: {', '.join(missing)}"
         return None
 
+    @staticmethod
+    def _resolve_bool_argument(call: ToolCall, name: str, *, default: bool) -> bool:
+        # @intent boolean-tool-args-reject-stringly-truthiness
+        # Models sometimes send booleans as strings, and bool("false") is True, which flips an explicit
+        # "no" into "yes" on destructive tools; only a real JSON boolean counts, and null means the default.
+        value = call.arguments.get(name)
+        if value is None:
+            return default
+        if not isinstance(value, bool):
+            raise ToolExecutionError(f"'{name}' must be a boolean (true/false).", details={"parameter": name})
+        return value
+
+    @staticmethod
+    def _optional_argument(call: ToolCall, name: str, *, default: Any) -> Any:
+        # @intent null-optional-arg-means-default
+        # Models often send JSON null for an optional argument they mean to leave out; treat it exactly
+        # like an omitted key so the documented default applies instead of crashing on None.
+        value = call.arguments.get(name)
+        return default if value is None else value
+
 
 class _ToolWrapper(BaseTool, ABC):
     """Private base contract for SDK wrappers that preserve one underlying tool."""
@@ -90,6 +123,11 @@ class _ToolWrapper(BaseTool, ABC):
     @abstractmethod
     def wrapped_tool(self) -> BaseTool:
         # Return the implementation whose runtime behavior the wrapper preserves.
+        raise NotImplementedError
+
+    @abstractmethod
+    def _rewrap(self, tool: BaseTool) -> BaseTool:
+        # Return the same kind of view, with the same model-facing changes, around another tool.
         raise NotImplementedError
 
 
@@ -105,6 +143,10 @@ class _CustomizedTool(_ToolWrapper):
     def wrapped_tool(self) -> BaseTool:
         """Return the original tool whose runtime behavior this view preserves."""
         return self._tool
+
+    def _rewrap(self, tool: BaseTool) -> BaseTool:
+        # Reuses the validated customization around another copy of the same tool, such as a fork clone.
+        return _CustomizedTool(tool, self._customization)
 
     def spec(self) -> ToolSpec:
         """Return a fresh model-facing spec with validated descriptions replaced."""

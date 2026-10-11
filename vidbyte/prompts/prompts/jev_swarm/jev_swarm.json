@@ -1,0 +1,31 @@
+{
+  "name": "Jev Swarm",
+  "description": "Instructions for JevAgent's SWARM dynamic-compute option: the message that asks the main agent to plan a team, each helper's assignment, the results and rejection messages, and the launch tool's model-facing descriptions.",
+  "key": "jev_swarm",
+  "prompts": {
+    "plan_prompt": {
+      "path": "plan_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_swarm/plan_prompt.md"
+    },
+    "assignment_prompt": {
+      "path": "assignment_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_swarm/assignment_prompt.md"
+    },
+    "results_prompt": {
+      "path": "results_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_swarm/results_prompt.md"
+    },
+    "rejected_prompt": "The swarm was not launched because the plan needs changes. Each problem below names the assignment it concerns and what to change.\n\n{reasons}\n\n{next_step}",
+    "retry_prompt": "Fix every problem above and call the tool again with the complete revised plan, or continue the work yourself if the units cannot be separated this way. You can submit {remaining} more plan(s) in this run.",
+    "closed_prompt": "The swarm is no longer available in this run, because it already ran or its plan attempts are used up. Continue the remaining work yourself.",
+    "tool_description": "Launches a team of helper agents that work in parallel on separate parts of the remaining task and returns their results to you. Use it once, with one assignment for each independent unit of work, when the units do not overlap and none of them needs another unit's result. Each helper starts fresh with the original request, the verified notes about this run, the shared conventions, and its own assignment, and it cannot see this conversation or the other helpers. The call returns every helper's result in assignment order, or a list of problems to fix when the plan is rejected. Keep the decisions that shape the whole task with yourself, and combine the returned results into the final deliverable.",
+    "conventions_description": "The decisions every helper must follow so that separately produced parts fit together. State the shared output format, interfaces, naming, style, method, and constraints that apply to all assignments. Helpers cannot see each other, so any choice left unstated here may be made differently by each of them. Write it as complete instructions that make sense without this conversation, including the constraints from the original request that every part must respect.",
+    "assignments_description": "The assignments, one for each independent unit of the remaining work, in the order you want their results returned. Give at least two and no more than the allowed number, and cover every unit exactly once. No two assignments may share an item, source, file, or question, and none may depend on another assignment's result. Every helper runs at the same time as the others, with the same tools and permissions you have.",
+    "name_description": "A short label that identifies this assignment in the returned results. Use a few plain words that describe the unit. Make it different from every other assignment's name. The label is shown with the helper's result so you can match each result to its unit.",
+    "objective_description": "What this helper must accomplish for its unit, written as complete instructions. State the goal and the method the helper should follow, applying the shared conventions where they matter. The helper has no memory of this conversation, so do not refer to earlier messages or to decisions you have not written down. Keep the objective to this unit alone, and leave the decisions that shape the whole task with yourself.",
+    "inputs_description": "The exact material this helper works on, named precisely enough to find without searching. Name the specific files, entities, sources, records, or questions that make up this unit. Include any values, findings, or excerpts from your own work that the helper needs and cannot find on its own. Everything named here belongs to this assignment only.",
+    "deliverable_description": "The exact result this helper must return and the form it should take. Describe its content, structure, and level of detail so it can be merged with the other assignments' results. Follow the output format set in the shared conventions. Ask for a result compact enough to read alongside every other helper's result.",
+    "boundaries_description": "What lies outside this helper's unit and must not be done or changed. Name the items, files, and decisions that belong to other assignments or remain with you. Mark anything the helper must not modify, even when it seems related to its unit. Clear boundaries keep helpers from duplicating or undoing each other's work.",
+    "verification_description": "How the helper must check its result before returning it. Describe a concrete check the helper can carry out with its own tools, and the outcome that counts as passing. The helper reports what the check showed alongside its result. A check that only says to review the work gives you no reason to trust the result."
+  }
+}

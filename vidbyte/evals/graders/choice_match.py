@@ -35,12 +35,20 @@ class ChoiceMatchGrader(BaseGrader):
     def _extract_matches(self, actual: str) -> list[str]:
         # Returns all allowed choices found as standalone labels in the output.
         flags = 0 if self.case_sensitive else re.IGNORECASE
-        matches = []
-        for choice in self.choices:
-            pattern = rf"(?<!\w)\(?{re.escape(choice)}\)?\.?(?!\w)"
-            if re.search(pattern, actual.strip(), flags=flags):
-                matches.append(choice)
-        return matches
+        text = actual.strip()
+        spans = [
+            (index, found.span())
+            for index, choice in enumerate(self.choices)
+            for found in re.finditer(rf"(?<!\w)\(?{re.escape(choice)}\)?\.?(?!\w)", text, flags=flags)
+        ]
+        # @intent nested-label-counts-once
+        # A label found inside a longer matched label ("spam" in "not spam") is part of that label, not a second answer.
+        kept = {
+            index
+            for index, (start, end) in spans
+            if not any(other != index and o_start <= start and end <= o_end and o_end - o_start > end - start for other, (o_start, o_end) in spans)
+        }
+        return [self.choices[index] for index in sorted(kept)]
 
     def _normalize(self, value: str) -> str:
         # Applies the configured case sensitivity to a choice value.

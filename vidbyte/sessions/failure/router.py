@@ -79,9 +79,10 @@ class FailureMetadataNormalizer:
             return ()
         failures: list[Failure] = []
         cls._append_explicit_failures(failures, metadata)
-        cls._append_stop_failure(failures, metadata)
         cls._append_contract_failures(failures, metadata)
         cls._append_tool_failures(failures, metadata)
+        # Record the stop last so a contract or tool budget record for the same stop wins.
+        cls._append_stop_failure(failures, metadata)
         cls._append_tool_context_failures(failures, metadata)
         cls._append_middleware_failures(failures, metadata)
         cls._append_fallback_failure(failures, metadata)
@@ -110,6 +111,11 @@ class FailureMetadataNormalizer:
         if stop_reason is None or str(stop_reason) in {"final_response", "is_done"}:
             return
         code = cls._STOP_CODES.get(str(stop_reason), FailureCode.RUNTIME_ERROR)
+        # @intent one-stop-one-routable-failure
+        # A contract or tool budget appender may already have recorded this stop with richer
+        # details; a second routable record would run the bound recovery handler twice.
+        if any(item.code is code and item.status is FailureStatus.EXHAUSTED for item in failures):
+            return
         status = FailureStatus.EXHAUSTED if code is not FailureCode.RUNTIME_MIDDLEWARE_ABORT else FailureStatus.TERMINAL
         failures.append(Failure(code=code, source="agent_runtime", phase=FailurePhase.LOOP, status=status, disposition=FailureDisposition.ROUTE if status is FailureStatus.EXHAUSTED else FailureDisposition.STOP, details={"stop_reason": str(stop_reason), "iteration_count": metadata.get("iteration_count"), "tokens_used": metadata.get("tokens_used")}))
 

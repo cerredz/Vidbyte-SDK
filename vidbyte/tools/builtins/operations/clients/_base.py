@@ -27,6 +27,7 @@ from datetime import date
 from json import JSONDecodeError, loads
 from typing import Any
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
@@ -69,6 +70,11 @@ class WebOperationClient:
 
     async def request_json(self, operation: str, method: str, *, path: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, query: Mapping[str, str] | None = None) -> tuple[Mapping[str, Any], int]:
         """Issue one bounded provider request and return its JSON object with the attempts used."""
+        # @intent read-only-post-operations-declare-retry-safety
+        # The search and fetch endpoints take POST only to carry a JSON body; they read
+        # vendor data and change nothing, so repeating one cannot duplicate a side effect.
+        # The transport refuses to retry POST without an idempotency key, so a fresh key per
+        # call declares that safety and keeps the bounded, billable retry budget working.
         response = await self._transport.request(
             method=method,
             url=self._absolute_url(path, query),
@@ -80,6 +86,7 @@ class WebOperationClient:
             backoff_multiplier=self._retry.backoff_multiplier,
             retry_status_codes=self._retry.retry_status_codes,
             max_response_bytes=self._max_response_bytes,
+            idempotency_key=f"{self._provider}-{operation}-{uuid4().hex}",
         )
         self._require_ok(operation, response)
         return self._decode_object(operation, response), response.attempts

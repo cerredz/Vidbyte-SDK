@@ -121,6 +121,8 @@ class ReflexionRuntimeAlgorithm:
         )
         if isinstance(raw_result, AgentResult):
             return raw_result
+        # The reflection call is billed like a loop call, so it lands in the run's usage ledger.
+        self.runtime.usage_tracker.record_call(raw_result)
         return self.algorithm.capture_reflection(handle.extract_text(raw_result))
 
     @staticmethod

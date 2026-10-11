@@ -7,8 +7,9 @@ from typing import Any, Mapping
 from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
-from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
 class OpenAIProvider:
@@ -51,7 +52,7 @@ class OpenAIProvider:
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return self._video_job_from_response(parsed, model=config.model)
 
-    def run_tts(self, *, text: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+    def run_tts(self, *, text: str, transport: SyncHttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
         # POST to /audio/speech and return raw audio bytes from the binary response.
         config = self._audio_config_for(config)
         payload: dict[str, Any] = {"model": config.model, "input": text, "voice": config.voice or "alloy", "response_format": config.response_format or "mp3"}
@@ -64,7 +65,7 @@ class OpenAIProvider:
             raise ProviderResponseError("OpenAI TTS returned empty audio bytes.", provider=self.provider.value)
         return AudioModelResponse(provider=self.provider, model=config.model, audio_bytes=response.raw_bytes, transcript=None, raw={})
 
-    def run_stt(self, *, audio: bytes, format: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+    def run_stt(self, *, audio: bytes, format: str, transport: SyncHttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
         # Upload audio via multipart to /audio/transcriptions and extract the transcript string.
         config = self._audio_config_for(config)
         fields: dict[str, str] = {"model": config.model}
@@ -77,7 +78,7 @@ class OpenAIProvider:
             raise ProviderResponseError("OpenAI STT response did not include a text field.", provider=self.provider.value, response_excerpt=str(parsed))
         return AudioModelResponse(provider=self.provider, model=config.model, audio_bytes=None, transcript=transcript, raw=parsed)
 
-    def run_embedding(self, *, texts: list[str], transport: HttpTransport, config: EmbeddingModelConfig | None = None) -> EmbeddingResponse:
+    def run_embedding(self, *, texts: list[str], transport: SyncHttpTransport, config: EmbeddingModelConfig | None = None) -> EmbeddingResponse:
         # POST to /embeddings and return one float vector per input text, sorted by index.
         config = self._embedding_config_for(config)
         payload: dict[str, Any] = {"model": config.model, "input": texts}
@@ -90,7 +91,7 @@ class OpenAIProvider:
         embeddings = self._extract_embeddings(parsed, expected_count=len(texts))
         return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=embeddings, raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
 
-    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
+    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: SyncHttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
         # POST to /responses with stream=True and yield text deltas from SSE events.
         config = self._text_config_for(config)
         payload = self._create_text_payload(config, prompt, system, metadata)
@@ -176,8 +177,26 @@ class OpenAIProvider:
     def _create_input(self, config: TextModelConfig, prompt: str) -> str | list[Mapping[str, Any]]:
         # Preserve multi-turn Responses inputs when callers provide message history.
         if config.messages:
-            return [dict(message) for message in config.messages] + [{"role": "user", "content": prompt}]
+            items = [item for message in config.messages for item in self._responses_items(message)]
+            return items + [{"role": "user", "content": prompt}]
         return prompt
+
+    @staticmethod
+    def _responses_items(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+        # The agent transcript is chat-shaped; Responses wants function_call/function_call_output items.
+        # Item ids (fc_...) are never echoed: without their reasoning items reasoning models reject them.
+        if "type" in message:
+            return [dict(message)]
+        if message.get("role") == "tool":
+            return [{"type": "function_call_output", "call_id": message.get("tool_call_id"), "output": message.get("content")}]
+        tool_calls = message.get("tool_calls")
+        if message.get("role") != "assistant" or not isinstance(tool_calls, list):
+            return [dict(message)]
+        items: list[dict[str, Any]] = [{"role": "assistant", "content": message["content"]}] if message.get("content") else []
+        for call in tool_calls:
+            function = call.get("function") or {}
+            items.append({"type": "function_call", "call_id": call.get("id"), "name": function.get("name"), "arguments": function.get("arguments") or "{}"})
+        return items
 
     def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
         # Responses API uses instructions for system/developer guidance.
@@ -196,15 +215,32 @@ class OpenAIProvider:
 
     def _attach_tools(self, payload: dict[str, Any], config: TextModelConfig) -> None:
         # OpenAI Responses supports built-in and function tools plus tool_choice.
+        # @intent responses-function-tools-are-flat
+        # Tools arrive in the Chat Completions nested shape {type, function: {...}}; Responses rejects it
+        # (400 "Missing required parameter: 'tools[0].name'") and wants name/parameters at the top level.
+        # Built-in and already-flat tools pass through unchanged.
         if config.tools:
-            payload["tools"] = [dict(tool) for tool in config.tools]
-        if config.tool_choice is not None:
-            payload["tool_choice"] = config.tool_choice
+            tools: list[dict[str, Any]] = []
+            for tool in config.tools:
+                nested = tool.get("function") if tool.get("type") == "function" else None
+                if isinstance(nested, Mapping):
+                    hoisted = {key: nested[key] for key in ("name", "description", "parameters", "strict") if key in nested}
+                    tools.append({"type": "function", **hoisted})
+                else:
+                    tools.append(dict(tool))
+            payload["tools"] = tools
+        choice = config.tool_choice
+        if isinstance(choice, Mapping) and choice.get("type") == "function" and isinstance(choice.get("function"), Mapping):
+            choice = {"type": "function", "name": choice["function"].get("name")}
+        if choice is not None:
+            payload["tool_choice"] = choice
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # Wraps the resolved JSON schema in the Responses API's strict text.format envelope.
+        # Wraps the resolved JSON schema, rewritten into strict mode's dialect, in the Responses API's
+        # strict text.format envelope.
         if config.response_format is not None:
-            payload["text"] = {"format": {"type": "json_schema", "name": "agent_output", "schema": dict(config.response_format), "strict": True}}
+            schema = OutputSchemaFormatter().strict(config.response_format)
+            payload["text"] = {"format": {"type": "json_schema", "name": "agent_output", "schema": schema, "strict": True}}
 
     def _attach_metadata(self, payload: dict[str, Any], config: TextModelConfig, metadata: Mapping[str, object] | None) -> None:
         # Merge runner-call metadata with static config metadata.

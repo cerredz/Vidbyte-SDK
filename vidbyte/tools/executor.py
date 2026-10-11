@@ -82,10 +82,16 @@ class ToolExecutor:
             return ToolResult.error("unknown", "No Action block found in text.")
         tool_name = action_match.group(1).strip()
 
-        input_match = re.search(r"Action Input:\s*(\{.*?\})", text, re.DOTALL)
-        try:
-            arguments = json.loads(input_match.group(1).strip()) if input_match else {}
-        except json.JSONDecodeError:
-            arguments = {}
+        # @intent react-action-input-decodes-whole-json-object
+        # Decode the complete JSON object after "Action Input:" so nested objects and
+        # braces inside strings survive, and any trailing text is ignored. A missing or
+        # malformed object still means no arguments, so validation reports what is absent.
+        arguments = {}
+        input_match = re.search(r"Action Input:\s*(?=\{)", text)
+        if input_match:
+            try:
+                arguments, _ = json.JSONDecoder().raw_decode(text, input_match.end())
+            except json.JSONDecodeError:
+                arguments = {}
 
         return await self.execute_call(ToolCall(tool_name=tool_name, arguments=arguments))

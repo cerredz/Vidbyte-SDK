@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
 from vidbyte.middleware.base import AgentMiddleware
+from vidbyte.middleware.builtins.limit_validation import positive_integer
 
 
 TOKEN_BUDGET_FINAL_RESPONSE_NOTICE = (
@@ -39,10 +40,7 @@ class TokenBudgetMiddleware(AgentMiddleware):
     """Enforce provider-reported token ceilings with optional one-call final-answer overrun."""
 
     def __init__(self, *, max_tokens: int, abort_reason: str = "token_budget_exceeded", allow_final_response_over_budget: bool = False) -> None:
-        # Validates that max_tokens is a meaningful positive ceiling.
-        if max_tokens <= 0:
-            raise ValueError("max_tokens must be greater than zero.")
-        self.max_tokens = max_tokens
+        self.max_tokens = positive_integer(max_tokens, "max_tokens")
         self.abort_reason = abort_reason
         self.allow_final_response_over_budget = allow_final_response_over_budget
 

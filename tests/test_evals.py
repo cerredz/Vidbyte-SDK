@@ -22,7 +22,7 @@ import unittest
 from datetime import datetime
 from typing import Any
 
-from tests.agent_test_support import bind_test_runner
+from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.agents.base import BaseAgent
 from vidbyte.evals import (
@@ -47,8 +47,10 @@ from vidbyte.evals import (
     MultipleChoiceTemplate,
     NumericAnswerTemplate,
     NumericMatchGrader,
+    PredicateGrader,
     RegexMatchGrader,
     RubricGrader,
+    RunProbe,
     SafeCustomerSupportTemplate,
     ShortAnswerFactTemplate,
     StructuredJsonTemplate,
@@ -107,6 +109,25 @@ class MockAgent(BaseAgent):
         class Reply:
             content = f"processed:{prompt}"
             metadata = {"mock": True}
+        return Reply()
+
+
+class VerdictJudgeRunner:
+    """Offline judge model that returns a distinct verdict per call and records each system prompt."""
+
+    def __init__(self, verdicts: list[str]) -> None:
+        # Stores the verdict payloads to hand out in order and an empty system prompt log.
+        self.verdicts = list(verdicts)
+        self.systems: list[str] = []
+
+    def run(self, prompt: str, *, system: str | None = None, **_: object) -> object:
+        # Records the system prompt and finishes the agent loop with the next verdict.
+        self.systems.append(system or "")
+        arguments = json.dumps({"final_answer": self.verdicts[len(self.systems) - 1]})
+
+        class Reply:
+            text = ""
+            raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": arguments}]}
         return Reply()
 
 
@@ -249,6 +270,48 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             WeightedGrader([(ContainsGrader(), 0.0)])
 
+    async def test_composite_graders_forward_probe_to_predicate_children(self) -> None:
+        # Tests that all-of, any-of, weighted, and nested composites hand the run probe to behavior children.
+        # @intent composite-graders-forward-run-probe
+        case = EvalCase(prompt="t", expected="Paris")
+        probe = RunProbe(tool_calls=())
+        saw_probe = PredicateGrader(lambda p: p is probe, name="saw_probe")
+
+        res_all = await AllOfGrader([ContainsGrader(), saw_probe]).agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_all.passed)
+        self.assertEqual(res_all.score, 1.0)
+
+        res_any = await AnyOfGrader([saw_probe]).agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_any.passed)
+        self.assertEqual(res_any.score, 1.0)
+
+        weighted = WeightedGrader([(ContainsGrader(), 1.0), (saw_probe, 1.0)])
+        res_weighted = await weighted.agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_weighted.passed)
+        self.assertEqual(res_weighted.score, 1.0)
+
+        nested = AllOfGrader([ContainsGrader(), AnyOfGrader([WeightedGrader([(saw_probe, 1.0)], threshold=1.0)])])
+        res_nested = await nested.agrade_with_probe(case, "Paris", probe)
+        self.assertTrue(res_nested.passed)
+        self.assertEqual(res_nested.score, 1.0)
+
+    async def test_composite_graders_without_probe_are_unchanged(self) -> None:
+        # Tests that plain agrade still grades text children and leaves behavior children failing for lack of a probe.
+        # @intent composite-agrade-without-probe-unchanged
+        case = EvalCase(prompt="t", expected="Paris")
+        needs_probe = PredicateGrader(lambda p: True, name="needs_probe")
+
+        res_all = await AllOfGrader([ContainsGrader(), needs_probe]).agrade(case, "Paris")
+        self.assertFalse(res_all.passed)
+        self.assertAlmostEqual(res_all.score, 0.5)
+
+        res_weighted = await WeightedGrader([(ContainsGrader(), 1.0), (needs_probe, 1.0)]).agrade(case, "Paris")
+        self.assertAlmostEqual(res_weighted.score, 0.5)
+
+        res_any = await AnyOfGrader([ExactMatchGrader(), ContainsGrader()]).agrade_with_probe(case, "The answer is Paris.", None)
+        self.assertTrue(res_any.passed)
+        self.assertEqual(res_any.score, 1.0)
+
     async def test_supporting_deterministic_graders(self) -> None:
         # Tests deterministic graders used by prebuilt template bundles.
         contains_all = ContainsAllGrader(["refund", "30 days"])
@@ -263,6 +326,26 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         length = LengthGrader(min_chars=2, max_chars=4)
         self.assertTrue((await length.agrade(EvalCase(prompt="t"), "abcd")).passed)
         self.assertFalse((await length.agrade(EvalCase(prompt="t"), "abcde")).passed)
+
+    async def test_bare_string_terms_are_one_term(self) -> None:
+        # @intent bare-string-term-is-one-term
+        # [Silent Failure] tuple("30 days") split the term into characters, so a wrong answer passed.
+        case = EvalCase(prompt="t")
+        wrong = "Refunds are accepted within 14 days; call 555-0300 for help."
+        missing = await ContainsAllGrader("30 days").agrade(case, wrong)
+        self.assertFalse(missing.passed)
+        self.assertIn("['30 days']", missing.reason)
+        self.assertTrue((await ContainsAllGrader("30 days").agrade(case, "Refunds within 30 days.")).passed)
+
+        clean = await ForbiddenContentGrader("password").agrade(case, "Reset it from the account page.")
+        self.assertTrue(clean.passed, clean.reason)
+        self.assertFalse((await ForbiddenContentGrader("password").agrade(case, "Your password is hunter2.")).passed)
+
+        template = T.concise_grounded_answer(required_terms="30 days", forbidden_terms="password")
+        self.assertFalse((await template.build_grader().agrade(case, wrong)).passed)
+        self.assertTrue((await template.build_grader().agrade(case, "Refunds within 30 days.")).passed)
+        support = T.safe_customer_support(forbidden_terms="password")
+        self.assertTrue((await support.build_grader().agrade(EvalCase(prompt="t", expected="30 days"), "Refunds within 30 days.")).passed)
 
     async def test_choice_numeric_and_json_match_graders(self) -> None:
         # Tests choice extraction, numeric tolerance, and JSON exact/subset matching.
@@ -282,6 +365,71 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         subset = JSONSubsetGrader()
         self.assertTrue((await subset.agrade(EvalCase(prompt="t", expected={"a": {"b": 2}}), '{"a": {"b": 2, "c": 3}}')).passed)
         self.assertFalse((await subset.agrade(EvalCase(prompt="t", expected=[1, 3]), "[1, 2]")).passed)
+
+    async def test_choice_grader_counts_nested_label_once(self) -> None:
+        # Tests that an exact longer label wins over a shorter label nested inside it.
+        # @intent nested-label-counts-once
+        spam = ChoiceMatchGrader(["spam", "not spam"])
+        self.assertEqual(spam._extract_matches("not spam"), ["not spam"])
+        self.assertTrue((await spam.agrade(EvalCase(prompt="t", expected="not spam"), "not spam")).passed)
+        self.assertFalse((await spam.agrade(EvalCase(prompt="t", expected="spam"), "not spam")).passed)
+        self.assertTrue((await spam.agrade(EvalCase(prompt="t", expected="spam"), "spam")).passed)
+        self.assertFalse((await spam.agrade(EvalCase(prompt="t", expected="spam"), "spam or not spam?")).passed)
+        billing = ChoiceMatchGrader(["billing", "billing dispute", "refund"])
+        self.assertTrue((await billing.agrade(EvalCase(prompt="t", expected="billing dispute"), "billing dispute")).passed)
+        self.assertFalse((await billing.agrade(EvalCase(prompt="t", expected="refund"), "billing dispute or refund")).passed)
+
+    async def test_numeric_grader_reads_grouped_thousands(self) -> None:
+        # Tests that comma-grouped thousands parse as one number while ungrouped commas do not.
+        # @intent grouped-thousands-parse-as-one-number
+        numeric = NumericMatchGrader()
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=1250), "1,250")).passed)
+        self.assertEqual(numeric._parse_number("1,000,000.5"), 1000000.5)
+        self.assertEqual(numeric._parse_number("Total: -12,345.6 units"), -12345.6)
+        self.assertEqual(numeric._parse_number("1,2"), 1.0)
+        self.assertEqual(numeric._parse_number("1,2345"), 1.0)
+        self.assertEqual(numeric._parse_number("+3.5"), 3.5)
+        self.assertEqual(numeric._parse_number(".5"), 0.5)
+        self.assertEqual(numeric._parse_number("12345"), 12345.0)
+
+    async def test_numeric_grader_reads_scientific_notation(self) -> None:
+        # Tests that a number in scientific notation parses as one number instead of its mantissa.
+        # @intent scientific-notation-parse-as-one-number
+        numeric = NumericMatchGrader()
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=0.00001), "The rate is 1e-05 mol/s.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=1200), "Total: 1.2e3 units.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=6.02e23), "Avogadro: 6.02E23.")).passed)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected="1.2e3"), "1200")).passed)
+        self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=1200), "1300")).passed)
+        self.assertEqual(numeric._parse_number("5 eggs"), 5.0)
+        self.assertEqual(numeric._parse_number("3em"), 3.0)
+
+    async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
+        # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
+        # @intent json-bool-is-not-number
+        mismatches = [
+            (True, 1),
+            (False, 0),
+            ({"approved": True, "count": 1}, {"approved": 1, "count": 1}),
+            ({"approved": False}, {"approved": 0}),
+            ({"flags": [True, False]}, {"flags": [1, 0]}),
+            ({"outer": {"inner": [{"ok": True}]}}, {"outer": {"inner": [{"ok": 1}]}}),
+            ({"count": 1}, {"count": True}),
+        ]
+        matches = [
+            ({"total": 1}, {"total": 1.0}),
+            ({"approved": True, "flags": [True, False]}, {"approved": True, "flags": [True, False]}),
+            ({"nested": {"ok": False, "n": [2]}}, {"nested": {"ok": False, "n": [2.0]}}),
+        ]
+        for grader in (JSONExactMatchGrader(), JSONSubsetGrader()):
+            for expected, actual in mismatches:
+                with self.subTest(grader=grader.name, expected=expected, actual=actual):
+                    result = await grader.agrade(EvalCase(prompt="x", expected=json.dumps(expected)), json.dumps(actual))
+                    self.assertFalse(result.passed)
+            for expected, actual in matches:
+                with self.subTest(grader=grader.name, expected=expected, actual=actual):
+                    result = await grader.agrade(EvalCase(prompt="x", expected=json.dumps(expected)), json.dumps(actual))
+                    self.assertTrue(result.passed)
 
     async def test_template_registry_and_custom_templates(self) -> None:
         # Tests template registry resolution, validation, and custom template support.
@@ -378,6 +526,41 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
                 os.remove(os.path.join(temp_dir, name))
             os.rmdir(temp_dir)
 
+    async def test_eval_suite_json_null_optionals_load_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default
+        # [Crash] json.dumps(asdict(case)) writes null for unset optionals, which failed the whole suite load.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "nulls.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [
+                    {"prompt": "omitted", "expected": "omitted"},
+                    {"prompt": "tags", "expected": "tags", "tags": None},
+                    {"prompt": "metadata", "expected": "metadata", "metadata": None},
+                    {"prompt": "templates", "expected": "templates", "templates": None},
+                    {"prompt": "template", "expected": "template", "template": None},
+                    {"prompt": "all", "expected": "all", "tags": None, "metadata": None, "template": None, "templates": None},
+                    {"prompt": "mixed", "expected": "Paris", "template": None, "templates": ["short_answer_fact"]},
+                ]}, f)
+            suite = EvalSuite.from_json(path)
+
+            bad_path = os.path.join(temp_dir, "bad.json")
+            with open(bad_path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [{"prompt": "q", "templates": "short_answer_fact"}]}, f)
+            with self.assertRaises(ValueError):
+                EvalSuite.from_json(bad_path)
+        finally:
+            for name in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, name))
+            os.rmdir(temp_dir)
+
+        for case in suite.cases[:6]:
+            self.assertEqual((case.tags, case.metadata, case.templates), ((), {}, ()), case.prompt)
+        self.assertEqual(len(suite.cases[6].templates), 1)
+
+        runner = EvalRunner(MockRunner("ok"), default_grader=ContainsGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(EvalSuite("nulls", suite.cases[:6]))).results), 6)
+
     async def test_eval_registry_structured_expected_roundtrip(self) -> None:
         # Tests SQLite registry persistence for structured expected payloads.
         temp_dir = tempfile.mkdtemp()
@@ -457,6 +640,113 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_strict = await grader_strict.agrade(case, "Verbose correct answer.")
         self.assertFalse(res_strict.passed)
 
+    async def test_llm_judge_string_verdicts_fail_closed(self) -> None:
+        # A string verdict must be read by its meaning, never by Python truthiness ("false" is not a pass).
+        case = EvalCase(prompt="2+2?", expected="4")
+        expectations = (
+            ('{"score": 0.1, "passed": "false", "reason": "wrong"}', False),
+            ('{"score": 0.9, "passed": "true", "reason": "right"}', True),
+            ('{"score": 0.9, "passed": " TRUE ", "reason": "right"}', True),
+            ('{"score": 0.9, "passed": "yes", "reason": "ambiguous"}', False),
+            ('{"score": 0.9, "passed": 1, "reason": "number"}', False),
+            ('{"score": 0.9, "reason": "missing verdict"}', False),
+            ('{"score": 0.9, "passed": false, "reason": "bool false"}', False),
+        )
+        for reply, expected_passed in expectations:
+            res = await LLMJudgeGrader(judge_runner=MockRunner(reply)).agrade(case, "answer")
+            self.assertIs(res.passed, expected_passed, reply)
+
+    async def test_judge_graders_ignore_trailing_prose_with_braces(self) -> None:
+        # A valid verdict followed by prose containing braces, or wrapped in a fenced block, must still parse.
+        case = EvalCase(prompt="2+2?", expected="4")
+        judge_reply = '{"score": 1.0, "passed": true, "reason": "exact"}\nNote: format {ok}.'
+        res = await LLMJudgeGrader(judge_runner=MockRunner(judge_reply)).agrade(case, "4")
+        self.assertTrue(res.passed)
+        self.assertEqual(res.score, 1.0)
+        self.assertEqual(res.reason, "exact")
+
+        fenced = 'Verdict:\n```json\n{"score": 0.2, "passed": false, "reason": "off"}\n```\nSee {notes}.'
+        res_fenced = await LLMJudgeGrader(judge_runner=MockRunner(fenced)).agrade(case, "5")
+        self.assertFalse(res_fenced.passed)
+        self.assertEqual(res_fenced.score, 0.2)
+        self.assertEqual(res_fenced.reason, "off")
+
+        rubric_reply = '{"scores": {"accuracy": 0.9}, "reasons": {"accuracy": "good"}}\nKeys used: {accuracy}.'
+        rubric_grader = RubricGrader(judge_runner=MockRunner(rubric_reply), rubric={"accuracy": 1.0}, threshold=0.7)
+        res_rubric = await rubric_grader.agrade(case, "4")
+        self.assertTrue(res_rubric.passed)
+        self.assertAlmostEqual(res_rubric.score, 0.9)
+
+        rubric_fenced = '```json\n{"scores": {"accuracy": 0.8}, "reasons": {"accuracy": "ok"}}\n```'
+        res_rubric_fenced = await RubricGrader(judge_runner=MockRunner(rubric_fenced), rubric={"accuracy": 1.0}).agrade(case, "4")
+        self.assertTrue(res_rubric_fenced.passed)
+        self.assertAlmostEqual(res_rubric_fenced.score, 0.8)
+
+        # Genuinely missing or broken JSON still reports the existing failure reasons.
+        res_missing = await RubricGrader(judge_runner=MockRunner("no json here"), rubric={"accuracy": 1.0}).agrade(case, "4")
+        self.assertIn("Failed to find JSON block", res_missing.reason)
+        res_broken = await LLMJudgeGrader(judge_runner=MockRunner('{"score": 1.0, "passed": tru')).agrade(case, "4")
+        self.assertFalse(res_broken.passed)
+        self.assertIn("Failed to parse judge JSON", res_broken.reason)
+
+    async def test_judge_graders_read_null_fields_as_omitted(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A judge model that sends null for a field must get the same grade as one that leaves the field out.
+        case = EvalCase(prompt="2+2?", expected="4")
+        null_reply = '{"score": null, "passed": true, "reason": null}'
+        res_null = await LLMJudgeGrader(judge_runner=MockRunner(null_reply)).agrade(case, "4")
+        res_omitted = await LLMJudgeGrader(judge_runner=MockRunner('{"passed": true}')).agrade(case, "4")
+        self.assertEqual((res_null.score, res_null.passed, res_null.reason), (res_omitted.score, res_omitted.passed, res_omitted.reason))
+        self.assertEqual((res_null.score, res_null.passed, res_null.reason), (0.0, True, "Graded by LLM Judge."))
+        self.assertNotIn("None", res_null.reason)
+
+        rubric = {"accuracy": 1.0, "tone": 1.0}
+        rubric_null = '{"scores": {"accuracy": 1.0, "tone": null}, "reasons": {"accuracy": "correct", "tone": null}}'
+        rubric_omitted = '{"scores": {"accuracy": 1.0}, "reasons": {"accuracy": "correct"}}'
+        res_rubric_null = await RubricGrader(judge_runner=MockRunner(rubric_null), rubric=rubric, threshold=0.5).agrade(case, "4")
+        res_rubric_omitted = await RubricGrader(judge_runner=MockRunner(rubric_omitted), rubric=rubric, threshold=0.5).agrade(case, "4")
+        self.assertEqual(
+            (res_rubric_null.score, res_rubric_null.passed, res_rubric_null.reason),
+            (res_rubric_omitted.score, res_rubric_omitted.passed, res_rubric_omitted.reason),
+        )
+        self.assertTrue(res_rubric_null.passed)
+        self.assertAlmostEqual(res_rubric_null.score, 0.5)
+        self.assertIn("tone: No explanation. (0.0)", res_rubric_null.reason)
+        self.assertNotIn("None", res_rubric_null.reason)
+
+        # A null scores or reasons section reads like a missing one, not a parse failure.
+        res_null_sections = await RubricGrader(judge_runner=MockRunner('{"scores": null, "reasons": null}'), rubric=rubric).agrade(case, "4")
+        res_empty = await RubricGrader(judge_runner=MockRunner("{}"), rubric=rubric).agrade(case, "4")
+        self.assertEqual((res_null_sections.score, res_null_sections.passed, res_null_sections.reason), (res_empty.score, res_empty.passed, res_empty.reason))
+        self.assertNotIn("Failed to parse", res_null_sections.reason)
+
+        # Genuinely malformed values still fail closed.
+        res_bad_score = await LLMJudgeGrader(judge_runner=MockRunner('{"score": "abc", "passed": true}')).agrade(case, "4")
+        self.assertFalse(res_bad_score.passed)
+        self.assertIn("Failed to parse judge JSON", res_bad_score.reason)
+        res_bad_dim = await RubricGrader(judge_runner=MockRunner('{"scores": {"accuracy": "abc"}}'), rubric=rubric).agrade(case, "4")
+        self.assertFalse(res_bad_dim.passed)
+        self.assertIn("Failed to parse rubric response JSON", res_bad_dim.reason)
+
+    async def test_agent_judge_does_not_carry_verdicts_across_cases(self) -> None:
+        # Grading several cases with one BaseAgent judge must not grow its history or leak earlier verdicts.
+        verdicts = [json.dumps({"score": 1.0, "passed": True, "reason": f"verdict-{i}"}) for i in range(3)]
+        rubric_verdicts = [json.dumps({"scores": {"accuracy": 1.0}, "reasons": {"accuracy": f"verdict-{i}"}}) for i in range(3)]
+        for verdict_list, make_grader in (
+            (verdicts, lambda judge: LLMJudgeGrader(judge_runner=judge)),
+            (rubric_verdicts, lambda judge: RubricGrader(judge_runner=judge, rubric={"accuracy": 1.0})),
+        ):
+            model = VerdictJudgeRunner(verdict_list)
+            judge = build_test_agent(name="judge", system_prompt="You judge.", runner=model)
+            grader = make_grader(judge)
+            for i in range(3):
+                result = await grader.agrade(EvalCase(prompt=f"case {i}", expected="ok"), "ok")
+                self.assertTrue(result.passed)
+            self.assertEqual(judge.history, [])
+            self.assertEqual(len(model.systems), 3)
+            for i, system in enumerate(model.systems):
+                self.assertFalse(any(f"verdict-{j}" in system for j in range(i)), f"judgment {i} saw an earlier verdict")
+
     async def test_eval_suite(self) -> None:
         # Tests EvalSuite loading, tagging, and tag filtering features.
         case_a = EvalCase(prompt="A", tags=("math",))
@@ -471,6 +761,33 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] Filtering with empty tags sequence returns empty suite
         empty_filter = suite.filter([])
         self.assertEqual(len(empty_filter), 0)
+
+    async def test_bare_string_tags_are_one_tag(self) -> None:
+        # @intent bare-string-tag-is-one-tag
+        # [Silent Failure] set("billing") matched single letters, so a tag slice selected zero cases and passed vacuously.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "tags.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [
+                    {"prompt": "q1", "expected": "q1", "tags": "billing"},
+                    {"prompt": "q2", "expected": "q2", "tags": "billing, refunds"},
+                    {"prompt": "q3", "expected": "q3", "tags": ["math"]},
+                ]}, f)
+            suite = EvalSuite.from_json(path)
+        finally:
+            os.remove(path)
+            os.rmdir(temp_dir)
+        self.assertEqual([c.tags for c in suite.cases], [("billing",), ("billing", "refunds"), ("math",)])
+
+        self.assertEqual([c.prompt for c in suite.filter("billing")], ["q1", "q2"])
+        self.assertEqual([c.prompt for c in suite.filter(["math"])], ["q3"])
+        self.assertEqual(len(suite.filter("b")), 0)
+
+        runner = EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(suite, tags="refunds")).results), 1)
+        self.assertEqual(len((await runner.arun(suite, tags=["billing"])).results), 2)
+        self.assertEqual(len((await runner.arun(suite)).results), 3)
 
     async def test_eval_runner_with_agent_fork(self) -> None:
         # Tests EvalRunner executing suites and ensures state isolation using clone forks.
@@ -503,6 +820,15 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res.grader_result.passed)
         self.assertIsNotNone(res.error)
         self.assertIn("Runner crashed!", res.error)
+
+    async def test_eval_runner_rejects_concurrency_below_one(self) -> None:
+        # @intent eval-concurrency-at-least-one
+        # [Silent Failure] concurrency=0 built Semaphore(0), so every case waited forever and arun() never returned.
+        for bad in (0, -1, True):
+            with self.assertRaisesRegex(ValueError, "concurrency must be an integer of at least 1"):
+                EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=bad)
+        runner = EvalRunner(MockRunner("ok"), default_grader=ExactMatchGrader(), concurrency=1)
+        self.assertEqual(len((await runner.arun(EvalSuite("suite", [EvalCase(prompt="q1")]))).results), 1)
 
     async def test_eval_registry_and_comparison(self) -> None:
         # Tests EvalRegistry persistence loop and ComparisonReport metric generation.

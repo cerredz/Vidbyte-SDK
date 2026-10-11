@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-from vidbyte.lib.http.transport import HttpTransport
+from vidbyte.lib.http.transport import SyncHttpTransport
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -46,9 +46,13 @@ class SmitheryRegistryClient:
 
     REGISTRY_URL = "https://registry.smithery.ai/servers"
 
-    def __init__(self, transport: HttpTransport | None = None, *, timeout: float = _DEFAULT_TIMEOUT) -> None:
+    def __init__(self, transport: SyncHttpTransport | None = None, *, timeout: float = _DEFAULT_TIMEOUT) -> None:
         """Store the HTTP transport and request timeout."""
-        self._transport = transport or HttpTransport()
+        # @intent smithery-client-uses-a-blocking-transport
+        # search() is synchronous and the tool runs it on a worker thread, so the default
+        # transport must return a response directly; the async HttpTransport would hand
+        # back an un-awaited coroutine and every search would fail.
+        self._transport = transport or SyncHttpTransport()
         self._timeout = timeout
 
     def search(self, query: str, *, limit: int = _DEFAULT_LIMIT) -> list[SmitheryServerResult]:

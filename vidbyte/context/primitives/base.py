@@ -69,11 +69,23 @@ CREATE_TOOL_COMMON_FIELDS: dict[str, dict[str, Any]] = {
 
 @runtime_checkable
 class ContextItem(Protocol):
-    """Structural protocol for context primitives managed by ContextManager."""
+    """Structural protocol for context primitives managed by ContextManager.
 
-    kind: str
-    title: str
-    metadata: Mapping[str, Any]
+    The members are read-only properties because every primitive is a frozen dataclass; a settable
+    attribute here would make mypy reject every primitive passed to ContextManager.
+    """
+
+    @property
+    def kind(self) -> str:
+        """Return the primitive's kind label."""
+
+    @property
+    def title(self) -> str:
+        """Return the primitive's display title."""
+
+    @property
+    def metadata(self) -> Mapping[str, Any]:
+        """Return the primitive's metadata mapping."""
 
     def to_context_text(self) -> str:
         """Return a compact compatibility rendering for BaseContext."""

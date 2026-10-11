@@ -67,6 +67,7 @@ from tests.agent_test_support import build_test_agent
 from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.lib.dataclasses.speed import (
     CallSpeedRecord,
+    RecordModelCallFailureInput,
     RecordModelCallInput,
     RecordToolCallInput,
     ToolCallSpeedRecord,
@@ -313,6 +314,42 @@ class AgentSpeedTrackerRollupTests(unittest.TestCase):
         efficiency = self.tracker.rollup().run_stats.parallelism_efficiency
         self.assertGreater(efficiency, 1.5)  # ~2x: two 0.02s calls finished within one 0.02s window
 
+    def test_rollup_reports_ordered_first_tool_and_result_ready_latencies(self) -> None:
+        self.tracker.record_run_start()
+        self._advance(0.01)
+        tool_started_at = self.tracker.now()
+        self._advance(0.02)
+        self.tracker.record_tool_call(RecordToolCallInput(tool_name="search", started_at=tool_started_at))
+        self.tracker.record_result_ready()
+        stats = self.tracker.rollup().run_stats
+        self.assertAlmostEqual(stats.time_to_first_tool_ms, 10.0, delta=0.5)
+        self.assertAlmostEqual(stats.time_to_result_ready_ms, 30.0, delta=0.5)
+
+    def test_rollup_first_tool_latency_is_none_when_a_later_run_start_moves_the_boundary(self) -> None:
+        # Overlapping runs share one tracker: a second run start moves the run boundary past a
+        # tool the first run already started. The rollup and archive must degrade, not raise.
+        self.tracker.record_run_start()
+        self._advance(0.01)
+        tool_started_at = self.tracker.now()
+        self._advance(0.15)
+        self.tracker.record_run_start()
+        self._advance(0.15)
+        self.tracker.record_tool_call(RecordToolCallInput(tool_name="slow", started_at=tool_started_at))
+        self.tracker.record_result_ready()
+        self.tracker.record_run_end()
+        stats = self.tracker.rollup().run_stats
+        self.assertIsNone(stats.time_to_first_tool_ms)
+        self.assertAlmostEqual(stats.time_to_result_ready_ms, 150.0, delta=0.5)
+        self.assertEqual(self.tracker.history().run_count, 1)
+
+    def test_rollup_result_ready_latency_is_none_when_it_precedes_the_run_start(self) -> None:
+        self._now = 1.0
+        self.tracker.record_run_start()
+        self._now = 0.5  # An ill-ordered boundary: result-ready reads earlier than the run start.
+        self.tracker.record_result_ready()
+        self.tracker.record_run_end()
+        self.assertIsNone(self.tracker.rollup().run_stats.time_to_result_ready_ms)
+
     def test_rollup_recording_integrity_is_corrupted_after_an_unusable_call(self) -> None:
         self.tracker.record_call(RecordModelCallInput(response=_NoProviderResponse(), dispatched_at=0.0))
         self.assertEqual(self.tracker.rollup().recording_integrity, AgentSpeedRecordingIntegrity.CORRUPTED)
@@ -327,6 +364,15 @@ class AgentSpeedTrackerRollupTests(unittest.TestCase):
         rollup = self.tracker.rollup()
         self.assertEqual(rollup.call_stats.call_count, 0)
         self.assertIsNone(rollup.run_stats.total_duration_ms)
+
+    def test_rollup_retry_count_total_counts_retry_attempts_not_summed_ordinals(self) -> None:
+        # Attempts carry retry ordinals 0, 1, 2: one original attempt plus two retries.
+        for ordinal in (0, 1):
+            self.tracker.record_call_failure(RecordModelCallFailureInput(provider="anthropic", model="claude-sonnet-5", dispatched_at=self.tracker.now(), retry_count=ordinal))
+        self.tracker.record_call(RecordModelCallInput(response=_FakeModelResponse(), dispatched_at=self.tracker.now(), retry_count=2))
+        rollup = self.tracker.rollup()
+        self.assertEqual(rollup.call_stats.retry_count_total, 2)
+        self.assertEqual(rollup.model_stats[0].retry_count_total, 2)
 
 
 class _FinalAnswerRunner:
@@ -383,6 +429,17 @@ class AgentSpeedTrackerBaseAgentIntegrationTests(unittest.IsolatedAsyncioTestCas
             await agent.generate_reply("task")
         stats = agent.get_speed_stats()
         self.assertIsNotNone(stats.run_stats.total_duration_ms)
+
+    async def test_measure_stream_with_chunks_rolls_up_inter_chunk_gaps(self) -> None:
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work carefully.",
+            runner=_FinalAnswerRunner(),
+        )
+        self.assertEqual(list(agent.measure_stream(iter(["a", "b", "c"]))), ["a", "b", "c"])
+        stream_stats = agent.get_speed_stats().stream_stats
+        self.assertEqual(stream_stats.chunk_count, 3)
+        self.assertIsNotNone(stream_stats.inter_chunk_gap_ms_mean)
 
 
 if __name__ == "__main__":

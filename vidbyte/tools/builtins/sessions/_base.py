@@ -14,8 +14,8 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.tools.base import BaseTool
 from vidbyte.sessions.errors import SessionError
@@ -34,16 +34,43 @@ class _SessionBuiltinTool(BaseTool):
         # Bind the store, scope (default own runs), and an unset active session.
         self._store = store
         self._scope = scope or SessionScope.own_runs()
+        # The scope as configured, before any session grants, so another agent's copy starts from it.
+        self._configured_scope = self._scope.copy()
         self._session: "Session | None" = None
+        # The agent that carries this tool; BaseAgent gives a different agent its own copy rather than re-bind it.
+        self._owner: object | None = None
+
+    def bind_owner(self, owner: object) -> None:
+        # Record the agent whose session this tool acts on.
+        self._owner = owner
 
     def bind_session(self, session: "Session") -> None:
         # Attach the active session and grant it scope access.
         self._session = session
         self._scope.allow(session.id)
 
+    def clone_for_fork(self) -> "_SessionBuiltinTool":
+        # Return an unbound copy with its own scope so a forked agent cannot steal or widen the parent's binding.
+        clone = type(self)(self._store, scope=self._scope.copy())
+        clone._configured_scope = self._configured_scope.copy()
+        return clone
+
+    def clone_for_agent(self) -> "_SessionBuiltinTool":
+        # @intent shared-session-tool-gets-configured-scope
+        # Return an unbound copy for a sibling agent with the configured scope only, never the other agent's session grants.
+        return type(self)(self._store, scope=self._configured_scope.copy())
+
     def _denied(self, name: str, session_id: str) -> ToolResult:
         # Return a denied result for an out-of-scope session id.
         return ToolResult.error(name, f"Access denied for session: {session_id}.")
+
+    @staticmethod
+    def _optional_text(arguments: Mapping[str, Any], name: str) -> str:
+        # @intent null-optional-arg-means-default
+        # Models often send JSON null for an optional argument they mean to leave out; treat it exactly
+        # like an omitted key so the documented default applies instead of the literal text "None".
+        value = arguments.get(name)
+        return "" if value is None else str(value)
 
     def _resolve_session_id(self, identifier: str) -> str:
         # Resolve a concrete session id or tag/name through the bound store.

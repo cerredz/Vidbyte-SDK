@@ -1,0 +1,348 @@
+"""FILE: tests/test_queued_prompt_usage.py
+
+PURPOSE: Regression tests that queued prompts drained after the primary run keep every run's usage on the agent's tracker, that a failed or cancelled run leaves the queue empty, and that concurrent runs on one agent each drain only their own follow-ups.
+ROLE IN CODEBASE: Guards BaseAgent._drain_queued_prompts, whose drained generate_reply calls reset the usage tracker and once left get_usage() reporting only the last drained run, and BaseAgent._close_failed_reply, which once left queued prompts for the next unrelated run.
+ARCHITECTURE NOTE: Offline scripted runners; the usage tests report a priced model's token usage, the cleanup tests drive the real run_prompts_sequentially tool through function-call responses.
+COMMON MODIFICATION PATTERNS: Add a case here when the drain gains a new exit path that could drop a run's usage or leave prompts queued.
+KNOWN EDGE CASES: A drained run that fails before its model call records nothing, so only the runs before it are counted. A cancellation during the automatic handoff, after the primary run succeeded, must also clear the queue. A run that fails its output_schema must raise before its follow-ups drain.
+RELATED DOCS: docs/design/queued-drain-keeps-usage.md, docs/design/queued-prompts-cleared-on-failure.md, docs/design/queued-prompts-cleared-on-handoff-cancel.md, docs/design/run-scoped-prompt-queue.md, docs/design/schema-failure-skips-queued-prompts.md.
+TESTS: python -m pytest tests/test_queued_prompt_usage.py.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import unittest
+from collections.abc import Callable
+from functools import partial
+from typing import Any
+
+from pydantic import BaseModel
+
+from tests.agent_test_support import build_test_agent
+from vidbyte import OutputSchemaViolationError, tool
+from vidbyte.agents.pricing import UsageTracker
+from vidbyte.context.handoff import MinimalHandoff
+from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.runners import TextModelResponse
+from vidbyte.lib.usage_ledger import usage_ledger_scope
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+
+_PRICED_MODEL = "gpt-5.4-mini"
+
+
+class ScriptedRunner:
+    """Returns one priced text response per call and fails on the call numbers it is told to."""
+
+    def __init__(self, *, fail_on: tuple[int, ...] = ()) -> None:
+        self.response = TextModelResponse(provider=ModelProvider.OPENAI, model=_PRICED_MODEL, text="done", raw={}, usage={"input_tokens": 100, "output_tokens": 20})
+        self.fail_on = fail_on
+        self.calls = 0
+
+    def run(self, prompt: str, system: str = "", **kwargs: Any) -> TextModelResponse:
+        self.calls += 1
+        if self.calls in self.fail_on:
+            raise RuntimeError("scripted model failure")
+        return self.response
+
+
+def _single_run_cost() -> float:
+    tracker = UsageTracker()
+    tracker.record_call(ScriptedRunner().response)
+    cost = tracker.rollup().cost_usd
+    assert cost is not None
+    return cost
+
+
+class QueuedPromptUsageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_usage_covers_primary_and_every_drained_run(self) -> None:
+        runner = ScriptedRunner()
+        agent = build_test_agent(runner=runner, name="queued", system_prompt="Answer briefly.")
+        agent.enqueue_prompts(["first follow-up", "second follow-up"])
+        reply = await agent.arun("primary")
+        usage = agent.get_usage()
+        self.assertEqual(reply.metadata["queued_prompt_runs"], 2)
+        self.assertEqual(runner.calls, 3)
+        self.assertEqual(usage.model_call_count, 3)
+        self.assertEqual((usage.input_tokens, usage.output_tokens), (300, 60))
+        self.assertEqual([record.call_index for record in usage.calls], [1, 2, 3])
+        self.assertTrue(usage.cost_complete)
+        self.assertAlmostEqual(agent.get_cost_usd(), 3 * _single_run_cost())
+
+    async def test_failed_drained_run_keeps_earlier_usage(self) -> None:
+        runner = ScriptedRunner(fail_on=(3,))
+        agent = build_test_agent(runner=runner, name="queued", system_prompt="Answer briefly.")
+        agent.enqueue_prompts(["first follow-up", "failing follow-up"])
+        reply = await agent.arun("primary")
+        self.assertIn("queued_prompt_error", reply.metadata)
+        self.assertEqual(agent.get_usage().model_call_count, 2)
+
+    async def test_parent_ledger_receives_every_drained_run(self) -> None:
+        runner = ScriptedRunner()
+        agent = build_test_agent(runner=runner, name="queued", system_prompt="Answer briefly.")
+        agent.enqueue_prompts(["first follow-up", "second follow-up"])
+        parent = UsageTracker()
+        with usage_ledger_scope(parent):
+            await agent.arun("primary")
+        self.assertEqual(parent.rollup().model_call_count, 3)
+        self.assertEqual(agent.get_usage().model_call_count, 3)
+
+
+_FOLLOWUPS = ["FOLLOWUP-1 email the CFO", "FOLLOWUP-2 post to #general"]
+
+
+class _FunctionCallResponse:
+    """Minimal runner response carrying one model function call."""
+
+    def __init__(self, name: str, arguments: dict[str, Any]) -> None:
+        self.text = ""
+        self.raw = {"output": [{"type": "function_call", "name": name, "arguments": json.dumps(arguments)}]}
+
+
+def _queue_followups(prompt: str) -> _FunctionCallResponse:
+    return _FunctionCallResponse("run_prompts_sequentially", {"prompts": _FOLLOWUPS})
+
+
+def _finish(prompt: str) -> _FunctionCallResponse:
+    return _FunctionCallResponse("isDone", {"final_answer": "done"})
+
+
+def _fail(prompt: str) -> _FunctionCallResponse:
+    raise RuntimeError("HTTP 400 from the model provider")
+
+
+class StepRunner:
+    """Async runner that plays one scripted step per model call, then finishes every later call."""
+
+    def __init__(self, steps: list[Callable[[str], Any]]) -> None:
+        self.steps = list(steps)
+        self.prompts: list[str] = []
+        self.hang = asyncio.Event()
+
+    async def arun(self, prompt: str, **_: object) -> _FunctionCallResponse:
+        self.prompts.append(prompt)
+        step = self.steps.pop(0) if self.steps else _finish
+        if step is None:
+            # Simulates a model call still in flight when the caller's timeout cancels the run.
+            await self.hang.wait()
+        return step(prompt)
+
+
+class QueuedPromptFailureCleanupTests(unittest.IsolatedAsyncioTestCase):
+    # @intent failed-run-leaves-no-queued-prompts
+    # Prompts queued by a run that fails or is cancelled must not run after the next unrelated request.
+
+    def _agent(self, runner: StepRunner) -> Any:
+        return build_test_agent(runner=runner, name="queued", system_prompt="Answer briefly.", tools=[RunPromptsSequentiallyTool()])
+
+    async def _assert_next_run_is_clean(self, agent: Any, runner: StepRunner) -> None:
+        calls_before = len(runner.prompts)
+        reply = await agent.arun("hello")
+        self.assertNotIn("queued_prompt_runs", reply.metadata)
+        self.assertEqual(len(runner.prompts) - calls_before, 1)
+        self.assertEqual(agent._queued_prompts, [])
+
+    async def test_failed_primary_run_clears_queue(self) -> None:
+        runner = StepRunner([_queue_followups, _fail])
+        agent = self._agent(runner)
+        with self.assertRaises(AgentExecutionError):
+            await agent.arun("plan the launch")
+        self.assertEqual(agent._queued_prompts, [])
+        await self._assert_next_run_is_clean(agent, runner)
+
+    async def test_cancelled_primary_run_clears_queue(self) -> None:
+        runner = StepRunner([_queue_followups, None])
+        agent = self._agent(runner)
+        with self.assertRaises(TimeoutError):
+            await asyncio.wait_for(agent.arun("plan the launch"), timeout=0.2)
+        self.assertEqual(agent._queued_prompts, [])
+        await self._assert_next_run_is_clean(agent, runner)
+
+    async def test_cancelled_drained_run_clears_queue(self) -> None:
+        runner = StepRunner([_queue_followups, _finish, None])
+        agent = self._agent(runner)
+        with self.assertRaises(TimeoutError):
+            await asyncio.wait_for(agent.arun("plan the launch"), timeout=0.2)
+        self.assertEqual(agent._queued_prompts, [])
+        await self._assert_next_run_is_clean(agent, runner)
+
+    async def test_failed_drained_run_still_reports_error_on_primary_reply(self) -> None:
+        runner = StepRunner([_queue_followups, _finish, _fail])
+        agent = self._agent(runner)
+        reply = await agent.arun("plan the launch")
+        self.assertIn("queued_prompt_error", reply.metadata)
+        self.assertEqual(agent._queued_prompts, [])
+        await self._assert_next_run_is_clean(agent, runner)
+
+    async def test_cancelled_auto_handoff_clears_queue(self) -> None:
+        # The primary run succeeds, then the caller's timeout cancels the automatic handoff before the drain starts.
+        runner = StepRunner([_queue_followups, _finish, None])
+        agent = build_test_agent(
+            runner=runner, name="queued", system_prompt="Answer briefly.", tools=[RunPromptsSequentiallyTool()], handoff=MinimalHandoff()
+        )
+        with self.assertRaises(TimeoutError):
+            await asyncio.wait_for(agent.arun("ship v3"), timeout=0.2)
+        self.assertEqual(agent._queued_prompts, [])
+        calls_before = len(runner.prompts)
+        reply = await agent.arun("hello")
+        self.assertNotIn("queued_prompt_runs", reply.metadata)
+        # A drained follow-up would reach the model as its own task prompt; only "hello" and its handoff may.
+        self.assertEqual(runner.prompts[calls_before], "hello")
+        self.assertFalse(any(prompt.startswith("FOLLOWUP") for prompt in runner.prompts[calls_before:]))
+        self.assertEqual(agent._queued_prompts, [])
+
+
+def _queue_prompts(prompts: list[str], prompt: str) -> _FunctionCallResponse:
+    return _FunctionCallResponse("run_prompts_sequentially", {"prompts": prompts})
+
+
+class PerRunRunner:
+    """Async runner that plays a separate scripted step list per task prompt; an Event step blocks until set, then finishes."""
+
+    def __init__(self, scripts: dict[str, list[Any]]) -> None:
+        self.scripts = {prompt: list(steps) for prompt, steps in scripts.items()}
+        self.prompts: list[str] = []
+        self.blocked = asyncio.Event()
+
+    async def arun(self, prompt: str, **_: object) -> _FunctionCallResponse:
+        self.prompts.append(prompt)
+        steps = self.scripts.get(prompt, [])
+        step = steps.pop(0) if steps else _finish
+        if isinstance(step, asyncio.Event):
+            self.blocked.set()
+            await step.wait()
+            return _finish(prompt)
+        return step(prompt)
+
+
+class RunScopedQueueTests(unittest.IsolatedAsyncioTestCase):
+    # @intent run-scoped-prompt-queue
+    # Concurrent runs on one agent must each drain, record, and clear only the follow-ups they queued.
+
+    def _agent(self, runner: PerRunRunner) -> Any:
+        return build_test_agent(runner=runner, name="queued", system_prompt="Answer briefly.", tools=[RunPromptsSequentiallyTool()])
+
+    async def test_finished_run_does_not_drain_concurrent_runs_followups(self) -> None:
+        release = asyncio.Event()
+        runner = PerRunRunner({"X: plan": [partial(_queue_prompts, ["X-FOLLOWUP-1", "X-FOLLOWUP-2"]), release]})
+        agent = self._agent(runner)
+        x_task = asyncio.create_task(agent.arun("X: plan"))
+        await runner.blocked.wait()
+        y_reply = await agent.arun("Y: date?")
+        release.set()
+        x_reply = await x_task
+        self.assertNotIn("queued_prompt_runs", y_reply.metadata)
+        self.assertEqual(x_reply.metadata["queued_prompt_runs"], 2)
+        self.assertEqual(runner.prompts, ["X: plan", "X: plan", "Y: date?", "X-FOLLOWUP-1", "X-FOLLOWUP-2"])
+        self.assertEqual(agent._queued_prompts, [])
+
+    async def test_run_drains_its_own_followups_while_another_run_drains(self) -> None:
+        release = asyncio.Event()
+        runner = PerRunRunner({"X: plan": [partial(_queue_prompts, ["X-FOLLOWUP"])], "X-FOLLOWUP": [release], "Y: report": [partial(_queue_prompts, ["Y-FOLLOWUP"])]})
+        agent = self._agent(runner)
+        x_task = asyncio.create_task(agent.arun("X: plan"))
+        await runner.blocked.wait()
+        y_reply = await agent.arun("Y: report")
+        # Y ran its follow-up itself while X's drain was still blocked.
+        self.assertEqual(runner.prompts[-1], "Y-FOLLOWUP")
+        release.set()
+        x_reply = await x_task
+        self.assertEqual(y_reply.metadata["queued_prompt_runs"], 1)
+        self.assertEqual(x_reply.metadata["queued_prompt_runs"], 1)
+        self.assertEqual(runner.prompts.count("Y-FOLLOWUP"), 1)
+
+    async def test_failed_run_does_not_clear_concurrent_runs_queue(self) -> None:
+        release = asyncio.Event()
+        runner = PerRunRunner({"Y: report": [partial(_queue_prompts, ["Y-FOLLOWUP"]), release], "X: plan": [_fail]})
+        agent = self._agent(runner)
+        y_task = asyncio.create_task(agent.arun("Y: report"))
+        await runner.blocked.wait()
+        with self.assertRaises(AgentExecutionError):
+            await agent.arun("X: plan")
+        release.set()
+        y_reply = await y_task
+        self.assertEqual(y_reply.metadata["queued_prompt_runs"], 1)
+        self.assertEqual(runner.prompts[-1], "Y-FOLLOWUP")
+
+    async def test_prompts_enqueued_between_runs_drain_with_the_next_run(self) -> None:
+        runner = PerRunRunner({})
+        agent = self._agent(runner)
+        await agent.arun("first")
+        agent.enqueue_prompts(["later follow-up"])
+        self.assertEqual(agent._queued_prompts, ["later follow-up"])
+        reply = await agent.arun("second")
+        self.assertEqual(reply.metadata["queued_prompt_runs"], 1)
+        self.assertEqual(runner.prompts, ["first", "second", "later follow-up"])
+        self.assertEqual(agent._queued_prompts, [])
+
+
+class _Ticket(BaseModel):
+    summary: str
+
+
+def _call_send_email(prompt: str) -> _FunctionCallResponse:
+    return _FunctionCallResponse("send_email", {"to": "customer@example.com"})
+
+
+def _finish_ticket(prompt: str) -> _FunctionCallResponse:
+    return _FunctionCallResponse("isDone", {"final_answer": json.dumps({"summary": "refund filed"})})
+
+
+class SchemaFailureQueuedPromptTests(unittest.IsolatedAsyncioTestCase):
+    # @intent failed-run-leaves-no-queued-prompts
+    # A run that fails its output_schema must raise before its queued follow-ups run, so a retry cannot repeat their side effects.
+
+    def _agent(self, runner: PerRunRunner, sent: list[str]) -> Any:
+        @tool
+        def send_email(to: str) -> str:
+            """Send the refund email."""
+            sent.append(to)
+            return "sent"
+
+        return build_test_agent(
+            runner=runner, name="queued", system_prompt="Answer briefly.", tools=[RunPromptsSequentiallyTool(), send_email], output_schema=_Ticket
+        )
+
+    async def test_schema_failure_raises_before_queued_followup_runs(self) -> None:
+        # The primary run queues the email follow-up, then never returns valid Ticket JSON.
+        runner = PerRunRunner({"file the ticket": [partial(_queue_prompts, ["send the refund email"])], "send the refund email": [_call_send_email, _finish_ticket]})
+        sent: list[str] = []
+        agent = self._agent(runner, sent)
+        with self.assertRaises(OutputSchemaViolationError):
+            await agent.arun("file the ticket")
+        self.assertNotIn("send the refund email", runner.prompts)
+        self.assertEqual(sent, [])
+        self.assertEqual(agent._queued_prompts, [])
+        # The failed turn is still recorded in history before the error is raised.
+        self.assertIs(agent.history[-1], agent.last_reply)
+        self.assertEqual(agent.history[-1].sender, "queued")
+        self.assertIsNone(agent.history[-1].structured)
+
+    async def test_schema_success_still_drains_queued_followup(self) -> None:
+        runner = PerRunRunner(
+            {"file the ticket": [partial(_queue_prompts, ["send the refund email"]), _finish_ticket], "send the refund email": [_call_send_email, _finish_ticket]}
+        )
+        sent: list[str] = []
+        agent = self._agent(runner, sent)
+        reply = await agent.arun("file the ticket")
+        self.assertEqual(reply.structured, _Ticket(summary="refund filed"))
+        self.assertEqual(reply.metadata["queued_prompt_runs"], 1)
+        self.assertNotIn("queued_prompt_error", reply.metadata)
+        self.assertEqual(sent, ["customer@example.com"])
+        self.assertEqual(agent._queued_prompts, [])
+
+    async def test_drained_schema_failure_is_recorded_on_primary_reply(self) -> None:
+        # A drained follow-up that fails its schema is reported on the successful primary reply, not raised.
+        runner = PerRunRunner({"file the ticket": [partial(_queue_prompts, ["send the refund email"]), _finish_ticket]})
+        sent: list[str] = []
+        agent = self._agent(runner, sent)
+        reply = await agent.arun("file the ticket")
+        self.assertEqual(reply.structured, _Ticket(summary="refund filed"))
+        self.assertIn("OutputSchemaViolationError", reply.metadata["queued_prompt_error"])
+        self.assertEqual(agent._queued_prompts, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

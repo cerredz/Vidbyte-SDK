@@ -39,9 +39,13 @@ def _usage_mapping_total(usage: Mapping[str, Any]) -> int | None:
         value = usage.get(key)
         if isinstance(value, int):
             return value
+    # @intent anthropic-cache-buckets-count-toward-total
+    # Anthropic usage has no total key and its input_tokens excludes both prompt-cache
+    # buckets, so they must be summed here or the max_tokens budget undercounts cached runs.
+    # Subset-billing providers (OpenAI, DeepSeek, Gemini) always report a total key above.
     parts = [
         usage.get(key)
-        for key in ("input_tokens", "prompt_tokens", "output_tokens", "completion_tokens", "promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount")
+        for key in ("input_tokens", "prompt_tokens", "output_tokens", "completion_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount")
         if isinstance(usage.get(key), int)
     ]
     if parts:

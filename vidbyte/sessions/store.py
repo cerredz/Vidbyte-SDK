@@ -110,13 +110,20 @@ class BaseSessionStore(ABC):
         return sorted(results, key=lambda item: item.updated_at)
 
     def prune(self, session_id: str, *, keep: int | None = None) -> None:
-        # Delete oldest checkpoints beyond `keep`, never removing the current head.
+        # Delete checkpoints beyond `keep`: off-head-chain ones first (oldest first), then oldest
+        # head-chain ancestors, never removing the current head.
         if keep is None:
             return
         meta = self._read_meta(session_id)
         head_id = meta.head_id if meta is not None else None
         checkpoints = self.history(session_id)
-        removable = [c for c in checkpoints if c.id != head_id]
+        by_id = {c.id: c for c in checkpoints}
+        head_chain: set[str] = set()
+        cursor = head_id
+        while cursor is not None and cursor in by_id and cursor not in head_chain:
+            head_chain.add(cursor)
+            cursor = by_id[cursor].parent_id
+        removable = sorted((c for c in checkpoints if c.id != head_id), key=lambda c: (c.id in head_chain, c.seq))
         excess = len(removable) - max(keep - (1 if head_id else 0), 0)
         for checkpoint in removable[: max(excess, 0)]:
             self._delete_checkpoint(checkpoint.id)

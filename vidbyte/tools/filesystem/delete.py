@@ -21,10 +21,10 @@ class DeleteTool(FileSystemTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Require write permission, verify the path exists, delete it, and return the path.
+        # Read the recursive flag strictly, require write permission, verify the path exists, delete it, and return the path.
         path = call.arguments.get("path", "")
-        recursive = bool(call.arguments.get("recursive", False))
         try:
+            recursive = self._resolve_bool_argument(call, "recursive", default=False)
             self._require_write()
             target = self._path(path)
             if not target.exists():

@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from vidbyte.lib.dataclasses.context import ContextMessage, ProgressLog
 from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, Summarizer, TokenCounter
+from vidbyte.middleware.compaction.call_signature import tool_call_signature
 
 
 _ANSI_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -20,17 +21,16 @@ def _is_tool_message(message: ContextMessage) -> bool:
 
 
 def _provider_groups(messages: Sequence[ContextMessage]) -> tuple[tuple[ContextMessage, ...], ...]:
-    # Groups messages into logical units, pairing each tool call with its immediate result.
+    # Groups messages into logical units, pairing each tool call with every consecutive result (parallel calls).
     groups: list[tuple[ContextMessage, ...]] = []
     index = 0
     while index < len(messages):
-        message = messages[index]
-        if message.kind == "tool_call" and index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
-            groups.append((message, messages[index + 1]))
-            index += 2
-        else:
-            groups.append((message,))
-            index += 1
+        end = index + 1
+        if messages[index].kind == "tool_call":
+            while end < len(messages) and messages[end].kind == "tool_result":
+                end += 1
+        groups.append(tuple(messages[index:end]))
+        index = end
     return tuple(groups)
 
 
@@ -290,21 +290,27 @@ class DeduplicateToolCallsCompaction(BaseCompaction):
     """Removes duplicate tool-call/result pairs while keeping the first occurrence."""
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        seen_call_content: set[str] = set()
+        seen_signatures: set[str] = set()
         remove_indexes: set[int] = set()
         for index, message in enumerate(messages):
-            if message.kind == "tool_call":
-                if message.content in seen_call_content:
-                    remove_indexes.add(index)
-                    if index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
-                        remove_indexes.add(index + 1)
-                else:
-                    seen_call_content.add(message.content)
+            # Key each call on its tool names and arguments, not its per-call id, so repeated calls match.
+            signature = tool_call_signature(message)
+            if signature is None:
+                continue
+            if signature in seen_signatures:
+                remove_indexes.add(index)
+                if index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
+                    remove_indexes.add(index + 1)
+            else:
+                seen_signatures.add(signature)
         return tuple(m for i, m in enumerate(messages) if i not in remove_indexes)
 
 
 class SummarizeRangeCompaction(BaseCompaction):
-    """Summarizes middle history while preserving system and recent messages."""
+    """Summarizes middle history while preserving system and recent messages.
+
+    keep_last is rounded up to whole provider groups so a tool call and its results are never split.
+    """
 
     def __init__(self, summarizer: Summarizer, keep_last: int = 3) -> None:
         if summarizer is None:
@@ -315,8 +321,14 @@ class SummarizeRangeCompaction(BaseCompaction):
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
         system = tuple(m for m in messages if m.role == "system")
         non_system = tuple(m for m in messages if m.role != "system")
-        recent = non_system[-self.keep_last:] if self.keep_last else ()
-        middle = non_system[:-self.keep_last] if self.keep_last else non_system
+        # @intent never-split-a-tool-call-from-its-results
+        groups = _provider_groups(non_system)
+        split, kept = len(groups), 0
+        while split and kept < self.keep_last:
+            split -= 1
+            kept += len(groups[split])
+        middle = tuple(m for group in groups[:split] for m in group)
+        recent = tuple(m for group in groups[split:] for m in group)
         if not middle:
             return tuple(messages)
         summary_text = await self.summarizer.summarize(middle)
@@ -326,11 +338,14 @@ class SummarizeRangeCompaction(BaseCompaction):
             kind="summary",
             metadata={"compaction": CompactionMode.SUMMARIZE_RANGE.value},
         )
-        return system + (summary,) + tuple(recent)
+        return system + (summary,) + recent
 
 
 class SummarizeOldestNCompaction(BaseCompaction):
-    """Summarizes the oldest n non-system messages and keeps the rest verbatim."""
+    """Summarizes the oldest n non-system messages and keeps the rest verbatim.
+
+    n is rounded up to whole provider groups so a tool call and its results are never split.
+    """
 
     def __init__(self, summarizer: Summarizer, n: int = 5) -> None:
         if summarizer is None:
@@ -341,8 +356,14 @@ class SummarizeOldestNCompaction(BaseCompaction):
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
         system = tuple(m for m in messages if m.role == "system")
         non_system = tuple(m for m in messages if m.role != "system")
-        to_summarize = non_system[:self.n]
-        rest = non_system[self.n:]
+        # @intent never-split-a-tool-call-from-its-results
+        groups = _provider_groups(non_system)
+        split, covered = 0, 0
+        while split < len(groups) and covered < self.n:
+            covered += len(groups[split])
+            split += 1
+        to_summarize = tuple(m for group in groups[:split] for m in group)
+        rest = tuple(m for group in groups[split:] for m in group)
         if not to_summarize:
             return tuple(messages)
         summary_text = await self.summarizer.summarize(to_summarize)
@@ -568,27 +589,35 @@ class TrimWithProviderBoundariesCompaction(BaseCompaction):
         self.token_counter = token_counter
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        # Trims from the oldest side, repairs tool boundaries, then optionally applies token trimming.
-        if self.max_messages is None:
-            selected = tuple(messages)
-        else:
-            selected_indexes = set(range(max(0, len(messages) - self.max_messages), len(messages)))
-            selected_indexes.update(self._boundary_repairs(messages, selected_indexes))
-            selected = tuple(message for index, message in enumerate(messages) if index in selected_indexes)
-        if self.max_tokens is None:
-            return selected
-        return await TrimToTokenBudgetCompaction(self.max_tokens, self.token_counter, preserve_system=True).compact(selected)
+        # Trims whole call/result groups by count, then by token budget, so no tool boundary is ever split.
+        # @intent parallel-tool-turns-are-kept-or-dropped-whole
+        groups = _provider_groups(messages)
+        if self.max_messages is not None:
+            first_kept = max(0, len(messages) - self.max_messages)
+            kept: list[tuple[ContextMessage, ...]] = []
+            offset = 0
+            for group in groups:
+                if offset + len(group) > first_kept:
+                    kept.append(group)
+                offset += len(group)
+            groups = tuple(kept)
+        if self.max_tokens is not None:
+            groups = self._trim_groups_to_tokens(groups, self.max_tokens)
+        return tuple(message for group in groups for message in group)
 
-    def _boundary_repairs(self, messages: Sequence[ContextMessage], selected_indexes: set[int]) -> set[int]:
-        # Finds adjacent call/result records needed to avoid broken provider transcript shapes.
-        repairs: set[int] = set()
-        for index in tuple(selected_indexes):
-            message = messages[index]
-            if message.kind == "tool_result" and index > 0 and messages[index - 1].kind == "tool_call":
-                repairs.add(index - 1)
-            if message.kind == "tool_call" and index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
-                repairs.add(index + 1)
-        return repairs
+    def _trim_groups_to_tokens(self, groups: Sequence[tuple[ContextMessage, ...]], max_tokens: int) -> tuple[tuple[ContextMessage, ...], ...]:
+        # Keeps system groups first, then the newest whole groups that still fit the token budget.
+        def cost(group: tuple[ContextMessage, ...]) -> int:
+            # Sums the token cost of every record in one call/result group.
+            return sum(_message_tokens(message, self.token_counter) for message in group)
+
+        keep = {index for index, group in enumerate(groups) if group[0].role == "system"}
+        remaining = max_tokens - sum(cost(groups[index]) for index in keep)
+        for index in range(len(groups) - 1, -1, -1):
+            if remaining >= 0 and index not in keep and cost(groups[index]) <= remaining:
+                keep.add(index)
+                remaining -= cost(groups[index])
+        return tuple(group for index, group in enumerate(groups) if index in keep)
 
 
 class DeleteMessagesByIdOrRangeCompaction(BaseCompaction):

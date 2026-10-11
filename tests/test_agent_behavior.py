@@ -29,8 +29,10 @@ from vidbyte.evals import Behavior, ContainsGrader, EvalCase, EvalRunner, EvalSu
 from vidbyte.evals.behavior.efficiency import EfficiencyBehavior
 from vidbyte.evals.behavior.output import OutputBehavior
 from vidbyte.evals.behavior.tool import ToolBehavior
+from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
+from vidbyte.lib.runners import TextModelResponse
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -110,6 +112,18 @@ class MockAgent(BaseAgent):
         return reply
 
 
+class HandoffOnPromptRunner:
+    """Runner that records a handoff on the bound agent whenever the prompt says "handoff"."""
+
+    def __init__(self) -> None:
+        self.agent: BaseAgent | None = None
+
+    def run(self, prompt: str, **_: object) -> TextModelResponse:
+        if "handoff" in prompt and self.agent is not None:
+            self.agent.record_handoff(Handoff(sections={"summary": prompt}))
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Final answer: OK", raw={})
+
+
 class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
     """Main test suite validating all behavior predicate categories and integration."""
 
@@ -160,6 +174,20 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         calls = (make_call("a", state=ToolCallState.SUCCEEDED), make_call("b", state=ToolCallState.FAILED))
         probe = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"tool_calls": calls})))
         self.assertEqual(probe.tool_call_states, ("succeeded", "failed"))
+
+    def test_probe_excludes_internal_finish_tool(self) -> None:
+        # [Hidden Assumption] the runtime's internal isDone call is plumbing, not a developer tool call.
+        done = ToolCallContext(tool_name="isDone", arguments={}, state=ToolCallState.SUCCEEDED, metadata={"internal": True})
+        md = {"tool_calls": (make_call("lookup"), done), "tool_call_states": ("succeeded", "succeeded"), "tool_call_count": 2}
+        probe = RunProbe.from_reply(make_reply(metadata=md))
+        b = behavior_from_probe(probe)
+        self.assertTrue(b.tool.called_only_tools(["lookup"]))
+        self.assertEqual(b.tool.called_tool_names(), ("lookup",))
+        self.assertEqual(b.stop.total_tool_calls(), 1)
+        self.assertEqual(probe.tool_call_states, ("succeeded",))
+        only_done = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"tool_calls": (done,), "tool_call_count": 1})))
+        self.assertTrue(behavior_from_probe(only_done).tool.called_no_tools())
+        self.assertEqual(only_done.tool_call_count, 0)
 
     def test_probe_from_agent_structured(self) -> None:
         # [Hidden Assumption] from_agent copies metadata["structured"] into probe.structured.
@@ -303,6 +331,14 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.tool_args.tool_never_called_with("search", query="java"))
         self.assertFalse(b.tool_args.tool_never_called_with("search", query="python"))
 
+    def test_tool_args_can_check_argument_named_name(self) -> None:
+        # [Hidden Failure] An argument called `name` is matched, not bound to the tool-name parameter.
+        b = behavior_from_probe(RunProbe(tool_calls=(make_call("create_user", args={"name": "Ada", "role": "admin"}),)))
+        self.assertTrue(b.tool_args.tool_called_with("create_user", name="Ada"))
+        self.assertFalse(b.tool_args.tool_called_with("create_user", name="Eve"))
+        self.assertTrue(b.tool_args.tool_never_called_with("create_user", name="Eve"))
+        self.assertFalse(b.tool_args.tool_never_called_with("create_user", name="Ada", role="admin"))
+
     def test_tool_called_with_matching(self) -> None:
         # [Hidden Assumption] tool_called_with_matching calls predicate on arg value.
         b = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"query": "python tutorial"}),)))
@@ -323,8 +359,9 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.stop.stopped_on("final_response"))
 
     def test_stopped_normally(self) -> None:
-        # [Silent Failure] stopped_normally True only for "final_response".
+        # [Silent Failure] stopped_normally True only for "final_response" and "is_done".
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response")).stop.stopped_normally())
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done")).stop.stopped_normally())
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_iterations")).stop.stopped_normally())
 
     def test_did_not_hit_budgets(self) -> None:
@@ -379,6 +416,19 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.handoff.handoff_occurred())
         self.assertFalse(b.handoff.handoff_is_filled())
         self.assertEqual(b.handoff.handoff_count(), 0)
+
+    async def test_handoff_predicates_cover_only_the_latest_run(self) -> None:
+        # [Hidden Failure] a handoff from an earlier run must not be reported for a later run without one.
+        runner = HandoffOnPromptRunner()
+        agent = build_test_agent(name="t", system_prompt="t", runner=runner)
+        runner.agent = agent
+        await agent.arun("please handoff")
+        self.assertTrue(agent.behavior.handoff.handoff_occurred())
+        self.assertEqual(agent.behavior.handoff.handoff_count(), 1)
+        await agent.arun("plain answer")
+        self.assertFalse(agent.behavior.handoff.handoff_occurred())
+        self.assertEqual(agent.behavior.handoff.handoff_count(), 0)
+        self.assertEqual(len(agent.handoffs), 1)
 
     # --- OutputBehavior Category F ---
 
@@ -441,7 +491,18 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.output.contains_citation("bracket"))
         self.assertTrue(b.output.contains_citation("footnote"))
         self.assertTrue(b.output.contains_citation("url"))
-        self.assertTrue(b.output.citation_count("any", at_least=4))
+        self.assertEqual(b.output.citation_count("any"), 3)
+
+    def test_output_any_citation_counts_markdown_link_once(self) -> None:
+        # [Silent Failure] a markdown link's URL and numeric label must not count as extra references.
+        cases = {
+            "Rates rose in 2025 [Fed report](https://example.com/fed-2025).": 1,
+            "See [1](https://example.com/a).": 1,
+            "[a](https://a.test) and https://b.test plus [2] and [^3].": 4,
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(behavior_from_probe(RunProbe(output=text)).output.citation_count("any"), expected)
 
     def test_output_unknown_citation_style_raises(self) -> None:
         # [Hidden Failure] unknown citation style raises ValueError.
@@ -701,12 +762,16 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
     def test_efficiency_stopped_normally_within_iterations(self) -> None:
         # [Hidden Failure] stopped_normally_within_iterations requires normal stop and iteration bound.
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
+        self.assertFalse(behavior_from_probe(RunProbe(stop_reason="is_done", iteration_count=3)).efficiency.stopped_normally_within_iterations(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_iterations", iteration_count=2)).efficiency.stopped_normally_within_iterations(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=3)).efficiency.stopped_normally_within_iterations(2))
 
     def test_efficiency_stopped_normally_within_tool_calls(self) -> None:
         # [Hidden Failure] stopped_normally_within_tool_calls requires normal stop and tool-call bound.
         self.assertTrue(behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
+        self.assertTrue(behavior_from_probe(RunProbe(stop_reason="is_done", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
+        self.assertFalse(behavior_from_probe(RunProbe(stop_reason="is_done", tool_call_count=3)).efficiency.stopped_normally_within_tool_calls(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_tool_calls", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2))
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=3)).efficiency.stopped_normally_within_tool_calls(2))
 

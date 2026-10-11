@@ -105,14 +105,20 @@ class CreateHandoffTool(BaseTool):
         if not title:
             raise ValueError("create_handoff requires a non-empty 'title'.")
         sections = args.get("sections")
-        if not isinstance(sections, Mapping) or not sections:
+        # @intent null-optional-arg-means-default
+        # A null section value means "no content given": leave that section out exactly like an omitted
+        # one so the receiver never sees "None", and treat all-null sections like an empty object.
+        normalized = {str(k): str(v) for k, v in sections.items() if v is not None} if isinstance(sections, Mapping) else {}
+        if not normalized:
             raise ValueError("create_handoff requires a non-empty 'sections' object mapping section title to content.")
-        normalized = {str(k): str(v) for k, v in sections.items()}
         primitive_id = self._next_primitive_id()
         instructions_parts: list[str] = []
-        if audience := str(args.get("audience", "")).strip():
+        # @intent null-optional-arg-means-default
+        # A null audience or instructions means "not given", so it must never reach the receiver as "None".
+        raw_audience, raw_extra = args.get("audience"), args.get("instructions")
+        if raw_audience is not None and (audience := str(raw_audience).strip()):
             instructions_parts.append(f"Audience: {audience}")
-        if extra := str(args.get("instructions", "")).strip():
+        if raw_extra is not None and (extra := str(raw_extra).strip()):
             instructions_parts.append(f"Instructions: {extra}")
         instructions = "\n".join(instructions_parts) or None
         return Handoff(title=title, sections=normalized, instructions=instructions, primitive_id=primitive_id)
@@ -120,6 +126,12 @@ class CreateHandoffTool(BaseTool):
     def _next_primitive_id(self) -> str:
         """Return a stable, monotonic primitive id scoped to the bound agent's run."""
         count = len(self._agent.handoffs) + 1 if self._agent is not None else 1
+        # @intent handoff-ids-never-overwrite-registered-handoffs
+        # A forked, shared, or restored context manager can already hold handoff ids this
+        # agent never authored, so skip any id that is taken instead of replacing it.
+        manager = getattr(self._agent, "context_manager", None)
+        while manager is not None and manager.get_by_id(f"handoff:{count}") is not None:
+            count += 1
         return f"handoff:{count}"
 
     def _render_result(self, produced: Handoff) -> ToolResult:

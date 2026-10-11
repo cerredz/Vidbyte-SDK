@@ -57,12 +57,13 @@ DEFAULT_FALLBACK_ERRORS: tuple[type[BaseException], ...] = (
 class AgentFallback:
     """Ordered model chain plus the transforms that route an in-flight run to the next model."""
 
-    def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS) -> None:
+    def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS, timeout_seconds: float | None = None) -> None:
         # Stores the chain (index 0 is the primary) and caches runners lazily, keyed by chain index.
         if not models:
             raise ConfigurationError("AgentFallback requires at least the primary model in its chain.")
         self.models = tuple(models)
         self.fallback_on = tuple(fallback_on)
+        self.timeout_seconds = timeout_seconds
         self._runner_cache: dict[int, object] = {}
 
     @classmethod
@@ -84,7 +85,7 @@ class AgentFallback:
         if spec is None:
             return None
         settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=tuple(spec))
-        return settings.to_fallback(primary=cls._primary_model(runner_config, agent_name))
+        return settings.to_fallback(primary=cls._primary_model(runner_config, agent_name), timeout_seconds=runner_config.timeout_seconds)
 
     @staticmethod
     def _primary_model(runner_config: AgentRunnerConfig, agent_name: str) -> FallbackModel:
@@ -154,11 +155,16 @@ class AgentFallback:
         """Build and memoize the executable runner for the model at index."""
         if index not in self._runner_cache:
             target = self.model_at(index)
+            # @intent fallback-runner-keeps-agent-timeout
+            # A backup model gets the agent's own per-request timeout, as the primary runner does;
+            # omitted when unset so the model config keeps its own default.
+            options = {"timeout_seconds": self.timeout_seconds} if self.timeout_seconds is not None else {}
             self._runner_cache[index] = Runner.from_model(
                 provider=target.provider,
                 model_name=target.model,
                 api_key=target.api_key,
                 temperature=target.temperature,
+                options=options,
             ).build()
         return self._runner_cache[index]
 

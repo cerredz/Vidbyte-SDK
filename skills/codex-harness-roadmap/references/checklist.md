@@ -20,7 +20,7 @@ Do not count those as new work. Their deeper semantics, additional operation met
 
 A label names the implementation route, not a guarantee of availability for every platform, model, account, or runtime. Any experimental child field remains gated even when its parent row says P/CFG. Follow the task's caveat and official source.
 
-There are **100 pending tasks**. IDs are stable. Mark one complete only with an implementation commit and evidence; move changed assumptions into the baseline rather than silently resetting checkbox meanings.
+There are **98 pending tasks**. IDs are stable. Mark one complete only with an implementation commit and evidence; move changed assumptions into the baseline rather than silently resetting checkbox meanings.
 
 ## Contents
 
@@ -164,8 +164,8 @@ Completion evidence: Context updates have known placement and lifetime; compacti
 Evidence: [S02](sources.md#s02), [S08](sources.md#s08); vidbyte/tools/ and vidbyte/agents/contracts/. Implementation seam: Proposed CodexToolTranslator and CodexOutputContractTranslator.
 
 - [ ] **U01 [V] Export tool schemas.** Translate Tools/BaseTool names, descriptions, arguments, and capabilities into an MCP-exposed catalog.
-- [ ] **U02 [E] Support dynamic tools.** Evaluate experimental dynamicTools registration plus item/tool/call dispatch when an MCP bridge is unsuitable.
-- [ ] **U03 [V] Execute tool callbacks correctly.** Validate inputs, preserve call IDs, encode outputs/errors/media, and propagate cancellation and timeout.
+- [x] **U02 [E] Support dynamic tools.** Evaluate experimental dynamicTools registration plus item/tool/call dispatch when an MCP bridge is unsuitable. Delivered by `CodexHarnessAgentSettings.tools` and `vidbyte/agents/codex/tools.py`; evidence in `docs/design/codex-harness-tools.md` and `tests/test_codex_tools.py`.
+- [x] **U03 [V] Execute tool callbacks correctly.** Validate inputs, preserve call IDs, encode outputs/errors/media, and propagate cancellation and timeout. Delivered through `ToolExecutor` with call IDs, a bounded wait, and cancellation on connection close; `ToolResult` carries text only, so no media is encoded.
 - [ ] **U04 [V] Translate tool policy.** Map allow/deny, concurrency, dependencies, and tool-error policy only where a pre-execution control point exists.
 - [ ] **U05 [V] Extend output contracts.** Map final structured-output validation and applicable OutputContract checks; do not substitute output shape for required tool behavior.
 

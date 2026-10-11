@@ -13,6 +13,8 @@ TESTS: Offline transport checks and python scripts/run_ci.py.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
 from vidbyte.agents.codex.config import CodexContentTranslator
@@ -21,6 +23,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexRunResult,
     CodexSdkTypes,
     CodexThreadIdentity,
+    CodexToolAttachRequest,
     CodexTransportForkRequest,
     CodexTransportRunRequest,
 )
@@ -29,6 +32,8 @@ from vidbyte.lib.errors import CodexAgentError
 
 if TYPE_CHECKING:
     from openai_codex import TurnResult
+
+    from vidbyte.agents.codex.tools import CodexToolBridge
 
 
 class _CodexThread(Protocol):
@@ -55,7 +60,9 @@ class CodexTransport:
             config = sdk.codex_config(
                 **CodexContentTranslator.client_kwargs(request.settings)
             )
-            async with sdk.async_codex(config) as client:
+            async with sdk.async_codex(config) as client, self._attached_tools(
+                client, request.tools
+            ):
                 thread = await self._open_thread(client, sdk, request)
                 try:
                     sdk_input = CodexContentTranslator.run_input(request.prompt, sdk)
@@ -187,6 +194,23 @@ class CodexTransport:
                 operation=operation,
                 error_type=type(exc).__name__,
             ) from exc
+
+    @staticmethod
+    @asynccontextmanager
+    async def _attached_tools(client: _CodexClient, tools: CodexToolBridge | None) -> AsyncIterator[None]:
+        # @intent tools-live-only-for-one-connection
+        # Attach before the thread opens so thread/start registers the tools, and
+        # cancel unfinished tool calls before the app-server connection closes.
+        if tools is None:
+            yield
+            return
+        handler = tools.attach(
+            CodexToolAttachRequest(client=client, loop=asyncio.get_running_loop())
+        )
+        try:
+            yield
+        finally:
+            handler.close()
 
     @staticmethod
     def _load_sdk() -> CodexSdkTypes:

@@ -14,6 +14,7 @@ Relations:
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from vidbyte.lib.errors import SourceParseError, SourceSecurityError
 from vidbyte.sources import (
@@ -83,6 +84,31 @@ class LlmsTxtParserTests(unittest.TestCase):
         # [Edge Case] An empty link target is malformed.
         with self.assertRaises(SourceParseError):
             parse_llms_txt(b"# T\n## S\n- [text]()", url="u")
+
+    def test_parse_link_note_separator_variants(self) -> None:
+        # [Hidden Assumption] Colon, hyphen, en-dash, and em-dash all introduce a link note.
+        for separator in (":", " :", " -", " \u2013", " \u2014"):
+            with self.subTest(separator=separator):
+                raw = f"# T\n## S\n- [Guide](https://ex.com/g.md){separator}  Read this first \n".encode()
+                link = parse_llms_txt(raw, url="u").sections[0].links[0]
+                self.assertEqual((link.title, link.url, link.note), ("Guide", "https://ex.com/g.md", "Read this first"))
+
+    def test_parse_link_without_note_unchanged(self) -> None:
+        # [Edge Case] A bare link, or one with only trailing whitespace, has no note.
+        doc = parse_llms_txt(b"# T\n## S\n- [a](https://ex.com/a.md)\n- [b](https://ex.com/b.md)   \n", url="u")
+        self.assertEqual([link.note for link in doc.sections[0].links], [None, None])
+
+    def test_parse_link_with_unseparated_trailing_text_fails_closed(self) -> None:
+        # [Silent Failure] Trailing text without a recognized separator is still malformed.
+        with self.assertRaises(SourceParseError):
+            parse_llms_txt(b"# T\n## S\n- [a](https://ex.com/a.md) trailing words", url="u")
+
+    def test_parse_repository_llms_txt(self) -> None:
+        # [Regression] The SDK's own llms.txt, which uses em-dash link notes, parses.
+        raw = (Path(__file__).resolve().parents[1] / "llms.txt").read_bytes()
+        doc = parse_llms_txt(raw, url="https://ex.com/llms.txt")
+        notes = {link.url: link.note for section in doc.sections for link in section.links}
+        self.assertTrue(notes["vidbyte/providers/README.md"].startswith("API, modality"))
 
     def test_parse_optional_section_flagged(self) -> None:
         # [Edge Case] A "## Optional" section is flagged optional.

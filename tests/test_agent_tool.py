@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import unittest
 
 from tests.agent_test_support import build_test_agent
@@ -267,6 +269,97 @@ class ContextGetterBindingTests(unittest.TestCase):
         _, history = child_tool._context_getter()  # type: ignore[misc]
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].content, "ping")
+
+
+class _DelegatingRunner:
+    """Calls the child tool, yielding so concurrent runs interleave, then finishes once tool results are present."""
+
+    async def arun(self, message: str, **kwargs: object) -> object:
+        await asyncio.sleep(0.01)
+        if kwargs.get("messages"):
+            return _FakeResponse("done")
+        return _ToolCallResponse("child")
+
+
+class _ToolCallResponse(_FakeResponse):
+    def __init__(self, tool_name: str) -> None:
+        super().__init__("")
+        self.raw = {"output": [{"type": "function_call", "name": tool_name, "arguments": "{}", "call_id": "fc_child"}]}
+
+
+class _RecordingRunner:
+    """Records the <current_request> each delegation receives and echoes it back."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def arun(self, message: str, **kwargs: object) -> _FakeResponse:
+        match = re.search(r"<current_request>\s*(.*?)\s*</current_request>", message, re.S)
+        request = match.group(1) if match else ""
+        self.seen.append(request)
+        return _FakeResponse(f"seen:{request}")
+
+
+class ConcurrentRunContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_runs_forward_their_own_prompt_to_agent_tool(self) -> None:
+        recorder = _RecordingRunner()
+        child = build_test_agent(
+            name="child",
+            system_prompt="child system",
+            runner=recorder,
+            agent_metadata=AgentMetadata(name="child", description="A test agent.", use_cases="Testing."),
+        )
+        parent = build_test_agent(name="parent", system_prompt="parent system", runner=_DelegatingRunner(), tools=(child.as_tool(),))
+
+        await asyncio.gather(parent.arun("ALICE request"), parent.arun("BOB request"))
+
+        self.assertCountEqual(recorder.seen, ["ALICE request", "BOB request"])
+        self.assertEqual(parent._active_prompt, "")
+
+    async def test_customized_agent_tool_forwards_parent_prompt(self) -> None:
+        # @intent wrapped-agent-tool-gets-parent-context
+        # A customize() view over as_tool() must still bind the parent's context getter to the wrapped AgentTool.
+        recorder = _RecordingRunner()
+        child = build_test_agent(
+            name="child",
+            system_prompt="child system",
+            runner=recorder,
+            agent_metadata=AgentMetadata(name="child", description="A test agent.", use_cases="Testing."),
+        )
+        customized = child.as_tool().customize(description="Ask the child specialist (localized).")
+        parent = build_test_agent(name="parent", system_prompt="parent system", runner=_DelegatingRunner(), tools=(customized,))
+
+        await parent.arun("CUSTOMER-ASKS refund order 991")
+
+        self.assertEqual(recorder.seen, ["CUSTOMER-ASKS refund order 991"])
+
+    async def test_shared_agent_tool_forwards_each_parents_own_prompt(self) -> None:
+        # @intent shared-bound-tool-gets-own-copy
+        # One as_tool() instance mounted on two parents must never send one parent's conversation for the other.
+        recorder = _RecordingRunner()
+        child = build_test_agent(
+            name="child",
+            system_prompt="child system",
+            runner=recorder,
+            agent_metadata=AgentMetadata(name="child", description="A test agent.", use_cases="Testing."),
+        )
+        shared = child.as_tool()
+        acme = build_test_agent(name="acme", system_prompt="acme router", runner=_DelegatingRunner(), tools=(shared,))
+        globex = build_test_agent(name="globex", system_prompt="globex router", runner=_DelegatingRunner(), tools=(shared.customize(description="Ask the child."),))
+
+        await globex.arun("GLOBEX card declined")
+        await acme.arun("ACME invoice wrong")
+
+        self.assertEqual(recorder.seen, ["GLOBEX card declined", "ACME invoice wrong"])
+        self.assertIs(acme.tools._get("child"), shared)
+        self.assertIs(acme._agent_tool_items[0], shared)
+
+    def test_single_parent_binds_its_tool_in_place(self) -> None:
+        child_tool = AgentTool(_make_agent("child"))
+        parent = build_test_agent(name="parent", system_prompt="parent system", runner=FakeRunner(), tools=(child_tool,))
+        parent.add_tool(_make_agent("other").as_tool())
+        self.assertIs(parent.tools._get("child"), child_tool)
+        self.assertIs(child_tool._owner, parent)
 
 
 if __name__ == "__main__":

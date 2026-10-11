@@ -26,12 +26,12 @@ from vidbyte.lib.enums.failure import (
     FailureStatus,
     RuleErrorMode,
 )
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 
 
 class FailureSafety:
     """Sanitize and bound arbitrary failure details without throwing."""
 
-    _SECRET_PARTS: ClassVar[tuple[str, ...]] = ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")
     _MAX_TEXT: ClassVar[int] = 500
     _MAX_ITEMS: ClassVar[int] = 32
 
@@ -40,13 +40,16 @@ class FailureSafety:
         # @intent credential-safe-learning-records
         # Failure details are model-facing training signal, so bounds and key
         # redaction happen before a record can enter Session history.
+        # @intent failure-details-use-precise-credential-keys
+        # Substring matching dropped diagnostics such as tokens_used and author, so
+        # keys are classified with the shared exact-name/suffix credential policy.
         """Return a bounded, credential-safe mapping for failure details."""
         if not isinstance(values, Mapping):
             return {}
         safe: dict[str, Any] = {}
         for key, value in list(values.items())[: cls._MAX_ITEMS]:
             key_text = str(key)
-            if any(part in key_text.upper() for part in cls._SECRET_PARTS):
+            if CredentialKeyPolicy.is_secret_key(key_text):
                 continue
             safe[key_text] = cls.sanitize_value(value)
         return safe

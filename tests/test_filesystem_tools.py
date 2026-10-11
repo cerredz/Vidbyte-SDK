@@ -4,6 +4,8 @@ import asyncio
 import base64
 import json
 import unittest
+import zipfile
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from vidbyte.tools.catalog import Tools
@@ -186,6 +188,25 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             read = run(ReadTextTool(config).execute(ToolCall("read_text", {"path": "f.txt"})))
             self.assertEqual(read.output, "hello there")
 
+    def test_replace_text_preserves_lf_line_endings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.py"
+            target.write_bytes(b"def f():\n    x = 1\n    return 2\n\nprint(f())\n")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.py", "search": "return 2", "replacement": "return 3"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            self.assertEqual(target.read_bytes(), b"def f():\n    x = 1\n    return 3\n\nprint(f())\n")
+
+    def test_replace_text_preserves_crlf_line_endings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.py"
+            target.write_bytes(b"def f():\r\n    x = 1\r\n    return 2\r\n\r\nprint(f())\r\n")
+            call = ToolCall("replace_text", {"path": "f.py", "search": "    x = 1\n    return 2\n", "replacement": "    x = 1\n    return 3\n"})
+            result = run(ReplaceTextTool(config).execute(call))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            self.assertEqual(target.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
+
     def test_tree_returns_newline_joined_tree_entries(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -231,6 +252,17 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             result = run(TreeTool(config).execute(ToolCall("tree", {"path": ".", "max_entries": 3})))
             self.assertEqual(result.status, ToolStatus.SUCCESS)
             self.assertEqual(len(result.output.splitlines()), 3)
+            self.assertTrue(result.metadata["truncated"])
+
+    def test_tree_not_truncated_when_entries_exactly_fill_limit(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for i in range(3):
+                run(WriteTextTool(config).execute(ToolCall("write_text", {"path": f"f{i}.txt", "content": "x"})))
+            result = run(TreeTool(config).execute(ToolCall("tree", {"path": ".", "max_entries": 3})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            self.assertEqual(len(result.output.splitlines()), 3)
+            self.assertFalse(result.metadata["truncated"])
 
     def test_list_dir_returns_empty_string_for_empty_directory(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -283,6 +315,30 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             result = run(ReadTextTool(config).execute(ToolCall("read_text", {"path": "../outside.txt"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
 
+    def test_find_pattern_escaping_root_returns_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "OUTSIDE_SECRET.txt").write_text("secret", encoding="utf-8")
+            Path(tmp, "root", "notes").mkdir(parents=True)
+            config = FileSystemToolConfig(root=str(Path(tmp, "root")))
+            absolute = str(Path(tmp, "*.txt"))
+            for pattern in ("../*", "*/../../*", "notes\\..\\..\\*", absolute):
+                result = run(FindTool(config).execute(ToolCall("find", {"pattern": pattern, "root": "."})))
+                self.assertEqual(result.status, ToolStatus.ERROR, pattern)
+                self.assertNotIn("OUTSIDE_SECRET", result.output)
+                self.assertIn("escaped the configured root", result.output)
+
+    def test_zip_destination_inside_source_is_not_archived(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            run(MakeDirTool(config).execute(ToolCall("make_dir", {"path": "notes"})))
+            run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "notes/a.md", "content": "a"})))
+            result = run(ZipTool(config).execute(ToolCall("zip", {"source": ".", "destination": "backup.zip"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS)
+            with zipfile.ZipFile(Path(tmp, "backup.zip")) as archive:
+                names = archive.namelist()
+            self.assertFalse(any(name.endswith("backup.zip") for name in names), names)
+            self.assertTrue(any(name.endswith("notes/a.md") for name in names), names)
+
     def test_write_without_allow_write_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=False)
@@ -301,6 +357,32 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             config = FileSystemToolConfig(root=tmp, allow_write=True)
             result = run(DeleteTool(config).execute(ToolCall("delete", {"path": "nope.txt"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
+
+    def test_delete_refuses_string_recursive_flag_and_keeps_directory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "reports").mkdir()
+            Path(tmp, "reports", "q1.txt").write_text("keep", encoding="utf-8")
+            result = run(DeleteTool(config).execute(ToolCall("delete", {"path": "reports", "recursive": "false"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("'recursive' must be a boolean (true/false)", result.output)
+            self.assertTrue(Path(tmp, "reports", "q1.txt").exists())
+
+    def test_make_dir_null_flags_use_documented_defaults(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            result = run(MakeDirTool(config).execute(ToolCall("make_dir", {"path": "a/b/c", "parents": None, "exist_ok": None})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertTrue(Path(tmp, "a", "b", "c").is_dir())
+
+    def test_create_parents_string_flag_is_refused_without_writing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for tool, name in ((WriteTextTool(config), "write_text"), (AppendTool(config), "append_text"), (TouchTool(config), "touch")):
+                result = run(tool.execute(ToolCall(name, {"path": "new/f.txt", "content": "x", "create_parents": "false"})))
+                self.assertEqual(result.status, ToolStatus.ERROR, name)
+                self.assertIn("'create_parents' must be a boolean (true/false)", result.output)
+            self.assertFalse(Path(tmp, "new").exists())
 
     def test_diff_without_content_or_other_path_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -323,6 +405,17 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "aa", "replacement": "bb"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
 
+    def test_replace_text_overlapping_matches_returns_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.go"
+            original = b"func a() {\nif x {\nfor {\n}\n}\n}\n"
+            target.write_bytes(original)
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.go", "search": "}\n}\n", "replacement": "}\n"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("exactly once", result.output)
+            self.assertEqual(target.read_bytes(), original)
+
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -336,6 +429,51 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "x\ny"})))
             result = run(ReadLinesTool(config).execute(ToolCall("read_lines", {"path": "f.txt", "start": 3, "end": 1})))
             self.assertEqual(result.status, ToolStatus.ERROR)
+
+
+class FileSystemToolNullOptionalArgumentTests(unittest.TestCase):
+    """An explicit JSON null for an optional argument behaves exactly like leaving it out."""
+
+    def _assert_null_matches_omitted(self, tool, name: str, base: dict, nulls: dict) -> None:
+        omitted = run(tool.execute(ToolCall(name, dict(base))))
+        nulled = run(tool.execute(ToolCall(name, {**base, **nulls})))
+        self.assertEqual(omitted.status, ToolStatus.SUCCESS, omitted.output)
+        self.assertEqual(nulled.status, ToolStatus.SUCCESS, nulled.output)
+        self.assertEqual(nulled.output, omitted.output)
+        self.assertEqual(nulled.metadata, omitted.metadata)
+
+    def test_null_optional_arguments_use_documented_defaults(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp)
+            Path(tmp, "app.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+            Path(tmp, "sub").mkdir()
+            Path(tmp, "sub", "util.py").write_text("x", encoding="utf-8")
+            cases = (
+                (ReadLinesTool(config), "read_lines", {"path": "app.py"}, {"start": None}),
+                (ReadLinesTool(config), "read_lines", {"path": "app.py"}, {"start": None, "end": None}),
+                (FindTool(config), "find", {"pattern": "*.py"}, {"root": None}),
+                (ListDirTool(config), "list_dir", {}, {"path": None}),
+                (TreeTool(config), "tree", {}, {"path": None, "max_depth": None, "max_entries": None}),
+            )
+            for tool, name, base, nulls in cases:
+                with self.subTest(tool=name, nulls=sorted(nulls)):
+                    self._assert_null_matches_omitted(tool, name, base, nulls)
+
+    def test_read_lines_null_start_reads_from_first_line(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp)
+            Path(tmp, "app.py").write_text("one\ntwo\n", encoding="utf-8")
+            result = run(ReadLinesTool(config).execute(ToolCall("read_lines", {"path": "app.py", "start": None, "end": 1})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output, "one")
+
+    def test_tree_non_integer_max_depth_returns_error_result(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp)
+            for arguments in ({"max_depth": "abc"}, {"max_entries": "abc"}):
+                with self.subTest(arguments=arguments):
+                    result = run(TreeTool(config).execute(ToolCall("tree", arguments)))
+                    self.assertEqual(result.status, ToolStatus.ERROR)
 
 
 class FileSystemToolImportTests(unittest.TestCase):

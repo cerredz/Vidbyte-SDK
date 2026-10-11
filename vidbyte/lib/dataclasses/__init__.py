@@ -44,13 +44,10 @@ from vidbyte.lib.dataclasses.agents import (
     AgentRuntimeStats,
     AgentSpec,
     AgentStopReason,
+    FinishReview,
+    FinishReviewAction,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.config import (
-    AgentSettings,
-    MiddlewareDefinition,
-    ToolDefinition,
-)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -66,8 +63,13 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
-    CodexTurnSettings,
     CodexTurnError,
+    CodexTurnSettings,
+)
+from vidbyte.lib.dataclasses.config import (
+    AgentSettings,
+    MiddlewareDefinition,
+    ToolDefinition,
 )
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -206,6 +208,7 @@ from vidbyte.lib.dataclasses.sessions import (
     TraceCapture,
     UsageRollup,
 )
+from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.dataclasses.sources import (
     ArtifactRef,
     FetchResponse,
@@ -349,6 +352,8 @@ __all__ = [
     "FileSystemToolConfig",
     "FinalizationContext",
     "FinalizationRenderer",
+    "FinishReview",
+    "FinishReviewAction",
     "ForkRecoverySettings",
     "GitDiffContextItem",
     "HandoffAgentDescriptor",
@@ -425,6 +430,7 @@ __all__ = [
     "SearchHit",
     "SearchPayload",
     "Selection",
+    "SkillDocument",
     "SessionMeta",
     "SessionStatus",
     "SourceResult",

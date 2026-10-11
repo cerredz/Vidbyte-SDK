@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.builtins._note_ids import next_free_counter
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
 
 if TYPE_CHECKING:
@@ -104,6 +105,7 @@ class ReflexionTool(BaseTool):
 
     def _next_primitive_id(self) -> str:
         # Generates a stable, unique primitive ID based on the instance counter.
+        self._counter = next_free_counter(self._manager, "reflexion", self._counter)
         return f"reflexion:{self._counter}"
 
     def _build_item(self, args: dict, primitive_id: str) -> object:
@@ -111,10 +113,13 @@ class ReflexionTool(BaseTool):
         from vidbyte.context.primitives import ReflexionContextItem
         raw_failed = args.get("failed_attempt")
         failed_attempt = str(raw_failed).strip() if raw_failed and str(raw_failed).strip() else None
+        # @intent null-optional-arg-means-default
+        raw_title = args.get("title")
+        title = "" if raw_title is None else str(raw_title).strip()
         return ReflexionContextItem(
             primitive_id=primitive_id,
             critique=str(args.get("critique", "")).strip(),
             correction_plan=str(args.get("correction_plan", "")).strip(),
             failed_attempt=failed_attempt,
-            title=str(args.get("title", "Reflexion Note")).strip() or "Reflexion Note",
+            title=title or "Reflexion Note",
         )

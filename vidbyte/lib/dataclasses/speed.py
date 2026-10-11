@@ -12,6 +12,7 @@ TESTS: Covered by tests/test_agent_speed.py, tests/test_agent_runtime.py, and sc
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 from typing import Any
 
 from vidbyte.lib.constants.speed import (
@@ -449,7 +450,7 @@ class StreamSpeedRecord:
     @property
     def inter_chunk_gaps_ms(self) -> tuple[float, ...]:
         """Return elapsed milliseconds between each pair of observed chunks."""
-        return tuple((right - left) * _MILLISECONDS_PER_SECOND for left, right in zip(self.chunk_timestamps, self.chunk_timestamps[1:], strict=True))
+        return tuple((right - left) * _MILLISECONDS_PER_SECOND for left, right in pairwise(self.chunk_timestamps))
 
     @property
     def chunk_rate_per_second(self) -> float | None:
@@ -485,7 +486,7 @@ class CallSpeedStats:
     output_tokens_total: int | None = None
     weighted_output_tokens_per_second: float | None = None
     prompt_tokens_per_second: float | None = None
-    retry_count_total: int = AGENT_SPEED_ZERO_COUNT
+    retry_count_total: int = AGENT_SPEED_ZERO_COUNT  # number of retry attempts (records with retry_count > 0)
     fallback_call_count: int = 0
     ttft_ms_p90: float | None = None
     ttft_ms_min: float | None = None
@@ -682,7 +683,7 @@ class ModelSpeedStats:
     output_tokens_per_second_p90: float | None = None
     output_tokens_per_second_min: float | None = None
     output_tokens_per_second_stdev: float | None = None
-    retry_count_total: int = AGENT_SPEED_ZERO_COUNT
+    retry_count_total: int = AGENT_SPEED_ZERO_COUNT  # number of retry attempts (records with retry_count > 0)
     fallback_call_count: int = AGENT_SPEED_ZERO_COUNT
     cancelled_call_count: int = 0
     cancellation_rate: float = 0.0

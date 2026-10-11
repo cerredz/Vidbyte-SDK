@@ -10,6 +10,7 @@ Purpose:
     parses YAML and each class validates its fields against the SDK's canonical sources of
     truth (ProviderModelRegistry, AgentRuntimeType, AgentType, AgentLoopSettings).
 Architecture:
+    - _YamlSecretKeyPolicy: The shared credential-key classifier widened with config-only names.
     - _ConfigValidation: Shared validation primitives (text, bounds, references, serializability)
       used by every config dataclass.
     - ToolDefinition / MiddlewareDefinition / ContextItemDefinition: A named ref plus data-only
@@ -35,6 +36,7 @@ Non-Goals:
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 from collections.abc import Mapping, Sequence
@@ -46,14 +48,22 @@ from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.enums import AgentRuntimeType, AgentType, ModelModality
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
+from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 
 if TYPE_CHECKING:
     from vidbyte.agents.settings import AgentLoopSettings
 
-_SECRET_KEYS = frozenset(
+_CONFIG_SECRET_KEYS = frozenset(
     {"api_key", "token", "password", "passwd", "secret", "authorization", "credential", "credentials", "private_key", "access_key", "secret_key", "session_token", "cookie", "bearer"}
 )
-_SECRET_SUFFIXES = ("_api_key", "_token", "_password", "_secret", "_credential", "_credentials", "_private_key", "_access_key", "_secret_key")
+_CONFIG_SECRET_SUFFIXES = ("_api_key", "_token", "_password", "_secret", "_credential", "_credentials", "_private_key", "_access_key", "_secret_key")
+
+
+class _YamlSecretKeyPolicy(CredentialKeyPolicy):
+    """Shared credential-key classifier plus the names only the YAML guard rejects (cookie, bearer, passwd)."""
+
+    _SECRET_KEYS = CredentialKeyPolicy._SECRET_KEYS | _CONFIG_SECRET_KEYS
+    _SECRET_SUFFIXES = CredentialKeyPolicy._SECRET_SUFFIXES + _CONFIG_SECRET_SUFFIXES
 
 # Bounds that turn a plausible-but-unusable document into a load-time error naming the field.
 _MAX_NAME_CHARS = 64
@@ -186,8 +196,9 @@ class _ConfigValidation:
             raise cls._error(f"'{field_name}' contains unsupported field(s): {', '.join(unknown)}.", f"{field_name}.{unknown[0]}", unknown=unknown, allowed=sorted(allowed))
 
     @classmethod
-    def _serializable(cls, value: object, field_name: str, ancestry: frozenset[int] = frozenset(), depth: int = 0) -> None:
+    def _serializable(cls, value: object, field_name: str, ancestry: frozenset[int] = frozenset(), depth: int = 0, *, check_secret_keys: bool = True) -> None:
         # Accepts only YAML data values, rejecting secrets, env interpolation, cycles, and deep nesting.
+        # check_secret_keys=False skips only the key-name credential check, for mappings whose keys are names.
         if value is None or isinstance(value, (bool, int, float)):
             return
         if isinstance(value, str):
@@ -198,15 +209,17 @@ class _ConfigValidation:
             cls._guard_cycle(value, field_name, ancestry)
             cls._guard_depth(field_name, depth)
             for index, item in enumerate(value):
-                cls._serializable(item, f"{field_name}[{index}]", ancestry | {id(value)}, depth + 1)
+                cls._serializable(item, f"{field_name}[{index}]", ancestry | {id(value)}, depth + 1, check_secret_keys=check_secret_keys)
             return
         if isinstance(value, Mapping) and all(isinstance(key, str) for key in value):
             cls._guard_cycle(value, field_name, ancestry)
             cls._guard_depth(field_name, depth)
             for key, item in value.items():
-                if key.strip().lower() in _SECRET_KEYS or key.strip().lower().endswith(_SECRET_SUFFIXES):
+                # @intent yaml-secret-guard-normalizes-key-spelling
+                # Classify with the shared camelCase/hyphen normalization so apiKey or x-api-key cannot bypass the guard.
+                if check_secret_keys and _YamlSecretKeyPolicy.is_secret_key(key):
                     raise cls._error("Configuration must not contain YAML-held secrets.", f"{field_name}.{key}")
-                cls._serializable(item, f"{field_name}.{key}", ancestry | {id(value)}, depth + 1)
+                cls._serializable(item, f"{field_name}.{key}", ancestry | {id(value)}, depth + 1, check_secret_keys=check_secret_keys)
             return
         raise cls._error("Configuration values must be YAML scalars, lists, or string-keyed mappings.", field_name, actual_type=type(value).__name__)
 
@@ -354,6 +367,7 @@ class AgentSettings(_ConfigValidation):
         self.output_schema = self._validated_output_schema(self.output_schema)
         self.trace_option = self._validated_trace_option(self.trace_option)
         self.max_tool_rounds = self._positive_int(self.max_tool_rounds, "agent.max_tool_rounds")
+        self.loop = self._loop_with_tool_rounds(self.loop, self.max_tool_rounds)
         self._validate_runtime_compatibility()
 
     @classmethod
@@ -416,7 +430,8 @@ class AgentSettings(_ConfigValidation):
             "agent_metadata": self.agent_metadata,
             "output_schema": dict(self.output_schema) if self.output_schema is not None else None,
             "trace_option": self.trace_option,
-            "max_tool_rounds": self.max_tool_rounds,
+            # The round cap already lives in agent_loop_settings; BaseAgent rejects it passed twice.
+            "max_tool_rounds": None,
         }
 
     @staticmethod
@@ -581,7 +596,10 @@ class AgentSettings(_ConfigValidation):
         if value is None:
             return None
         schema = cls._mapping(value, "agent.output_schema")
-        cls._serializable(schema, "agent.output_schema")
+        # @intent output-schema-field-names-are-not-secrets
+        # Schema keys are JSON Schema keywords and the field names the model must output, so a property
+        # named token or auth is not a credential; interpolation, cycle, depth, and type checks still apply.
+        cls._serializable(schema, "agent.output_schema", check_secret_keys=False)
         if "type" not in schema and "properties" not in schema:
             raise cls._error("'agent.output_schema' must be a JSON Schema object declaring at least 'type' or 'properties'.", "agent.output_schema", keys=sorted(schema))
         return schema
@@ -670,11 +688,32 @@ class AgentSettings(_ConfigValidation):
             raise cls._error(f"'agent.loop' is invalid: {error}", "agent.loop") from error
 
     @classmethod
+    def _loop_with_tool_rounds(cls, loop: "AgentLoopSettings", rounds: int | None) -> "AgentLoopSettings":
+        # @intent yaml-max-tool-rounds-in-loop
+        # BaseAgent refuses a loop object alongside a flat round cap, so the top-level cap is folded into
+        # a copy of the loop; the caller's loop object is never changed, and a conflicting cap is rejected.
+        if rounds is None or loop.max_iterations == rounds:
+            return loop
+        if loop.max_iterations is not None:
+            raise cls._error("'agent.max_tool_rounds' conflicts with 'agent.loop.max_iterations'; set one, or give both the same value.", "agent.max_tool_rounds", actual_value=rounds, loop_max_iterations=loop.max_iterations)
+        merged = copy.copy(loop)
+        merged.max_iterations = rounds
+        # @intent yaml-max-tool-rounds-validates-floors
+        # The loop checks its floors against its ceilings only when it is built, so the copy is checked again
+        # with the new cap; otherwise a floor the cap makes unreachable would load under this spelling but be
+        # rejected under 'agent.loop.max_iterations'. The check only reads fields, so running it twice is safe.
+        try:
+            merged._validate()
+        except ConfigurationError as error:
+            raise cls._error(f"'agent.max_tool_rounds' is invalid: {error}", "agent.max_tool_rounds", actual_value=rounds) from error
+        return merged
+
+    @classmethod
     def _coerce_loop_members(cls, mapping: dict[str, Any]) -> None:
         # @intent reachable-nested-loop-settings
         # AgentLoopSettings requires real nested objects, so a YAML mapping for these fields would
         # otherwise be rejected outright and leave three documented loop settings unusable from a file.
-        from vidbyte.agents.contracts import OutputContract
+        from vidbyte.agents import contracts
         from vidbyte.agents.settings import ToolErrorPolicy, ToolSettings
 
         for key, builder in (("tool_error_policy", ToolErrorPolicy), ("tool_settings", ToolSettings)):
@@ -684,18 +723,25 @@ class AgentSettings(_ConfigValidation):
                     mapping[key] = builder(**payload)
                 except (TypeError, ValueError, ConfigurationError) as error:
                     raise cls._error(f"'agent.loop.{key}' is invalid: {error}", f"agent.loop.{key}") from error
-        contracts = mapping.get("output_contracts")
-        if isinstance(contracts, list):
-            mapping["output_contracts"] = tuple(cls._coerce_contract(OutputContract, item, index) for index, item in enumerate(contracts))
+        contracts_value = mapping.get("output_contracts")
+        if isinstance(contracts_value, list):
+            # The abstract base cannot be built (its empty key is never satisfied), and SchemaConformance
+            # is declared through agent.output_schema, so a document names one concrete floor by class name.
+            floors = {name: getattr(contracts, name) for name in contracts.__all__ if name not in {"OutputContract", "SchemaConformance"}}
+            mapping["output_contracts"] = tuple(cls._coerce_contract(contracts.OutputContract, floors, item, index) for index, item in enumerate(contracts_value))
 
     @classmethod
-    def _coerce_contract(cls, builder: type, item: object, index: int) -> Any:
-        # Builds one output contract from a document mapping, passing an already-built contract through and naming its position on failure.
-        if isinstance(item, builder):
+    def _coerce_contract(cls, base: type, floors: Mapping[str, type], item: object, index: int) -> Any:
+        # Builds the concrete floor a document mapping names by `type`, passing an already-built contract through and naming its position on failure.
+        if isinstance(item, base):
             return item
         if not isinstance(item, Mapping):
-            raise cls._error(f"'agent.loop.output_contracts[{index}]' must be a mapping of contract fields or an already-built {builder.__name__}.", f"agent.loop.output_contracts[{index}]", actual_type=type(item).__name__)
+            raise cls._error(f"'agent.loop.output_contracts[{index}]' must be a mapping of contract fields or an already-built {base.__name__}.", f"agent.loop.output_contracts[{index}]", actual_type=type(item).__name__)
         payload = cls._mapping(item, f"agent.loop.output_contracts[{index}]")
+        name = payload.pop("type", None)
+        builder = floors.get(name) if isinstance(name, str) else None
+        if builder is None:
+            raise cls._error(f"'agent.loop.output_contracts[{index}].type' must be one of {sorted(floors)}.", f"agent.loop.output_contracts[{index}].type", actual_value=name, allowed=sorted(floors))
         try:
             return builder(**payload)
         except (TypeError, ValueError, ConfigurationError) as error:

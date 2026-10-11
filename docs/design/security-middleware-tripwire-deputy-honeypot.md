@@ -33,7 +33,7 @@ All three fit within the existing `AgentMiddleware` hook model and require no ch
 ### Non-Goals
 
 - No changes to `AgentRuntime`, `MiddlewarePipeline`, `MiddlewareContext`, or `MiddlewareDecision` — all three middleware fit within the existing hook model.
-- No actual mutation of tool results or model prompts. Canary injection operates by tracking injected watermarks internally; it does not mutate the frozen `ToolResult` dataclass. The middleware records watermarks alongside results so it knows what to scan for.
+- No mutation of the raw `ToolResult` or of model prompts. Canary injection returns `MiddlewareTransform(model_visible_tool_result=...)` — a copy of the result with the canary appended on a new line — so only the model-visible tool output carries the watermark while the runtime keeps the raw result unchanged. The middleware also records each watermark internally so it knows what to scan for.
 - No cryptographic watermarking — canaries are randomized plaintext tokens with low natural occurrence probability.
 - No network calls or external services.
 - No new third-party dependencies.
@@ -80,7 +80,7 @@ Key context fields available to middleware:
 2. Accept `inject_probability: float` (default `0.3`) — probability of injecting a canary into any given tool result. Must be in `(0.0, 1.0]`.
 3. Accept `abort_reason: str` (default `"canary_leaked"`) — customizable abort reason.
 4. Accept `random_seed: int | None` (default `None`) — for deterministic testing.
-5. On `after_tool_call`, if `ctx.tool_result` exists and is not from an internal tool, roll a random float. If below `inject_probability`, generate a unique canary string (`watermark_prefix` + 8 random hex chars), and store it in an internal set of active canaries. The canary is tracked but **not** injected into the immutable `ToolResult` — it exists only in the middleware's internal ledger.
+5. On `after_tool_call`, if `ctx.tool_result` exists and is not from an internal tool, roll a random float. If below `inject_probability`, generate a unique canary string (`watermark_prefix` + 8 random hex chars), store it in an internal set of active canaries, and return a `MiddlewareTransform` whose `model_visible_tool_result` is a copy of the result with the canary appended to its output on a new line. The raw `ToolResult` is never mutated.
 6. On `after_model_response`, extract the text content from `ctx.model_response` (via the response object's `.text` attribute or `str()`). Scan it for any active canary string. If found, return `MiddlewareDecision.abort(abort_reason)` with metadata containing the leaked canary and the tool name that generated it.
 7. Canaries that are never leaked are harmless — they accumulate in the set but have no runtime cost beyond memory.
 8. On `before_run`, clear all active canaries to avoid cross-run leakage.
@@ -137,7 +137,7 @@ Three new files are added under `vidbyte/middleware/builtins/`, one per middlewa
 
 **Data flow — CanaryTripwireMiddleware:**
 1. `before_run` → clear canary ledger
-2. `after_tool_call` → probabilistically generate a canary, store `(canary_string, tool_name)` in ledger
+2. `after_tool_call` → probabilistically generate a canary, store `(canary_string, tool_name)` in ledger, append it to the model-visible tool result via `MiddlewareTransform`
 3. `after_model_response` → scan model output text for any canary in ledger → abort if found
 
 **Data flow — ConfusedDeputyGuardMiddleware:**
@@ -242,7 +242,7 @@ class ConfusedDeputyGuardMiddleware(AgentMiddleware):
 - If `ctx.message` is empty (e.g., system-only invocation), the guard still works — it detects tool-result → tool-arg flow regardless of user message content.
 - Non-string argument values (ints, bools, nested dicts) are skipped entirely.
 - Very short tool results (< `min_argument_length` chars) can still match against long arguments.
-- If the user's own message legitimately repeats tool output, this is by definition not a confused deputy — the user message came first. However, the middleware only checks tool results against arguments, not the user message against arguments, so this scenario is not falsely flagged.
+- If the user's own message legitimately repeats tool output, this is by definition not a confused deputy — the user message came first. The middleware also measures each flagged argument's longest verbatim overlap with the user message and skips it when that overlap is at least as long as the overlap with tool output, so this scenario is not falsely flagged.
 
 ---
 

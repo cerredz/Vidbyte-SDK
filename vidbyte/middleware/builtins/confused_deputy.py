@@ -60,15 +60,16 @@ class ConfusedDeputyGuardMiddleware(AgentMiddleware):
         state: _ConfusedDeputyRunState = ctx.run_state.get(self.__class__) or _ConfusedDeputyRunState()
         if ctx.tool_call is None or ctx.tool_is_internal or not state.tool_outputs:
             return MiddlewareDecision.continue_()
-        return self._check_arguments(ctx, state.tool_outputs)
+        return self._check_arguments(ctx, state.tool_outputs, state.user_message)
 
-    def _check_arguments(self, ctx: MiddlewareContext, tool_outputs: list[str]) -> MiddlewareDecision:
+    def _check_arguments(self, ctx: MiddlewareContext, tool_outputs: list[str], user_message: str) -> MiddlewareDecision:
         # Scans each string argument for verbatim overlap with prior tool results.
         for arg_name, arg_value in ctx.tool_call.arguments.items():
             if not isinstance(arg_value, str) or len(arg_value) < self._min_arg_length:
                 continue
             ratio = self._max_overlap_ratio(arg_value, tool_outputs)
-            if ratio > self._max_ratio:
+            # Skip text at least as attributable to the user's own message as to tool content.
+            if ratio > self._max_ratio and ratio > self._longest_common_substring_length(arg_value, user_message) / len(arg_value):
                 return MiddlewareDecision.abort(
                     self._abort_reason,
                     metadata={

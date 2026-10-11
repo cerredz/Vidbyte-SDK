@@ -21,11 +21,11 @@ class MakeDirTool(FileSystemTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Resolve the path, create the directory with optional parent creation, and return the path.
+        # Read the boolean flags strictly, resolve the path, create the directory with optional parent creation, and return the path.
         path = call.arguments.get("path", "")
-        parents = bool(call.arguments.get("parents", True))
-        exist_ok = bool(call.arguments.get("exist_ok", True))
         try:
+            parents = self._resolve_bool_argument(call, "parents", default=True)
+            exist_ok = self._resolve_bool_argument(call, "exist_ok", default=True)
             self._require_write()
             target = self._path(path)
             self.backend.make_dir(target, parents=parents, exist_ok=exist_ok)

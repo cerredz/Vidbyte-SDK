@@ -27,6 +27,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.lib.dataclasses.middleware import MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
@@ -341,7 +342,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             context=context,
         )
 
-        visible_tool_message = runner.calls[1]["kwargs"]["messages"][0]
+        visible_tool_message = runner.calls[1]["kwargs"]["messages"][-1]
         self.assertNotIn("raw secret result", visible_tool_message["content"])
         self.assertIn("Raw tool output was withheld", visible_tool_message["content"])
         raw_context = result.metadata["tool_calls"][0]
@@ -513,6 +514,29 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["stop_reason"], "max_tokens")
         self.assertEqual(result.metadata["iteration_count"], 1)
         self.assertEqual(result.metadata["tokens_used"], 4)
+        self.assertEqual(len(runner.calls), 1)
+
+    async def test_runtime_max_tokens_counts_anthropic_cache_buckets(self) -> None:
+        # @intent anthropic-cache-buckets-count-toward-total
+        usage = {"input_tokens": 50, "output_tokens": 20, "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 0}
+        runner = FakeRunner([FakeResponse("working", {"usage": usage}), FakeResponse("working", {"usage": usage})])
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(max_tokens=5000),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="anthropic", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        self.assertEqual(result.metadata["stop_reason"], "max_tokens")
+        self.assertEqual(result.metadata["tokens_used"], 20070)
         self.assertEqual(len(runner.calls), 1)
 
     async def test_runtime_without_limits_continues_until_final_response(self) -> None:
@@ -735,6 +759,51 @@ class ToolActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.metadata["tool_settings_budget"], "max_identical_calls")
+
+    async def test_loop_settings_max_tool_calls_stops_a_fan_out_turn_before_executing_past_the_budget(self) -> None:
+        """AgentLoopSettings.max_tool_calls caps a parallel turn mid-iteration, matching ToolSettings.max_calls."""
+        tool = CountingSearchTool()
+        runtime = AgentRuntime(
+            agent_name="researcher",
+            system_prompt="Research.",
+            tools=Tools([tool]),
+            permission_policy=PermissionPolicy(),
+            config=AgentLoopSettings(max_tool_calls=2).to_runtime_config(),
+        )
+        fan_out = FakeResponse("", {"output": [{"type": "function_call", "name": "counting_search", "arguments": f'{{"query": "q{index}"}}'} for index in range(4)]})
+
+        result = await self._run(runtime, [fan_out, self._done_response()])
+
+        self.assertEqual(len(tool.executed_arguments), 2)
+        self.assertEqual(result.metadata["stop_reason"], "max_tool_calls")
+
+    async def test_loop_settings_allowed_tools_refuses_calls_outside_the_gate(self) -> None:
+        """AgentLoopSettings.allowed_tools refuses an unlisted tool like a denied one, while listed tools and isDone still run."""
+        deleted: list[str] = []
+
+        @tool
+        def delete_note(note_id: str) -> str:
+            deleted.append(note_id)
+            return "deleted"
+
+        search = CountingSearchTool()
+        runtime = AgentRuntime(
+            agent_name="researcher",
+            system_prompt="Research.",
+            tools=Tools([search, delete_note]),
+            permission_policy=PermissionPolicy(),
+            config=AgentLoopSettings(allowed_tools=("counting_search",)).to_runtime_config(),
+        )
+        delete_call = FakeResponse("", {"output": [{"type": "function_call", "name": "delete_note", "arguments": '{"note_id": "n1"}'}]})
+
+        result = await self._run(runtime, [delete_call, self._search_response('{"query": "q"}'), self._done_response()])
+
+        self.assertEqual(deleted, [])
+        self.assertEqual(search.executed_arguments, [{"query": "q"}])
+        refused = next(ctx for ctx in result.metadata["tool_calls"] if ctx.tool_name == "delete_note")
+        self.assertEqual(refused.state.value, "denied")
+        self.assertEqual(refused.result.metadata["error"], "allowed_tools_denied")
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
 
     async def test_denied_call_retains_its_activity(self) -> None:
         """A middleware-denied call keeps the annotation so a product can say the action was blocked."""

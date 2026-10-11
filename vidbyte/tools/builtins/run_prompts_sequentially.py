@@ -45,6 +45,10 @@ class RunPromptsSequentiallyTool(BaseTool):
         """Attach the live agent whose queue receives the prompts."""
         self._agent = agent
 
+    def clone_for_fork(self) -> RunPromptsSequentiallyTool:
+        """Return an unbound copy so a forked agent cannot steal the parent's binding."""
+        return RunPromptsSequentiallyTool()
+
     def spec(self) -> ToolSpec:
         """Return the model-facing declaration with a JSON-Schema prompts array."""
         return ToolSpec(

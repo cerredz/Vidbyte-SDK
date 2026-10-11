@@ -1,0 +1,11 @@
+{
+  "name": "Jev Fresh Continuation",
+  "description": "Instructions for an opt-in JevAgent continuation that receives the original request, the run state, and the latest handoff in a clean agent context.",
+  "key": "jev_fresh_continuation",
+  "prompts": {
+    "fresh_prompt": {
+      "path": "fresh_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md"
+    }
+  }
+}

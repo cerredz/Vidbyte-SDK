@@ -125,6 +125,7 @@ class IndependentCriticRuntimeAlgorithm:
             output_schema=self.algorithm.review_output_schema(),
             output_contract=None,
             include_internal_tools=False,
+            usage_tracker=self.runtime.usage_tracker,
         )
 
     def _build_reviewer_context(self, *, reviewer_runtime: AgentRuntime) -> BaseAgentContext:

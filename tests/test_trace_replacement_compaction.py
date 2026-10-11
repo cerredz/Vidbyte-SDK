@@ -281,6 +281,34 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         TraceReplacementCompactionMiddleware.replace_keep_errors()
         TraceReplacementCompactionMiddleware.replace_keep_active_branch("b1")
 
+    async def test_parallel_tool_turn_is_never_split(self) -> None:
+        # [Hidden Failure] a parallel call turn is one group, so kept tails never orphan a sibling tool result.
+        history = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "read files"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "function": {"name": "read_file"}}, {"id": "c2", "function": {"name": "read_file"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "a"},
+            {"role": "tool", "tool_call_id": "c2", "content": "b"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "c3", "function": {"name": "read_file"}}]},
+            {"role": "tool", "tool_call_id": "c3", "content": "c"},
+        ]
+        presets = (
+            TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=1, artifact=_ARTIFACT),
+            TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=2, artifact=_ARTIFACT),
+            TraceReplacementCompactionMiddleware.replace_oldest_n_iterations(1, artifact=_ARTIFACT),
+        )
+        for mw in presets:
+            decision = await mw.before_model_call(_ctx(history))
+            pending: set[str] = set()
+            for message in decision.transform.provider_messages:
+                if message["role"] == "tool":
+                    self.assertIn(message["tool_call_id"], pending)
+                    pending.discard(message["tool_call_id"])
+                    continue
+                self.assertEqual(pending, set())
+                pending = {call["id"] for call in message.get("tool_calls") or ()}
+            self.assertEqual(pending, set())
+
     async def test_truncated_chars_bounds_injected_trace(self) -> None:
         # [Silent Failure] the injected trace message respects the char bound.
         mw = TraceReplacementCompactionMiddleware.trace_truncated_chars(40, keep_last_user=False, artifact=_ARTIFACT)

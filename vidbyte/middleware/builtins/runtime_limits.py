@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
+from vidbyte.middleware.builtins.limit_validation import positive_integer, positive_real
 
 
 class RuntimeLimitMiddleware(AgentMiddleware):
@@ -27,9 +28,9 @@ class RuntimeLimitMiddleware(AgentMiddleware):
         max_model_calls: int | None = None,
         max_tool_calls: int | None = None,
     ) -> None:
-        self.max_elapsed_seconds = self._positive_float(max_elapsed_seconds, "max_elapsed_seconds")
-        self.max_model_calls = self._positive_int(max_model_calls, "max_model_calls")
-        self.max_tool_calls = self._positive_int(max_tool_calls, "max_tool_calls")
+        self.max_elapsed_seconds = positive_real(max_elapsed_seconds, "max_elapsed_seconds") if max_elapsed_seconds is not None else None
+        self.max_model_calls = positive_integer(max_model_calls, "max_model_calls") if max_model_calls is not None else None
+        self.max_tool_calls = positive_integer(max_tool_calls, "max_tool_calls") if max_tool_calls is not None else None
 
     async def before_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Abort before another iteration when any limit is reached."""
@@ -49,18 +50,5 @@ class RuntimeLimitMiddleware(AgentMiddleware):
                 metadata={"max_tool_calls": self.max_tool_calls},
             )
         return MiddlewareDecision.continue_()
-
-    @staticmethod
-    def _positive_int(value: int | None, name: str) -> int | None:
-        if value is not None and value <= 0:
-            raise ValueError(f"{name} must be greater than zero when provided.")
-        return value
-
-    @staticmethod
-    def _positive_float(value: float | None, name: str) -> float | None:
-        if value is not None and value <= 0:
-            raise ValueError(f"{name} must be greater than zero when provided.")
-        return value
-
 
 __all__ = ["RuntimeLimitMiddleware"]

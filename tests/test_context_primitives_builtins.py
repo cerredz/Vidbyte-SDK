@@ -154,6 +154,21 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("appears 2 times", result.output)
 
+    async def test_edit_errors_when_old_string_matches_overlapping_positions(self) -> None:
+        """Verify context_edit refuses an old string that matches at two overlapping positions."""
+        manager = ContextManager()
+        original = "func a() {\nif x {\nfor {\n}\n}\n}\n"
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content=original))
+        tool = ContextEditTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "note:1", "old_string": "}\n}\n", "new_string": "}\n"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("appears 2 times", result.output)
+        stored = manager.get_by_id("note:1")
+        assert stored is not None
+        self.assertEqual(stored.content, original)
+
     async def test_edit_replaces_unique_plan_step(self) -> None:
         """Verify context_edit can patch a unique string inside plan step tuples."""
         manager = ContextManager()
@@ -344,6 +359,24 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
         assert stored is not None
         self.assertIn("new body", stored.to_context_text())
         self.assertNotIn("old body", stored.to_context_text())
+
+    async def test_null_primitive_type_and_title_behave_like_omitted(self) -> None:
+        # @intent null-optional-arg-means-default: null type means "text" and null title means the type default.
+        manager = ContextManager()
+        tool = ContextUpsertTool(manager)
+        call = ToolCall(
+            tool_name="context_upsert",
+            arguments={"primitive_id": "note:1", "content": "body text", "primitive_type": None, "title": None},
+        )
+
+        result = await tool.execute(call)
+
+        self.assertEqual(result.status.value, "success", result.output)
+        stored = manager.get_by_id("note:1")
+        assert stored is not None
+        self.assertIsInstance(stored, TextContextItem)
+        self.assertEqual(stored.title, "Text")
+        self.assertNotIn("None", stored.to_context_text())
 
     async def test_public_imports_accessible_from_root(self) -> None:
         from vidbyte import ContextEditTool as RootEdit

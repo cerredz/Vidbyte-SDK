@@ -270,7 +270,7 @@ requests, and writes responses. Separates the transport/dispatch engine from the
 individual method handlers. The heart of the running process.
 
 #### `vidbyte/mcp_server/server/handlers/`
-The protocol-level JSON-RPC method handlers — `initialize`, `tools/list`, `tools/call`,
+The protocol-level JSON-RPC method handlers — `initialize`, `ping`, `tools/list`, `tools/call`,
 `prompts/list`, and `prompts/get`. The `tools/call` handler is the one that delegates into
 the Studio tools. These are distinct from the Studio tool implementations they dispatch to.
 

@@ -75,6 +75,7 @@ class RunState:
     context_summary: Mapping[str, Any] = field(default_factory=dict)
     trace_option: Mapping[str, Any] = field(default_factory=dict)
     output_schema: Mapping[str, Any] | None = None
+    permission_policy: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -51,8 +51,17 @@ class BaseCodeSearchTool(BaseTool):
         return path.resolve().relative_to(self.root_dir).as_posix()
 
     def should_ignore(self, path: Path) -> bool:
-        """Return whether a path is inside an ignored directory or file part."""
-        return any(part in self.ignore_patterns for part in path.parts)
+        """Return whether a path below the root has an ignored directory or file part.
+
+        Only the parts below the configured root are checked, so a root that itself
+        sits inside an ignored-name directory (for example ``node_modules/pkg``)
+        still searches its own files. Paths outside the root are always ignored.
+        """
+        try:
+            relative = path.relative_to(self.root_dir)
+        except ValueError:
+            return True
+        return any(part in self.ignore_patterns for part in relative.parts)
 
     def iter_files(
         self,

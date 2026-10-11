@@ -13,6 +13,7 @@ Functions:
     - _resolve_template: Fetches prompt assets or falls back to system defaults.
     - _invoke_judge: Invokes the judge runner asynchronously or synchronously.
     - _parse_response: Decodes the multidimensional JSON scores and calculates the weighted result.
+    - _without_nulls: Treats null score/reason entries as omitted so they get the default values.
 Relations:
     Related to vidbyte.evals.base (BaseGrader), vidbyte.evals.types (EvalCase, GraderResult),
     and vidbyte.prompts (fetches judgment templates).
@@ -21,9 +22,10 @@ Relations:
 from __future__ import annotations
 
 import json
-import re
 import inspect
 from typing import Any, ClassVar
+from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.types import AgentForkSettings
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult
 from vidbyte.lib.enums.prompts import Prompt
@@ -84,6 +86,9 @@ class RubricGrader(BaseGrader):
     async def _invoke_judge(self, prompt: str) -> str:
         # Invokes the judge runner asynchronously if supported, otherwise runs it synchronously.
         runner = self.judge_runner
+        if isinstance(runner, BaseAgent):
+            # Judge on a fresh fork so earlier verdicts never leak into this case; preloaded history is kept.
+            runner = runner.fork(AgentForkSettings(name=f"{runner.name}_judge", include_history=bool(runner.history)))
         if hasattr(runner, "arun"):
             res = await runner.arun(prompt, temperature=0.0)
         elif hasattr(runner, "generate_reply"):
@@ -108,14 +113,16 @@ class RubricGrader(BaseGrader):
 
     def _parse_response(self, text: str) -> GraderResult:
         # Safely extracts the dimension scores and calculates the weighted average against the threshold.
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
+        start = text.find("{")
+        if start < 0:
             return GraderResult(score=0.0, passed=False, reason=f"Failed to find JSON block in rubric response: {text}")
 
         try:
-            parsed = json.loads(match.group(0))
-            scores = parsed.get("scores", {})
-            reasons = parsed.get("reasons", {})
+            # Decode only the first JSON object so trailing prose (even with braces) cannot break the scores.
+            parsed, _ = json.JSONDecoder().raw_decode(text, start)
+            # Judges send null for scores or reasons they have nothing for, so nulls read exactly like omitted ones.
+            scores = self._without_nulls(parsed.get("scores"))
+            reasons = self._without_nulls(parsed.get("reasons"))
             
             total_weight = sum(self.rubric.values())
             if total_weight <= 0.0:
@@ -134,3 +141,11 @@ class RubricGrader(BaseGrader):
             return GraderResult(score=final_score, passed=passed, reason=reason)
         except Exception as exc:
             return GraderResult(score=0.0, passed=False, reason=f"Failed to parse rubric response JSON: {str(exc)}")
+
+    @staticmethod
+    def _without_nulls(section: Any) -> Any:
+        # @intent null-optional-arg-means-default
+        # Drops null entries (or a null section) so they fall back to the same defaults as omitted ones.
+        if section is None:
+            return {}
+        return {key: value for key, value in section.items() if value is not None}

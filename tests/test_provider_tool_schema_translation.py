@@ -338,15 +338,37 @@ class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
         self.assertIn("[tool_error kind=invalid_arguments retryable=false]", formatted["content"])
         self.assertIn("bad args", formatted["content"])
 
-    def test_openai_responses_error_uses_function_call_output_shape(self) -> None:
+    def test_openai_responses_results_stay_chat_shaped_on_success_and_error(self) -> None:
+        # The transcript is chat-shaped so fallback can carry it; OpenAIProvider translates it.
         call = ToolCall("lookup", call_id="fc-1", metadata={"provider_shape": "openai_responses"})
-        result = ToolResult.error("lookup", "upstream failed", metadata={"error": "upstream_error", "retryable": True})
+        error = ToolResult.error("lookup", "upstream failed", metadata={"error": "upstream_error", "retryable": True})
 
-        formatted = ToolsFormatter.format_tool_result(call, result, "openai")
+        failed = ToolsFormatter.format_tool_result(call, error, "openai")
+        succeeded = ToolsFormatter.format_tool_result(call, ToolResult.success("lookup", "ok"), "openai")
 
-        self.assertEqual(formatted["type"], "function_call_output")
-        self.assertEqual(formatted["call_id"], "fc-1")
-        self.assertIn("[tool_error kind=upstream_error retryable=true]", formatted["output"])
+        self.assertEqual((failed["role"], failed["tool_call_id"]), ("tool", "fc-1"))
+        self.assertIn("[tool_error kind=upstream_error retryable=true]", failed["content"])
+        self.assertEqual((succeeded["role"], succeeded["tool_call_id"], succeeded["content"]), ("tool", "fc-1", "ok"))
+
+    def test_openai_responses_assistant_turn_is_chat_shaped(self) -> None:
+        raw = {
+            "output": [
+                {"type": "message", "content": [{"type": "output_text", "text": "Checking."}]},
+                {"type": "function_call", "id": "fc_9", "call_id": "call_1", "name": "lookup", "arguments": '{"q": "a"}'},
+            ]
+        }
+
+        turn = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
+
+        self.assertEqual(
+            turn,
+            {
+                "role": "assistant",
+                "content": "Checking.",
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": '{"q": "a"}'}}],
+            },
+        )
+        self.assertIsNone(ToolsFormatter.format_assistant_tool_calls({"output": [{"type": "message", "content": []}]}, "openai"))
 
     def test_default_error_rendering_includes_full_details(self) -> None:
         call = ToolCall("shell", call_id="call-1")
@@ -403,11 +425,6 @@ class AssistantToolCallHistoryFormatterTests(unittest.TestCase):
 
     def test_openai_returns_none_when_tool_calls_absent(self) -> None:
         raw = {"choices": [{"message": {"role": "assistant", "content": "Hello!"}}]}
-        result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
-        self.assertIsNone(result)
-
-    def test_openai_returns_none_for_responses_api_shape(self) -> None:
-        raw = {"output": [{"type": "function_call", "name": "read", "arguments": "{}", "call_id": "fc_1"}]}
         result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
         self.assertIsNone(result)
 
