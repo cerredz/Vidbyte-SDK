@@ -16,7 +16,7 @@ import unittest
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.paradigms import AgentRoleSettings, ContextMinimalFanoutParadigm, ContextMinimalFanoutSettings
-from vidbyte.paradigms.context_minimal_fanout.types import EnvironmentContext, PromptSplitPlan, SplitPrompt
+from vidbyte.paradigms.context_minimal_fanout.types import ContextFile, EnvironmentContext, PromptSplitPlan, SplitPrompt
 from vidbyte.tools.builtins.output_schema import OutputSchemaBuilder
 
 
@@ -98,6 +98,16 @@ class SnapshotNullTextTests(unittest.TestCase):
         ]}})
         self.assertEqual([f.path for f in environment.files], ["src/api.py"])
         self.assertEqual((environment.files[0].notes, environment.files[0].content), ("routes", "def route(): ..."))
+
+    def test_null_model_comments_falls_through_to_comments_alias(self) -> None:
+        nulled = ContextFile.from_value({"path": "a.py", "model_comments": None, "comments": ["x"]})
+        omitted = ContextFile.from_value({"path": "a.py", "comments": ["x"]})
+        self.assertEqual(nulled, omitted)
+        assert nulled is not None
+        self.assertEqual(nulled.model_comments, ("x",))
+        canonical = ContextFile.from_value({"path": "a.py", "model_comments": ["kept"], "comments": ["x"]})
+        assert canonical is not None
+        self.assertEqual(canonical.model_comments, ("kept",))
 
     def test_unfilled_declared_plan_field_reads_as_omitted(self) -> None:
         prompt = {"id": "p1", "title": "Cache core", "prompt": "Refactor the cache."}

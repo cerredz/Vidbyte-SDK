@@ -59,7 +59,10 @@ class ContextFile:
                 return None
             notes = _first_text(value, "notes", "excerpt")
             content = _first_text(value, "content", "full_file", "full_text")
-            comments = value.get("model_comments", value.get("comments", ()))
+            # A null model_comments falls back to the comments alias, the same first-non-null rule as _first_text.
+            comments = value.get("model_comments")
+            if comments is None:
+                comments = value.get("comments")
             return cls(path=path, notes=notes, content=content, model_comments=_text_tuple(comments))
         text = str(value).strip()
         return cls(path=text) if text else None
