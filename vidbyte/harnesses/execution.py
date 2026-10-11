@@ -26,13 +26,14 @@ PUBLIC API INVENTORY:
 WHAT NOT TO DO IN THIS FILE:
     1. Do not build a second event/store system; bind a SessionStore instead.
     2. Do not let a collection or sink error propagate out of execute().
-    3. Do not treat one Harness instance as concurrently reentrant; it holds one
-       run_id at a time. Use a fresh instance per concurrent execution.
+    3. Do not keep the active run_id in shared instance state; overlapping
+       execute() calls on one instance must each keep their own run_id.
 
 KNOWN EDGE CASES:
     Synchronous run() bodies cannot be interrupted by an asyncio timeout while
     blocking. Cancellation and timeout cannot fence side effects already started.
-    session() is only valid during execute(), when a run_id exists.
+    session() is only valid during execute(), when a run_id exists. Code run in a
+    plain thread (no copied context) falls back to the lone in-flight run_id.
 
 COMMON ERRORS:
     HarnessConfigurationError before load(); HarnessExecutionError for run()
@@ -42,13 +43,13 @@ RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
 
 TESTS:
-    Exercised by inline load/identity/success/failure/timeout/collect smoke
-    verification; no dedicated test file was added under the no-tests workflow.
+    tests/test_harness_execution.py covers overlapping executions on one instance.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -107,7 +108,11 @@ class Harness:
         self._collect = bool(collect)                                # opt-in consent, default off
         self._redactor = HarnessRedactor()
         self._spec: HarnessSpec | None = None
-        self._run_id: str | None = None
+        # @intent overlapping-executions-keep-their-own-run-id
+        # Each execute() (asyncio Task) sees only its own run_id, so overlapping trials on one
+        # instance never tag, list, or collect each other's sessions.
+        self._run_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(f"vidbyte_harness_run_id_{id(self)}", default=None)
+        self._active_run_ids: list[str] = []   # in-flight executions, for readers outside their context
 
     # --- configuration & identity ------------------------------------------------
 
@@ -131,21 +136,22 @@ class Harness:
     @property
     def run_id(self) -> str | None:
         # Returns the current unique execution id while execute() is running.
-        return self._run_id
+        return self._current_run_id()
 
     # --- developer seams ---------------------------------------------------------
 
     def session(self, agent: "BaseAgent") -> Session:
         # Auto-instrument seam: full-fidelity capture is forced, no tracing code needed.
         # The run_id tag is the fan-in that later reconstructs the whole multi-agent run.
-        if self._run_id is None:
+        run_id = self._current_run_id()
+        if run_id is None:
             raise HarnessConfigurationError("Harness.session(agent) is only available during execute().")
         return Session(
             agent,
             store=self._store,
             policy=Session.PER_STEP_POLICY,   # intermediate decisions, not just final turns
             trace=Session.FULL_TRACE,          # trace_events + artifact captured per checkpoint
-            tags=[self._run_id],               # fan-in key across all agents in the run
+            tags=[run_id],                     # fan-in key across all agents in the run
         )
 
     async def run(self, request: Any) -> Any:
@@ -163,21 +169,38 @@ class Harness:
         if self._spec is None:
             raise HarnessConfigurationError("Harness.load(...) must be called before execute().")
         timeout = self._validate_timeout(timeout_seconds)
-        self._run_id = f"hrun_{uuid4().hex}"
+        # Give this execution its own run_id, visible only inside this execution's context,
+        # so an overlapping execute() on the same instance cannot overwrite it.
+        run_id = f"hrun_{uuid4().hex}"
+        token = self._run_id_var.set(run_id)
+        self._active_run_ids.append(run_id)
         started_at = _utc_now()
+        # Run the author's run(); every failure path finalizes this execution's own manifest.
         try:
             output = await self._invoke_with_timeout(request, timeout)
         except _HarnessDeadlineExpired as exc:
-            run = await self._finalize(request, None, HarnessRunStatus.TIMED_OUT, started_at)
+            run = await self._finalize(run_id, request, None, HarnessRunStatus.TIMED_OUT, started_at)
             raise HarnessTimeoutError("Harness execution exceeded timeout_seconds.", run=run) from exc
         except asyncio.CancelledError:
-            await self._finalize_shielded(request, None, HarnessRunStatus.CANCELLED, started_at)
+            await self._finalize_shielded(run_id, request, None, HarnessRunStatus.CANCELLED, started_at)
             raise
         except Exception as exc:
-            run = await self._finalize(request, None, HarnessRunStatus.FAILED, started_at)
+            run = await self._finalize(run_id, request, None, HarnessRunStatus.FAILED, started_at)
             raise HarnessExecutionError("Harness implementation execution failed.", run=run) from exc
-        run = await self._finalize(request, output, HarnessRunStatus.SUCCEEDED, started_at)
+        finally:
+            # The run is over, so session() stops tagging with this run_id.
+            self._active_run_ids.remove(run_id)
+            self._run_id_var.reset(token)
+        # Finalize the successful run with the run_id captured above, not shared state.
+        run = await self._finalize(run_id, request, output, HarnessRunStatus.SUCCEEDED, started_at)
         return HarnessExecutionResult(output=output, run=run)
+
+    def _current_run_id(self) -> str | None:
+        # Prefers this execution's own run_id; outside any execution context, uses the lone in-flight one.
+        run_id = self._run_id_var.get()
+        if run_id is not None:
+            return run_id
+        return self._active_run_ids[0] if len(self._active_run_ids) == 1 else None
 
     async def _invoke_with_timeout(self, request: Any, timeout_seconds: float | None) -> Any:
         # Applies an optional deadline around the sync-or-async run() override.
@@ -200,37 +223,37 @@ class Harness:
         result = self.run(request)
         return await result if inspect.isawaitable(result) else result
 
-    async def _finalize(self, request: Any, output: Any, status: HarnessRunStatus, started_at: str) -> HarnessRun:
+    async def _finalize(self, run_id: str, request: Any, output: Any, status: HarnessRunStatus, started_at: str) -> HarnessRun:
         # Builds the operational manifest and runs consented, fail-open collection.
-        session_ids = self._safe_session_ids()
+        session_ids = self._safe_session_ids(run_id)
         run = HarnessRun(
             schema_version=HARNESS_SCHEMA_VERSION,
-            run_id=self._run_id or "",
+            run_id=run_id,
             spec_id=self.spec.spec_id,
             status=status,
             started_at=started_at,
             ended_at=_utc_now(),
             session_ids=session_ids,
         )
-        await self._maybe_collect(request, output, status)
+        await self._maybe_collect(run_id, request, output, status)
         return run
 
-    async def _finalize_shielded(self, request: Any, output: Any, status: HarnessRunStatus, started_at: str) -> None:
+    async def _finalize_shielded(self, run_id: str, request: Any, output: Any, status: HarnessRunStatus, started_at: str) -> None:
         # Makes a best-effort, shielded collection attempt before re-raising cancellation.
-        task = asyncio.create_task(self._maybe_collect(request, output, status))
+        task = asyncio.create_task(self._maybe_collect(run_id, request, output, status))
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:
             return
 
-    async def _maybe_collect(self, request: Any, output: Any, status: HarnessRunStatus) -> None:
+    async def _maybe_collect(self, run_id: str, request: Any, output: Any, status: HarnessRunStatus) -> None:
         # Consent gate + join + sink write. Any failure here must never fail the run.
-        if not self._collect or self._sink is None or self._spec is None or self._run_id is None:
+        if not self._collect or self._sink is None or self._spec is None:
             return
         try:
             reward = await self._safe_score(request, output, status)
             record = TrajectoryCollector(self._store, redactor=self._redactor.redact).collect(
-                self._run_id, self._spec, request, output, status.value, reward=reward
+                run_id, self._spec, request, output, status.value, reward=reward
             )
             await self._sink.write(record)
         except Exception:
@@ -246,10 +269,10 @@ class Harness:
             return None
         return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
-    def _safe_session_ids(self) -> tuple[str, ...]:
+    def _safe_session_ids(self, run_id: str) -> tuple[str, ...]:
         # Reads the fan-in session ids for this run without failing the run on a store error.
         try:
-            return tuple(meta.session_id for meta in self._store.list_sessions(tag=self._run_id))
+            return tuple(meta.session_id for meta in self._store.list_sessions(tag=run_id))
         except Exception:
             return ()
 
