@@ -1297,6 +1297,23 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # BatchForkTool
 # ---------------------------------------------------------------------------
+class SessionScopeTests(unittest.TestCase):
+    def test_bare_session_id_string_is_rejected(self) -> None:  # [Silent Failure]
+        # @intent name-lists-reject-bare-strings
+        # A bare id would otherwise become an allowlist of its characters and deny the very session meant.
+        with self.assertRaisesRegex(ValueError, "list of session ids"):
+            SessionScope.sessions("se_x")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "list of session ids"):
+            SessionScope(allow_ids="se_x")  # type: ignore[arg-type]
+
+    def test_list_and_tuple_of_ids_permit_the_session(self) -> None:  # [Edge Case]
+        # Verifies the list and tuple forms still allow exactly the named session.
+        for scope in (SessionScope.sessions(["se_x"]), SessionScope(allow_ids=("se_x",))):
+            self.assertTrue(scope.permits("se_x"))
+            self.assertFalse(scope.permits("s"))
+            self.assertEqual(scope.allowed_ids(), {"se_x"})
+
+
 class BatchForkToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_spec_requires_bounded_count(self) -> None:  # [Hidden Assumption]
         # Verifies the model-facing schema requires and bounds the fan-out count.
