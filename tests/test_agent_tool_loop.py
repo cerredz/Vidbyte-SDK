@@ -618,6 +618,38 @@ class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(searched, ["a", "b"])
 
 
+class InternalToolBudgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rejected_is_done_attempts_do_not_spend_max_tool_calls(self) -> None:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # Early isDone calls the floor rejects are loop control, so both searches the floor demands still fit the budget.
+        searched: list[str] = []
+
+        @tool
+        def search(q: str) -> str:
+            """Search."""
+            searched.append(q)
+            return "hit"
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "isDone", '{"final_answer": "early 1"}')),
+                _chat_tool_turn(("call_2", "search", '{"q": "a"}')),
+                _chat_tool_turn(("call_3", "isDone", '{"final_answer": "early 2"}')),
+                _chat_tool_turn(("call_4", "search", '{"q": "b"}')),
+                _chat_tool_turn(("call_5", "isDone", '{"final_answer": "done after 2 searches"}')),
+            ]
+        )
+        settings = AgentLoopSettings(max_tool_calls=3, output_contracts=(MinToolCalls(2),))
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(searched, ["a", "b"])
+        self.assertEqual(reply.content, "done after 2 searches")
+        self.assertIn("max_tool_calls: 2/3", runner.calls[-1]["kwargs"]["system"])
+
+
 class IterationFloorAtMaxIterationsTests(unittest.IsolatedAsyncioTestCase):
     async def test_floor_equal_to_max_iterations_is_met_in_the_last_iteration(self) -> None:
         # The budget is checked before an iteration and the floor after its model call, so iteration 3 of 3 can finish.

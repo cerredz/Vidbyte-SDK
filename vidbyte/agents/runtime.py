@@ -382,7 +382,9 @@ class AgentRuntime:
                 state.provider,
                 iteration_count=state.iteration_count,
                 tokens_used=state.tokens_used,
-                tool_call_count=state.tool_call_count,
+                # @intent internal-tools-never-spend-the-tool-budget
+                # The model-visible max_tool_calls usage reports the same non-internal count the budget enforces.
+                tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)),
             )
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
@@ -1635,7 +1637,9 @@ class AgentRuntime:
         # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
         # The budget is ToolSettings.max_calls or AgentRuntimeConfig.max_tool_calls (AgentLoopSettings.max_tool_calls), whichever is lower.
         limits = [limit for limit in (self.config.max_tool_calls, settings.max_calls if settings is not None else None) if limit is not None]
-        if not limits or len(call_contexts) < min(limits):
+        # @intent internal-tools-never-spend-the-tool-budget
+        # Loop-control calls such as isDone are the runtime's own, so only developer tool calls spend the budget.
+        if not limits or len(self._non_internal_tool_contexts(call_contexts)) < min(limits):
             return None
         return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
@@ -1820,7 +1824,9 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=contexts,
             )
-        if self.config.max_tool_calls is not None and len(contexts) >= self.config.max_tool_calls:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # Loop-control calls such as isDone are the runtime's own, so only developer tool calls spend the budget.
+        if self.config.max_tool_calls is not None and len(self._non_internal_tool_contexts(contexts)) >= self.config.max_tool_calls:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_tool_calls.",
                 stop_reason=AgentStopReason.MAX_TOOL_CALLS,
