@@ -10,7 +10,7 @@ Architecture:
     - VideoModelConfig: dataclass for video generation tasks.
     - DecisionModelConfig: dataclass for calibrated decision models (TypeSafe Jev).
 Key Functions:
-    - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry.
+    - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry; in managed state it returns the non-secret placeholder instead.
     - resolved_endpoint: Resolves provider endpoint by delegating to ProviderModelRegistry.
     - is_vidbyte_managed: Reports whether a TextModelConfig routes through the Vidbyte gateway.
     - resolved_vidbyte_api_key: Resolves the live Vidbyte key a managed TextModelConfig sends.
