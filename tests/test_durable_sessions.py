@@ -562,6 +562,26 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(SessionStoreError, "pass new_id"):
             SessionBundleImporter(source).import_bundle(bundle)
 
+    async def test_new_id_import_rejects_existing_session_id(self) -> None:  # [Silent Failure]
+        # @intent bundle-import-never-overwrites-a-session
+        # A copy whose new_id names an existing session must fail and leave that session untouched.
+        source = InMemorySessionStore()
+        session = Session(FakeAgent(), store=source)
+        await session.arun("one")
+        bundle = SessionBundleExporter(source).export(session.id)
+        target = InMemorySessionStore()
+        other = Session(FakeAgent(), store=target)
+        await other.arun("other")
+        meta_before, history_before = target.get_meta(other.id), target.history(other.id)
+
+        with self.assertRaisesRegex(SessionStoreError, "already exists"):
+            SessionBundleImporter(target).import_bundle(bundle, new_id=other.id)
+
+        self.assertEqual(target.get_meta(other.id), meta_before)
+        self.assertEqual(target.get_meta(other.id).head_id, history_before[-1].id)
+        self.assertEqual(target.history(other.id), history_before)
+        self.assertEqual(SessionBundleImporter(target).import_bundle(bundle, new_id="se_fresh"), "se_fresh")
+
     def test_import_uses_ingest_not_put(self) -> None:  # [Hidden Failure]
         # Verify bundle import does not call the seq-reassigning put path.
         class PutFailingStore(InMemorySessionStore):

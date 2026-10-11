@@ -85,6 +85,9 @@ class SessionBundleImporter:
     def import_bundle(self, bundle: bytes, *, new_id: str | None = None) -> str:
         # Parse, optionally re-id, and ingest the bundle, returning the final session id.
         meta, checkpoints = self._read_bundle(bundle)
+        # @intent bundle-import-never-overwrites-a-session
+        # Refuse when the id the import would land on is taken, whether it is the bundle's own id or the copy's new_id.
+        self._assert_session_absent(meta.session_id if new_id is None else new_id)
         if new_id is not None:
             meta, checkpoints = self._rewrite_session_id(meta, checkpoints, new_id)
             # @intent bundle-copy-never-shares-checkpoint-ids
@@ -92,8 +95,6 @@ class SessionBundleImporter:
             # them gets fresh ids; otherwise it would overwrite or shadow the original's checkpoints.
             if self._any_checkpoint_exists(checkpoints):
                 meta, checkpoints = self._mint_checkpoint_ids(meta, checkpoints)
-        else:
-            self._assert_session_absent(meta.session_id)
         self._store.ingest(meta, checkpoints)
         return meta.session_id
 
@@ -180,12 +181,12 @@ class SessionBundleImporter:
         return replace(meta, head_id=fresh.get(meta.head_id, meta.head_id)), remapped
 
     def _assert_session_absent(self, session_id: str) -> None:
-        # Raise before same-id import would overwrite an existing session record.
+        # Raise before an import would overwrite an existing session record under the id it lands on.
         try:
             self._store.get_meta(session_id)
         except SessionNotFoundError:
             return
-        raise SessionStoreError("Session already exists; pass new_id= to import as a copy.", details={"session_id": session_id})
+        raise SessionStoreError("Session already exists; pass new_id= with an unused session id to import as a copy.", details={"session_id": session_id})
 
 
 def _now() -> str:
