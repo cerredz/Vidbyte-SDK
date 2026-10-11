@@ -127,8 +127,11 @@ class VidbyteGatewayTransport(HttpTransport):
     """Sends a provider adapter's native request to Vidbyte's generative gateway, with same-key retries and credential-safe errors."""
 
     def __init__(self, inner: HttpTransport, *, provider: ModelProvider, model: str, api_key: str) -> None:
-        # Keeps the transport that sends each attempt and what this
-        # call's envelope and bearer header carry.
+        """Keep the transport that sends each attempt and what this call's envelope and bearer header carry."""
+        # @intent one-gateway-transport-per-call-holds-the-bearer
+        # The runner builds one transport for each managed call, so the
+        # Vidbyte key and this call's envelope fields live only as long
+        # as the call and are never shared with a concurrent one.
         self._inner = inner
         self._provider = provider
         self._model = model
