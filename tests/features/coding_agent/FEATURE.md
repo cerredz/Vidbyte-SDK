@@ -6,7 +6,7 @@ An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAge
 
 ## Contract
 
-`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
+`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, readonly_paths=(), **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. `readonly_paths` is a list or tuple of non-blank `fnmatch` globs relative to `root_dir`; when it is non-empty, one `ReadonlyPathsMiddleware` is appended after the caller's middleware, and it denies `write_text` and `replace_text` on any file whose resolved, root-relative POSIX path matches (ignoring case on Windows), naming the file and the pattern. Behaviour other than construction is `BaseAgent`'s own.
 
 `BashTool(root_dir)` runs `bash -c <command>` in `root_dir` with stdin closed and stderr merged into stdout. A success result holds the decoded output, at most `BASH_MAX_OUTPUT_BYTES` bytes followed by an omitted-byte count, and ends with `exit code: <n>`. It returns `bash_not_found`, `spawn_failed` or `timeout` errors. One time limit, `BASH_TIMEOUT_SECONDS`, covers both reading and waiting. On a timeout or a cancellation, the command's process group is killed (POSIX) or Git's launcher is killed (Windows), then the tool waits at most `BASH_KILL_GRACE_SECONDS` and closes the pipe.
 
@@ -76,6 +76,12 @@ These are the failure inventory the tests were chosen from, given as input → w
   - Construction makes a network call (INV-18).
 - **Fetch view errors.** The model sees only the "Fetched N page(s)" summary and never the page text (AC-7). The view changes the schema or metadata, so the bill differs from the bare tool's (AC-7, INV-16, INV-20).
 - **Tool list errors.** A caller tool silently shadows a built-in tool (AC-8). Caller tools are reordered or dropped (AC-9).
+- **Read-only path errors.**
+  - `readonly_paths="tests/**"` is split into one-character patterns that protect nothing.
+  - The raw `path` argument is matched, so `./tests/x.py`, `src/../tests/x.py`, an absolute path, or on Windows `tests\x.py` and `TESTS/x.py` edit a protected file.
+  - Only existing files are checked, so a new test file is written.
+  - A path the tool would reject (outside root) gets a denial instead of the tool's own error.
+  - The check runs before the caller's middleware, or is added when there are no patterns.
 - **Subclass errors.** `CodingAgent` overrides `BaseAgent` behaviour, or adds state that changes `export_state` (INV-1, INV-2). `restore` reports a tool mismatch or loses allow-all (AC-21).
 - **Bash spawn errors.**
   - `shell=True` or string interpolation mangles quotes or `$` (INV-9).
@@ -114,6 +120,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Identity errors.
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
+- `test_coding_agent_readonly_paths.py` checks `readonly_paths` through the loop: both edit tools denied with the file unchanged and the path and pattern named, every path spelling and a new file, case on Windows, unprotected writes and protected reads, the outside-root error unchanged, no middleware by default, construction errors, and the caller's middleware first.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
