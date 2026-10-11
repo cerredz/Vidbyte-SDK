@@ -51,6 +51,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import inspect
+import math
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -267,7 +268,9 @@ class Harness:
             value = await self.score(request, output)
         except Exception:
             return None
-        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        # @intent non-finite-score-is-no-label
+        # A NaN or infinite score is unusable and cannot be JSON-encoded, so it must not cost the run its trajectory.
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
 
     def _safe_session_ids(self, run_id: str) -> tuple[str, ...]:
         # Reads the fan-in session ids for this run without failing the run on a store error.
