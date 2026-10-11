@@ -344,5 +344,36 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("prompt", result.output)
 
 
+    async def test_child_mcp_servers_close_after_its_run_even_when_it_fails(self) -> None:
+        # @intent internal-forks-close-their-mcp-servers
+        # [Resource Leak] The child reconnected the parent's MCP servers and was discarded without closing them.
+        class ClosingChild(StubChild):
+            def __init__(self, fail: bool) -> None:
+                super().__init__()
+                self.fail = fail
+                self.events: list[str] = []
+
+            async def generate_reply(self, prompt: str) -> AgentMessage:
+                self.events.append("run")
+                if self.fail:
+                    raise RuntimeError("child crashed")
+                return await super().generate_reply(prompt)
+
+            async def close_mcp_servers(self) -> None:
+                self.events.append("close")
+
+        for fail, status in ((False, ToolStatus.SUCCESS), (True, ToolStatus.ERROR)):
+            agent = StubAgent()
+            child = ClosingChild(fail)
+            agent.child = child
+            tool = ForkConversationTool()
+            tool.bind_agent(agent)
+
+            result = await tool.execute(_call(prompt="branch"))
+
+            self.assertEqual(result.status, status)
+            self.assertEqual(child.events, ["run", "close"])
+
+
 if __name__ == "__main__":
     unittest.main()

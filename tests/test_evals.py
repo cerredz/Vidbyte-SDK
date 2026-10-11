@@ -19,6 +19,7 @@ import os
 import tempfile
 import json
 import unittest
+from unittest.mock import patch
 from datetime import datetime
 from typing import Any
 
@@ -838,6 +839,38 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.results[0].actual, "processed:q1")
         self.assertEqual(agent.last_options["trace_metadata"]["eval_suite"], "suite")
         self.assertEqual(agent.last_options["trace_metadata"]["eval_case_index"], 1)
+
+    async def test_eval_runner_closes_each_fork_mcp_servers_after_its_run(self) -> None:
+        # @intent internal-forks-close-their-mcp-servers
+        # [Resource Leak] Each eval fork reconnected the target's MCP servers and was dropped without closing them.
+        class SpyFork:
+            def __init__(self, fail: bool) -> None:
+                self.fail = fail
+                self.last_reply = None
+                self.events: list[str] = []
+
+            async def arun(self, message: AgentInput, **options: Any) -> Any:
+                self.events.append("run")
+                if self.fail:
+                    raise RuntimeError("fork run crashed")
+
+                class Reply:
+                    content = f"processed:{message.prompt}"
+                    metadata: dict[str, Any] = {}
+                return Reply()
+
+            async def close_mcp_servers(self) -> None:
+                self.events.append("close")
+
+        agent = MockAgent()
+        forks = [SpyFork(fail=False), SpyFork(fail=True)]
+        suite = EvalSuite("suite", [EvalCase(prompt="q1", expected="processed:q1"), EvalCase(prompt="q2")])
+        with patch.object(agent, "fork", side_effect=forks):
+            result = await EvalRunner(agent, default_grader=ExactMatchGrader(), concurrency=1).arun(suite)
+
+        self.assertTrue(result.results[0].grader_result.passed)
+        self.assertIn("fork run crashed", result.results[1].error or "")
+        self.assertEqual([fork.events for fork in forks], [["run", "close"], ["run", "close"]])
 
     async def test_eval_runner_graceful_exception_handling(self) -> None:
         # Tests EvalRunner resilient case execution when targets raise errors.

@@ -119,8 +119,15 @@ class ForkConversationTool(BaseTool):
             request = self._build_request(dict(call.arguments))
             self._enforce_depth_cap()
             child = self._build_child(request)
-            reply = await child.generate_reply(request["prompt"])
-            return self._build_success(child, getattr(reply, "content", str(reply)))
+            # @intent internal-forks-close-their-mcp-servers
+            # The child reconnects the parent's MCP servers for itself and is discarded here, so close them when its run ends.
+            try:
+                reply = await child.generate_reply(request["prompt"])
+                return self._build_success(child, getattr(reply, "content", str(reply)))
+            finally:
+                close_mcp_servers = getattr(child, "close_mcp_servers", None)
+                if close_mcp_servers is not None:
+                    await close_mcp_servers()
         except Exception as exc:
             return ToolResult.error(_TOOL_NAME, str(exc), metadata={"error_type": type(exc).__name__})
 
