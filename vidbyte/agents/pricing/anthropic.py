@@ -76,12 +76,12 @@ class AnthropicUsage(ProviderUsage):
         return sum(part or 0 for part in parts)
 
     def _over_threshold(self, pricing: ModelPricing) -> bool:
-        # True when the whole prompt crosses the model's prompt-length tier.
+        # True when the whole prompt crosses the prompt-length tier.
         # @intent anthropic-tier-counts-cached-prompt
-        # Anthropic prices Haiku 5.5 by prompt length counting "all of its
-        # input tokens, including cache reads and cache writes", while
-        # input_tokens here excludes both, so a cache-heavy prompt would
-        # otherwise bill at the cheaper tier.
+        # Anthropic prices Haiku 5.5 by a prompt length that counts "all
+        # of its input tokens, including cache reads and cache writes",
+        # while input_tokens here excludes both, so a cache-heavy prompt
+        # would otherwise bill at the cheaper tier.
         prompt_tokens = self.total_prompt_tokens
         if pricing.threshold_tokens is None or prompt_tokens is None:
             return False
