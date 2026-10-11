@@ -2,15 +2,17 @@
 
 Branch `feat/decision-model-providers`, started at `68cc97d7`, PR https://github.com/cerredz/Vidbyte-SDK/pull/697. Inputs read: `verify-log.md` (iteration 1), `review.md`, the orchestrator's failure evidence, AGENTS.md, spec r11 §12.3 row 5, field guide `blocking-lint-invariants.md` (C002), house style.
 
-## Gate matrix (all at `d1737132`, the merged tree, everything committed)
+## Gate matrix (all at `486e8a2e`, merged with origin/main `6ce0706e`, everything committed)
+
+The same four gates were first green at `d1737132` (merge of `4e7f73fb`): 91, 406, `SDK-LINT: PASS`, `3071 passed, 1 skipped`. Main moved one commit during the run, so I merged again and re-ran everything; the rows below are the final run.
 
 | Gate | Command | Result | Final lines |
 |---|---|---|---|
-| 1 feature pack | `python -m pytest tests/features/decision_model_providers -q` | PASS (91) | `........................................................................ [ 79%]` / `...................                                                      [100%]` / `91 passed in 1.12s` |
-| 2 area suite | `python -m pytest tests/test_jev_agent.py tests/test_jev_managed_gateway.py tests/test_jev_managed_runs.py tests/test_jev_usage_ledger.py tests/test_jev_preflight.py tests/test_jev_done.py tests/test_model_registry.py tests/test_agent_pricing.py tests/test_embedding_runner.py tests/test_agent_settings_validation.py -q` | PASS (406) | `........................................................................ [ 88%]` / `..............................................                           [100%]` / `406 passed in 2.46s` |
+| 1 feature pack | `python -m pytest tests/features/decision_model_providers -q` | PASS (91) | `........................................................................ [ 79%]` / `...................                                                      [100%]` / `91 passed in 1.05s` |
+| 2 area suite | `python -m pytest tests/test_jev_agent.py tests/test_jev_managed_gateway.py tests/test_jev_managed_runs.py tests/test_jev_usage_ledger.py tests/test_jev_preflight.py tests/test_jev_done.py tests/test_model_registry.py tests/test_agent_pricing.py tests/test_embedding_runner.py tests/test_agent_settings_validation.py -q` | PASS (406) | `........................................................................ [ 88%]` / `..............................................                           [100%]` / `406 passed in 2.71s` |
 | 3 SDK lint | `python lint/run.py` | PASS, exit 0, 0 REGRESSED | `S063 RATCHETED: 4 known finding(s). ...` / `S064 RATCHETED: 4 known finding(s). ...` / `SDK-LINT: PASS` |
-| 4 full local gate | `python scripts/run_ci.py` | PASS, exit 0 | `====== 3071 passed, 1 skipped in 16.15s ======` / `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
-| 5 test-contract diffs | `git diff 3943089c HEAD -- tests/features/decision_model_providers/ \| wc -c` and `git diff $(git merge-base origin/main HEAD) HEAD -- tests/ ':(exclude)tests/features/decision_model_providers' \| wc -c` | PASS | `0` and `0` (merge base now `4e7f73fb` = origin/main); `git diff origin/main HEAD -- lint/baseline.json \| wc -c` → `0` |
+| 4 full local gate | `python scripts/run_ci.py` | PASS, exit 0 | `====== 3072 passed, 1 skipped in 16.67s ======` / `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| 5 test-contract diffs | `git diff 3943089c HEAD -- tests/features/decision_model_providers/ \| wc -c` and `git diff $(git merge-base origin/main HEAD) HEAD -- tests/ ':(exclude)tests/features/decision_model_providers' \| wc -c` | PASS | `0` and `0` (merge base now `6ce0706e` = origin/main); `git diff origin/main HEAD -- lint/baseline.json \| wc -c` → `0` |
 | 6 remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/697` | none configured (workflows disabled) | `no checks reported on the 'feat/decision-model-providers' branch` |
 
 Lint rows that matter: `C002 9 9 RATCHETED`, `C009 1 1 RATCHETED`, `C010 0 0 CLEAN`, `S009 345 350 IMPROVED`, `S051 258 259 IMPROVED`, `S015 13 13 RATCHETED`, `A001 643 643 RATCHETED`, `A009 0 0 CLEAN`. No baseline, config or suppression was touched.
@@ -27,7 +29,8 @@ Lint rows that matter: `C002 9 9 RATCHETED`, `C009 1 1 RATCHETED`, `C010 0 0 CLE
 ### R-19 (Minor, spec-only) — fixed @44dc3faf (spec)
 No code change. `review.md` status updated, as briefed.
 
-### [gate:integration] — merged @d1737132
+### [gate:integration] — merged @d1737132, then @486e8a2e
+- Second merge: after the first push, `gh pr view` showed `MERGEABLE`/`BEHIND`. Another session's fetch had moved the shared `origin/main` ref to `6ce0706e`, one commit (`fix(sources): UrlAllowlist refuses bare-string schemes/hosts ...` #757), which touches only `vidbyte/sources/security.py` and `tests/test_sources_base.py`. `git merge-tree` exited 0, and `git merge --no-ff` made `486e8a2e`. All four gates and both contract diffs were re-run on it (matrix above).
 - `git fetch origin`: origin/main had moved to `4e7f73fb` (33 commits ahead of the old merge base `7be96284`). `git merge-tree --write-tree HEAD origin/main` exited 0.
 - `git merge --no-ff origin/main` made merge commit `d1737132`, with no conflicts and no rebase. Main changes no file under `lint/`, no `pyproject.toml`, and no pricebook file. It touches `vidbyte/lib/constants/jev.py` and adds an import to `vidbyte/lib/dataclasses/jev.py`, which shifted the R-18 line to 527.
 - No gate broke after the merge, so there is no `[gate:*]` fix commit. C009 and C010 did not fire, so the C010 lock was not refreshed and no rate was touched.
@@ -42,11 +45,14 @@ None.
 ## Commits this iteration
 - b5be5ca4 fix(lib): accept int and float subclass timeouts in DecisionHttpCall [R-18]
 - d1737132 Merge origin/main into feat/decision-model-providers [gate:integration]
-- docs(spec): verify-log iteration 2 for decision-model-providers (this report, `verify-log.md`, `review.md`)
+- ed5b4eac docs(spec): verify-log iteration 2 for decision-model-providers (this report, `verify-log.md`, `review.md`)
+- 486e8a2e Merge origin/main into feat/decision-model-providers [gate:integration]
+- docs(spec): record the second integration merge for iteration 2
 
 ## Still open
 No confirmed finding. The follow-up Minors stay open by design and are not this iteration's to fix: R-5, R-8, R-9, R-10, R-11, R-12, R-13, R-14, R-15, R-17.
 
 ## If a next iteration is needed
+- Worktrees share remote-tracking refs, so another session's fetch can move `origin/main` under you. Check `git rev-parse origin/main` right before pushing.
 - If main moves again before merge, re-run `git merge --no-ff origin/main` and the four gates. S051 is at 258/259, so any import that main or this branch adds out of order would regress it. Fix it with `python -m ruff check --config lint/ruff.toml --select I001 --fix <file>`, run only on files this branch changes.
 - R-18 has a single seam: the bool clause must stay `type(...) is bool`. `isinstance(self.timeout_seconds, bool)` takes C002 to 10/9.
