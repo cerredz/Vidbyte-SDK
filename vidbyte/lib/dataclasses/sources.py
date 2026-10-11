@@ -44,6 +44,13 @@ class ArtifactRef:
     pin: PinPolicy = PinPolicy.PINNED
     content_type_hint: str | None = None
 
+    def __post_init__(self) -> None:
+        # @intent pinned-hash-is-case-insensitive-hex
+        # A SHA-256 hex digest means the same bytes in any letter case (PowerShell prints it uppercase), so store
+        # the pin in the lowercase form sha256_hex() produces; a blank pin is left untouched so it fails exactly as before.
+        if isinstance(self.expected_hash, str) and self.expected_hash.strip():
+            object.__setattr__(self, "expected_hash", self.expected_hash.strip().lower())
+
 
 @dataclass(frozen=True, slots=True)
 class Selection:
