@@ -389,7 +389,9 @@ class EnvironmentContextItem:
             lines.append(f"CWD: {self.cwd}")
         if self.shell:
             lines.append(f"Shell: {self.shell}")
-        if len(lines) == 1:
+        # @intent empty-environment-renders-na
+        # Check the fields, not the line count, so the intro lines cannot hide an empty record.
+        if not (self.os_name or self.cwd or self.shell):
             lines.append("N/A")
         return _with_context_intro("\n".join(lines))
 
