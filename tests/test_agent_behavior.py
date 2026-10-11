@@ -72,10 +72,23 @@ def behavior_from_probe(probe: RunProbe) -> Behavior:
 
 
 class StructuredPayload(BaseModel):
-    """Pydantic payload used to verify model_dump structured traversal."""
+    """Pydantic payload used to verify pydantic structured traversal."""
 
     answer: str
     items: list[dict[str, Any]]
+
+
+class StructuredCustomer(BaseModel):
+    """Nested pydantic model used to verify structured fields resolve as themselves."""
+
+    tier: str
+
+
+class StructuredTicket(BaseModel):
+    """Pydantic payload whose fields hold nested pydantic models."""
+
+    customer: StructuredCustomer
+    tags: list[StructuredCustomer]
 
 
 class StubAgent:
@@ -587,11 +600,22 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.output.structured_contains_keys(["a", "c"]))
 
     def test_structured_pydantic_model_dump(self) -> None:
-        # [Hidden Assumption] Pydantic structured objects are supported through model_dump().
+        # [Hidden Assumption] Pydantic structured objects are supported through their model fields.
         payload = StructuredPayload(answer="yes", items=[{"title": "First"}])
         b = behavior_from_probe(RunProbe(structured=payload))
         self.assertTrue(b.output.structured_field_equals("answer", "yes"))
         self.assertTrue(b.output.structured_field_exists("items.0.title"))
+
+    def test_structured_pydantic_nested_model_resolves_as_itself(self) -> None:
+        # [Silent Failure] A nested pydantic field resolves to the reply's own model, not a dumped dict.
+        payload = StructuredTicket(customer=StructuredCustomer(tier="gold"), tags=[StructuredCustomer(tier="vip")])
+        b = behavior_from_probe(RunProbe(structured=payload))
+        self.assertTrue(b.output.structured_field_type("customer", StructuredCustomer))
+        self.assertTrue(b.output.structured_field_equals("customer", payload.customer))
+        self.assertTrue(b.output.structured_field_matches("customer", lambda c: c.tier == "gold"))
+        self.assertTrue(b.output.structured_field_type("tags.0", StructuredCustomer))
+        self.assertTrue(b.output.structured_field_equals("customer.tier", "gold"))
+        self.assertTrue(b.output.structured_contains_keys(["customer", "tags"]))
 
     # --- EfficiencyBehavior Category G ---
 
