@@ -18,7 +18,7 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 | S0 worktree + capture + recon | done | 2026-10-10 18:10 | 2026-10-10 18:24 | reports/S0-scout.md | base_commit c07529316 |
 | S1 spec + review | done | 2026-10-10 19:20 | 2026-10-11 01:10 | reports/S1-spec-review-2.md | spec r4 approved @ed9f098a; 2 review rounds + orchestrator r4 |
 | S2 tests | done | 2026-10-11 01:12 (est.) | 2026-10-10 22:36 | reports/S2-test-author.md | 32 tests red (32 failed, orchestrator re-ran; no collection errors); area suites 69 passed; test commit 2eb7e3e5, proof 6069160f; S2_HEAD set at the status commit |
-| S3 implement | pending | | | | |
+| S3 implement | running | 2026-10-10 22:43 | | reports/S3-implementer.md | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -44,6 +44,9 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - Test layout: spec §13 says flat test files; S2 used the repo's tests/features/sdk_* feature-pack convention (tests/features/sdk_managed_text/ with FEATURE.md and README.md). Accepted: the repo convention outranks the spec's description of layout (AGENTS.md > spec for HOW).
 - EC-26 vs §9.2 (S2 open item): §9.2's failure-mapping rows are binding and 'the first match decides'. A FastAPI default 404 body {"detail":"Not Found"} is a non-2xx JSON object without top-level "error": true, so row 6 (relayed provider error, '<provider> returned HTTP 404 through the Vidbyte gateway', not billed) applies. EC-26's 'Vidbyte returned HTTP 404' column is illustrative; the binding fact is that the message carries HTTP 404. No new row is built. S3 records the EC-26 wording fix as a deviation in §17.
 - Clock note: S0–S2 timestamps in this file were estimates ahead of the system clock (2026-10-10 22:35 at backend S3 close); later rows use date.
+- Merged origin/main (00cbd6db, 60 commits past base c07529316) into the branch as e91cf822 before S3, mirroring the backend run. Drift on §12.3 files is additive (jev.py +29, enums, lint/baseline.json +11; nothing under vidbyte/providers). Post-merge: new pack 32 failed (missing names/behavior only); full suite '32 failed, 2972 passed, 1 skipped in 16.42s', 0 failures outside tests/features/sdk_managed_text; 'python lint/run.py' -> 'SDK-LINT: PASS'; C020 still 4 (spec tightens to 2 in P1). S2_HEAD test-tree baseline for the implementer: e91cf822 (tests unchanged since 2eb7e3e5).
+- GitHub Actions automatic triggers are disabled in the SDK repo too (ci.yml, static-policy.yml, etc. are workflow_dispatch only). Local gates are the only proof.
+- Global semgrep 1.170.1 crashes on import because the global mcp package is 2.x. Built an isolated venv at <scratchpad>/semgrep-venv (semgrep==1.170.1, mcp<2; no global change). Its semgrep.exe still shells out to the global pysemgrep, so call the venv's pysemgrep.exe directly: '<scratchpad>/semgrep-venv/Scripts/pysemgrep.exe scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte --metrics=off' -> 'Ran 1 rule on 871 files: 0 findings.' on e91cf822.
 
 ## User replies (verbatim)
 - none yet
@@ -87,3 +90,4 @@ Linked run: this request spans two repos. The sibling pipeline is `generative-mo
 - unittest.TestCase reserves _outcome; never name a helper _outcome.
 - SDK lint reads git ls-files: stage new files before running lint. Full lint takes about 1 minute. AC-14/AC-17 need the C020 count cut from 4 to 2.
 - Backend contract to re-vendor at SDK P2: commit ceabda93ea8f782d0d91f897c05b0ee974f2c5a3 on feat/generative-model-gateway (pushed; PR cerredz/Vidbyte#672). It lists "models.generate" and "/api/v1/models/generate". Re-check before SDK S6 that no later backend commit changed contracts/.
+- SDK gate set: (a) PYTHONPATH=$(pwd) python -m pytest tests/features/sdk_managed_text -q; (b) PYTHONPATH=$(pwd) python -m pytest -q (full); (c) python lint/run.py until SDK-LINT: PASS (stage new files first: lint reads git ls-files); (d) PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source, then python scripts/run_ci.py --stage package with no PYTHONPATH; (e) semgrep via the scratch venv's pysemgrep.exe (scans tracked files only: commit first). Never pip install -e or any global install.
