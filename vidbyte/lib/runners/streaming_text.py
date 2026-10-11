@@ -61,8 +61,15 @@ class StreamingTextModelRunner:
             return
         provider = config.normalized_provider()
         env_var = ProviderModelRegistry.get_api_key_env_var(provider)
+        # Offer the caller's own key as a way to stream only for a
+        # provider this runner can stream; for any other provider that
+        # advice would just lead to the provider refusal below.
+        way_forward = f"Use TextModelRunner, or set {env_var} to stream with your own key."
+        if provider not in self.STREAMING_SUPPORTED_PROVIDERS:
+            streaming = ", ".join(sorted(supported.value for supported in self.STREAMING_SUPPORTED_PROVIDERS))
+            way_forward = f"Use TextModelRunner: streaming supports only {streaming}, so setting {env_var} would not make {provider.value} stream either."
         raise UnsupportedProviderError(
-            f"Streaming is not available in Vidbyte-managed mode. Use TextModelRunner, or set {env_var} to stream with your own key.",
+            f"Streaming is not available in Vidbyte-managed mode. {way_forward}",
             details={"provider": provider.value, "mode": TextModelMode.VIDBYTE_MANAGED.value},
         )
 
