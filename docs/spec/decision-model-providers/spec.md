@@ -1,7 +1,7 @@
 ---
 spec: decision-model-providers
 title: Add more decision model providers beyond TypeSafe Jev
-status: reviewed             # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: verified             # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 11
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-decision-model-providers
