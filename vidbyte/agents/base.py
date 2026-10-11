@@ -1006,6 +1006,10 @@ class BaseAgent(McpAttachableMixin):
         )
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
+        # @intent name-lists-reject-bare-strings
+        # A bare string is itself a sequence, so the loop below would run one paid model call per character.
+        if isinstance(prompts, (str, bytes)):
+            raise ValueError("BaseAgent.arun_sequentially() prompts must be a list of prompts, not a single string.")
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
         results: list[AgentMessage] = []
         for prompt in prompts:
