@@ -190,6 +190,16 @@ class TrajectoryCheckpointToolTests(unittest.IsolatedAsyncioTestCase):
         stored = manager.get_by_id("trajectory_checkpoint:1")
         self.assertEqual(stored.score, 1.0)
 
+    async def test_non_finite_score_stores_none(self) -> None:
+        for raw in ("nan", "NaN", "inf", "-inf"):
+            with self.subTest(raw=raw):
+                tool, manager = self._tool()
+                await tool.execute(self._call(reasoning_summary="r", trajectory="t", output="o", score=raw))
+                self.assertIsNone(manager.get_by_id("trajectory_checkpoint:1").score)
+        tool, manager = self._tool()
+        await tool.execute(self._call(reasoning_summary="r", trajectory="t", output="o", score="0.4"))
+        self.assertEqual(manager.get_by_id("trajectory_checkpoint:1").score, 0.4)
+
     async def test_two_calls_produce_distinct_primitive_ids(self) -> None:
         tool, manager = self._tool()
         base_call = self._call(reasoning_summary="r", trajectory="t", output="o")

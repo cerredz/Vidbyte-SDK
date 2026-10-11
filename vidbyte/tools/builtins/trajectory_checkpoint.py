@@ -16,6 +16,7 @@ Relations:
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from vidbyte.tools.base import BaseTool
@@ -129,9 +130,13 @@ class TrajectoryCheckpointTool(BaseTool):
             return None
         try:
             value = float(str(raw).strip())
-            return max(_MIN_SCORE, min(_MAX_SCORE, value))
         except (ValueError, TypeError):
             return None
+        # @intent non-finite-score-is-unparsable
+        # min(1.0, nan) is 1.0, so NaN/inf would be recorded as a perfect score; None means unparsable.
+        if not math.isfinite(value):
+            return None
+        return max(_MIN_SCORE, min(_MAX_SCORE, value))
 
     def _build_item(self, args: dict, primitive_id: str) -> object:
         # Constructs the TrajectoryCheckpointContextItem from validated call arguments.
