@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/coding_context/progress_notes.py
 
-PURPOSE: Defines ProgressNotesLoader, which keeps a CodingAgent's own notes file, <root>/.vidbyte/progress.md, and shows it in the PROGRESS_NOTES section with a short instruction to keep it up to date, so a second run picks up where the first stopped.
+PURPOSE: Defines ProgressNotesLoader, which keeps a CodingAgent's own notes file, <root>/.vidbyte/coding-agent/progress.md, and shows it in the PROGRESS_NOTES section with a short instruction to keep it up to date, so a second run picks up where the first stopped.
 ROLE IN CODEBASE: Called once by CodingAgent.__init__ (vidbyte/agents/coding.py) with the validated CodingAgentSettings; returns a CodingContextSectionText (vidbyte/lib/dataclasses/coding.py) that CodingContextWindow (vidbyte/agents/coding_context/window.py) places last among the sections. Reads its paths, cap, template, and text from vidbyte/lib/constants/coding.py.
-ARCHITECTURE NOTE: The notes are the agent's local working file, not a repository convention. The loader creates the file from a template, and a .vidbyte/.gitignore holding "*" so the folder ignores itself, each only when missing; exclusive-create mode means an existing file is never overwritten. The agent edits the file with write_text or replace_text; the section is read once, at construction.
+ARCHITECTURE NOTE: The notes are the agent's local working file, not a repository convention. The loader creates the file from a template, and a .vidbyte/coding-agent/.gitignore holding "*" so only the notes folder ignores itself, each only when missing; .vidbyte itself and its .gitignore are never touched, because other tools (vidbyte-cli's task board) write there; exclusive-create mode means an existing file is never overwritten. The agent edits the file with write_text or replace_text; the section is read once, at construction.
 FUNCTION INVENTORY: ProgressNotesLoader.load is the narrated main function; _create_if_missing writes a file only when it does not exist; _read_capped reads at most the cap and appends the cut note when the file is longer.
 COMMON MODIFICATION PATTERNS: Change the paths, cap, template, or model-facing text in vidbyte/lib/constants/coding.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not overwrite or reset an existing notes file or .gitignore; the notes are kept between runs on purpose. 2. Do not edit the user's own .gitignore. 3. Do not raise when the root cannot be written; the switch is on by default and read-only use must keep working.
-KNOWN EDGE CASES: Any OSError while creating or reading the files (a read-only root, a permission error, a file named .vidbyte, a folder named progress.md) gives no section. On a read-only root where both files already exist nothing is written, so the section is still shown. A character split by the cap, and any byte that is not UTF-8, is dropped from the shown text.
+KNOWN EDGE CASES: Any OSError while creating or reading the files (a read-only root, a permission error, a file named .vidbyte or coding-agent, a folder named progress.md) gives no section. On a read-only root where both files already exist nothing is written, so the section is still shown. A character split by the cap, and any byte that is not UTF-8, is dropped from the shown text.
 RELATED DOCS: docs/design/coding-agent-progress-notes.md; vidbyte/agents/coding_context/README.md; vidbyte/agents/README.md (Coding Agent)
 TESTS: tests/features/coding_agent/test_coding_agent_progress_notes.py
 """
@@ -29,7 +29,7 @@ from vidbyte.lib.enums.coding import CodingContextSection
 
 
 class ProgressNotesLoader:
-    """Keeps the agent's own <root>/.vidbyte/progress.md and shows it, capped at 32 KiB, in the PROGRESS_NOTES section."""
+    """Keeps the agent's own <root>/.vidbyte/coding-agent/progress.md and shows it, capped at 32 KiB, in the PROGRESS_NOTES section."""
 
     @classmethod
     def load(cls, settings: CodingAgentSettings) -> CodingContextSectionText | None:
@@ -43,9 +43,9 @@ class ProgressNotesLoader:
         path = folder / CODING_PROGRESS_NOTES_FILE_NAME
         try:
             # Make the notes folder and have it ignore itself, so git
-            # never shows the notes and the user's .gitignore is never
-            # touched.
-            folder.mkdir(exist_ok=True)
+            # never shows the notes. Only this folder is ignored; the
+            # user's .gitignore and other tools' files stay as they are.
+            folder.mkdir(parents=True, exist_ok=True)
             cls._create_if_missing(folder / ".gitignore", CODING_PROGRESS_NOTES_GITIGNORE)
 
             # Start the notes from the template the first time. A file

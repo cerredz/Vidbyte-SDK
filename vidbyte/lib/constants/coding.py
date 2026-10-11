@@ -20,12 +20,14 @@ CODING_AGENTS_MD_FILE_NAME = "AGENTS.md"
 CODING_AGENTS_MD_MAX_BYTES = 32_768
 
 # The agent's own notes folder and file under the root folder. They are
-# local working files, not a repository convention.
-CODING_PROGRESS_NOTES_DIR = ".vidbyte"
+# local working files, not a repository convention. The folder is its
+# own subfolder of .vidbyte, which other Vidbyte tools also write to.
+CODING_PROGRESS_NOTES_DIR = ".vidbyte/coding-agent"
 CODING_PROGRESS_NOTES_FILE_NAME = "progress.md"
 
-# Written as .vidbyte/.gitignore, so the folder ignores itself the way
-# pytest's .pytest_cache does and the user's .gitignore is never edited.
+# Written as .vidbyte/coding-agent/.gitignore, so only the notes folder
+# ignores itself, the way pytest's .pytest_cache does. Neither the
+# user's .gitignore nor other tools' files under .vidbyte are touched.
 CODING_PROGRESS_NOTES_GITIGNORE = "*\n"
 
 # 32 KiB, the same cap as AGENTS.md; notes are meant to stay short.
@@ -35,10 +37,10 @@ CODING_PROGRESS_NOTES_MAX_BYTES = 32_768
 CODING_PROGRESS_NOTES_TEMPLATE = "# Progress notes\n\n## Done\n\n## Next\n\n## Decisions\n"
 
 # Shown to the model above the notes.
-CODING_PROGRESS_NOTES_INSTRUCTION = "This is your own notes file for this repository. It is kept between runs and is never committed. Read it before you start.\nAfter each meaningful step, update .vidbyte/progress.md with write_text or replace_text: what is done, what is next, and any decisions.\nKeep it short."
+CODING_PROGRESS_NOTES_INSTRUCTION = "This is your own notes file for this repository. It is kept between runs and is never committed. Read it before you start.\nAfter each meaningful step, update .vidbyte/coding-agent/progress.md with write_text or replace_text: what is done, what is next, and any decisions.\nKeep it short."
 
 # Shown after notes cut at the cap.
-CODING_PROGRESS_NOTES_TRUNCATION_NOTE = "[The notes were cut at 32 KiB. Read the rest of .vidbyte/progress.md with read_lines, then shorten it.]"
+CODING_PROGRESS_NOTES_TRUNCATION_NOTE = "[The notes were cut at 32 KiB. Read the rest of .vidbyte/coding-agent/progress.md with read_lines, then shorten it.]"
 
 __all__ = [
     "CODING_AGENTS_MD_FILE_NAME",
