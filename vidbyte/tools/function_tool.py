@@ -73,7 +73,11 @@ class FunctionTool(BaseTool):
                 if inspect.isawaitable(value):
                     value = await value
         except Exception as exc:
-            return ToolResult.failure(self.name, str(exc), metadata={"error_type": exc.__class__.__name__})
+            # @intent function-tool-errors-share-the-runtime-error-kind
+            # A raising function tool reports the same execution_error kind the runtime gives a raising
+            # BaseTool, so the model and ToolErrorPolicy treat both ways of writing a tool alike.
+            metadata = {"error": "execution_error", "error_type": exc.__class__.__name__}
+            return ToolResult.failure(self.name, str(exc), metadata=metadata)
 
         return ToolResult.success(
             self.name,
