@@ -169,6 +169,17 @@ class SupermemorySearchTests(unittest.IsolatedAsyncioTestCase):
         await tool.execute(ToolCall("supermemory_search_memory", {"query": "test", "container_tag": "user_99"}))
         self.assertEqual(transport.last_call["json_body"]["containerTag"], "user_99")
 
+    async def test_search_bare_list_response_succeeds_with_count(self) -> None:
+        """[Regression] a bare-list body is read as the results, not crashed on."""
+        hits = [{"id": "doc1", "text": "Alice likes cats"}, {"id": "doc2", "text": "Alice lives in Oslo"}]
+        transport = MockTransport(200, hits)
+        tool = _inject_transport(SupermemorySearchMemoryTool("key123"), transport)
+        result = await tool.execute(ToolCall("supermemory_search_memory", {"query": "cats"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.metadata["count"], 2)
+        self.assertIn("Alice likes cats", result.output)
+        self.assertIn("Alice lives in Oslo", result.output)
+
 
 class SupermemoryDeleteTests(unittest.IsolatedAsyncioTestCase):
 
