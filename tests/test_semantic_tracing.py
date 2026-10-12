@@ -223,6 +223,21 @@ class TraceControllerTests(unittest.TestCase):
         tracer.end_trace(root, output="done")
         self.assertNotIn("runtime.iteration", [event.get("name") for event in inner.events])
 
+    def test_minimal_profile_drops_agent_fallback_span(self) -> None:
+        # Verifies agent.fallback is filtered under the minimal profile but still emitted under the default profile.
+        # @intent minimal-profile-keeps-only-agent-run
+        emitted: dict[str, list[str | None]] = {}
+        for label, profile in (("minimal", TraceProfile.minimal()), ("default", TraceProfile.default())):
+            inner = RecordingTracer()
+            tracer = Trace.profile(inner, profile)
+            root = tracer.start_trace("agent.run")
+            span = tracer.start_span("agent.fallback", parent=root, attempt="1")
+            tracer.end_span(span, output="next-model")
+            tracer.end_trace(root, output="done")
+            emitted[label] = [event.get("name") for event in inner.events if event["type"].startswith("start_")]
+        self.assertEqual(emitted["minimal"], ["agent.run"])
+        self.assertEqual(emitted["default"], ["agent.run", "agent.fallback"])
+
     def test_verbose_profile_allows_runtime_iteration(self) -> None:
         # Verifies verbose spans are delegated when enabled.
         inner = RecordingTracer()
