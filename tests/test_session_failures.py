@@ -390,6 +390,16 @@ class FailureNormalizationTests(unittest.TestCase):
         failures = FailureMetadataNormalizer.from_reply(reply)
         self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.TOOL_IDENTICAL_CALL_LIMIT, "tool_settings")])
 
+    def test_denied_stop_stays_routable_after_earlier_denied_call(self) -> None:  # [Hidden Failure]
+        # @intent one-stop-one-routable-failure
+        # Verify a tool_settings_denied stop keeps exactly one routable record whether or not an earlier call was denied.
+        for states in ((), ("denied",)):
+            with self.subTest(tool_call_states=states):
+                reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "tool_settings_denied", "tool_call_states": states})
+                failures = FailureMetadataNormalizer.from_reply(reply)
+                rows = [(item.code, item.source, item.status, item.disposition) for item in failures]
+                self.assertEqual(rows, [(FailureCode.TOOL_PERMISSION_DENIED, "agent_runtime", FailureStatus.EXHAUSTED, FailureDisposition.ROUTE)])
+
     def test_middleware_abort_stop_yields_one_record(self) -> None:  # [Hidden Failure]
         # @intent one-middleware-abort-one-record
         # Verify one middleware abort keeps only the richer middleware record, not a runtime twin.
