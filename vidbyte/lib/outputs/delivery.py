@@ -4,13 +4,14 @@ PURPOSE: Defines OutputHttp and OutputSmtp, which send one connector request and
 ROLE IN CODEBASE: Called by every connector's send in this package; HTTP goes through vidbyte/lib/http/transport.py, email through stdlib smtplib.
 ARCHITECTURE NOTE: The only place delivery outcomes become error codes, so the INV-11 code grammar and the retry policy live in one module.
 COMMON MODIFICATION PATTERNS: A new HTTP connector builds an OutputRequest and calls OutputHttp.post; it never calls HttpTransport itself.
-KNOWN EDGE CASES: A 2xx without a usable https link is FAILED invalid_response; a partial SMTP refusal is FAILED, since a retry would duplicate the mail.
+KNOWN EDGE CASES: A 2xx without a usable https link is FAILED invalid_response; a partial SMTP refusal is FAILED, since a retry would duplicate the mail; a QUIT reply after the send never changes the receipt.
 RELATED DOCS: vidbyte/lib/outputs/README.md
 TESTS: tests/features/agent_output_connectors/test_output_connectors_http_failures.py and test_output_connectors_email.py
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -140,11 +141,18 @@ class OutputSmtp:
         # may already have accepted the mail for some recipients.
         try:
             # Connect, upgrade to TLS unless implicit, sign in, send.
-            with OutputSmtp._client(settings) as client:
+            client = OutputSmtp._client(settings)
+            try:
                 if settings.port != SMTP_IMPLICIT_TLS_PORT:
                     client.starttls(context=ssl.create_default_context())
                 client.login(settings.username, settings.password)
                 refused = client.send_message(message)
+            finally:
+                # The outcome is known before QUIT, so its reply, or a
+                # dropped connection, never changes the receipt; quit()
+                # closes the socket either way.
+                with contextlib.suppress(smtplib.SMTPException, OSError):
+                    client.quit()
         except smtplib.SMTPRecipientsRefused:
             return DeliveryReceipt(OutputDestination.EMAIL, DeliveryStatus.FAILED, error_code=OUTPUT_ERROR_SMTP_REFUSED)
         except smtplib.SMTPResponseException as exc:
