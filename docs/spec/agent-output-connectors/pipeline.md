@@ -40,6 +40,10 @@ started: 2026-10-11 17:36
 - 2026-10-11 — S2_HEAD = 72fc2002 (test tree baseline for S3/S5/S6 diffs; tests last changed in d90400d2).
 - 2026-10-11 — S2 built a throwaway prototype in its scratchpad (outside repo, never committed) to mutation-test the suite (71/72 caught); accepted, since nothing under vidbyte/ changed.
 
+- 2026-10-11 — S3 BLOCKED at row 27: S008 (C901 ≤10 / PLR0915 ≤50, baseline 19) — `_generate_reply` is 10/50 on base; inline block → 12/57 REGRESSED. Decided myself (not product intent): baseline raise forbidden (hard rule); move delivery to `_deliver_outputs` + gate-forced `_record_last_trace` extraction; two-hop chain accepted because S008 is an enforced gate and Style 1 is "shape to aim for", with repo precedent `_assert_schema_satisfied` → `_notify_session_exception` (base.py:962). Reverses R-13. Spec r5 @c29fabf4 (S3-1), plus lint-forced renames `*_MENTION_TOKEN`→`*_MENTION_PREFIX`, new `OUTPUT_ERROR_TOKEN_MAX_CHARS` (S3-2).
+- 2026-10-11 — Accepted r5's guarded form (`if self.outputs: await self._deliver_outputs(...)` in `_generate_reply`, measured 10/9/50 = base, no new S008 finding) over the unguarded 9/8/49, because it keeps INV-22 ("adds no await" without outputs) as written.
+- 2026-10-11 — CONFLICT `OutputArguments.optional_callable(value: object, ...)` (spec §8.5:595) vs S3's `Callable[[AgentMessage], OutputContent] | None` annotation (mypy `disallow_any_generics`, runtime check unchanged): accepted as an S3 implementation deviation recorded under spec §17, no spec edit.
+
 ## User replies (verbatim)
 - (none yet)
 
@@ -73,4 +77,7 @@ started: 2026-10-11 17:36
 - Slack escapes after truncation; Jira paragraphs = non-blank lines of the truncated body — *source:* S2
 - Layering test parses real imports: agents/output may import stdlib, vidbyte.lib, vidbyte.agents.output only; lib/outputs must not import httpx/requests/aiohttp/http.client/urllib.request — *source:* S2 / spec r4 §12.2
 - Run new tests: `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors` (no global `pip install -e`; deps present in global Python 3.11) — *source:* S2
+- S008 headroom on `_generate_reply` is zero (10/9/50 with the guarded `_deliver_outputs` call); add nothing else to it — *source:* S3 / spec r5
+- Comments must fit 72 columns incl. indentation; S054/S105 flags string constants with a `_TOKEN_` name segment; only run `ruff check --select I001 --fix` on newly created files — *source:* S3
+- `fork.py` and `jev/agent.py` changes can't land before row 27 (forks raise TypeError otherwise) — *source:* S3
 - Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
