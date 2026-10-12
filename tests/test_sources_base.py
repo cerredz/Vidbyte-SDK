@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import http.server
+import sys
 import tempfile
 import threading
 import unittest
@@ -293,6 +294,20 @@ class SourcesBaseTests(unittest.TestCase):
             source = DocumentSource(fetcher=FileFetcher(), allowlist=UrlAllowlist(allowed_schemes=("file",)))
             result = source.load(ArtifactRef(url=path.as_uri()))
             self.assertEqual(result.items[0].title, "Title")
+
+    def test_filefetcher_keeps_file_uri_host_as_unc_share(self) -> None:
+        # @intent file-uri-host-is-a-unc-share
+        # [Silent Failure] A file URI host is the share serving the file, never dropped for a local path.
+        path = FileFetcher()._resolve_path("file://docs-share/handbook/oncall.md")
+        self.assertIn("docs-share", str(path))
+        self.assertNotEqual(path, Path("/handbook/oncall.md").resolve())
+        if sys.platform == "win32":
+            self.assertTrue(str(path).startswith("\\\\docs-share\\handbook"))
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp).resolve() / "doc.md"
+            local.write_bytes(_DATA)
+            for url in (local.as_uri(), local.as_uri().replace("file://", "file://localhost", 1)):
+                self.assertEqual(FileFetcher().fetch(url).body_bytes, _DATA)
 
     def test_httpfetcher_refuses_file_and_schemeless_urls_before_any_request(self) -> None:
         # [Hidden Assumption] HttpFetcher never opens a local file and only raises SourceFetchError.

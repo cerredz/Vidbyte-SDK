@@ -40,6 +40,10 @@ class FileFetcher:
         parsed = urlparse(url)
         if parsed.scheme == "file":
             raw_path = unquote(parsed.path)
+            if parsed.netloc and parsed.netloc.lower() != "localhost":
+                # @intent file-uri-host-is-a-unc-share
+                # RFC 8089 names the serving host in the authority (Path.as_uri() writes a UNC share so); keep it.
+                return Path("//" + parsed.netloc + raw_path)
             if raw_path.startswith("/") and len(raw_path) > 3 and raw_path[2] == ":":
                 raw_path = raw_path[1:]
             return Path(raw_path).resolve()
