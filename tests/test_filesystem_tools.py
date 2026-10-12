@@ -587,6 +587,42 @@ class EditToolDiffTests(unittest.TestCase):
             marker = "\\ No newline at end of file"
             self.assertEqual(result.output.split("\n")[3:], ["@@ -1 +1 @@", "-alpha beta", marker, "+alpha gamma", marker])
 
+    def test_form_feed_line_stays_one_diff_line(self) -> None:
+        # A ^L page break line is one line on disk, so the diff must not
+        # split it or mark it as a last line without a newline.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.c").write_text("int a;\n\f\nint b;\nint c;\n", encoding="utf-8")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.c", "search": "int c;", "replacement": "int c2;"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output.split("\n")[3:], ["@@ -1,4 +1,4 @@", " int a;", " \f", " int b;", "-int c;", "+int c2;"])
+
+    def test_line_separator_inside_a_line_stays_one_diff_line(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.js").write_text('const s = "x y";\nlet n = 1;\n', encoding="utf-8")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.js", "search": "n = 1", "replacement": "n = 2"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertNotIn("No newline at end of file", result.output)
+            self.assertEqual(result.output.split("\n")[3:], ["@@ -1,2 +1,2 @@", ' const s = "x y";', "-let n = 1;", "+let n = 2;"])
+
+    def test_missing_final_newline_is_marked_only_at_the_real_end(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.txt").write_text("page\fbreak\nlast", encoding="utf-8")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "last", "replacement": "end"})))
+            marker = "\\ No newline at end of file"
+            self.assertEqual(result.output.split("\n")[3:], ["@@ -1,2 +1,2 @@", " page\fbreak", "-last", marker, "+end", marker])
+
+    def test_write_text_new_file_counts_lines_by_newline_only(self) -> None:
+        # A form feed is not a line break; a last line without a newline
+        # still counts, and empty content has no lines.
+        for content, expected in (("page1\fstill line1\nline2\n", 2), ("a b\nc", 2), ("", 0)):
+            with self.subTest(content=content), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "new.txt", "content": content})))
+                self.assertEqual(result.output, f"{result.metadata['path']}\ncreated, {expected} lines")
+
     def test_write_text_over_non_utf8_file_still_writes(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
