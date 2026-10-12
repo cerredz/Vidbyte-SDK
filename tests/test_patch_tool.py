@@ -111,6 +111,16 @@ class PatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "success")
         self.assertEqual(self.file.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
 
+    async def test_crlf_spelled_blocks_match_and_keep_crlf_line_endings(self) -> None:
+        """Search and replace blocks spelled with CRLF still match a CRLF file, which never gets CR CR LF."""
+        # @intent model-crlf-text-keeps-file-endings
+        self.file.write_bytes(b"[a]\r\nx=1\r\ny=2\r\n")
+        result = await PatchTool(self.root).execute(
+            ToolCall("patch_file", {"file_path": "demo.py", "search_block": "[a]\r\nx=1", "replace_block": "[a]\r\nx=10\r\nz=3"})
+        )
+        self.assertEqual(result.status.value, "success", result.output)
+        self.assertEqual(self.file.read_bytes(), b"[a]\r\nx=10\r\nz=3\r\ny=2\r\n")
+
     async def test_diff_marks_last_line_without_final_newline(self) -> None:
         """Editing a last line with no final newline keeps "-old" and "+new" on separate lines with git's marker."""
         self.file.write_bytes(b"[app]\nname = demo\ndebug = false")
