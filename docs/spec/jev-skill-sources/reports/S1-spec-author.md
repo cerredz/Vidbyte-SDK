@@ -316,3 +316,26 @@ The S2 test author (`S2-test-author.md`) committed the tests at `d01e0afa` and l
 - 4: `SkillSourceType`.
 
 The per-name split differs from S2's table because S2 sorted the imports after its tally. The count and the cause are the same.
+
+## r5 addendum (revision after the S4 adversarial review)
+
+The S4 review (`review.md`, verified in `reports/S4-findings-verifier.md`) routed four items to spec text. The code is implemented, so this revision changes wording and EC rows only. No public name, signature, reason, constant, §8.4 budget, §8.5 interface, or §6.2 Proof cell changed. The spec is revision 5 and stays `status: reviewed`.
+
+| Finding | Disposition | Change |
+|---|---|---|
+| S4-R-2 (Blocker) | accepted | New EC-118 (GitHub) and EC-119 (Anthropic and OpenAI). A token or key from the entry or the env fallback that, after stripping, is not `isascii()` and `isprintable()` is `auth_failed` with no request and is remembered, like the Vidbyte-prefix guard (EC-77) and a missing key (EC-76). For GitHub this applies to the whole group. The detail names both the entry field and the env var and never echoes the value. D-30 gains one clause ("and a credential an HTTP header cannot carry"). Also updated: the §9.2 credential row, FR-9 and FR-10 cross-references, rows 15 and 16, and the §12.4 prefix-check item |
+| S4-R-1 (Blocker) | accepted (spec-text clarified) | EC-68 and the §9.2 "200 with an unexpected body" row now include a listing whose `tree` items are not all objects with a text `path`: `fetch_failed`, not remembered, "unexpected answer". Row 15 mirrors this. There is no new reason |
+| S4-R-4 (Major) | no change | EC-24 already requires the remembered local `not_found` detail to say that a new agent is needed. This is an implementation fix |
+| S4-R-14 (Minor) | accepted (wording) | The §12.4 A001 item now covers new `.py` files plus `vidbyte/lib/enums/skills.py`. The four modified package roots keep their old-style headers, because upgrading them would move the A001 count of 642 that AC-21 pins |
+
+**Checked in the code before wording the rows**
+- `github.py` `resolve`: `_token` strips the token, then the prefix guard returns `(refused,) * len(entries)`. The new rule uses the same group-wide return.
+- `github.py` `_tree_paths`: line 177 filters out non-object items silently, which is the S4-R-1 path.
+- `vendor.py` `_key`: `resolve_api_key` strips, then the prefix guard runs. The new check sits in the same place.
+- The current details name both `token=` and `GITHUB_TOKEN`, and both `api_key=` and the vendor env var. The new rows require the same pair.
+
+**Self-check**
+- New IDs are EC-118 and EC-119. The highest ID before this revision was EC-117, and no ID was reused or renumbered.
+- Every edited table row keeps its column count (the pipe counts in the diff match).
+- §8.4, §8.5, and all 29 Proof cells are byte-identical to r4.
+- Nothing under `tests/`, `vidbyte/`, `lint/`, `scripts/`, `contracts/`, or `REPO_MAP.md` was touched.
