@@ -4,7 +4,8 @@ PURPOSE:
     Regression tests for the descriptor loader exported from vidbyte.lib.config: a
     `loop.output_contracts` list in an agent YAML is built into concrete floor objects,
     and an unknown floor type fails as a ConfigurationError carrying the file path; a
-    `loop.tool_error_policy` mapping is built into a ToolErrorPolicy.
+    `loop.tool_error_policy` mapping is built into a ToolErrorPolicy; YAML merge keys
+    resolve as SafeLoader resolves them while own duplicate keys stay rejected.
 
 ROLE IN CODEBASE:
     Exercises YamlLoader._construct_base_agent and YamlLoader._build_output_contracts in
@@ -36,9 +37,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 from vidbyte.agents.contracts import MinToolCalls
 from vidbyte.agents.settings import ToolErrorPolicy, UnrecoverableAction
 from vidbyte.lib.config import YamlLoader
+from vidbyte.lib.config.loader import _DuplicateKeySafeLoader
 from vidbyte.lib.errors import ConfigurationError
 
 BASE = "name: researcher\nsystem_prompt: Research things.\nloop:\n  max_iterations: 6\n  output_contracts:\n"
@@ -68,6 +72,23 @@ class LibConfigLoaderOutputContractsTests(unittest.TestCase):
             self.assertIsInstance(policy, ToolErrorPolicy)
             self.assertEqual(policy.max_retries_per_tool_call, 2)
             self.assertEqual(policy.on_unrecoverable, UnrecoverableAction.ABORT_RUN)
+
+
+class LibConfigLoaderMergeKeyTests(unittest.TestCase):
+    def test_merge_keys_resolve_like_safe_loader(self) -> None:
+        # @intent yaml-merge-keys-are-resolved
+        documents = (
+            "a: &a {x: 1, y: 2}\nb: {<<: *a, y: 3}\n",
+            "a: &a {x: 1, y: 1}\nb: &b {y: 2, z: 2}\nc: {<<: [*a, *b], z: 3}\n",
+            "defs: {mid: &mid {<<: {x: 1}, x: 2}}\ntop: {<<: *mid}\n",
+        )
+        for text in documents:
+            with self.subTest(text=text):
+                self.assertEqual(yaml.load(text, Loader=_DuplicateKeySafeLoader), yaml.load(text, Loader=yaml.SafeLoader))
+
+    def test_own_duplicate_beside_a_merge_is_still_rejected(self) -> None:
+        with self.assertRaisesRegex(yaml.constructor.ConstructorError, "Duplicate key 'y' is not allowed"):
+            yaml.load("a: &a {x: 1, y: 2}\nb: {<<: *a, y: 1, y: 2}\n", Loader=_DuplicateKeySafeLoader)
 
 
 if __name__ == "__main__":
