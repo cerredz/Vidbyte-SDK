@@ -1153,7 +1153,9 @@ class BaseAgent(McpAttachableMixin):
             # FailureMetadataNormalizer, so the Session boundary must be notified directly.
             metadata["handoff_error"] = repr(exc)
             self._notify_session_exception(exc)
-            self.last_handoff = None
+            # @intent failed-auto-handoff-keeps-run-handoff
+            # Keep a handoff the model already wrote during this run; clear it only when this run recorded none.
+            self.last_handoff = self.handoffs[-1] if len(self.handoffs) > self._run_handoff_start else None
 
     def _build_context(
         self,
