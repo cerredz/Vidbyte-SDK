@@ -1328,6 +1328,9 @@ class BaseAgent(McpAttachableMixin):
             kwargs["usage_tracker"] = self._usage_tracker
             kwargs["speed_tracker"] = self._speed_tracker
             kwargs["fallback"] = self.fallback
+            # @intent a-tool-the-agent-adds-mid-run-reaches-the-next-iteration
+            # The runtime gets a snapshot of the catalog, so it also reads the live one to adopt tools added mid-run.
+            kwargs["agent_catalog"] = lambda: self.tools
 
         return runtime_cls(
             agent_name=self.name,
