@@ -208,6 +208,11 @@ class GeminiProvider:
         model = quote(config.model, safe="")
         task_type = config.input_type or "RETRIEVAL_DOCUMENT"
         payload: dict[str, Any] = {"requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}, "taskType": task_type} for t in texts]}
+        # @intent embedding-dimensions-reach-every-provider
+        # The shared dimensions setting becomes Gemini's per-request outputDimensionality, the way input_type becomes taskType.
+        if config.dimensions is not None:
+            for request in payload["requests"]:
+                request["outputDimensionality"] = config.dimensions
         url = f"{config.resolved_endpoint()}/models/{model}:batchEmbedContents"
         response = transport.request(method="POST", url=url, headers=self._create_embedding_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)

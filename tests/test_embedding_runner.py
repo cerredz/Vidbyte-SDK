@@ -161,6 +161,27 @@ class EmbeddingRunnerTests(unittest.TestCase):
 
         self.assertEqual(transport.requests[0]["headers"].get("x-goog-api-key"), "goog_key")
 
+    def test_gemini_embedding_includes_output_dimensionality_when_set(self) -> None:
+        transport = FakeTransport([_make_gemini_embedding_response([[0.1], [0.2]]), _make_gemini_embedding_response([[0.3], [0.4]])])
+        sized = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.GEMINI, model="gemini-embedding-001", api_key="key", dimensions=768),
+            transport=transport,
+        )
+        unsized = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.GEMINI, model="gemini-embedding-001", api_key="key"),
+            transport=transport,
+        )
+
+        sized.run(["query", "document"])
+        unsized.run(["query", "document"])
+
+        sized_requests = transport.requests[0]["json_body"]["requests"]
+        unsized_requests = transport.requests[1]["json_body"]["requests"]
+        self.assertEqual(len(sized_requests), 2)
+        self.assertTrue(all(entry.get("outputDimensionality") == 768 for entry in sized_requests))
+        self.assertEqual(len(unsized_requests), 2)
+        self.assertTrue(all("outputDimensionality" not in entry for entry in unsized_requests))
+
     # --- Edge cases ---
 
     def test_empty_list_raises_configuration_error(self) -> None:
