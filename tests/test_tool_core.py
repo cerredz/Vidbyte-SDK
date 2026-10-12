@@ -239,6 +239,22 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("at", rejected.output)
         self.assertEqual(tool.executed_arguments, [{"text": "hi"}])
 
+    def test_direct_validate_call_accepts_a_wire_shaped_annotation(self) -> None:
+        """A valid annotation still inside the arguments passes direct validation, bound or customized."""
+        # @intent activity-validate-call-prepares-first
+        _, bound = self._bound_echo()
+        customized = bound.customize(description="Custom echo.", parameter_descriptions={})
+
+        for wrapped in (bound, customized):
+            self.assertIsNone(
+                wrapped.validate_call(ToolCall("echo", {"text": "hi", "activity": {"reason": "greet"}}))
+            )
+            malformed = wrapped.validate_call(ToolCall("echo", {"text": "hi", "activity": {"nope": 1}}))
+            self.assertIn("Invalid 'activity' annotation", malformed)
+            self.assertIn("reason", malformed)
+            missing = wrapped.validate_call(ToolCall("echo", {"text": "hi"}))
+            self.assertEqual(missing, "Missing required parameters: activity")
+
 
 class ToolCustomizationTests(unittest.IsolatedAsyncioTestCase):
     """Verifies immutable model-facing description customization."""
