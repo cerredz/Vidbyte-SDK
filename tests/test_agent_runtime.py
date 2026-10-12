@@ -1217,6 +1217,18 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(len(usage.calls), 1)
         self.assertEqual((usage.input_tokens, usage.output_tokens, usage.total_tokens), (100, 20, 120))
 
+    def test_actor_root_named_like_a_completion_address_still_runs(self) -> None:
+        # [Regression] The boot message to a root named "orchestrator" or "system" became the run's answer unrun.
+        for name in ("orchestrator", "system"):
+            for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+                with self.subTest(name=name, topology=topology):
+                    runner = AnswerRunner()
+                    runtime = ActorRuntime(topology=topology, include_actors=[])
+                    agent = build_test_agent(name=name, system_prompt="s", runtime=runtime, runner=runner)
+                    result = agent.run("q")
+                    self.assertEqual(result.content, "ANSWER")
+                    self.assertEqual(runner.calls, 1)
+
 if __name__ == "__main__":
     unittest.main()
 
