@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
-from vidbyte import Agent, AggregateAgent, ProposerSpec, Trace, TraceController, TraceProfile
+from vidbyte import Agent, AggregateAgent, DebugTracer, ProposerSpec, Trace, TraceController, TraceProfile
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
@@ -17,6 +17,7 @@ from vidbyte.trace.providers import GenericProviderTranslator, LangSmithProvider
 from vidbyte.trace.registry import TraceComponentRegistry
 from vidbyte.trace.schema import SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
 
+_RUNTIME_SPAN_NAMES = ("runtime.iteration", "runtime.search.run", "runtime.search.node", "runtime.actor.run", "runtime.actor.spawn", "runtime.actor.message")
 
 class RecordingTracer(TracerBase):
     """Tracer double used by semantic tracing tests."""
@@ -219,6 +220,26 @@ class TraceControllerTests(unittest.TestCase):
         tracer.end_span(span, output="shown")
         tracer.end_trace(root, output="done")
         self.assertIn("runtime.iteration", [event.get("name") for event in inner.events])
+
+    def test_search_and_actor_component_settings_filter_their_runtime_spans(self) -> None:
+        # Verifies runtime.search.* and runtime.actor.* follow the `search`/`actor` components their factories declare.
+        emitted = self._emitted_runtime_spans
+        self.assertEqual(emitted(TraceProfile.verbose()), set(_RUNTIME_SPAN_NAMES))
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(search="off")), {"runtime.iteration", "runtime.actor.run", "runtime.actor.spawn", "runtime.actor.message"})
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(actor="off")), {"runtime.iteration", "runtime.search.run", "runtime.search.node"})
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(runtimes="off")), {"runtime.search.run", "runtime.search.node", "runtime.actor.run", "runtime.actor.spawn", "runtime.actor.message"})
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(runtimes="off", search="off", actor="off")), set())
+
+    @staticmethod
+    def _emitted_runtime_spans(profile: TraceProfile) -> set[str]:
+        # Opens every sample runtime span under one root and returns the names that reached the debug tracer.
+        events: list[dict[str, Any]] = []
+        tracer = Trace.profile(DebugTracer(events), profile)
+        root = tracer.start_trace("agent.run")
+        for name in _RUNTIME_SPAN_NAMES:
+            tracer.end_span(tracer.start_span(name, parent=root))
+        tracer.end_trace(root)
+        return {event["name"] for event in events if event["type"] == "start_span"}
 
     def test_explicit_parent_beats_current_stack(self) -> None:
         # Verifies explicit parent contexts are passed through to the inner tracer.
