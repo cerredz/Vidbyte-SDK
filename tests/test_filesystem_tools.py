@@ -210,6 +210,28 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(result.status, ToolStatus.SUCCESS)
             self.assertEqual(target.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
 
+    def test_write_text_over_existing_file_keeps_its_line_endings(self) -> None:
+        # Replacing a file must not flip every line to the platform default,
+        # whichever style the file already uses and whatever OS runs the test.
+        for old, new in ((b"a = 1\nb = 2\nc = 3\n", b"a = 1\nb = 22\nc = 3\n"), (b"a = 1\r\nb = 2\r\nc = 3\r\n", b"a = 1\r\nb = 22\r\nc = 3\r\n")):
+            with self.subTest(old=old), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                target = Path(tmp) / "f.py"
+                target.write_bytes(old)
+                result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.py", "content": "a = 1\nb = 22\nc = 3\n"})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(target.read_bytes(), new)
+
+    def test_write_text_over_non_utf8_crlf_file_still_writes_and_keeps_crlf(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.txt"
+            target.write_bytes(b"caf\xe9\r\nbar\r\n")
+            result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "café\nbar\n"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output.split("\n")[1], "no diff: the old file is not valid utf-8 text")
+            self.assertEqual(target.read_bytes(), "café\r\nbar\r\n".encode("utf-8"))
+
     def test_tree_returns_newline_joined_tree_entries(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
