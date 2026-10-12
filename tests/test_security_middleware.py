@@ -9,6 +9,7 @@ Purpose:
     assumptions for all three security middleware implementations.
 Architecture:
     - CanaryTripwireTests: 12 test cases covering canary injection and leak detection.
+    - DenialTruncationTests: 1 test case covering denial reasons under result_max_chars.
     - ConfusedDeputyGuardTests: 20 test cases covering overlap ratio analysis.
     - HoneypotToolTests: 7 test cases covering trap tool detection.
     - ToolNameNormalizationTests: 4 test cases covering padded and blank tool names.
@@ -41,6 +42,7 @@ from vidbyte.middleware.builtins import (
 from vidbyte.middleware.pipeline import MiddlewarePipeline
 from vidbyte.tools import ToolCall, ToolResult, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
+from vidbyte.tools.types import ToolPermission
 
 
 class FakeModelResponse:
@@ -436,6 +438,34 @@ class CanaryTripwireRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runner = EchoRunner(echo=False)
         result = await self._run(runner)
         self.assertNotEqual(result.metadata["stop_reason"], "middleware_abort")
+
+
+class DenialTruncationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_denial_reason_survives_result_max_chars(self) -> None:
+        # @intent denials-are-never-truncated
+        # [Silent Failure] A refused call never ran, so a small result_max_chars must not cut its denial reason off.
+        @tool(permission=ToolPermission.WRITE)
+        def lookup() -> str:
+            # Never runs: both guardrails below refuse it.
+            return "internal document"
+
+        cases = {
+            "permission_denied": ((), PermissionPolicy()),
+            "middleware_denied": ((ToolPolicyMiddleware(deny_tools={"lookup"}),), PermissionPolicy.allow_all()),
+        }
+        for error, (middleware, policy) in cases.items():
+            with self.subTest(error=error):
+                config = AgentRuntimeConfig(tool_settings=ToolSettings(result_max_chars=20))
+                runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=policy, config=config, middleware=middleware)
+                context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+                runner = EchoRunner(echo=False)
+                handle = RunnerHandle(runner=runner, provider="openai", invoke=invoke_echo_runner, extract_text=echo_runner_text, extract_metadata=echo_runner_metadata)
+                result = await runtime.arun("task", handle=handle, context=context)
+                denial = result.metadata["tool_calls"][0].result
+                self.assertEqual(denial.metadata["error"], error)
+                self.assertGreater(len(denial.output), 20)
+                self.assertIn(denial.output, runner.seen_tool_output)
+                self.assertNotIn("truncated by ToolSettings", runner.seen_tool_output)
 
 
 # ---------------------------------------------------------------------------
