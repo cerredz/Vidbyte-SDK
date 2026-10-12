@@ -14,7 +14,7 @@ started: 2026-10-11 17:36
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-11 17:36 | 2026-10-11 17:52 | reports/S0-scout.md | base_commit db3988ff; code-map.md (4 sections, 477 lines) |
-| S1 spec + review | running | 2026-10-11 17:55 | | reports/S1-spec-author.md | spec r1 @6248fc96 (11 connectors, 22 files) |
+| S1 spec + review | done | 2026-10-11 17:55 | 2026-10-11 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @1335db49 approved; r1 NEEDS REWORK (1B/5M/5m) → r2 SOUND WITH FIXES (0B/2M/5m), all 18 accepted |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-11 17:36
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-11 17:36 — Slug `agent-output-connectors`, branch `feat/agent-output-connectors`, worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-output-connectors` — pipeline defaults; SDK AGENTS.md defines no override.
@@ -31,6 +31,9 @@ started: 2026-10-11 17:36
 - 2026-10-11 17:52 — "forks do not inherit outputs" vs "as_tool delivers on every call" contradiction (AgentTool.execute runs on a fork, tools/agent_tool.py:59): not a user decision (both lines were assistant-proposed consequences); the spec author resolves it from the code and records a D-n.
 
 - 2026-10-11 — Committed the S1 author's report (Stage F only stages spec.md) — keeps reports on the branch.
+
+- 2026-10-11 — Q-1..Q-10 take their stated defaults (all "No"/"Not built"): no CodexHarnessAgent outputs; as_tool/sub-agents (forks) do not deliver; no HMAC webhook; no Session.resume outputs=; render cannot return None; receipts not persisted; no YAML; Q-8/Q-9/Q-10 scope-adding not built — S1 summary printed, no user reply.
+- 2026-10-11 — Pointed the author at the reviewer report by path rather than pasting the findings block, to keep orchestrator context lean; one-line summaries of every finding were included in the message.
 
 ## User replies (verbatim)
 - (none yet)
@@ -51,3 +54,10 @@ started: 2026-10-11 17:36
 - Contract names (spec §8.5): OutputConnector.deliver/_send, OutputArguments, OutputText, OutputHttp, OutputSmtp, OutputDispatcher.connectors/.deliver, records OutputContent/DeliveryReceipt/OutputRequest/SmtpSettings, enums OutputDestination/DeliveryStatus, OutputDeliveryError — *source:* S1 author r1
 - Test seams: patch HttpTransport._send_once + transport.asyncio.sleep; patch smtplib.SMTP/SMTP_SSL as seen by vidbyte/lib/outputs/delivery.py; monkeypatch.setenv for credentials — *source:* S1 author r1
 - Header keys passed to HttpTransport must be lowercase (else duplicate content-type); lib/errors/base.py may import AgentMessage/DeliveryReceipt only under TYPE_CHECKING; agents/output/dispatcher.py must not import from vidbyte.agents (base.py imports it → cycle); S012 flags a helper named `request` — *source:* S1 author r1
+- r3 contract additions: OutputConnector is a runtime_checkable Protocol in vidbyte/agents/output/connector.py (declare `destination` as a plain annotation, not ClassVar — mypy); OutputShaping + OutputDispatcher(.connectors/.deliver/._deliver_one) in agents/output; BaseOutput + 11 connectors with public `send(reply, content)` + OutputArguments(.matching/.address/.optional_callable) + OutputText + OutputHttp + OutputSmtp in vidbyte/lib/outputs/; delivery is an inline try/except in BaseAgent._generate_reply (no _deliver_outputs) — *source:* S1 author r3
+- isinstance(SomeOutputClass, OutputConnector) is True for the class object; OutputDispatcher.connectors checks isinstance(item, type) first — *source:* S1 review r2
+- S009 runs `python -m mypy --config-file lint/mypy.ini vidbyte` inside lint (baseline 350); S051 I001 import order already fails on base (base.py has 3 unsorted blocks; baseline 259) — never re-sort base.py or run `ruff --fix` on it — *source:* S1 review r2 / author r3
+- A002 matches tokens in function bodies (names/attributes), not just def names: `_link` and `_deliver_one` need `# @intent` — *source:* S1 review r1/r2
+- Skip rule: deliver only when stop_reason absent, `final_response`, or `is_done`; budget stops come from runtime.py `_stopped_result` (~1882/1911) — *source:* S1 review r1
+- `_deliver_one` wraps `connector.send` in `asyncio.wait_for(..., OUTPUT_DELIVERY_DEADLINE_SECONDS)` (35 s); tests can shorten it by setting the attribute on the dispatcher module — *source:* S1 author r3
+- Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
