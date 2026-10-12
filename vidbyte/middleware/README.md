@@ -69,6 +69,18 @@ This soft-overrun mode depends on provider-reported token usage. It is separate
 from `Agent(max_tokens=...)`, which remains a runtime hard cap and can stop the
 run before middleware gets a chance to request the final response.
 
+`review_finish(ctx)` is the one hook that returns a `FinishReview` instead of a
+`MiddlewareDecision`. The linear runtime calls it at every finish attempt, a
+plain answer or an `isDone` call, after the output contracts accept it.
+`FinishReview.accept()` lets the run end, `FinishReview.continue_with(text)`
+sends the model back to work with `text` as a user message, and
+`FinishReview.stop(text)` ends the run with the model's answer and
+`stop_reason` `contract_unsatisfied`. The first middleware that does not accept
+decides, and later ones are not asked. The hook records no events and ignores
+`fail_closed`: an exception it raises ends the run. `CodingAgent`'s
+`verify_command` is built on it (`builtins/verify_command.py`, not re-exported
+from `vidbyte.middleware.builtins`).
+
 ## Key Modules
 
 - `base.py`: hook base class for custom middleware.

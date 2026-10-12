@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+from pathlib import Path
+
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -9,7 +12,7 @@ class WriteTextTool(FileSystemTool):
 
     def spec(self) -> ToolSpec:
         # Declares the model-facing contract for writing text files.
-        return ToolSpec(
+        spec = ToolSpec(
             name="write_text",
             description="Write text content to a file at the given path inside the configured root.",
             parameters=(
@@ -19,6 +22,12 @@ class WriteTextTool(FileSystemTool):
             ),
             permission=ToolPermission.WRITE,
         )
+        # Tell the model up front that big existing files are edited
+        # with replace_text, so it does not try a whole rewrite first.
+        limit = self._config.max_overwrite_lines
+        if limit is None:
+            return spec
+        return dataclasses.replace(spec, description=f"{spec.description} Existing files over {limit:,} lines cannot be replaced whole; change them with replace_text.")
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Extract arguments (the create_parents flag strictly), write the file, and return the resolved path on success.
@@ -28,7 +37,28 @@ class WriteTextTool(FileSystemTool):
             create_parents = self._resolve_bool_argument(call, "create_parents", default=False)
             self._require_write()
             target = self._path(path)
+            # @intent big-existing-files-are-edited-not-rewritten
+            # A model that rewrites a long file from memory often drops
+            # code without noticing, so an existing file over the line
+            # limit is refused untouched and the model is sent to
+            # replace_text instead.
+            refusal = self._overwrite_refusal(path, target)
+            if refusal is not None:
+                return ToolResult.error(self.name, refusal)
             self.backend.write_text(target, content, encoding=self._config.encoding, create_parents=create_parents)
             return ToolResult.success(self.name, str(target), metadata={"path": str(target), "encoding": self._config.encoding})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))
+
+    def _overwrite_refusal(self, path: str, target: Path) -> str | None:
+        """Return the refusal text when target is an existing file over max_overwrite_lines, else None."""
+        limit = self._config.max_overwrite_lines
+        if limit is None or not self.backend.stat(target).is_file:
+            return None
+        # Count lines from bytes, so an undecodable file cannot break
+        # the check, and a last line without a newline still counts.
+        data = self.backend.read_binary(target)
+        lines = data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
+        if lines <= limit:
+            return None
+        return f"write_text refused: {path} already has {lines:,} lines, over the {limit:,}-line limit for replacing a whole existing file. Use replace_text to change only the parts that need to change."

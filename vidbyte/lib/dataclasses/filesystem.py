@@ -5,10 +5,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vidbyte.lib.enums import Platform
-from vidbyte.lib.errors import ToolExecutionError
+from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 
 if TYPE_CHECKING:
     from vidbyte.lib.tools.filesystem.backends.base import BaseFileSystemBackend
+
+# The smallest overwrite line limit; 0 would refuse every existing file.
+_MIN_OVERWRITE_LINES = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +27,26 @@ class FileStat:
 
 
 @dataclass(frozen=True, slots=True)
+class OverwriteLineLimit:
+    """Validated limit on the lines an existing file may have for write_text to replace it whole; None means no limit.
+
+    parameter is the keyword the caller set, so the error names it.
+    """
+
+    lines: int | None
+    parameter: str
+
+    def __post_init__(self) -> None:
+        # @intent big-existing-files-are-edited-not-rewritten
+        # A number is the most lines an existing file may have and still
+        # be replaced whole, so it must be a real whole number of at
+        # least one; True or 2.5 would quietly set a different limit.
+        lines = self.lines
+        if lines is not None and (isinstance(lines, bool) or not isinstance(lines, int) or lines < _MIN_OVERWRITE_LINES):
+            raise ConfigurationError(f"{self.parameter} must be None or an int of at least {_MIN_OVERWRITE_LINES}.", details={"parameter": self.parameter, "value": repr(lines)})
+
+
+@dataclass(frozen=True, slots=True)
 class FileSystemToolConfig:
     """Configuration shared by root-scoped filesystem tools."""
 
@@ -32,6 +55,12 @@ class FileSystemToolConfig:
     encoding: str = "utf-8"
     platform: Platform | str = Platform.LOCAL
     backend: BaseFileSystemBackend | None = None
+    max_overwrite_lines: int | None = None
+
+    def __post_init__(self) -> None:
+        # None lets write_text replace any existing file; a bad limit
+        # fails here, before any tool is built.
+        OverwriteLineLimit(self.max_overwrite_lines, "max_overwrite_lines")
 
     def normalized_platform(self) -> Platform:
         try:
@@ -59,4 +88,5 @@ class FileSystemToolConfig:
 __all__ = [
     "FileStat",
     "FileSystemToolConfig",
+    "OverwriteLineLimit",
 ]

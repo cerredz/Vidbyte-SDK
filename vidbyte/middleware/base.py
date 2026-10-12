@@ -7,6 +7,8 @@ Purpose:
     only the runtime lifecycle hooks they need.
 Architecture:
     - AgentMiddleware: Optional async hook methods matching AgentRuntime breakpoints.
+      review_finish is the one hook that returns a FinishReview instead of a
+      MiddlewareDecision.
 Relations:
     Used by vidbyte.middleware.pipeline and vidbyte.agents.runtime.
 """
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 from abc import ABC
 
+from vidbyte.lib.dataclasses.agents import FinishReview
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 
 
@@ -73,6 +76,18 @@ class AgentMiddleware(ABC):
         """Run before returning the final runtime result."""
         del ctx
         return MiddlewareDecision.continue_()
+
+    async def review_finish(self, ctx: MiddlewareContext) -> FinishReview:
+        """Review a finish attempt after the output contracts accepted it; the default accepts.
+
+        Unlike the other hooks this returns a FinishReview, because a
+        finish review has three outcomes: accept, continue the run with
+        feedback for the model, or stop with the model's answer and
+        CONTRACT_UNSATISFIED. An exception raised here propagates to the
+        caller of the run instead of following fail_closed.
+        """
+        del ctx
+        return FinishReview.accept()
 
 
 __all__ = ["AgentMiddleware"]
