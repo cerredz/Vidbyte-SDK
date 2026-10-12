@@ -20,10 +20,11 @@ started: 2026-10-11 17:36
 | S4 adversarial review | done | 2026-10-11 | 2026-10-11 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 httpx INFO log leaks secret URLs) / 3 Major (R-2 str destination, R-3 SMTP thread holds sync run past deadline, R-4 duplicated email rule) / 11 Minor; 0 refuted (1 sub-claim) |
 | S5 repair loop | done (converged at iteration 1) | 2026-10-11 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | merge ba83c953 (origin/main, no conflicts); 12 findings fixed one commit each; HEAD ed1dd67b; 340/340; SDK-LINT PASS; run_ci source 3743 passed; full run_ci CI passed (re-run by orchestrator at ed1dd67b); Semgrep 0; remote ci 38211917706 + static-policy 38211919803 success @1348b728; review.md 0 open |
 | S5 re-review | done (round 1/2) | 2026-10-12 | 2026-10-12 | reports/S5-rereview.md | SOUND: 0 Blocker / 0 Major / 2 Minor (R-C1 Telegram ctor raise not recorded as deviation; R-C2 E302 blank line email.py:32); all 12 fixes hold; merge clean; §4 snippet byte-equal |
+| S5 re-review | done (round 2/2) | 2026-10-12 | 2026-10-12 | reports/S5-rereview-2.md | SOUND: 0 Blocker / 0 Major / 2 Minor (R-C1 resend hint warns only about `network`, but EC-5 http_5xx-after-create and EC-24 smtp_recipients_refused can also already be delivered → following it duplicated a GitHub issue in a probe; R-C2 pr-body.md still calls S6-1/S6-2 "not fixed" + stale Telegram rationale); S6-1/S6-2 hold; merge clean; S008 10/9/50; AC-1/AC-15/contract hold; full pytest 3824 passed |
 | S6 PR | body written; reopened S5 for 2 Minors | 2026-10-12 | | reports/S6-pr-author.md | PR #882 retitled (no [WIP]), draft, 1 mermaid, spec pr-open @ae6115f4; ci 38215600229 + static 38215602359 success @ae6115f4; AC-18/AC-24 proofs exist on branch |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 (iteration 2 = S6 follow-ups) · S5 re-review rounds: 2/2
+- S1 review rounds: 2/2 · S5 repair iterations: 3/8 (iteration 2 = S6 follow-ups; iteration 3 = re-review-2 R-C1 wording) · S5 re-review rounds: 2/2
 
 ## Decisions the orchestrator made
 - 2026-10-11 17:36 — Slug `agent-output-connectors`, branch `feat/agent-output-connectors`, worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-output-connectors` — pipeline defaults; SDK AGENTS.md defines no override.
@@ -67,6 +68,9 @@ started: 2026-10-11 17:36
 - 2026-10-12 — Test author added AC-20 `email-empty-to` @4b063c28 (red for the right reason). Repair-2 (fresh agent) @81f9cba0: merge d4100704 (8 main commits, no conflicts; INV-9 allowlist still matches runtime after #889/#887; #888 header behaviour fine), S6-1 5b437f24 (`OutputArguments.non_empty`, names `to`), S6-2 2334385b (hint = zip recipe). Spot-check: 341 passed (re-run by me), pack diff vs d87fcbaf empty, tests/base.py/lint unchanged since merge, review.md 0 open, ci 38217869950 + static 38217872582 success @81f9cba0.
 - 2026-10-12 — Stop chasing main: #891/#856 landed during repair-2; merge-tree clean, PR mergeable; a further catch-up is left to the user at merge time (re-measure S008 if #891's base.py change is merged).
 - 2026-10-12 — Spending re-review round 2/2 (focused on ed1dd67b..HEAD: merge + S6-1 + S6-2) in parallel with spec r7 (name `OutputArguments.non_empty` in §8.5, row 13, §17) — the change set re-entered repair after the SOUND re-review, and the user is comparing quality.
+
+- 2026-10-12 — Spec r7 @5bd94199 (docs only: §8.5, rows 5/13/25, §16 S6-1/S6-2, Telegram §17 bullet); verified by `git show --stat` (spec.md + S1 report only), status pr-open, pushed.
+- 2026-10-12 — Re-review 2 SOUND with 2 Minors. Fixing RR2 R-C1 anyway in repair iteration 3 (fresh agent), scoped to wording only: the SDK's own error advice contradicts request.md §C ("the first post may have landed") and EC-5's "at most one issue exists", and a user following it double-posts — a real behavior change for callers, not cosmetics. No re-review rounds remain, so I verify iteration 3 myself (file list, gates, pack diff). Then spec r8 aligns §9.2/AC-24/EC-42 to the new literal, then the S6 author refreshes pr-body.md (covers RR2 R-C2).
 
 ## User replies (verbatim)
 - (none yet)
@@ -113,3 +117,5 @@ started: 2026-10-11 17:36
 - S009 reads 350/350 after the merge because main added the finding; identical finding sets at ba83c953 and HEAD — *source:* S5 repair-1
 - Test-baseline check after the catch-up merge: `git diff 7f3bb7ff..HEAD -- tests/features/agent_output_connectors` plus `git diff ba83c953..HEAD -- tests/`; a plain `7f3bb7ff..HEAD -- tests/` includes main's test files — *source:* S5 polish
 - Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
+- RR2 R-C1 repro: script `HttpTransport._send_once` so GitHub stores the issue then answers 502, apply the hint's two expressions → 2 issues; the fix is the hint literal (one line, S062) + agents/output/README.md:98-99 + lib/outputs/README.md:145-146 (+ spec §9.2/AC-24/EC-42 by the spec author) — *source:* S5 re-review 2
+- The adjacent string literals at errors/base.py:486-497 are main's pre-existing code; do not copy them (S062) — *source:* S5 re-review 2
