@@ -125,14 +125,21 @@ class OpenAIProvider:
         return resolved
 
     def _extract_embeddings(self, parsed: Mapping[str, Any], *, expected_count: int) -> tuple[tuple[float, ...], ...]:
-        # Sort data items by index and convert each embedding list to an immutable tuple.
+        # Sort data items by index and convert each embedding list to an immutable tuple, refusing any item without one.
         data = parsed.get("data")
         if not isinstance(data, list):
             raise ProviderResponseError("OpenAI embeddings response missing data list.", provider=self.provider.value, response_excerpt=str(parsed))
         if len(data) != expected_count:
             raise ProviderResponseError(f"OpenAI returned {len(data)} embeddings but {expected_count} were requested.", provider=self.provider.value, response_excerpt=str(parsed))
         sorted_items = sorted(data, key=lambda item: item.get("index", 0) if isinstance(item, dict) else 0)
-        return tuple(tuple(float(v) for v in item["embedding"]) for item in sorted_items if isinstance(item, dict) and isinstance(item.get("embedding"), list))
+        # @intent one-vector-per-input-or-error
+        result: list[tuple[float, ...]] = []
+        for item in sorted_items:
+            embedding = item.get("embedding") if isinstance(item, dict) else None
+            if not isinstance(embedding, list):
+                raise ProviderResponseError("OpenAI embedding item missing embedding list.", provider=self.provider.value, response_excerpt=str(item))
+            result.append(tuple(float(v) for v in embedding))
+        return tuple(result)
 
     def _extract_stream_delta(self, raw_line: str) -> str | None:
         # Parse one SSE JSON line and return the text delta, or None for non-delta events.
