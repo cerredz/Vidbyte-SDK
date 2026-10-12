@@ -163,6 +163,10 @@ class SyncHttpTransport:
             return HttpResponse(status_code=exc.code, body=exc.read().decode("utf-8", errors="replace"), headers=dict(exc.headers.items()) if exc.headers else {})
         except URLError as exc:
             raise ProviderRequestError("HTTP multipart upload failed.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-upload-multipart-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; a read timeout or dropped connection during the upload must not escape raw.
+        except (OSError, http.client.HTTPException) as exc:
+            raise ProviderRequestError("HTTP multipart upload failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def stream_request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 120.0) -> Iterator[str]:
         # Open an SSE connection and yield each data-line payload, stopping at [DONE].
@@ -181,6 +185,10 @@ class SyncHttpTransport:
             raise ProviderRequestError("Provider SSE request failed.", provider="http", status_code=exc.code, response_excerpt=error_body[:500]) from exc
         except URLError as exc:
             raise ProviderRequestError("HTTP SSE connection failed.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-stream-request-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; a timeout or dropped connection while waiting for or reading the stream must not escape raw.
+        except (OSError, http.client.HTTPException) as exc:
+            raise ProviderRequestError("HTTP SSE stream failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def _send_once(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float) -> HttpResponse:
         # Execute a single stdlib urllib request and return HTTP errors as responses.
@@ -197,6 +205,10 @@ class SyncHttpTransport:
             return HttpResponse(status_code=exc.code, body=exc.read().decode("utf-8", errors="replace"), headers=dict(exc.headers.items()) if exc.headers else {})
         except URLError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-request-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; a read timeout or dropped connection must not escape raw.
+        except (OSError, http.client.HTTPException) as exc:
+            raise ProviderRequestError("HTTP response failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def _build_multipart_body(self, *, boundary: str, fields: Mapping[str, str], file_field: str, file_bytes: bytes, file_name: str, file_content_type: str) -> bytes:
         # Build an RFC 2046 multipart/form-data body from text fields and one file.
