@@ -37,6 +37,10 @@ _UNENFORCEABLE: Mapping[str, str] = {
     "maxLength": "at most {value} characters",
     "minimum": "no less than {value}",
     "maximum": "no greater than {value}",
+    # @intent exclusive-bounds-are-bounds-too
+    # Pydantic emits gt/lt as exclusiveMinimum/exclusiveMaximum; left unfolded, Gemini drops them silently.
+    "exclusiveMinimum": "greater than {value}",
+    "exclusiveMaximum": "less than {value}",
     "multipleOf": "a multiple of {value}",
     "pattern": "matching the pattern {value}",
 }
@@ -81,15 +85,19 @@ class OutputSchemaFormatter:
 
     def validate(self, output: str, schema: type | Mapping[str, Any]) -> tuple[Any, str | None]:
         # Parse output as JSON and validate against the schema; returns (parsed, error_message).
+        text = self._unfenced(output)
         try:
-            parsed = json.loads(self._unfenced(output))
+            parsed = json.loads(text)
         except (json.JSONDecodeError, ValueError) as exc:
             return None, f"output is not valid JSON: {exc}"
         try:
             from pydantic import BaseModel, ValidationError
             if isinstance(schema, type) and issubclass(schema, BaseModel):
                 try:
-                    return schema.model_validate(parsed), None
+                    # @intent json-output-validates-in-json-mode
+                    # The output is JSON text, so it is validated in Pydantic's JSON mode: a strict=True
+                    # model's Python mode rejects the JSON spellings of enums, datetimes and tuples.
+                    return schema.model_validate_json(text), None
                 except ValidationError as exc:
                     return None, str(exc)
         except ImportError:

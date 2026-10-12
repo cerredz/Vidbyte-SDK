@@ -470,6 +470,8 @@ class EnvironmentContextItem:
             "This primitive carries execution-environment context relevant to interpreting commands and paths. The following facts describe the operating system, hardware, date, working directory, project files, git state, shell, and the tools that shell finds, as far as they were gathered. A missing fact means nobody gathered that detail, not that the environment lacks it. Use this record to choose commands, paths, and package managers, and treat it as a snapshot taken when it was gathered.",
             "",
             "Environment:",
+            # @intent empty-environment-renders-na
+            # Check the facts, not the line count, so the intro lines cannot hide an empty record.
             *(facts or ["N/A"]),
         ]
         return _with_context_intro("\n".join(lines))

@@ -101,6 +101,9 @@ class CodingContextWindow:
             # A section that is already a primitive renders itself and
             # only takes its section's id; a text section is wrapped.
             if isinstance(section, CodingContextSectionItem):
+                # CodingContextSectionItem already checked that item is a dataclass; repeating the check narrows its type for replace().
+                if not dataclasses.is_dataclass(section.item):
+                    raise ConfigurationError("CodingAgent context section items must be dataclass primitives.", details={"section": section.section.value, "item_type": type(section.item).__name__})
                 item = dataclasses.replace(section.item, primitive_id=section.section.value)
             else:
                 item = TextContextItem(title=section.title, content=section.content, source=section.source, primitive_id=section.section.value)

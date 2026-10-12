@@ -19,6 +19,7 @@ import os
 import tempfile
 import json
 import unittest
+from unittest.mock import patch
 from datetime import datetime
 from typing import Any
 
@@ -129,6 +130,51 @@ class VerdictJudgeRunner:
             text = ""
             raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": arguments}]}
         return Reply()
+
+
+class ForkClosingJudge(BaseAgent):
+    """Offline judge agent whose forks record their run and MCP close, optionally failing the run."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        # Builds an offline judge; every fork shares the same failure switch.
+        super().__init__(name="closing_judge", system_prompt="Test.", provider="openai", model_name="gpt-4.1-mini")
+        bind_test_runner(self, object())
+        self.fail = fail
+        self.forks: list[ForkClosingJudge] = []
+        self.ran = False
+        self.closed = 0
+        self.closed_after_run = False
+
+    def fork(self, settings: AgentForkSettings | None = None) -> ForkClosingJudge:
+        # Hands out a fresh child so the test can tell the fork apart from the caller's judge.
+        child = ForkClosingJudge(fail=self.fail)
+        self.forks.append(child)
+        return child
+
+    async def arun(self, message: str | AgentInput, **options: Any) -> Any:
+        # Returns a passing verdict for both graders, or raises when configured to fail.
+        self.ran = True
+        if self.fail:
+            raise RuntimeError("judge run failed")
+        return json.dumps({"score": 1.0, "passed": True, "scores": {"accuracy": 1.0}})
+
+    async def close_mcp_servers(self) -> None:
+        # Records the close and whether the run had already happened.
+        self.closed += 1
+        self.closed_after_run = self.ran
+
+
+class ClosableRunner(MockRunner):
+    """Non-agent judge runner that records any MCP close a grader tries on it."""
+
+    def __init__(self, response_text: str) -> None:
+        # Starts with no recorded closes.
+        super().__init__(response_text)
+        self.closed = 0
+
+    async def close_mcp_servers(self) -> None:
+        # Records a close the grader must never make on a caller-owned runner.
+        self.closed += 1
 
 
 class EvalTests(unittest.IsolatedAsyncioTestCase):
@@ -269,6 +315,17 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
             AllOfGrader([])
         with self.assertRaises(ValueError):
             WeightedGrader([(ContainsGrader(), 0.0)])
+
+    async def test_weighted_grader_full_marks_pass_at_threshold_one(self) -> None:
+        # Tests that every child passing scores exactly 1.0, so threshold=1.0 passes despite float rounding of weights.
+        # @intent weighted-full-marks-scores-exactly-one
+        case = EvalCase(prompt="t", expected="Paris")
+        children = [ContainsGrader(), ContainsAllGrader(["A-1042"]), LengthGrader(max_chars=200)]
+        for weights in ((2, 3, 1), (1, 4, 1), (3, 2, 2)):
+            weighted = WeightedGrader(list(zip(children, weights)), threshold=1.0)
+            res = await weighted.agrade(case, "Paris, ticket A-1042.")
+            self.assertEqual(res.score, 1.0, weights)
+            self.assertTrue(res.passed, weights)
 
     async def test_composite_graders_forward_probe_to_predicate_children(self) -> None:
         # Tests that all-of, any-of, weighted, and nested composites hand the run probe to behavior children.
@@ -765,6 +822,26 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
             for i, system in enumerate(model.systems):
                 self.assertFalse(any(f"verdict-{j}" in system for j in range(i)), f"judgment {i} saw an earlier verdict")
 
+    async def test_agent_judge_closes_its_fork_mcp_servers(self) -> None:
+        # @intent internal-forks-close-their-mcp-servers
+        # Each judgment forks the judge, and the fork's MCP servers must be closed after its run, even when it fails.
+        case = EvalCase(prompt="2 + 2?", expected="4")
+        make_graders = (lambda judge: LLMJudgeGrader(judge_runner=judge), lambda judge: RubricGrader(judge_runner=judge, rubric={"accuracy": 1.0}))
+        for make_grader in make_graders:
+            judge = ForkClosingJudge()
+            result = await make_grader(judge).agrade(case, "4")
+            self.assertTrue(result.passed)
+            self.assertEqual([fork.closed for fork in judge.forks], [1])
+            self.assertTrue(judge.forks[0].closed_after_run)
+            self.assertEqual(judge.closed, 0)
+            failing = ForkClosingJudge(fail=True)
+            with self.assertRaisesRegex(RuntimeError, "judge run failed"):
+                await make_grader(failing).agrade(case, "4")
+            self.assertEqual([fork.closed for fork in failing.forks], [1])
+            runner = ClosableRunner('{"score": 1.0, "passed": true, "scores": {"accuracy": 1.0}}')
+            await make_grader(runner).agrade(case, "4")
+            self.assertEqual(runner.closed, 0)
+
     async def test_eval_suite(self) -> None:
         # Tests EvalSuite loading, tagging, and tag filtering features.
         case_a = EvalCase(prompt="A", tags=("math",))
@@ -838,6 +915,38 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.results[0].actual, "processed:q1")
         self.assertEqual(agent.last_options["trace_metadata"]["eval_suite"], "suite")
         self.assertEqual(agent.last_options["trace_metadata"]["eval_case_index"], 1)
+
+    async def test_eval_runner_closes_each_fork_mcp_servers_after_its_run(self) -> None:
+        # @intent internal-forks-close-their-mcp-servers
+        # [Resource Leak] Each eval fork reconnected the target's MCP servers and was dropped without closing them.
+        class SpyFork:
+            def __init__(self, fail: bool) -> None:
+                self.fail = fail
+                self.last_reply = None
+                self.events: list[str] = []
+
+            async def arun(self, message: AgentInput, **options: Any) -> Any:
+                self.events.append("run")
+                if self.fail:
+                    raise RuntimeError("fork run crashed")
+
+                class Reply:
+                    content = f"processed:{message.prompt}"
+                    metadata: dict[str, Any] = {}
+                return Reply()
+
+            async def close_mcp_servers(self) -> None:
+                self.events.append("close")
+
+        agent = MockAgent()
+        forks = [SpyFork(fail=False), SpyFork(fail=True)]
+        suite = EvalSuite("suite", [EvalCase(prompt="q1", expected="processed:q1"), EvalCase(prompt="q2")])
+        with patch.object(agent, "fork", side_effect=forks):
+            result = await EvalRunner(agent, default_grader=ExactMatchGrader(), concurrency=1).arun(suite)
+
+        self.assertTrue(result.results[0].grader_result.passed)
+        self.assertIn("fork run crashed", result.results[1].error or "")
+        self.assertEqual([fork.events for fork in forks], [["run", "close"], ["run", "close"]])
 
     async def test_eval_runner_graceful_exception_handling(self) -> None:
         # Tests EvalRunner resilient case execution when targets raise errors.

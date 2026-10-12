@@ -231,7 +231,9 @@ class BaseContext:
         if self.artifacts:
             parts.append("Artifacts:\n" + "\n\n".join(f"{artifact.name} ({artifact.artifact_type}):\n{artifact.content}" for artifact in self.artifacts))
         if self.responses:
-            parts.append("Responses:\n" + "\n\n".join(response.content for response in self.responses))
+            # @intent response-sender-reaches-the-model
+            # Name who sent each response, as history and artifacts name theirs, so the model can tell one participant's answer from another's.
+            parts.append("Responses:\n" + "\n\n".join(_format_context_response(response) for response in self.responses))
         if self.tool_calls:
             parts.append("Tool calls:\n" + "\n".join(f"{call.name}: args={dict(call.arguments)} output={call.output}" for call in self.tool_calls))
         if self.context_items:
@@ -277,6 +279,13 @@ def _format_history_item(item: object) -> str:
     if isinstance(item, AgentMessage):
         return f"{item.sender} -> {item.recipient}: {item.content}"
     return str(item)
+
+
+def _format_context_response(response: ContextResponse) -> str:
+    """Render one response with its sender when one is set, matching ResponseContextItem's wording."""
+    if response.sender:
+        return f"Response from {response.sender}:\n{response.content}"
+    return response.content
 
 
 def _format_context_tool(tool: object) -> str:

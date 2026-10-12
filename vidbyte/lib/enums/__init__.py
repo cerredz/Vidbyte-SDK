@@ -136,6 +136,7 @@ from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
+from vidbyte.lib.enums.text_model import TextModelMode
 from vidbyte.lib.enums.usage import UsageAccountingFailure, UsageKind
 
 __all__ = [
@@ -227,6 +228,7 @@ __all__ = [
     "StructuredOutputSupport",
     "TaskStatus",
     "TestimonyTrust",
+    "TextModelMode",
     "TransitivityConsistency",
     "UsageAccountingFailure",
     "UsageKind",

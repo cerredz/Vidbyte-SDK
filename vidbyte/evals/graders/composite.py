@@ -100,7 +100,9 @@ class WeightedGrader(BaseGrader):
     async def agrade_with_probe(self, case: EvalCase, actual: str, probe: RunProbe | None) -> GraderResult:
         # Runs child graders with the run probe, computes a weighted score, and applies the threshold.
         weighted_results = [(grader, weight, await _grade_child(grader, case, actual, probe)) for grader, weight in self.weighted_graders]
-        score = sum(result.score * weight for _, weight, result in weighted_results)
+        # @intent weighted-full-marks-scores-exactly-one
+        # Divides by the summed weights, like RubricGrader, so all-pass is exactly 1.0 and threshold=1.0 can pass.
+        score = sum(result.score * weight for _, weight, result in weighted_results) / sum(weight for _, weight, _ in weighted_results)
         passed = score >= self.threshold
         reason = self._format_reason(weighted_results, score)
         return GraderResult(score=score, passed=passed, reason=reason)

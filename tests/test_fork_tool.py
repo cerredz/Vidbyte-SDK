@@ -5,6 +5,7 @@ from unittest.mock import patch
 from typing import Any
 
 from tests.agent_test_support import build_test_agent
+from tests.test_agent_fork_isolation import TwoToolMcpTransport
 from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.context.handoff import EngineeringHandoff
@@ -144,6 +145,18 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([msg.content for msg in agent.captured.history], ["two", "three"])
         self.assertEqual(agent.captured.tools.names(), ("beta", "gamma"))
 
+    async def test_drop_only_fork_does_not_grant_unnamed_extra_toolsets(self) -> None:
+        # @intent fork-extras-are-opt-in
+        # A drop-only fork pulled in every configured extra toolset although none was named.
+        agent = StubAgent()
+        tool = ForkConversationTool(extra_toolsets={"admin": Tools([NamedTool("delete_user")])})
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", drop_tool_names=["beta"]))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(agent.captured.tools.names(), ("alpha",))
+
     async def test_null_history_mode_falls_back_to_default_chain(self) -> None:
         # A JSON-null history_mode means "not given": context_window's mode applies, else "full", never "none".
         cases = (
@@ -239,6 +252,7 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertEqual(agent.captured.history, [])
         self.assertEqual(agent.captured.tools.names(), ("alpha", "gamma"))
+        self.assertEqual(agent.captured.drop_tools, ("beta",))
         self.assertEqual(agent.captured.model_name, "gpt-4.1-mini")
         self.assertEqual(agent.captured.provider, "openai")
         self.assertEqual(agent.captured.temperature, 0.4)
@@ -319,6 +333,54 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(settings.max_contract_rejections, 5)
                 self.assertEqual(settings.max_queued_prompts, 7)
 
+    async def test_allowed_tools_override_cannot_widen_parent_gate(self) -> None:
+        # @intent fork-tool-allowed-tools-cannot-widen-parent-gate
+        # A gated parent forked a child whose allowed_tools named a gated-out tool, and the child ran it.
+        agent = StubAgent()
+        agent.agent_loop_settings = AgentLoopSettings(max_iterations=3, allowed_tools=("alpha",))
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", loop_settings={"allowed_tools": ["beta"]}))
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("cannot widen the parent's allowed_tools gate", result.output)
+        self.assertIn("'beta'", result.output)
+        self.assertEqual(result.metadata["error_type"], "PermissionDeniedError")
+        self.assertIsNone(agent.captured)
+        self.assertEqual(agent.child.prompts, [])
+
+    async def test_allowed_tools_override_may_narrow_parent_gate_or_pick_freely_without_one(self) -> None:
+        # Narrowing within a parent gate is allowed; with no parent gate any catalog tool is still accepted.
+        cases = ((("alpha", "beta"), ["alpha"]), (None, ["beta"]))
+        for parent_gate, requested in cases:
+            with self.subTest(parent_gate=parent_gate):
+                agent = StubAgent()
+                agent.agent_loop_settings = AgentLoopSettings(max_iterations=3, allowed_tools=parent_gate)
+                tool = ForkConversationTool()
+                tool.bind_agent(agent)
+
+                result = await tool.execute(_call(prompt="branch", loop_settings={"allowed_tools": requested}))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(agent.captured.agent_loop_settings.allowed_tools, tuple(requested))
+
+    async def test_null_loop_settings_fields_keep_parent_values(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A null allowed_tools gave the child an empty gate that denied every tool, and a null max_tokens failed the fork.
+        agent = StubAgent()
+        agent.agent_loop_settings = AgentLoopSettings(max_iterations=3, max_tokens=4000, allowed_tools=("alpha",))
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", loop_settings={"max_iterations": 2, "allowed_tools": None, "max_tokens": None}))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        settings = agent.captured.agent_loop_settings
+        self.assertEqual(settings.allowed_tools, ("alpha",))
+        self.assertEqual(settings.max_tokens, 4000)
+        self.assertEqual(settings.max_iterations, 2)
+
     async def test_depth_cap_prevents_recursive_fork_construction(self) -> None:
         # Depth cap should be checked before parent.fork is called.
         agent = StubAgent()
@@ -342,6 +404,73 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, ToolStatus.ERROR)
         self.assertIn("prompt", result.output)
+
+
+    async def test_child_mcp_servers_close_after_its_run_even_when_it_fails(self) -> None:
+        # @intent internal-forks-close-their-mcp-servers
+        # [Resource Leak] The child reconnected the parent's MCP servers and was discarded without closing them.
+        class ClosingChild(StubChild):
+            def __init__(self, fail: bool) -> None:
+                super().__init__()
+                self.fail = fail
+                self.events: list[str] = []
+
+            async def generate_reply(self, prompt: str) -> AgentMessage:
+                self.events.append("run")
+                if self.fail:
+                    raise RuntimeError("child crashed")
+                return await super().generate_reply(prompt)
+
+            async def close_mcp_servers(self) -> None:
+                self.events.append("close")
+
+        for fail, status in ((False, ToolStatus.SUCCESS), (True, ToolStatus.ERROR)):
+            agent = StubAgent()
+            child = ClosingChild(fail)
+            agent.child = child
+            tool = ForkConversationTool()
+            tool.bind_agent(agent)
+
+            result = await tool.execute(_call(prompt="branch"))
+
+            self.assertEqual(result.status, status)
+            self.assertEqual(child.events, ["run", "close"])
+
+    @patch("vidbyte.tools.mcp.attach.McpStdioTransport", TwoToolMcpTransport)
+    async def test_drop_tool_names_removes_inherited_mcp_tool_from_child(self) -> None:
+        # @intent fork-tool-drop-names-cover-inherited-mcp-tools
+        # The child reconnects the parent's MCP servers, so a dropped MCP tool came back and was offered to the child.
+        cases = (
+            ({"drop_tool_names": ["remote_calc"]}, {"lookup", "fork_conversation", "spare_calc"}),
+            ({}, {"lookup", "fork_conversation", "remote_calc", "spare_calc"}),
+        )
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                tool = ForkConversationTool()
+                agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[NamedTool("lookup"), tool])
+                await agent.attach_mcp_server(["calc"])
+                offered: list[set[str]] = []
+                real_fork = agent.fork
+
+                def fork_recording_child_tools(settings: AgentForkSettings) -> BaseAgent:
+                    # Fork for real, then record the child's tools once its MCP servers connect, before it answers.
+                    child = real_fork(settings)
+                    real_reply = child.generate_reply
+
+                    async def reply_after_recording(prompt: str) -> AgentMessage:
+                        await child._ensure_mcp_connected()
+                        offered.append({item.name for item in child.tools})
+                        return await real_reply(prompt)
+
+                    child.generate_reply = reply_after_recording  # type: ignore[method-assign]
+                    return child
+
+                with patch.object(agent, "fork", side_effect=fork_recording_child_tools):
+                    result = await tool.execute(_call(prompt="branch", **overrides))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(offered, [expected])
+                self.assertEqual({item.name for item in agent.tools}, {"lookup", "fork_conversation", "remote_calc", "spare_calc"})
 
 
 if __name__ == "__main__":

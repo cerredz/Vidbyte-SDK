@@ -7,11 +7,13 @@ The model sees, in order:
 1. the system prompt, the agentic-loop note, and the tool list (the runtime's fixed header), then the loop budgets when any are set;
 2. `coding:agents_md`: the root folder's `AGENTS.md`, from `AgentsMdLoader` in `agents_md.py`;
 3. `coding:environment`: an `EnvironmentContextItem` (`vidbyte/context/primitives/documents.py`) holding facts about the machine and the project (OS family and version, CPU, date, root folder, project files, languages, package managers, declared dependencies, installed dependency folders, git branch, which bash runs commands, and the system package managers and tools that bash finds), from `EnvironmentLoader` in `environment.py`;
-4. `coding:repo_map`: reserved for the map.md section;
-5. `coding:setup_results`: reserved for the setup-command results section;
+4. `coding:repo_map`: the root folder's `MAP.md`, from `MapMdLoader` in `map_md.py`;
+5. `coding:setup_results`: the setup commands' pass/fail note, from `SetupCommandsLoader` in `setup_commands.py`, which runs the commands while the agent is built;
 6. `coding:progress_notes`: the agent's own notes file, `.vidbyte/coding-agent/progress.md`, from `ProgressNotesLoader` in `progress_notes.py`;
 7. the caller's own context-manager primitives, in the caller's order and placements;
 8. the context body, then the user's message.
+
+`MAP.md` is a CodingAgent convention: a short, human-written map of where things live in the repository (the main folders, the entry points, and where new code goes), so the model skips exploring the layout. It is read exactly like `AGENTS.md`, from the root folder only, capped at 32 KiB, and turned off with `load_map=False`. Both loaders are thin subclasses of `RootFileLoader` in `root_file.py`, which finds, reads, decodes, and truncates one named root file.
 
 ## The contract
 
@@ -24,7 +26,7 @@ The model sees, in order:
 
 A new section takes three things, and no file in this package other than the new loader changes:
 
-1. **One loader class in its own file**, `vidbyte/agents/coding_context/<section>.py`, with `load(settings) -> CodingContextSectionText | CodingContextSectionItem | None`, following `agents_md.py`: an A001 header, a narrated `load`, and one level of helpers. A loader that grows a second job, such as running a process or parsing manifests, moves that job into its own class beside it, as `environment_probe.py` and `project_dependencies.py` do for `environment.py`.
+1. **One loader class in its own file**, `vidbyte/agents/coding_context/<section>.py`, with `load(settings) -> CodingContextSectionText | CodingContextSectionItem | None`, following `root_file.py`: an A001 header, a narrated `load`, and one level of helpers. A section that is one root file is a `RootFileLoader` subclass, as `agents_md.py` and `map_md.py` are. A loader that grows a second job, such as running a process or parsing manifests, moves that job into its own class beside it, as `environment_probe.py` and `project_dependencies.py` do for `environment.py`.
 2. **The reserved enum member**: the loader returns its record with `section=CodingContextSection.ENVIRONMENT`, `REPO_MAP`, or `SETUP_RESULTS`. The enum does not change.
 3. **One line in `CodingAgent.__init__`** (`vidbyte/agents/coding.py`): import the loader from its module and add `<Loader>.load(settings)` to the `sections` tuple. The tuple's order does not matter; the enum decides.
 
@@ -39,4 +41,5 @@ If the section has its own switch, that switch is part of the feature, not of th
 - `EnvironmentLoader` only gathers raw facts; every word the model reads is written by `EnvironmentContextItem`, so a wording change belongs there, not in the loader. It never gathers environment-variable values, the user name, or the host name.
 - `EnvironmentProbe` (`environment_probe.py`) runs the one bash probe. The script prints raw tab-separated records, not text for the model, and only finished lines are parsed, so output cut by a timeout or the 8 KiB cap never becomes half a record. It writes to a temporary file, not a pipe, so a timeout on Windows cannot hang construction. The probe is cached per bash path and `PATH`, so git facts are read from `.git` rather than the probe, which keeps the cache independent of the root folder.
 - `ProjectDependencies` (`project_dependencies.py`) reads names from `pyproject.toml`, `requirements.txt`, `package.json`, and `Cargo.toml` in the root only. A missing, oversized, or malformed manifest gives no names, never an error.
-- `ProgressNotesLoader` is the one loader that writes: it creates `.vidbyte/coding-agent/progress.md` from a template and `.vidbyte/coding-agent/.gitignore` holding `*`, each only when missing, and never overwrites either. It never touches `.vidbyte/` itself, because other tools write there. Any `OSError` there, such as a read-only root, means no section rather than a failed construction, because the switch is on by default.
+- `SetupCommandsLoader` runs commands, so construction blocks until they finish. It reuses `BashTool.find_bash()`, `BashTool.not_found_message()`, and the `BASH_*` time limits instead of copying them, and it uses the synchronous `subprocess` module because the constructor may run inside an event loop.
+- `ProgressNotesLoader` is the one loader that writes files itself: it creates `.vidbyte/coding-agent/progress.md` from a template and `.vidbyte/coding-agent/.gitignore` holding `*`, each only when missing, and never overwrites either. It never touches `.vidbyte/` itself, because other tools write there. Any `OSError` there, such as a read-only root, means no section rather than a failed construction, because the switch is on by default.

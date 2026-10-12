@@ -58,6 +58,8 @@ class GeminiProvider:
         # Gemini supports alternating user/model turns through the contents array.
         history = [self._gemini_turn(message) for message in config.messages]
         history.insert(self._prompt_index(history), {"role": "user", "parts": [{"text": prompt}]})
+        # A model note followed by a model call is one model step, so they travel as one model turn.
+        history = self._merge_model_turns(history)
         # Answers to one parallel function-call turn must travel together in a single user turn.
         return self._merge_function_responses(history)
 
@@ -66,20 +68,39 @@ class GeminiProvider:
         # the prompt that provoked that exchange arrives separately and would otherwise land
         # after it, leaving the functionCall turn with nothing in front of it. Gemini rejects
         # that outright: "function call turn comes immediately after a user turn or after a
-        # function response turn". Slot the prompt in as that missing opening turn. A history
-        # whose calls are already introduced is left alone and the prompt simply appends.
+        # function response turn". Slot the prompt in as that missing opening turn. A model turn
+        # at the very start, text or call, has nothing in front of it either and gets the same
+        # treatment. A history whose model turns are already introduced is left alone and the
+        # prompt simply appends.
+        # @intent gemini-prompt-opens-a-model-led-history
+        # A rejected plain-text draft now opens this run's exchange, and Gemini refuses contents that start with a model turn.
         for index, turn in enumerate(history):
-            if not self._has_part(turn, "functionCall"):
+            if not (self._has_part(turn, "functionCall") or (index == 0 and turn.get("role") == "model")):
                 continue
             return len(history) if index and history[index - 1].get("role") == "user" else index
         return len(history)
+
+    def _merge_model_turns(self, history: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        # A context note pinned to the conversation arrives as its own assistant turn, so a
+        # functionCall turn can land right behind another model turn. Gemini rejects that: "function
+        # call turn comes immediately after a user turn or after a function response turn". Fold
+        # back-to-back model turns into one, keeping every part verbatim and in order.
+        # @intent gemini-one-model-turn-per-step
+        # Gemini expects one model turn per step, and a split step leaves its call without a user turn in front.
+        merged: list[Mapping[str, Any]] = []
+        for turn in history:
+            if merged and turn.get("role") == "model" and merged[-1].get("role") == "model":
+                merged[-1] = {**merged[-1], "parts": [*(merged[-1].get("parts") or ()), *(turn.get("parts") or ())]}
+                continue
+            merged.append(turn)
+        return merged
 
     def _merge_function_responses(self, history: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
         # @intent boundary: the runtime formats each tool result as its own user turn, but when
         # the model makes several calls in one turn Gemini demands every answer in the single
         # content that follows it: "the number of function response parts is equal to the number
         # of function call parts of the function call turn". Fold back-to-back response-only
-        # user turns into one, keeping call order. Text turns are never merged.
+        # user turns into one, keeping call order. User text turns are never merged.
         merged: list[Mapping[str, Any]] = []
         for turn in history:
             if merged and self._is_function_response_turn(turn) and self._is_function_response_turn(merged[-1]):

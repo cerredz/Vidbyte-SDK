@@ -36,10 +36,11 @@ class BaseCodeSearchTool(BaseTool):
         # ignore_patterns="node_modules" is a str, so tuple() would ignore its characters and skip nothing.
         if isinstance(ignore_patterns, (str, bytes)):
             raise ConfigurationError('ignore_patterns must be a list of directory or file names (e.g. ["node_modules"]), not a single string.')
-        self.ignore_patterns = tuple(
-            ignore_patterns
-            or (".git", "node_modules", "__pycache__", ".venv", "venv")
-        )
+        # @intent empty-ignore-list-means-ignore-nothing
+        # Only None selects the defaults; an explicit [] is a deliberate "skip nothing", not a falsy fallback.
+        if ignore_patterns is None:
+            ignore_patterns = (".git", "node_modules", "__pycache__", ".venv", "venv")
+        self.ignore_patterns = tuple(ignore_patterns)
         self.max_file_bytes = max_file_bytes
 
     def resolve_under_root(self, path: str | Path = ".") -> Path:

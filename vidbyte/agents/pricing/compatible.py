@@ -4,7 +4,9 @@ Description:
     OpenAI-compatible chat-completions usage shape and cost formula.
 Purpose:
     Parses prompt/completion/total usage for xAI, DeepSeek, GLM, MiniMax, and
-    Kimi, including each provider's cached-input and reasoning detail variants.
+    Kimi, including each provider's cached-input and reasoning detail variants,
+    and folds reasoning that a provider reports outside completion_tokens (xAI)
+    into billed output.
 Architecture:
     - ChatCompletionUsage: ProviderUsage bound to the compatible providers.
 Relations:
@@ -38,17 +40,35 @@ class ChatCompletionUsage(ProviderUsage):
     @classmethod
     def from_usage_payload(cls, payload: Mapping[str, Any]) -> "ChatCompletionUsage | None":
         # Parses a chat-completions usage dict; None when no token fields exist.
+        prompt = cls.coerce_int(payload.get("prompt_tokens"))
+        completion = cls.coerce_int(payload.get("completion_tokens"))
+        total = cls.coerce_int(payload.get("total_tokens"))
+        reasoning = cls._reasoning(payload)
         usage = cls(
-            input_tokens=cls.coerce_int(payload.get("prompt_tokens")),
-            output_tokens=cls.coerce_int(payload.get("completion_tokens")),
-            total_tokens=cls.coerce_int(payload.get("total_tokens")),
+            input_tokens=prompt,
+            # Billed output must include reasoning, which some providers report outside completion_tokens.
+            output_tokens=cls._billed_output(prompt, completion, total, reasoning),
+            total_tokens=total,
             cached_input_tokens=cls._cached_input(payload),
-            reasoning_tokens=cls._reasoning(payload),
+            reasoning_tokens=reasoning,
             raw=payload,
         )
         if all(count is None for count in (usage.input_tokens, usage.output_tokens, usage.total_tokens)):
             return None
         return usage
+
+    @staticmethod
+    def _billed_output(prompt: int | None, completion: int | None, total: int | None, reasoning: int | None) -> int | None:
+        # @intent reasoning-outside-completion-is-billed-output
+        # xAI bills reasoning as output but leaves it out of completion_tokens, so its total is
+        # prompt + completion + reasoning; OpenAI-style providers already count reasoning inside
+        # completion_tokens, where adding it again would double-bill. The reported total tells the
+        # two conventions apart without naming a provider, and anything unprovable stays as reported.
+        if prompt is None or completion is None or total is None or not reasoning:
+            return completion
+        if total == prompt + completion + reasoning:
+            return completion + reasoning
+        return completion
 
     @classmethod
     def _cached_input(cls, payload: Mapping[str, Any]) -> int | None:

@@ -8,7 +8,8 @@ Purpose:
     defer subprocess initialization via with_mcp_server, and inspect capability cards.
 Architecture:
     - MockMcpStdioTransport: Mocked stdio transport returning custom remote tool specs.
-    - McpAttachmentTests: IsolatedAsyncioTestCase containing all scenarios described in the plan.
+    - McpAttachmentTests: IsolatedAsyncioTestCase containing all scenarios described in the plan,
+      including an attach whose bridged tool name is already taken, which must attach no server.
     - LoopBoundMcpTransport / SyncRunMcpLoopTests: a transport that only works on the loop it
       started on, proving sync run() and pipeline run_sync() reconnect instead of reusing a closed
       loop's pipes, while one long-lived loop keeps its connection.
@@ -28,9 +29,9 @@ from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import BaseAgent
-from vidbyte.lib.errors import McpAttachmentError, McpInitializeError
+from vidbyte.lib.errors import McpAttachmentError, McpInitializeError, ToolRegistrationError
 from vidbyte.pipelines import SequentialPipeline
-from vidbyte.tools import ToolCall, ToolPermission, Tools
+from vidbyte.tools import ToolCall, ToolPermission, Tools, tool
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.mcp.presets import McpPresetConfigurationError, McpPresetRegistry
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
@@ -281,6 +282,58 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
         card = agent.card()
         self.assertEqual(card.mcp_server_names, ("server1", "server2"))
         self.assertEqual(card.mcp_tool_names, ("remote_server1", "remote_server2"))
+
+    async def test_lazy_attach_with_a_taken_tool_name_attaches_no_server_and_retries_cleanly(self) -> None:
+        """A bridged tool whose name is taken fails the run, leaves no server attached or running, and re-queues."""
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner(), tools=[remote_calc, note])
+        own_items = agent._agent_tool_items
+        # "other" registers its tool first, then "calc" collides, so the batch fails part-way through.
+        agent.with_mcp_server(command=["other"])
+        agent.with_mcp_server(command=["calc"])
+        configs = list(agent._pending_mcp_configs)
+
+        for attempt in (1, 2):
+            with self.assertRaises(ToolRegistrationError):
+                await agent.arun(f"request {attempt}")
+            # No server from the batch stays attached or running, and the agent's own tools are untouched.
+            self.assertEqual(agent.mcp_servers(), ())
+            self.assertEqual([t.name for t in agent.tools], ["remote_calc", "note"])
+            self.assertIs(agent.tools[0], remote_calc)
+            self.assertEqual(agent._agent_tool_items, own_items)
+            self.assertEqual(len(MockMcpStdioTransport.instances), 2 * attempt)
+            self.assertTrue(all(inst.closed for inst in MockMcpStdioTransport.instances))
+            # The configs wait to connect again in order, so a retry starts no extra copies.
+            self.assertEqual(agent._pending_mcp_configs, configs)
+            self.assertIsNone(agent._mcp_attach_in_flight)
+
+    async def test_eager_attach_with_a_taken_tool_name_keeps_earlier_servers_only(self) -> None:
+        """A single eager attach whose tool name is taken closes that server and keeps what was already attached."""
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner(), tools=[remote_calc])
+        await agent.attach_mcp_server(command=["other"])
+        earlier = agent.mcp_servers()
+
+        with self.assertRaises(ToolRegistrationError):
+            await agent.attach_mcp_server(command=["calc"])
+
+        self.assertEqual(agent.mcp_servers(), earlier)
+        self.assertEqual([t.name for t in agent.tools], ["remote_calc", "remote_other"])
+        self.assertIs(agent.tools[0], remote_calc)
+        other, calc = MockMcpStdioTransport.instances
+        self.assertFalse(other.closed)
+        self.assertTrue(calc.closed)
+
+
+@tool
+def remote_calc(text: str) -> str:
+    """A plain tool whose name matches the tool the mock "calc" MCP server exposes."""
+    return text
+
+
+@tool
+def note(text: str) -> str:
+    """A plain tool with no MCP counterpart."""
+    return text
+
 
 class LoopBoundMcpTransport(MockMcpStdioTransport):
     """Mock transport that, like real subprocess pipes, only works on the loop it started on."""

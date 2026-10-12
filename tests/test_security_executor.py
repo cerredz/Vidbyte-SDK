@@ -39,6 +39,14 @@ class WriteTool(BaseTool):
         return ToolResult.success(self.name, "ok")
 
 
+class StringExecuteTool(WriteTool):
+    """Test tool that spells its permission as the plain string "execute"."""
+
+    def spec(self) -> ToolSpec:
+        """Return a spec whose permission is the str spelling, not the enum member."""
+        return ToolSpec(name="run", description="Run.", permission="execute")  # type: ignore[arg-type]
+
+
 class SecurityExecutorTests(unittest.IsolatedAsyncioTestCase):
     """Verifies permission policy behavior."""
 
@@ -62,3 +70,14 @@ class SecurityExecutorTests(unittest.IsolatedAsyncioTestCase):
         ).execute_call(ToolCall("write", {}))
         self.assertEqual(result.status.value, "success")
         self.assertTrue(tool.executed)
+
+    async def test_string_spelled_permission_is_denied_cleanly(self) -> None:
+        """A "execute" string permission becomes the enum and yields a normal denial, not a crash."""
+        tool = StringExecuteTool()
+        registry = ToolRegistry()
+        registry.register(tool)
+        result = await ToolExecutor(registry).execute_call(ToolCall("run", {}))
+        self.assertIs(tool.spec().permission, ToolPermission.EXECUTE)
+        self.assertEqual(result.status.value, "error")
+        self.assertEqual(result.metadata["permission"], "execute")
+        self.assertFalse(tool.executed)

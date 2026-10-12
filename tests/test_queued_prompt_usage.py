@@ -1,6 +1,6 @@
 """FILE: tests/test_queued_prompt_usage.py
 
-PURPOSE: Regression tests that queued prompts drained after the primary run keep every run's usage on the agent's tracker, that a failed or cancelled run leaves the queue empty, and that concurrent runs on one agent each drain only their own follow-ups.
+PURPOSE: Regression tests that queued prompts drained after the primary run keep every run's usage on the agent's tracker, that a failed or cancelled run leaves the queue empty, and that concurrent runs on one agent each drain only their own follow-ups, and that last_queued_replies describes only the most recent request.
 ROLE IN CODEBASE: Guards BaseAgent._drain_queued_prompts, whose drained generate_reply calls reset the usage tracker and once left get_usage() reporting only the last drained run, and BaseAgent._close_failed_reply, which once left queued prompts for the next unrelated run.
 ARCHITECTURE NOTE: Offline scripted runners; the usage tests report a priced model's token usage, the cleanup tests drive the real run_prompts_sequentially tool through function-call responses.
 COMMON MODIFICATION PATTERNS: Add a case here when the drain gains a new exit path that could drop a run's usage or leave prompts queued.
@@ -276,6 +276,41 @@ class RunScopedQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["queued_prompt_runs"], 1)
         self.assertEqual(runner.prompts, ["first", "second", "later follow-up"])
         self.assertEqual(agent._queued_prompts, [])
+
+
+class QueuedRepliesPerRequestTests(unittest.IsolatedAsyncioTestCase):
+    # @intent queued-replies-are-per-request
+    # last_queued_replies holds only the follow-up replies drained by the most recent top-level request.
+
+    def _agent(self, runner: PerRunRunner) -> Any:
+        return build_test_agent(runner=runner, name="queued", system_prompt="Answer briefly.", tools=[RunPromptsSequentiallyTool()])
+
+    async def test_request_keeps_every_drained_reply(self) -> None:
+        runner = PerRunRunner({})
+        agent = self._agent(runner)
+        agent.enqueue_prompts(["first follow-up", "second follow-up"])
+        await agent.arun("primary")
+        self.assertEqual(len(agent.last_queued_replies), 2)
+        self.assertEqual(runner.prompts, ["primary", "first follow-up", "second follow-up"])
+
+    async def test_request_without_followups_clears_earlier_queued_replies(self) -> None:
+        runner = PerRunRunner({})
+        agent = self._agent(runner)
+        agent.enqueue_prompts(["follow-up: cite sources"])
+        await agent.arun("first")
+        self.assertEqual(len(agent.last_queued_replies), 1)
+        await agent.arun("second")
+        self.assertEqual(agent.last_queued_replies, [])
+
+    async def test_failed_request_clears_earlier_queued_replies(self) -> None:
+        runner = PerRunRunner({"boom": [_fail]})
+        agent = self._agent(runner)
+        agent.enqueue_prompts(["follow-up: cite sources"])
+        await agent.arun("first")
+        self.assertEqual(len(agent.last_queued_replies), 1)
+        with self.assertRaises(AgentExecutionError):
+            await agent.arun("boom")
+        self.assertEqual(agent.last_queued_replies, [])
 
 
 class _Ticket(BaseModel):

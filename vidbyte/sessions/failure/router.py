@@ -24,6 +24,7 @@ from vidbyte.lib.dataclasses.failure import Failure, RecoveryAttempt, RecoveryBi
 from vidbyte.lib.dataclasses.failure_recovery import FailureRouterSettings
 from vidbyte.lib.enums.failure import FailureCode, FailureDisposition, FailurePhase, FailureStatus, RuleErrorMode
 from vidbyte.lib.errors import FailureRaisedError
+from vidbyte.lib.tools.formatter import ToolsFormatter
 from vidbyte.sessions.failure.rules import FailureRule
 
 _EMPTY_COUNT = 0
@@ -55,6 +56,9 @@ class FailureMetadataNormalizer:
         "unknown_tool": FailureCode.TOOL_NOT_FOUND,
         "permission_denied": FailureCode.TOOL_PERMISSION_DENIED,
         "middleware_denied": FailureCode.TOOL_PERMISSION_DENIED,
+        "tool_settings_denied": FailureCode.TOOL_PERMISSION_DENIED,
+        "tool_settings_max_calls_per_tool": FailureCode.TOOL_PERMISSION_DENIED,
+        "allowed_tools_denied": FailureCode.TOOL_PERMISSION_DENIED,
         "timeout": FailureCode.TOOL_TIMEOUT,
         "validation_error": FailureCode.TOOL_ARGUMENTS_INVALID,
         "invalid_arguments": FailureCode.TOOL_ARGUMENTS_INVALID,
@@ -65,7 +69,8 @@ class FailureMetadataNormalizer:
     }
     # @intent tool-error-codes-cover-known-metadata-error-tokens
     # "mcp_error" (vidbyte/tools/mcp/client.py) is mapped alongside the vidbyte/tools/executor.py
-    # and vidbyte/agents/runtime.py ToolResult.metadata["error"] tokens; a token with no entry here
+    # and vidbyte/agents/runtime.py ToolResult.metadata["error"] tokens, including the
+    # vidbyte/agents/settings/tool.py ToolSettings.denial refusals; a token with no entry here
     # is simply left uncounted by _append_tool_context_failures rather than misclassified.
 
     @classmethod
@@ -165,7 +170,10 @@ class FailureMetadataNormalizer:
         for call in calls:
             result = getattr(call, "result", None)
             result_metadata = getattr(result, "metadata", {})
-            error = str(result_metadata.get("error", "")) if isinstance(result_metadata, Mapping) else ""
+            raw = (result_metadata.get("error") or result_metadata.get("error_type")) if isinstance(result_metadata, Mapping) else None
+            # @intent ledger-tool-error-kinds-match-the-model-visible-kind
+            # Normalize the token as ToolsFormatter does for the model; an absent token stays uncounted.
+            error = ToolsFormatter._normalized_error_kind(raw) if raw else ""
             code = cls._TOOL_ERROR_CODES.get(error)
             if code is not None:
                 counts[code] = counts.get(code, _EMPTY_COUNT) + 1
@@ -364,6 +372,12 @@ class FailureRouter:
 
     def capture_exception(self, exc: BaseException, *, phase: FailurePhase = FailurePhase.RUNTIME, source: str = "session") -> Failure:
         """Record one SDK exception once, deduplicating Session and agent boundaries."""
+        # @intent raise-disposition-reaches-the-caller
+        # A FailureRaisedError carries a failure this ledger already recorded; return it rather than add a runtime.error twin.
+        raised_id = getattr(exc.failure, "id", None) if isinstance(exc, FailureRaisedError) else None
+        recorded = next((failure for failure in reversed(self._history) if raised_id is not None and failure.id == raised_id), None)
+        if recorded is not None:
+            return recorded
         exception_ids: set[int] = set()
         current: BaseException | None = exc
         while current is not None:

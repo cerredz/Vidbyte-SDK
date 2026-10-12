@@ -528,6 +528,32 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(store.get_meta(session.id).head_id, original[0].id)
                     self.assertEqual(store.get_meta(copy_id).head_id, copied[0].id)
 
+    async def test_own_id_import_after_copy_into_same_store_mints_fresh_checkpoint_ids(self) -> None:  # [Silent Failure]
+        # @intent bundle-copy-never-shares-checkpoint-ids
+        # Importing the copy first and then the bundle under its own id must not hijack the copy's checkpoints.
+        with tempfile.TemporaryDirectory() as source_root, tempfile.TemporaryDirectory() as target_root:
+            for name, source, target in (("memory", InMemorySessionStore(), InMemorySessionStore()), ("file", FileSessionStore(source_root), FileSessionStore(target_root))):
+                with self.subTest(store=name):
+                    session = Session(FakeAgent(), store=source)
+                    await session.arun("one")
+                    await session.arun("two")
+                    bundle = session.export()
+
+                    copy_id = SessionBundleImporter(target).import_bundle(bundle, new_id=f"se_sandbox_{name}")
+                    own_id = SessionBundleImporter(target).import_bundle(bundle)
+                    copied = target.history(copy_id)
+                    owned = target.history(own_id)
+
+                    self.assertEqual(own_id, session.id)
+                    self.assertEqual(len(copied), 2)
+                    self.assertEqual(len(owned), 2)
+                    self.assertTrue(all(c.session_id == copy_id for c in copied))
+                    self.assertTrue(all(c.session_id == own_id for c in owned))
+                    self.assertFalse({c.id for c in copied} & {c.id for c in owned})
+                    self.assertEqual(target.get_meta(copy_id).head_id, copied[-1].id)
+                    self.assertEqual(target.head(own_id).session_id, own_id)
+                    self.assertEqual(target.head(copy_id).session_id, copy_id)
+
     async def test_imports_file_bundle_into_memory_store_with_same_id_when_absent(self) -> None:  # [Hidden Failure]
         # Verify file-to-memory import preserves the original id when no collision exists.
         with tempfile.TemporaryDirectory() as root:
@@ -910,6 +936,21 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         await session.arun("fetch next")
         self.assertNotIn("SOURCE-OWN-CONTENT", " ".join(runner.prompts[next_start:]))
 
+    async def test_edit_drops_tool_outputs_of_removed_turns(self) -> None:  # [Silent Failure]
+        # @intent edit-drops-tool-call-memory
+        # A turn removed by edit() must not leak its tool outputs into later requests.
+        runner = FetchThenDoneRunner(["A", "B", "C"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=InMemorySessionStore())
+        await session.arun("fetch A")
+        await session.arun("fetch B")
+        self.assertIn("SOURCE-B-CONTENT", str(agent._tool_call_contexts))
+        session.edit(lambda h: h[:-1])
+        self.assertEqual(agent._tool_call_contexts, [])
+        turn_three_start = len(runner.prompts)
+        await session.arun("fetch C")
+        self.assertNotIn("SOURCE-B-CONTENT", " ".join(runner.prompts[turn_three_start:]))
+
     def test_rewind_tolerates_agent_without_tool_memory(self) -> None:  # [Hidden Assumption]
         # Compatible agents without tool-call memory still rewind cleanly.
         agent = FakeAgent()
@@ -1040,6 +1081,46 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         reply = await resumed.arun("third")
         self.assertEqual(reply.content, "answer-1")
         self.assertEqual(len(resumed.agent.history), 3)
+
+    async def test_resume_at_checkpoint_branches_from_that_checkpoint(self) -> None:  # [Silent Failure]
+        # Resuming at an older checkpoint must record the next turn under it, matching resume().rewind(to=).
+        store = InMemorySessionStore()
+        session = Session(build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner()), store=store)
+        await session.arun("first")
+        first = session.head
+        await session.arun("second")
+        await session.arun("third")
+
+        resumed = Session.resume(store, session.id, checkpoint_id=first)
+        self.assertEqual(resumed.head, first)
+        self.assertEqual(store.head(session.id).id, first)
+        self.assertEqual(len(resumed.agent.history), 1)
+        bind_test_runner(resumed.agent, EchoRunner())
+        await resumed.arun("branch")
+        self.assertEqual(store.get(resumed.head).parent_id, first)
+
+    async def test_resume_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
+        # Like rewind and fork(at=), resume must not splice another session's checkpoint into this one.
+        store = InMemorySessionStore()
+        own = Session(build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner()), store=store)
+        await own.arun("mine")
+        other = Session(build_test_agent(name="other", system_prompt="Work.", runner=EchoRunner()), store=store)
+        await other.arun("theirs")
+        own_head = own.head
+
+        with self.assertRaises(SessionError):
+            Session.resume(store, own.id, checkpoint_id=other.head)
+        self.assertEqual(store.head(own.id).id, own_head)
+
+    async def test_fork_of_resumed_session_keeps_stored_tags(self) -> None:  # [Silent Failure]
+        # A resumed session is the same tagged session, so its fork must inherit the tags exactly as a fork of the original does.
+        store = InMemorySessionStore()
+        session = Session(build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner()), store=store, tags=("acme",))
+        await session.arun("first")
+
+        branch = Session.resume(store, session.id).fork()
+        self.assertEqual(store.get_meta(branch.id).tags, ("acme",))
+        self.assertIn(branch.id, [meta.session_id for meta in store.list_sessions(tag="acme")])
 
     async def test_file_store_parity_round_trip(self) -> None:  # [Silent Failure]
         with tempfile.TemporaryDirectory() as root:
@@ -1212,6 +1293,24 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.get(result.output).session_id, bound.id)
         self.assertEqual(store.get(result.output).label, "")
 
+    async def test_checkpoint_own_session_id_stays_on_bound_head_chain(self) -> None:  # [Silent Failure]
+        # @intent own-session-id-means-bound-thread
+        # Naming the bound session by id or tag checkpoints like omitting it, so the label is the head the next turn descends from.
+        for identifier in ("id", "tag"):
+            with self.subTest(identifier=identifier):
+                store = InMemorySessionStore()
+                bound = Session(FakeAgent(), store=store, tags=("mine",))
+                await bound.arun("one")
+                tool = CheckpointTool(store)
+                tool.bind_session(bound)
+                target = bound.id if identifier == "id" else "mine"
+                result = await tool.execute(ToolCall(tool_name="checkpoint", arguments={"session_id": target, "label": "pre-migrate"}))
+                self.assertEqual(result.status.value, "success")
+                self.assertEqual(result.output, bound.head)
+                self.assertEqual(store.get(result.output).label, "pre-migrate")
+                following = bound.checkpoint()
+                self.assertEqual(store.get(following).parent_id, result.output)
+
     async def test_resume_tools_null_checkpoint_id_resumes_from_head(self) -> None:  # [Silent Failure]
         # A JSON null checkpoint_id means the omitted default: resume from the target session's head.
         for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
@@ -1232,6 +1331,21 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "success")
         self.assertEqual(store.get_meta(result.output).parent_session_id, bound.id)
 
+    async def test_fork_tool_own_session_id_keeps_bound_session_tags(self) -> None:  # [Silent Failure]
+        # @intent own-session-id-means-bound-thread
+        # Naming the bound session's own id forks it like an omitted id, so the branch keeps the session's tags.
+        store = InMemorySessionStore()
+        bound = Session(FakeAgent(), store=store, tags=("billing",))
+        await bound.arun("one")
+        tool = ForkTool(store)
+        tool.bind_session(bound)
+        result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": bound.id}))
+        self.assertEqual(result.status.value, "success")
+        meta = store.get_meta(result.output)
+        self.assertEqual(meta.parent_session_id, bound.id)
+        self.assertEqual(meta.tags, ("billing",))
+        self.assertIn(result.output, [listed.session_id for listed in store.list_sessions(tag="billing")])
+
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
         store.put(_checkpoint("secret-session", "c1"))
@@ -1239,6 +1353,14 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall(tool_name="session", arguments={"operation": "read_run", "session_id": "secret-session"}))
         self.assertEqual(result.status.value, "error")
         self.assertIn("denied", result.output.lower())
+
+    async def test_read_run_unknown_session_is_error_not_raised(self) -> None:  # [Edge Case]
+        # @intent session-tool-never-raises
+        # An unknown session id comes back as an error result the model can read, like every sibling session tool.
+        tool = SessionTool(InMemorySessionStore(), scope=SessionScope.all_runs())
+        result = await tool.execute(ToolCall(tool_name="session", arguments={"operation": "read_run", "session_id": "nope"}))
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("SessionNotFoundError", result.output)
 
     async def test_read_run_returns_trace_artifact(self) -> None:  # [Silent Failure]
         store = InMemorySessionStore()
@@ -1297,6 +1419,23 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # BatchForkTool
 # ---------------------------------------------------------------------------
+class SessionScopeTests(unittest.TestCase):
+    def test_bare_session_id_string_is_rejected(self) -> None:  # [Silent Failure]
+        # @intent name-lists-reject-bare-strings
+        # A bare id would otherwise become an allowlist of its characters and deny the very session meant.
+        with self.assertRaisesRegex(ValueError, "list of session ids"):
+            SessionScope.sessions("se_x")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "list of session ids"):
+            SessionScope(allow_ids="se_x")  # type: ignore[arg-type]
+
+    def test_list_and_tuple_of_ids_permit_the_session(self) -> None:  # [Edge Case]
+        # Verifies the list and tuple forms still allow exactly the named session.
+        for scope in (SessionScope.sessions(["se_x"]), SessionScope(allow_ids=("se_x",))):
+            self.assertTrue(scope.permits("se_x"))
+            self.assertFalse(scope.permits("s"))
+            self.assertEqual(scope.allowed_ids(), {"se_x"})
+
+
 class BatchForkToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_spec_requires_bounded_count(self) -> None:  # [Hidden Assumption]
         # Verifies the model-facing schema requires and bounds the fan-out count.
@@ -1366,6 +1505,69 @@ class ProviderImportSafetyTests(unittest.TestCase):
         from vidbyte.lib.providers import PostgresSessionStore
         with self.assertRaises(VidbyteSdkError):
             PostgresSessionStore(dsn="postgresql://invalid:5432/none")
+
+
+class _FakePgCursor:
+    """Cursor of the fake psycopg driver, enforcing PostgreSQL's aborted-transaction rule."""
+
+    def __init__(self, conn: _FakePgConnection) -> None:
+        self._conn = conn
+        self._row: tuple[object, ...] | None = None
+
+    def __enter__(self) -> _FakePgCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
+        # A failed statement poisons a non-autocommit transaction until it is rolled back.
+        if self._conn.aborted:
+            raise RuntimeError("current transaction is aborted, commands ignored until end of transaction block")
+        if '"missing"' in sql:
+            self._conn.aborted = not self._conn.autocommit
+            raise RuntimeError('relation "missing" does not exist')
+        if sql.startswith("INSERT INTO vidbyte_sessions"):
+            self._conn.rows[str(params[0])] = params[1]
+        elif sql.startswith("SELECT payload FROM vidbyte_sessions"):
+            self._row = (self._conn.rows[str(params[0])],) if params[0] in self._conn.rows else None
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        return self._row
+
+
+class _FakePgConnection:
+    """Connection of the fake psycopg driver; COMMIT or ROLLBACK ends an aborted transaction."""
+
+    def __init__(self, autocommit: bool) -> None:
+        self.autocommit = autocommit
+        self.aborted = False
+        self.rows: dict[str, object] = {}
+
+    def cursor(self) -> _FakePgCursor:
+        return _FakePgCursor(self)
+
+    def commit(self) -> None:
+        self.aborted = False
+
+    def rollback(self) -> None:
+        self.aborted = False
+
+
+class PostgresSessionStoreRecoveryTests(unittest.TestCase):
+    def test_failed_statement_does_not_poison_later_store_operations(self) -> None:  # [Hidden Failure]
+        # @intent postgres-store-survives-failed-statement
+        # A model querying a missing table through the row tools must not break the store's own session writes.
+        fake_psycopg = mock.MagicMock(spec=["connect"])
+        fake_psycopg.connect.side_effect = lambda dsn, autocommit=False: _FakePgConnection(autocommit)
+        with mock.patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            from vidbyte.lib.providers import PostgresSessionStore
+            store = PostgresSessionStore(dsn="postgresql://fake/db")
+        with self.assertRaises(RuntimeError):
+            store.select_rows("missing")
+        meta = SessionMeta(session_id="se", head_id=None, parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
+        store.put_meta(meta)
+        self.assertEqual(store.get_meta("se"), meta)
 
 
 if __name__ == "__main__":

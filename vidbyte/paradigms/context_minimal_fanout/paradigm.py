@@ -34,7 +34,9 @@ from vidbyte.paradigms.context_minimal_fanout.types import (
     SplitPrompt,
 )
 from vidbyte.tools.builtins.output_schema import AppendOutputTool, DeclareOutputSchemaTool, ExtendOutputSchemaTool, OutputSchemaBuilder
+from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.toolsets import ParadigmMinimalToolset
+from vidbyte.tools.types import ToolPermission
 
 
 class ContextMinimalFanoutParadigm(ParadigmHarness):
@@ -151,6 +153,13 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         # Constructs a fresh implementation agent for one split prompt.
         tools = (*self._implementation_toolset(settings), *settings.implementation.tools)
         middleware = self._with_budget_middleware(settings.implementation.middleware, settings.implementation.max_tokens, settings)
+        # Let the agent use the patch tool it is handed, unless the caller chose its own permission policy.
+        # @intent fanout-implementation-write-opt-in-is-honoured
+        # BaseAgent's default policy allows only SAFE and READ, so without this grant every patch_file call
+        # was denied and implementation_include_write=True (the default) could never change a file.
+        options = dict(settings.implementation.agent_options)
+        if settings.include_minimal_toolset and settings.implementation_include_write:
+            options.setdefault("permission_policy", PermissionPolicy(allowed=frozenset({ToolPermission.SAFE, ToolPermission.READ, ToolPermission.WRITE})))
         agent = BaseAgent(
             name=f"{settings.implementation.name}-{split_prompt.id}",
             system_prompt=settings.implementation.system_prompt or self._prompts.for_role("implementation"),
@@ -161,7 +170,7 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
             model_name=settings.implementation.model_name,
             temperature=settings.implementation.temperature,
             metadata={"role": "implementation", "split_prompt_id": split_prompt.id},
-            **dict(settings.implementation.agent_options),
+            **options,
         )
         return self._bind_role_runner(agent, settings.implementation)
 

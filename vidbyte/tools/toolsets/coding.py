@@ -3,7 +3,7 @@
 PURPOSE: Defines CodingAgentTools, the catalog of the seven tools a CodingAgent starts with over one root folder (bash, read_lines, write_text, replace_text, glob, grep, and one web-fetch tool), and the private _FetchedPagesView that lets the model read the pages a keyed fetch tool returned.
 ROLE IN CODEBASE: Built by vidbyte/agents/coding.py (CodingAgent) from a validated CodingAgentSettings (vidbyte/lib/dataclasses/coding.py); exported by vidbyte/tools/toolsets/__init__.py and the root vidbyte package. Composes vidbyte/tools/builtins/bash.py, the filesystem and code-search tools, and the priced fetch tools in vidbyte/tools/builtins/operations/fetch.py with their provider clients.
 ARCHITECTURE NOTE: CodingAgentTools is a Tools subclass that holds only the seven tools. The agent appends the caller's own tools when it hands everything to BaseAgent, because BaseAgent skips caller items that are not tools while a Tools catalog would reject them. The settings record has already checked the root and the keys, so this module only builds. _FetchedPagesView is a _ToolWrapper around a keyed fetch tool that appends each fetched page's text to a successful result's output; spec, validation, permission, metadata, and pricing stay the wrapped tool's, and the runtime unwraps it before pricing.
-FUNCTION INVENTORY: CodingAgentTools.__init__ is the narrated main function; authenticate_tools gives the one supplied key to its provider client and fetch tool, or returns DirectHttpFetchTool; get_tools returns the seven tools in order over a root folder, with the given fetch tool last. _FetchedPagesView delegates spec, validate_call, and execute, and adds page text to a successful execute result.
+FUNCTION INVENTORY: CodingAgentTools.__init__ is the narrated main function; authenticate_tools gives the one supplied key to its provider client and fetch tool, or returns DirectHttpFetchTool; get_tools returns the seven tools in order over a root folder, with the given fetch tool last and write_text limited to max_rewrite_lines. _FetchedPagesView delegates spec, validate_call, and execute, and adds page text to a successful execute result.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one row to the table in authenticate_tools and one key field on CodingAgentSettings; a tool swap changes get_tools and the agents README together.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read fetch keys from environment variables. 2. Do not keep the settings record or a key on the catalog; a key lives only inside its provider client. 3. Do not edit the wrapped fetch tools to change their output; the view is the only place page text is added.
 KNOWN EDGE CASES: fork() keeps the same _FetchedPagesView object, and _rewrap puts a new view around a fork clone of the fetch tool. Bash is not confined to the root folder.
@@ -54,7 +54,7 @@ class CodingAgentTools(Tools):
 
         # Put bash and the five file and search tools over the root
         # folder first, and the fetch tool last.
-        super().__init__(self.get_tools(Path(settings.root_dir), fetch_tool))
+        super().__init__(self.get_tools(Path(settings.root_dir), fetch_tool, settings.max_rewrite_lines))
 
     @staticmethod
     def authenticate_tools(settings: CodingAgentSettings) -> BaseTool:
@@ -77,11 +77,12 @@ class CodingAgentTools(Tools):
         return DirectHttpFetchTool()
 
     @staticmethod
-    def get_tools(root_dir: Path, fetch_tool: BaseTool) -> tuple[BaseTool, ...]:
+    def get_tools(root_dir: Path, fetch_tool: BaseTool, max_rewrite_lines: int | None) -> tuple[BaseTool, ...]:
         """Return the seven coding tools over root_dir in order, with fetch_tool last."""
         # Read, write, and edit share one configuration that allows
-        # writing, so all three see the same root folder.
-        file_config = FileSystemToolConfig(root=root_dir, allow_write=True)
+        # writing, so all three see the same root folder. write_text
+        # refuses to replace an existing file over max_rewrite_lines.
+        file_config = FileSystemToolConfig(root=root_dir, allow_write=True, max_overwrite_lines=max_rewrite_lines)
         return (BashTool(root_dir), ReadLinesTool(file_config), WriteTextTool(file_config), ReplaceTextTool(file_config), GlobTool(root_dir), GrepTool(root_dir), fetch_tool)
 
 

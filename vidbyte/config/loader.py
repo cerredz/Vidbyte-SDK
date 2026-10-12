@@ -33,7 +33,7 @@ Non-Goals:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -55,8 +55,9 @@ if TYPE_CHECKING:
 _SUPPORTED_SUFFIXES = frozenset({".yaml", ".yml"})
 _HARNESS_ENVELOPE_KEYS = frozenset({"schema_version", "harness"})
 _TEXT_FILE_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".text", ".rst"})
-# Keys describing an agent's place in a harness rather than how to construct it.
-# Anything else unrecognized still fails AgentSettings' own allowlist by field name.
+# Keys never passed through whole: role places an agent in a harness, and params is an open object
+# whose AgentSettings-named entries are hoisted one by one. Anything else unrecognized still fails
+# AgentSettings' own allowlist by field name.
 _HARNESS_ONLY_AGENT_KEYS = frozenset({"role", "params"})
 _HARNESS_AGENT_FIELD_ALIASES = {"model": "model_name"}
 
@@ -206,6 +207,15 @@ class YamlLoader:
             if field != key and field in entry:
                 continue
             payload[field] = self._agent_settings_value(field, value)
+        # @intent harness-params-are-agent-hyperparameters
+        # The harness contract keeps per-agent hyperparameters under params, so one naming an AgentSettings field must build the agent too.
+        params = entry.get("params")
+        if isinstance(params, Mapping):
+            agent_fields = {item.name for item in fields(AgentSettings)}
+            for key, value in params.items():
+                # A key written at the entry's top level beats the same key in params; harness-only knobs stay with the harness.
+                if key in agent_fields and key not in payload:
+                    payload[key] = self._agent_settings_value(key, value)
         return payload
 
     def _agent_settings_value(self, field: str, value: Any) -> Any:

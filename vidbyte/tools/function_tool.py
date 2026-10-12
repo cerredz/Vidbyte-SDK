@@ -4,10 +4,10 @@ import asyncio
 import dataclasses
 import inspect
 import json
-from collections.abc import Callable
-from typing import Any, get_type_hints
+from collections.abc import Callable, Mapping
+from typing import Annotated, Any, get_type_hints
 
-from pydantic import BaseModel, ValidationError, create_model
+from pydantic import BaseModel, TypeAdapter, ValidationError, create_model
 from pydantic_core import to_jsonable_python
 
 from vidbyte.tools.base import BaseTool
@@ -33,6 +33,7 @@ class FunctionTool(BaseTool):
         self._permission = permission
         self._output_schema = output_schema
         self.args_model = _build_args_model(func, self._name)
+        self._null_means_default = _null_means_default_fields(self.args_model)
         self._spec = self._build_spec()
         self.__name__ = self._name
         self.__doc__ = getattr(func, "__doc__", None)
@@ -51,14 +52,14 @@ class FunctionTool(BaseTool):
 
     def validate_call(self, call: ToolCall) -> str | None:
         try:
-            self.args_model.model_validate(dict(call.arguments))
+            _validate_arguments(self.args_model, self._arguments(call))
         except ValidationError as exc:
             return _validation_message(exc)
         return None
 
     async def execute(self, call: ToolCall) -> ToolResult:
         try:
-            model = self.args_model.model_validate(dict(call.arguments))
+            model = _validate_arguments(self.args_model, self._arguments(call))
         except ValidationError as exc:
             return ToolResult.failure(self.name, _validation_message(exc), metadata={"error_type": "validation"})
 
@@ -73,7 +74,11 @@ class FunctionTool(BaseTool):
                 if inspect.isawaitable(value):
                     value = await value
         except Exception as exc:
-            return ToolResult.failure(self.name, str(exc), metadata={"error_type": exc.__class__.__name__})
+            # @intent function-tool-errors-share-the-runtime-error-kind
+            # A raising function tool reports the same execution_error kind the runtime gives a raising
+            # BaseTool, so the model and ToolErrorPolicy treat both ways of writing a tool alike.
+            metadata = {"error": "execution_error", "error_type": exc.__class__.__name__}
+            return ToolResult.failure(self.name, str(exc), metadata=metadata)
 
         return ToolResult.success(
             self.name,
@@ -84,6 +89,17 @@ class FunctionTool(BaseTool):
                 "args_model": self.args_model.__name__,
             },
         )
+
+    def _arguments(self, call: ToolCall) -> dict[str, Any]:
+        # @intent null-optional-arg-means-default
+        # Models often send JSON null for an optional argument they mean to leave out; treat it exactly like an
+        # omitted key so the function's default applies instead of failing validation. A parameter whose type
+        # accepts None still receives None, and a required parameter still rejects null.
+        return {
+            name: value
+            for name, value in call.arguments.items()
+            if not (value is None and name in self._null_means_default)
+        }
 
     def _build_spec(self) -> ToolSpec:
         schema = self.args_model.model_json_schema()
@@ -134,6 +150,32 @@ def _build_args_model(func: Callable[..., Any], tool_name: str) -> type[BaseMode
     return create_model(f"{model_name}Args", **fields)
 
 
+def _null_means_default_fields(args_model: type[BaseModel]) -> frozenset[str]:
+    # Parameters with a default whose type rejects None; a null for one of them means "use the default".
+    names = set()
+    for name, field in args_model.model_fields.items():
+        if field.is_required():
+            continue
+        annotation: Any = Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation
+        try:
+            TypeAdapter(annotation).validate_python(None)
+        except ValidationError:
+            names.add(name)
+    return frozenset(names)
+
+
+def _validate_arguments(args_model: type[BaseModel], arguments: dict[str, Any]) -> BaseModel:
+    # @intent tool-arguments-validate-in-json-mode
+    # A model sends its arguments as JSON, so they validate in Pydantic's JSON mode: a strict=True model's Python mode
+    # rejects the JSON spellings of enums, dates and tuples. A call built in code may hold values JSON cannot (a model
+    # instance, a datetime, NaN); those arguments keep Python-mode validation.
+    try:
+        text = json.dumps(arguments, allow_nan=False)
+    except (TypeError, ValueError):
+        return args_model.model_validate(arguments)
+    return args_model.model_validate_json(text)
+
+
 def _docstring_summary(func: Callable[..., Any]) -> str:
     doc = inspect.getdoc(func) or ""
     paragraphs = [part.strip() for part in doc.split("\n\n") if part.strip()]
@@ -153,7 +195,16 @@ def _stringify_output(value: object) -> str:
         return value
     try:
         return json.dumps(value, default=_json_default, sort_keys=True)
-    except TypeError:
+    except (TypeError, ValueError):
+        pass
+    # @intent tool-model-output-is-json
+    # default= never sees dict keys, so Enum/date keys and mixed int/str keys raise above; normalize keys the way
+    # the equivalent model's JSON mode does, letting _json_default turn read-only mappings into objects and other
+    # unknown leaves into str(), and fall back to a repr only if that still fails. Nested models dump by alias here
+    # too (see _json_default).
+    try:
+        return json.dumps(to_jsonable_python(value, by_alias=True, fallback=_json_default), sort_keys=True)
+    except (TypeError, ValueError):
         return str(value)
 
 
@@ -162,10 +213,18 @@ def _json_default(value: object) -> object:
     # Models and dataclass instances become JSON objects so output_schema validation sees fields, not a repr string.
     # Other leaves (Enum, datetime, UUID, set) take pydantic's JSON-mode value, so a dict or dataclass return
     # serializes exactly like the equivalent model; only types pydantic cannot serialize fall back to str().
+    # @intent tool-model-output-round-trips
+    # A model dumps by alias, its own JSON form (the one model_json_schema describes and model_validate accepts), so a
+    # tool returning its declared output_schema type passes its own output check; models without aliases are unchanged.
     if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
+        return value.model_dump(mode="json", by_alias=True)
+    # @intent read-only-mappings-are-json-objects
+    # A frozen record often holds a MappingProxyType; asdict cannot deep-copy one and pydantic cannot serialize one,
+    # so read fields shallowly and turn any non-dict Mapping into a dict, letting json.dumps recurse through both.
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return dataclasses.asdict(value)
+        return {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
+    if isinstance(value, Mapping):
+        return dict(value)
     try:
         return to_jsonable_python(value)
     except ValueError:  # PydanticSerializationError and UnicodeDecodeError are both ValueErrors.

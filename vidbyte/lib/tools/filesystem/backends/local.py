@@ -25,10 +25,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         with path.open("w", encoding=encoding, newline=newline) as handle:
             handle.write(content)
 
-    def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool) -> None:
+    def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding=encoding) as handle:
+        with path.open("a", encoding=encoding, newline=newline) as handle:
             handle.write(content)
 
     def list_dir(self, path: Path) -> tuple[str, ...]:
@@ -69,7 +69,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
     def diff_text(self, left: Path, right_content: str, *, encoding: str, label: str) -> str:
         current = left.read_text(encoding=encoding).splitlines(keepends=True) if left.exists() else []
         proposed = right_content.splitlines(keepends=True)
-        return "".join(difflib.unified_diff(current, proposed, fromfile=str(left), tofile=label))
+        lines = difflib.unified_diff(current, proposed, fromfile=str(left), tofile=label)
+        # A last line with no newline gets git's marker, so the next
+        # diff line does not run onto the end of it.
+        return "".join(line if line.endswith("\n") else f"{line}\n\\ No newline at end of file\n" for line in lines)
 
     def zip_path(self, source: Path, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)

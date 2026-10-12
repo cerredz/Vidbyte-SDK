@@ -31,7 +31,7 @@ from vidbyte.sessions.contracts import (
     TraceCapture,
 )
 from vidbyte.lib.errors import AgentExecutionError
-from vidbyte.sessions.errors import SessionError
+from vidbyte.sessions.errors import SessionError, SessionNotFoundError
 from vidbyte.sessions.failure import Failure, FailurePhase, FailureRouter
 from vidbyte.sessions.portable import SessionBundleExporter
 from vidbyte.sessions.serialization import SessionSerializer
@@ -117,6 +117,7 @@ class Session:
         self._failures = FailureRouter(self)
         if _existing:
             self._adopt_existing_head()
+            self._adopt_existing_tags()
         else:
             self._write_initial_meta()
         self._bind_session_tools()
@@ -223,6 +224,10 @@ class Session:
     def edit(self, transform: Callable[[list[AgentMessage]], Sequence[AgentMessage]], *, label: str = "edit") -> "Session":
         """Apply a transform to history and write the result as a new checkpoint."""
         self._agent.history = list(transform(list(self._agent.history)))
+        # @intent edit-drops-tool-call-memory
+        # Rewritten history may drop turns, so clear tool-call memory as rewind() does; otherwise removed tool outputs are replayed next run.
+        if hasattr(self._agent, "_tool_call_contexts"):
+            self._agent._tool_call_contexts = []
         self._persist(self._agent.last_reply, label=label)
         return self
 
@@ -282,8 +287,17 @@ class Session:
         source = store.get(checkpoint_id) if checkpoint_id else store.head(session_id)
         if source is None:
             raise SessionError("Cannot resume a session with no checkpoints.", details={"session_id": session_id})
+        # @intent resume-checkpoint-stays-in-its-session
+        # Refuse another session's checkpoint, as rewind() and fork(at=) do; adopt() and fork_from() are the explicit cross-session paths.
+        if checkpoint_id and source.session_id != session_id:
+            raise SessionError("Cannot resume from a checkpoint from another session.", details={"checkpoint_id": checkpoint_id})
         agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
-        return cls(agent, store=store, session_id=session_id, policy=policy, trace=trace, _existing=True)
+        session = cls(agent, store=store, session_id=session_id, policy=policy, trace=trace, _existing=True)
+        # @intent resume-checkpoint-becomes-head
+        # The agent holds this checkpoint's history, so move the live and stored head there exactly as rewind() does; the next turn then records it as its parent.
+        if checkpoint_id:
+            session.rewind(to=source.id)
+        return session
 
     @classmethod
     def continue_(cls, store: SessionStore, session_id: str, **kwargs: Any) -> "Session":
@@ -347,6 +361,15 @@ class Session:
         # Point this session at the stored head when resuming an existing session.
         existing = self._store.head(self._session_id)
         self._head_id = existing.id if existing is not None else None
+
+    def _adopt_existing_tags(self) -> None:
+        # Take the tags recorded in the stored meta when resuming an existing session.
+        # @intent resumed-session-keeps-its-tags
+        # resume() rebuilds the same tagged session, so fork() must still copy its stored tags onto every branch.
+        try:
+            self._tags = tuple(self._store.get_meta(self._session_id).tags)
+        except SessionNotFoundError:
+            return
 
     def _session_latency(self) -> float | None:
         # Return checkpoint wall-clock span in seconds, or None when unavailable.

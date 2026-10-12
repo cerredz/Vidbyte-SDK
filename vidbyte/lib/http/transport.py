@@ -25,6 +25,19 @@ def _require_idempotency_guard(*, method: str, retry_count: int, idempotency_key
         raise ProviderRequestError(f"Retrying {method.upper()} requires an explicit idempotency_key: repeating it after a network ambiguity can duplicate the underlying side effect.", provider="http")
 
 
+# @intent exactly-one-content-type-in-any-spelling
+# Header names are case-insensitive, but dict.setdefault is not: a caller's "Content-Type" plus
+# a default "content-type" become two keys, httpx sends both lines, and Exa rejects the combined
+# "application/json, application/json" with HTTP 400. The default is added only when no spelling
+# of the header is present, and a caller's own value is never replaced.
+def _json_request_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    # Returns a copy of the headers that carries exactly one content-type for a JSON body.
+    request_headers = dict(headers)
+    if not any(name.lower() == "content-type" for name in request_headers):
+        request_headers["content-type"] = "application/json"
+    return request_headers
+
+
 @dataclass(frozen=True, slots=True)
 class HttpResponse:
     status_code: int
@@ -62,7 +75,7 @@ class HttpTransport:
         content: bytes | None = None
         if json_body is not None:
             content = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
+            request_headers = _json_request_headers(request_headers)
         request = client.build_request(method, url, headers=request_headers, content=content)
         if max_response_bytes is not None:
             return await self._send_bounded(client, request, max_response_bytes=max_response_bytes)
@@ -117,7 +130,7 @@ class SyncHttpTransport:
         body_data: bytes | None = None
         if json_body is not None:
             body_data = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
+            request_headers = _json_request_headers(request_headers)
         request = Request(url=url, data=body_data, headers=request_headers, method=method)
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
@@ -153,7 +166,7 @@ class SyncHttpTransport:
         body_data: bytes | None = None
         if json_body is not None:
             body_data = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
+            request_headers = _json_request_headers(request_headers)
         request = Request(url=url, data=body_data, headers=request_headers, method=method)
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
@@ -170,7 +183,7 @@ class SyncHttpTransport:
         request_headers = dict(headers)
         if json_body is not None:
             body = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
+            request_headers = _json_request_headers(request_headers)
         request = Request(url=url, data=body, headers=request_headers, method=method)
         try:
             with urlopen(request, timeout=timeout_seconds) as response:

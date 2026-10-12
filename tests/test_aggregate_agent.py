@@ -311,6 +311,15 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
             await agent.generate_reply("q")
         self.assertEqual(outer.rollup().model_call_count, 4)
 
+    async def test_behavior_describes_the_latest_run(self) -> None:
+        # [Silent Failure] Reading agent.behavior after one run must not pin it to that run for every later run.
+        agent = self._agent()
+        first = await agent.generate_reply("refund question")
+        self.assertEqual(agent.behavior.probe.output, first.content)
+        second = await agent.generate_reply("digital question")
+        self.assertNotEqual(second.content, first.content)
+        self.assertEqual(agent.behavior.probe.output, second.content)
+
     async def test_persisted_agent_checkpoints_each_successful_turn(self) -> None:
         # [Silent Failure] A Session-bound AggregateAgent checkpoints every turn with its proposer and aggregator tokens.
         agent = self._agent(proposers=[_metered_agent("a"), _metered_agent("b")], aggregator=_metered_agent("synth"))

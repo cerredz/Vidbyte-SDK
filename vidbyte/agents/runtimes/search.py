@@ -85,7 +85,7 @@ class SearchTreeRuntimeComponent:
             memory=managed_context.memory,
             permissions=managed_context.permissions,
             metadata=dict(agent_metadata),
-            context_items=tuple(managed_context.context_items),
+            context_items=tuple(base_context.context_items) if base_context is not None else (),
         )
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: Any = None) -> StrategyResult:

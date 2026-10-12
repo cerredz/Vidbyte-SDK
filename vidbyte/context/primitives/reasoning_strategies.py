@@ -85,10 +85,17 @@ _CONDITION_MET_KEYS = ("condition", "satisfied")
 def _render_object_bullets(
     items: tuple[Mapping[str, Any], ...], keys: tuple[str, ...]
 ) -> tuple[str, ...]:
-    # Flattens each mapping into one "key: value; key: value" bullet, skipping absent keys.
+    # Flattens each mapping into one "key: value; key: value" bullet, skipping absent keys
+    # and empty values (None, blank text, empty containers) but keeping False and 0.
     bullets = []
     for item in items:
-        parts = [f"{key}: {item[key]}" for key in keys if item.get(key)]
+        # @intent false-verdict-is-a-verdict
+        # A false or zero verdict (e.g. "holds": false) is an answer, so it must not read as unexamined.
+        parts = [
+            f"{key}: {item[key]}"
+            for key in keys
+            if isinstance(item.get(key), (bool, int, float)) or str(item.get(key) or "").strip()
+        ]
         if parts:
             bullets.append("; ".join(parts))
     return tuple(bullets)

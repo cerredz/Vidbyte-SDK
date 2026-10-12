@@ -93,7 +93,7 @@ def _item(agent: Any) -> EnvironmentContextItem:
 
 def _load_as(platform_name: str, root: Path, monkeypatch: pytest.MonkeyPatch) -> EnvironmentContextItem:
     # Runs the loader alone with sys.platform faked, so nothing else the agent builds sees the fake.
-    settings = CodingAgentSettings(root_dir=root, permission_policy=PermissionPolicy.allow_all())
+    settings = CodingAgentSettings(root_dir=root, permission_policy=PermissionPolicy.allow_all(), max_rewrite_lines=300)
     with monkeypatch.context() as patch:
         patch.setattr(sys, "platform", platform_name)
         section = EnvironmentLoader.load(settings)

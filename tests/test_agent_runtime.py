@@ -37,7 +37,7 @@ from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.tools import ToolActivity, ToolParameter
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, TaskContextItem, TrajectoryCheckpointAlgorithm
+from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, DocumentContextItem, TaskContextItem, TextContextItem, TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
@@ -58,6 +58,17 @@ class FakeRunner:
     def __init__(self, responses: list[FakeResponse]) -> None:
         self.responses = list(responses)
         self.calls: list[dict] = []
+
+
+class RecordingRunner:
+    """Offline runner that records every model request and answers without tool calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def run(self, prompt: str, **kwargs: object) -> FakeResponse:
+        self.calls.append({"prompt": prompt, "kwargs": kwargs})
+        return FakeResponse("ok", {"output_text": "ok"})
 
 
 class WriteTool(BaseTool):
@@ -197,6 +208,43 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(context.permissions.can_read_files)
         self.assertEqual(context.context_items[0].goal, "preserve context")
         self.assertEqual(tuple(tool.name for tool in context.tools), ("isDone",))
+
+    def test_runtime_renders_each_context_item_once(self) -> None:
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Agent system.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+        )
+        manager = ContextManager()
+        manager.add(TextContextItem(title="Managed", content="MARKER-MANAGER"))
+        context = runtime.build_context(
+            "task",
+            base_context=StrategyContext(context_items=[TaskContextItem(goal="MARKER-CALLER")]),
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+            context_items=(DocumentContextItem(source="spec.md", content="MARKER-AGENT"),),
+            context_manager=manager,
+        )
+
+        system = runtime._build_system_string(context)
+        for marker in ("MARKER-AGENT", "MARKER-MANAGER", "MARKER-CALLER"):
+            self.assertEqual(system.count(marker), 1, marker)
+
+    async def test_base_context_history_reaches_the_model_like_history_argument(self) -> None:
+        # [Regression] BaseContext(history=...) passed as context= was dropped while history= reached the model.
+        earlier = AgentMessage(sender="customer", recipient="support", content="HISTMARK order 1234 is late")
+        requests: dict[str, str] = {}
+        for form, options in (("history", {"history": [earlier]}), ("context", {"context": StrategyContext(history=(earlier,))})):
+            runner = RecordingRunner()
+            agent = build_test_agent(name="support", system_prompt="Help.", runner=runner)
+            await agent.arun("any update?", **options)
+            requests[form] = str(runner.calls)
+
+        self.assertEqual(requests["history"].count("HISTMARK"), 1)
+        self.assertEqual(requests["context"].count("HISTMARK"), 1)
 
     def test_runtime_builds_non_agentic_context_without_internal_tools(self) -> None:
         @tool
@@ -934,6 +982,35 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
         timed_out_calls = [call for call in tool_calls if call.timed_out]
         self.assertEqual(len(timed_out_calls), 1)
         self.assertEqual(timed_out_calls[0].tool_name, "slow_tool")
+
+    async def test_settings_denials_are_recorded_like_a_middleware_denial(self) -> None:
+        """A ToolSettings or allowed_tools refusal reaches speed stats as one failed call, exactly like a middleware denial."""
+        guardrails = {
+            "middleware": dict(middleware=[DenyingMiddleware()]),
+            "denied_tools": dict(config=AgentRuntimeConfig(tool_settings=ToolSettings(denied_tools=["write"]))),
+            "allowed_tools": dict(config=AgentLoopSettings(allowed_tools=("other",)).to_runtime_config()),
+        }
+        for name, guardrail in guardrails.items():
+            with self.subTest(guardrail=name):
+                write_tool = WriteTool()
+                runner = FakeRunner(
+                    [
+                        _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "write", "arguments": "{}", "call_id": "call_1"}]}),
+                        _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+                    ]
+                )
+                runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([write_tool]), permission_policy=PermissionPolicy(), **guardrail)
+                context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+                await runtime.arun(
+                    "task",
+                    handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                    context=context,
+                )
+
+                self.assertFalse(write_tool.executed)
+                write_stats = next(stats for stats in runtime.speed_tracker.rollup().tool_stats if stats.tool_name == "write")
+                self.assertEqual((write_stats.tool_call_count, write_stats.failed_tool_call_count), (1, 1))
 
 
 class AnswerRunner:

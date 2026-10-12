@@ -436,7 +436,7 @@ Codex runs its own loop, so Vidbyte can enforce middleware only at the **turn bo
 | `before_run` | ✅ | Before Codex is started. An abort here costs nothing. |
 | `after_run` | ✅ | After the turn finished. An abort here cannot undo the turn. |
 | `on_model_error` | ✅ (observe only) | When a turn attempt raised. Its decision is ignored, and the real error is re-raised. |
-| `before_iteration`, `before_model_call`, `after_model_response`, `before_tool_call`, `after_tool_call`, `after_iteration` | ❌ | These run inside Codex's loop. A middleware that overrides any of them is **rejected at construction**. |
+| `before_iteration`, `before_model_call`, `after_model_response`, `before_tool_call`, `after_tool_call`, `after_iteration`, `review_finish` | ❌ | These run inside Codex's loop. A middleware that overrides any of them is **rejected at construction**. |
 
 ### A guard that blocks a run before it starts
 

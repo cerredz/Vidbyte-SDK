@@ -7,14 +7,16 @@ from unittest.mock import patch
 from tests.agent_test_support import build_test_agent
 from pydantic import BaseModel
 
-from vidbyte import Agent, OutputSchemaViolationError, tool
+from vidbyte import Agent, AgentMiddleware, MiddlewareDecision, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.lib.runners import TextModelRunner
-from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
-from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareEvent, MiddlewareHook
+from vidbyte.middleware.builtins import AuditLogMiddleware, MessageHistoryCompactionMiddleware, RuntimeLimitMiddleware, ToolPolicyMiddleware
+from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, ToolStatus
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, IsDoneTool
+from vidbyte.tools.security import PermissionPolicy
 
 
 class FakeResponse:
@@ -154,6 +156,32 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "Agent runtime stopped after reaching max_iterations.")
         self.assertEqual(reply.metadata["stop_reason"], "max_iterations")
         self.assertEqual(reply.metadata["iteration_count"], 1)
+
+    async def test_custom_tool_string_status_is_normalized_so_its_output_reaches_the_model(self) -> None:
+        # Regression: a ToolResult built with status="success" crashed the runtime on status.value.
+        class StockTool(BaseTool):
+            def spec(self) -> ToolSpec:
+                return ToolSpec(name="stock", description="Check stock.")
+
+            async def execute(self, call: ToolCall) -> ToolResult:
+                return ToolResult(tool_name="stock", status="success", output="sku X1 has 4 units")
+
+        runner = ToolCallingRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "stock", "arguments": "{}", "call_id": "call_1"}]}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "4"}', "call_id": "call_2"}]}),
+            ]
+        )
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[StockTool()])
+
+        reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["tool_call_states"], ("succeeded", "succeeded"))
+        tool_messages = [message for message in runner.calls[1]["kwargs"]["messages"] if message.get("role") == "tool"]
+        self.assertEqual([message.get("content") for message in tool_messages], ["sku X1 has 4 units"])
+        self.assertIs(ToolResult(tool_name="t", status="error", output="x").status, ToolStatus.ERROR)
+        with self.assertRaises(ValueError):
+            ToolResult(tool_name="t", status="ok", output="x")
 
 
 class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
@@ -510,6 +538,27 @@ class RejectedFinishSiblingCallTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not executed", following[1]["content"])
         self.assertEqual(second_call_messages[second_call_messages.index(following[-1]) + 1]["role"], "user")
 
+    async def test_accepted_is_done_end_of_run_hooks_do_not_see_the_provisional_refusal(self) -> None:
+        # @intent accepted-finish-hides-provisional-refusal
+        # An accepted isDone finish must not reach the after-run hooks as a refused one.
+        @tool
+        def search(q: str) -> str:
+            """Search."""
+            return "hit"
+
+        captured = _CaptureAfterRunMessages()
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": "done"}'), ("call_2", "search", '{"q": "a"}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search], middleware=[captured])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            result = await agent.arun("task")
+
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+        self.assertEqual(result.content, "done")
+        self.assertTrue(captured.messages, "the after-run hook saw no conversation")
+        rendered = repr(captured.messages)
+        self.assertNotIn("not accepted", rendered)
+        self.assertNotIn("turned down", rendered)
+
     def _assert_tool_calls_answered(self, messages: list[dict]) -> list[dict]:
         """Assert every assistant tool_call id is answered by the contiguous tool messages that follow it; return them."""
         assistant_indices = [i for i, m in enumerate(messages) if isinstance(m.get("tool_calls"), list)]
@@ -569,6 +618,89 @@ class ContractUnsatisfiedStructuredOutputTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(ctx.exception.stop_reason, "contract_unsatisfied")
 
 
+class _StopAfterFirstIteration(AgentMiddleware):
+    async def after_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        return MiddlewareDecision.abort("stop_after_first")
+
+
+class ContractRejectedPlainTextDraftTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rejected_plain_text_draft_stays_before_the_feedback(self) -> None:
+        # @intent contract-feedback-follows-the-rejected-draft
+        # A plain-text finish the floor rejects must reach the next request, so the model can revise what it wrote.
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "hit"
+
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _chat_tool_turn(("call_1", "lookup", '{"q": "a"}')), _text_turn("final answer")])
+        settings = AgentLoopSettings(output_contracts=(MinToolCalls(1),))
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.content, "final answer")
+        second_request = runner.calls[1]["kwargs"]["messages"]
+        feedback_index = next(i for i, m in enumerate(second_request) if "You cannot finish yet" in str(m.get("content")))
+        self.assertEqual(second_request[feedback_index]["role"], "user")
+        self.assertEqual(second_request[feedback_index - 1], {"role": "assistant", "content": "DRAFT answer"})
+
+    async def test_rejected_plain_text_finish_still_completes_its_iteration(self) -> None:
+        # @intent rejected-finish-still-completes-its-iteration
+        # Every started iteration reports completing, and an after-iteration abort on the rejected one stops the run.
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "hit"
+
+        settings = AgentLoopSettings(output_contracts=(MinToolCalls(1),))
+        events: list[MiddlewareEvent] = []
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _chat_tool_turn(("call_1", "lookup", '{"q": "a"}')), _text_turn("final answer")])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=[AuditLogMiddleware(sink=events)], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.content, "final answer")
+        hooks = [event.hook for event in events]
+        self.assertEqual(hooks.count(MiddlewareHook.BEFORE_ITERATION), 3)
+        self.assertEqual(hooks.count(MiddlewareHook.AFTER_ITERATION), 3)
+
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _text_turn("never requested")])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=[_StopAfterFirstIteration()], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "middleware_abort")
+        self.assertEqual(len(runner.calls), 1)
+
+    async def test_exhausted_plain_text_reply_reaches_the_end_of_run_hooks(self) -> None:
+        # @intent exhausted-reply-reaches-end-of-run-hooks
+        # The reply a contract-exhausted plain-text finish returns is in the conversation the after-run hooks see.
+        @tool
+        def lookup(q: str) -> str:
+            """Look something up."""
+            return "hit"
+
+        captured = _CaptureAfterRunMessages()
+        runner = ToolCallingRunner([_text_turn("DRAFT answer"), _text_turn("SECOND answer")])
+        settings = AgentLoopSettings(max_iterations=6, output_contracts=(MinToolCalls(1),), max_contract_rejections=1)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=[captured], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
+        self.assertEqual(reply.content, "SECOND answer")
+        self.assertIn({"role": "assistant", "content": "SECOND answer"}, captured.messages)
+
+
+class _CaptureAfterRunMessages(AgentMiddleware):
+    def __init__(self) -> None:
+        self.messages: list[dict[str, object]] = []
+
+    async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        self.messages = [dict(message) for message in ctx.provider_messages or ()]
+        return MiddlewareDecision.continue_()
+
+
 class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
     async def test_floor_equal_to_per_tool_cap_is_met_even_when_denials_abort(self) -> None:
         # A per-tool cap only denies the call after the cap, so the floor is met without ever reaching the abort path.
@@ -589,6 +721,90 @@ class PerToolFloorAtCapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["stop_reason"], "final_response")
         self.assertEqual(reply.content, "answer")
         self.assertEqual(searched, ["a", "b"])
+
+
+class InternalToolBudgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rejected_is_done_attempts_do_not_spend_max_tool_calls(self) -> None:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # Early isDone calls the floor rejects are loop control, so both searches the floor demands still fit the budget.
+        searched: list[str] = []
+
+        @tool
+        def search(q: str) -> str:
+            """Search."""
+            searched.append(q)
+            return "hit"
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "isDone", '{"final_answer": "early 1"}')),
+                _chat_tool_turn(("call_2", "search", '{"q": "a"}')),
+                _chat_tool_turn(("call_3", "isDone", '{"final_answer": "early 2"}')),
+                _chat_tool_turn(("call_4", "search", '{"q": "b"}')),
+                _chat_tool_turn(("call_5", "isDone", '{"final_answer": "done after 2 searches"}')),
+            ]
+        )
+        settings = AgentLoopSettings(max_tool_calls=3, output_contracts=(MinToolCalls(2),))
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(searched, ["a", "b"])
+        self.assertEqual(reply.content, "done after 2 searches")
+        self.assertIn("max_tool_calls: 2/3", runner.calls[-1]["kwargs"]["system"])
+
+    async def test_rejected_is_done_attempts_do_not_spend_middleware_tool_call_limit(self) -> None:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # A RuntimeLimitMiddleware cap counts the same developer calls as AgentLoopSettings.max_tool_calls.
+        sent: list[str] = []
+
+        @tool
+        def send_invoice(customer: str) -> str:
+            """Send the invoice."""
+            sent.append(customer)
+            return "sent"
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "isDone", '{"final_answer": "early 1"}')),
+                _chat_tool_turn(("call_2", "isDone", '{"final_answer": "early 2"}')),
+                _chat_tool_turn(("call_3", "send_invoice", '{"customer": "acme"}')),
+                _chat_tool_turn(("call_4", "isDone", '{"final_answer": "Invoice sent."}')),
+            ]
+        )
+        settings = AgentLoopSettings(max_iterations=8, output_contracts=(MinToolCalls(1),), max_contract_rejections=5)
+        agent = build_test_agent(name="billing", system_prompt="Send invoices.", runner=runner, tools=[send_invoice], middleware=[RuntimeLimitMiddleware(max_tool_calls=2)], agent_loop_settings=settings)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("invoice acme")
+
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(sent, ["acme"])
+        self.assertEqual(reply.content, "Invoice sent.")
+
+    async def test_after_run_tool_call_count_excludes_the_accepted_is_done(self) -> None:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # after_run sees the same non-internal count as every other hook, so the finishing isDone never adds one.
+        @tool
+        def send_invoice(customer: str) -> str:
+            """Send the invoice."""
+            return "sent"
+
+        events: list[MiddlewareEvent] = []
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "send_invoice", '{"customer": "acme"}')),
+                _chat_tool_turn(("call_2", "isDone", '{"final_answer": "Invoice sent."}')),
+            ]
+        )
+        agent = build_test_agent(name="billing", system_prompt="Send invoices.", runner=runner, tools=[send_invoice], middleware=[AuditLogMiddleware(sink=events)])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("invoice acme")
+
+        counts = {event.hook: event.metadata["tool_call_count"] for event in events}
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(counts[MiddlewareHook.AFTER_RUN], 1)
+        self.assertEqual(counts[MiddlewareHook.AFTER_RUN], counts[MiddlewareHook.AFTER_ITERATION])
 
 
 class IterationFloorAtMaxIterationsTests(unittest.IsolatedAsyncioTestCase):
@@ -686,3 +902,48 @@ class CompactionFloorTests(unittest.IsolatedAsyncioTestCase):
         reply, _ = await self._run(exclude_tools=("lookup",))
 
         self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
+
+
+class DeniedIsDoneTests(unittest.IsolatedAsyncioTestCase):
+    # @intent denied-finish-is-not-a-finish
+    # A denied isDone is answered like any denied call and the loop continues, so the denial text never becomes the reply.
+    async def _run(self, **agent_options: object) -> tuple[object, ToolCallingRunner]:
+        @tool(permission=ToolPermission.READ)
+        def search(q: str) -> str:
+            """Search."""
+            return "hit"
+
+        runner = ToolCallingRunner(
+            [
+                _chat_tool_turn(("call_1", "search", '{"q": "a"}')),
+                _chat_tool_turn(("call_2", "isDone", '{"final_answer": "early"}')),
+                _text_turn("final answer in text"),
+            ]
+        )
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search], **agent_options)
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
+        return reply, runner
+
+    def _denial_seen_by_model(self, runner: ToolCallingRunner) -> str:
+        tool_messages = [m for m in runner.calls[2]["kwargs"]["messages"] if m.get("role") == "tool" and m.get("tool_call_id") == "call_2"]
+        self.assertEqual(len(tool_messages), 1, "the denied isDone must be answered in the model's next request")
+        return str(tool_messages[0]["content"])
+
+    async def test_permission_denied_is_done_continues_the_run(self) -> None:
+        reply, runner = await self._run(permission_policy=PermissionPolicy(allowed=frozenset({ToolPermission.READ})))
+
+        self.assertEqual(reply.content, "final answer in text")
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertIn("Permission denied", self._denial_seen_by_model(runner))
+
+    async def test_middleware_denied_is_done_continues_the_run_and_stays_internal(self) -> None:
+        reply, runner = await self._run(middleware=[ToolPolicyMiddleware(allow_tools=["search"], allow_internal_tools=False)])
+
+        self.assertEqual(reply.content, "final answer in text")
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertIn("Tool denied by middleware", self._denial_seen_by_model(runner))
+        # @intent denied-internal-tool-stays-internal
+        denied = [c for c in reply.metadata["tool_calls"] if c.tool_name == IS_DONE_TOOL_NAME]
+        self.assertEqual(len(denied), 1)
+        self.assertTrue(denied[0].metadata.get("internal"))

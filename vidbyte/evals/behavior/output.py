@@ -254,7 +254,10 @@ class OutputBehavior:
         if callable(model_dump):
             dumped = model_dump()
             if isinstance(dumped, Mapping):
-                return dumped
+                # @intent nested-field-resolves-as-itself
+                # model_dump() turns nested models into dicts; read each field back off the object so a resolved
+                # field is the structured output's own value, as the attribute branch returns for a dataclass.
+                return {key: getattr(value, key, dumped[key]) for key in dumped}
         return None
 
     def _normalize_pair(self, output: str, target: str, *, case_sensitive: bool, strip: bool) -> tuple[str, str]:
