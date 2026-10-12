@@ -77,7 +77,7 @@ VIDBYTE_MANAGED_TEXT_PROVIDERS: frozenset[ModelProvider] = frozenset({
 })
 # The gateway refuses a body without an output-token cap and injects
 # none, so a managed call without max_output_tokens sends this one.
-VIDBYTE_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS: int = 8_192
+VIDBYTE_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS: int = 32_768
 # The gateway gives one upstream call up to 600 s in total; 30 s more
 # covers its admission, hold, and metering, so the SDK never gives up
 # on a call Vidbyte may still complete and bill.
