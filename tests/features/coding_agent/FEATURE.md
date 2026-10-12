@@ -6,7 +6,7 @@ An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAge
 
 ## Contract
 
-`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, verify_command=None, max_verify_attempts=3, tools=(), permission_policy=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
+`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, verify_command=None, max_verify_attempts=3, tools=(), permission_policy=None, readonly_paths=(), max_rewrite_lines=300, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. `readonly_paths` is a list or tuple of non-blank `fnmatch` globs relative to `root_dir`; when it is non-empty, one `ReadonlyPathsMiddleware` is appended after the caller's middleware, and it denies `write_text` and `replace_text` on any file whose resolved, root-relative POSIX path matches (ignoring case on Windows), naming the file and the pattern. `max_rewrite_lines` (an int of at least 1, or `None` for no limit) makes `write_text` refuse, with an error result that points to `replace_text`, to replace an existing file with more lines than the limit; the file is left untouched and the `write_text` description names the limit. Behaviour other than construction is `BaseAgent`'s own.
 
 With `verify_command` set (a non-blank string; `max_verify_attempts` is an int of at least 1, never a bool), the agent appends one `VerifyCommandMiddleware` after the caller's middleware. At every finish attempt that the output contracts accept, a plain answer or an `isDone` call, it runs `bash -c <command>` once in `root_dir` through `BashTool`. Exit code 0 lets the run end as usual. Anything else sends the model `Not done yet: the verification command `<command>` failed (<reason>). Its output is below. Fix the problem, then finish again.` and the bash output, as a user message. The `max_verify_attempts`-th failure ends the run without raising: the output is the model's last answer and `stop_reason` is `contract_unsatisfied`. `metadata["verify_command"]` is `{"passed", "attempts", "last_exit_code"}`. With no bash, construction raises `ConfigurationError` naming `verify_command`.
 
@@ -80,7 +80,14 @@ These are the failure inventory the tests were chosen from, given as input → w
   - The client falls back to the provider's environment variable (INV-6).
   - Construction makes a network call (INV-18).
 - **Fetch view errors.** The model sees only the "Fetched N page(s)" summary and never the page text (AC-7). The view changes the schema or metadata, so the bill differs from the bare tool's (AC-7, INV-16, INV-20).
+- **Rewrite limit errors.** The default 300 never reaches `write_text`, so a model rewrites a big file from memory and drops code. `None` still limits, or a bad value (`0`, `True`, `2.5`, `"300"`) is accepted and sets a different limit.
 - **Tool list errors.** A caller tool silently shadows a built-in tool (AC-8). Caller tools are reordered or dropped (AC-9).
+- **Read-only path errors.**
+  - `readonly_paths="tests/**"` is split into one-character patterns that protect nothing.
+  - The raw `path` argument is matched, so `./tests/x.py`, `src/../tests/x.py`, an absolute path, or on Windows `tests\x.py` and `TESTS/x.py` edit a protected file.
+  - Only existing files are checked, so a new test file is written.
+  - A path the tool would reject (outside root) gets a denial instead of the tool's own error.
+  - The check runs before the caller's middleware, or is added when there are no patterns.
 - **Subclass errors.** `CodingAgent` overrides `BaseAgent` behaviour, or adds state that changes `export_state` (INV-1, INV-2). `restore` reports a tool mismatch or loses allow-all (AC-21).
 - **Bash spawn errors.**
   - `shell=True` or string interpolation mangles quotes or `$` (INV-9).
@@ -123,6 +130,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Identity errors.
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
+- `test_coding_agent_max_rewrite_lines.py` checks that the default 300 refuses a 301-line rewrite through the loop and the run goes on, that the model is told the limit, that `None` turns it off, and that bad values fail at construction. The line-counting rules are tested in `tests/test_filesystem_tools.py` (`WriteTextOverwriteLimitTests`).
 - `test_coding_agent_verify_command.py` checks `verify_command` on both finish paths: a pass on the first finish, a failure fixed after feedback, a run never fixed, a run ended first by another limit, no command, invalid arguments, a missing bash, the output cap, the time limit, the root after `chdir`, the model's own bash calls, contracts first, a fresh count per run, and a plain `BaseAgent`. It also checks `FinishReview` and `MiddlewarePipeline.review_finish`.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
@@ -145,6 +153,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - An endless printer.
   - Closing the transport after `asyncio.run`.
   - Cancellation, both directly and through the runtime's tool timeout.
+- `test_coding_agent_readonly_paths.py` checks `readonly_paths` through the loop: both edit tools denied with the file unchanged and the path and pattern named, every path spelling and a new file, case on Windows, unprotected writes and protected reads, the outside-root error unchanged, no middleware by default, construction errors, and the caller's middleware first.
 
 Run everything with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent`.
 

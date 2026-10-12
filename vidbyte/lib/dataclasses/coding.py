@@ -1,19 +1,20 @@
 """FILE: vidbyte/lib/dataclasses/coding.py
 
-PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the verification command and its attempt limit, the caller's own tools, and the permission policy; and CodingVerification, the validated outcome so far of one run's verification command.
-ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools), and exported by the root vidbyte package. CodingVerification is built by vidbyte/middleware/builtins/verify_command.py (VerifyCommandMiddleware) once per verification and kept in the run's run_state.
+PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the verification command and its attempt limit, the caller's own tools, the permission policy, the read-only path patterns, and the write_text rewrite limit; and CodingVerification, the validated outcome so far of one run's verification command.
+ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools), and exported by the root vidbyte package; its readonly_paths feed vidbyte/middleware/builtins/readonly_paths.py. CodingVerification is built by vidbyte/middleware/builtins/verify_command.py (VerifyCommandMiddleware) once per verification and kept in the run's run_state.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
-FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_verification checks verify_command and max_verify_attempts; _check_tools_and_policy checks the caller's tools and the policy. CodingVerification.__post_init__ checks attempts and last_exit_code, and passed is derived from last_exit_code.
+FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_verification checks verify_command and max_verify_attempts; _check_tools_and_policy checks the caller's tools and the policy; _readonly_paths checks the patterns and returns them as a tuple; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses. CodingVerification.__post_init__ checks attempts and last_exit_code, and passed is derived from last_exit_code.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools. A new CodingAgent keyword adds one field and one check here, and its bounds go in vidbyte/lib/constants/coding.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
-KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. max_verify_attempts is checked even when verify_command is None. Whether bash exists is checked by VerifyCommandMiddleware, not here, because vidbyte/lib cannot import the bash tool.
-RELATED DOCS: docs/spec/coding-agent/spec.md; docs/design/coding-agent-verify-command.md; vidbyte/agents/README.md (Coding Agent)
-TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, and tests/features/coding_agent/test_coding_agent_verify_command.py
+KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. readonly_paths keeps its raw type for the same reason: tuple("tests/**") would split a bare string into characters. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. max_verify_attempts is checked even when verify_command is None. Whether bash exists is checked by VerifyCommandMiddleware, not here, because vidbyte/lib cannot import the bash tool.
+RELATED DOCS: docs/spec/coding-agent/spec.md; docs/design/coding-agent-verify-command.md; docs/design/coding-agent-readonly-paths.md; vidbyte/agents/README.md (Coding Agent)
+TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_readonly_paths.py, and tests/features/coding_agent/test_coding_agent_verify_command.py
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,22 +22,26 @@ from vidbyte.lib.constants.coding import (
     CODING_DEFAULT_MAX_VERIFY_ATTEMPTS,
     CODING_MIN_VERIFY_ATTEMPTS,
 )
+from vidbyte.lib.dataclasses.filesystem import OverwriteLineLimit
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.errors import ConfigurationError
 
 
 @dataclass(frozen=True, slots=True)
 class CodingAgentSettings:
-    """Validated CodingAgent arguments: the root folder, at most one fetch key, the verification command, the caller's tools, and the policy.
+    """Validated CodingAgent arguments: the root folder, at most one fetch key, the verification command, the caller's tools, the policy, the read-only patterns, and the rewrite limit.
 
     root_dir is typed Path | str because the record must see the raw
     value: Path("") is the current folder, so converting first would
     accept an empty string. After __post_init__ it is always the
-    resolved absolute Path.
+    resolved absolute Path. readonly_paths is typed Sequence[str] for
+    the same reason: tuple("tests/**") would split a bare string into
+    characters. After __post_init__ it is always a tuple of str.
     """
 
     root_dir: Path | str
     permission_policy: PermissionPolicy
+    max_rewrite_lines: int | None
     tools: tuple[object, ...] = ()
     firecrawl_api_key: str | None = field(default=None, repr=False)
     browserbase_api_key: str | None = field(default=None, repr=False)
@@ -44,6 +49,7 @@ class CodingAgentSettings:
     tavily_api_key: str | None = field(default=None, repr=False)
     verify_command: str | None = None
     max_verify_attempts: int = CODING_DEFAULT_MAX_VERIFY_ATTEMPTS
+    readonly_paths: Sequence[str] = ()
 
     def __post_init__(self) -> None:
         # Check the root folder and keep its absolute path, so a later
@@ -60,6 +66,14 @@ class CodingAgentSettings:
 
         # Check the caller's tools and the policy every call runs under.
         self._check_tools_and_policy()
+
+        # Check the read-only patterns and keep them as a tuple.
+        object.__setattr__(self, "readonly_paths", self._readonly_paths())
+
+        # Check the rewrite limit with the same rule write_text's own
+        # config uses: None turns it off, and a number is the most lines
+        # an existing file may have and still be replaced whole.
+        OverwriteLineLimit(self.max_rewrite_lines, "max_rewrite_lines")
 
     def _resolved_root(self) -> Path:
         """Return root_dir as an absolute path, or raise when it is not an existing directory."""
@@ -116,6 +130,20 @@ class CodingAgentSettings:
             raise ConfigurationError("CodingAgent tools must be a tuple.", details={"tools_type": type(self.tools).__name__})
         if not isinstance(self.permission_policy, PermissionPolicy):
             raise ConfigurationError("CodingAgent permission_policy must be a PermissionPolicy.", details={"permission_policy_type": type(self.permission_policy).__name__})
+
+    def _readonly_paths(self) -> tuple[str, ...]:
+        """Return readonly_paths as a tuple, or raise unless it is a list or tuple of non-blank strings."""
+        # @intent readonly-paths-reject-a-bare-string
+        # A bare string is a sequence of characters, so "tests/**"
+        # would protect the files "t", "e", and so on, and the tests
+        # would stay editable without any error.
+        paths = self.readonly_paths
+        if isinstance(paths, str) or not isinstance(paths, Sequence):
+            raise ConfigurationError(f"CodingAgent readonly_paths must be a list or tuple of glob strings such as ['tests/**'], not a {type(paths).__name__}.", details={"readonly_paths_type": type(paths).__name__})
+        bad = [repr(path) for path in paths if not isinstance(path, str) or not path.strip()]
+        if bad:
+            raise ConfigurationError("CodingAgent readonly_paths entries must be non-blank strings.", details={"bad_entries": bad})
+        return tuple(paths)
 
 
 @dataclass(frozen=True, slots=True)

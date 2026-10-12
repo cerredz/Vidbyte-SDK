@@ -21,11 +21,15 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - `test_coding_agent_acceptance.py` checks the end-to-end runs through the agent loop. Start here for a caller-visible regression.
 - `test_coding_agent_contract.py` checks the constructor contract: public names, the subclass surface, export and restore parity, caller tools, identity errors, and root validation and pinning.
 - `test_coding_agent_web_fetch.py` checks fetch-key selection, authentication, confinement and secrecy, and the keyed fetch view against the bare priced tool.
+- `test_coding_agent_max_rewrite_lines.py` checks that `max_rewrite_lines` reaches `write_text`: the default 300 refuses a 301-line rewrite and the run goes on, `None` turns it off, and bad values fail at construction.
 - `test_coding_agent_verify_command.py` checks `verify_command`: feedback and retries on both finish paths, the attempt limit and its metadata, argument checks, the output cap and time limit it inherits from bash, and that a plain `BaseAgent` finishes as before.
 - `test_bash_tool_contract.py` checks `BashTool`'s input and output contract: the spec, validation, streams, `cwd`, argv, stdin, spawn errors, decoding, the output cap, and the bash lookup.
 - `test_bash_tool_process_bounds.py` checks the time limit, process-group kill, cancellation and pipe cleanup on real processes. Start here for a hang or a leftover process.
+- `test_coding_agent_readonly_paths.py` checks that `readonly_paths` files can be read but not edited with `write_text` or `replace_text`, however the model spells the path, and that construction rejects a bare string.
 
 ## Logs
 
 - 2026-10-10 - The pack was written red before implementation from spec r3 - every test fails at import until `vidbyte/agents/coding.py` and `vidbyte/tools/builtins/bash.py` exist.
+- 2026-10-11 - Added `test_coding_agent_max_rewrite_lines.py` for the `max_rewrite_lines` keyword (write_text may not replace a big existing file).
+- 2026-10-11 - Added `test_coding_agent_readonly_paths.py` with the `readonly_paths` setting (`docs/design/coding-agent-readonly-paths.md`).
 - 2026-10-11 - Added `test_coding_agent_verify_command.py` with `verify_command` (docs/design/coding-agent-verify-command.md).
