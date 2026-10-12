@@ -1428,6 +1428,7 @@ await session.arun("first step")
 
 # later / cold process - re-supply non-serializable parts
 session = Session.resume(store, session_id, tools=[grep])
+session = Session.resume(store, session_id, api_key=tenant_key)  # keys are never checkpointed; re-pass an explicit one
 session = Session.continue_(store, session_id)           # == resume(head)
 branch = Session.fork_from(store, checkpoint_id)         # new id + parent lineage
 branches = session.batch_fork(3)                                   # child records only

@@ -289,8 +289,8 @@ class Session:
         return self._persist(None, label=label).id
 
     @classmethod
-    def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO) -> "Session":
-        """Reconstruct a live session from a checkpoint, re-supplying non-serializable parts."""
+    def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, api_key: str | None = None) -> "Session":
+        """Reconstruct a live session from a checkpoint, re-supplying non-serializable parts (tools, middleware, tracer, output schema, API key)."""
         session_id = store.resolve(session_id)
         source = store.get(checkpoint_id) if checkpoint_id else store.head(session_id)
         if source is None:
@@ -299,7 +299,9 @@ class Session:
         # Refuse another session's checkpoint, as rewind() and fork(at=) do; adopt() and fork_from() are the explicit cross-session paths.
         if checkpoint_id and source.session_id != session_id:
             raise SessionError("Cannot resume from a checkpoint from another session.", details={"checkpoint_id": checkpoint_id})
-        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
+        # @intent resume-takes-the-agent-key
+        # Checkpoints never store the key, so an agent built with an explicit key needs it back here, as fork_from() and BaseAgent.restore() accept it.
+        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_key=api_key)
         session = cls(agent, store=store, session_id=session_id, policy=policy, trace=trace, _existing=True)
         # @intent resume-checkpoint-becomes-head
         # The agent holds this checkpoint's history, so move the live and stored head there exactly as rewind() does; the next turn then records it as its parent.
