@@ -128,3 +128,65 @@ The remote runs ran on the code commit a9230d46. The docs-only commit that recor
 **Still open:** none.
 
 **Test tree check:** `git diff 7f3bb7ff..HEAD -- tests/` is not empty. It shows 38 files and +3929/−34 lines, all of which came in with the main catch-up merge. The output is byte-identical to `git diff db3988ff e6d42359 -- tests/` (main's own test changes). None of those files is under `tests/features/agent_output_connectors/`. Both `git diff 7f3bb7ff 9db8a702 -- tests/` (the branch before the merge) and `git diff ba83c953..HEAD -- tests/` (everything after the merge) are empty. So no test was edited by this pipeline.
+
+## Iteration 2 — 2026-10-12 — agent report: reports/S5-repair-2.md
+
+**Defects in:**
+- S6-1 (Minor, from the S6 author): `EmailOutput(to=[])` or `to=()` raised a `ConfigurationError` naming the internal `recipients` field, not `to` (AC-20, INV-21).
+- S6-2 (Minor, from the S6 author): the `OutputDeliveryError.repair_approaches` resend hint passed `failed`, which reads as `err.failed`, the receipts, to `OutputDispatcher.deliver`.
+- Failing gate: the feature pack, `1 failed, 340 passed` at d87fcbaf. The failure is `[email-empty-to]`, the test author's red test for S6-1 (4b063c28).
+- Mergeability: the PR was BEHIND origin/main by 8 commits.
+
+**Step 0, catch up with main (orchestrator-directed):**
+- Ran `git fetch origin`, then `git merge origin/main`, which brought in #890, #885, #889, #767, #888, #887, #746, and #763. Git merged without conflicts.
+- The merge commit is d4100704 `chore(merge): catch up with origin/main [gate:mergeability]`, with parents d87fcbaf and ab7182d3.
+- Overlapping files: `vidbyte/lib/enums/__init__.py` and `vidbyte/agents/README.md`. Both keep both sides. The contract did not conflict and is current at 623 exports.
+- After the merge, the feature pack gave `1 failed, 340 passed` (the same red test).
+- **#889 and #887 against INV-9.** Main changes which messages the end-of-run hooks see after a review STOP, and no stop reason changes.
+  - A review-refused finish still reports `CONTRACT_UNSATISFIED` (`runtime.py:873-877`).
+  - `AgentStopReason` is unchanged (its diff is empty).
+  - So `OUTPUT_DELIVERABLE_STOP_REASONS = {final_response, is_done}` still matches the spec, and a review-stopped run is skipped.
+- **#888 against the lowercase header-key deviation.** `_json_request_headers` adds `content-type` only when no spelling is present.
+  - Slack and Google Chat pass a lowercase `content-type`, which is kept; the other connectors get the default once.
+  - The `OutputRequest` lowercase-key check is unchanged.
+- From main: `lint/baseline.json` C018 1 → 0 (#763). A002 now counts 639, against 638 at b18ac7d1, whose code equals d87fcbaf. This iteration's two fixes add no function that A002 inspects. A002 has no finding in this PR's output files; the 4 in `errors/base.py` are in other error classes (lines 166, 299, 314, 323). So the +1 came in with the merge. Which of main's files carries it was not isolated.
+
+**Hypotheses and attempts (in order):**
+- S6-1. Root cause: `OutputArguments.texts` accepts an empty sequence, so `()` reached `SmtpSettings`, whose `__post_init__` names its own field.
+  - Rejected: make `texts` reject an empty sequence. GitHub's `labels=()` default goes through `texts`.
+  - Rejected: an inline raise in `EmailOutput.__init__`. It breaks §12.4's "no `raise` in connector constructors" and would be a second deviation beside TelegramOutput's.
+  - Rejected: a `minimum=` keyword on `texts`. It acts as a flag with one non-default caller, and it changes a §8.5 signature.
+  - Chosen, and it worked first time: a new leaf `OutputArguments.non_empty(values, *, parameter)` wraps the `texts` result in `EmailOutput.__init__`. The message is "to must list at least one value." with `details={"parameter": "to"}`. `SmtpSettings` is unchanged and still rejects `recipients=()` when built directly.
+  - Spec follow-up, not done here because the briefing limits my `docs/` writes: this is a ninth `OutputArguments` method beyond §8.5. §8.5, §12.3 row 13, and the §17 TelegramOutput bullet ("rather than adding a ninth `OutputArguments` method") each want one line.
+- S6-2. Root cause: the hint's variable `failed` collides with the `err.failed` property.
+  - The new single string gives the README and spec recipe, `failed_connectors = [c for c, r in zip(agent.outputs, err.receipts, strict=True) if r.status is DeliveryStatus.FAILED]`, then `await OutputDispatcher.deliver(failed_connectors, err.reply, {})`. It says outright that `err.failed` holds receipts, and keeps R-11's network caution.
+  - **Failed first:** splitting the literal over two lines, as `errors/base.py:496-497` does, gives lint S062 (no-implicit-string-concatenation) **SDK-LINT: FAIL**. The diagnostic requires one literal on one line; `+` and `''.join()` do not work either. The `:496` precedent predates S062, so do not copy it.
+  - Verified: `scratchpad/s5r2/verify_s6_2_hint.py` evaluates the two expressions taken from the live hint string and prints `selected: 1 of 2` and `resend receipts: [('webhook', 'sent')]`. Before the fix, the literal hint gave `[('webhook', 'unexpected:AttributeError')]`.
+
+**Changes:**
+- d4100704 chore(merge): catch up with origin/main [gate:mergeability]
+- 5b437f24 fix(outputs): name the to parameter when EmailOutput gets no recipients [S6-1]
+- 2334385b fix(outputs): give OutputDeliveryError the working resend recipe [S6-2]
+
+Edits were limited to `vidbyte/lib/outputs/base.py`, `vidbyte/lib/outputs/email.py`, and `vidbyte/lib/errors/base.py`. Nothing under `tests/`, `lint/`, `.github/`, `.semgrep/`, or `vidbyte/agents/base.py` changed.
+
+**Gate matrix out** (code at 2334385b):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| feature pack | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors` | PASS | `341 passed in 3.87s` |
+| lint | `python lint/run.py` | PASS | `S025 IMPROVED 263 -> 261` · `S051 IMPROVED 259 -> 258` · `SDK-LINT: PASS` |
+| run_ci source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `SDK-LINT: PASS` · `3824 passed, 13 skipped in 32.43s` · `CI passed.` |
+| run_ci full | `python scripts/run_ci.py` (PYTHONPATH unset) | PASS | `3824 passed, 13 skipped in 33.12s` · `No broken requirements found.` · `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` (exit 0) |
+| contract | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at 839e8e33… (vidbyte-sdk 0.2.1, 623 exports).` |
+| Semgrep | `semgrep --test …` · `semgrep scan --error …` (1.170.1, own venv) | PASS | `1/1: ✓ All tests passed` · `Ran 1 rule on 911 files: 0 findings.` (both exit 0) |
+| remote ci.yml | run 38217488376 on 2334385b | PASS | success: Source / Python 3.11 (`3819 passed, 18 skipped in 41.70s` · `CI passed.`), Source / Python 3.12 (`3819 passed, 18 skipped, 19 warnings in 53.88s` · `CI passed.`), Package (`Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.`) |
+| remote static-policy.yml | run 38217490653 on 2334385b | PASS | success: Static policy (`1/1: ✓ All tests passed` · `Ran 1 rule on 911 files: 0 findings.`) |
+
+The full suite grew from 3743 to 3824 passing because of main's 8 commits. The remote runs ran on the code commit 2334385b. The docs-only commit that records this log is dispatched again afterwards, and its run IDs are in the S5 STATUS block.
+
+**Test tree check:**
+- `git diff d87fcbaf..HEAD -- tests/features/agent_output_connectors` is empty.
+- `git diff d4100704..HEAD -- tests/` is empty.
+
+**Still open:** none of S6-1 or S6-2. The spec §8.5, §12.3 row 13, and §17 line for `OutputArguments.non_empty` is a docs follow-up for the orchestrator.
