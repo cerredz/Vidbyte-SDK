@@ -45,6 +45,8 @@ started: 2026-10-11 23:17
 - 2026-10-12 — Spec r5 (18903d3d): EC-118 (GitHub) / EC-119 (vendors) non-ASCII/control-char credential → AUTH_FAILED, zero requests, remembered, detail names field + env var and never the value; EC-68 clarified (tree items not all dicts with str path → FETCH_FAILED, not remembered); §12.4 A001 wording (R-14).
 - 2026-10-12 — S2b narrow test-author pass (f90b0680 tests, 578cd064 report): +44 red cases (R-1 5 rows, R-2 36+2 cases incl. a real-build_request test patching httpx.AsyncClient.send, R-4 1) and green R-6 guards proven against all 5 surviving mutants; only header docstrings changed in existing test files. **New test baseline S2_HEAD = 578cd064** (S5/S6 diff tests/ against it).
 
+- 2026-10-12 — Branch was 33 behind main (MERGEABLE/BEHIND); caught up by merge 4f956afc (no conflicts; overlapping files lint/baseline.json, vidbyte/agents/README.md, lib/dataclasses/__init__.py, lib/enums/__init__.py merged cleanly). Orchestrator re-ran on the merge: contract --check current (615), lint PASS, feature tests 434 passed 1 skipped (incl. main's new test_http_transport_content_type.py), source 4219 passed / CI passed, package smoke passed.
+
 ## User replies (verbatim)
 - (none yet)
 
