@@ -51,6 +51,16 @@ class CompatibleToolCallTextTests(unittest.TestCase):
                 self.assertEqual(self._text(provider_type, text_turn), "The answer is 42.")
                 self.assertEqual(self._text(provider_type, call_turn), "")
 
+    def test_chunked_content_answers_with_its_text_chunks(self) -> None:
+        """A Mistral reasoning reply's chunk list yields only its text chunks; a plain string is unchanged."""
+        thinking = {"type": "thinking", "thinking": [{"type": "text", "text": "Recall the capital of France."}]}
+        reasoning_turn = {"role": "assistant", "content": [thinking, {"type": "text", "text": "Paris"}]}
+        two_text_turn = {"role": "assistant", "content": [{"type": "text", "text": "Par"}, {"type": "text", "text": "is"}]}
+        plain_turn = {"role": "assistant", "content": "Paris"}
+        self.assertEqual(self._text(MistralProvider, reasoning_turn), "Paris")
+        self.assertEqual(self._text(MistralProvider, two_text_turn), "Paris")
+        self.assertEqual(self._text(MistralProvider, plain_turn), "Paris")
+
 
 if __name__ == "__main__":
     unittest.main()
