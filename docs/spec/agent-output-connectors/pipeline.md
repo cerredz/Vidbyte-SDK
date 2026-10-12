@@ -72,6 +72,9 @@ started: 2026-10-11 17:36
 - 2026-10-12 — Spec r7 @5bd94199 (docs only: §8.5, rows 5/13/25, §16 S6-1/S6-2, Telegram §17 bullet); verified by `git show --stat` (spec.md + S1 report only), status pr-open, pushed.
 - 2026-10-12 — Re-review 2 SOUND with 2 Minors. Fixing RR2 R-C1 anyway in repair iteration 3 (fresh agent), scoped to wording only: the SDK's own error advice contradicts request.md §C ("the first post may have landed") and EC-5's "at most one issue exists", and a user following it double-posts — a real behavior change for callers, not cosmetics. No re-review rounds remain, so I verify iteration 3 myself (file list, gates, pack diff). Then spec r8 aligns §9.2/AC-24/EC-42 to the new literal, then the S6 author refreshes pr-body.md (covers RR2 R-C2).
 
+- 2026-10-12 — Repair-3 spot-check passed @9dadba0a: code commit 563efc51 touches only errors/base.py (1 line) + 2 READMEs; lint/ unchanged; pack diff vs d87fcbaf and tests/ diff vs d4100704 both 0 lines; 341 passed (re-run by me); ci 38220771957 + static 38220773950 success on 9dadba0a (checked via gh run view). Caution now names network, invalid_response, smtp_error, smtp_recipients_refused, and codes starting http_5 — wider than the reviewer's list, each derived from the code that builds it (invalid_response only after a 2xx; smtp_error covers a reply timeout after DATA). Accepted: all five can follow a stored post.
+- 2026-10-12 — Spec r8 next: align §9.2, AC-24, EC-42, row 25 with the final literal, and correct EC-46 (`port=2465` yields `smtp_error`, not `network` — code is right, the spec mis-predicted; no test pins it). Then S6 refresh (RR2-C2 + final verification table).
+
 ## User replies (verbatim)
 - (none yet)
 
@@ -119,3 +122,5 @@ started: 2026-10-11 17:36
 - Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
 - RR2 R-C1 repro: script `HttpTransport._send_once` so GitHub stores the issue then answers 502, apply the hint's two expressions → 2 issues; the fix is the hint literal (one line, S062) + agents/output/README.md:98-99 + lib/outputs/README.md:145-146 (+ spec §9.2/AC-24/EC-42 by the spec author) — *source:* S5 re-review 2
 - The adjacent string literals at errors/base.py:486-497 are main's pre-existing code; do not copy them (S062) — *source:* S5 re-review 2
+- `smtplib.SMTPServerDisconnected` is both SMTPException and OSError; any read timeout after TCP connect is `smtp_error`, only connect/TLS-handshake OSError is `network` — *source:* S5 repair-3
+- Git Bash: `semgrep --test … > /dev/null` exits 2 despite passing; read the exit code unredirected — *source:* S5 repair-3
