@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Registered for SkillSourceType.GITHUB in SkillLoader (loader.p
 ARCHITECTURE NOTE: resolve is the one narrated main; its step leaves (_commit_sha, _tree_paths, _raw_document) each call SkillFetch.get and then _GitHubAnswer.failure, so the three steps share one status map without calls going two levels deep (spec D-31). Raw files are fetched concurrently and every gather result is classified against BaseException.
 FUNCTION INVENTORY: _GitHubAnswer.failure(response, *, step, target) -> SkillResolution | None; GitHubSkillResolver.group_key(entry) -> Hashable; GitHubSkillResolver.resolve(entries) -> tuple[SkillResolution, ...]; GitHubSkillResolver._token(entry) -> str | None; GitHubSkillResolver._commit_sha(entry, auth) -> str | SkillResolution; GitHubSkillResolver._tree_paths(repo, sha, auth) -> tuple[str, ...] | SkillResolution; GitHubSkillResolver._search(paths, entry, sha) -> str | SkillResolution; GitHubSkillResolver._raw_document(entry, folder, sha, auth) -> SkillResolution.
 COMMON MODIFICATION PATTERNS: A status GitHub starts using for a known condition joins the dict in _GitHubAnswer.failure. A change to how a folder is found by name changes _search only.
-WHAT NOT TO DO IN THIS FILE: 1. Do not follow redirects or read a Location header. 2. Do not send a token that starts with the Vidbyte key prefix, and never put any token in a URL, label, or detail. 3. Do not call HTTPStatus(status): 529 is not a member. 4. Do not echo a response body. 5. Do not mix entries with different tokens in one group.
+WHAT NOT TO DO IN THIS FILE: 1. Do not follow redirects or read a Location header. 2. Do not send a token that starts with the Vidbyte key prefix or holds a character outside printable ASCII (a header cannot carry it, and httpx would raise outside every catch), and never put any token in a URL, label, or detail. 3. Do not call HTTPStatus(status): 529 is not a member. 4. Do not echo a response body. 5. Do not mix entries with different tokens in one group.
 KNOWN EDGE CASES: A 403 with x-ratelimit-remaining "0" or a retry-after header is GitHub's rate limit (RATE_LIMITED, transient); any other 403 is AUTH_FAILED. A 3xx means the repository moved (NOT_FOUND, remembered). A commit answer that is not a 40-character SHA, a tree that is not usable JSON, and a tree whose items are not all objects with a text path (what a 2,000-level nested body parses to on Python 3.12+) are network faults (FETCH_FAILED, transient). A truncated tree, or two folders of the same name at the shallowest depth, is INVALID_SKILL for the searched entries only. A SKILL.md at the repository root is not supported (spec Q-6).
 RELATED DOCS: vidbyte/agents/skills/README.md; docs/spec/jev-skill-sources/spec.md (D-10, D-11, D-18, D-21, D-30, D-31, section 9.2)
 TESTS: tests/features/jev_skills_preload/test_skill_sources_github.py; tests/features/jev_skills_preload/test_skill_sources_security.py
@@ -97,13 +97,19 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
         # One commit lookup and at most one tree listing serve the whole
         # group, so five skills from one repository cost seven requests.
         # The token is checked before any request: a Vidbyte key is never
-        # sent to GitHub. A shared step's failure applies to exactly the
-        # entries that needed it.
+        # sent to GitHub, and a token a header cannot carry is refused
+        # instead of crashing the run. A shared step's failure applies to
+        # exactly the entries that needed it.
         first = entries[0]
         # Pick the token: the entry's own, else GITHUB_TOKEN, stripped.
         token = self._token(first)
         if token is not None and token.startswith(VIDBYTE_API_KEY_PREFIX):
             refused = SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail="The GitHub token is a Vidbyte API key, and a Vidbyte key is never sent to GitHub; set GITHUB_TOKEN or token= to a GitHub token, or leave both unset for public repositories.")
+            return (refused,) * len(entries)
+        # An HTTP header carries only printable ASCII, so a token with any
+        # other character is refused before a request is built.
+        if token is not None and not (token.isascii() and token.isprintable()):
+            refused = SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail="The GitHub token holds a character an HTTP header cannot carry (only printable ASCII is allowed); fix the entry's token= or GITHUB_TOKEN.")
             return (refused,) * len(entries)
         auth = {"authorization": f"Bearer {token}"} if token else {}
         # Pin the ref to one commit so every file comes from the same

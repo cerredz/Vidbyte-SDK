@@ -5,8 +5,8 @@ ROLE IN CODEBASE: Subclassed by AnthropicSkillResolver (anthropic.py) and OpenAI
 ARCHITECTURE NOTE: resolve is the one narrated main and calls only leaf helpers and other classes. Keys come from the entry, else ProviderModelRegistry.resolve_api_key, which strips both; the provider's fixed default endpoint is the only host a key is sent to. Archives are read with zipfile over an in-memory buffer and nothing is extracted to disk.
 FUNCTION INVENTORY: VendorSkillResolver.resolve(entries) -> tuple[SkillResolution, ...]; _headers(key) (each vendor sets it); _key(entry); _content_url(entry, version); _record_url(entry); _refused_latest(entry, answer); _classify(answer, entry, version, step); _record_version(record, entry); _skill_markdown(body).
 COMMON MODIFICATION PATTERNS: A new vendor is a subclass in its own module that sets PROVIDER and SOURCE_TYPE and overrides _headers, plus its entry class, enum member, and loader map entry. A status the vendor starts using joins the dict in _classify.
-WHAT NOT TO DO IN THIS FILE: 1. Do not follow redirects; x-api-key would reach another origin. 2. Do not send a key that starts with the Vidbyte key prefix. 3. Do not extract an archive or read any member but the one SKILL.md. 4. Do not let the bzip2 or lzma decoders see untrusted bytes; only stored and deflate members are read. 5. Do not call HTTPStatus(status) or echo a body.
-KNOWN EDGE CASES: "latest" refused with 400, 404, or 422 triggers one skill-record read (latest_version, else latest_version_id; an integer becomes decimal text, a bool is not a version), then one download of that version; a 404 for it says the skill exists but its content route was not found. A missing key is AUTH_FAILED with no request and is remembered. A vendor 3xx is FETCH_FAILED (transient). A body starting with `---` after an optional byte-order mark is a bare SKILL.md; anything else must be a zip with exactly one SKILL.md (any case) at the root or one folder deep. A member declaring more than the SKILL.md cap is TOO_LARGE before it is read. Corrupt archives raise BadZipFile, zlib.error, EOFError, NotImplementedError, or ValueError (which includes UnicodeDecodeError), and all become INVALID_SKILL.
+WHAT NOT TO DO IN THIS FILE: 1. Do not follow redirects; x-api-key would reach another origin. 2. Do not send a key that starts with the Vidbyte key prefix or holds a character outside printable ASCII; a header cannot carry it, and httpx would raise outside every catch. 3. Do not extract an archive or read any member but the one SKILL.md. 4. Do not let the bzip2 or lzma decoders see untrusted bytes; only stored and deflate members are read. 5. Do not call HTTPStatus(status) or echo a body.
+KNOWN EDGE CASES: "latest" refused with 400, 404, or 422 triggers one skill-record read (latest_version, else latest_version_id; an integer becomes decimal text, a bool is not a version), then one download of that version; a 404 for it says the skill exists but its content route was not found. A missing key, a Vidbyte key, and a key a header cannot carry are AUTH_FAILED with no request and are remembered. A vendor 3xx is FETCH_FAILED (transient). A body starting with `---` after an optional byte-order mark is a bare SKILL.md; anything else must be a zip with exactly one SKILL.md (any case) at the root or one folder deep. A member declaring more than the SKILL.md cap is TOO_LARGE before it is read. Corrupt archives raise BadZipFile, zlib.error, EOFError, NotImplementedError, or ValueError (which includes UnicodeDecodeError), and all become INVALID_SKILL.
 RELATED DOCS: vidbyte/agents/skills/README.md; docs/spec/jev-skill-sources/spec.md (D-10, D-11, D-19, D-20, D-21, D-29, D-30, section 9.2)
 TESTS: tests/features/jev_skills_preload/test_skill_sources_vendor.py; tests/features/jev_skills_preload/test_skill_sources_security.py
 """
@@ -113,12 +113,16 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
         # The registry strips the entry key and the environment value, and
         # the stripped value is the one checked and sent. A Vidbyte key is
         # never sent to a vendor, even when it sits in the vendor variable.
+        # A header carries only printable ASCII, so a key with any other
+        # character is refused here instead of crashing the run.
         try:
             key = ProviderModelRegistry.resolve_api_key(self.PROVIDER, entry.api_key)
         except ConfigurationError:
             return SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail=f"No API key for {self.host}: pass api_key= on the entry or set {self.env_var}.")
         if key.startswith(VIDBYTE_API_KEY_PREFIX):
             return SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail=f"The key for {self.host} is a Vidbyte API key, and a Vidbyte key is never sent to a vendor; pass the vendor's own key as api_key= or in {self.env_var}.")
+        if not (key.isascii() and key.isprintable()):
+            return SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail=f"The key for {self.host} holds a character an HTTP header cannot carry (only printable ASCII is allowed); fix the entry's api_key= or {self.env_var}.")
         return key
 
     def _content_url(self, entry: VendorSkillT, version: str) -> str:
