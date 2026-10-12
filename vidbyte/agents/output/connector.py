@@ -47,6 +47,9 @@ class OutputShaping:
     def is_deliverable(reply: AgentMessage) -> bool:
         """True when the reply has text and its run finished with an accepted answer."""
         stop_reason = reply.metadata.get("stop_reason")
+        # @intent only-accepted-answers-are-delivered
+        # A run stopped by a budget, guard, or middleware ends with an
+        # SDK notice, not an answer, so it is never posted.
         return bool(reply.content.strip()) and (stop_reason is None or stop_reason in OUTPUT_DELIVERABLE_STOP_REASONS)
 
     @staticmethod

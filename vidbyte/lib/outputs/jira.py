@@ -49,6 +49,9 @@ class JiraIssueOutput(BaseOutput):
         render: Callable[[AgentMessage], OutputContent] | None = None,
     ) -> None:
         super().__init__(render=render)
+        # @intent jira-site-is-a-bare-atlassian-host
+        # The site is checked as a bare *.atlassian.net host, so the
+        # Basic credentials can never be sent to another server.
         self._site = OutputArguments.matching(site, JIRA_SITE_PATTERN, parameter="site")
         self._project = OutputArguments.text(project, parameter="project")
         self._email = OutputArguments.address(email, parameter="email")
@@ -57,9 +60,6 @@ class JiraIssueOutput(BaseOutput):
 
     async def send(self, reply: AgentMessage, content: OutputContent) -> DeliveryReceipt:
         """Create one issue with a one-line summary and one paragraph per body line."""
-        # @intent jira-site-is-a-bare-atlassian-host
-        # The site is checked as a bare *.atlassian.net host, so the
-        # Basic credentials can never be sent to another server.
         basic = base64.b64encode(f"{self._email}:{self._api_token}".encode()).decode()
         lines = OutputText.truncate(content.body, JIRA_TEXT_MAX_CHARS).splitlines()
         paragraphs = [{"type": "paragraph", "content": [{"type": "text", "text": line}]} for line in lines if line.strip()]
@@ -69,7 +69,9 @@ class JiraIssueOutput(BaseOutput):
             "summary": OutputText.single_line(content.title, OUTPUT_TITLE_MAX_CHARS),
             "description": {"type": "doc", "version": JIRA_ADF_VERSION, "content": paragraphs},
         }
-        # Jira returns only the issue key; the prefix makes it a link.
+        # @intent jira-issue-link-is-built-from-the-key
+        # Jira returns only the new issue's key, so the link is built
+        # from the checked site; a 2xx with no key is FAILED.
         request = OutputRequest(f"https://{self._site}/rest/api/3/issue", {"authorization": f"Basic {basic}"}, {"fields": fields}, link_path=("key",), link_prefix=f"https://{self._site}/browse/")
         return await OutputHttp.post(self.destination, request)
 
