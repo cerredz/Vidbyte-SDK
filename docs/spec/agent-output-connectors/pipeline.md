@@ -17,7 +17,7 @@ started: 2026-10-11 17:36
 | S1 spec + review | done | 2026-10-11 17:55 | 2026-10-11 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @1335db49 approved; r1 NEEDS REWORK (1B/5M/5m) → r2 SOUND WITH FIXES (0B/2M/5m), all 18 accepted |
 | S2 tests | done | 2026-10-11 | 2026-10-11 | reports/S2-test-author.md | 86 tests / 313 cases in tests/features/agent_output_connectors/ (9 modules); red `21 failed, 292 errors`; test commit d90400d2; S2_HEAD 72fc2002; 7 spec defects → spec r4 @f3229734; status tests-written @5e79413f |
 | S3 implement | done | 2026-10-11 | 2026-10-11 | reports/S3-implementer.md | S3_HEAD 9463c348; draft PR #882; 313/313 green (re-run by orchestrator); SDK-LINT PASS; run_ci source 3516 passed + full CI passed; budget 23/23 files, 26/26 classes, 0 deps; ci.yml 38194285572 in progress, static-policy 38194287162 success (both at fa430c8f; later commits docs-only) |
-| S4 adversarial review | running | 2026-10-11 | | | |
+| S4 adversarial review | done | 2026-10-11 | 2026-10-11 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 httpx INFO log leaks secret URLs) / 3 Major (R-2 str destination, R-3 SMTP thread holds sync run past deadline, R-4 duplicated email rule) / 11 Minor; 0 refuted (1 sub-claim) |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -45,6 +45,9 @@ started: 2026-10-11 17:36
 - 2026-10-11 — CONFLICT `OutputArguments.optional_callable(value: object, ...)` (spec §8.5:595) vs S3's `Callable[[AgentMessage], OutputContent] | None` annotation (mypy `disallow_any_generics`, runtime check unchanged): accepted as an S3 implementation deviation recorded under spec §17, no spec edit.
 
 - 2026-10-11 — S3 spot-check passed: tree clean, test diff vs 72fc2002 empty, all non-docs commits cite IDs, local HEAD == origin, PR #882 draft `[WIP]` MERGEABLE, spec `status: implemented`, `pr:` set.
+
+- 2026-10-11 — S4 spot-check passed: review.md confirmed rows each carry path:line + verifier's own evidence; refuted sub-claim (R-V1 https drift) cites D-19/§9.1/D-21.
+- 2026-10-11 — S5 prep ordering: findings need three owners (spec-author: R-5, R-3/R-11 wording, R-13 [scope-adding] → Q-n; test-author: R-1, R-2, R-3, R-12, R-14, R-15 tests; repair: all source). Run sequentially (spec r6 → test additions, red → repair iteration 1) because spec author and test author both edit spec.md. Test additions come from the S2 test author only (pipeline rule); repair agents get no test diff.
 
 ## User replies (verbatim)
 - (none yet)
