@@ -386,6 +386,39 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(recorder.model_call_count, sum(expected_calls))
             self.assertEqual(result.metadata["stop_reason"], expected_stop)
 
+    async def test_fallback_context_reset_stays_true_after_a_later_same_wire_switch(self) -> None:
+        # @intent fallback-context-reset-is-sticky
+        # A cross-wire switch resets the transcript; a later same-wire switch must not report it as kept.
+        for chain_provider, expected_reset in (("anthropic", True), ("deepseek", False)):
+            primary = FakeRunner([ProviderRequestError("500 deepseek down", provider="deepseek", status_code=500)])
+            first_backup = FakeRunner([ProviderRequestError("500 backup down", provider=chain_provider, status_code=500)])
+            second_backup = FakeRunner([FakeResponse("answered by the last backup")])
+            backups = {1: first_backup, 2: second_backup}
+
+            class _FakeChain(AgentFallback):
+                def build_runner(self, index: int) -> object:
+                    return backups[index]
+
+            runtime = AgentRuntime(
+                agent_name="worker",
+                system_prompt="Work.",
+                tools=Tools(),
+                permission_policy=PermissionPolicy(),
+                fallback=_FakeChain(
+                    [FallbackModel("deepseek", "deepseek-chat"), FallbackModel(chain_provider, "backup-a"), FallbackModel(chain_provider, "backup-b")]
+                ),
+            )
+
+            result = await runtime.arun(
+                "task",
+                handle=RunnerHandle(runner=primary, provider="deepseek", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                context=self._context(runtime),
+            )
+
+            self.assertEqual((len(primary.calls), len(first_backup.calls), len(second_backup.calls)), (1, 1, 1))
+            self.assertEqual(len(result.metadata["fallback"]["attempts"]), 2)
+            self.assertIs(result.metadata["fallback"]["context_reset"], expected_reset)
+
     async def test_tool_error_policy_retries_idempotent_transient_tool_error(self) -> None:
         flaky = FlakyTool(permission=ToolPermission.READ)
         runner = FakeRunner(

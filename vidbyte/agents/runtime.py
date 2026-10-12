@@ -326,6 +326,7 @@ class AgentRuntime:
         fallback_index = 0
         fallback_attempts: list[dict[str, str]] = []
         fallback_errors: list[BaseException] = []
+        fallback_context_reset = False
 
         decision = await self.middleware.before_run(self._middleware_context(MiddlewareHook.BEFORE_RUN, state))
         if decision.action is not MiddlewareAction.CONTINUE:
@@ -438,10 +439,13 @@ class AgentRuntime:
                 tool_schemas, messages = transition.tool_schemas, transition.messages
                 state.messages = messages
                 fallback_index = transition.index
+                # @intent fallback-context-reset-is-sticky
+                # Once any switch reset the transcript this run, a later same-wire switch cannot undo it.
+                fallback_context_reset = fallback_context_reset or transition.context_reset
                 # A non-None transition proves self.fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
                     state.run_state,
-                    self.fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
+                    self.fallback.result_metadata(fallback_attempts, context_reset=fallback_context_reset),
                 )
                 continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
