@@ -17,6 +17,7 @@ Architecture:
     - Context exports: context contracts plus general problem-solving challenge records.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
+    - Output exports: OutputConnector, the eleven destination connectors (SlackOutput through WebhookOutput), and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
@@ -261,6 +262,25 @@ from vidbyte.agents import (
     UsageRecord,
     UsageRollup,
     UsageTracker,
+)
+from vidbyte.agents.output import (
+    DeliveryReceipt,
+    DeliveryStatus,
+    DiscordOutput,
+    EmailOutput,
+    GitHubIssueOutput,
+    GoogleChatOutput,
+    JiraIssueOutput,
+    LinearIssueOutput,
+    NotionPageOutput,
+    OutputConnector,
+    OutputContent,
+    OutputDeliveryError,
+    OutputDestination,
+    SlackOutput,
+    TeamsOutput,
+    TelegramOutput,
+    WebhookOutput,
 )
 from vidbyte.agents.pricing import ProviderUsage
 from vidbyte.client import VidbyteSDK
@@ -971,6 +991,23 @@ __all__ = [
     "UsageRecord",
     "UsageRollup",
     "UsageTracker",
+    "DeliveryReceipt",
+    "DeliveryStatus",
+    "DiscordOutput",
+    "EmailOutput",
+    "GitHubIssueOutput",
+    "GoogleChatOutput",
+    "JiraIssueOutput",
+    "LinearIssueOutput",
+    "NotionPageOutput",
+    "OutputConnector",
+    "OutputContent",
+    "OutputDeliveryError",
+    "OutputDestination",
+    "SlackOutput",
+    "TeamsOutput",
+    "TelegramOutput",
+    "WebhookOutput",
     "AlternativeChallengeContextItem",
     "AmbiguityContextItem",
     "AgentType",
