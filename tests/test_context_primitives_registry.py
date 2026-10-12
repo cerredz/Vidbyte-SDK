@@ -399,6 +399,37 @@ class CreateToolRegistryTests(unittest.IsolatedAsyncioTestCase):
         assert stored is not None
         self.assertIn("old", stored.to_context_text())
 
+    async def test_create_tools_store_payload_bodies_verbatim(self) -> None:
+        """Verify artifact content and git diff bodies keep their leading indentation and trailing lines."""
+        manager = ContextManager()
+        artifact_body = "    return total\n\nprint(1)\n"
+        diff_body = "@@ -1,3 +1,3 @@\n context\n-old\n+new\n \n"
+        artifact_args = _sample_args_for_key("artifact") | {"content": artifact_body}
+        diff_args = _sample_args_for_key("git_diff") | {"diff": diff_body}
+
+        for key, args in (("artifact", artifact_args), ("git_diff", diff_args)):
+            definition = CREATE_TOOL_REGISTRY[key]
+            result = await CreateContextPrimitiveTool(definition, manager).execute(ToolCall(tool_name=definition.tool_name, arguments=args))
+            self.assertEqual(result.status.value, "success")
+
+        artifact = manager.get_by_id("artifact:1")
+        diff = manager.get_by_id("git_diff:1")
+        assert isinstance(artifact, ArtifactContextItem) and isinstance(diff, GitDiffContextItem)
+        self.assertEqual(artifact.content, artifact_body)
+        self.assertEqual(diff.diff, diff_body)
+
+    async def test_create_tool_still_rejects_whitespace_only_body(self) -> None:
+        """Verify a payload body made only of whitespace is still rejected as empty."""
+        manager = ContextManager()
+        definition = CREATE_TOOL_REGISTRY["artifact"]
+        args = _sample_args_for_key("artifact") | {"content": "  \n\t\n"}
+
+        result = await CreateContextPrimitiveTool(definition, manager).execute(ToolCall(tool_name=definition.tool_name, arguments=args))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("content must be a non-empty string.", result.output)
+        self.assertIsNone(manager.get_by_id("artifact:1"))
+
     def test_registry_tool_names_are_unique(self) -> None:
         """Verify every registry row produces exactly one unique create tool name."""
         names = [definition.tool_name for definition in CREATE_TOOL_REGISTRY.values()]
