@@ -4,7 +4,7 @@ PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAge
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities. JevAlignmentSettings.skills accepts SkillEntry, SkillDocument, and str values in one list: strings become inline_skill_<position> documents counted over the whole list, entries pass through unchanged and are resolved later by the preload's SkillLoader (no I/O here), and names must be unique across every kind.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-run-brief.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, and scripts/test-jev-agent-scaffold.py.
 """
@@ -45,7 +45,7 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevProbability, JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.dataclasses.skills import SkillDocument
+from vidbyte.lib.dataclasses.skills import SkillDocument, SkillEntry
 from vidbyte.lib.enums import (
     DecisionModelMode,
     JevContinuationGate,
@@ -78,24 +78,24 @@ class JevBulkSettings:
 class JevAlignmentSettings:
     """Select request-time skill guidance for JevAgent."""
 
-    skills: tuple[SkillDocument | str, ...] = ()
+    skills: tuple[SkillEntry | SkillDocument | str, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes caller skills once so every run reads the same named documents.
         object.__setattr__(self, "skills", self._normalized_skills())
 
-    def _normalized_skills(self) -> tuple[SkillDocument, ...]:
+    def _normalized_skills(self) -> tuple[SkillEntry | SkillDocument, ...]:
         # @intent names-uniquely-identify-response-results
         # JevAgent.response exposes each decision by the configured name. Duplicate names would make two
-        # different candidate bodies indistinguishable to callers and future source adapters.
-        """Normalize caller strings and require unique stable names for every skill."""
+        # different candidate bodies indistinguishable to callers, whichever source each came from.
+        """Normalize caller strings, keep skill entries unchanged, and require unique stable names for every skill."""
         if isinstance(self.skills, (str, bytes)):
-            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings, not a string.")
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillEntry, SkillDocument, or string values, not a string.")
         try:
             candidates = tuple(self.skills)
         except TypeError as exc:
-            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings.") from exc
-        skills: list[SkillDocument] = []
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillEntry, SkillDocument, or string values.") from exc
+        skills: list[SkillEntry | SkillDocument] = []
         for index, candidate in enumerate(candidates, start=1):
             if isinstance(candidate, str):
                 candidate = SkillDocument(
@@ -104,8 +104,8 @@ class JevAlignmentSettings:
                     text=candidate,
                     source="inline",
                 )
-            if not isinstance(candidate, SkillDocument):
-                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillDocument or string values.")
+            if not isinstance(candidate, (SkillEntry, SkillDocument)):
+                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillEntry, SkillDocument, or string values.")
             skills.append(candidate)
         seen: set[str] = set()
         duplicates: set[str] = set()
