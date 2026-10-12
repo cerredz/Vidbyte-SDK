@@ -1598,6 +1598,27 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNot(child_tool, tool)
         self.assertTrue(child_tool._scope.permits(second.id))
 
+    async def test_fork_given_another_agents_session_tool_gets_configured_scope(self) -> None:  # [Silent Failure]
+        # @intent fork-never-inherits-another-agents-session-grants
+        # A fork handed a session tool that another agent carries must not reach that agent's session; the owner's fork still does.
+        store = InMemorySessionStore()
+        shared = SessionTool(store)
+        acme = build_test_agent(name="acme", system_prompt="Work.", runner=EchoRunner(), tools=[shared])
+        acme_session = Session(acme, store=store)
+        await acme.arun("acme")
+        globex = build_test_agent(name="globex", system_prompt="Work.", runner=EchoRunner())
+        added = globex.fork(AgentForkSettings(name="added", add_tools=[shared]))
+        listed = globex.fork(AgentForkSettings(name="listed", tools=[shared.customize(description="Sessions.")]))
+        acme_child = acme.fork(AgentForkSettings(name="acme-child"))
+        list_call = ToolCall(tool_name="session", arguments={"operation": "list_my_runs"})
+
+        for child in (added, listed):
+            child_tool = child.tools._get("session")
+            self.assertFalse(getattr(child_tool, "wrapped_tool", child_tool)._scope.permits(acme_session.id))
+            self.assertEqual(json.loads((await child_tool.execute(list_call)).output), [])
+        self.assertEqual(listed.tools._get("session").spec().description, "Sessions.")
+        self.assertTrue(acme_child.tools._get("session")._scope.permits(acme_session.id))
+
 
 # ---------------------------------------------------------------------------
 # BatchForkTool
