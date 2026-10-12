@@ -1032,6 +1032,22 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
             stored = "".join(path.read_text(encoding="utf-8") for path in Path(root).rglob("*") if path.is_file())
             self.assertNotIn("sk-tenant-acme", stored)
 
+    def test_cold_resume_and_continue_take_the_agent_key(self) -> None:  # [Silent Failure]
+        # @intent resume-takes-the-agent-key
+        # A tenant's cold resume must authenticate with the re-supplied key, not the server's env key, as fork_from() already does.
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
+            store = FileSessionStore(root)
+            agent = BaseAgent(name="desk", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            session = Session(agent, store=store)
+            session.checkpoint()
+
+            resumed = [Session.resume(store, session.id, api_key="sk-tenant-acme"), Session.continue_(store, session.id, api_key="sk-tenant-acme")]
+
+            for live in resumed:
+                config = live.agent.runner_config
+                self.assertEqual(config.api_key, "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+
     def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
         store.put(_checkpoint("other", "foreign"))
