@@ -126,7 +126,8 @@ def test_environment_is_shown_after_agents_md_and_before_the_user_message(coding
     assert item.os_name == platform.platform() and item.cwd == str(tmp_path.resolve())
     assert item.languages == ("Python",) and item.package_managers == ("uv",) and item.dependencies == ("httpx",)
     assert item.tools == (EnvironmentTool("git", "git version 9.9.9-fake", "/fake/bin/git"), EnvironmentTool("uv", "uv 0.0.1-fake", "/fake/bin/uv"))
-    assert f"({platform.platform()})" in system
+    # On Linux the distribution precedes the platform inside the parentheses, so match the platform on its own.
+    assert platform.platform() in system
     assert f"- Date when gathered: {today:%Y-%m-%d}" in system
     assert f"- Working directory: {tmp_path.resolve()}" in system
     assert "- Languages: Python\n- Package managers: uv\n- Declared dependencies: httpx\n" in system
