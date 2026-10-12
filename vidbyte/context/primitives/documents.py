@@ -9,9 +9,15 @@ ROLE IN CODEBASE:
 ARCHITECTURE NOTE:
     Dataclasses own source-oriented field rendering while shared helpers add the
     managed-context boundary; filesystem reads are isolated to FileContextItem.
+    EnvironmentContextItem receives raw facts that a loader gathered (for
+    CodingAgent, EnvironmentLoader) and owns every line of their wording.
 FUNCTION INVENTORY:
     TextContextItem, FileContextItem, GitDiffContextItem, DocumentContextItem,
     EnvironmentContextItem, and MemoryContextItem each render one record type.
+    EnvironmentContextItem.__post_init__ checks its gathered facts with
+    _wrong_texts, _wrong_lists, and _wrong_values; its to_context_text
+    joins _host_lines, _project_lines, _git_lines, _shell_lines, and
+    _tool_lines.
 COMMON MODIFICATION PATTERNS:
     Keep source metadata before body content, preserve excerpt fallback behavior,
     and retain TOOL_CREATE_META synchronization for create-enabled records.
@@ -20,22 +26,30 @@ WHAT NOT TO DO IN THIS FILE:
     registry, placement, and caller-owned freshness belong elsewhere.
 KNOWN EDGE CASES:
     File content may be absent in favor of an excerpt, environment values may be
-    missing, and optional source metadata is omitted when empty.
+    missing, and optional source metadata is omitted when empty. The Git Bash
+    line names /c/Users paths, so a WSL bash must not be given
+    ShellKind.GIT_BASH.
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/tree/main/vidbyte/context/primitives
 TESTS:
     Existing context primitive registry tests plus source/package smoke gates cover
-    imports, create-tool rendering, and context integration.
+    imports, create-tool rendering, and context integration;
+    tests/features/coding_agent/test_coding_agent_environment.py covers
+    EnvironmentContextItem's gathered facts.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
 from vidbyte.context.primitives.base import _language_from_path, _with_context_intro
+from vidbyte.lib.dataclasses.context import EnvironmentTool
+from vidbyte.lib.enums.context import GitHeadState, OperatingSystemFamily, ShellKind
+from vidbyte.lib.errors import ConfigurationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,7 +339,15 @@ class DocumentContextItem:
 
 @dataclass(frozen=True, slots=True)
 class EnvironmentContextItem:
-    """Structured environment state supplied by the caller."""
+    """Structured environment state: the host, the project, git, the shell, and the tools that shell finds.
+
+    A caller may set only os_name, cwd, and shell, as the
+    context_create_environment tool does. EnvironmentLoader
+    (vidbyte/agents/coding_context/environment.py) fills every field
+    from Python, file checks, and one bash probe, and this record turns
+    those raw facts into the text the model reads. A fact left at its
+    default is not rendered, because nobody gathered it.
+    """
 
     os_name: str | None = None
     cwd: str | None = None
@@ -335,6 +357,32 @@ class EnvironmentContextItem:
     title: str = "Environment"
     primitive_id: str | None = None
     primitive_frozen: bool = False
+    os_family: OperatingSystemFamily | None = None
+    os_distribution: str | None = None
+    architecture: str | None = None
+    cpu_count: int | None = None
+    local_time: datetime | None = None
+    project_files: tuple[str, ...] = ()
+    languages: tuple[str, ...] = ()
+    package_managers: tuple[str, ...] = ()
+    dependencies: tuple[str, ...] = ()
+    dependency_folders: tuple[str, ...] = ()
+    git_state: GitHeadState | None = None
+    git_ref: str | None = None
+    shell_kind: ShellKind | None = None
+    shell_error: str | None = None
+    bash_version: str | None = None
+    uname: str | None = None
+    system_package_managers: tuple[str, ...] = ()
+    tools: tuple[EnvironmentTool, ...] = ()
+    probe_error: str | None = None
+
+    _OS_FAMILY_LABELS: ClassVar[dict[OperatingSystemFamily, str]] = {
+        OperatingSystemFamily.WINDOWS: "Windows",
+        OperatingSystemFamily.MACOS: "macOS",
+        OperatingSystemFamily.LINUX: "Linux",
+        OperatingSystemFamily.OTHER: "Other",
+    }
 
     TOOL_CREATE_META: ClassVar[dict[str, Any]] = {
         "key": "environment",
@@ -376,24 +424,127 @@ class EnvironmentContextItem:
         },
     }
 
+    def __post_init__(self) -> None:
+        # Check the gathered facts where they enter the context layer,
+        # so a malformed record fails when it is built instead of
+        # rendering nonsense to the model. The three original fields
+        # stay unchecked, as they always were.
+        wrong = [*self._wrong_texts(), *self._wrong_lists(), *self._wrong_values()]
+        if wrong:
+            raise ConfigurationError(f"EnvironmentContextItem {', '.join(wrong)} has the wrong type or value.", details={"fields": wrong})
+
+    def _wrong_texts(self) -> list[str]:
+        """Return the optional text fields that are set but are not non-blank strings."""
+        texts = {"os_distribution": self.os_distribution, "architecture": self.architecture, "git_ref": self.git_ref, "shell_error": self.shell_error, "bash_version": self.bash_version, "uname": self.uname, "probe_error": self.probe_error}
+        return [name for name, value in texts.items() if value is not None and (not isinstance(value, str) or not value.strip())]
+
+    def _wrong_lists(self) -> list[str]:
+        """Return the list fields that are not tuples of non-blank strings, or of EnvironmentTool records for tools."""
+        lists = {"project_files": self.project_files, "languages": self.languages, "package_managers": self.package_managers, "dependencies": self.dependencies, "dependency_folders": self.dependency_folders, "system_package_managers": self.system_package_managers}
+        wrong = [name for name, values in lists.items() if not isinstance(values, tuple) or not all(isinstance(value, str) and value.strip() for value in values)]
+        if not isinstance(self.tools, tuple) or not all(isinstance(tool, EnvironmentTool) for tool in self.tools):
+            wrong.append("tools")
+        return wrong
+
+    def _wrong_values(self) -> list[str]:
+        """Return the enum, count, time, and paired fields whose values do not fit."""
+        enums = {"os_family": (self.os_family, OperatingSystemFamily), "git_state": (self.git_state, GitHeadState), "shell_kind": (self.shell_kind, ShellKind)}
+        wrong = [name for name, (value, choices) in enums.items() if value is not None and not isinstance(value, choices)]
+        if self.cpu_count is not None and (isinstance(self.cpu_count, bool) or not isinstance(self.cpu_count, int) or self.cpu_count < 1):
+            wrong.append("cpu_count")
+        if self.local_time is not None and (not isinstance(self.local_time, datetime) or self.local_time.tzinfo is None):
+            wrong.append("local_time")
+        # A branch or a detached commit is named by git_ref, and a shell
+        # kind describes the shell that shell names.
+        if self.git_state in (GitHeadState.BRANCH, GitHeadState.DETACHED) and not self.git_ref:
+            wrong.append("git_ref")
+        if self.shell_kind is not None and not self.shell:
+            wrong.append("shell")
+        return wrong
+
     def to_context_text(self) -> str:
-        # Renders OS, working directory, and shell if set.
+        # Renders each known fact as one line, in the order host,
+        # project, git, shell, and tools; unknown facts are left out.
+        facts = [*self._host_lines(), *self._project_lines(), *self._git_lines(), *self._shell_lines(), *self._tool_lines()]
         lines = [
-            "This primitive carries execution-environment context relevant to interpreting commands and paths. The following fields identify the operating system, current working directory, and shell when those values are known. Missing values mean the caller did not provide that detail, not that the environment has no such value. Use this record to qualify operational assumptions made from the other context.",
+            "This primitive carries execution-environment context relevant to interpreting commands and paths. The following facts describe the operating system, hardware, date, working directory, project files, git state, shell, and the tools that shell finds, as far as they were gathered. A missing fact means nobody gathered that detail, not that the environment lacks it. Use this record to choose commands, paths, and package managers, and treat it as a snapshot taken when it was gathered.",
             "",
             "Environment:",
+            # @intent empty-environment-renders-na
+            # Check the facts, not the line count, so the intro lines cannot hide an empty record.
+            *(facts or ["N/A"]),
         ]
-        if self.os_name:
-            lines.append(f"OS: {self.os_name}")
-        if self.cwd:
-            lines.append(f"CWD: {self.cwd}")
-        if self.shell:
-            lines.append(f"Shell: {self.shell}")
-        # @intent empty-environment-renders-na
-        # Check the fields, not the line count, so the intro lines cannot hide an empty record.
-        if not (self.os_name or self.cwd or self.shell):
-            lines.append("N/A")
         return _with_context_intro("\n".join(lines))
+
+    def _host_lines(self) -> list[str]:
+        """Return the operating system, CPU, date, and working directory lines."""
+        lines = []
+        family = self._OS_FAMILY_LABELS[self.os_family] if self.os_family is not None else ""
+        system = "; ".join(part for part in (self.os_distribution, self.os_name) if part)
+        if family or system:
+            lines.append(f"- Operating system: {family} ({system})" if family and system else f"- Operating system: {family or system}")
+        if self.architecture:
+            lines.append(f"- CPU architecture: {self.architecture}")
+        if self.cpu_count is not None:
+            lines.append(f"- Logical CPU cores: {self.cpu_count}")
+        if self.local_time is not None:
+            lines.append(f"- Date when gathered: {self.local_time:%Y-%m-%d} (time zone {self.local_time.tzname()}, UTC{self.local_time:%z})")
+        if self.cwd:
+            lines.append(f"- Working directory: {self.cwd}")
+        return lines
+
+    def _project_lines(self) -> list[str]:
+        """Return one line per non-empty project list: files, languages, package managers, dependencies, and dependency folders."""
+        listed = (
+            ("Project files in the working directory", self.project_files),
+            ("Languages", self.languages),
+            ("Package managers", self.package_managers),
+            ("Declared dependencies", self.dependencies),
+            ("Installed dependency folders", self.dependency_folders),
+        )
+        return [f"- {label}: {', '.join(values)}" for label, values in listed if values]
+
+    def _git_lines(self) -> list[str]:
+        """Return the line saying whether the working directory is in a git repository, and on which branch or commit."""
+        match self.git_state:
+            case None:
+                return []
+            case GitHeadState.NOT_A_REPOSITORY:
+                return ["- Git: not inside a git repository."]
+            case GitHeadState.BRANCH:
+                return [f"- Git: inside a git repository, on branch {self.git_ref}."]
+            case GitHeadState.DETACHED:
+                return [f"- Git: inside a git repository, detached at commit {self.git_ref}."]
+        return ["- Git: inside a git repository; its branch could not be read."]
+
+    def _shell_lines(self) -> list[str]:
+        """Return the shell line, with the Git Bash rules on Windows, and the bash, uname, and system package manager lines."""
+        lines = []
+        if self.shell_error:
+            lines.append(f"- Shell: none, so shell commands will fail: {self.shell_error}")
+        elif self.shell_kind is ShellKind.GIT_BASH:
+            lines.append(f"- Shell: Git Bash (MSYS) from {self.shell}. Write POSIX shell commands, not PowerShell or cmd. Windows paths appear as /c/Users/... inside bash.")
+        elif self.shell_kind is ShellKind.BASH:
+            lines.append(f"- Shell: bash from {self.shell}.")
+        elif self.shell:
+            lines.append(f"- Shell: {self.shell}")
+        if self.bash_version:
+            lines.append(f"- Bash version: {self.bash_version}")
+        if self.uname:
+            lines.append(f"- System (uname -srm): {self.uname}")
+        if self.system_package_managers:
+            lines.append(f"- System package managers on the shell's PATH: {', '.join(self.system_package_managers)}")
+        return lines
+
+    def _tool_lines(self) -> list[str]:
+        """Return the tools the shell found with their versions and paths, then the probe failure line."""
+        lines = []
+        if self.tools:
+            lines.append("- Tools on the shell's PATH, with the first line of each version output:")
+            lines.extend(f"  - {tool.name}: {tool.version or 'no version output'} ({tool.path})" for tool in self.tools)
+        if self.probe_error:
+            lines.append(f"- Tool probe failed: {self.probe_error}. The facts gathered from the shell may be incomplete.")
+        return lines
 
 
 @dataclass(frozen=True, slots=True)

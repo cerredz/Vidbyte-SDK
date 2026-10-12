@@ -164,7 +164,7 @@ def test_empty_setup_commands_add_no_section_and_start_no_process(coding_agent_c
     # Edge case: the default runs nothing, so the request is what it was before this feature.
     started = _forbid_processes(monkeypatch)
 
-    agent = _agent(coding_agent_cls, tmp_path, progress_notes=False)
+    agent = _agent(coding_agent_cls, tmp_path, load_environment=False, progress_notes=False)
     system, _prompt = _first_request(agent, script_model)
 
     assert started == []

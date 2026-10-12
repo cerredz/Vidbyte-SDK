@@ -148,7 +148,7 @@ def test_root_that_cannot_be_written_gives_no_section_and_does_not_raise(coding_
         raise PermissionError(13, "Permission denied", str(self))
 
     monkeypatch.setattr(Path, "mkdir", refuse)
-    agent = _agent(coding_agent_cls, tmp_path)
+    agent = _agent(coding_agent_cls, tmp_path, load_environment=False)
 
     assert agent.context_manager is None
     assert not _notes_dir(tmp_path).exists()
@@ -156,7 +156,7 @@ def test_root_that_cannot_be_written_gives_no_section_and_does_not_raise(coding_
 
 def test_progress_notes_false_creates_nothing_and_adds_no_section(coding_agent_cls, tmp_path) -> None:
     # FR-8 edge: the switch off means no files and no section.
-    agent = _agent(coding_agent_cls, tmp_path, progress_notes=False)
+    agent = _agent(coding_agent_cls, tmp_path, progress_notes=False, load_environment=False)
 
     assert agent.context_manager is None
     assert list(tmp_path.iterdir()) == []

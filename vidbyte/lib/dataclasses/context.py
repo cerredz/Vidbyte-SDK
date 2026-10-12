@@ -14,6 +14,7 @@ Architecture:
     - ContextToolCall: Structured record of a tool call.
     - ContextResponse: Structured model/agent response.
     - ContextArtifact: File or text intermediate product.
+    - EnvironmentTool: One tool a shell finds on its PATH, for EnvironmentContextItem.
     - ContextItem: Standardized structured context units managed by ContextManager.
     - BaseContext: Baseline context with formatting capabilities.
     - BaseAgentContext: Context object built by BaseAgent before delegating to a runner.
@@ -30,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.context.primitives import ContextItem
@@ -162,6 +164,28 @@ class ContextArtifact:
     content: str
     artifact_type: str = "text"
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class EnvironmentTool:
+    """One command-line tool a shell finds on its PATH: its name, the first line of its version output, and where it lives.
+
+    version is empty when the tool printed nothing for its version
+    flag; name and path are never blank.
+    """
+
+    name: str
+    version: str
+    path: str
+
+    def __post_init__(self) -> None:
+        # A tool with no name or no path cannot be shown or run, so
+        # reject it where it is built.
+        wrong = [name for name, value in (("name", self.name), ("path", self.path)) if not isinstance(value, str) or not value.strip()]
+        if not isinstance(self.version, str):
+            wrong.append("version")
+        if wrong:
+            raise ConfigurationError(f"EnvironmentTool {', '.join(wrong)} must be text; name and path must not be blank.", details={"fields": wrong})
 
 
 @dataclass(frozen=True, slots=True)
