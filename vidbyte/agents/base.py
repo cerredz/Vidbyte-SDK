@@ -13,8 +13,9 @@ Architecture:
       lifetime, both reset at the top of every generate_reply() and threaded
       into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
     - Inside a metered run (an active vidbyte.lib.usage_ledger ledger, opened by
-      JevRuntime), a nested agent records into its own tracker and merges that
-      run's usage into the active ledger when it finishes.
+      JevRuntime, a team agent, or a top-level agent over its own tracker), a
+      nested agent records into its own tracker and merges that run's usage into
+      the active ledger when it finishes.
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -797,8 +798,14 @@ class BaseAgent(McpAttachableMixin):
             self.last_queued_replies = []
         try:
             parent = active_usage_ledger()
-            if parent is None or parent is self._usage_tracker:
+            if parent is self._usage_tracker:
                 return await self._generate_reply(message, **options)
+            if parent is None:
+                # @intent top-level-agent-owns-the-run-ledger
+                # A plain top-level run is billed for every call it causes, so it opens the ledger over its own
+                # tracker: sub-agent tools, trace agents and lib-level calls then reach its get_usage() exactly once.
+                with usage_ledger_scope(self._usage_tracker):
+                    return await self._generate_reply(message, **options)
             with usage_ledger_scope(self._usage_tracker):
                 try:
                     return await self._generate_reply(message, **options)
