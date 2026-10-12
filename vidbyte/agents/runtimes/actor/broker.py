@@ -85,6 +85,7 @@ class BaseActorRuntime(ABC):
         self._tasks: list[asyncio.Task] = []
         self._message_count = 0
         self._completion_future: asyncio.Future[str] | None = None
+        self._boot_pending = False
 
         # RunnerHandle and options populated at execution time
         self._handle: RunnerHandle | None = None
@@ -222,7 +223,8 @@ class BaseActorRuntime(ABC):
             # Root orchestrator actor
             await self.spawn(self.agent_name, self.system_prompt, model_name=None)
 
-            # Boot message
+            # Boot message: mark it so it reaches the root actor even when the root is named like a completion address.
+            self._boot_pending = True
             await self.send("system", self.agent_name, message)
 
             # Execution tracking and termination safeguards
@@ -268,6 +270,14 @@ class BaseActorRuntime(ABC):
         if span is not None and _is_semantic_tracer(self.tracer):
             self.tracer.end_span(span, output=output, error=error)
 
+    def _take_boot_message(self) -> bool:
+        # @intent boot-message-reaches-root-actor-whatever-its-name
+        # Reports, once, that this send is the boot message, so a root actor named "system" or
+        # "orchestrator" receives the user's prompt instead of the prompt becoming the run's answer.
+        is_boot = self._boot_pending
+        self._boot_pending = False
+        return is_boot
+
     def _check_quiescence(self) -> bool:
         """Returns True if all mailboxes are empty and no worker tasks are active."""
         if self._message_count == 0:
@@ -293,7 +303,8 @@ class PointToPointActorRuntime(BaseActorRuntime):
             self._end_semantic_span(span, output="max_loop")
             return
 
-        if recipient == "system" or recipient == "orchestrator":
+        is_boot = self._take_boot_message()
+        if not is_boot and (recipient == "system" or recipient == "orchestrator"):
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
             self._end_semantic_span(span, output="completion")
@@ -326,16 +337,17 @@ class BroadcastActorRuntime(BaseActorRuntime):
             self._end_semantic_span(span, output="max_loop")
             return
 
-        if recipient == "system" or recipient == "orchestrator":
+        is_boot = self._take_boot_message()
+        if not is_boot and (recipient == "system" or recipient == "orchestrator"):
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
             self._end_semantic_span(span, output="completion")
             return
 
-        # Broadcast to all registered actors (excluding the sender)
+        # Broadcast to all registered actors (excluding the sender, unless it is the boot message to a root named "system")
         msg_id = str(uuid.uuid4())
         for actor_id, actor in self._actors.items():
-            if actor_id != sender:
+            if actor_id != sender or is_boot:
                 msg = ActorMessage(
                     message_id=msg_id,
                     sender=sender,
