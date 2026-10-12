@@ -150,9 +150,15 @@ class EnvironmentLoader:
                 return GitHeadState.UNREADABLE, None
             # @intent empty-branch-name-is-unreadable
             # "ref: refs/heads/" names no branch, so it reads like an empty HEAD.
+            # @intent reftable-placeholder-head-is-unreadable
+            # The reftable ref backend keeps refs in .git/reftable/ and writes
+            # the placeholder "ref: refs/heads/.invalid" into HEAD. Git forbids
+            # a name part that starts with ".", so such a name is no branch.
             if head.startswith("ref: refs/heads/"):
                 branch = head.removeprefix("ref: refs/heads/")
-                return (GitHeadState.BRANCH, branch) if branch else (GitHeadState.UNREADABLE, None)
+                if branch and not any(part.startswith(".") for part in branch.split("/")):
+                    return GitHeadState.BRANCH, branch
+                return GitHeadState.UNREADABLE, None
             return (GitHeadState.DETACHED, head) if head else (GitHeadState.UNREADABLE, None)
         return GitHeadState.NOT_A_REPOSITORY, None
 
