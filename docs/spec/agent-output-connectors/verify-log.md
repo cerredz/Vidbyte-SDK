@@ -105,3 +105,24 @@ Edits were limited to the following. None of them touches `vidbyte/agents/base.p
 The remote runs ran on the code commit a9230d46. The docs-only commit that records this log is dispatched again afterwards; its run IDs and results are in the S5 STATUS block.
 
 **Still open:** none of the findings handed to this iteration. R-5 (spec-only, done in r6), R-13 (Q-11, not built), and R-14 (tests already added) were not this iteration's.
+
+## Iteration 1 addendum (polish) — 2026-10-12
+
+**Defects in:** two trivial Minors from the final re-review (reports/S5-rereview.md, verdict SOUND).
+- R-C2: `email.py:32` had one blank line before `class EmailOutput` (E302). The R-3 edit left it.
+- R-C1: the R-8 `chat_id` check raises inline in `TelegramOutput.__init__`. That contradicts the §12.4 line "Connector constructors contain no `raise` themselves", and the spec did not record it as a deviation.
+
+**Changes:**
+- ad4ed50a style(outputs): restore two blank lines before EmailOutput [rereview R-C2]. `ruff check --no-cache --preview --select E302 vidbyte/lib/outputs/email.py` gives `All checks passed!`.
+- 0ca19568 docs(spec): record the TelegramOutput chat_id deviation [rereview R-C1]. It adds one bullet to the §17 "Implementation deviations" list and changes no other spec line. The code is kept as it was.
+
+**Gate matrix out** (at 0ca19568):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| feature pack | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors` | PASS | `340 passed in 2.93s` |
+| lint | `python lint/run.py` | PASS | `SDK-LINT: PASS` |
+| run_ci source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `SDK-LINT: PASS` · `3743 passed, 13 skipped in 38.70s` · `CI passed.` |
+| remote ci.yml and static-policy.yml | dispatched on the commit that records this addendum | see the S5 STATUS reply | — |
+
+**Still open:** none. `git diff 7f3bb7ff..HEAD -- tests/` is empty.
