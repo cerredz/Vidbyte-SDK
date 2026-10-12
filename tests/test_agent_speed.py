@@ -110,6 +110,22 @@ class MathHelperTests(unittest.TestCase):
     def test_argmax_index_returns_none_for_empty_mapping(self) -> None:
         self.assertIsNone(MathHelper.argmax_index({}))
 
+    def test_max_concurrency_treats_touching_intervals_as_sequential(self) -> None:
+        self.assertEqual(MathHelper.max_concurrency([(0.0, 1.0), (1.0, 2.0)]), 1)
+
+    def test_max_concurrency_counts_truly_overlapping_intervals(self) -> None:
+        self.assertEqual(MathHelper.max_concurrency([(0.0, 2.0), (1.0, 3.0)]), 2)
+
+    def test_max_concurrency_is_one_for_identical_zero_length_intervals(self) -> None:
+        # A coarse clock (15.6 ms on Windows) stamps fast sequential tools with one instant.
+        self.assertEqual(MathHelper.max_concurrency([(5.0, 5.0)] * 4), 1)
+
+    def test_max_concurrency_counts_a_zero_length_interval_inside_a_longer_one(self) -> None:
+        self.assertEqual(MathHelper.max_concurrency([(0.0, 2.0), (1.0, 1.0)]), 2)
+
+    def test_max_concurrency_returns_none_for_empty_intervals(self) -> None:
+        self.assertIsNone(MathHelper.max_concurrency([]))
+
 
 class RecordModelCallInputValidationTests(unittest.TestCase):
     def test_negative_dispatched_at_raises(self) -> None:
