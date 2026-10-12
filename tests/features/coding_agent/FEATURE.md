@@ -148,6 +148,7 @@ These are the failure inventory the tests were chosen from, given as input → w
   - The probe runs again for every agent, or a cached probe answers for a different `PATH`.
   - A worktree's `.git` file or a detached checkout gives the wrong git line.
   - A malformed, oversized, or undecodable manifest breaks construction, or a string where a list belongs is read letter by letter.
+  - A dependency written with a parenthesized version (`requests (>=2.32)`, as Poetry 2 writes it) or followed by a requirements.txt comment (`pytest  # runner`) is dropped, or widening the name match turns a URL, path, or `git+https://` line into a name.
   - Output cut by a timeout or the byte cap becomes half a tool record.
   - A loader bug renders nonsense instead of failing where `EnvironmentContextItem` is built.
 - **MAP.md errors.** The map renders before `AGENTS.md` or not at all; `load_map=False` still reads the folder; a lowercase `map.md` is missed; the cut splits a character or names the wrong file; a folder named `MAP.md` is skipped; `load_map="yes"` is accepted. The shared `RootFileLoader` steps are pinned by the `AGENTS.md` tests.
@@ -167,7 +168,9 @@ These are the failure inventory the tests were chosen from, given as input → w
 
 ## Historical Regressions
 
-None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r3. The S1 review found the Windows launcher orphan (EC-14), the pipe-holding descendants (EC-28 to EC-30) and the transport leak (INV-26) before any code existed.
+- 2026-10-12, #885 follow-up: the environment section dropped every Poetry 2 dependency (`name (>=1)`) and every bare requirements.txt name followed by an inline comment, because the name match allowed only `[ < > = ! ~ ; @` or the end after a name. Pinned by `test_declared_dependencies_read_parenthesized_versions_and_inline_comments` and `test_requirement_lines_that_are_not_names_give_no_names`.
+
+The feature was specified in `docs/spec/coding-agent/spec.md` r3. The S1 review found the Windows launcher orphan (EC-14), the pipe-holding descendants (EC-28 to EC-30) and the transport leak (INV-26) before any code existed.
 
 ## Test Suite Map
 
@@ -181,7 +184,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
 - `test_coding_agent_agents_md.py` checks `AGENTS.md` loading and the shared coding context window: the position in the request, the byte-identical request without a file, the switch, case variants, the root-only lookup, the cap and the cut character, blank and undecodable files, a broken file, strict bool validation, the caller's manager, fork, read-once, and `CodingContextWindow` and `CodingContextSectionText` on their own.
-- `test_coding_agent_environment.py` checks the environment section: its position and facts in the request as an `EnvironmentContextItem`, the OS family and the Windows Git Bash line, no bash, a timed-out or failing probe, cut probe output, the switch and its strict bool, a planted secret, marker files with their languages and package managers, declared dependencies from every manifest with the name cap, the size cap, and malformed manifests, installed dependency folders, git branches (subfolder, worktree, detached, broken, empty), the probe cache, the item built by a caller and its field checks, `CodingContextSectionItem` placement and checks, and one run of the host's real bash.
+- `test_coding_agent_environment.py` checks the environment section: its position and facts in the request as an `EnvironmentContextItem`, the OS family and the Windows Git Bash line, no bash, a timed-out or failing probe, cut probe output, the switch and its strict bool, a planted secret, marker files with their languages and package managers, declared dependencies from every manifest with the name cap, Poetry 2 parenthesized versions and requirements.txt inline comments, URL, VCS, and path lines giving no name, the size cap, and malformed manifests, installed dependency folders, git branches (subfolder, worktree, detached, broken, empty), the probe cache, the item built by a caller and its field checks, `CodingContextSectionItem` placement and checks, and one run of the host's real bash.
 - `test_coding_agent_map_md.py` checks `MAP.md` loading: the position before the user message and after `AGENTS.md`, a missing or blank file, `map.md`, the cap and the cut character, a broken file, the switch, and strict bool validation.
 - `test_coding_agent_setup_commands.py` checks setup commands: two passing lines placed after `AGENTS.md` and before the user message, stop at the first failure (a marker file proves the next command never ran), the time limit, `root_dir` as the working directory, no bash, the empty default, input validation, and the capped tail of a huge output.
 - `test_coding_agent_progress_notes.py` checks progress notes: a fresh root, existing notes and `.gitignore` kept, git status clean, a sibling tool's `.vidbyte/` files still visible to git, the cross-run edit with `replace_text`, a root that cannot be written, the switch, strict bool validation, and the cap.
