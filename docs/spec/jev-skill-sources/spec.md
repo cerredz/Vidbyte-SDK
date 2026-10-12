@@ -1,7 +1,7 @@
 ---
 spec: jev-skill-sources
 title: JevAgent skill sources — declarative skill entries resolved under the hood
-status: tests-written
+status: implemented
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-jev-skill-sources
@@ -9,7 +9,7 @@ branch: feat/jev-skill-sources
 base_commit: ba3e4ca51ad78c44026dfd296663ae7b092bce56
 created: 2026-10-12
 updated: 2026-10-12
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/904
 ---
 
 # Spec: JevAgent skill sources — declarative skill entries resolved under the hood
