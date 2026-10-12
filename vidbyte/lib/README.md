@@ -39,6 +39,7 @@ print(default_model, api_key_env, openai_models, gpt56_luna_price)
 - `constants/`: shared SDK constants, including model/provider-to-runner mappings.
 - `registries/`: agent, provider/model, pricing, runtime, prompt, tool, actor, and declarable-component registries.
 - `errors/`: SDK-specific exception types.
+- `outputs/`: provider classes that send a finished agent reply's title and body to Slack, email, issue trackers, docs, and webhooks.
 - `runners/`: runner handles, concrete model runners, and runner inference helpers.
 - `tools/`: provider-specific tool schema formatting.
 - `tracing/`: tracer base classes and null tracer.
