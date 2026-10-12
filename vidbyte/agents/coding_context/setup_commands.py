@@ -21,7 +21,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import BinaryIO
+from typing import IO
 
 import vidbyte.tools.builtins.bash as bash_tool
 from vidbyte.lib.constants.coding import (
@@ -79,7 +79,7 @@ class SetupCommandsLoader:
         return cls._section(f"These commands ran in {root} before this conversation started:\n" + "\n".join(lines))
 
     @staticmethod
-    def _run(executable: str, command: str, root: Path, output: BinaryIO) -> tuple[bool, str]:
+    def _run(executable: str, command: str, root: Path, output: IO[bytes]) -> tuple[bool, str]:
         """Run `bash -c command` in root, writing into output, and return whether it passed and a short outcome."""
         # @intent setup-command-subprocess-is-bounded
         # The command reaches bash as one argv item, so no second shell
@@ -111,7 +111,7 @@ class SetupCommandsLoader:
         return exit_code == 0, f"exit {exit_code}, {time.monotonic() - started:.1f} s"
 
     @staticmethod
-    def _output_tail(output: BinaryIO) -> str:
+    def _output_tail(output: IO[bytes]) -> str:
         """Return the last output lines, at most the line cap taken from at most the byte cap, each indented by three spaces."""
         size = output.seek(0, os.SEEK_END)
         output.seek(max(0, size - CODING_SETUP_OUTPUT_TAIL_BYTES))
