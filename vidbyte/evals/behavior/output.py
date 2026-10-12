@@ -28,8 +28,8 @@ class OutputBehavior:
     """Predicates over final response output for a completed agent run."""
 
     # @intent code-fences-may-be-indented-or-empty
-    # Fences sit on their own lines, may be indented (list items) and may wrap no body, so a block never swallows the next one.
-    _CODE_BLOCK_PATTERN = re.compile(r"(?ms)^[ \t]*(`{3,}|~{3,})([^\n`]*)\n(?:.*?\n)??[ \t]*\1[ \t]*$")
+    # Fences sit on their own lines (LF or CRLF), may be indented (list items) and may wrap no body, so a block never swallows the next one.
+    _CODE_BLOCK_PATTERN = re.compile(r"(?ms)^[ \t]*(`{3,}|~{3,})([^\n`]*)\n(?:.*?\n)??[ \t]*\1[ \t]*\r?$")
     _URL_PATTERN = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>)\]]+")
     _MARKDOWN_CITATION_PATTERN = re.compile(r"\[[^\]]+\]\((?:https?://|www\.)[^)\s]+\)")
     _FOOTNOTE_CITATION_PATTERN = re.compile(r"\[\^[^\]]+\]")
