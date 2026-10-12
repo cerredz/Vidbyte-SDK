@@ -313,8 +313,9 @@ class PointToPointActorRuntime(BaseActorRuntime):
         self._message_count += 1
         span = self._start_semantic_span("runtime.actor.message", sender=sender, recipient=recipient, content=content)
 
-        # Max loop safety gate
-        if self._message_count >= self.max_loop:
+        # @intent max-loop-allows-exactly-max-loop-messages
+        # Max loop safety gate: route up to max_loop messages and refuse the one after, so max_loop=2 still delivers the prompt and returns its answer.
+        if self._message_count > self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
             self._end_semantic_span(span, output="max_loop")
@@ -322,6 +323,11 @@ class PointToPointActorRuntime(BaseActorRuntime):
 
         is_boot = self._take_boot_message()
         if not is_boot and (recipient == "system" or recipient == "orchestrator"):
+            # @intent coordinator-completes-only-from-the-root
+            # In coordinator mode only the root actor's reply is the run's answer; another actor answering the boot message is dropped.
+            if self.termination_mode == "coordinator" and sender != self.agent_name:
+                self._end_semantic_span(span, output="ignored_non_root_completion")
+                return
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
             self._end_semantic_span(span, output="completion")
@@ -347,8 +353,9 @@ class BroadcastActorRuntime(BaseActorRuntime):
         self._message_count += 1
         span = self._start_semantic_span("runtime.actor.message", sender=sender, recipient=recipient, content=content)
 
-        # Max loop safety gate
-        if self._message_count >= self.max_loop:
+        # @intent max-loop-allows-exactly-max-loop-messages
+        # Max loop safety gate: route up to max_loop messages and refuse the one after, so max_loop=2 still delivers the prompt and returns its answer.
+        if self._message_count > self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
             self._end_semantic_span(span, output="max_loop")
@@ -356,6 +363,11 @@ class BroadcastActorRuntime(BaseActorRuntime):
 
         is_boot = self._take_boot_message()
         if not is_boot and (recipient == "system" or recipient == "orchestrator"):
+            # @intent coordinator-completes-only-from-the-root
+            # In coordinator mode only the root actor's reply is the run's answer; another actor answering the boot message is dropped.
+            if self.termination_mode == "coordinator" and sender != self.agent_name:
+                self._end_semantic_span(span, output="ignored_non_root_completion")
+                return
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
             self._end_semantic_span(span, output="completion")

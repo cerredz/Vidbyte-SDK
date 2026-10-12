@@ -1243,6 +1243,23 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
                     self.assertEqual(result.content, "ANSWER")
                     self.assertEqual(runner.calls, 1)
 
+    def test_actor_max_loop_allows_exactly_max_loop_messages(self) -> None:
+        # @intent max-loop-allows-exactly-max-loop-messages
+        # [Regression] The ceiling refused the max_loop-th message, so max_loop=2 billed the answer and then replaced it.
+        result, runner = self._run(ActorRuntime(include_actors=[], max_loop=2))
+        self.assertEqual(result.content, "ANSWER")
+        self.assertEqual(runner.calls, 1)
+
+    def test_actor_broadcast_coordinator_returns_the_root_answer(self) -> None:
+        # @intent coordinator-completes-only-from-the-root
+        # [Regression] In broadcast coordinator mode the first actor to answer the boot message ended the run with its text.
+        from vidbyte.agents.runtimes.actor.actor import PlannerActor
+
+        runtime = ActorRuntime(topology=AgentRuntimeType.ACTOR_MODEL_BROADCAST, include_actors=[PlannerActor])
+        agent = build_test_agent(name="root", system_prompt="s", runtime=runtime, runner=PerActorRunner(slow_actor="root"))
+        result = asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+        self.assertEqual(result.content, "ANSWER FROM root")
+
     def test_actor_quiescence_waits_for_an_actor_that_is_still_working(self) -> None:
         # [Regression] Quiescence ended the run while the root actor was still awaiting its model call.
         agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(termination_mode="quiescence", include_actors=[]), runner=SlowAnswerRunner())
@@ -1265,6 +1282,18 @@ class SlowAnswerRunner:
     async def arun(self, prompt: str, **_: object) -> FakeResponse:
         await asyncio.sleep(0.05)
         return FakeResponse("SLOW ANSWER", {})
+
+
+class PerActorRunner:
+    """Offline runner that names the answering actor, and makes one actor answer after the others."""
+
+    def __init__(self, *, slow_actor: str) -> None:
+        self.slow_actor = slow_actor
+
+    async def arun(self, prompt: str, **_: object) -> FakeResponse:
+        actor_id = prompt.split("Your Actor ID is: ", 1)[1].split("\n", 1)[0]
+        await asyncio.sleep(0.05 if actor_id == self.slow_actor else 0)
+        return FakeResponse(f"ANSWER FROM {actor_id}", {})
 
 
 class FailingRunner:
