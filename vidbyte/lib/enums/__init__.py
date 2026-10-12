@@ -51,7 +51,13 @@ from vidbyte.lib.enums.codex import (
 )
 from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.enums.config import AgentType, DocumentType
-from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.context import (
+    BudgetPreset,
+    GitHeadState,
+    OperatingSystemFamily,
+    PermissionPreset,
+    ShellKind,
+)
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -166,6 +172,7 @@ __all__ = [
     "FailurePhase",
     "FailureSeverity",
     "FailureStatus",
+    "GitHeadState",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
@@ -197,6 +204,7 @@ __all__ = [
     "ModelProvider",
     "MultiAgentStopReason",
     "NecessarySufficientVerdict",
+    "OperatingSystemFamily",
     "OrchestratorAction",
     "PartitionVerdict",
     "PermissionPreset",
@@ -212,6 +220,7 @@ __all__ = [
     "ReturnableOption",
     "Reversibility",
     "RuleErrorMode",
+    "ShellKind",
     "Skill",
     "SkillEnums",
     "StrawmanCriticism",

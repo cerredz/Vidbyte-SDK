@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/constants/coding.py
 
-PURPOSE: Defines the fixed AGENTS.md file name and byte cap that CodingAgent uses when it loads a repository's AGENTS.md into the model's context, the probe script, limits, and project marker files of its environment section, and the paths, cap, template, and model-facing text of the agent's own progress notes file.
-ROLE IN CODEBASE: Read by AgentsMdLoader (vidbyte/agents/coding_context/agents_md.py), EnvironmentLoader (vidbyte/agents/coding_context/environment.py), ProgressNotesLoader (vidbyte/agents/coding_context/progress_notes.py), and the coding-agent feature tests.
-ARCHITECTURE NOTE: Immutable constants only; the loaders own the reading, decoding, probing, and truncation behavior. The probe script prints finished lines, so the loader only caps and appends them.
-COMMON MODIFICATION PATTERNS: Change a cap or a limit here, never at the call, so the loaders, their notes, and the tests stay in step. A new tool to report is one more name in the probe script's for list.
+PURPOSE: Defines the fixed AGENTS.md file name and byte cap that CodingAgent uses when it loads a repository's AGENTS.md into the model's context, the probe script, limits, marker-file tables, and dependency caps of its environment section, and the paths, cap, template, and model-facing text of the agent's own progress notes file.
+ROLE IN CODEBASE: Read by AgentsMdLoader (vidbyte/agents/coding_context/agents_md.py), EnvironmentLoader (vidbyte/agents/coding_context/environment.py), EnvironmentProbe (vidbyte/agents/coding_context/environment_probe.py), ProjectDependencies (vidbyte/agents/coding_context/project_dependencies.py), ProgressNotesLoader (vidbyte/agents/coding_context/progress_notes.py), and the coding-agent feature tests.
+ARCHITECTURE NOTE: Immutable constants only; the loaders own the reading, decoding, probing, and truncation behavior. The probe script prints raw tab-separated records, not text for the model; EnvironmentProbe parses them and EnvironmentContextItem (vidbyte/context/primitives/documents.py) formats them. Marker tables are tuples of pairs, so their order is the listing order.
+COMMON MODIFICATION PATTERNS: Change a cap or a limit here, never at the call, so the loaders, their notes, and the tests stay in step. A new tool to report is one more name in the probe script's tool loop, and a new system package manager one more name in its package-manager loop. A new language or lockfile is one more pair in its marker table.
 KNOWN EDGE CASES: The AGENTS.md cap counts bytes, not characters; the loader moves the cut back to a whole UTF-8 character, so the shown text can be up to three bytes shorter. The probe script uses only bash 3.2 syntax, because macOS ships bash 3.2.
 RELATED DOCS: docs/design/coding-agent-agents-md.md; docs/design/coding-agent-environment-context.md; docs/design/coding-agent-progress-notes.md; vidbyte/agents/coding_context/README.md
 TESTS: tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_environment.py, and tests/features/coding_agent/test_coding_agent_progress_notes.py
@@ -23,44 +23,95 @@ CODING_AGENTS_MD_MAX_BYTES = 32_768
 # so only a hanging tool reaches it.
 CODING_ENVIRONMENT_PROBE_TIMEOUT_SECONDS = 15.0
 
-# The probe prints about 20 short lines; more than this is never shown.
+# The probe prints about 30 short lines; more than this is never read.
 CODING_ENVIRONMENT_PROBE_MAX_BYTES = 8_192
 
-# Files in the root folder that tell the model which package manager or
-# build tool the project uses.
-CODING_ENVIRONMENT_PROJECT_MARKERS = (
-    "pyproject.toml",
-    "uv.lock",
-    "poetry.lock",
-    "requirements.txt",
-    "package.json",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "bun.lock",
-    "bun.lockb",
-    "Cargo.toml",
-    "go.mod",
-    "Makefile",
+# Files in the root folder that name the project's language, as (file
+# name, language) pairs in the order the languages are listed.
+CODING_ENVIRONMENT_LANGUAGE_MARKERS = (
+    ("pyproject.toml", "Python"),
+    ("setup.py", "Python"),
+    ("requirements.txt", "Python"),
+    ("package.json", "JavaScript"),
+    ("tsconfig.json", "TypeScript"),
+    ("Cargo.toml", "Rust"),
+    ("go.mod", "Go"),
+    ("pom.xml", "Java"),
+    ("build.gradle", "Java or Kotlin"),
+    ("build.gradle.kts", "Kotlin"),
+    ("Gemfile", "Ruby"),
+    ("composer.json", "PHP"),
+    ("CMakeLists.txt", "C or C++"),
+    ("Package.swift", "Swift"),
+    ("pubspec.yaml", "Dart"),
+    ("mix.exs", "Elixir"),
 )
 
-# Run as `bash -c` in the root folder. It prints the bash version and
-# the system, then each tool found on bash's own PATH with the first
-# line of its version output. It never prints environment values or the
-# host name (uname gets no -n).
+# Lockfiles in the root folder that name the package manager the
+# project uses, as (file name, package manager) pairs.
+CODING_ENVIRONMENT_PACKAGE_MANAGER_MARKERS = (
+    ("uv.lock", "uv"),
+    ("poetry.lock", "Poetry"),
+    ("Pipfile.lock", "Pipenv"),
+    ("pdm.lock", "PDM"),
+    ("package-lock.json", "npm"),
+    ("pnpm-lock.yaml", "pnpm"),
+    ("yarn.lock", "Yarn"),
+    ("bun.lock", "Bun"),
+    ("bun.lockb", "Bun"),
+    ("Cargo.lock", "Cargo"),
+    ("go.sum", "Go modules"),
+    ("Gemfile.lock", "Bundler"),
+    ("composer.lock", "Composer"),
+)
+
+# Build and task files in the root folder that tell the model how the
+# project is built, tested, or run.
+CODING_ENVIRONMENT_BUILD_FILES = (
+    "Makefile",
+    "justfile",
+    "Taskfile.yml",
+    "tox.ini",
+    "noxfile.py",
+    "Dockerfile",
+    "compose.yaml",
+    "docker-compose.yml",
+)
+
+# Folders in the root folder that hold installed dependencies; one being
+# present tells the model the install step has already run.
+CODING_ENVIRONMENT_DEPENDENCY_FOLDERS = (".venv", "venv", "node_modules", "vendor")
+
+# A manifest larger than this is not read for dependency names.
+CODING_ENVIRONMENT_MANIFEST_MAX_BYTES = 262_144
+
+# At most this many declared dependency names are shown.
+CODING_ENVIRONMENT_MAX_DEPENDENCIES = 60
+
+# Run as `bash -c` in the root folder. It prints raw tab-separated
+# records, one per line, and EnvironmentContextItem formats them:
+#   bash, then the bash version and `uname -srm`;
+#   package-manager, then a system package manager found on the PATH;
+#   tool, then the name, the first version line, and the path.
+# Package managers come before tools, so a hanging tool cannot hide
+# them. It never prints environment values or the host name (uname
+# gets no -n).
 CODING_ENVIRONMENT_PROBE_SCRIPT = r"""
-printf -- '- Bash: %s (%s)\n' "$BASH_VERSION" "$(uname -srm 2>/dev/null)"
-echo '- Tools on the bash PATH (first line of each version output):'
-for t in git python python3 pip uv poetry node npm pnpm yarn bun go cargo java dotnet docker make gh; do
+printf 'bash\t%s\t%s\n' "$BASH_VERSION" "$(uname -srm 2>/dev/null)"
+for m in brew port apt-get dnf yum zypper pacman apk winget choco scoop; do
+  command -v "$m" >/dev/null 2>&1 && printf 'package-manager\t%s\n' "$m"
+done
+for t in git python python3 pip uv poetry node npm pnpm yarn bun deno go cargo rustc java dotnet ruby php docker make gh; do
   p=$(command -v "$t") || continue
   case $t in
     go) v=$("$t" version 2>&1) ;;
     java) v=$("$t" -version 2>&1) ;;
     *) v=$("$t" --version 2>&1) ;;
   esac
-  printf -- '  - %s: %s (%s)\n' "$t" "${v%%$'\n'*}" "$p"
+  printf 'tool\t%s\t%s\t%s\n' "$t" "${v%%$'\n'*}" "$p"
 done
 """
+
 # The agent's own notes folder and file under the root folder. They are
 # local working files, not a repository convention. The folder is its
 # own subfolder of .vidbyte, which other Vidbyte tools also write to.
@@ -87,10 +138,15 @@ CODING_PROGRESS_NOTES_TRUNCATION_NOTE = "[The notes were cut at 32 KiB. Read the
 __all__ = [
     "CODING_AGENTS_MD_FILE_NAME",
     "CODING_AGENTS_MD_MAX_BYTES",
+    "CODING_ENVIRONMENT_BUILD_FILES",
+    "CODING_ENVIRONMENT_DEPENDENCY_FOLDERS",
+    "CODING_ENVIRONMENT_LANGUAGE_MARKERS",
+    "CODING_ENVIRONMENT_MANIFEST_MAX_BYTES",
+    "CODING_ENVIRONMENT_MAX_DEPENDENCIES",
+    "CODING_ENVIRONMENT_PACKAGE_MANAGER_MARKERS",
     "CODING_ENVIRONMENT_PROBE_MAX_BYTES",
     "CODING_ENVIRONMENT_PROBE_SCRIPT",
     "CODING_ENVIRONMENT_PROBE_TIMEOUT_SECONDS",
-    "CODING_ENVIRONMENT_PROJECT_MARKERS",
     "CODING_PROGRESS_NOTES_DIR",
     "CODING_PROGRESS_NOTES_FILE_NAME",
     "CODING_PROGRESS_NOTES_GITIGNORE",
