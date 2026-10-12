@@ -374,6 +374,15 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.tool_args.tool_never_called_with("create_user", name="Eve"))
         self.assertFalse(b.tool_args.tool_never_called_with("create_user", name="Ada", role="admin"))
 
+    def test_tool_called_with_omitted_argument_does_not_match_none(self) -> None:
+        # [Silent Failure] An argument the model never sent does not match None; an explicit null does.
+        omitted = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"query": "refund"}),)))
+        self.assertFalse(omitted.tool_args.tool_called_with("search", cursor=None))
+        self.assertTrue(omitted.tool_args.tool_never_called_with("search", cursor=None))
+        explicit = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"query": "refund", "cursor": None}),)))
+        self.assertTrue(explicit.tool_args.tool_called_with("search", cursor=None))
+        self.assertFalse(explicit.tool_args.tool_never_called_with("search", cursor=None))
+
     def test_tool_called_with_matching(self) -> None:
         # [Hidden Assumption] tool_called_with_matching calls predicate on arg value.
         b = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"query": "python tutorial"}),)))
