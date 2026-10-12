@@ -983,6 +983,35 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(timed_out_calls), 1)
         self.assertEqual(timed_out_calls[0].tool_name, "slow_tool")
 
+    async def test_settings_denials_are_recorded_like_a_middleware_denial(self) -> None:
+        """A ToolSettings or allowed_tools refusal reaches speed stats as one failed call, exactly like a middleware denial."""
+        guardrails = {
+            "middleware": dict(middleware=[DenyingMiddleware()]),
+            "denied_tools": dict(config=AgentRuntimeConfig(tool_settings=ToolSettings(denied_tools=["write"]))),
+            "allowed_tools": dict(config=AgentLoopSettings(allowed_tools=("other",)).to_runtime_config()),
+        }
+        for name, guardrail in guardrails.items():
+            with self.subTest(guardrail=name):
+                write_tool = WriteTool()
+                runner = FakeRunner(
+                    [
+                        _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "write", "arguments": "{}", "call_id": "call_1"}]}),
+                        _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+                    ]
+                )
+                runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([write_tool]), permission_policy=PermissionPolicy(), **guardrail)
+                context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+                await runtime.arun(
+                    "task",
+                    handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                    context=context,
+                )
+
+                self.assertFalse(write_tool.executed)
+                write_stats = next(stats for stats in runtime.speed_tracker.rollup().tool_stats if stats.tool_name == "write")
+                self.assertEqual((write_stats.tool_call_count, write_stats.failed_tool_call_count), (1, 1))
+
 
 class AnswerRunner:
     """Offline runner that returns one fixed answer for every actor or search call."""

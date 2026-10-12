@@ -1749,7 +1749,11 @@ class AgentRuntime:
         reason, meta = denial
         if settings is not None and settings.aborts_on_deny:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        denied_started_at = self.speed_tracker.now()
         context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta, iteration_count=iteration_count)
+        # @intent every-refused-call-reaches-speed-stats
+        # Speed stats count a refused call as one failed call whichever guardrail refused it, matching a middleware denial and the run's own counts.
+        self.speed_tracker.record_tool_call(RecordToolCallInput(tool_name=call.tool_name, started_at=denied_started_at, succeeded=False, error_type="ToolSettingsDenied", iteration_index=iteration_count))
         call_contexts.append(context_record)
         self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
         return context_record, result
