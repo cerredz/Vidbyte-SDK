@@ -289,3 +289,30 @@ Review round 2 (`S1-spec-review-2.md`) returned SOUND WITH FIXES: 2 Blockers, 6 
 - 117 ECs, all guarded or accepted.
 - No undefined IDs.
 - 30 rows, 14 CREATE.
+
+## r4 addendum (revision after the S2 test author)
+
+The S2 test author (`S2-test-author.md`) committed the tests at `d01e0afa` and listed seven open items. The tests are now the contract, so this revision changes wording and pins only. Every edit was checked against the committed tests. No public name, signature, field, constant, URL shape, §8.4 budget, §8.5 interface, §12.3 row, or §6.2 Proof cell changed. The spec is revision 4 and stays `status: approved`.
+
+| Finding | Disposition | Change |
+|---|---|---|
+| S2-1 (Major) | accepted | Verified in `vidbyte/agents/base.py`: `arun` calls `generate_reply`, and `BaseAgent._generate_reply`'s `except Exception` branch re-raises as `AgentExecutionError(...) from exc`, except `UsageAccountingError` and `FailureRaisedError`. Its `except BaseException` branch re-raises cancellation unchanged. INV-9, AC-15 (Then column), EC-9, EC-96, EC-97, and §5 now say that the loader and the preload re-raise the original object unchanged. At `arun`, a programming error is `AgentExecutionError` with `__cause__` set to the original, and cancellation stays `CancelledError`. This matches `test_skill_sources_memory.py`. INV-23 stays as written, because it names `JevSkillsPreload.run`, where it is true |
+| S2-2 | accepted | The symlink loop moved from EC-19 (`fetch_failed`) to EC-17 (`not_found`, remembered), consistent with `read_capped` returning `None` when `is_file()` is false. `read_capped` is unchanged |
+| S2-3 | accepted (stated, not pinned) | EC-31 says that both folded readings conform, as the tests accept either. No new trimming rule |
+| S2-4 | accepted | §9.1: an invalid `SkillResolution` raises `ConfigurationError`, the convention of `SkillDocument` and `JevSkillResult`, and one of the errors the contract test accepts |
+| S2-5 | accepted (one-line rule) | D-17 and EC-43: a lock whose `version` is missing or not a JSON number is treated as absent. This is upstream behavior: `vercel-labs/skills` `src/local-lock.ts:readLocalLock` returns an empty lock when `typeof parsed.version !== 'number'`. No test lock omits `version`, so the rule conflicts with no test |
+| S2-6 | accepted (confirmed) | D-21: `<version>` is the version segment of the download that answered. That is `@latest` on a direct download, or the record's version after the fallback, with an integer written as decimal text. This matches `test_skill_sources_vendor.py` |
+| S2-7 | no change | The briefing said 30 ACs, but the spec has 29. This is not a spec defect |
+
+**Self-check**
+- §8.4, §8.5, §9.2, and §12.3 are byte-identical to r3.
+- All 29 Proof cells are unchanged.
+- No ID was added or lost.
+- Every edited table row keeps its column count.
+
+**Red run after the edit:** `PYTHONPATH=$(pwd) python -m pytest tests/features/jev_skills_preload -q` gives `354 errors`, all of them missing-feature imports:
+- 265: `No module named 'vidbyte.agents.skills'`;
+- 85: `AnthropicSkill`;
+- 4: `SkillSourceType`.
+
+The per-name split differs from S2's table because S2 sorted the imports after its tally. The count and the cause are the same.
