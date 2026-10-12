@@ -18,7 +18,7 @@ started: 2026-10-11 23:17
 | S2 tests | done | 2026-10-12 | 2026-10-12 | reports/S2-test-author.md | S2_HEAD d01e0afa; 12 modules + conftest in tests/features/jev_skills_preload/, 354 cases red (missing vidbyte.agents.skills etc.); AC-1..AC-29 cited; spec r4 (5c08566a) fixed 2 S2 defects |
 | S3 implement | done | 2026-10-12 | 2026-10-12 | reports/S3-implementer.md | S3_HEAD 97c67062; draft PR #904; 25 code commits; budget 14/14 files, 9/9 public names, 3/3 enums, 0 deps; 373 passed 1 skipped; lint PASS; run_ci source+package PASS; semgrep 0 findings; 7 deviations in spec §17; tests untouched since d01e0afa |
 | S4 adversarial review | done | 2026-10-12 | 2026-10-12 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker (R-1 py3.12 tree listing, R-2 non-ASCII credential crash, R-3 72-col comments) / 3 Major (R-4 EC-24 detail, R-5 duplicated guards, R-6 skills.sh test gap); 13 Minor (5 trivial, rest follow-up); refuted 0 B/M |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 2026-10-12 | | | test baseline 578cd064 (44 red, 382 pass, 1 skip) |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -40,7 +40,10 @@ started: 2026-10-11 23:17
 - 2026-10-12 — S3 was cut off mid-row 20 by an API usage limit (17 commits in, one staged edit to jev.py); resumed the same agent via SendMessage after the limit reset rather than a fresh one (it kept its orientation context). Verified the test tree untouched before resuming.
 
 - 2026-10-12 — Remote CI on 8eb304cc: Static policy success; Source 3.11 success; Source 3.12 FAILED (1 test, tree nests 2000 levels → not_found); Package skipped. Fed to the verifier as [orchestrator: CI] → R-1.
-- 2026-10-12 — S4 routing: spec-text first (r5: new EC row for non-ASCII/control-char credentials → AUTH_FAILED under R-2; EC-68 clarified for non-object tree items under R-1; §12.4 A001 wording under R-14), then a narrow test-author pass (S2b) for the test parts of R-1, R-2, R-4 and R-6 (only the test author may touch tests/), then S5 repair for source fixes R-1..R-5 plus trivial Minors (R-9, R-10, R-12, R-13, R-14). Follow-ups NOT built (reported to the user): R-7 Path(""), R-8, R-11, R-15, R-16 dot segments, R-17 YAML off-loop, R-18 logging [scope-adding], R-19 URL length.
+- 2026-10-12 — S4 routing: spec-text first (r5: new EC row for non-ASCII/control-char credentials → AUTH_FAILED under R-2; EC-68 clarified for non-object tree items under R-1; §12.4 A001 wording under R-14), then a narrow test-author pass (S2b) for the test parts of R-1, R-2, R-4 and R-6 (only the test author may touch tests/), then S5 repair for source fixes R-1..R-5 plus trivial Minors (R-8, R-9, R-12, R-13; R-14 done in spec r5). Follow-ups NOT built (reported to the user): R-7 Path(""), R-10, R-11, R-15, R-16 dot segments, R-17 YAML off-loop, R-18 logging [scope-adding], R-19 URL length.
+
+- 2026-10-12 — Spec r5 (18903d3d): EC-118 (GitHub) / EC-119 (vendors) non-ASCII/control-char credential → AUTH_FAILED, zero requests, remembered, detail names field + env var and never the value; EC-68 clarified (tree items not all dicts with str path → FETCH_FAILED, not remembered); §12.4 A001 wording (R-14).
+- 2026-10-12 — S2b narrow test-author pass (f90b0680 tests, 578cd064 report): +44 red cases (R-1 5 rows, R-2 36+2 cases incl. a real-build_request test patching httpx.AsyncClient.send, R-4 1) and green R-6 guards proven against all 5 surviving mutants; only header docstrings changed in existing test files. **New test baseline S2_HEAD = 578cd064** (S5/S6 diff tests/ against it).
 
 ## User replies (verbatim)
 - (none yet)
