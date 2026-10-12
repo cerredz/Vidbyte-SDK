@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from tests.agent_test_support import build_test_agent
 from vidbyte import (
     AgentMessage,
+    AgentMiddleware,
     Failure,
     FailureCode,
     FailureDisposition,
@@ -28,12 +29,14 @@ from vidbyte import (
     FailureRouter,
     FailureStatus,
     ForkRecovery,
+    MiddlewareDecision,
     RuleErrorMode,
     Session,
     StopRecovery,
     rule,
     tool,
 )
+from vidbyte.agents import AgentLoopSettings, ToolSettings
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
     MiddlewareContext,
@@ -109,6 +112,16 @@ class _RefundCallRunner:
         name, arguments = self.responses.pop(0)
         call = {"id": f"call_{name}", "type": "function", "function": {"name": name, "arguments": arguments}}
         return SimpleNamespace(text="", raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]})
+
+
+class _DenyRefundMiddleware(AgentMiddleware):
+    """Middleware that refuses every refund call, the reference refusal for ledger comparisons."""
+
+    async def before_tool_call(self, context: MiddlewareContext) -> MiddlewareDecision:
+        # Refuse the refund tool and let every other call through.
+        if context.tool_call is not None and context.tool_call.tool_name == "refund":
+            return MiddlewareDecision.deny_tool("refunds are blocked")
+        return MiddlewareDecision.continue_()
 
 
 class FailureContractsTests(unittest.TestCase):
@@ -436,6 +449,38 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(refunded, [])
                 self.assertEqual([(item.code, item.status, item.disposition) for item in session.failures.history()], [(code, FailureStatus.TERMINAL, FailureDisposition.RAISE)])
                 self.assertEqual(raised.exception.failure.id, session.failures.history()[0].id)
+
+    async def test_settings_refusals_record_tool_runtime_cause_like_middleware(self) -> None:  # [Silent Failure]
+        # @intent ledger-records-every-refusal-kind
+        # Verify a ToolSettings or allowed_tools refusal leaves the same tool_runtime permission record as a middleware refusal.
+        guards = {
+            "middleware": {"middleware": [_DenyRefundMiddleware()]},
+            "tool_settings": {"agent_loop_settings": AgentLoopSettings(tool_settings=ToolSettings(denied_tools=["refund"]))},
+            "allowed_tools": {"agent_loop_settings": AgentLoopSettings(allowed_tools=("lookup",))},
+        }
+        ledgers: dict[str, set[tuple[str, FailureCode]]] = {}
+        for name, options in guards.items():
+            with self.subTest(guard=name):
+                refunded: list[int] = []
+
+                @tool
+                def refund(amount: int) -> str:
+                    """Refund an order."""
+                    refunded.append(amount)
+                    return "refunded"
+
+                @tool
+                def lookup(order_id: str) -> str:
+                    """Look up an order."""
+                    return "found"
+
+                session = Session(build_test_agent(name="payments", system_prompt="Pay.", runner=_RefundCallRunner(), tools=[refund, lookup], **options))
+                await session.arun("refund order o1")
+                self.assertEqual(refunded, [])
+                ledgers[name] = {(item.source, item.code) for item in session.failures.history()}
+                self.assertIn(("tool_runtime", FailureCode.TOOL_PERMISSION_DENIED), ledgers[name])
+        self.assertEqual(ledgers["tool_settings"], ledgers["middleware"])
+        self.assertEqual(ledgers["allowed_tools"], ledgers["middleware"])
 
     async def test_session_routes_exception_after_local_handling(self) -> None:  # [Hidden Failure]
         # Verify exception-time escalation runs once after the local agent boundary records it.
