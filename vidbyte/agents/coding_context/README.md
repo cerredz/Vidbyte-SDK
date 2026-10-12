@@ -6,7 +6,7 @@ The model sees, in order:
 
 1. the system prompt, the agentic-loop note, and the tool list (the runtime's fixed header), then the loop budgets when any are set;
 2. `coding:agents_md`: the root folder's `AGENTS.md`, from `AgentsMdLoader` in `agents_md.py`;
-3. `coding:environment`: reserved for the environment-context section;
+3. `coding:environment`: facts about the machine (OS, CPU, date, root folder, project files, git branch, which bash runs commands, and the tools that bash finds), from `EnvironmentLoader` in `environment.py`;
 4. `coding:repo_map`: reserved for the map.md section;
 5. `coding:setup_results`: reserved for the setup-command results section;
 6. `coding:progress_notes`: the agent's own notes file, `.vidbyte/coding-agent/progress.md`, from `ProgressNotesLoader` in `progress_notes.py`;
@@ -36,4 +36,5 @@ If the section has its own switch, that switch is part of the feature, not of th
 - Do not add a section to the system prompt string, and do not write to `ContextManager`'s private registry; `scripts/check_context_write_paths.py` fails CI on private access.
 - When a section is loaded and the caller passed a `context_manager`, the agent renders a new manager. Tools bound to the caller's manager object, such as `ContextWindowFactory` tools, keep writing to the caller's object, which that agent no longer shows.
 - `fork()` keeps every section, because it copies the agent's manager. `BaseAgent.restore()` does not bring sections back.
+- `EnvironmentLoader` never shows environment-variable values, the user name, or the host name. Its one bash probe writes to a temporary file, not a pipe, so a timeout on Windows cannot hang construction. The probe is cached per bash path and `PATH`, so git facts are read from `.git` rather than the probe, which keeps the cache independent of the root folder.
 - `ProgressNotesLoader` is the one loader that writes: it creates `.vidbyte/coding-agent/progress.md` from a template and `.vidbyte/coding-agent/.gitignore` holding `*`, each only when missing, and never overwrites either. It never touches `.vidbyte/` itself, because other tools write there. Any `OSError` there, such as a read-only root, means no section rather than a failed construction, because the switch is on by default.
