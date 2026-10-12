@@ -13,7 +13,6 @@ Relations:
 
 from __future__ import annotations
 
-import difflib
 from pathlib import Path
 
 from vidbyte.lib.tools.filesystem import LineEndings
@@ -79,14 +78,8 @@ class PatchTool(BaseTool):
                 handle.write(after)
         except OSError as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "write_error"})
-        diff = "".join(
-            difflib.unified_diff(
-                before.splitlines(keepends=True),
-                after.splitlines(keepends=True),
-                fromfile=f"a/{file_path}",
-                tofile=f"b/{file_path}",
-            )
-        )
+        # Split at "\n" only and mark a missing final newline, so each diff line stays on its own line.
+        diff = LineEndings.unified_diff(before, after, fromfile=f"a/{file_path}", tofile=f"b/{file_path}")
         return ToolResult.success(
             self.name,
             diff or "Patch applied with no line-level diff.",

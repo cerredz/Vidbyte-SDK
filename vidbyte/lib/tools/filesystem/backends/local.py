@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import difflib
 import shutil
 import zipfile
 from pathlib import Path
@@ -68,12 +67,8 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         return tuple(str(path.relative_to(root)) for path in sorted(root.rglob(pattern), key=lambda item: str(item).lower()))
 
     def diff_text(self, left: Path, right_content: str, *, encoding: str, label: str) -> str:
-        current = LineEndings.split_lines(left.read_text(encoding=encoding)) if left.exists() else []
-        proposed = LineEndings.split_lines(right_content)
-        lines = difflib.unified_diff(current, proposed, fromfile=str(left), tofile=label)
-        # A last line with no newline gets git's marker, so the next
-        # diff line does not run onto the end of it.
-        return "".join(line if line.endswith("\n") else f"{line}\n\\ No newline at end of file\n" for line in lines)
+        current = left.read_text(encoding=encoding) if left.exists() else ""
+        return LineEndings.unified_diff(current, right_content, fromfile=str(left), tofile=label)
 
     def zip_path(self, source: Path, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)

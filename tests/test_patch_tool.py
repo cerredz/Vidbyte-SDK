@@ -110,3 +110,23 @@ class PatchToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.status.value, "success")
         self.assertEqual(self.file.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
+
+    async def test_diff_marks_last_line_without_final_newline(self) -> None:
+        """Editing a last line with no final newline keeps "-old" and "+new" on separate lines with git's marker."""
+        self.file.write_bytes(b"[app]\nname = demo\ndebug = false")
+        result = await PatchTool(self.root).execute(
+            ToolCall("patch_file", {"file_path": "demo.py", "search_block": "debug = false", "replace_block": "debug = true"})
+        )
+        self.assertEqual(result.status.value, "success")
+        hunk = "@@ -1,3 +1,3 @@\n [app]\n name = demo\n-debug = false\n\\ No newline at end of file\n+debug = true\n\\ No newline at end of file\n"
+        self.assertEqual(result.output, f"--- a/demo.py\n+++ b/demo.py\n{hunk}")
+        self.assertEqual(self.file.read_bytes(), b"[app]\nname = demo\ndebug = true")
+
+    async def test_diff_keeps_form_feed_line_as_one_line(self) -> None:
+        """A form-feed page-break line stays one diff line, so hunk counts match the file's real lines."""
+        self.file.write_bytes(b"a = 1\n\f\nb = 2\n")
+        result = await PatchTool(self.root).execute(
+            ToolCall("patch_file", {"file_path": "demo.py", "search_block": "b = 2", "replace_block": "b = 3"})
+        )
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(result.output, "--- a/demo.py\n+++ b/demo.py\n@@ -1,3 +1,3 @@\n a = 1\n \f\n-b = 2\n+b = 3\n")
