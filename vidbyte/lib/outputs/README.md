@@ -141,6 +141,8 @@ Set `sender` when the username is not an email address.
   `OUTPUT_DELIVERY_DEADLINE_SECONDS` is FAILED `network`, but an SMTP send may
   still finish afterwards. The SMTP session runs on its own worker thread, not
   the loop's default executor, so `run()` returns at the deadline instead of
-  waiting for it; the interpreter still waits for that thread at exit.
+  waiting for it; the interpreter still waits for that thread at exit. A
+  FAILED `network` receipt, and an email that passed the deadline, may
+  already have been delivered, so check that destination before resending it.
 - **Restored sessions:** `Session.resume` and `fork_from` return agents with
   `outputs=()`; pass `outputs=` to `BaseAgent.restore` to deliver again.

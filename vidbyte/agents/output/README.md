@@ -94,3 +94,6 @@ except OutputDeliveryError as err:
     )
     receipts = await OutputDispatcher.deliver(failed, err.reply, {})
 ```
+
+A FAILED `network` receipt, and an email that passed the deadline, may
+already have been delivered, so check that destination before resending it.

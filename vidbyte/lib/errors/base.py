@@ -212,7 +212,7 @@ class OutputDeliveryError(AgentExecutionError):
         self.repair_approaches = (
             "Read each failed receipt's error_code.",
             "Fix the credential or target of the failed output.",
-            "Resend only the failed outputs with OutputDispatcher.deliver(failed, err.reply, {}).",
+            "Resend only the failed outputs with OutputDispatcher.deliver(failed, err.reply, {}); a failed network output may already have posted, so check its destination first.",
         )
         self.related_docs = ("vidbyte/lib/outputs/README.md", "vidbyte/agents/output/README.md")
         self.relevant_tests = ("python scripts/run_ci.py",)
