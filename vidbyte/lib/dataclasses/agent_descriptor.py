@@ -68,7 +68,9 @@ def _has_secret_like_keys(mapping: Mapping[str, Any]) -> bool:
     # Returns True if any key in the mapping looks like a secret or credential.
     for key in mapping:
         lower = key.lower().replace("-", "_")
-        if lower in _SECRET_KEY_SUFFIXES:
+        # @intent secret-key-suffixes-match-as-suffixes
+        # A suffix matches the whole key or its last underscore-separated part (openai_api_key, db_password).
+        if any(lower == suffix or lower.endswith("_" + suffix) for suffix in _SECRET_KEY_SUFFIXES):
             return True
         if any(lower.startswith(prefix) for prefix in _SECRET_KEY_PREFIXES):
             return True
