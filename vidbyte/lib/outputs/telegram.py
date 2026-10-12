@@ -21,6 +21,7 @@ from vidbyte.lib.dataclasses.outputs import (
     OutputRequest,
 )
 from vidbyte.lib.enums.outputs import OutputDestination
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.outputs.base import BaseOutput, OutputArguments
 from vidbyte.lib.outputs.delivery import OutputHttp
 from vidbyte.lib.outputs.text import OutputText
@@ -33,7 +34,13 @@ class TelegramOutput(BaseOutput):
 
     def __init__(self, *, chat_id: int | str, bot_token: str | None = None, render: Callable[[AgentMessage], OutputContent] | None = None) -> None:
         super().__init__(render=render)
-        self._chat_id = chat_id if isinstance(chat_id, int) and not isinstance(chat_id, bool) else OutputArguments.text(chat_id, parameter="chat_id")
+        # A chat is a numeric id or an @channel name, never a bool.
+        if isinstance(chat_id, int) and not isinstance(chat_id, bool):
+            self._chat_id: int | str = chat_id
+        elif isinstance(chat_id, str):
+            self._chat_id = OutputArguments.text(chat_id, parameter="chat_id")
+        else:
+            raise ConfigurationError(f"chat_id must be an int or a non-blank string, got {chat_id!r}.", details={"parameter": "chat_id"})
         self._bot_token = OutputArguments.credential(self.destination, bot_token, parameter="bot_token")
 
     async def send(self, reply: AgentMessage, content: OutputContent) -> DeliveryReceipt:
