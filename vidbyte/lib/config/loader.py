@@ -27,6 +27,7 @@ import yaml
 
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.agents.settings import ToolErrorPolicy
 from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
@@ -164,12 +165,18 @@ class YamlLoader:
         tool_settings_raw = loop_raw.pop("tool_settings", None)
         output_contracts_raw = loop_raw.pop("output_contracts", None)
         tool_settings = ToolSettings(**tool_settings_raw) if tool_settings_raw else None
+        # @intent lib-loader-builds-tool-error-policy
+        # YAML only yields a plain mapping for the retry/abort policy, so build the real policy the loop settings require.
+        tool_error_policy = loop_raw.pop("tool_error_policy", None)
+        if isinstance(tool_error_policy, dict):
+            tool_error_policy = ToolErrorPolicy(**tool_error_policy)
         # @intent lib-loader-builds-output-contracts
         # YAML only yields plain mappings, so each contract is built into its floor before the loop settings read it.
         output_contracts = YamlLoader._build_output_contracts(output_contracts_raw, path)
         loop = AgentLoopSettings(
             **loop_raw,
             tool_settings=tool_settings,
+            tool_error_policy=tool_error_policy,
             output_contracts=output_contracts,
         )
         tools_raw = raw.get("tools", [])
