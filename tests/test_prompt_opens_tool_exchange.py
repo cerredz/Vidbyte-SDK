@@ -84,8 +84,10 @@ class AnthropicPromptOrderTests(unittest.TestCase):
         self.assertEqual(wire[3], ANTHROPIC_CALL)
 
     def test_a_tool_result_does_not_introduce_a_call(self) -> None:
-        wire = _anthropic_wire([{"role": "assistant", "content": "prior reply"}, ANTHROPIC_RESULT, ANTHROPIC_CALL])
-        self.assertTrue(_is_prompt(wire[0]))
+        # A tool_result turn carries role "user" but is not the user speaking, so the call still needs the prompt.
+        wire = _anthropic_wire([{"role": "user", "content": "earlier"}, ANTHROPIC_RESULT, ANTHROPIC_CALL])
+        self.assertTrue(_is_prompt(wire[2]))
+        self.assertEqual(wire[3], ANTHROPIC_CALL)
 
     def test_prompt_appends_without_a_tool_round(self) -> None:
         wire = _anthropic_wire([{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "prior reply"}])
