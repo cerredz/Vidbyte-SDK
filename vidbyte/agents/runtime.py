@@ -1729,7 +1729,9 @@ class AgentRuntime:
         if after_decision.action is not MiddlewareAction.ABORT_RUN and not (call.tool_name == IS_DONE_TOOL_NAME and result.status.value == "success"):
             # Show the model its view of the result, and remember that view on the record
             # so later runs replay what the model saw rather than the raw, unprotected output.
-            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision)
+            # @intent denials-are-never-truncated
+            # A permission or middleware denial never ran, so result_max_chars must not cut its reason off.
+            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision, truncate=context_record.state is not ToolCallState.DENIED)
             context_record = self._with_model_visible_result(context_record, result, visible_result)
         state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
