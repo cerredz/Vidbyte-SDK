@@ -519,6 +519,18 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.value._policy.value, Session.MANUAL_POLICY)
         self.assertEqual(result.value._tags, ("repair",))
 
+    def test_fork_recovery_keeps_live_agent_key(self) -> None:  # [Silent Failure]
+        # @intent fork-recovery-keeps-agent-key
+        # Verify both the plain and the tagged fork branch authenticate with the live agent's explicit key.
+        agent = build_test_agent(name="tenant", system_prompt="Work.", runner=_FailingRunner(), api_key="sk-tenant-live")
+        session = Session(agent)
+        session.checkpoint()
+        failure = Failure(code=FailureCode.RUNTIME_MAX_ITERATIONS, source="test", phase=FailurePhase.LOOP)
+        for handler in (ForkRecovery(), ForkRecovery(tags=["repair"])):
+            with self.subTest(tags=handler._fork_settings.tags):
+                child = handler.recover(failure, session=session).value
+                self.assertEqual(child.agent.runner_config.api_key, "sk-tenant-live")
+
     def test_fork_recovery_refuses_bare_string_tags(self) -> None:  # [Hidden Assumption]
         # Verify tags="incident" is refused instead of tagging the branch with its characters.
         with self.assertRaisesRegex(ValueError, "ForkRecovery.tags must be a list of tag names"):
