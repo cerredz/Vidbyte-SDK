@@ -761,7 +761,9 @@ class AgentRuntime:
                         dispatched_at=attempt_dispatched_at,
                         retry_count=retry_ordinal,
                         fallback_index=int(state.run_state.get("_speed_fallback_index", AGENT_SPEED_ZERO_COUNT)) or None,
-                        iteration_index=iteration_count or None,
+                        # @intent failed-attempt-shares-its-iteration-index
+                        # iteration_count is not yet counted here, so +1 names the 1-based iteration the success record will carry.
+                        iteration_index=iteration_count + AGENT_SPEED_FIRST_INDEX,
                         error_type=type(exc).__name__,
                     )
                 )
@@ -811,7 +813,8 @@ class AgentRuntime:
                         dispatched_at=attempt_dispatched_at,
                         retry_count=retry_ordinal,
                         fallback_index=int(state.run_state.get("_speed_fallback_index", AGENT_SPEED_ZERO_COUNT)) or None,
-                        iteration_index=iteration_count or None,
+                        # @intent failed-attempt-shares-its-iteration-index
+                        iteration_index=iteration_count + AGENT_SPEED_FIRST_INDEX,
                         error_type=type(exc).__name__,
                         cancelled=True,
                     )

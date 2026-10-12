@@ -944,10 +944,15 @@ class RetryOnceMiddleware(AgentMiddleware):
 
 
 class FlakyModelOnFakeClock:
-    """Model whose first attempt fails; every attempt and sleep advances a manual clock instead of wall time."""
+    """Model whose ``fail_on_attempt``-th attempt fails; every attempt and sleep advances a manual clock instead of wall time.
 
-    def __init__(self, attempt_seconds: float) -> None:
+    The first ``tool_turns`` successful replies call ``slow_tool`` so the failure can land in a later iteration.
+    """
+
+    def __init__(self, attempt_seconds: float, *, fail_on_attempt: int = 1, tool_turns: int = 0) -> None:
         self._attempt_seconds = attempt_seconds
+        self._fail_on_attempt = fail_on_attempt
+        self._tool_turns = tool_turns
         self._now = 0.0
         self.attempts = 0
 
@@ -960,8 +965,11 @@ class FlakyModelOnFakeClock:
     async def invoke(self, runner: object, prompt: str, **kwargs: object) -> FakeResponse:
         self._now += self._attempt_seconds
         self.attempts += 1
-        if self.attempts == 1:
+        if self.attempts == self._fail_on_attempt:
             raise RuntimeError("transient provider failure")
+        if self._tool_turns:
+            self._tool_turns -= 1
+            return _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "slow_tool", "arguments": "{}", "call_id": f"call_{self.attempts}"}]})
         return _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]})
 
 
@@ -1078,6 +1086,37 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(succeeded.dispatched_at, stats.retry_waits[0].completed_at)
         self.assertAlmostEqual(succeeded.duration_ms, 200.0)
         self.assertAlmostEqual(stats.run_stats.overlap_ms, 0.0)
+
+    async def test_failed_attempt_carries_the_iteration_index_of_its_retry_success(self) -> None:
+        """[Regression] A failed attempt was stamped with the previous iteration's index (None in iteration 1)."""
+        # Each case: the attempt that fails, how many tool turns come first, and the iteration both records belong to.
+        cases = {"iteration 1": (1, 0, 1), "iteration 2": (2, 1, 2)}
+        for name, (fail_on_attempt, tool_turns, expected_iteration) in cases.items():
+            with self.subTest(failure_in=name):
+                model = FlakyModelOnFakeClock(attempt_seconds=0.1, fail_on_attempt=fail_on_attempt, tool_turns=tool_turns)
+                runtime = AgentRuntime(
+                    agent_name="worker",
+                    system_prompt="Work.",
+                    tools=Tools([SlowTool(sleep_seconds=0)]),
+                    permission_policy=PermissionPolicy(),
+                    middleware=[RetryOnceMiddleware(sleep_seconds=0.5)],
+                    speed_tracker=AgentSpeedTracker(clock=model.now),
+                )
+                context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+                with patch.object(runtime.middleware, "sleep", model.sleep):
+                    await runtime.arun(
+                        "task",
+                        handle=RunnerHandle(runner=model, provider="openai", invoke=model.invoke, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                        context=context,
+                    )
+
+                calls = runtime.speed_tracker.calls
+                failed_index = next(index for index, call in enumerate(calls) if not call.succeeded)
+                retry_success = calls[failed_index + 1]
+                self.assertTrue(retry_success.succeeded)
+                self.assertEqual(calls[failed_index].iteration_index, expected_iteration)
+                self.assertEqual(retry_success.iteration_index, expected_iteration)
 
 
 class AnswerRunner:
