@@ -315,6 +315,15 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
                 self.assertEqual(result.status, ToolStatus.SUCCESS)
                 self.assertEqual(target.read_bytes(), expected, name)
 
+    def test_append_text_tolerates_undecodable_bytes_in_existing_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "app.log"
+            target.write_bytes(b"start\ncrash \xff dump\n")
+            result = run(AppendTool(config).execute(ToolCall("append_text", {"path": "app.log", "content": "status: ok\n"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(target.read_bytes(), b"start\ncrash \xff dump\nstatus: ok\n")
+
     def test_copy_then_move(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
