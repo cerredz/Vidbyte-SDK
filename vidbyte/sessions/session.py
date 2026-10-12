@@ -177,7 +177,10 @@ class Session:
 
     def checkpoint(self, *, label: str = "") -> str:
         """Write a checkpoint of the current state on demand and return its id."""
-        stored = self._persist(self._agent.last_reply, label=label)
+        # @intent bookmark-keeps-session-status
+        # A labeled checkpoint records the current state and adds no turn, so it must not reopen a COMPLETED session.
+        status = self._store.get_meta(self._session_id).status
+        stored = self._persist(self._agent.last_reply, label=label, status=status)
         return stored.id
 
     def record_turn(self, reply: AgentMessage) -> None:
@@ -195,7 +198,11 @@ class Session:
             raise SessionError("Cannot fork a session with no checkpoints.", details={"session_id": self._session_id})
         if at is not None and self._store.get(at).session_id != self._session_id:
             raise SessionError("Cannot fork from a checkpoint from another session.", details={"checkpoint_id": at})
-        return self.fork_from(self._store, checkpoint_id, tools=tools or (), middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags)
+        # @intent live-fork-keeps-agent-key
+        # Checkpoints never store the key, so hand the live agent's own key to the branch; without it the branch bills
+        # the provider's env key. The branch restores this session's checkpoint, so the provider is the same.
+        api_key = getattr(getattr(self._agent, "runner_config", None), "api_key", None)
+        return self.fork_from(self._store, checkpoint_id, tools=tools or (), middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags, api_key=api_key)
 
     def batch_fork(self, count: int, *, at: str | None = None, tools: Sequence[object] | None = None, middleware: Sequence[object] | None = None) -> list[ForkOutcome]:
         # Attempt count independent forks from the same checkpoint, isolating branch creation failures.
@@ -306,10 +313,10 @@ class Session:
         return cls.resume(store, session_id, **kwargs)
 
     @classmethod
-    def fork_from(cls, store: SessionStore, checkpoint_id: str, *, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = ()) -> "Session":
+    def fork_from(cls, store: SessionStore, checkpoint_id: str, *, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = (), api_key: str | None = None) -> "Session":
         """Create a new session branched from any checkpoint, copying its state as the root."""
         source = store.get(checkpoint_id)
-        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
+        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_key=api_key)
         session = cls(agent, store=store, session_id=f"se_{uuid4().hex}", policy=policy, trace=trace, tags=tags, parent_session_id=source.session_id)
         session._persist(None, label="fork")
         return session
@@ -322,7 +329,7 @@ class Session:
             if reply is not None and isinstance(reply.metadata, dict):
                 reply.metadata["__session_error__"] = f"{type(exc).__name__}: {exc}"
 
-    def _persist(self, reply: AgentMessage | None, *, label: str) -> Checkpoint:
+    def _persist(self, reply: AgentMessage | None, *, label: str, status: SessionStatus = SessionStatus.ACTIVE) -> Checkpoint:
         # Build a checkpoint from the agent's current state and write it to the store.
         captured = self._recorder.capture(self._agent, reply) if reply is not None else self._recorder.capture(self._agent, _empty_reply(self._agent.name))
         checkpoint = Checkpoint(
@@ -333,7 +340,7 @@ class Session:
             created_at=_now(),
             run_state=self._agent.export_state(),
             label=label,
-            status=SessionStatus.ACTIVE,
+            status=status,
             trace_artifact=captured.artifact,
             trace_summary=captured.summary,
             trace_events=captured.events,
@@ -467,10 +474,10 @@ class Session:
         return self._recorder._policy
 
     @staticmethod
-    def _restore_agent(source: Checkpoint, *, tools: Sequence[object], middleware: Sequence[object], tracer: object | None, output_schema: object | None) -> "BaseAgent":
+    def _restore_agent(source: Checkpoint, *, tools: Sequence[object], middleware: Sequence[object], tracer: object | None, output_schema: object | None, api_key: str | None = None) -> "BaseAgent":
         # Rebuild a BaseAgent from a checkpoint's RunState via the rehydration contract.
         from vidbyte.agents.base import BaseAgent
-        return BaseAgent.restore(source.run_state, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
+        return BaseAgent.restore(source.run_state, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_key=api_key)
 
 
 def _now() -> str:
