@@ -13,6 +13,9 @@ Key Functions:
       input_tokens alone excludes both cache buckets).
     - _over_threshold: Compares that full prompt, not input_tokens, with a
       model's prompt-length tier (Claude Haiku 5.5's 100K tier).
+    - cost_usd: Bills cache writes at the 5-minute cache-write rate, except the
+      cache_creation.ephemeral_1h_input_tokens part, which bills at 2x the
+      active input rate.
 Relations:
     Registered in vidbyte/agents/pricing/base.py; rates from PROVIDER_PRICING.
 Similar Files:
@@ -26,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vidbyte.agents.pricing.base import ProviderUsage
+from vidbyte.lib.constants.pricing import ANTHROPIC_CACHE_WRITE_1H_INPUT_MULTIPLIER
 from vidbyte.lib.registries.pricing import ModelPricing
 
 
@@ -105,9 +109,16 @@ class AnthropicUsage(ProviderUsage):
         # A 0.0 base input rate (a free model) leaves the tier ratio undefined, so its cache rate applies unscaled.
         elif pricing.input_per_million != 0.0:
             cache_write_rate = cache_write_rate * (input_rate / pricing.input_per_million)
+        # @intent anthropic-1h-cache-write-is-2x-input
+        # cache_write_rate is the 5-minute write; the cache_creation breakdown names the
+        # 1-hour part, which Anthropic bills at 2x the active input rate. With no
+        # breakdown every write stays at the 5-minute rate, as before.
+        cache_writes = self.cache_creation_input_tokens or 0
+        one_hour_writes = min(self.nested_int(self.raw, "cache_creation", "ephemeral_1h_input_tokens") or 0, cache_writes)
         return (
             (self.input_tokens or 0) * input_rate
-            + (self.cache_creation_input_tokens or 0) * cache_write_rate
+            + (cache_writes - one_hour_writes) * cache_write_rate
+            + one_hour_writes * input_rate * ANTHROPIC_CACHE_WRITE_1H_INPUT_MULTIPLIER
             + (self.cache_read_input_tokens or 0) * cache_read_rate
             + (self.output_tokens or 0) * output_rate
         ) / 1_000_000

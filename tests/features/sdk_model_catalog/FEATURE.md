@@ -18,7 +18,7 @@ Provider and model names, offline provider-shaped usage mappings and the in-proc
 
 ## Observable Outcomes
 
-A call to an added model records a cost equal to its token counts times the published rate. Prompts past a published tier bill at the tier's rate: Grok 4.7 from exactly 200,000 prompt tokens, GPT-6 above 272,000 input tokens, and Claude Haiku 5.5 above 100,000 prompt tokens counting cache reads and writes.
+A call to an added model records a cost equal to its token counts times the published rate. Prompts past a published tier bill at the tier's rate: Grok 4.7 from exactly 200,000 prompt tokens, GPT-6 above 272,000 input tokens, and Claude Haiku 5.5 above 100,000 prompt tokens counting cache reads and writes. An Anthropic cache write bills at the 5-minute cache-write rate unless the usage's `cache_creation` breakdown reports it as a 1-hour write, which bills at 2x the active input rate.
 
 ## State Transitions
 
@@ -34,15 +34,17 @@ Only the local registries; expected rates were copied from the provider pages ci
 
 ## Known Failure Modes
 
-Longest-prefix lookup silently priced a missing claude-sonnet-5-5 as claude-sonnet-5. Anthropic's `input_tokens` excludes cache buckets, so a cache-heavy Haiku 5.5 prompt over 100K billed the cheaper tier.
+Longest-prefix lookup silently priced a missing claude-sonnet-5-5 as claude-sonnet-5. Anthropic's `input_tokens` excludes cache buckets, so a cache-heavy Haiku 5.5 prompt over 100K billed the cheaper tier. The pricebook's cache-write rate is the 5-minute write, so 1-hour cache writes billed at 1.25x input instead of 2x.
 
 ## Historical Regressions
 
 2026-10-11: the catalog lacked every model released since July 2026, Claude Opus 5, Fable 5 and Mythos 5 had no price, the deprecated Gemini 3.5 Flash still billed its old $9 output rather than the 3.6 Flash rate it now routes to, and Mistral's default model resolved to no price.
 
+2026-10-12: a claude-sonnet-5 response reporting 2,000 one-hour cache-write tokens billed them at $2.50/M, the 5-minute rate, instead of $4.00/M.
+
 ## Test Suite Map
 
-`test_catalog_pricing_contract.py` covers catalog validation, wrong-provider rejection, runner-map parity, modality, exact rates, exact-key identity, versioned ids, routed names, tier metadata, every tier boundary and two tracker calls. Run `python -m pytest -q tests/features/sdk_model_catalog`.
+`test_catalog_pricing_contract.py` covers catalog validation, wrong-provider rejection, runner-map parity, modality, exact rates, exact-key identity, versioned ids, routed names, tier metadata, every tier boundary, 5-minute and 1-hour Anthropic cache writes (including a malformed or negative breakdown) and three tracker calls. Run `python -m pytest -q tests/features/sdk_model_catalog`.
 
 ## Omitted Testing Strategies
 

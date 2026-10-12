@@ -13,3 +13,4 @@ This folder pins the model catalog and the first-party pricebook. An added model
 ## Logs
 
 - 2026-10-11 - Catalogued and priced the models released since July 2026; Claude Haiku 5.5's 100K tier now counts cache reads and writes.
+- 2026-10-12 - Anthropic 1-hour cache writes, named by the usage's `cache_creation` breakdown, now bill at 2x the active input rate instead of the 5-minute cache-write rate.

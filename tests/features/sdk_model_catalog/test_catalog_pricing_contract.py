@@ -3,10 +3,10 @@
 PURPOSE: Pin the October 2026 catalog refresh: every added model validates, is detected as text, and prices at its first-party rate.
 ROLE IN CODEBASE: Exercises vidbyte/lib/constants/runners.py, vidbyte/lib/enums/model_modality.py, vidbyte/lib/registries/{models,pricing}.py and vidbyte/agents/pricing/anthropic.py.
 ARCHITECTURE NOTE: Expected rates are copied from the provider pages cited in pricing.py; parsing, lookup and cost math stay production code.
-FUNCTION INVENTORY: catalog tests (validation, wrong provider, parity, modality); rate tests (exact rates, exact keys, dated ids, corrections, metadata); threshold tests (xAI, OpenAI, Anthropic Haiku 5.5); tracker integration tests.
+FUNCTION INVENTORY: catalog tests (validation, wrong provider, parity, modality); rate tests (exact rates, exact keys, dated ids, corrections, metadata); threshold tests (xAI, OpenAI, Anthropic Haiku 5.5); Anthropic 5-minute and 1-hour cache-write tests; tracker integration tests.
 COMMON MODIFICATION PATTERNS: When a provider changes a price, change EXPECTED_RATES and pricing.py together, citing the provider page.
 WHAT NOT TO DO IN THIS FILE: 1. Do not call providers. 2. Do not derive expected rates from PROVIDER_PRICING; that would make every rate test vacuous.
-KNOWN EDGE CASES: Longest-prefix lookup silently prices claude-sonnet-5-5 as claude-sonnet-5 when its own row is missing; Anthropic input_tokens excludes cache buckets.
+KNOWN EDGE CASES: Longest-prefix lookup silently prices claude-sonnet-5-5 as claude-sonnet-5 when its own row is missing; Anthropic input_tokens excludes cache buckets; the pricebook cache_write rate is the 5-minute write, while 1-hour writes bill at 2x input.
 RELATED DOCS: tests/features/sdk_model_catalog/FEATURE.md and docs/design/model-catalog-pricing-refresh.md.
 TESTS: python -m pytest -q tests/features/sdk_model_catalog
 """
@@ -284,6 +284,75 @@ def test_anthropic_usage_without_token_fields_uses_base_rates() -> None:
     # and so no tier.
     usage = AnthropicUsage(output_tokens=1_000)
     assert usage.cost_usd(_resolve(ANTHROPIC, "claude-haiku-5-5")) == pytest.approx(1_000 * 0.5 / 1_000_000)
+
+
+def _anthropic_cache_writes(cache_creation: object, *, input_tokens: int = 100, writes: int = 2_000) -> AnthropicUsage:
+    # Parses an Anthropic usage payload with cache writes and the given
+    # cache_creation breakdown, as the Messages API reports it.
+    usage = AnthropicUsage.from_usage_payload({"input_tokens": input_tokens, "output_tokens": 50, "cache_creation_input_tokens": writes, "cache_read_input_tokens": 0, "cache_creation": cache_creation})
+    assert usage is not None
+    return usage
+
+
+def test_anthropic_1h_cache_writes_bill_at_twice_the_input_rate() -> None:
+    # [Silent Failure] Anthropic bills 1-hour cache writes at 2x input
+    # ($4.00 on claude-sonnet-5), not the 5-minute $2.50.
+    usage = _anthropic_cache_writes({"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 2_000})
+    assert usage.cost_usd(_resolve(ANTHROPIC, "claude-sonnet-5")) == pytest.approx((100 * 2.0 + 2_000 * 4.0 + 50 * 10.0) / 1_000_000)
+
+
+def test_anthropic_mixed_cache_writes_bill_each_duration_at_its_own_rate() -> None:
+    # [Silent Failure] cache_creation_input_tokens is the sum of both
+    # durations, so each part bills at its own rate.
+    usage = _anthropic_cache_writes({"ephemeral_5m_input_tokens": 1_000, "ephemeral_1h_input_tokens": 2_000}, writes=3_000)
+    assert usage.cost_usd(_resolve(ANTHROPIC, "claude-sonnet-5")) == pytest.approx((100 * 2.0 + 1_000 * 2.5 + 2_000 * 4.0 + 50 * 10.0) / 1_000_000)
+
+
+def test_anthropic_cache_writes_without_a_breakdown_bill_at_the_5m_rate() -> None:
+    # [Hidden Failure] Without a cache_creation object, every write keeps
+    # the 5-minute rate, as before.
+    usage = AnthropicUsage.from_usage_payload({"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 2_000, "cache_read_input_tokens": 0})
+    assert usage is not None
+    assert usage.cost_usd(_resolve(ANTHROPIC, "claude-sonnet-5")) == pytest.approx((100 * 2.0 + 2_000 * 2.5 + 50 * 10.0) / 1_000_000)
+
+
+def test_haiku_5_5_1h_cache_writes_over_100k_bill_at_twice_the_high_tier_input() -> None:
+    # [Silent Failure] Over 100K Anthropic lists Haiku 5.5 1-hour writes
+    # at $1.00, twice the $0.50 high-tier input.
+    usage = _anthropic_cache_writes({"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 1_000_000}, input_tokens=0, writes=1_000_000)
+    assert usage.cost_usd(_resolve(ANTHROPIC, "claude-haiku-5-5")) == pytest.approx(1.00 + 50 * 2.5 / 1_000_000)
+
+
+@pytest.mark.parametrize("cache_creation", [
+    "oops",
+    [2_000],
+    {"ephemeral_1h_input_tokens": "2000"},
+    {"ephemeral_1h_input_tokens": True},
+    {"ephemeral_1h_input_tokens": 2.5},
+    {"ephemeral_1h_input_tokens": None},
+])
+def test_anthropic_malformed_1h_breakdown_bills_writes_at_the_5m_rate(cache_creation: object) -> None:
+    # [Edge Case] A malformed breakdown reads as unreported, as malformed
+    # top-level counts do, so writes keep the 5-minute rate.
+    usage = _anthropic_cache_writes(cache_creation)
+    assert usage.cost_usd(_resolve(ANTHROPIC, "claude-sonnet-5")) == pytest.approx((100 * 2.0 + 2_000 * 2.5 + 50 * 10.0) / 1_000_000)
+
+
+def test_anthropic_1h_breakdown_above_the_write_total_is_clamped() -> None:
+    # [Edge Case] More 1-hour tokens than cache_creation_input_tokens
+    # never bills writes that were not reported.
+    usage = _anthropic_cache_writes({"ephemeral_1h_input_tokens": 5_000})
+    assert usage.cost_usd(_resolve(ANTHROPIC, "claude-sonnet-5")) == pytest.approx((100 * 2.0 + 2_000 * 4.0 + 50 * 10.0) / 1_000_000)
+
+
+def test_tracker_negative_1h_breakdown_corrupts_the_ledger() -> None:
+    # [Silent Failure] A negative 1-hour count fails recording like any
+    # negative token count, rather than lowering the bill.
+    payload = {"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 2_000, "cache_creation": {"ephemeral_1h_input_tokens": -2_000}}
+    tracker = UsageTracker()
+    assert tracker.record_call(SimpleNamespace(provider=ANTHROPIC, model="claude-sonnet-5", usage=payload)) is None
+    assert tracker.recording_corrupted
+    assert tracker.rollup().model_call_count == 0
 
 
 def test_every_rate_in_the_pricebook_is_finite_and_non_negative() -> None:
