@@ -23,7 +23,7 @@ started: 2026-10-11 17:36
 | S6 PR | body written; reopened S5 for 2 Minors | 2026-10-12 | | reports/S6-pr-author.md | PR #882 retitled (no [WIP]), draft, 1 mermaid, spec pr-open @ae6115f4; ci 38215600229 + static 38215602359 success @ae6115f4; AC-18/AC-24 proofs exist on branch |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 (iteration 2 = S6 follow-ups) · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 (iteration 2 = S6 follow-ups) · S5 re-review rounds: 2/2
 
 ## Decisions the orchestrator made
 - 2026-10-11 17:36 — Slug `agent-output-connectors`, branch `feat/agent-output-connectors`, worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-output-connectors` — pipeline defaults; SDK AGENTS.md defines no override.
@@ -63,6 +63,10 @@ started: 2026-10-11 17:36
 - 2026-10-12 — Polish pass done @12729d09 (R-C2 blank line ad4ed50a; R-C1 §17 deviation 0ca19568); 340 passed, SDK-LINT PASS, run_ci source 3743 passed; remote ci 38214072413 + static-policy 38214075610 success @12729d09. Test-tree check corrected: pack diff vs 7f3bb7ff empty, `git diff ba83c953..HEAD -- tests/` empty (non-pack differences vs 7f3bb7ff are main's, via the merge). Spec status → verified.
 
 - 2026-10-12 — S6 spot-check passed. S6 OPEN ITEMS name two Minor code defects: (a) `EmailOutput(to=[])` error names `recipients` not `to` (email.py:50, dataclasses/outputs.py:112-113; AC-20 says name the parameter); (b) `OutputDeliveryError` repair hint (errors/base.py:215) says `deliver(failed, …)` but `err.failed` is receipts → `unexpected:AttributeError` when followed. Per skill, code defects found at S6 go back to S5: test author adds the AC-20 `to=[]` case (red) → fresh repair agent iteration 2 (catch-up merge of origin/main, 7 commits incl. #885 coding.py, #889 runtime.py; fix a + b) → resume S6 author to refresh the body.
+
+- 2026-10-12 — Test author added AC-20 `email-empty-to` @4b063c28 (red for the right reason). Repair-2 (fresh agent) @81f9cba0: merge d4100704 (8 main commits, no conflicts; INV-9 allowlist still matches runtime after #889/#887; #888 header behaviour fine), S6-1 5b437f24 (`OutputArguments.non_empty`, names `to`), S6-2 2334385b (hint = zip recipe). Spot-check: 341 passed (re-run by me), pack diff vs d87fcbaf empty, tests/base.py/lint unchanged since merge, review.md 0 open, ci 38217869950 + static 38217872582 success @81f9cba0.
+- 2026-10-12 — Stop chasing main: #891/#856 landed during repair-2; merge-tree clean, PR mergeable; a further catch-up is left to the user at merge time (re-measure S008 if #891's base.py change is merged).
+- 2026-10-12 — Spending re-review round 2/2 (focused on ed1dd67b..HEAD: merge + S6-1 + S6-2) in parallel with spec r7 (name `OutputArguments.non_empty` in §8.5, row 13, §17) — the change set re-entered repair after the SOUND re-review, and the user is comparing quality.
 
 ## User replies (verbatim)
 - (none yet)
