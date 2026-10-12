@@ -3,7 +3,7 @@
 PURPOSE: Regression tests for OutputSchemaFormatter constraint annotation.
 ROLE IN CODEBASE: Keeps unenforceable constraints out of native wire schemas at every depth.
 ARCHITECTURE NOTE: Resolves a Pydantic model, annotates it, and inspects the resulting dict.
-FUNCTION INVENTORY: OutputSchemaAnnotateTests covers anyOf branches emitted for Optional fields and gt/lt exclusive bounds; OutputSchemaFencedValidateTests covers fence-tag case.
+FUNCTION INVENTORY: OutputSchemaAnnotateTests covers anyOf branches emitted for Optional fields and gt/lt exclusive bounds; OutputSchemaFencedValidateTests covers fence-tag case; OutputSchemaJsonModeValidateTests covers strict models validating JSON output in JSON mode.
 COMMON MODIFICATION PATTERNS: Add a model per new schema shape that annotate() must traverse.
 WHAT NOT TO DO: Do not assert exact description wording; assert keys left the schema.
 KNOWN EDGE CASES: Pydantic emits Optional[X] and X | None as anyOf [X, null].
@@ -13,10 +13,12 @@ TESTS: Run with python -m pytest -q tests/test_output_schema_formatter.py.
 
 from __future__ import annotations
 
+import datetime
+import enum
 import json
 import unittest
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
@@ -78,6 +80,48 @@ class OutputSchemaFencedValidateTests(unittest.TestCase):
                 parsed, error = formatter.validate(f'```{tag}\n{{"total": 4}}\n```', Total)
                 self.assertIsNone(error)
                 self.assertEqual(parsed.total, 4)
+
+
+class Category(str, enum.Enum):
+    BILLING = "billing"
+    BUG = "bug"
+
+
+class StrictTicket(BaseModel):
+    model_config = ConfigDict(strict=True)
+    category: Category
+    opened: datetime.datetime
+    tags: tuple[str, ...]
+
+
+class LaxTicket(BaseModel):
+    category: Category
+    opened: datetime.datetime
+    tags: tuple[str, ...]
+
+
+class OutputSchemaJsonModeValidateTests(unittest.TestCase):
+    """Verify validate() checks JSON output in Pydantic's JSON mode, so strict models accept JSON spellings."""
+
+    def test_strict_model_accepts_json_spellings_of_enum_datetime_and_tuple(self) -> None:
+        """A strict=True model validates from its own JSON text exactly as a lax model does."""
+        formatter = OutputSchemaFormatter()
+        text = '{"category": "billing", "opened": "2026-10-11T09:30:00", "tags": ["refund", "vip"]}'
+        for schema in (StrictTicket, LaxTicket):
+            with self.subTest(schema=schema.__name__):
+                parsed, error = formatter.validate(text, schema)
+                self.assertIsNone(error)
+                self.assertIs(parsed.category, Category.BILLING)
+                self.assertEqual(parsed.opened, datetime.datetime(2026, 10, 11, 9, 30))
+                self.assertEqual(parsed.tags, ("refund", "vip"))
+
+    def test_strict_model_still_rejects_lax_coercion(self) -> None:
+        """JSON mode keeps strictness: a string where the schema wants an array still fails."""
+        parsed, error = OutputSchemaFormatter().validate(
+            '{"category": "billing", "opened": "2026-10-11T09:30:00", "tags": "refund"}', StrictTicket
+        )
+        self.assertIsNone(parsed)
+        self.assertIn("tags", error or "")
 
 
 if __name__ == "__main__":
