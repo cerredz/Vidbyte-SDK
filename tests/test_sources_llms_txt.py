@@ -93,6 +93,16 @@ class LlmsTxtParserTests(unittest.TestCase):
                 link = parse_llms_txt(raw, url="u").sections[0].links[0]
                 self.assertEqual((link.title, link.url, link.note), ("Guide", "https://ex.com/g.md", "Read this first"))
 
+    def test_parse_link_url_keeps_balanced_parentheses(self) -> None:
+        # [Regression] CommonMark link destinations may hold a balanced "(...)" pair, as real doc URLs do.
+        msdn = "https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ms682411(v=vs.85)"
+        wiki = "https://en.wikipedia.org/wiki/Mutex_(computing)"
+        raw = f"# T\n## S\n- [CreateMutex]({msdn}): create a mutex\n- [Mutex]({wiki})\n".encode()
+        links = parse_llms_txt(raw, url="u").sections[0].links
+        self.assertEqual([(link.url, link.note) for link in links], [(msdn, "create a mutex"), (wiki, None)])
+        with self.assertRaises(SourceParseError):
+            parse_llms_txt(b"# T\n## S\n- [x](https://ex.com/a_(b)", url="u")
+
     def test_parse_link_without_note_unchanged(self) -> None:
         # [Edge Case] A bare link, or one with only trailing whitespace, has no note.
         doc = parse_llms_txt(b"# T\n## S\n- [a](https://ex.com/a.md)\n- [b](https://ex.com/b.md)   \n", url="u")
