@@ -131,8 +131,28 @@ class ZepGetMemoryTool(BaseMemoryTool):
         if not self._ok(status):
             return ToolResult.error(self.name, self._error_output(status, data), metadata={"provider": "zep"})
 
-        context = data.get("context", self._success_output(data))
-        return ToolResult.success(self.name, str(context), metadata={"provider": "zep", "session_id": session_id})
+        # @intent zep-get-memory-shows-facts-and-recent-messages
+        # Show the facts and the recent messages that lastn asks for; a new session has a null context,
+        # which must not reach the model as the text 'None'. Fall back to the raw response if both are empty.
+        output = self._render_memory(data) or self._success_output(data)
+        return ToolResult.success(self.name, output, metadata={"provider": "zep", "session_id": session_id})
+
+    @staticmethod
+    def _render_memory(data: object) -> str:
+        # Joins the non-empty context string and a "Recent messages:" block, or returns "" when neither exists.
+        if not isinstance(data, dict):
+            return ""
+        context = data.get("context")
+        parts = [context] if isinstance(context, str) and context.strip() else []
+        messages = data.get("messages")
+        lines = [
+            f"{m.get('role_type') or m.get('role')}: {m.get('content')}"
+            for m in (messages if isinstance(messages, list) else [])
+            if isinstance(m, dict)
+        ]
+        if lines:
+            parts.append("Recent messages:\n" + "\n".join(lines))
+        return "\n\n".join(parts)
 
 
 class ZepSearchMemoryTool(BaseMemoryTool):
