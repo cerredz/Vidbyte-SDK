@@ -8,7 +8,7 @@ The model sees, in order:
 2. `coding:agents_md`: the root folder's `AGENTS.md`, from `AgentsMdLoader` in `agents_md.py`;
 3. `coding:environment`: reserved for the environment-context section;
 4. `coding:repo_map`: reserved for the map.md section;
-5. `coding:setup_results`: reserved for the setup-command results section;
+5. `coding:setup_results`: the setup commands' pass/fail note, from `SetupCommandsLoader` in `setup_commands.py`, which runs the commands while the agent is built;
 6. `coding:progress_notes`: the agent's own notes file, `.vidbyte/coding-agent/progress.md`, from `ProgressNotesLoader` in `progress_notes.py`;
 7. the caller's own context-manager primitives, in the caller's order and placements;
 8. the context body, then the user's message.
@@ -36,4 +36,5 @@ If the section has its own switch, that switch is part of the feature, not of th
 - Do not add a section to the system prompt string, and do not write to `ContextManager`'s private registry; `scripts/check_context_write_paths.py` fails CI on private access.
 - When a section is loaded and the caller passed a `context_manager`, the agent renders a new manager. Tools bound to the caller's manager object, such as `ContextWindowFactory` tools, keep writing to the caller's object, which that agent no longer shows.
 - `fork()` keeps every section, because it copies the agent's manager. `BaseAgent.restore()` does not bring sections back.
-- `ProgressNotesLoader` is the one loader that writes: it creates `.vidbyte/coding-agent/progress.md` from a template and `.vidbyte/coding-agent/.gitignore` holding `*`, each only when missing, and never overwrites either. It never touches `.vidbyte/` itself, because other tools write there. Any `OSError` there, such as a read-only root, means no section rather than a failed construction, because the switch is on by default.
+- `SetupCommandsLoader` runs commands, so construction blocks until they finish. It reuses `BashTool.find_bash()`, `BashTool.not_found_message()`, and the `BASH_*` time limits instead of copying them, and it uses the synchronous `subprocess` module because the constructor may run inside an event loop.
+- `ProgressNotesLoader` is the one loader that writes files itself: it creates `.vidbyte/coding-agent/progress.md` from a template and `.vidbyte/coding-agent/.gitignore` holding `*`, each only when missing, and never overwrites either. It never touches `.vidbyte/` itself, because other tools write there. Any `OSError` there, such as a read-only root, means no section rather than a failed construction, because the switch is on by default.

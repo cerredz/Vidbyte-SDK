@@ -6,9 +6,11 @@ An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAge
 
 ## Contract
 
-`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, load_agents=True, context_manager=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
+`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, load_agents=True, setup_commands=(), context_manager=None, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. Behaviour other than construction is `BaseAgent`'s own.
 
 With `load_agents=True` (a real `bool`), the agent lists `root_dir` once and reads `AGENTS.md`, or, when that exact name is absent, the first case variant in sorted order; parent folders are never searched. At most `CODING_AGENTS_MD_MAX_BYTES` (32,768) bytes are read and decoded as UTF-8 with replacement characters, without a byte-order mark; a longer file is cut at a whole character and ends with a line giving the shown and total bytes and the `read_lines` start line for the rest. The text renders as primitive `coding:agents_md`, titled `Repository instructions (<file name>)`, after the system prompt and before the user message. A missing or blank file adds nothing; a present file that is not a readable regular file raises `ConfigurationError` naming its path. `CodingContextWindow.build(sections, context_manager)` places the sections in `CodingContextSection` order ahead of the caller's manager content, in a new manager; with no sections it returns the caller's manager, or `None`.
+
+`setup_commands` is a list or tuple of non-blank strings; a bare string, a non-sequence, or a bad item raises `ConfigurationError` naming `setup_commands` before anything runs. The commands run once, at construction, in order, each as `bash -c <command>` in `root_dir` with stdin closed and stderr merged into stdout, through `BashTool.find_bash()` and `BASH_TIMEOUT_SECONDS`. The first non-zero exit, timeout, or failure to start stops the run, and later commands are listed as not run. Nothing raises for a command's outcome. The note renders as primitive `coding:setup_results`, titled `Setup command results`, after the `AGENTS.md` section and before the progress notes: one `passed` line per passing command, and for the failed one at most `CODING_SETUP_OUTPUT_TAIL_LINES` (30) lines from at most its last `CODING_SETUP_OUTPUT_TAIL_BYTES` (8,192) bytes of output. Without bash, nothing runs and the note says so with `BashTool.not_found_message()`. An empty list runs nothing and adds nothing.
 
 With `progress_notes=True` (the default, a real `bool`), construction creates `<root>/.vidbyte/coding-agent/progress.md` from `CODING_PROGRESS_NOTES_TEMPLATE` and `<root>/.vidbyte/coding-agent/.gitignore` holding `*`, each only when missing, and never overwrites either; `.vidbyte/` itself gets no `.gitignore`. The notes, at most `CODING_PROGRESS_NOTES_MAX_BYTES` (32,768) bytes, render as primitive `coding:progress_notes`, the last section, titled `Progress notes (.vidbyte/coding-agent/progress.md)`, after `CODING_PROGRESS_NOTES_INSTRUCTION`; a longer file is cut and followed by `CODING_PROGRESS_NOTES_TRUNCATION_NOTE`. Any `OSError` while creating or reading them gives no section and no error. `progress_notes=False` creates and reads nothing.
 
@@ -37,7 +39,7 @@ SDK callers that construct `vidbyte.CodingAgent`, and the model inside `AgentRun
 
 ## State Transitions
 
-Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` or `progress_notes` that is not a bool, an unreadable `AGENTS.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call and starts no process; it reads at most 32,768 bytes of `AGENTS.md` and of `.vidbyte/coding-agent/progress.md`, and creates only the two notes files, when they are missing. A bash call goes through these stages:
+Construction either raises (bad root, bad or duplicate key, duplicate tool name, a `load_agents` or `progress_notes` that is not a bool, bad `setup_commands`, an unreadable `AGENTS.md`, or a `BaseAgent` identity error) or yields a ready agent. Building an agent makes no network call and starts no process except the setup commands; it reads at most 32,768 bytes of `AGENTS.md` and of `.vidbyte/coding-agent/progress.md`, and creates only the two notes files, when they are missing. A bash call goes through these stages:
 
 1. Validated.
 2. Spawned.
@@ -62,6 +64,7 @@ Construction either raises (bad root, bad or duplicate key, duplicate tool name,
 - With nothing to load, the request equals a plain `BaseAgent`'s byte for byte.
 - The caller's `context_manager` is never changed; its content renders after the coding sections.
 - Sections render in `CodingContextSection` order whatever order the loaders are listed in.
+- A setup command after a failed one never starts, and a setup command's outcome never raises.
 
 ## External Dependencies
 
@@ -119,6 +122,13 @@ These are the failure inventory the tests were chosen from, given as input → w
   - `load_agents="yes"` or `1` is accepted by truthiness.
   - The caller's manager is changed, or its content is dropped or rendered first.
   - `fork()` loses the section, or a later `chdir` or edit changes it.
+- **Setup command errors.**
+  - `setup_commands="uv sync"` runs one command per character.
+  - A command after a failure still runs, or the failure is hidden or raises.
+  - A command that never ends hangs construction.
+  - Commands run in the process working directory instead of `root_dir`.
+  - A missing bash raises, or something still starts.
+  - A huge failing output fills the context.
 - **Progress notes errors.** The last run's notes or a changed `.vidbyte/coding-agent/.gitignore` are overwritten. Git lists the notes folder, or the user's root `.gitignore` is edited. Another tool's files under `.vidbyte/`, such as vidbyte-cli's `.vidbyte/task-board/`, are hidden from git. The notes render before another section, or never reach the model. A notes edit made in one run is not shown to the next agent. A read-only root fails construction. `progress_notes=False` still creates the folder. A truthy stand-in flips the switch. A file over the cap crashes or shows a split character.
 - **Bash lookup errors.** On Windows the `PATH` `bash` (WSL's launcher) is chosen instead of Git's `bin/bash.exe`, or the lookup walks past three parent folders (AC-22). A missing bash breaks construction or the other tools (AC-17).
 
@@ -138,6 +148,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
 - `test_coding_agent_agents_md.py` checks `AGENTS.md` loading and the shared coding context window: the position in the request, the byte-identical request without a file, the switch, case variants, the root-only lookup, the cap and the cut character, blank and undecodable files, a broken file, strict bool validation, the caller's manager, fork, read-once, and `CodingContextWindow` and `CodingContextSectionText` on their own.
+- `test_coding_agent_setup_commands.py` checks setup commands: two passing lines placed after `AGENTS.md` and before the user message, stop at the first failure (a marker file proves the next command never ran), the time limit, `root_dir` as the working directory, no bash, the empty default, input validation, and the capped tail of a huge output.
 - `test_coding_agent_progress_notes.py` checks progress notes: a fresh root, existing notes and `.gitignore` kept, git status clean, a sibling tool's `.vidbyte/` files still visible to git, the cross-run edit with `replace_text`, a root that cannot be written, the switch, strict bool validation, and the cap.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:

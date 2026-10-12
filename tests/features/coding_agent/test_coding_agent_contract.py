@@ -38,6 +38,8 @@ EXPECTED_SIGNATURE = {
     "permission_policy": None,
     # AGENTS.md loading: the switch, and the caller's manager the coding context sections go ahead of.
     "load_agents": True,
+    # Setup commands: run once at construction; empty runs nothing.
+    "setup_commands": (),
     # Progress notes: the switch for the agent's own .vidbyte/coding-agent/progress.md section.
     "progress_notes": True,
     "context_manager": None,
