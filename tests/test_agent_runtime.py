@@ -23,6 +23,7 @@ Similar Files:
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from typing import Literal
 from unittest.mock import patch
@@ -43,6 +44,7 @@ from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions,
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
+from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
@@ -1228,6 +1230,37 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
                     result = agent.run("q")
                     self.assertEqual(result.content, "ANSWER")
                     self.assertEqual(runner.calls, 1)
+
+    def test_actor_quiescence_waits_for_an_actor_that_is_still_working(self) -> None:
+        # [Regression] Quiescence ended the run while the root actor was still awaiting its model call.
+        agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(termination_mode="quiescence", include_actors=[]), runner=SlowAnswerRunner())
+        result = asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+        self.assertEqual(result.content, "SLOW ANSWER")
+
+    def test_actor_run_raises_when_an_actor_model_call_fails(self) -> None:
+        # [Regression] A failed actor model call hung coordinator mode and reported success in quiescence mode.
+        for mode in ("coordinator", "quiescence"):
+            with self.subTest(termination_mode=mode):
+                agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(termination_mode=mode, include_actors=[]), runner=FailingRunner())
+                with self.assertRaises(AgentExecutionError) as caught:
+                    asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+                self.assertIsInstance(caught.exception.__cause__, RuntimeError)
+
+
+class SlowAnswerRunner:
+    """Offline runner that yields to the event loop before answering, like a real model call."""
+
+    async def arun(self, prompt: str, **_: object) -> FakeResponse:
+        await asyncio.sleep(0.05)
+        return FakeResponse("SLOW ANSWER", {})
+
+
+class FailingRunner:
+    """Offline runner whose model call always fails, like a provider rejecting the request."""
+
+    async def arun(self, prompt: str, **_: object) -> FakeResponse:
+        await asyncio.sleep(0)
+        raise RuntimeError("provider rejected the request")
 
 if __name__ == "__main__":
     unittest.main()

@@ -86,6 +86,8 @@ class BaseActorRuntime(ABC):
         self._message_count = 0
         self._completion_future: asyncio.Future[str] | None = None
         self._boot_pending = False
+        # Actors currently handling a message; quiescence waits for this to reach zero.
+        self.busy_actors = 0
 
         # RunnerHandle and options populated at execution time
         self._handle: RunnerHandle | None = None
@@ -282,7 +284,22 @@ class BaseActorRuntime(ABC):
         """Returns True if all mailboxes are empty and no worker tasks are active."""
         if self._message_count == 0:
             return False
+        if self.busy_actors > 0:
+            return False
         return all(actor.inbox.empty() for actor in self._actors.values())
+
+    def mark_busy(self) -> None:
+        """Records that an actor has started handling a message."""
+        self.busy_actors += 1
+
+    def mark_idle(self) -> None:
+        """Records that an actor has finished handling a message."""
+        self.busy_actors -= 1
+
+    def fail(self, exc: BaseException) -> None:
+        """Ends the run with an actor's error so both termination modes raise it."""
+        if self._completion_future is not None and not self._completion_future.done():
+            self._completion_future.set_exception(exc)
 
     @abstractmethod
     async def send(self, sender: str, recipient: str, content: str, parent_task_id: str | None = None) -> None:
