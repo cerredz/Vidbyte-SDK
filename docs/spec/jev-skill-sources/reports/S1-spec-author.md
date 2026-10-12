@@ -213,3 +213,46 @@ None of these adds a field or a knob. Each defines the value domain or failure m
 4. **mypy (S009) and the generic resolvers.** S009 must accept `SkillResolver(Generic[SkillEntryT])` with a `VendorSkillResolver` over a constrained TypeVar. Not run. If mypy objects, the implementer needs equivalent typing, without renaming the §8.5 classes.
 5. **The `RuntimeError` on an encrypted zip member.** That the stdlib raises it is known CPython behavior, but I did not run it. D-20's flag check guards it either way.
 6. **The A001 count.** The header upgrade should lower A001 by exactly one (to 642). This assumes the new and modified files all carry complete headers; otherwise the count rises and REGRESSES.
+
+## r2 addendum (revision after review round 1)
+
+The round-1 review (`S1-spec-review.md`, SOUND WITH FIXES: 1 Blocker, 5 Major, 9 Minor) is applied as spec revision 2. The status stays `draft`. Every finding is recorded in spec §16:
+
+| Finding | Disposition | Where |
+|---|---|---|
+| R-1 (Blocker) | accepted | D-29: each `yaml.safe_load` / `json.loads` call also catches `ValueError` and `RecursionError`; EC-109 to EC-112; AC-23 |
+| R-2 | accepted, option (b) | D-27: whole-step `asyncio.timeout(SKILL_FETCH_DEADLINE_SECONDS=25.0)`; NFR-1 reworded; A-12 corrects request.md's retry claim; Q-2 resolved; AC-24 |
+| R-3 | accepted | D-22: `SkillResolver.group_key` and one `resolve(group)` main per resolver; the loader groups by `(type, group_key)`; `_resolve_one` removed |
+| R-4 | accepted | INV-15 and D-30: the Vidbyte-key guard covers `GitHubSkill.token` and `GITHUB_TOKEN`; AC-22 |
+| R-5 | accepted, documentation only | T-4 (b) and EC-114; README note |
+| R-6 | accepted | D-19 reads `latest_version` or `latest_version_id`, with a distinct "content route not found" detail; D-20 handles a bare `SKILL.md`; A-1 and A-4 marked for the user's real-key QA; AC-25, AC-26 |
+| R-7 | accepted | three `DECISION_FAILED` detail texts and the batching `TOO_LARGE` text in §9.2 |
+| R-8 (scope-adding) | Q-6, default not built | `"."` is rejected; EC-73 is now a documented limitation; NG-13 |
+| R-9 | accepted | EC-44 and D-17 cite S1's own choice; Q-7 |
+| R-10 | accepted | label is `local:<folder name>`; INV-18 |
+| R-11 | accepted | P3 holds rows 5 and 6; dependency order fixed |
+| R-12 | accepted | §11 "Considered and not reused" (`vidbyte.sources`); new row 30 (agents README Key Modules) |
+| R-13 | accepted as a stated limitation | NFR-4; EC-113 |
+| R-14 | accepted | a remembered resolution is never replaced (INV-5, D-24); EC-95; AC-27 |
+| R-15 | accepted | D-28: the memory is resolved configuration, not run state |
+
+**Checked in the repo for r2**
+- `vidbyte/agents/README.md` Key Modules lists `coding_context/`, so it needs a `skills/` line.
+- The invariant sits at `skills/jev-agent/SKILL.md:109`.
+- `CodexSkillInput` uses `field(default=..., init=False)` for `type`.
+- `vidbyte/sources/fetches/http.py` uses the blocking `SyncHttpTransport.request_bytes`, and `fetches/file.py:35` reads files uncapped.
+- `asyncio.timeout` already bounds whole steps in `agents/multi/runner.py:51` and `harnesses/execution.py:210`.
+- `JevSkillsPreload` drops a batch on a `VidbyteSdkError` and on a reply without token counts. `_build_batch` checks both `JEV_SKILLS_MAX_REQUEST_JSON_BYTES` and `JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES`.
+
+**Self-check (Stage E) re-run**
+- 18 sections.
+- 27 ACs, each mapped to a W-row. AC-1, AC-11 and AC-20 were unmapped in r1 and are now mapped.
+- 114 ECs, each guarded or accepted.
+- No undefined IDs.
+- 30 rows, 14 CREATE.
+- No `_resolve_one` or `GITHUB_ROOT_PATH` remnants.
+- The only "orchestrator decision" citations are SkillDocument staying public (NG-10, FR-15), N1 (D-2) and N12 (D-30).
+
+**Still least sure of**
+- A-1 and A-4, the vendor content routes, now pending the user's real-key QA.
+- Whether S009/mypy accepts the `ABC` + `Generic` resolver base with a constrained `VendorSkillT`.
