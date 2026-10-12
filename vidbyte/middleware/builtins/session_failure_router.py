@@ -8,7 +8,8 @@ ARCHITECTURE NOTE: Only type-checks against vidbyte.sessions.failure.router.Fail
     middleware without creating an import cycle between the middleware and sessions domain layers.
 COMMON MODIFICATION PATTERNS: Add a hook override here when the runtime gains a new lifecycle breakpoint;
     keep rule evaluation itself owned by FailureRouter.evaluate().
-KNOWN EDGE CASES: A matched rule with a stop disposition aborts the run; a raise disposition's
+KNOWN EDGE CASES: A matched rule with a stop disposition aborts the run, except at review_finish, where it
+    ends the run unverified with the model's answer and CONTRACT_UNSATISFIED; a raise disposition's
     FailureRaisedError propagates through MiddlewarePipeline to the caller; every other disposition
     is left to FailureRouter's own history and recovery bookkeeping.
 RELATED DOCS: docs/design/session-failure-vocabulary.md; skills/failure/README.md.
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vidbyte.lib.dataclasses.agents import FinishReview
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.enums.failure import FailureCode, FailureDisposition
 from vidbyte.middleware.base import AgentMiddleware
@@ -74,6 +76,16 @@ class FailureMiddleware(AgentMiddleware):
     async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Evaluate Session rules before the runtime returns its final result."""
         return await self._evaluate("after_run", ctx)
+
+    async def review_finish(self, ctx: MiddlewareContext) -> FinishReview:
+        """Evaluate Session rules at each finish attempt the output contracts accepted."""
+        # @intent review-finish-rules-are-evaluated
+        # A finish review cannot abort, so a stop or raise rule refuses the finish and the run ends unverified.
+        failures = await self.router.evaluate("review_finish", ctx)
+        for failure in failures:
+            if failure.disposition in (FailureDisposition.STOP, FailureDisposition.RAISE):
+                return FinishReview.stop(f"Session failure rule {failure.source!r} matched {FailureCode.from_value(failure.code).value} at review_finish.")
+        return FinishReview.accept()
 
     async def _evaluate(self, hook: str, context: MiddlewareContext) -> MiddlewareDecision:
         # Translate rule dispositions into the existing middleware decision contract.
