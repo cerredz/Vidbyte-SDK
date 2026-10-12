@@ -90,11 +90,12 @@ class SessionBundleImporter:
         self._assert_session_absent(meta.session_id if new_id is None else new_id)
         if new_id is not None:
             meta, checkpoints = self._rewrite_session_id(meta, checkpoints, new_id)
-            # @intent bundle-copy-never-shares-checkpoint-ids
-            # Checkpoint ids are store-wide keys, so a copy landing in a store that already holds
-            # them gets fresh ids; otherwise it would overwrite or shadow the original's checkpoints.
-            if self._any_checkpoint_exists(checkpoints):
-                meta, checkpoints = self._mint_checkpoint_ids(meta, checkpoints)
+        # @intent bundle-copy-never-shares-checkpoint-ids
+        # Checkpoint ids are store-wide keys, so any import (a new_id copy or the bundle's own id) landing
+        # in a store that already holds them gets fresh ids; otherwise it would overwrite or shadow another
+        # session's checkpoints, and the outcome would depend on import order.
+        if self._any_checkpoint_exists(checkpoints):
+            meta, checkpoints = self._mint_checkpoint_ids(meta, checkpoints)
         self._store.ingest(meta, checkpoints)
         return meta.session_id
 
