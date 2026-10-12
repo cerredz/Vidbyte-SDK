@@ -115,6 +115,57 @@ class GeminiUnionTypeTests(unittest.TestCase):
         self.assertIn('"type": ["string", "null"]', json.dumps(openai))
 
 
+class GeminiArrayItemsTests(unittest.TestCase):
+    """Gemini rejects the whole request when an array schema has no `items`."""
+
+    def _parameters(self, spec: ToolSpec) -> dict:
+        return ToolsFormatter.to_gemini_tool(spec)["function_declarations"][0]["parameters"]
+
+    def test_tool_parameter_array_gets_any_item_schema(self) -> None:
+        # ToolParameter has no item schema, so every type="array" parameter renders item-less.
+        spec = ToolSpec(
+            name="tagThings",
+            description="Tag things.",
+            parameters=(ToolParameter(name="x", type="array", description="Tags.", required=True),),
+        )
+        x = self._parameters(spec)["properties"]["x"]
+        self.assertEqual(x["type"], "array")
+        self.assertEqual(x["items"], {})
+        self.assertEqual(x["description"], "Tags.")
+
+    def test_nested_and_nullable_arrays_get_items_at_every_level(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "grid": {"type": "array", "items": {"type": "array"}},
+                "meta": {"type": "object", "properties": {"ids": {"type": "array"}}},
+                "maybe": {"type": ["array", "null"]},
+                "either": {"type": ["array", "string"]},
+            },
+        }
+        properties = self._parameters(_spec_with_schema(schema))["properties"]
+        self.assertEqual(properties["grid"], {"type": "array", "items": {"type": "array", "items": {}}})
+        self.assertEqual(properties["meta"]["properties"]["ids"], {"type": "array", "items": {}})
+        self.assertEqual(properties["maybe"], {"type": "array", "nullable": True, "items": {}})
+        self.assertEqual(properties["either"], {"anyOf": [{"type": "array", "items": {}}, {"type": "string"}]})
+
+    def test_array_with_items_is_unchanged(self) -> None:
+        schema = {"type": "object", "properties": {"s": {"type": "array", "items": {"type": "string"}, "minItems": 1}}}
+        self.assertEqual(self._parameters(_spec_with_schema(schema)), schema)
+
+    def test_grep_tool_extensions_carry_items(self) -> None:
+        from vidbyte.tools.builtins.code_search import GrepTool
+
+        extensions = self._parameters(GrepTool(".").spec())["properties"]["extensions"]
+        self.assertEqual(extensions["type"], "array")
+        self.assertEqual(extensions["items"], {})
+
+    def test_other_providers_keep_item_less_arrays(self) -> None:
+        schema = {"type": "object", "properties": {"x": {"type": "array"}}}
+        openai = ToolsFormatter.to_openai_tool(_spec_with_schema(schema))
+        self.assertNotIn("items", json.dumps(openai))
+
+
 class GeminiToolResultRoleTests(unittest.TestCase):
     """generateContent accepts only 'user' and 'model' turns."""
 

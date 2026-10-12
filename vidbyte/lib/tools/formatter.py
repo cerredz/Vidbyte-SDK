@@ -176,7 +176,8 @@ class ToolsFormatter:
         `$defs`/`$ref`, which Pydantic emits for any nested model, and `additionalProperties`,
         which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
         place and unsupported keywords are dropped. A list-valued ``type`` (for example
-        ``["string", "null"]``) is also rejected, so it is collapsed to a single type.
+        ``["string", "null"]``) is also rejected, so it is collapsed to a single type, and an
+        array without ``items`` is rejected, so it gets ``items: {}`` (any item).
         """
         defs = dict(schema.get("$defs") or {})
         root = {key: value for key, value in schema.items() if key != "$defs"}
@@ -185,13 +186,15 @@ class ToolsFormatter:
     @staticmethod
     def _gemini_node(node: Mapping[str, Any], defs: Mapping[str, Any], seen: tuple[str, ...]) -> dict[str, Any]:
         # Expands $ref against $defs, keeps only Gemini-supported keywords, collapses
-        # list-valued types and words dropped bounds into the description, depth-first.
+        # list-valued types, gives item-less arrays an any-item schema and words dropped
+        # bounds into the description, depth-first.
         kept: dict[str, Any] = {}
         for key, value in node.items():
             if key not in ToolsFormatter._GEMINI_SCHEMA_KEYWORDS:
                 continue
             kept[key] = ToolsFormatter._gemini_keyword_value(key, value, defs, seen)
         kept = ToolsFormatter._gemini_single_type(kept)
+        kept = ToolsFormatter._gemini_array_items(kept)
         kept = ToolsFormatter._gemini_fold_bounds(node, kept)
         ref = node.get("$ref")
         if not isinstance(ref, str):
@@ -236,6 +239,24 @@ class ToolsFormatter:
         elif names:
             collapsed.setdefault("anyOf", [{"type": name} for name in names])
         return collapsed
+
+    @staticmethod
+    def _gemini_array_items(kept: dict[str, Any]) -> dict[str, Any]:
+        # @intent gemini-array-needs-items
+        # Gemini rejects the whole request ("items: missing field") when an array schema has no
+        # items, which is how every ToolParameter(type="array") renders. JSON Schema reads a
+        # missing items as "any item", so {} says the same thing in a form Gemini accepts.
+        # Array branches a collapsed type list just produced under anyOf get the same treatment.
+        patched = dict(kept)
+        if patched.get("type") == "array" and "items" not in patched:
+            patched["items"] = {}
+        branches = patched.get("anyOf")
+        if isinstance(branches, list):
+            patched["anyOf"] = [
+                {**branch, "items": {}} if isinstance(branch, Mapping) and branch.get("type") == "array" and "items" not in branch else branch
+                for branch in branches
+            ]
+        return patched
 
     @staticmethod
     def _gemini_fold_bounds(node: Mapping[str, Any], kept: dict[str, Any]) -> dict[str, Any]:
