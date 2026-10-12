@@ -136,6 +136,27 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             ToolActivity(schema=dict, description="Not a model.")
 
+    def test_prompt_doc_lists_activity_argument_like_native_schema(self) -> None:
+        """System-prompt tool docs list the activity argument the native schema requires."""
+        # @intent prompt-doc-lists-activity-argument
+        _, bound = self._bound_echo()
+        self.assertIn(
+            "Parameters:\n- text (string, required): Text to echo.\n- activity (object, required): Explain the user-visible action this echo advances.\nPermission: safe",
+            bound.spec().to_prompt_str(),
+        )
+        _, optional = self._bound_echo(required=False)
+        self.assertIn("- activity (object, optional): ", optional.spec().to_prompt_str())
+        no_args = ToolSpec(
+            name="helper",
+            description="Zero-parameter tool.",
+            activity=ToolActivity(schema=EchoActivity, description="Why you call it."),
+        )
+        rendered = no_args.to_prompt_str()
+        self.assertNotIn("Parameters: none", rendered)
+        self.assertIn("Parameters:\n- activity (object, required): Why you call it.", rendered)
+        # The native schema sent in the same request requires the same argument the prompt now lists.
+        self.assertEqual(ToolsFormatter.to_openai_tool(no_args)["function"]["parameters"]["required"], ["activity"])
+
     def test_prepared_call_separates_activity_from_arguments(self) -> None:
         """Preparation removes the reserved key and normalizes the annotation payload."""
         tool, bound = self._bound_echo()
