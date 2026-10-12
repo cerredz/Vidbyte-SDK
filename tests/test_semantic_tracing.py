@@ -363,6 +363,45 @@ class SessionTraceTests(unittest.TestCase):
         ends = [event["type"] for event in inner.events if event["type"].startswith("end")]
         self.assertEqual(ends, ["end_span", "end_span", "end_span", "end_trace"])
 
+    def test_session_with_suppressed_root_keeps_agent_runs_as_root_traces(self) -> None:
+        # Verifies a profile-filtered session root never turns agent runs into parentless spans.
+        self.assertEqual(
+            self._record_two_session_runs(TraceProfile.minimal()),
+            [("start_trace", "agent.run", False), ("end_trace", None, False), ("start_trace", "agent.run", False), ("end_trace", None, False)],
+        )
+        self.assertEqual(
+            self._record_two_session_runs(TraceProfile.default()),
+            [("start_trace", "workflow", False), ("start_span", "agent.run", True), ("end_span", None, False), ("start_span", "agent.run", True), ("end_span", None, False), ("end_trace", None, False)],
+        )
+
+    @staticmethod
+    def _record_two_session_runs(profile: TraceProfile) -> list[tuple[str, str | None, bool]]:
+        # Runs two top-level agent traces inside one session and returns (event type, name, has parent) per event.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=profile)
+        with tracer.session("workflow"):
+            for agent_name in ("a", "b"):
+                run = tracer.start_trace("agent.run", agent_name=agent_name)
+                tracer.end_trace(run, output=agent_name)
+        return [(event["type"], event.get("name"), event.get("parent") is not None) for event in inner.events]
+
+    def test_session_with_suppressed_root_keeps_nested_agent_run_under_tool_span(self) -> None:
+        # Verifies a nested agent run still attaches to its caller's tool span when the session root is filtered out.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=TraceProfile.minimal())
+        with tracer.session("workflow"):
+            outer = tracer.start_trace("agent.run", agent_name="orchestrator")
+            tool_call = tracer.start_span("tool.call", tool_name="researcher")
+            nested = tracer.start_trace("agent.run", agent_name="child")
+            tracer.end_trace(nested, output="child")
+            tracer.end_span(tool_call, output="tool")
+            tracer.end_trace(outer, output="outer")
+        starts = [(event["type"], event["name"]) for event in inner.events if event["type"].startswith("start")]
+        self.assertEqual(starts, [("start_trace", "agent.run"), ("start_span", "tool.call"), ("start_span", "agent.run")])
+        self.assertIs(inner.events[2]["parent"], tool_call.provider_context)
+        ends = [event["type"] for event in inner.events if event["type"].startswith("end")]
+        self.assertEqual(ends, ["end_span", "end_span", "end_trace"])
+
 
 class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_default_profile_records_core_and_default_spans(self) -> None:
