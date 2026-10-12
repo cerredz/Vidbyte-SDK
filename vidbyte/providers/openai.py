@@ -9,6 +9,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
+from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
@@ -185,8 +186,11 @@ class OpenAIProvider:
     def _create_input(self, config: TextModelConfig, prompt: str) -> str | list[Mapping[str, Any]]:
         # Preserve multi-turn Responses inputs when callers provide message history.
         if config.messages:
-            items = [item for message in config.messages for item in self._responses_items(message)]
-            return items + [{"role": "user", "content": prompt}]
+            # Put the prompt in front of the tool exchange it provoked, placed on the chat-shaped turns so an
+            # assistant note and the function_call items it splits into stay together behind the prompt.
+            history = [dict(message) for message in config.messages]
+            history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn), {"role": "user", "content": prompt})
+            return [item for message in history for item in self._responses_items(message)]
         return prompt
 
     @staticmethod

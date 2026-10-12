@@ -263,6 +263,16 @@ class GeminiContentsOrderingTests(unittest.TestCase):
         self.assertEqual(model_turn["parts"][0]["text"], "prior answer")
         self.assertNotIn("content", model_turn)
 
+    def test_prompt_skips_a_replayed_exchange_and_opens_this_runs_round(self) -> None:
+        # A replayed transcript already holds an introduced exchange; the prompt opens this run's call instead.
+        call = {"role": "model", "parts": [{"functionCall": {"name": "hours", "args": {}}}]}
+        response = {"role": "user", "parts": [{"functionResponse": {"name": "hours", "response": {}}}]}
+        contents = self._contents([{"role": "user", "content": "Hours on Sunday?"}, call, response, {"role": "assistant", "content": "closed"}, call, response])
+        self.assertEqual([c["role"] for c in contents], ["user", "model", "user", "model", "user", "model", "user"])
+        self.assertEqual(contents[3]["parts"], [{"text": "closed"}])
+        self.assertEqual(contents[4]["parts"], [{"text": "do the thing"}])
+        self.assertIn("functionCall", contents[5]["parts"][0])
+
 
 def _call_turn(*names: str) -> dict:
     return {"role": "model", "parts": [{"functionCall": {"name": name, "args": {}}} for name in names]}

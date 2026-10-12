@@ -9,6 +9,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.lib.util import PromptPlacement
 
 
 class AnthropicProvider:
@@ -66,8 +67,16 @@ class AnthropicProvider:
         return {"x-api-key": config.resolved_api_key(), "anthropic-version": "2023-06-01", "content-type": "application/json"}
 
     def _create_messages(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
-        # Preserve multi-turn history and append the current user prompt.
-        return [dict(message) for message in config.messages] + [{"role": "user", "content": prompt}]
+        # Preserve multi-turn history and put the prompt in front of the tool exchange it provoked.
+        history = [dict(message) for message in config.messages]
+        history.insert(PromptPlacement.index(history, is_call_turn=self._is_tool_use_turn), {"role": "user", "content": prompt})
+        return history
+
+    @staticmethod
+    def _is_tool_use_turn(turn: Mapping[str, Any]) -> bool:
+        # An assistant turn whose content carries a tool_use block is a tool call.
+        content = turn.get("content")
+        return turn.get("role") == "assistant" and isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_use" for block in content)
 
     def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
         # Anthropic uses a top-level system parameter rather than a system role.

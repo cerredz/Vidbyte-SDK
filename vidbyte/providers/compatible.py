@@ -10,6 +10,7 @@ from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 # A reply that is one markdown fence from start to end; its body is unwrapped only when it is JSON.
@@ -68,8 +69,10 @@ class OpenAICompatibleProvider:
         instructions = system or config.system
         if instructions:
             messages.append({"role": "system", "content": instructions})
-        messages.extend(dict(message) for message in config.messages)
-        messages.append({"role": "user", "content": prompt})
+        # Put the prompt in front of the tool exchange it provoked, so the newest turn is the work, not the task again.
+        history = [dict(message) for message in config.messages]
+        history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn), {"role": "user", "content": prompt})
+        messages.extend(history)
         return messages
 
     def _attach_sampling(self, payload: dict[str, Any], config: TextModelConfig) -> None:
