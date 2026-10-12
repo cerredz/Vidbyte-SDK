@@ -256,3 +256,36 @@ The round-1 review (`S1-spec-review.md`, SOUND WITH FIXES: 1 Blocker, 5 Major, 9
 **Still least sure of**
 - A-1 and A-4, the vendor content routes, now pending the user's real-key QA.
 - Whether S009/mypy accepts the `ABC` + `Generic` resolver base with a constrained `VendorSkillT`.
+
+## r3 addendum (final revision after review round 2)
+
+Review round 2 (`S1-spec-review-2.md`) returned SOUND WITH FIXES: 2 Blockers, 6 Minors, and all of R-1 to R-15 confirmed landed. All eight findings are accepted; none is disputed, so no new Q-n was needed. The spec is now `status: approved`, revision 3.
+
+| Finding | Disposition | Change |
+|---|---|---|
+| R-16 (Blocker) | accepted | D-20 now checks the compression method: only `ZIP_STORED` or `ZIP_DEFLATED` is read. It adds `ValueError` to the catch, and the catch now wraps both `ZipFile(...)` and the member read. Updated EC-85; new EC-115 and AC-28 |
+| R-17 (Blocker) | accepted | New `SkillFetchStep` enum (5 members) in the skills enum module, exported from `vidbyte.lib.enums` only. §8.4 now counts 3 enums; §8.5 and rows 1, 2, 10 updated |
+| R-18 | accepted | Keys and tokens are stripped before the prefix check, and the stripped value is sent (D-30, INV-15, EC-77, AC-22, rows 15–16) |
+| R-19 | accepted | A bare `SKILL.md` over the cap is `TOO_LARGE`. An explicit-version 404 detail names the content route. A `bool` is not a version (EC-79, EC-80, EC-83, AC-29) |
+| R-20 | accepted, no lock | Each load returns the remembered resolution where one exists, so INV-10 holds when loads overlap (row 19, D-24, EC-95, AC-27) |
+| R-21 | accepted, option 1 | D-31: a private `_GitHubAnswer` status classifier, following the `_GatewayAnswer` precedent. The package now has 12 classes |
+| R-22 | accepted | NFR-1 and EC-103 now say "every run that retries". New EC-116 (blocked egress) and EC-117 (a `path=` hint); README note added |
+| R-23 | accepted | `JevSkillsPreload` stays a plain class. The deadline constant is read at call time (rows 10 and 22, §13) |
+
+**Implementer facts the orchestrator asked for**
+- Added to §11 under "Implementer facts verified in review round 2": key stripping, C020 production-only, the A002 `@intent` trigger, `HTTPStatus(529)` raising, `deadline.expired()`, the instance-patched `run`, and the zip exception modes.
+- Mirrored in the §12.4 checklist, §13, and the §14 "Never" list.
+
+**Re-checked in the repo**
+- `resolve_api_key` and `find_vidbyte_api_key` strip before checking (`models.py:162-190`).
+- `_invoke_with_timeout` checks `deadline.expired()` (`execution.py:205-219`).
+- The gateway looks statuses up by integer (`vidbyte_gateway.py:98-106`); `_GatewayAnswer` is at `:41`.
+- The test assigns `agent.skill_preload.run` (`test_jev_skill_preload.py:415-424`).
+- The API contract tracks only root `vidbyte` exports, and the root imports `vidbyte.lib.enums` names explicitly, so `SkillFetchStep` does not leak into the contract.
+
+**Self-check**
+- 18 sections.
+- 29 ACs, all mapped to W-rows.
+- 117 ECs, all guarded or accepted.
+- No undefined IDs.
+- 30 rows, 14 CREATE.
