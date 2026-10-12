@@ -44,6 +44,7 @@ class FileSessionStore(BaseSessionStore):
                 f"Invalid session or checkpoint id for file store: {checkpoint.session_id!r} / {checkpoint.id!r}.",
                 details={"session_id": checkpoint.session_id, "checkpoint_id": checkpoint.id},
             )
+        self._assert_directory_owner(directory.parent, checkpoint.session_id)
         target = directory / f"{checkpoint.seq:08d}-{checkpoint.id}.json"
         self._atomic_write_json(target, self._serializer.checkpoint_to_dict(checkpoint))
 
@@ -55,11 +56,12 @@ class FileSessionStore(BaseSessionStore):
         return None
 
     def _read_session_checkpoints(self, session_id: str) -> list[Checkpoint]:
-        # Parse every checkpoint file for a session.
+        # Parse every checkpoint file for a session, keeping only those it owns (its directory may alias another id's).
         directory = self._checkpoint_dir(session_id)
         if directory is None or not directory.exists():
             return []
-        return [self._serializer.checkpoint_from_dict(self._read_json(path)) for path in directory.glob("*.json")]
+        checkpoints = [self._serializer.checkpoint_from_dict(self._read_json(path)) for path in directory.glob("*.json")]
+        return [checkpoint for checkpoint in checkpoints if checkpoint.session_id == session_id]
 
     def _delete_checkpoint(self, checkpoint_id: str) -> None:
         # @intent file-store-ids-are-opaque-and-rooted
@@ -70,26 +72,44 @@ class FileSessionStore(BaseSessionStore):
     def _checkpoint_paths(self, checkpoint_id: str) -> list[Path]:
         # @intent file-store-ids-are-opaque-and-rooted
         # Escape the id for glob, then keep only files named exactly <seq>-<checkpoint_id>.json, so an id
-        # that is a suffix of another id ("b" vs "a-b") does not match it.
+        # that is a suffix of another id ("b" vs "a-b") does not match it. The case-sensitive endswith keeps a
+        # case-insensitive glob (Windows) from matching "ck_x" for "CK_X".
         if not _is_plain_segment(checkpoint_id):
             return []
         suffix = f"-{checkpoint_id}.json"
         matches = self._root.glob(f"*/checkpoints/*{glob.escape(suffix)}")
-        return [path for path in matches if path.name[: -len(suffix)].lstrip("-").isdigit()]
+        return [path for path in matches if path.name.endswith(suffix) and path.name[: -len(suffix)].lstrip("-").isdigit()]
 
     def _write_meta(self, meta: SessionMeta) -> None:
         # Atomically write the session meta file.
         directory = self._session_dir(meta.session_id)
         if directory is None:
             raise SessionStoreError(f"Invalid session id for file store: {meta.session_id!r}.", details={"session_id": meta.session_id})
+        self._assert_directory_owner(directory, meta.session_id)
         self._atomic_write_json(directory / "meta.json", self._serializer.meta_to_dict(meta))
 
     def _read_meta(self, session_id: str) -> SessionMeta | None:
-        # Parse a session's meta file, or None when absent or the id is not a valid session name.
+        # Parse a session's meta file, or None when absent, the id is not a valid session name, or the
+        # directory belongs to a different id that aliases this one on the filesystem.
         directory = self._session_dir(session_id)
         if directory is None or not (directory / "meta.json").exists():
             return None
-        return self._serializer.meta_from_dict(self._read_json(directory / "meta.json"))
+        meta = self._serializer.meta_from_dict(self._read_json(directory / "meta.json"))
+        return meta if meta.session_id == session_id else None
+
+    def _assert_directory_owner(self, directory: Path, session_id: str) -> None:
+        # @intent file-store-ids-never-alias-another-session
+        # On a case-insensitive or name-normalizing filesystem distinct ids ("Acme"/"acme", "acme"/"acme.")
+        # share one directory; refuse to write into a directory whose meta names a different session.
+        meta_path = directory / "meta.json"
+        if not meta_path.exists():
+            return
+        owner = self._read_json(meta_path).get("session_id")
+        if owner != session_id:
+            raise SessionStoreError(
+                f"Session id {session_id!r} collides with existing session {owner!r} on this filesystem.",
+                details={"session_id": session_id, "existing_session_id": owner},
+            )
 
     def _read_all_meta(self) -> list[SessionMeta]:
         # Parse every session meta file under the root.
