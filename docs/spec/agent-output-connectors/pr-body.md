@@ -160,10 +160,10 @@ Code last changed at `ad4ed50a`; every commit after it changes only `docs/`. The
 | Full local gate | `python scripts/run_ci.py` (PYTHONPATH unset; source and package stages) | `3743 passed, 13 skipped in 29.58s` · `No broken requirements found.` · `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` |
 | Public API contract | `python scripts/generate-sdk-public-api.py --check` | `contracts/sdk-public-api.json is current at 839e8e33… (vidbyte-sdk 0.2.1, 623 exports).` |
 | Semgrep 1.170.1 | `semgrep --test …typed-mapping-boundary-policy…` · `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `1/1: ✓ All tests passed` · `Ran 1 rule on 908 files: 0 findings.` (exit 0) |
-| Remote `ci.yml` | dispatched on `12729d09` (same code), run 38214072413 | success: Source / Python 3.11, Source / Python 3.12, Package |
-| Remote `static-policy.yml` | dispatched on `12729d09` (same code), run 38214075610 | success: Static policy |
+| Remote `ci.yml` | dispatched on `b58a022a`, run 38215147873 | success. Source / Python 3.11: `3738 passed, 18 skipped` · `CI passed.` Source / Python 3.12: `3738 passed, 18 skipped` · `CI passed.` Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` |
+| Remote `static-policy.yml` | dispatched on `b58a022a`, run 38215150030 | success. `1/1: ✓ All tests passed` · `Ran 1 rule on 908 files: 0 findings.` |
 
-Remote CI on this repo runs only when dispatched, so `gh pr checks` lists nothing; the run IDs above are the checks. `main` is now 7 commits ahead (#746, #763, #767, #885, #887, #888, #889). `git merge-tree` shows a clean merge. A throwaway merge of current `main` passes the feature pack and the coding-agent pack (`610 passed, 12 skipped`) and `python lint/run.py` (`SDK-LINT: PASS`).
+Remote CI on this repo runs only when dispatched, so `gh pr checks` lists nothing; the run IDs above are the checks. Later commits on this branch change only files under `docs/spec/agent-output-connectors/`. `main` is now 7 commits ahead (#746, #763, #767, #885, #887, #888, #889). `git merge-tree` shows a clean merge. A throwaway merge of current `main` passes the feature pack and the coding-agent pack (`610 passed, 12 skipped`) and `python lint/run.py` (`SDK-LINT: PASS`).
 
 ## Adversarial review
 15 findings confirmed by an independent verifier across three lenses (spec conformance, repo conventions, engineering), 14 fixed, 1 waived. R-13 (reject non-ASCII credentials) adds scope, so it became optional question Q-11 and was not built. A final conformance re-review returned SOUND; its two Minors were closed in `0ca19568` and `ad4ed50a`. Full record: `docs/spec/agent-output-connectors/review.md`.
