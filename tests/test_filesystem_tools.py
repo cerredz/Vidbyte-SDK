@@ -452,6 +452,19 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             self.assertIn("exactly once", result.output)
             self.assertEqual(target.read_bytes(), original)
 
+    def test_replace_text_error_says_whether_search_was_missing_or_repeated(self) -> None:
+        # The model reads only this message, so it must tell "not found"
+        # (re-read the file) apart from "several matches" (add context).
+        for search, expected in (("zz", "but it was not found."), ("aa", "but it appears 3 times; include more surrounding text to make it unique.")):
+            with self.subTest(search=search), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                target = Path(tmp) / "f.txt"
+                target.write_bytes(b"aa\naa\naa\n")
+                result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": search, "replacement": "bb"})))
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertIn(f"ReplaceTextTool requires the search text to appear exactly once, {expected}", result.output)
+                self.assertEqual(target.read_bytes(), b"aa\naa\naa\n")
+
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
