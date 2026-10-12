@@ -59,6 +59,41 @@ from vidbyte.tools.mcp.presets import (
     LocalFilesystemMCP, OsCommandMCP, EnvInspectorMCP, ProcessManagerMCP,
     SystemDiagnosticsMCP, MarkdownLinterMCP, PythonSandboxMCP, SqliteSandboxMCP,
     CsvParserMCP, JsonValidatorMCP, SequentialThinkingMCP,
+    # E-Commerce & Payments
+    StripeMCP, ShopifyMCP, WoocommerceMCP, SquareMCP, PaypalMCP,
+    # Automation & Workflow
+    ZapierMCP, N8nMCP,
+    # Search & Web Research (additional)
+    PerplexityMCP, SerperMCP, YouSearchMCP, ApifyMCP, BrowserbaseMCP,
+    ZenrowsMCP, ScrapingbeeMCP, LinkupMCP,
+    # Version Control, Development & Task Tracking (additional)
+    AsanaMCP, TrelloMCP, ClickupMCP, PagerdutyMCP, DatadogMCP,
+    NewrelicMCP, TerraformMCP, GithubActionsMCP, TravisCiMCP, MondayMCP,
+    # Databases & Cache (additional)
+    DynamodbMCP, CassandraMCP, ElasticsearchMCP, CockroachdbMCP, FirebaseMCP,
+    WeaviateMCP, MilvusMCP, TimescaledbMCP, TursoMCP, FaunadbMCP,
+    # Productivity, Office & CRM (additional)
+    ObsidianVaultMCP, TodoistMCP, ConfluenceMCP, ZohoCrmMCP, IntercomMCP,
+    PipedriveMCP, FreshserviceMCP, ZendeskMCP, SmartsheetMCP, BasecampMCP,
+    # Document Parsers & Media Utilities (additional)
+    DoclingMCP, UnstructuredMCP, CamelotMCP, PptxParserMCP, DocxParserMCP,
+    LibreofficeMCP, VideoTranscriptMCP, ExifToolMCP,
+    # Communication & Chat (additional)
+    MattermostMCP, RocketchatMCP, MailgunMCP, PostmarkMCP, ResendMCP,
+    LineMessagingMCP, PushoverMCP, MandrillMCP,
+    # Cloud Platforms, Hosting & Infrastructure (additional)
+    AwsRdsMCP, AwsCloudwatchMCP, GcpBigqueryMCP, AzureDevopsMCP, DigitaloceanMCP,
+    FlyIoMCP, RailwayMCP, RenderMCP, LinodeMCP, VultrMCP,
+    # AI Platforms & Creative APIs (additional)
+    StabilityAiMCP, RunwayMCP, CohereSearchMCP, MistralMCP, TogetherAiMCP,
+    DeepgramMCP, AssemblyAiMCP, HeygenMCP, SunoMCP, LangsmithMCP,
+    # Reference & Academic (additional)
+    PubmedMCP, CrossrefMCP, SemanticScholarMCP, OpenLibraryMCP, NpmRegistryMCP,
+    PypiMCP, DockerHubMCP, OpenMeteoMCP,
+    # Native System & Utilities (additional)
+    GitMCP, HttpClientMCP, WebhookSenderMCP, YamlValidatorMCP, XmlParserMCP,
+    TomlParserMCP, Base64ToolsMCP, HashingToolsMCP, UuidGeneratorMCP,
+    RegexTesterMCP, DateTimeMCP,
 )
 from vidbyte.tools.mcp.transport import McpStdioTransport, McpTransport
 from vidbyte.tools.mcp.types import (
@@ -114,4 +149,39 @@ __all__ = [
     "LocalFilesystemMCP", "OsCommandMCP", "EnvInspectorMCP", "ProcessManagerMCP",
     "SystemDiagnosticsMCP", "MarkdownLinterMCP", "PythonSandboxMCP", "SqliteSandboxMCP",
     "CsvParserMCP", "JsonValidatorMCP", "SequentialThinkingMCP",
+    # E-Commerce & Payments
+    "StripeMCP", "ShopifyMCP", "WoocommerceMCP", "SquareMCP", "PaypalMCP",
+    # Automation & Workflow
+    "ZapierMCP", "N8nMCP",
+    # Search & Web Research (additional)
+    "PerplexityMCP", "SerperMCP", "YouSearchMCP", "ApifyMCP", "BrowserbaseMCP",
+    "ZenrowsMCP", "ScrapingbeeMCP", "LinkupMCP",
+    # Version Control, Development & Task Tracking (additional)
+    "AsanaMCP", "TrelloMCP", "ClickupMCP", "PagerdutyMCP", "DatadogMCP",
+    "NewrelicMCP", "TerraformMCP", "GithubActionsMCP", "TravisCiMCP", "MondayMCP",
+    # Databases & Cache (additional)
+    "DynamodbMCP", "CassandraMCP", "ElasticsearchMCP", "CockroachdbMCP", "FirebaseMCP",
+    "WeaviateMCP", "MilvusMCP", "TimescaledbMCP", "TursoMCP", "FaunadbMCP",
+    # Productivity, Office & CRM (additional)
+    "ObsidianVaultMCP", "TodoistMCP", "ConfluenceMCP", "ZohoCrmMCP", "IntercomMCP",
+    "PipedriveMCP", "FreshserviceMCP", "ZendeskMCP", "SmartsheetMCP", "BasecampMCP",
+    # Document Parsers & Media Utilities (additional)
+    "DoclingMCP", "UnstructuredMCP", "CamelotMCP", "PptxParserMCP", "DocxParserMCP",
+    "LibreofficeMCP", "VideoTranscriptMCP", "ExifToolMCP",
+    # Communication & Chat (additional)
+    "MattermostMCP", "RocketchatMCP", "MailgunMCP", "PostmarkMCP", "ResendMCP",
+    "LineMessagingMCP", "PushoverMCP", "MandrillMCP",
+    # Cloud Platforms, Hosting & Infrastructure (additional)
+    "AwsRdsMCP", "AwsCloudwatchMCP", "GcpBigqueryMCP", "AzureDevopsMCP", "DigitaloceanMCP",
+    "FlyIoMCP", "RailwayMCP", "RenderMCP", "LinodeMCP", "VultrMCP",
+    # AI Platforms & Creative APIs (additional)
+    "StabilityAiMCP", "RunwayMCP", "CohereSearchMCP", "MistralMCP", "TogetherAiMCP",
+    "DeepgramMCP", "AssemblyAiMCP", "HeygenMCP", "SunoMCP", "LangsmithMCP",
+    # Reference & Academic (additional)
+    "PubmedMCP", "CrossrefMCP", "SemanticScholarMCP", "OpenLibraryMCP", "NpmRegistryMCP",
+    "PypiMCP", "DockerHubMCP", "OpenMeteoMCP",
+    # Native System & Utilities (additional)
+    "GitMCP", "HttpClientMCP", "WebhookSenderMCP", "YamlValidatorMCP", "XmlParserMCP",
+    "TomlParserMCP", "Base64ToolsMCP", "HashingToolsMCP", "UuidGeneratorMCP",
+    "RegexTesterMCP", "DateTimeMCP",
 ]
