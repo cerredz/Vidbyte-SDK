@@ -751,6 +751,26 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
             tracer.end_trace(context, output="ok")
         self.assertTrue(hasattr(captured[0], "isoformat"))
 
+    def test_langsmith_root_run_type_is_resolved_not_sent_as_input(self) -> None:
+        # [Hidden Failure] The root run must take run_type from its attributes, like child spans, not leak it into inputs.
+        created: list[dict[str, Any]] = []
+
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                created.append(kwargs)
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            tracer = LangSmithTracer(api_key="test-key")
+            tracer.start_trace("agent.run", agent_name="a")
+            tracer.start_trace("agent.run", agent_name="a", run_type="chain")
+            tracer.start_trace("custom.root", query="q", run_type="retriever")
+        self.assertEqual([run["run_type"] for run in created], ["chain", "chain", "retriever"])
+        self.assertEqual([run["inputs"] for run in created], [{"agent_name": "a"}, {"agent_name": "a"}, {"query": "q"}])
+
 
 # ---------------------------------------------------------------------------
 # Cancellation / BaseException trace-closure tests  (#142)
