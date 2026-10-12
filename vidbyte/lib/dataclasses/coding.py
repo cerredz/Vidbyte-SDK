@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/dataclasses/coding.py
 
-PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, the write_text rewrite limit, the context-section switches, and the setup commands. Also defines CodingContextSectionText, one section of the CodingAgent context window.
-ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools) and by the section loaders in vidbyte/agents/coding_context/, and exported by the root vidbyte package. CodingContextSectionText is returned by each section loader and read by CodingContextWindow (vidbyte/agents/coding_context/window.py).
+PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, the read-only path patterns, the write_text rewrite limit, the context-section switches, and the setup commands. Also defines CodingContextSectionText, one section of the CodingAgent context window.
+ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools) and by the section loaders in vidbyte/agents/coding_context/, feeds its readonly_paths to vidbyte/middleware/builtins/readonly_paths.py, and is exported by the root vidbyte package. CodingContextSectionText is returned by each section loader and read by CodingContextWindow (vidbyte/agents/coding_context/window.py).
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
-FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; _check_context_switches checks the section switches; _checked_setup_commands checks the setup commands and returns them as a tuple; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses. CodingContextSectionText.__post_init__ checks the section kind and the text fields.
+FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; _readonly_paths checks the patterns and returns them as a tuple; _check_context_switches checks the section switches; _checked_setup_commands checks the setup commands and returns them as a tuple; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses. CodingContextSectionText.__post_init__ checks the section kind and the text fields.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools. A context section with its own on/off switch adds one bool field here and one isinstance check in _check_context_switches.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
-KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. setup_commands="uv sync" is rejected rather than run one character at a time, which is why setup_commands keeps its raw type until __post_init__ checks it. CodingContextSectionText does not cap its content; each loader bounds its own text.
+KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. readonly_paths keeps its raw type for the same reason: tuple("tests/**") would split a bare string into characters. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. setup_commands="uv sync" is rejected rather than run one character at a time, which is why setup_commands keeps its raw type until __post_init__ checks it. CodingContextSectionText does not cap its content; each loader bounds its own text.
 RELATED DOCS: docs/spec/coding-agent/spec.md; vidbyte/agents/README.md (Coding Agent)
-TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_map_md.py, tests/features/coding_agent/test_coding_agent_setup_commands.py, and tests/features/coding_agent/test_coding_agent_progress_notes.py
+TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_map_md.py, tests/features/coding_agent/test_coding_agent_setup_commands.py, tests/features/coding_agent/test_coding_agent_progress_notes.py, and tests/features/coding_agent/test_coding_agent_readonly_paths.py
 """
 
 from __future__ import annotations
@@ -26,15 +26,16 @@ from vidbyte.lib.errors import ConfigurationError
 
 @dataclass(frozen=True, slots=True)
 class CodingAgentSettings:
-    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, the policy, the rewrite limit, and the section switches.
+    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, the policy, the read-only patterns, the rewrite limit, and the section switches.
 
     root_dir is typed Path | str because the record must see the raw
     value: Path("") is the current folder, so converting first would
     accept an empty string. After __post_init__ it is always the
-    resolved absolute Path. setup_commands is typed Sequence[str] for
-    the same reason: a bare string is itself a sequence of strings, so
-    the record must see the raw value to refuse it. After __post_init__
-    it is always a tuple.
+    resolved absolute Path. readonly_paths and setup_commands are typed
+    Sequence[str] for the same reason: a bare string is itself a
+    sequence of strings (tuple("tests/**") would split it into
+    characters), so the record must see the raw value to refuse it.
+    After __post_init__ each is always a tuple of str.
     """
 
     root_dir: Path | str
@@ -45,6 +46,7 @@ class CodingAgentSettings:
     browserbase_api_key: str | None = field(default=None, repr=False)
     parallel_api_key: str | None = field(default=None, repr=False)
     tavily_api_key: str | None = field(default=None, repr=False)
+    readonly_paths: Sequence[str] = ()
     load_agents: bool = True
     load_map: bool = True
     setup_commands: Sequence[str] = ()
@@ -61,6 +63,9 @@ class CodingAgentSettings:
 
         # Check the caller's tools and the policy every call runs under.
         self._check_tools_and_policy()
+
+        # Check the read-only patterns and keep them as a tuple.
+        object.__setattr__(self, "readonly_paths", self._readonly_paths())
 
         # Check the rewrite limit with the same rule write_text's own
         # config uses: None turns it off, and a number is the most lines
@@ -125,6 +130,20 @@ class CodingAgentSettings:
             raise ConfigurationError("CodingAgent load_map must be True or False.", details={"parameter": "load_map", "load_map_type": type(self.load_map).__name__})
         if not isinstance(self.progress_notes, bool):
             raise ConfigurationError("CodingAgent progress_notes must be True or False.", details={"parameter": "progress_notes", "progress_notes_type": type(self.progress_notes).__name__})
+
+    def _readonly_paths(self) -> tuple[str, ...]:
+        """Return readonly_paths as a tuple, or raise unless it is a list or tuple of non-blank strings."""
+        # @intent readonly-paths-reject-a-bare-string
+        # A bare string is a sequence of characters, so "tests/**"
+        # would protect the files "t", "e", and so on, and the tests
+        # would stay editable without any error.
+        paths = self.readonly_paths
+        if isinstance(paths, str) or not isinstance(paths, Sequence):
+            raise ConfigurationError(f"CodingAgent readonly_paths must be a list or tuple of glob strings such as ['tests/**'], not a {type(paths).__name__}.", details={"readonly_paths_type": type(paths).__name__})
+        bad = [repr(path) for path in paths if not isinstance(path, str) or not path.strip()]
+        if bad:
+            raise ConfigurationError("CodingAgent readonly_paths entries must be non-blank strings.", details={"bad_entries": bad})
+        return tuple(paths)
 
     def _checked_setup_commands(self) -> tuple[str, ...]:
         """Return setup_commands as a tuple, or raise unless it is a list or tuple of non-blank command strings."""
