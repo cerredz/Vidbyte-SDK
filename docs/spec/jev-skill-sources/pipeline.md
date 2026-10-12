@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-jev-skill-sources
 branch: feat/jev-skill-sources
 base_commit: ba3e4ca51ad78c44026dfd296663ae7b092bce56
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/904
 until: none
 started: 2026-10-11 23:17
 ---
@@ -16,7 +16,7 @@ started: 2026-10-11 23:17
 | S0 worktree + capture + recon | done | 2026-10-11 23:17 | 2026-10-12 | reports/S0-scout.md | base ba3e4ca5; code-map.md (4 sections, 12 contradictions N1–N12, gaps G1–G9) |
 | S1 spec + review | done | 2026-10-12 | 2026-10-12 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved (e9a0eeaf); round 1 SOUND WITH FIXES (1B/5M/9m), round 2 SOUND WITH FIXES (2B/0M/6m), all 23 findings applied |
 | S2 tests | done | 2026-10-12 | 2026-10-12 | reports/S2-test-author.md | S2_HEAD d01e0afa; 12 modules + conftest in tests/features/jev_skills_preload/, 354 cases red (missing vidbyte.agents.skills etc.); AC-1..AC-29 cited; spec r4 (5c08566a) fixed 2 S2 defects |
-| S3 implement | pending | | | | |
+| S3 implement | done | 2026-10-12 | 2026-10-12 | reports/S3-implementer.md | S3_HEAD 97c67062; draft PR #904; 25 code commits; budget 14/14 files, 9/9 public names, 3/3 enums, 0 deps; 373 passed 1 skipped; lint PASS; run_ci source+package PASS; semgrep 0 findings; 7 deviations in spec §17; tests untouched since d01e0afa |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -36,6 +36,8 @@ started: 2026-10-11 23:17
 
 - 2026-10-12 — S2 OPEN ITEMS resolved through a fresh spec author in Revision mode before S3 (spec r4, 5c08566a): S2-1 "propagates out of arun unchanged" reworded (BaseAgent wraps in AgentExecutionError with __cause__); S2-2 symlink loop moved EC-19 fetch_failed → EC-17 not_found; S2-3 folded-description newline both accepted; S2-4 invalid SkillResolution → ConfigurationError; S2-5 lock without numeric version → absent; S2-6 vendor label @latest confirmed; S2-7 briefing said 30 ACs, spec has 29 (orchestrator miscount, counted a bare "AC-"). §8.4/§8.5/§9.2/§12.3 byte-identical to r3; tests unchanged.
 - 2026-10-12 — S2 built a throwaway prototype in the session scratchpad to prove the tests can go green (373 pass, 51 seeded bugs caught). It is NOT given to S3: the implementer builds from the spec and tests only.
+
+- 2026-10-12 — S3 was cut off mid-row 20 by an API usage limit (17 commits in, one staged edit to jev.py); resumed the same agent via SendMessage after the limit reset rather than a fresh one (it kept its orientation context). Verified the test tree untouched before resuming.
 
 ## User replies (verbatim)
 - (none yet)
@@ -63,4 +65,5 @@ started: 2026-10-11 23:17
 - The fake transport fails on any URL it was not given: §9.2 URL shapes are binding (`quote(ref, safe="")`, `?recursive=1`, `quote(folder+"/SKILL.md", safe="/")?ref=<sha>`, vendor bases ending `/v1`). `LocalSkillResolver.read_capped` must stay a staticmethod (tests patch it). Memory is written only after every group returns. — *source:* S2
 - `read_capped`: `Path.is_file()` false → None → not_found (missing, dangling, loop, dir); OSError from is_file/open/read → FETCH_FAILED. Lock: missing/non-number version (bool is non-number), version < SKILLS_SH_LOCK_MIN_VERSION, or non-object `skills` → absent; guard types before comparing. Vendor label `f"{type}:{skill_id}@{version}"` (direct latest → `@latest`; after fallback, `str(record version)`). — *source:* spec r4
 - New tests: `tests/features/jev_skills_preload/{conftest.py, test_skill_sources_*.py}` (12 modules); run `PYTHONPATH=$(pwd) python -m pytest tests/features/jev_skills_preload tests/test_jev_skill_preload.py -q`. One expected Windows skip (lowercase `skill.md` on case-insensitive FS). Each module keeps `raise FEATURE_MISSING.with_traceback(None)` (perf). — *source:* S2
+- Lint specifics found at S3: S054 includes ruff S105 (`*_token_*` names bound to string literals fail → constant is `GITHUB_CREDENTIAL_ENV_VAR`); C002 rejects `isinstance(x, bool)` guards → `type(x) is int`; A007 scans the whole enclosing with/try for byte/status/depth/read words, so bare numbers there need named constants; S062 flags implicit string concatenation; JEV modules may not hold module-level constants. Contract regen only from a clean tree after the export commit. Semgrep scratch venv on PATH must be `/c/...` form in Git Bash. — *source:* S3
 - mypy 2.3.1 with `lint/mypy.ini` accepts `SkillResolver(ABC, Generic)` with a constrained `VendorSkillT`. `vidbyte/lib/enums/skills.py` is a current A001 finding; upgrading its header is IMPROVED → lower the baseline to 642 via `python lint/run.py --rule A001 --update-baseline`. — *source:* S1 reviewer r2, author r1
