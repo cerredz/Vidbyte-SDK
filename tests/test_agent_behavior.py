@@ -535,6 +535,19 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(b.output.code_block_count("bash"), 1)
         self.assertEqual(b.output.code_block_count("python"), 1)
 
+    def test_output_code_blocks_crlf_line_endings(self) -> None:
+        # [Hidden Failure / Silent Failure] CRLF answers count the same fenced blocks as their LF spelling.
+        output = "Run:\r\n```python\r\nprint('x')\r\n```\r\nThen:\r\n```bash\r\nls\r\n```\r\nDone.\r\n"
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertTrue(b.output.contains_code_block())
+        self.assertEqual(b.output.code_block_count(), 2)
+        self.assertEqual(b.output.code_block_count("python"), 1)
+        self.assertEqual(b.output.code_block_count("bash"), 1)
+        tilde = behavior_from_probe(RunProbe(output="~~~js\r\nconsole.log(1)\r\n~~~\r\nDone.\r\n"))
+        self.assertEqual(tilde.output.code_block_count("js"), 1)
+        indented = "1. Install:\r\n   ```bash\r\n   pip install x\r\n   ```\r\n2. Done.\r\n"
+        self.assertEqual(behavior_from_probe(RunProbe(output=indented)).output.code_block_count("bash"), 1)
+
     def test_output_urls(self) -> None:
         # [Edge Case / Silent Failure] URL detection handles http, https, and www forms.
         self.assertFalse(behavior_from_probe(RunProbe(output="no link")).output.contains_url())
