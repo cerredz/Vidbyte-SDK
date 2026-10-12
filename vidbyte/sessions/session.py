@@ -224,6 +224,10 @@ class Session:
     def edit(self, transform: Callable[[list[AgentMessage]], Sequence[AgentMessage]], *, label: str = "edit") -> "Session":
         """Apply a transform to history and write the result as a new checkpoint."""
         self._agent.history = list(transform(list(self._agent.history)))
+        # @intent edit-drops-tool-call-memory
+        # Rewritten history may drop turns, so clear tool-call memory as rewind() does; otherwise removed tool outputs are replayed next run.
+        if hasattr(self._agent, "_tool_call_contexts"):
+            self._agent._tool_call_contexts = []
         self._persist(self._agent.last_reply, label=label)
         return self
 

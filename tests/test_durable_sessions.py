@@ -936,6 +936,21 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         await session.arun("fetch next")
         self.assertNotIn("SOURCE-OWN-CONTENT", " ".join(runner.prompts[next_start:]))
 
+    async def test_edit_drops_tool_outputs_of_removed_turns(self) -> None:  # [Silent Failure]
+        # @intent edit-drops-tool-call-memory
+        # A turn removed by edit() must not leak its tool outputs into later requests.
+        runner = FetchThenDoneRunner(["A", "B", "C"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=InMemorySessionStore())
+        await session.arun("fetch A")
+        await session.arun("fetch B")
+        self.assertIn("SOURCE-B-CONTENT", str(agent._tool_call_contexts))
+        session.edit(lambda h: h[:-1])
+        self.assertEqual(agent._tool_call_contexts, [])
+        turn_three_start = len(runner.prompts)
+        await session.arun("fetch C")
+        self.assertNotIn("SOURCE-B-CONTENT", " ".join(runner.prompts[turn_three_start:]))
+
     def test_rewind_tolerates_agent_without_tool_memory(self) -> None:  # [Hidden Assumption]
         # Compatible agents without tool-call memory still rewind cleanly.
         agent = FakeAgent()
