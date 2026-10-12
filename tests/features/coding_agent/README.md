@@ -44,3 +44,5 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - 2026-10-11 - Added `test_coding_agent_max_rewrite_lines.py` for the `max_rewrite_lines` keyword (write_text may not replace a big existing file).
 - 2026-10-11 - Added `test_coding_agent_readonly_paths.py` with the `readonly_paths` setting (`docs/design/coding-agent-readonly-paths.md`).
 - 2026-10-11 - Added `test_coding_agent_verify_command.py` with `verify_command` (docs/design/coding-agent-verify-command.md).
+- 2026-10-12 - Declared dependencies now keep a name followed by a parenthesized version (Poetry 2) or a requirements.txt inline comment; `test_coding_agent_environment.py` gained the regression and the URL, VCS, and path cases.
+- 2026-10-12 - Manifests with a UTF-8 byte-order mark now list their dependency names (`test_declared_dependencies_read_manifests_with_a_byte_order_mark`).

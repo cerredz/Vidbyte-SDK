@@ -258,6 +258,41 @@ def test_declared_dependencies_come_from_every_manifest_once(tmp_path, no_bash, 
     assert "- Declared dependencies: httpx, pydantic, pytest, ruff, requests, rich, react, vitest, serde, insta\n" in item.to_context_text()
 
 
+def test_declared_dependencies_read_parenthesized_versions_and_inline_comments(tmp_path, no_bash, monkeypatch) -> None:
+    # Regression: Poetry 2 writes "name (>=1)" into PEP 621 lists, and pip allows "name  # comment"; both forms used to drop the name.
+    pyproject = '[project]\ndependencies = ["requests (>=2.32.3,<3.0.0)", "pydantic(>=2.7)", "httpx[http2] (>=0.27)", "rich"]\n[dependency-groups]\ndev = ["ruff (>=0.6)", "mypy ; python_version >= \'3.11\'"]\n'
+    requirements = "# tools\npytest  # test runner\nhypothesis==6.100  # property tests\ncoverage\t# tab before the comment\n    # indented comment\nblack\n"
+    _write_files(tmp_path, {"pyproject.toml": pyproject, "requirements.txt": requirements})
+
+    item = _load_as(sys.platform, tmp_path, monkeypatch)
+
+    assert item.dependencies == ("requests", "pydantic", "httpx", "rich", "ruff", "mypy", "pytest", "hypothesis", "coverage", "black")
+    assert "- Declared dependencies: requests, pydantic, httpx, rich, ruff, mypy, pytest, hypothesis, coverage, black\n" in item.to_context_text()
+
+
+def test_declared_dependencies_read_manifests_with_a_byte_order_mark(tmp_path, no_bash, monkeypatch) -> None:
+    # Regression: Windows PowerShell writes UTF-8 with a BOM, which npm and pip accept; the BOM used to break TOML and JSON parsing and hide the first requirements.txt name.
+    bom = b"\xef\xbb\xbf"
+    pyproject = bom + b'[project]\ndependencies = ["httpx>=0.27"]\n'
+    requirements = bom + b"flask\nrich\n"
+    package_json = bom + json.dumps({"dependencies": {"react": "^19"}, "devDependencies": {"vitest": "^2"}}).encode("utf-8")
+    _write_files(tmp_path, {"pyproject.toml": pyproject, "requirements.txt": requirements, "package.json": package_json})
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ("httpx", "flask", "rich", "react", "vitest")
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["https://example.com/pkg-1.0-py3-none-any.whl", "git+https://example.com/pkg.git", "git+https://example.com/pkg.git  # pinned fork", "./local/path", "../sibling/pkg", "pkg-1.0.tar.gz#sha256=abc", "--index-url https://example.com/simple"],
+    ids=["url", "vcs", "vcs-with-comment", "relative-path", "parent-path", "archive-with-fragment", "option"],
+)
+def test_requirement_lines_that_are_not_names_give_no_names(tmp_path, no_bash, monkeypatch, line) -> None:
+    # Edge case: widening what may follow a name must not turn a URL, a VCS link, a path, or an option into a name such as "git" or "https".
+    _write_files(tmp_path, {"requirements.txt": f"{line}\n"})
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ()
+
+
 def test_declared_dependencies_are_capped(tmp_path, no_bash, monkeypatch) -> None:
     # Edge case: a huge manifest cannot fill the context; only the first names up to the cap are kept.
     monkeypatch.setattr(dependencies_module, "CODING_ENVIRONMENT_MAX_DEPENDENCIES", 3)

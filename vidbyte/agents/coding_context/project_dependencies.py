@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Plain deterministic parsing with the standard library (tomlli
 FUNCTION INVENTORY: ProjectDependencies.read is the narrated main function; _text reads one manifest up to the size cap; _toml and _json parse text into a table; _python_names, _requirement_names, _node_names, and _rust_names pull the names out of one manifest each.
 COMMON MODIFICATION PATTERNS: A new manifest adds its file name to the reads in read, one _<language>_names helper, and its names to the list in read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run a package manager or import the project; reading the files is enough. 2. Do not raise for a bad manifest. 3. Do not search parent or child folders; only the root folder's own manifests count.
-KNOWN EDGE CASES: Names are kept in first-mention order and repeated names once, so a runtime dependency listed again as a development one appears once. Versions, extras, and markers are dropped. A requirements.txt line that is a URL, an option, or an include gives no name. Only the first CODING_ENVIRONMENT_MAX_DEPENDENCIES names are kept.
+KNOWN EDGE CASES: Names are kept in first-mention order and repeated names once, so a runtime dependency listed again as a development one appears once. Versions (bare or in parentheses), extras, markers, and requirements.txt comments are dropped. A requirements.txt line that is a URL, an option, or an include gives no name. Only the first CODING_ENVIRONMENT_MAX_DEPENDENCIES names are kept.
 RELATED DOCS: docs/design/coding-agent-environment-context.md; vidbyte/agents/coding_context/README.md
 TESTS: tests/features/coding_agent/test_coding_agent_environment.py
 """
@@ -26,8 +26,10 @@ from vidbyte.lib.constants.coding import (
 )
 
 # A requirement's name at the start of a PEP 508 string, followed by
-# extras, a version, a marker, a URL, or nothing.
-_REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?=[\[<>=!~;@]|$)")
+# extras, a version (bare or in parentheses, as Poetry 2 writes it), a
+# marker, a URL, a requirements.txt comment after whitespace, or nothing.
+# A URL, a path, or a VCS line such as git+https:// still gives no name.
+_REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?=[\[(<>=!~;@]|(?<=\s)#|$)")
 
 
 class ProjectDependencies:
@@ -62,7 +64,9 @@ class ProjectDependencies:
                 raw = handle.read(CODING_ENVIRONMENT_MANIFEST_MAX_BYTES)
         except OSError:
             return ""
-        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode("utf-8", errors="replace")
+        # "utf-8-sig" drops the byte-order mark Windows PowerShell writes,
+        # which npm and pip accept but tomllib, json, and the name match do not.
+        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode("utf-8-sig", errors="replace")
 
     @staticmethod
     def _toml(text: str) -> dict[str, Any]:
