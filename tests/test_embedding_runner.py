@@ -6,7 +6,7 @@ from typing import Mapping
 
 from vidbyte.lib.config import EmbeddingModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import ConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import EmbeddingModelRunner
 
@@ -73,6 +73,22 @@ class EmbeddingRunnerTests(unittest.TestCase):
         self.assertAlmostEqual(response.embeddings[0][0], 1.0)
         self.assertAlmostEqual(response.embeddings[1][0], 2.0)
         self.assertAlmostEqual(response.embeddings[2][0], 3.0)
+
+    def test_openai_malformed_embedding_item_raises_instead_of_dropping(self) -> None:
+        # A null or base64-string embedding must fail loudly, never shorten the result.
+        malformed_cases = {
+            "null": {"data": [{"index": 0, "embedding": [1.0]}, {"index": 1, "embedding": None}, {"index": 2, "embedding": [3.0]}]},
+            "base64": {"data": [{"index": 0, "embedding": "AACAPw=="}, {"index": 1, "embedding": "AAAAQA=="}, {"index": 2, "embedding": "AABAQA=="}]},
+        }
+        for label, body in malformed_cases.items():
+            with self.subTest(case=label):
+                runner = EmbeddingModelRunner(
+                    EmbeddingModelConfig(provider=ModelProvider.OPENAI, model="text-embedding-3-small", api_key="key"),
+                    transport=FakeTransport([body]),
+                )
+
+                with self.assertRaisesRegex(ProviderResponseError, "missing embedding list"):
+                    runner.run(["a", "b", "c"])
 
     def test_openai_embedding_sends_correct_url(self) -> None:
         transport = FakeTransport([_make_openai_embedding_response([[0.1]])])
