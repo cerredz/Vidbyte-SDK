@@ -13,12 +13,34 @@ from __future__ import annotations
 
 from vidbyte.lib.outputs.base import BaseOutput, OutputArguments
 from vidbyte.lib.outputs.delivery import OutputHttp, OutputSmtp
+from vidbyte.lib.outputs.discord import DiscordOutput
+from vidbyte.lib.outputs.email import EmailOutput
+from vidbyte.lib.outputs.github import GitHubIssueOutput
+from vidbyte.lib.outputs.google_chat import GoogleChatOutput
+from vidbyte.lib.outputs.jira import JiraIssueOutput
+from vidbyte.lib.outputs.linear import LinearIssueOutput
+from vidbyte.lib.outputs.notion import NotionPageOutput
+from vidbyte.lib.outputs.slack import SlackOutput
+from vidbyte.lib.outputs.teams import TeamsOutput
+from vidbyte.lib.outputs.telegram import TelegramOutput
 from vidbyte.lib.outputs.text import OutputText
+from vidbyte.lib.outputs.webhook import WebhookOutput
 
 __all__ = [
     "BaseOutput",
+    "DiscordOutput",
+    "EmailOutput",
+    "GitHubIssueOutput",
+    "GoogleChatOutput",
+    "JiraIssueOutput",
+    "LinearIssueOutput",
+    "NotionPageOutput",
     "OutputArguments",
     "OutputHttp",
     "OutputSmtp",
     "OutputText",
+    "SlackOutput",
+    "TeamsOutput",
+    "TelegramOutput",
+    "WebhookOutput",
 ]
