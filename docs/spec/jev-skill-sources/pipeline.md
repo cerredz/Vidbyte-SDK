@@ -18,12 +18,12 @@ started: 2026-10-11 23:17
 | S2 tests | done | 2026-10-12 | 2026-10-12 | reports/S2-test-author.md | S2_HEAD d01e0afa; 12 modules + conftest in tests/features/jev_skills_preload/, 354 cases red (missing vidbyte.agents.skills etc.); AC-1..AC-29 cited; spec r4 (5c08566a) fixed 2 S2 defects |
 | S3 implement | done | 2026-10-12 | 2026-10-12 | reports/S3-implementer.md | S3_HEAD 97c67062; draft PR #904; 25 code commits; budget 14/14 files, 9/9 public names, 3/3 enums, 0 deps; 373 passed 1 skipped; lint PASS; run_ci source+package PASS; semgrep 0 findings; 7 deviations in spec §17; tests untouched since d01e0afa |
 | S4 adversarial review | done | 2026-10-12 | 2026-10-12 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker (R-1 py3.12 tree listing, R-2 non-ASCII credential crash, R-3 72-col comments) / 3 Major (R-4 EC-24 detail, R-5 duplicated guards, R-6 skills.sh test gap); 13 Minor (5 trivial, rest follow-up); refuted 0 B/M |
-| S5 repair loop | running | 2026-10-12 | | | test baseline 578cd064 (44 red, 382 pass, 1 skip) |
+| S5 repair loop | done | 2026-10-12 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | converged in 1/8 iterations at d0d28c3d: R-1..R-6 + trivial R-8, R-9, R-12, R-13 fixed (R-14 via spec r5); 426 passed 1 skipped; lint PASS; source 3800 passed (orchestrator re-ran); package/contract/semgrep PASS; remote 4/4 green on d0d28c3d; tests/ and lint/ unchanged since 578cd064 |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2 (running)
 
 ## Decisions the orchestrator made
 - 2026-10-12 — Accepted the S0 scout's artifacts without its STATUS block: the previous Claude Code session ended while the scout was running; both files (code-map.md 42.5 KB with 4 sections, reports/S0-scout.md) were complete on disk and passed the spot-check.
