@@ -19,7 +19,7 @@ started: 2026-10-11 17:36
 | S3 implement | done | 2026-10-11 | 2026-10-11 | reports/S3-implementer.md | S3_HEAD 9463c348; draft PR #882; 313/313 green (re-run by orchestrator); SDK-LINT PASS; run_ci source 3516 passed + full CI passed; budget 23/23 files, 26/26 classes, 0 deps; ci.yml 38194285572 in progress, static-policy 38194287162 success (both at fa430c8f; later commits docs-only) |
 | S4 adversarial review | done | 2026-10-11 | 2026-10-11 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 httpx INFO log leaks secret URLs) / 3 Major (R-2 str destination, R-3 SMTP thread holds sync run past deadline, R-4 duplicated email rule) / 11 Minor; 0 refuted (1 sub-claim) |
 | S5 repair loop | done (converged at iteration 1) | 2026-10-11 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | merge ba83c953 (origin/main, no conflicts); 12 findings fixed one commit each; HEAD ed1dd67b; 340/340; SDK-LINT PASS; run_ci source 3743 passed; full run_ci CI passed (re-run by orchestrator at ed1dd67b); Semgrep 0; remote ci 38211917706 + static-policy 38211919803 success @1348b728; review.md 0 open |
-| S5 re-review | running (round 1/2) | 2026-10-12 | | | |
+| S5 re-review | done (round 1/2) | 2026-10-12 | 2026-10-12 | reports/S5-rereview.md | SOUND: 0 Blocker / 0 Major / 2 Minor (R-C1 Telegram ctor raise not recorded as deviation; R-C2 E302 blank line email.py:32); all 12 fixes hold; merge clean; §4 snippet byte-equal |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -57,6 +57,8 @@ started: 2026-10-11 17:36
 
 - 2026-10-12 — Repair-1 spot-check passed: tree clean; pack test diff vs 7f3bb7ff empty; non-pack test diffs vs merge-base empty (only main's); every repair commit cites R-n; HEAD == origin; remote green. R-5/R-13/R-14 statuses closed by the repair agent at my request (resolved outside repair: spec r6 / Q-11 / test author). Orchestrator full `python scripts/run_ci.py` at ed1dd67b: `CI passed.`
 - 2026-10-12 — main 5 commits ahead again (#767, #888, #887, #746, #763), no overlap with our files → PR still mergeable; no second catch-up merge needed before S6 unless GitHub reports a conflict.
+
+- 2026-10-12 — Re-review SOUND → loop converged. Applied the two trivial Minors anyway (one blank line; one §17 deviation bullet) by resuming the repair-1 agent instead of a fresh iteration: both are mechanical, no finding needs verification, and a fresh agent's orientation would cost more than the fix. Logged as a polish pass, not counted as iteration 2.
 
 ## User replies (verbatim)
 - (none yet)
