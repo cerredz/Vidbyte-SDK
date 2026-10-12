@@ -177,6 +177,34 @@ class ClosableRunner(MockRunner):
         self.closed += 1
 
 
+class KeywordOnlyJudgeRunner:
+    """Judge runner shaped like TextModelRunner: keyword-only options, no temperature, no **kwargs."""
+
+    def __init__(self, response_text: str) -> None:
+        # Starts with the fixed reply and no recorded prompts.
+        self.response_text = response_text
+        self.prompts: list[str] = []
+
+    async def arun(self, prompt: str, *, system: str | None = None, metadata: dict[str, object] | None = None) -> str:
+        # Records the prompt; any unexpected keyword such as temperature raises TypeError here.
+        self.prompts.append(prompt)
+        return self.response_text
+
+
+class KwargsRecordingJudgeRunner:
+    """Judge runner whose arun takes **kwargs and records the options it was given."""
+
+    def __init__(self, response_text: str) -> None:
+        # Starts with the fixed reply and no recorded options.
+        self.response_text = response_text
+        self.options: list[dict[str, Any]] = []
+
+    async def arun(self, prompt: str, **kwargs: Any) -> str:
+        # Records the keyword options so the test can check temperature still arrives.
+        self.options.append(kwargs)
+        return self.response_text
+
+
 class EvalTests(unittest.IsolatedAsyncioTestCase):
     """Main unit and integration test suite validating all evaluation components."""
 
@@ -802,6 +830,22 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_bad_dim = await RubricGrader(judge_runner=MockRunner('{"scores": {"accuracy": "abc"}}'), rubric=rubric).agrade(case, "4")
         self.assertFalse(res_bad_dim.passed)
         self.assertIn("Failed to parse rubric response JSON", res_bad_dim.reason)
+
+    async def test_judge_graders_accept_runner_without_temperature(self) -> None:
+        # @intent judge-runners-get-only-kwargs-they-accept
+        # A TextModelRunner-shaped judge has no temperature parameter, so both graders must call it with the prompt alone.
+        case = EvalCase(prompt="2 + 2?", expected="4")
+        reply = '{"score": 1.0, "passed": true, "reason": "ok", "scores": {"accuracy": 1.0}}'
+        make_graders = (lambda judge: LLMJudgeGrader(judge_runner=judge), lambda judge: RubricGrader(judge_runner=judge, rubric={"accuracy": 1.0}))
+        for make_grader in make_graders:
+            strict = KeywordOnlyJudgeRunner(reply)
+            result = await make_grader(strict).agrade(case, "4")
+            self.assertEqual((result.score, result.passed), (1.0, True), result.reason)
+            self.assertEqual(len(strict.prompts), 1)
+            # A runner that does take extra options still gets the deterministic temperature.
+            loose = KwargsRecordingJudgeRunner(reply)
+            await make_grader(loose).agrade(case, "4")
+            self.assertEqual(loose.options, [{"temperature": 0.0}])
 
     async def test_agent_judge_does_not_carry_verdicts_across_cases(self) -> None:
         # Grading several cases with one BaseAgent judge must not grow its history or leak earlier verdicts.
