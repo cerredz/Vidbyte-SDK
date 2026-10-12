@@ -171,7 +171,7 @@ Test files are under `tests/features/jev_skills_preload/`.
 | AC-29 | A bare SKILL.md one byte over the cap is `too_large` and remembered. | `test_skill_sources_vendor.py::test_bare_skill_md_cap_is_inclusive` |
 
 ## Verification
-Local runs on `0cb790b5` (Windows, Python 3.11.0); every later commit changes only `docs/spec/`.
+Local runs on `0cb790b5` (Windows, Python 3.11.0); every commit after `3ce9de96` changes only `docs/spec/`.
 
 | Gate | Command | Result |
 |---|---|---|
@@ -181,7 +181,7 @@ Local runs on `0cb790b5` (Windows, Python 3.11.0); every later commit changes on
 | Package stage | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
 | API contract | `PYTHONPATH=$(pwd) python scripts/generate-sdk-public-api.py --check` | `contracts/sdk-public-api.json is current at 3a4cb929… (vidbyte-sdk 0.2.1, 615 exports).` |
 | Semgrep | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py`; `semgrep scan --error --metrics=off --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (1.170.1, own venv) | `1/1: ✓ All tests passed` / `Ran 1 rule on 905 files: 0 findings.` |
-| Remote checks | `gh workflow run ci.yml` and `gh workflow run static-policy.yml` on the branch (both are dispatch-only), read with `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs` | 4/4 green on `3ce9de96`, the last commit that touched code (CI run 38248578493, Static policy run 38248580868): `Source / Python 3.11 success`, `Source / Python 3.12 success`, `Package success`, `Static policy success` |
+| Remote checks | `gh workflow run ci.yml` and `gh workflow run static-policy.yml` on the branch (both are dispatch-only), read with `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs` | 4/4 green on `276b0dd2` (CI run 38250786020, Static policy run 38250790715): `Source / Python 3.11 success` (`4215 passed, 18 skipped in 56.18s` / `CI passed.`), `Source / Python 3.12 success` (`4215 passed, 18 skipped, 19 warnings in 49.74s` / `CI passed.`), `Package success` (`Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.`), `Static policy success` (`Ran 1 rule on 905 files: 0 findings.`). The last code commit, `3ce9de96`, was also 4/4 green |
 
 ## Adversarial review
 19 findings confirmed by an independent verifier across three lenses (spec conformance, repo conventions, engineering) plus the remote CI result, 11 fixed, 8 waived as follow-ups. A post-repair conformance re-review found every fix sound and one new Minor spec-text drift (R-RC1, under Deviations). Full record: `docs/spec/jev-skill-sources/review.md`.

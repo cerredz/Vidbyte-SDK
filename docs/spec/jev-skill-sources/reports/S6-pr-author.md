@@ -79,7 +79,7 @@ Semgrep note: the first semgrep attempt failed with `ModuleNotFoundError: No mod
 
 ## Remote checks and PR state
 
-Filled in after the push and the dispatch; see the section "Final PR state" below.
+See "Final PR state" at the end.
 
 ## Candidate field-guide lessons (not written to the field guide)
 
@@ -153,4 +153,29 @@ None is a defect that needs a repair; listed so a reader does not rediscover the
 
 ## Final PR state
 
-(Filled in below after the push and the CI dispatch.)
+**Commits by this stage.**
+- `276b0dd2` `docs(spec): finalize jev-skill-sources for PR`: spec frontmatter `status: pr-open`, the §5 flowchart, the §17 S6 row, `pr-body.md`, and the first version of this report.
+- The next `docs(spec)` commit records the remote results below in `pr-body.md` and this report. It changes nothing outside `docs/spec/jev-skill-sources/`. Both workflows were dispatched on it as well; the orchestrator's STATUS block gives that result.
+
+**Remote checks on `276b0dd2`** (`gh workflow run ci.yml` and `gh workflow run static-policy.yml` with `--ref feat/jev-skill-sources`; `gh run watch … --exit-status` exited 0 for both):
+
+```text
+$ gh api repos/cerredz/Vidbyte-SDK/commits/276b0dd20d15e8ce8455453ac059641bf8cb2ed2/check-runs --jq '.check_runs[] | "\(.name)\t\(.conclusion)"'
+Package	success
+Static policy	success
+Source / Python 3.11	success
+Source / Python 3.12	success
+```
+
+Job log final lines: Source / Python 3.12 (job 114816229411) `4215 passed, 18 skipped, 19 warnings in 49.74s` / `CI passed.`; Source / Python 3.11 (job 114816229835) `4215 passed, 18 skipped in 56.18s` / `CI passed.`; Package (job 114817179596) `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.`; Static policy (job 114816243570) `1/1: ✓ All tests passed` / `Ran 1 rule on 905 files: 0 findings.`. CI run 38250786020, Static policy run 38250790715.
+
+**PR.**
+
+```text
+$ gh pr view 904 --repo cerredz/Vidbyte-SDK --json title,isDraft,baseRefName,url
+{"baseRefName":"main","isDraft":true,"title":"feat(jev): JevAgent skills load from inline text, local folders, skills.sh, GitHub, Anthropic, and OpenAI","url":"https://github.com/cerredz/Vidbyte-SDK/pull/904"}
+```
+
+The title has no `[WIP]`, the PR is still a draft, and the base is `main`. The body is `pr-body.md` from line 2 on; line 1 is the title.
+
+**Title convention.** AGENTS.md and code-map §1 set no PR-title rule. `origin/main` uses `feat(jev): …` for JevAgent capabilities (#651, #584, #521, #519, #518), so the title uses the `jev` scope.
