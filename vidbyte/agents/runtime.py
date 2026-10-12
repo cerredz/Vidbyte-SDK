@@ -621,7 +621,11 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
-                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    # @intent accepted-finish-hides-provisional-refusal
+                    # The end-of-run hooks of an accepted finish must not read the provisional refusal below as the outcome,
+                    # so they get the conversation as it stood before it.
+                    finished_messages = list(messages)
+                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages.
                     self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, "finish attempt not accepted yet; continue with the next message", metadata={"error": "finish_not_accepted"}), state.provider, MiddlewareDecision.continue_())
                     self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                     # The same middleware review as a plain final
@@ -640,6 +644,8 @@ class AgentRuntime:
                     if await self._continue_finish_attempt(final, state, messages):
                         finish_attempt_continued = True
                         break
+                    # The run ends here with the finish accepted, so the end-of-run hooks read the conversation without the refusal.
+                    state.messages = finished_messages
                     return await self._finish_result(final, state)
 
             if finish_attempt_continued or contract_rejected:
