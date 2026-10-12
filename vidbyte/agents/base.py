@@ -779,6 +779,10 @@ class BaseAgent(McpAttachableMixin):
         got = tuple(child._tool_name(tool) for tool in child._agent_tool_items)
         if set(expected) != set(got):
             child.metadata["__resume_tool_mismatch__"] = {"expected": list(expected), "got": list(got)}
+        else:
+            # @intent resume-tool-marker-describes-this-restore
+            # Drop a marker copied in from an earlier checkpoint, so a matching restore no longer reports a mismatch.
+            child.metadata.pop("__resume_tool_mismatch__", None)
 
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
