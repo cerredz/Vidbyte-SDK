@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/constants/coding.py
 
-PURPOSE: Defines the fixed AGENTS.md file name and byte cap that CodingAgent uses when it loads a repository's AGENTS.md into the model's context, the line and byte caps on the output tail it shows for a failed setup command, and the paths, cap, template, and model-facing text of the agent's own progress notes file.
-ROLE IN CODEBASE: Read by AgentsMdLoader (vidbyte/agents/coding_context/agents_md.py), SetupCommandsLoader (vidbyte/agents/coding_context/setup_commands.py), ProgressNotesLoader (vidbyte/agents/coding_context/progress_notes.py), and the coding-agent feature tests.
-ARCHITECTURE NOTE: Immutable constants only; the loaders own the reading, decoding, and truncation behavior.
+PURPOSE: Defines the fixed file names and byte caps that CodingAgent uses when it loads a repository's AGENTS.md and MAP.md into the model's context, the line and byte caps on the output tail it shows for a failed setup command, and the paths, cap, template, and model-facing text of the agent's own progress notes file.
+ROLE IN CODEBASE: Read by AgentsMdLoader (vidbyte/agents/coding_context/agents_md.py), MapMdLoader (vidbyte/agents/coding_context/map_md.py), SetupCommandsLoader (vidbyte/agents/coding_context/setup_commands.py), ProgressNotesLoader (vidbyte/agents/coding_context/progress_notes.py), and the coding-agent feature tests.
+ARCHITECTURE NOTE: Immutable constants only; the loaders own the reading, decoding, and truncation behavior, with RootFileLoader (vidbyte/agents/coding_context/root_file.py) doing it for AGENTS.md and MAP.md.
 COMMON MODIFICATION PATTERNS: Change the cap here, never at the read call, so the loader, its truncation line, and the tests stay in step.
-KNOWN EDGE CASES: The AGENTS.md and notes caps count bytes, not characters; the loader moves the cut back to a whole UTF-8 character, so the shown text can be up to three bytes shorter. The setup-output byte cap can cut the first shown line, or a character in it.
-RELATED DOCS: docs/design/coding-agent-agents-md.md; docs/design/coding-agent-setup-commands.md; docs/design/coding-agent-progress-notes.md; vidbyte/agents/coding_context/README.md
-TESTS: tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_setup_commands.py, and tests/features/coding_agent/test_coding_agent_progress_notes.py
+KNOWN EDGE CASES: The AGENTS.md, MAP.md, and notes caps count bytes, not characters; the loader moves the cut back to a whole UTF-8 character, so the shown text can be up to three bytes shorter. The setup-output byte cap can cut the first shown line, or a character in it.
+RELATED DOCS: docs/design/coding-agent-agents-md.md; docs/design/coding-agent-map-md.md; docs/design/coding-agent-setup-commands.md; docs/design/coding-agent-progress-notes.md; vidbyte/agents/coding_context/README.md
+TESTS: tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_map_md.py, tests/features/coding_agent/test_coding_agent_setup_commands.py, and tests/features/coding_agent/test_coding_agent_progress_notes.py
 """
 
 from __future__ import annotations
@@ -18,6 +18,13 @@ CODING_AGENTS_MD_FILE_NAME = "AGENTS.md"
 # 32 KiB, Codex's default project-doc cap, so a huge file cannot fill
 # the model's context.
 CODING_AGENTS_MD_MAX_BYTES = 32_768
+
+# The preferred repository-map file name; any case variant, such as
+# map.md, is accepted when this exact name is absent.
+CODING_MAP_MD_FILE_NAME = "MAP.md"
+
+# 32 KiB, the same cap as AGENTS.md; a map is meant to be short.
+CODING_MAP_MD_MAX_BYTES = 32_768
 
 # A failed setup command shows at most this many of its last output
 # lines, taken from at most this many of its last output bytes, so one
@@ -52,6 +59,8 @@ CODING_PROGRESS_NOTES_TRUNCATION_NOTE = "[The notes were cut at 32 KiB. Read the
 __all__ = [
     "CODING_AGENTS_MD_FILE_NAME",
     "CODING_AGENTS_MD_MAX_BYTES",
+    "CODING_MAP_MD_FILE_NAME",
+    "CODING_MAP_MD_MAX_BYTES",
     "CODING_PROGRESS_NOTES_DIR",
     "CODING_PROGRESS_NOTES_FILE_NAME",
     "CODING_PROGRESS_NOTES_GITIGNORE",

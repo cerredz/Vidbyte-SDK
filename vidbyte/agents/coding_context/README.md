@@ -7,11 +7,13 @@ The model sees, in order:
 1. the system prompt, the agentic-loop note, and the tool list (the runtime's fixed header), then the loop budgets when any are set;
 2. `coding:agents_md`: the root folder's `AGENTS.md`, from `AgentsMdLoader` in `agents_md.py`;
 3. `coding:environment`: reserved for the environment-context section;
-4. `coding:repo_map`: reserved for the map.md section;
+4. `coding:repo_map`: the root folder's `MAP.md`, from `MapMdLoader` in `map_md.py`;
 5. `coding:setup_results`: the setup commands' pass/fail note, from `SetupCommandsLoader` in `setup_commands.py`, which runs the commands while the agent is built;
 6. `coding:progress_notes`: the agent's own notes file, `.vidbyte/coding-agent/progress.md`, from `ProgressNotesLoader` in `progress_notes.py`;
 7. the caller's own context-manager primitives, in the caller's order and placements;
 8. the context body, then the user's message.
+
+`MAP.md` is a CodingAgent convention: a short, human-written map of where things live in the repository (the main folders, the entry points, and where new code goes), so the model skips exploring the layout. It is read exactly like `AGENTS.md`, from the root folder only, capped at 32 KiB, and turned off with `load_map=False`. Both loaders are thin subclasses of `RootFileLoader` in `root_file.py`, which finds, reads, decodes, and truncates one named root file.
 
 ## The contract
 
@@ -24,7 +26,7 @@ The model sees, in order:
 
 A new section takes three things, and no file in this package other than the new loader changes:
 
-1. **One loader class in its own file**, `vidbyte/agents/coding_context/<section>.py`, with `load(settings) -> CodingContextSectionText | None`, following `agents_md.py`: an A001 header, a narrated `load`, and one level of helpers.
+1. **One loader class in its own file**, `vidbyte/agents/coding_context/<section>.py`, with `load(settings) -> CodingContextSectionText | None`, following `root_file.py`: an A001 header, a narrated `load`, and one level of helpers. A section that is one root file is a `RootFileLoader` subclass, as `agents_md.py` and `map_md.py` are.
 2. **The reserved enum member**: the loader returns its record with `section=CodingContextSection.ENVIRONMENT`, `REPO_MAP`, or `SETUP_RESULTS`. The enum does not change.
 3. **One line in `CodingAgent.__init__`** (`vidbyte/agents/coding.py`): import the loader from its module and add `<Loader>.load(settings)` to the `sections` tuple. The tuple's order does not matter; the enum decides.
 
