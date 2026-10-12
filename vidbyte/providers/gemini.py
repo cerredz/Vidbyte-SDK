@@ -65,13 +65,17 @@ class GeminiProvider:
     def _create_contents(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
         # Gemini supports alternating user/model turns through the contents array.
         history = [self._gemini_turn(message) for message in config.messages]
-        history.insert(self._prompt_index(history), {"role": "user", "parts": [{"text": prompt}]})
+        history.insert(self._prompt_index(history, config.prompt_index), {"role": "user", "parts": [{"text": prompt}]})
         # A model note followed by a model call is one model step, so they travel as one model turn.
         history = self._merge_model_turns(history)
         # Answers to one parallel function-call turn must travel together in a single user turn.
         return self._merge_function_responses(history)
 
-    def _prompt_index(self, history: list[Mapping[str, Any]]) -> int:
+    def _prompt_index(self, history: list[Mapping[str, Any]], boundary: int | None = None) -> int:
+        # @intent prompt-sits-at-the-run-boundary
+        # The runtime's run boundary wins as it does in PromptPlacement, unless the history opens with a model turn.
+        if boundary is not None and boundary <= len(history) and not (history and history[0].get("role") == "model"):
+            return boundary
         # The runtime appends this run's tool exchange to whatever history it was handed, but
         # the prompt that provoked that exchange arrives separately and would otherwise land
         # after it, leaving the functionCall turn with nothing in front of it. Gemini rejects

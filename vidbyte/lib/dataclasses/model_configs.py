@@ -67,9 +67,14 @@ class TextModelConfig:
     endpoint: str | None = None
     timeout_seconds: float = 60.0
     mode: TextModelMode = TextModelMode.AUTO
+    # Where the runtime's own exchange begins in messages; the provider puts the prompt there.
+    prompt_index: int | None = None
 
     def __post_init__(self) -> None:
-        """Reject a mode that is not the enum, and what explicit managed mode can never serve, as soon as the config is built."""
+        """Reject a bad prompt_index, a mode that is not the enum, and what explicit managed mode can never serve, as soon as the config is built."""
+        # @intent prompt-sits-at-the-run-boundary
+        if self.prompt_index is not None and (isinstance(self.prompt_index, bool) or not isinstance(self.prompt_index, int) or self.prompt_index < 0):
+            raise ConfigurationError(f"prompt_index must be a non-negative int or None, got {self.prompt_index!r}.")
         # @intent text-mode-shape-fails-at-construction
         # AUTO reads no environment here: TextModelRunner rebuilds
         # the config on every call, so validate() settles AUTO once.

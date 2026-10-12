@@ -32,13 +32,14 @@ class StreamingTextModelRunner:
         self._transport = transport or SyncHttpTransport()
         self._provider = ModelProviders.streaming_text(config)
 
-    def stream(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = ()) -> Iterator[str]:
+    def stream(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), prompt_index: int | None = None) -> Iterator[str]:
         # Yield text chunk strings as they arrive from the provider SSE stream.
         call_config = replace(
             self._config,
             tools=tuple(dict(tool) for tool in tools),
             tool_choice=tool_choice,
             messages=tuple(dict(message) for message in messages),
+            prompt_index=prompt_index,
         )
         yield from self._provider.stream_text(
             prompt=prompt,
