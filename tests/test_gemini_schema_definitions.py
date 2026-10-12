@@ -1,4 +1,15 @@
-"""Gemini's schema reducer expands draft-07 `definitions` refs the same way it expands `$defs`."""
+"""FILE: tests/test_gemini_schema_definitions.py
+
+PURPOSE: Regression tests that Gemini's schema reducer expands draft-07 `definitions` refs like `$defs` refs.
+ROLE IN CODEBASE: Keeps a tool argument typed through `#/definitions/...` from reaching Gemini as an empty schema.
+ARCHITECTURE NOTE: Calls ToolsFormatter.to_gemini_tool on a ToolSpec with a raw input_schema; no provider or network.
+FUNCTION INVENTORY: _gemini_parameters builds the declaration; GeminiDraft07DefinitionsTests checks expansion and precedence.
+COMMON MODIFICATION PATTERNS: Add a schema per ref-block shape a JSON Schema producer emits.
+WHAT NOT TO DO: Do not call real provider endpoints or require API keys from the environment.
+KNOWN EDGE CASES: A name defined in both `$defs` and `definitions` resolves to the `$defs` entry.
+RELATED DOCS: vidbyte/lib/README.md
+TESTS: Run with python -m pytest -q tests/test_gemini_schema_definitions.py.
+"""
 
 from __future__ import annotations
 
