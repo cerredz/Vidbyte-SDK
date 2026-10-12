@@ -128,7 +128,7 @@ from vidbyte.lib.dataclasses.speed import (
     RecordToolCallInput,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality
+from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, UsageKind
 from vidbyte.lib.errors import (
     AllModelsFailedError,
     PermissionDeniedError,
@@ -540,9 +540,18 @@ class AgentRuntime:
                 # costs a review.
                 review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state))
                 if review.action is FinishReviewAction.STOP:
+                    # Same as contract exhaustion above: the end-of-run hooks see the reply the caller gets.
+                    state.messages = [*messages, self._assistant_message(last_assistant_output)] if last_assistant_output and last_assistant_output.strip() else messages
                     return await self._finish_result(self._unverified_finish_result(last_assistant_output or "", state), state)
                 if review.action is FinishReviewAction.CONTINUE:
-                    messages.extend((self._assistant_message(last_assistant_output or ""), {"role": "user", "content": review.feedback}))
+                    # Same as a contract rejection above: skip an empty draft, then end the iteration through the after-iteration hooks.
+                    if last_assistant_output and last_assistant_output.strip():
+                        messages.append(self._assistant_message(last_assistant_output))
+                    messages.append({"role": "user", "content": review.feedback})
+                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
+                    if decision.action is not MiddlewareAction.CONTINUE:
+                        abort_result = self._middleware_abort_result(decision, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+                        return await self._finish_result(abort_result, state)
                     continue
                 final = self._final_result(
                     output=last_assistant_output,
@@ -636,6 +645,8 @@ class AgentRuntime:
                     # output is usually the part that matters.
                     review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state, tool_call=call, tool_result=result))
                     if review.action is FinishReviewAction.STOP:
+                        # The run ends here too, so its end-of-run hooks skip the refusal, as the accepted finish's below do.
+                        state.messages = finished_messages
                         return await self._finish_result(self._unverified_finish_result(result.output or "", state), state)
                     if review.action is FinishReviewAction.CONTINUE:
                         messages.append({"role": "user", "content": review.feedback})
@@ -744,6 +755,13 @@ class AgentRuntime:
                         error_type=type(exc).__name__,
                     )
                 )
+                # @intent billed-failed-call-stays-on-the-bill
+                # A provider can bill a 200 whose reply is unusable; the adapter puts that usage on the error, so it is
+                # recorded here before retry, fallback, or re-raise, the same way the decision runner records TypeSafe's.
+                details = getattr(exc, "details", None)
+                billed = details.get("usage") if isinstance(details, Mapping) else None
+                if isinstance(billed, Mapping):
+                    self.usage_tracker.record_billed_failure(str(getattr(handle.provider, "value", handle.provider)), self._speed_model_name(handle), billed, kind=UsageKind.GENERATIVE)
                 decision = await self.middleware.on_model_error(
                     self._middleware_context(MiddlewareHook.ON_MODEL_ERROR, state, error=exc)
                 )

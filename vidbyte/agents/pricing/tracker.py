@@ -80,7 +80,7 @@ class UsageTracker:
         provider = _as_provider(getattr(response, "provider", None))
         return self._record(provider, getattr(response, "model", ""), getattr(response, "usage", None), kind=kind, failed=False)
 
-    def record_billed_failure(self, provider: ModelProvider, model: str, usage: Mapping[str, object], *, kind: UsageKind) -> UsageRecord | None:
+    def record_billed_failure(self, provider: ModelProvider | str, model: str, usage: Mapping[str, object], *, kind: UsageKind) -> UsageRecord | None:
         # Prices and stores the usage a provider billed for a call that then failed, marked failed=True.
         return self._record(_as_provider(provider), model, usage, kind=kind, failed=True)
 

@@ -570,6 +570,11 @@ OpenAI's Responses API nests breakdowns that matter for cost accuracy:
 - `usage.output_tokens_details.reasoning_tokens` — reasoning tokens. They are billed as output
   tokens and consume context, and they are **already included** in `output_tokens`. Adding them to
   `output_tokens` double-counts and overstates cost.
+- xAI's chat-completions usage is the exception: it reports
+  `completion_tokens_details.reasoning_tokens` **outside** `completion_tokens`, so its
+  `total_tokens` equals prompt + completion + reasoning, and xAI bills that reasoning as output.
+  `ChatCompletionUsage` adds reasoning to `output_tokens` only when the reported total proves this
+  convention; an OpenAI-style total, or a missing one, leaves `completion_tokens` as reported.
 
 ## Defensive Extraction
 
