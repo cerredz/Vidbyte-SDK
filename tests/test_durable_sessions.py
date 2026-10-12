@@ -438,6 +438,23 @@ class FileStoreTests(unittest.TestCase):
         self.assertLessEqual(len(remaining), 2)
 
 
+class SqliteStoreCorruptionTests(unittest.TestCase):
+    def test_corrupt_rows_raise_session_store_error(self) -> None:  # [Hidden Failure]
+        # @intent provider-store-corrupt-payload-is-session-store-error
+        # A truncated row must fail as SessionStoreError, the same as a truncated file in the file store.
+        from vidbyte.lib.providers import SqliteSessionStore
+        store = SqliteSessionStore(path=":memory:")
+        self.addCleanup(store._conn.close)
+        store.put(_checkpoint("se", "c1"))
+        store._conn.execute("UPDATE vidbyte_sessions SET payload='{not json'")
+        store._conn.execute("UPDATE vidbyte_checkpoints SET payload='{not json'")
+        for read in (lambda: store.get_meta("se"), lambda: store.list_sessions(), lambda: store.get("c1"), lambda: store.history("se")):
+            with self.assertRaises(SessionStoreError) as caught:
+                read()
+            self.assertIsInstance(caught.exception, SessionError)
+            self.assertIsInstance(caught.exception.__cause__, json.JSONDecodeError)
+
+
 class PruneHeadChainTests(unittest.IsolatedAsyncioTestCase):
     def _stores(self):
         return [("memory", InMemorySessionStore()), ("file", FileSessionStore(tempfile.mkdtemp()))]
@@ -1715,6 +1732,18 @@ class PostgresSessionStoreRecoveryTests(unittest.TestCase):
         meta = SessionMeta(session_id="se", head_id=None, parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
         store.put_meta(meta)
         self.assertEqual(store.get_meta("se"), meta)
+
+    def test_corrupt_meta_row_raises_session_store_error(self) -> None:  # [Hidden Failure]
+        # @intent provider-store-corrupt-payload-is-session-store-error
+        # A truncated text payload must fail as SessionStoreError rather than a raw JSONDecodeError.
+        fake_psycopg = mock.MagicMock(spec=["connect"])
+        fake_psycopg.connect.side_effect = lambda dsn, autocommit=False: _FakePgConnection(autocommit)
+        with mock.patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            from vidbyte.lib.providers import PostgresSessionStore
+            store = PostgresSessionStore(dsn="postgresql://fake/db")
+        store._conn.rows["se"] = "{not json"
+        with self.assertRaises(SessionStoreError):
+            store.get_meta("se")
 
 
 if __name__ == "__main__":
