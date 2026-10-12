@@ -195,6 +195,16 @@ class HandoffAgentTests(unittest.IsolatedAsyncioTestCase):
         sections = agent.parse_sections(json.dumps({"sections": {"Notes": "keep", "Risks": None}}))
         self.assertEqual(sections, {"Notes": "keep"})
 
+    async def test_free_form_handoff_keeps_markdown_sections_like_json(self) -> None:
+        # A free-form spec keeps every markdown section the model wrote, exactly as it keeps JSON ones.
+        body = "## Status\nTests pass.\n\n## Next\nShip it."
+        agent = build_test_agent(Handoff(title="Run handoff"), agent_type=HandoffAgent, runner=HandoffRunner(body))
+        doc = await agent.generate_handoff("digest")
+        self.assertEqual(doc.sections, {"Status": "Tests pass.", "Next": "Ship it."})
+        self.assertNotIn("extra_sections", doc.metadata)
+        self.assertIn("Ship it.", doc.to_context_text())
+        self.assertEqual(agent.parse_sections(body), agent.parse_sections(json.dumps({"sections": doc.sections})))
+
     def test_defaults_to_minimal_handoff(self) -> None:
         agent = build_test_agent(agent_type=HandoffAgent, runner=HandoffRunner("x"))
         self.assertIsInstance(agent.spec, MinimalHandoff)
