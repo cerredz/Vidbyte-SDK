@@ -19,11 +19,11 @@ started: 2026-10-11 23:17
 | S3 implement | done | 2026-10-12 | 2026-10-12 | reports/S3-implementer.md | S3_HEAD 97c67062; draft PR #904; 25 code commits; budget 14/14 files, 9/9 public names, 3/3 enums, 0 deps; 373 passed 1 skipped; lint PASS; run_ci source+package PASS; semgrep 0 findings; 7 deviations in spec §17; tests untouched since d01e0afa |
 | S4 adversarial review | done | 2026-10-12 | 2026-10-12 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker (R-1 py3.12 tree listing, R-2 non-ASCII credential crash, R-3 72-col comments) / 3 Major (R-4 EC-24 detail, R-5 duplicated guards, R-6 skills.sh test gap); 13 Minor (5 trivial, rest follow-up); refuted 0 B/M |
 | S5 repair loop | done | 2026-10-12 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | converged in 1/8 iterations at d0d28c3d: R-1..R-6 + trivial R-8, R-9, R-12, R-13 fixed (R-14 via spec r5); 426 passed 1 skipped; lint PASS; source 3800 passed (orchestrator re-ran); package/contract/semgrep PASS; remote 4/4 green on d0d28c3d; tests/ and lint/ unchanged since 578cd064 |
-| S5 re-review | pending | | | | |
+| S5 re-review | done | 2026-10-12 | 2026-10-12 | reports/S5-re-review-1.md | round 1: SOUND; 11/11 fixes confirmed; 0 B / 0 M / 1 Minor (R-RC1: §9.2 GitHub header row omits the content-type bearer_headers adds — spec text, routed to S6 Deviations); remote 4/4 green on 3ce9de96 |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2 (running)
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-12 — Accepted the S0 scout's artifacts without its STATUS block: the previous Claude Code session ended while the scout was running; both files (code-map.md 42.5 KB with 4 sections, reports/S0-scout.md) were complete on disk and passed the spot-check.
@@ -46,6 +46,8 @@ started: 2026-10-11 23:17
 - 2026-10-12 — S2b narrow test-author pass (f90b0680 tests, 578cd064 report): +44 red cases (R-1 5 rows, R-2 36+2 cases incl. a real-build_request test patching httpx.AsyncClient.send, R-4 1) and green R-6 guards proven against all 5 surviving mutants; only header docstrings changed in existing test files. **New test baseline S2_HEAD = 578cd064** (S5/S6 diff tests/ against it).
 
 - 2026-10-12 — Branch was 33 behind main (MERGEABLE/BEHIND); caught up by merge 4f956afc (no conflicts; overlapping files lint/baseline.json, vidbyte/agents/README.md, lib/dataclasses/__init__.py, lib/enums/__init__.py merged cleanly). Orchestrator re-ran on the merge: contract --check current (615), lint PASS, feature tests 434 passed 1 skipped (incl. main's new test_http_transport_content_type.py), source 4219 passed / CI passed, package smoke passed.
+
+- 2026-10-12 — R-RC1 (re-review Minor, spec text only) not sent back to an author: S6 records it under "Deviations from the spec". Follow-up for the user: S2/S2b test files carry `#` lines over 72 columns (R-3 covered vidbyte/ only; tests frozen).
 
 ## User replies (verbatim)
 - (none yet)
