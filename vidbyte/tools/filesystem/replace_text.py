@@ -40,8 +40,12 @@ class ReplaceTextTool(FileSystemTool):
             # @intent unique-edit-counts-overlapping-matches
             count = SubstringCounter.count_overlapping(content, search)
             if count != 1:
+                # Say which way the search failed, since the model only reads
+                # this message: not found means re-read the file, while several
+                # matches mean add surrounding text to pick one.
+                reason = "it was not found" if count == 0 else f"it appears {count} times; include more surrounding text to make it unique"
                 raise ToolExecutionError(
-                    "ReplaceTextTool requires the search text to appear exactly once.",
+                    f"ReplaceTextTool requires the search text to appear exactly once, but {reason}.",
                     details={"matches": count, "path": str(target)},
                 )
             updated = content.replace(search, replacement, 1)
