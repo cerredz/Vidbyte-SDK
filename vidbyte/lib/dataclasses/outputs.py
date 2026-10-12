@@ -11,14 +11,18 @@ TESTS: tests/features/agent_output_connectors/test_output_connectors_contract.py
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from vidbyte.lib.constants.outputs import SMTP_PORT_MAX, SMTP_PORT_MIN
+from vidbyte.lib.constants.outputs import (
+    OUTPUT_EMAIL_ADDRESS_PATTERN,
+    OUTPUT_HTTPS_PREFIX,
+    SMTP_PORT_MAX,
+    SMTP_PORT_MIN,
+)
 from vidbyte.lib.enums.outputs import DeliveryStatus, OutputDestination
 from vidbyte.lib.errors import ConfigurationError
-
-_HTTPS = "https://"
 
 
 def _require(condition: bool, field_name: str, message: str) -> None:
@@ -34,7 +38,7 @@ def _is_text(value: object) -> bool:
 
 def _is_address(value: object) -> bool:
     # One address: has an "@", and no whitespace, line break, or comma.
-    return isinstance(value, str) and "@" in value and not any(char.isspace() or char == "," for char in value)
+    return isinstance(value, str) and re.fullmatch(OUTPUT_EMAIL_ADDRESS_PATTERN, value) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +67,7 @@ class DeliveryReceipt:
         _require(isinstance(self.status, DeliveryStatus), "status", f"must be a DeliveryStatus, got {self.status!r}.")
         failed = self.status is DeliveryStatus.FAILED
         _require(_is_text(self.error_code) if failed else self.error_code is None, "error_code", f"must be set exactly when the status is failed, got {self.error_code!r}.")
-        url_allowed = self.status is DeliveryStatus.SENT and isinstance(self.url, str) and self.url.startswith(_HTTPS)
+        url_allowed = self.status is DeliveryStatus.SENT and isinstance(self.url, str) and self.url.startswith(OUTPUT_HTTPS_PREFIX)
         _require(self.url is None or url_allowed, "url", "must be None, or an https:// link on a sent receipt.")
 
 
@@ -78,7 +82,7 @@ class OutputRequest:
     link_prefix: str = ""
 
     def __post_init__(self) -> None:
-        _require(isinstance(self.url, str) and self.url.startswith(_HTTPS), "url", "must start with https://.")
+        _require(isinstance(self.url, str) and self.url.startswith(OUTPUT_HTTPS_PREFIX), "url", "must start with https://.")
         valid_headers = isinstance(self.headers, Mapping) and all(isinstance(key, str) and key == key.lower() and isinstance(value, str) for key, value in self.headers.items())
         _require(valid_headers, "headers", "must map lowercase string names to string values.")
         _require(isinstance(self.json_body, Mapping), "json_body", "must be a mapping.")

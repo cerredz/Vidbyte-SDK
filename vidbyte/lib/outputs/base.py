@@ -18,7 +18,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from urllib.parse import urlsplit
 
-from vidbyte.lib.constants.outputs import OUTPUT_CREDENTIAL_ENV_VARS
+from vidbyte.lib.constants.outputs import (
+    OUTPUT_CREDENTIAL_ENV_VARS,
+    OUTPUT_EMAIL_ADDRESS_PATTERN,
+    OUTPUT_HTTPS_PREFIX,
+)
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.outputs import DeliveryReceipt, OutputContent
 from vidbyte.lib.enums.outputs import OutputDestination
@@ -40,7 +44,7 @@ class OutputArguments:
     @staticmethod
     def https_url(value: str, *, parameter: str) -> str:
         """Require an https:// URL with a host; the error never shows the URL, which can be the secret."""
-        if value.startswith("https://") and urlsplit(value).hostname:
+        if value.startswith(OUTPUT_HTTPS_PREFIX) and urlsplit(value).hostname:
             return value
         raise ConfigurationError(f"{parameter} must be an https:// URL with a host.", details={"parameter": parameter})
 
@@ -83,7 +87,7 @@ class OutputArguments:
     @staticmethod
     def address(value: object, *, parameter: str) -> str:
         """Require one email address: an "@" and no whitespace, line break, or comma."""
-        if isinstance(value, str) and "@" in value and not any(char.isspace() or char == "," for char in value):
+        if isinstance(value, str) and re.fullmatch(OUTPUT_EMAIL_ADDRESS_PATTERN, value):
             return value
         raise ConfigurationError(f"{parameter} must be one email address, got {value!r}.", details={"parameter": parameter})
 

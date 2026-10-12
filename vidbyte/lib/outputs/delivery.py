@@ -31,6 +31,7 @@ from vidbyte.lib.constants.outputs import (
     OUTPUT_ERROR_TOKEN_PATTERN,
     OUTPUT_HTTP_SUCCESS_MAX,
     OUTPUT_HTTP_SUCCESS_MIN,
+    OUTPUT_HTTPS_PREFIX,
     OUTPUT_MAX_RESPONSE_BYTES,
     OUTPUT_RATE_LIMIT_RETRIES,
     OUTPUT_RETRY_STATUS_CODES,
@@ -115,7 +116,7 @@ class OutputHttp:
         if not (isinstance(node, str) and node.strip()):
             return None
         link = request.link_prefix + node
-        return link if link.startswith("https://") else None
+        return link if link.startswith(OUTPUT_HTTPS_PREFIX) else None
 
     @staticmethod
     def _keep_log_record(record: logging.LogRecord) -> bool:
