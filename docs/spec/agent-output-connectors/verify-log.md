@@ -125,4 +125,6 @@ The remote runs ran on the code commit a9230d46. The docs-only commit that recor
 | run_ci source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `SDK-LINT: PASS` · `3743 passed, 13 skipped in 38.70s` · `CI passed.` |
 | remote ci.yml and static-policy.yml | dispatched on the commit that records this addendum | see the S5 STATUS reply | — |
 
-**Still open:** none. `git diff 7f3bb7ff..HEAD -- tests/` is empty.
+**Still open:** none.
+
+**Test tree check:** `git diff 7f3bb7ff..HEAD -- tests/` is not empty. It shows 38 files and +3929/−34 lines, all of which came in with the main catch-up merge. The output is byte-identical to `git diff db3988ff e6d42359 -- tests/` (main's own test changes). None of those files is under `tests/features/agent_output_connectors/`. Both `git diff 7f3bb7ff 9db8a702 -- tests/` (the branch before the merge) and `git diff ba83c953..HEAD -- tests/` (everything after the merge) are empty. So no test was edited by this pipeline.
