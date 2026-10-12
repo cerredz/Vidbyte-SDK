@@ -132,7 +132,7 @@ class OutputSmtp:
 
     @staticmethod
     def send(settings: SmtpSettings, message: EmailMessage) -> DeliveryReceipt:
-        """Blocking: run it with asyncio.to_thread. One session, never retried."""
+        """Blocking: run it on a dedicated worker thread, never asyncio.to_thread. One session, never retried."""
         # @intent smtp-is-one-verified-tls-attempt
         # The session always runs over verified TLS and never falls back
         # to plain text. A failure is never retried, because the server

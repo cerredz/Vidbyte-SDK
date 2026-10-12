@@ -139,6 +139,8 @@ Set `sender` when the username is not an email address.
   channel-wide and mass mentions are suppressed.
 - **Deadline:** a destination that has not answered within
   `OUTPUT_DELIVERY_DEADLINE_SECONDS` is FAILED `network`, but an SMTP send may
-  still finish afterwards.
+  still finish afterwards. The SMTP session runs on its own worker thread, not
+  the loop's default executor, so `run()` returns at the deadline instead of
+  waiting for it; the interpreter still waits for that thread at exit.
 - **Restored sessions:** `Session.resume` and `fork_from` return agents with
   `outputs=()`; pass `outputs=` to `BaseAgent.restore` to deliver again.
