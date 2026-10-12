@@ -42,7 +42,9 @@ class ToolArgumentBehavior:
         for c in self._calls:
             if c.tool_name != name:
                 continue
-            if all(c.arguments.get(k) == v for k, v in args.items()):
+            # @intent omitted-tool-argument-does-not-match-none
+            # An argument the model never sent is not part of the call, so it does not match None.
+            if all(k in c.arguments and c.arguments[k] == v for k, v in args.items()):
                 return True
         return False
 
