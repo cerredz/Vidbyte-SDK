@@ -167,6 +167,19 @@ class LlmsTxtSourceTests(unittest.TestCase):
         result = _source().load(ArtifactRef(url="https://ex.com/llms.txt"), selection=Selection(expand=True))
         self.assertNotIn("changelog", " ".join(item.document_id for item in result.items))
 
+    def test_deny_only_selection_still_excludes_optional(self) -> None:
+        # [Regression] A deny glob narrows the set; it must not opt the Optional section into expansion or fetching.
+        # The changelog URL is unregistered, so any attempt to fetch it would raise SourceFetchError.
+        fetcher = InMemoryFetcher({"https://ex.com/llms.txt": _INDEX, "https://ex.com/quick.md": b"# Quickstart\nget started"})
+        result = _source(fetcher=fetcher).load(
+            ArtifactRef(url="https://ex.com/llms.txt"),
+            selection=Selection(deny=("Docs/Guide",), expand=True),
+        )
+        ids = [item.document_id for item in result.items]
+        self.assertEqual(len(ids), 2)  # index + quickstart only
+        self.assertIn("quickstart", ids[1])
+        self.assertNotIn("changelog", " ".join(ids))
+
     def test_expand_respects_allow_deny_globs(self) -> None:
         # [Edge Case] A link-level allow glob expands only the matching link.
         result = _source().load(

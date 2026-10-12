@@ -73,7 +73,9 @@ class LlmsTxtSource(Source[LlmsTxtDocument]):
         # Returns selected link tuples in document order.
         selected: list[tuple[int, int, LlmsTxtLink, LlmsTxtSection]] = []
         for s_idx, section in enumerate(ir.sections):
-            if section.optional and selection.is_trivial:
+            # @intent llms-txt-optional-needs-explicit-allow
+            # Only an explicit allow glob opts into Optional links; a deny glob narrows and never widens the set.
+            if section.optional and selection.allow == ("*",):
                 continue
             for l_idx, link in enumerate(section.links):
                 key = f"{section.name}/{link.title}"
