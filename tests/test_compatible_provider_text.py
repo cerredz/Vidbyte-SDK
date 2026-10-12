@@ -19,7 +19,7 @@ import unittest
 from collections.abc import Mapping
 
 from vidbyte.lib.http import HttpResponse
-from vidbyte.providers.compatible import MistralProvider
+from vidbyte.providers.compatible import MiniMaxProvider, MistralProvider
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.xai import XAIProvider
 
@@ -60,6 +60,17 @@ class CompatibleToolCallTextTests(unittest.TestCase):
         self.assertEqual(self._text(MistralProvider, reasoning_turn), "Paris")
         self.assertEqual(self._text(MistralProvider, two_text_turn), "Paris")
         self.assertEqual(self._text(MistralProvider, plain_turn), "Paris")
+
+    def test_minimax_inline_thinking_is_not_the_answer(self) -> None:
+        """A MiniMax reply's leading <think> block is dropped; other text and tool-call turns are unchanged."""
+        think = "<think>\nRecall the capital of France.\n</think>\n\n"
+        mid_answer = "Wrap reasoning in <think>...</think> tags."
+        call_turn = {"role": "assistant", "content": think, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}
+        self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": think + "Paris"}), "Paris")
+        self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": think + '{"city": "Paris"}'}), '{"city": "Paris"}')
+        self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": "Paris"}), "Paris")
+        self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": mid_answer}), mid_answer)
+        self.assertEqual(self._text(MiniMaxProvider, call_turn), "")
 
 
 if __name__ == "__main__":

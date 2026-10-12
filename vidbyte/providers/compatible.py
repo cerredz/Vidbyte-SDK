@@ -15,6 +15,8 @@ from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 # A reply that is one markdown fence from start to end; its body is unwrapped only when it is JSON.
 _WHOLE_FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n?(.*?)\n?[ \t]*```\s*\Z", re.DOTALL | re.IGNORECASE)
+# One complete reasoning block at the very start of a reply, plus the whitespace after it.
+_LEADING_THINK = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
 
 
 class OpenAICompatibleProvider:
@@ -202,6 +204,13 @@ class GLMProvider(OpenAICompatibleProvider):
 
 class MiniMaxProvider(OpenAICompatibleProvider):
     provider = ModelProvider.MINIMAX
+
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        # @intent inline-thinking-is-not-the-answer
+        # MiniMax M2/M3 put their reasoning inside content as one leading <think>...</think> block; the
+        # answer is what follows. Tool-call turns are echoed from the raw message, so the reasoning
+        # MiniMax requires in history stays intact.
+        return _LEADING_THINK.sub("", super()._extract_chat_text(parsed), count=1)
 
 
 class KimiProvider(OpenAICompatibleProvider):
