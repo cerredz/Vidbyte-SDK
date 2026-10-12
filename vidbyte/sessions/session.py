@@ -177,7 +177,10 @@ class Session:
 
     def checkpoint(self, *, label: str = "") -> str:
         """Write a checkpoint of the current state on demand and return its id."""
-        stored = self._persist(self._agent.last_reply, label=label)
+        # @intent bookmark-keeps-session-status
+        # A labeled checkpoint records the current state and adds no turn, so it must not reopen a COMPLETED session.
+        status = self._store.get_meta(self._session_id).status
+        stored = self._persist(self._agent.last_reply, label=label, status=status)
         return stored.id
 
     def record_turn(self, reply: AgentMessage) -> None:
@@ -322,7 +325,7 @@ class Session:
             if reply is not None and isinstance(reply.metadata, dict):
                 reply.metadata["__session_error__"] = f"{type(exc).__name__}: {exc}"
 
-    def _persist(self, reply: AgentMessage | None, *, label: str) -> Checkpoint:
+    def _persist(self, reply: AgentMessage | None, *, label: str, status: SessionStatus = SessionStatus.ACTIVE) -> Checkpoint:
         # Build a checkpoint from the agent's current state and write it to the store.
         captured = self._recorder.capture(self._agent, reply) if reply is not None else self._recorder.capture(self._agent, _empty_reply(self._agent.name))
         checkpoint = Checkpoint(
@@ -333,7 +336,7 @@ class Session:
             created_at=_now(),
             run_state=self._agent.export_state(),
             label=label,
-            status=SessionStatus.ACTIVE,
+            status=status,
             trace_artifact=captured.artifact,
             trace_summary=captured.summary,
             trace_events=captured.events,

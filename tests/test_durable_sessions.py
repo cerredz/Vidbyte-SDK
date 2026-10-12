@@ -50,7 +50,7 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeOutputTool, ResumeReplaceTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -753,6 +753,26 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(store.get_meta(fresh.id).head_id, None)
                     self.assertEqual(store.get_meta(fresh.id).status, SessionStatus.ACTIVE)
 
+    async def test_labeled_checkpoint_keeps_completed_status_and_a_run_reopens(self) -> None:  # [Silent Failure]
+        # @intent bookmark-keeps-session-status
+        # A bookmark adds no turn, so a COMPLETED session stays COMPLETED; a real turn still continues the thread as ACTIVE.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+        session.checkpoint(label="draft")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+
+        session.complete()
+        archived = session.checkpoint(label="archived")
+
+        meta = store.get_meta(session.id)
+        self.assertIs(meta.status, SessionStatus.COMPLETED)
+        self.assertEqual(meta.head_id, archived)
+        self.assertEqual(store.get(archived).label, "archived")
+        await session.arun("two")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+
     def test_usage_empty_session_returns_zero_rollup(self) -> None:  # [Edge Case]
         # Verify usage() is safe before any checkpoint exists.
         session = Session(FakeAgent(), store=InMemorySessionStore())
@@ -1334,6 +1354,31 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(store.get(result.output).label, "pre-migrate")
                 following = bound.checkpoint()
                 self.assertEqual(store.get(following).parent_id, result.output)
+
+    async def test_checkpoint_on_completed_session_keeps_it_completed(self) -> None:  # [Silent Failure]
+        # @intent bookmark-keeps-session-status
+        # A reviewer bookmarking a finished research session must not reopen it, or resume_output can no longer read its answer.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FileSessionStore(tmp)
+            research = Session(FakeAgent(name="researcher"), store=store, tags=("research-q3",))
+            await research.arun("q3 findings")
+            research.complete()
+            reviewer = Session(FakeAgent(name="reviewer"), store=store)
+            await reviewer.arun("review")
+            scope = SessionScope.sessions([research.id])
+            checkpoint_tool, output_tool = CheckpointTool(store, scope=scope), ResumeOutputTool(store, scope=scope)
+            checkpoint_tool.bind_session(reviewer)
+            output_tool.bind_session(reviewer)
+
+            marked = await checkpoint_tool.execute(ToolCall(tool_name="checkpoint", arguments={"session_id": research.id, "label": "reviewed"}))
+            resumed = await output_tool.execute(ToolCall(tool_name="resume_output", arguments={"session_id": research.id}))
+
+            self.assertEqual(marked.status.value, "success")
+            self.assertEqual(store.get(marked.output).label, "reviewed")
+            self.assertIs(store.get_meta(research.id).status, SessionStatus.COMPLETED)
+            self.assertIn(research.id, [meta.session_id for meta in store.list_sessions(status=SessionStatus.COMPLETED)])
+            self.assertEqual(resumed.status.value, "success", resumed.output)
+            self.assertTrue(any("q3 findings" in str(message.content) for message in reviewer.agent.history))
 
     async def test_resume_tools_null_checkpoint_id_resumes_from_head(self) -> None:  # [Silent Failure]
         # A JSON null checkpoint_id means the omitted default: resume from the target session's head.
