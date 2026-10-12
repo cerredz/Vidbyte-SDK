@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import inspect
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ValidationError, create_model
@@ -73,7 +73,11 @@ class FunctionTool(BaseTool):
                 if inspect.isawaitable(value):
                     value = await value
         except Exception as exc:
-            return ToolResult.failure(self.name, str(exc), metadata={"error_type": exc.__class__.__name__})
+            # @intent function-tool-errors-share-the-runtime-error-kind
+            # A raising function tool reports the same execution_error kind the runtime gives a raising
+            # BaseTool, so the model and ToolErrorPolicy treat both ways of writing a tool alike.
+            metadata = {"error": "execution_error", "error_type": exc.__class__.__name__}
+            return ToolResult.failure(self.name, str(exc), metadata=metadata)
 
         return ToolResult.success(
             self.name,
@@ -153,7 +157,15 @@ def _stringify_output(value: object) -> str:
         return value
     try:
         return json.dumps(value, default=_json_default, sort_keys=True)
-    except TypeError:
+    except (TypeError, ValueError):
+        pass
+    # @intent tool-model-output-is-json
+    # default= never sees dict keys, so Enum/date keys and mixed int/str keys raise above; normalize keys the way
+    # the equivalent model's JSON mode does, letting _json_default turn read-only mappings into objects and other
+    # unknown leaves into str(), and fall back to a repr only if that still fails.
+    try:
+        return json.dumps(to_jsonable_python(value, by_alias=False, fallback=_json_default), sort_keys=True)
+    except (TypeError, ValueError):
         return str(value)
 
 
@@ -164,8 +176,13 @@ def _json_default(value: object) -> object:
     # serializes exactly like the equivalent model; only types pydantic cannot serialize fall back to str().
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
+    # @intent read-only-mappings-are-json-objects
+    # A frozen record often holds a MappingProxyType; asdict cannot deep-copy one and pydantic cannot serialize one,
+    # so read fields shallowly and turn any non-dict Mapping into a dict, letting json.dumps recurse through both.
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return dataclasses.asdict(value)
+        return {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
+    if isinstance(value, Mapping):
+        return dict(value)
     try:
         return to_jsonable_python(value)
     except ValueError:  # PydanticSerializationError and UnicodeDecodeError are both ValueErrors.

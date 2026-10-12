@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/coding.py
 
 PURPOSE: Defines CodingAgent, a BaseAgent that takes every BaseAgent keyword unchanged plus a required root_dir, four optional fetch keys, and a write_text rewrite limit (max_rewrite_lines, 300 by default), and preloads seven tools over one root folder: bash, read_lines, write_text, replace_text, glob, grep, and one web-fetch tool picked by the key passed.
-ROLE IN CODEBASE: Exported by vidbyte/agents/__init__.py and the root vidbyte package, and run from a terminal by vidbyte/cli/coding.py (`vidbyte-sdk coding run`); builds on vidbyte/agents/base.py (BaseAgent), vidbyte/lib/dataclasses/coding.py (CodingAgentSettings), and vidbyte/tools/toolsets/coding.py (CodingAgentTools).
+ROLE IN CODEBASE: Exported by vidbyte/agents/__init__.py and the root vidbyte package; builds on vidbyte/agents/base.py (BaseAgent), vidbyte/lib/dataclasses/coding.py (CodingAgentSettings), and vidbyte/tools/toolsets/coding.py (CodingAgentTools).
 ARCHITECTURE NOTE: CodingAgent only gathers its own arguments into one validated CodingAgentSettings, builds CodingAgentTools from it, and hands everything to BaseAgent.__init__; it overrides no BaseAgent method, so runs, forks, sessions, and JevAgent specialist checks behave exactly as for a BaseAgent holding the same tools and policy.
 FUNCTION INVENTORY: CodingAgent.__init__ is the narrated main function and the only method.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key parameter on __init__, one key field on CodingAgentSettings, and one row in CodingAgentTools.authenticate_tools. A new check belongs in CodingAgentSettings, never in __init__, so a bad argument still fails before BaseAgent builds anything.

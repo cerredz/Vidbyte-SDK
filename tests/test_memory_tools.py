@@ -19,6 +19,8 @@ import unittest
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.tools.builtins.memory import (
     CogneeAddTool,
@@ -169,6 +171,17 @@ class SupermemorySearchTests(unittest.IsolatedAsyncioTestCase):
         await tool.execute(ToolCall("supermemory_search_memory", {"query": "test", "container_tag": "user_99"}))
         self.assertEqual(transport.last_call["json_body"]["containerTag"], "user_99")
 
+    async def test_search_bare_list_response_succeeds_with_count(self) -> None:
+        """[Regression] a bare-list body is read as the results, not crashed on."""
+        hits = [{"id": "doc1", "text": "Alice likes cats"}, {"id": "doc2", "text": "Alice lives in Oslo"}]
+        transport = MockTransport(200, hits)
+        tool = _inject_transport(SupermemorySearchMemoryTool("key123"), transport)
+        result = await tool.execute(ToolCall("supermemory_search_memory", {"query": "cats"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.metadata["count"], 2)
+        self.assertIn("Alice likes cats", result.output)
+        self.assertIn("Alice lives in Oslo", result.output)
+
 
 class SupermemoryDeleteTests(unittest.IsolatedAsyncioTestCase):
 
@@ -268,6 +281,16 @@ class Mem0SearchTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(ToolCall("mem0_search_memory", {"query": "cats"}))
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertEqual(result.metadata["count"], 0)
+
+    async def test_search_non_json_503_body_reports_status(self) -> None:
+        """[Regression] a gateway HTML 503 is reported with its status, not as a JSON parse error."""
+        transport = MockTransport(503, {})
+        transport.body = "<html>Service Unavailable</html>"
+        tool = _inject_transport(Mem0SearchMemoryTool("mem0key"), transport)
+        result = await tool.execute(ToolCall("mem0_search_memory", {"query": "cats"}))
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("503", result.output)
+        self.assertEqual(json.loads(result.output)["status"], 503)
 
 
 class Mem0GetTests(unittest.IsolatedAsyncioTestCase):
@@ -409,6 +432,17 @@ class ZepDeleteTests(unittest.IsolatedAsyncioTestCase):
         tool = _inject_transport(ZepDeleteSessionTool("zepkey"), transport)
         result = await tool.execute(ToolCall("zep_delete_session", {"session_id": "bad"}))
         self.assertEqual(result.status, ToolStatus.ERROR)
+
+    async def test_delete_session_id_stays_inside_its_path_segment(self) -> None:
+        """[Security] a model-supplied id cannot climb out of /api/v2/sessions/ and DELETE another endpoint."""
+        transport = MockTransport(200, {})
+        tool = _inject_transport(ZepDeleteSessionTool("zepkey"), transport)
+        await tool.execute(ToolCall("zep_delete_session", {"session_id": "../../admin"}))
+        self.assertEqual(httpx.URL(transport.last_call["url"]).raw_path, b"/api/v2/sessions/..%2F..%2Fadmin")
+        transport.last_call = {}
+        result = await tool.execute(ToolCall("zep_delete_session", {"session_id": ".."}))
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertEqual(transport.last_call, {})
 
 
 class CogneeAddTests(unittest.IsolatedAsyncioTestCase):

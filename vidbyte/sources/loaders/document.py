@@ -28,6 +28,10 @@ class DocumentSource(Source[MarkdownDocument]):
             text = snapshot.raw_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise SourceParseError("Document body is not valid UTF-8.", details={"url": snapshot.url}) from exc
+        # @intent document-bom-keeps-h1-title
+        # Drop a leading byte-order mark, as the llms.txt parser does, so the first-line H1 still matches.
+        if text and text[0] == chr(0xFEFF):
+            text = text[1:]
         title = DocumentRegex.first_h1_title(text) or snapshot.url
         return MarkdownDocument(title=title, body=text, url=snapshot.url)
 

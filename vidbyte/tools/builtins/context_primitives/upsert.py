@@ -93,8 +93,10 @@ class ContextUpsertTool(BaseTool):
         if item is None:
             return ToolResult.error(call.tool_name, f"Failed to construct primitive of type '{primitive_type}'.")
 
+        # @intent content-update-keeps-placement
+        # Updating content keeps the placement the model chose with context_move; a new id still goes to the end.
         try:
-            self._manager.upsert(item)
+            self._manager.upsert_preserving_placement(item)
         except ValueError as exc:
             return ToolResult.error(call.tool_name, str(exc))
 

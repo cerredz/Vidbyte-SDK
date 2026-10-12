@@ -222,6 +222,9 @@ class AggregateAgent(BaseAgent):
         # Runs the aggregation engine on the prompt and returns the synthesized AgentMessage.
         prompt = self._coerce_prompt(message)
         self._active_prompt = prompt
+        # @intent behavior-describes-latest-run
+        # This override bypasses BaseAgent._generate_reply, which drops the cached behavior facade at run start.
+        self._behavior_view = None
         trace_ctx = self._tracer.start_trace("agent.run", agent_name=self.name, strategy="aggregate", prompt=self._safe_trace_value(prompt), system_prompt=self._safe_trace_value(self.system_prompt), metadata=self._safe_trace_value(self.metadata))
         # Every proposer/aggregator child run merges into this agent's tracker; this run's rollup reaches an outer ledger once.
         parent = active_usage_ledger()

@@ -1,6 +1,7 @@
 """Tests for the five new prebuilt middleware: TokenBudgetMiddleware,
 CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
-LoopDetectionMiddleware, and CircuitBreakerMiddleware."""
+LoopDetectionMiddleware, and CircuitBreakerMiddleware, plus the
+per-instance run state of ToolErrorPolicyMiddleware and TokenRateLimitMiddleware."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import unittest
 from types import SimpleNamespace
 
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.settings import ToolErrorPolicy
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseContext
@@ -17,7 +19,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHook,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
+from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult, ToolStatus
 from vidbyte.middleware.builtins import (
     CircuitBreakerMiddleware,
     CircuitState,
@@ -25,6 +27,8 @@ from vidbyte.middleware.builtins import (
     ExponentialBackoffRetryMiddleware,
     LoopDetectionMiddleware,
     TokenBudgetMiddleware,
+    TokenRateLimitMiddleware,
+    ToolErrorPolicyMiddleware,
 )
 from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
 from vidbyte.middleware.builtins.token_budget import TOKEN_BUDGET_FINAL_RESPONSE_NOTICE
@@ -37,6 +41,75 @@ def _ctx(**kwargs) -> MiddlewareContext:
     defaults = dict(hook=MiddlewareHook.BEFORE_ITERATION, agent_name="test-agent")
     defaults.update(kwargs)
     return MiddlewareContext(**defaults)
+
+
+async def _model_calls_before_cost_abort(middleware: list[CostBudgetMiddleware], max_iterations: int = 12) -> int:
+    """Drive cost budgets in pipeline order on one run (20 tokens per call) and count model calls before abort."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    for calls in range(max_iterations):
+        for mw in middleware:
+            decision = await mw.before_iteration(_ctx(tokens_used=calls * 20, run_state=run_state))
+            if decision.action == MiddlewareAction.ABORT_RUN:
+                return calls
+        for mw in middleware:
+            await mw.after_model_response(_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=(calls + 1) * 20, run_state=run_state))
+    return max_iterations
+
+
+async def _tool_calls_before_loop_abort(middleware: list[LoopDetectionMiddleware], max_calls: int = 12) -> int:
+    """Drive loop detectors in pipeline order on one run of identical fetches and count executed calls before abort."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    call = ToolCall(tool_name="fetch", arguments={"url": "https://example.com"})
+    for executed in range(max_calls):
+        for mw in middleware:
+            decision = await mw.before_tool_call(_ctx(hook=MiddlewareHook.BEFORE_TOOL_CALL, tool_call=call, run_state=run_state))
+            if decision.action == MiddlewareAction.ABORT_RUN:
+                return executed
+    return max_calls
+
+
+async def _failed_tool_calls_before_error_abort(middleware: list[ToolErrorPolicyMiddleware], max_calls: int = 12) -> int:
+    """Drive tool error policies in pipeline order on one run of always-failing calls and count failures before abort."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    for failed in range(1, max_calls + 1):
+        call = ToolCall(tool_name="fetch", arguments={"attempt": failed})
+        result = ToolResult(tool_name="fetch", status=ToolStatus.ERROR, output="boom", metadata={"error": "execution_error"})
+        for mw in middleware:
+            decision = await mw.after_tool_call(_ctx(hook=MiddlewareHook.AFTER_TOOL_CALL, tool_call=call, tool_result=result, run_state=run_state))
+            if decision.action == MiddlewareAction.ABORT_RUN:
+                return failed
+    return max_calls
+
+
+class _SteppingClock:
+    """Fake monotonic clock that only moves when the test advances it."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def _hourly_rate_limit_sleeps(middleware: list[TokenRateLimitMiddleware], clock: _SteppingClock) -> list[float]:
+    """Drive rate limiters in pipeline order (25 s and 20 tokens per call) and record the hourly limiter's sleeps."""
+    run_state: dict = {}
+    for mw in middleware:
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+    sleeps: list[float] = []
+    for calls in range(1, 13):
+        clock.now += 25.0
+        for mw in middleware:
+            decision = await mw.before_iteration(_ctx(tokens_used=calls * 20, run_state=run_state))
+            if decision.action == MiddlewareAction.SLEEP and mw.per_seconds == 3600:
+                sleeps.append(decision.sleep_seconds)
+    return sleeps
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +248,21 @@ class TestTokenBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.transform.system, TOKEN_BUDGET_FINAL_RESPONSE_NOTICE)
         self.assertTrue(run_state["__result_metadata__"]["token_budget"]["final_response_requested"])
 
+    async def test_second_soft_budget_does_not_spend_this_ones_final_call(self) -> None:
+        # [Silent Failure] Two soft budgets exceeded in one step must each grant their own final-answer call.
+        for order in ((60, 80), (80, 60)):
+            budgets = [TokenBudgetMiddleware(max_tokens=cap, allow_final_response_over_budget=True) for cap in order]
+            run_state: dict = {}
+            for mw in budgets:
+                await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+            decisions = [
+                await mw.before_model_call(
+                    _ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL, tokens_used=90, system="base", run_state=run_state)
+                )
+                for mw in budgets
+            ]
+            self.assertEqual([d.action for d in decisions], [MiddlewareAction.CONTINUE] * 2, order)
+
     def test_raises_on_zero_max(self) -> None:
         # [Edge Case] Zero is not a meaningful ceiling.
         with self.assertRaises(ValueError):
@@ -184,6 +272,75 @@ class TestTokenBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] Negative values are not a meaningful ceiling.
         with self.assertRaises(ValueError):
             TokenBudgetMiddleware(max_tokens=-1)
+
+
+# ---------------------------------------------------------------------------
+# ToolErrorPolicyMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestToolErrorPolicyMiddleware(unittest.IsolatedAsyncioTestCase):
+    async def test_second_instance_does_not_change_when_strict_breaker_fires(self) -> None:
+        # [Silent Failure] A lenient org policy beside a strict team policy must not add to the team's error count.
+        def team() -> ToolErrorPolicyMiddleware:
+            return ToolErrorPolicyMiddleware(ToolErrorPolicy(max_total_tool_errors=3))
+
+        def org() -> ToolErrorPolicyMiddleware:
+            return ToolErrorPolicyMiddleware(ToolErrorPolicy(max_total_tool_errors=50))
+
+        alone = await _failed_tool_calls_before_error_abort([team()])
+        self.assertEqual(alone, 3)
+        self.assertEqual(await _failed_tool_calls_before_error_abort([team(), org()]), alone)
+        self.assertEqual(await _failed_tool_calls_before_error_abort([org(), team()]), alone)
+
+    async def test_legacy_argument_error_kinds_retry_as_invalid_arguments(self) -> None:
+        # [Silent Failure] The model sees kind=invalid_arguments for these names, so retry_on=("invalid_arguments",) must retry them.
+        for legacy in ("argument_error", "arguments_error"):
+            with self.subTest(legacy=legacy):
+                middleware = ToolErrorPolicyMiddleware(
+                    ToolErrorPolicy(retry_on=("invalid_arguments",), max_retries_per_tool_call=1, retry_backoff_base_seconds=0)
+                )
+                call = ToolCall(tool_name="fetch", arguments={}, call_id="fc_fetch")
+                result = ToolResult(tool_name="fetch", status=ToolStatus.ERROR, output="bad args", metadata={"error": legacy})
+                decision = await middleware.after_tool_call(
+                    _ctx(hook=MiddlewareHook.AFTER_TOOL_CALL, tool_call=call, tool_result=result, metadata={"tool_permission": "read"}, run_state={})
+                )
+                self.assertEqual(decision.action, MiddlewareAction.RETRY)
+                self.assertEqual(decision.metadata["error"], "invalid_arguments")
+
+    async def test_refused_calls_do_not_trip_error_budget_or_abort(self) -> None:
+        # [Silent Failure] A refused call is not a tool error, so repeated denials must not trip the breaker or abort the run.
+        for kind in ("permission_denied", "middleware_denied"):
+            with self.subTest(kind=kind):
+                middleware = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_total_tool_errors=1, on_unrecoverable="abort_run"))
+                run_state: dict = {}
+                await middleware.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+                for attempt in range(3):
+                    call = ToolCall(tool_name="write_file", arguments={"attempt": attempt})
+                    result = ToolResult(tool_name="write_file", status=ToolStatus.ERROR, output="denied", metadata={"error": kind})
+                    decision = await middleware.after_tool_call(
+                        _ctx(hook=MiddlewareHook.AFTER_TOOL_CALL, tool_call=call, tool_result=result, run_state=run_state)
+                    )
+                    self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
+
+
+# ---------------------------------------------------------------------------
+# TokenRateLimitMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestTokenRateLimitMiddleware(unittest.IsolatedAsyncioTestCase):
+    async def test_per_minute_limiter_does_not_weaken_per_hour_limiter(self) -> None:
+        # [Silent Failure] A plan with per-minute and per-hour quotas must still throttle on the hourly cap.
+        def stack(*windows: int) -> tuple[list[TokenRateLimitMiddleware], _SteppingClock]:
+            clock = _SteppingClock()
+            caps = {60: 1000, 3600: 50}
+            return [TokenRateLimitMiddleware(max_tokens=caps[w], per_seconds=w, clock=clock) for w in windows], clock
+
+        alone = await _hourly_rate_limit_sleeps(*stack(3600))
+        self.assertTrue(alone)
+        self.assertEqual(await _hourly_rate_limit_sleeps(*stack(60, 3600)), alone)
+        self.assertEqual(await _hourly_rate_limit_sleeps(*stack(3600, 60)), alone)
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +430,19 @@ class TestCostBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
         await mw.before_run(self._run_ctx(hook=MiddlewareHook.BEFORE_RUN))
         await mw.after_model_response(self._run_ctx(hook=MiddlewareHook.AFTER_MODEL_RESPONSE, tokens_used=1000))
         self.assertAlmostEqual(mw.estimated_spend_usd, 0.002)
+
+    async def test_second_instance_does_not_change_when_strict_budget_fires(self) -> None:
+        # [Silent Failure] A lenient org budget beside a strict team budget must not overwrite the team's spend.
+        def team() -> CostBudgetMiddleware:
+            return CostBudgetMiddleware(max_spend_usd=0.0005, cost_per_million_tokens=10.0)
+
+        def org() -> CostBudgetMiddleware:
+            return CostBudgetMiddleware(max_spend_usd=100.0, cost_per_million_tokens=1.0)
+
+        alone = await _model_calls_before_cost_abort([team()])
+        self.assertEqual(alone, 3)
+        self.assertEqual(await _model_calls_before_cost_abort([team(), org()]), alone)
+        self.assertEqual(await _model_calls_before_cost_abort([org(), team()]), alone)
 
     def test_raises_on_zero_spend(self) -> None:
         # [Edge Case] Zero budget is not meaningful.
@@ -548,6 +718,19 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL, tool_call=None, run_state=self._run_state
         ))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
+
+    async def test_second_instance_does_not_change_when_strict_detector_fires(self) -> None:
+        # [Silent Failure] A second detector must not double-count the strict detector's calls.
+        def team() -> LoopDetectionMiddleware:
+            return LoopDetectionMiddleware(max_repeated_calls=4, window=10)
+
+        def org() -> LoopDetectionMiddleware:
+            return LoopDetectionMiddleware(max_repeated_calls=6, window=10)
+
+        alone = await _tool_calls_before_loop_abort([team()])
+        self.assertEqual(alone, 3)
+        self.assertEqual(await _tool_calls_before_loop_abort([team(), org()]), alone)
+        self.assertEqual(await _tool_calls_before_loop_abort([org(), team()]), alone)
 
     async def test_metadata_contains_tool_name_and_count(self) -> None:
         # [Silent Failure] Abort metadata must identify the looping tool.

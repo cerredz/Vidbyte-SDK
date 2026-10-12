@@ -281,6 +281,16 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             result = run(ReadTextTool(config).execute(ToolCall("read_text", {"path": "f.txt"})))
             self.assertIn("two", result.output)
 
+    def test_append_text_keeps_existing_file_line_endings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, initial, expected in (("lf.txt", b"a\nb\n", b"a\nb\nc\n"), ("crlf.txt", b"a\r\nb\r\n", b"a\r\nb\r\nc\r\n")):
+                target = Path(tmp) / name
+                target.write_bytes(initial)
+                result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": "c\n"})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS)
+                self.assertEqual(target.read_bytes(), expected, name)
+
     def test_copy_then_move(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)

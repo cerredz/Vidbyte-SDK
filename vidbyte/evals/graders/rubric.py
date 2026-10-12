@@ -88,8 +88,14 @@ class RubricGrader(BaseGrader):
         runner = self.judge_runner
         if isinstance(runner, BaseAgent):
             # Judge on a fresh fork so earlier verdicts never leak into this case; preloaded history is kept.
-            runner = runner.fork(AgentForkSettings(name=f"{runner.name}_judge", include_history=bool(runner.history)))
-        if hasattr(runner, "arun"):
+            judge = runner.fork(AgentForkSettings(name=f"{runner.name}_judge", include_history=bool(runner.history)))
+            # @intent internal-forks-close-their-mcp-servers
+            # The fork starts its own MCP servers on its first run, so close them once the judge has answered or failed.
+            try:
+                res = await judge.arun(prompt, temperature=0.0)
+            finally:
+                await judge.close_mcp_servers()
+        elif hasattr(runner, "arun"):
             res = await runner.arun(prompt, temperature=0.0)
         elif hasattr(runner, "generate_reply"):
             res = await runner.generate_reply(prompt, temperature=0.0)

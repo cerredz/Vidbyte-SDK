@@ -31,6 +31,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHookInvocation,
     MiddlewareTransform,
 )
+from vidbyte.lib.errors import FailureRaisedError
 from vidbyte.middleware.base import AgentMiddleware
 
 
@@ -119,6 +120,10 @@ class MiddlewarePipeline:
             try:
                 raw_decision = await getattr(middleware, hook.value)(ctx)
                 decision = raw_decision or MiddlewareDecision.continue_()
+            except FailureRaisedError:
+                # @intent raise-disposition-reaches-the-caller
+                # A Session rule declared on_match=RAISE must surface its typed error, not become a middleware_error abort.
+                raise
             except Exception as exc:
                 error_type = type(exc).__name__
                 decision = self._exception_decision(middleware, hook, exc)

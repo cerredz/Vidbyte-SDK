@@ -74,7 +74,9 @@ class MinDistinctTools(OutputContract):
     """Requires at least `minimum` unique non-internal tool names used in the run."""
 
     key = "distinct_tool_count"
-    ceiling_key = None
+    # @intent call-counting-floors-respect-the-tool-call-ceiling
+    # Each distinct tool needs a call, and the global tool-call budget stops the run once reached.
+    ceiling_key = "max_tool_calls"
     unit = "distinct tools"
 
 
@@ -106,7 +108,9 @@ class MinToolCallsById(OutputContract):
     """Requires at least `minimum` non-internal calls to one named tool."""
 
     key = "tool_calls_by_name"
-    ceiling_key = None
+    # @intent call-counting-floors-respect-the-tool-call-ceiling
+    # The floor needs `minimum` calls, and the global tool-call budget stops the run once reached.
+    ceiling_key = "max_tool_calls"
     unit = "calls"
 
     def __init__(self, tool_name: str, minimum: int) -> None:

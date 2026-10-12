@@ -178,10 +178,12 @@ class SessionTraceController(TraceController):
             self._session_root.set(None)
 
     def start_trace(self, name: str, **attributes: Any) -> SpanContext:
-        # Converts child agent root traces into child spans while a session is active.
+        # Converts agent root traces into child spans while a session is active.
         root = self.root_context
         if root is not None and name == "agent.run":
-            return self.start_span(name, parent=root, **attributes)
+            # @intent session-keeps-nested-agent-runs-nested
+            # Attach to the innermost open span: the session root for a top-level run, the caller's tool span for a nested one.
+            return self.start_span(name, **attributes)
         return super().start_trace(name, **attributes)
 
     def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:

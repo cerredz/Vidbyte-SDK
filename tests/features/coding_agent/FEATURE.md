@@ -115,7 +115,6 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - Identity errors.
   - Root validation, and the root fixed across `chdir`.
 - `test_coding_agent_web_fetch.py` checks the following for each provider: provider selection, the key reaching its provider, the view against the bare tool, failed-fetch pass-through, keys absent from exports, two keys, and blank keys.
-- `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_coding_agent_max_rewrite_lines.py` checks that the default 300 refuses a 301-line rewrite through the loop and the run goes on, that the model is told the limit, that `None` turns it off, and that bad values fail at construction. The line-counting rules are tested in `tests/test_filesystem_tools.py` (`WriteTextOverwriteLimitTests`).
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.

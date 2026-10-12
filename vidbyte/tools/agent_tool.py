@@ -57,12 +57,17 @@ class AgentTool(BaseTool):
                 active_prompt, history = "", []
             serialized = self._serialize_context(active_prompt, list(history))
             child = self._agent.fork()
-            reply = await child.generate_reply(serialized)
-            return ToolResult.success(
-                self._name,
-                reply.content,
-                metadata={"agent_name": self._agent.agent_metadata.name},
-            )
+            # @intent internal-forks-close-their-mcp-servers
+            # The child reconnects the wrapped agent's MCP servers for itself and is discarded here, so close them when its run ends.
+            try:
+                reply = await child.generate_reply(serialized)
+                return ToolResult.success(
+                    self._name,
+                    reply.content,
+                    metadata={"agent_name": self._agent.agent_metadata.name},
+                )
+            finally:
+                await child.close_mcp_servers()
         except Exception as exc:
             return ToolResult.error(
                 self._name,

@@ -40,6 +40,12 @@ class UrlAllowlist:
                     f"UrlAllowlist.{field_name} must be a collection of {example}, not a single string.",
                     details={"field": field_name, "value": value},
                 )
+        # @intent url-allowlist-config-is-case-insensitive
+        # Schemes and hosts are case-insensitive (RFC 3986) and check() lowercases the URL side, so store the
+        # configured names lowercased too; otherwise a policy spelled "Docs.Acme.dev" or "HTTPS" refuses every URL.
+        object.__setattr__(self, "allowed_schemes", tuple(scheme.lower() for scheme in self.allowed_schemes))
+        if self.allowed_hosts is not None:
+            object.__setattr__(self, "allowed_hosts", frozenset(host.lower() for host in self.allowed_hosts))
 
     def check(self, url: str) -> None:
         # Raises SourceSecurityError when scheme/host are not permitted.

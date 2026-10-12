@@ -103,7 +103,13 @@ class AgentStage(Generic[StateT]):
         # Runs one agent invocation and maps its reply to the candidate contract.
         agent = self._resolve_agent(context)
         prompt = self._prompt_builder(context)
-        reply = await agent.arun(prompt)
+        # @intent internal-forks-close-their-mcp-servers
+        # A fork made here starts its own MCP servers on its first run, so close them once that run ends or fails.
+        try:
+            reply = await agent.arun(prompt)
+        finally:
+            if self._fresh_fork:
+                await agent.close_mcp_servers()
         result = self._result_builder(reply, context)
         return await result if inspect.isawaitable(result) else result
 

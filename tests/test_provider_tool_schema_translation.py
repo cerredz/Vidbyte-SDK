@@ -242,6 +242,24 @@ class ProviderToolSchemaTranslationTests(unittest.TestCase):
         self.assertEqual(schema["name"], "clear_cache")
         self.assertIn("cache_key", schema["parameters"]["properties"])
 
+    def test_gemini_schema_tells_exclusive_bounds_and_multiple_of_in_the_description(self) -> None:
+        spec = ToolSpec(
+            name="order",
+            description="Places an order.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "qty": {"type": "integer", "description": "How many.", "exclusiveMinimum": 0, "exclusiveMaximum": 11, "multipleOf": 5}
+                },
+                "required": ["qty"],
+            },
+        )
+
+        qty = tool_spec_to_provider_schema(spec, "gemini")["parameters"]["properties"]["qty"]
+
+        self.assertEqual(qty["description"], "How many. Must be greater than 0, less than 11, a multiple of 5.")
+        self.assertFalse({"exclusiveMinimum", "exclusiveMaximum", "multipleOf"} & set(qty))
+
     def test_parse_provider_tool_call_payloads(self) -> None:
         openai_calls = ToolsFormatter.parse_tool_calls(
             {"output": [{"type": "function_call", "name": "lookup", "arguments": '{"topic": "sdk"}', "call_id": "call-1"}]},
@@ -327,6 +345,19 @@ class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
         self.assertEqual(response["hint"], "Wait and retry.")
         self.assertTrue(response["retryable"])
 
+    def test_gemini_error_forwards_author_detail(self) -> None:
+        call = ToolCall("validate_rows", call_id="fn-1")
+        result = ToolResult.error(
+            "validate_rows",
+            "Validation failed.",
+            metadata={"error": "invalid_arguments", "detail": "row 7: price must be positive"},
+        )
+
+        formatted = ToolsFormatter.format_tool_result(call, result, "gemini")
+        response = formatted["parts"][0]["functionResponse"]["response"]
+
+        self.assertEqual(response["detail"], "row 7: price must be positive")
+
     def test_openai_error_encodes_envelope_in_content(self) -> None:
         call = ToolCall("lookup", call_id="call-1")
         result = ToolResult.error("lookup", "bad args", metadata={"error_type": "validation", "retryable": "false"})
@@ -401,6 +432,19 @@ class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
         self.assertIn("secret path", openai["content"])
         self.assertIn("Hint: Check cwd.", openai["content"])
         self.assertIn("Detail: traceback", openai["content"])
+
+    def test_long_error_output_reaches_every_provider_whole(self) -> None:
+        call = ToolCall("shell", call_id="call-1")
+        log = "x" * 1500 + "\nFAILED test_totals: expected 3, got 2"
+        result = ToolResult.error("shell", log, metadata={"error": "execution_error"})
+
+        openai = ToolsFormatter.format_tool_result(call, result, "openai")
+        anthropic = ToolsFormatter.format_tool_result(call, result, "anthropic")
+        gemini = ToolsFormatter.format_tool_result(call, result, "gemini")
+
+        self.assertIn(log, openai["content"])
+        self.assertIn(log, anthropic["content"][0]["content"])
+        self.assertEqual(gemini["parts"][0]["functionResponse"]["response"]["message"], log)
 
 
 class AssistantToolCallHistoryFormatterTests(unittest.TestCase):

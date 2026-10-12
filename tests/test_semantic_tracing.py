@@ -11,6 +11,7 @@ from vidbyte import Agent, AggregateAgent, ProposerSpec, Trace, TraceController,
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
+from vidbyte.tools import tool
 from vidbyte.trace.profiles import safe_trace_value
 from vidbyte.trace.providers import GenericProviderTranslator, LangSmithProviderTranslator
 from vidbyte.trace.registry import TraceComponentRegistry
@@ -61,6 +62,29 @@ class DoneRunner:
         # Returns a minimal OpenAI-compatible tool-call response.
         raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "{self.final_answer}"}}'}]}
         return types.SimpleNamespace(text="", raw=raw, metadata={})
+
+
+class LookupThenDoneRunner:
+    """Runner that calls one user tool, then finishes through the SDK internal isDone tool."""
+
+    def __init__(self) -> None:
+        self._config = types.SimpleNamespace(provider="xai", model="grok-test")
+        self.calls = 0
+
+    def run(self, prompt: str, **kwargs: object) -> object:
+        # Returns a lookup tool call on the first turn and an isDone call afterwards.
+        self.calls += 1
+        if self.calls == 1:
+            call = {"type": "function_call", "name": "lookup", "arguments": '{"topic": "sdk"}', "call_id": "call_1"}
+        else:
+            call = {"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "call_2"}
+        return types.SimpleNamespace(text="", raw={"output": [call]}, metadata={})
+
+
+@tool
+def lookup(topic: str) -> str:
+    """Look up a topic."""
+    return f"found:{topic}"
 
 
 class EchoAgent:
@@ -299,6 +323,25 @@ class SessionTraceTests(unittest.TestCase):
         tracer.end_trace(root, output="ok")
         self.assertEqual([event["type"] for event in inner.events], ["start_trace", "end_trace"])
 
+    def test_session_keeps_nested_agent_run_under_caller_tool_span(self) -> None:
+        # Verifies a session does not lift an agent run nested in a tool call up to the session root.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=TraceProfile.verbose())
+        with tracer.session("workflow"):
+            outer = tracer.start_trace("agent.run", agent_name="orchestrator")
+            tool_call = tracer.start_span("tool.call", tool_name="researcher")
+            nested = tracer.start_trace("agent.run", agent_name="child")
+            tracer.end_trace(nested, output="child")
+            tracer.end_span(tool_call, output="tool")
+            tracer.end_trace(outer, output="outer")
+        session_root = next(event["context"] for event in inner.events if event["type"] == "start_trace")
+        runs = [event for event in inner.events if event["type"] == "start_span" and event["name"] == "agent.run"]
+        self.assertEqual(len(runs), 2)
+        self.assertIs(runs[0]["parent"], session_root)
+        self.assertIs(runs[1]["parent"], tool_call.provider_context)
+        ends = [event["type"] for event in inner.events if event["type"].startswith("end")]
+        self.assertEqual(ends, ["end_span", "end_span", "end_span", "end_trace"])
+
 
 class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_default_profile_records_core_and_default_spans(self) -> None:
@@ -337,6 +380,28 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         names = [event.get("name") for event in events if event["type"].startswith("start")]
         self.assertIn("runtime.iteration", names)
         self.assertIn("context.window.build", names)
+
+    async def test_agent_verbose_profile_never_opens_a_span_under_a_closed_parent(self) -> None:
+        # @intent spans-never-open-under-a-closed-parent
+        # Verifies parser and tool spans attach to a span that is still open, not the iteration span that already ended.
+        events: list[dict[str, Any]] = []
+        tracer = Trace.profile(Trace.debug(events), TraceProfile.verbose())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=LookupThenDoneRunner(), trace=tracer, tools=[lookup])
+        await agent.generate_reply("hello")
+        open_contexts: list[SpanContext] = []
+        problems: list[str] = []
+        for event in events:
+            if event["type"] == "start_span" and not any(event["parent"] is context for context in open_contexts):
+                problems.append(str(event["name"]))
+            if event["type"] in {"start_trace", "start_span"}:
+                open_contexts.append(event["context"])
+            if event["type"] in {"end_trace", "end_span"}:
+                open_contexts = [context for context in open_contexts if context is not event["context"]]
+        names = [event.get("name") for event in events if event["type"] == "start_span"]
+        self.assertIn("runtime.iteration", names)
+        self.assertEqual(names.count("tool.call"), 2)
+        self.assertIn("parser.tool_calls", names)
+        self.assertEqual(problems, [])
 
     async def test_tool_call_attributes_include_arguments(self) -> None:
         # Verifies tool.call exposes tool name, input, and output-ready metadata.
