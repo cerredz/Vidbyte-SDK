@@ -18,7 +18,7 @@ started: 2026-10-11 17:36
 | S2 tests | done | 2026-10-11 | 2026-10-11 | reports/S2-test-author.md | 86 tests / 313 cases in tests/features/agent_output_connectors/ (9 modules); red `21 failed, 292 errors`; test commit d90400d2; S2_HEAD 72fc2002; 7 spec defects → spec r4 @f3229734; status tests-written @5e79413f |
 | S3 implement | done | 2026-10-11 | 2026-10-11 | reports/S3-implementer.md | S3_HEAD 9463c348; draft PR #882; 313/313 green (re-run by orchestrator); SDK-LINT PASS; run_ci source 3516 passed + full CI passed; budget 23/23 files, 26/26 classes, 0 deps; ci.yml 38194285572 in progress, static-policy 38194287162 success (both at fa430c8f; later commits docs-only) |
 | S4 adversarial review | done | 2026-10-11 | 2026-10-11 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 httpx INFO log leaks secret URLs) / 3 Major (R-2 str destination, R-3 SMTP thread holds sync run past deadline, R-4 duplicated email rule) / 11 Minor; 0 refuted (1 sub-claim) |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running (iteration 1) | 2026-10-11 | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -48,6 +48,10 @@ started: 2026-10-11 17:36
 
 - 2026-10-11 — S4 spot-check passed: review.md confirmed rows each carry path:line + verifier's own evidence; refuted sub-claim (R-V1 https drift) cites D-19/§9.1/D-21.
 - 2026-10-11 — S5 prep ordering: findings need three owners (spec-author: R-5, R-3/R-11 wording, R-13 [scope-adding] → Q-n; test-author: R-1, R-2, R-3, R-12, R-14, R-15 tests; repair: all source). Run sequentially (spec r6 → test additions, red → repair iteration 1) because spec author and test author both edit spec.md. Test additions come from the S2 test author only (pipeline rule); repair agents get no test diff.
+
+- 2026-10-11 — Spec r6 @a270e6ed (spec-author aligned S4 findings: R-1 httpx log filter, R-2, R-3 dedicated SMTP executor, R-4/R-9 constants, R-5 INV-2, R-11 resend caution, R-12 EC-48, R-13 → Q-11 not built + EC-49, R-15). Verified spec+report only, Proof cells unchanged.
+- 2026-10-11 — S2 test author added S4 tests @45ba29cc (+27 cases → 340; red `16 failed, 324 passed`, re-run by orchestrator; vidbyte/ untouched; no existing assertion removed; httpx_destination fixture moved to conftest). New test-tree baseline S2_HEAD_2 = 7f3bb7ff; S5/S6 diff tests against it.
+- 2026-10-11 — ci.yml 38194285572 at fa430c8f (S3 code) completed success (Source 3.11, 3.12, Package).
 
 ## User replies (verbatim)
 - (none yet)
@@ -87,4 +91,7 @@ started: 2026-10-11 17:36
 - `fork.py` and `jev/agent.py` changes can't land before row 27 (forks raise TypeError otherwise) — *source:* S3
 - Semgrep: global install broken by mcp 2.x; use a venv with semgrep==1.170.1 and put its Scripts first on PATH (semgrep.exe launches pysemgrep from PATH) — *source:* S3
 - Pre-existing, not ours: scripts/test-github-content-readmes.py 110/114 (4 failures in vidbyte/harnesses/README.md), not part of run_ci — *source:* S3
+- R-1 test sets INFO on the ROOT logger and requires the caller's own httpx request to still log — fix must not touch httpx level/disabled/propagate and must reset `_OUTPUT_POST_ACTIVE` — *source:* S2 S4-follow-up
+- R-3 test fails (10 s backstop, no hang) with `asyncio.to_thread` or `run_in_executor(None, …)`; needs module `_SMTP_EXECUTOR` — *source:* S2 S4-follow-up
+- R-12: suppress `smtplib.SMTPException`/`OSError` around QUIT only, after `send_message` returns — *source:* S2 S4-follow-up
 - Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
