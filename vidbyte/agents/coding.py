@@ -1,6 +1,6 @@
 """FILE: vidbyte/agents/coding.py
 
-PURPOSE: Defines CodingAgent, a BaseAgent that takes every BaseAgent keyword unchanged plus a required root_dir and four optional fetch keys, and preloads seven tools over one root folder: bash, read_lines, write_text, replace_text, glob, grep, and one web-fetch tool picked by the key passed.
+PURPOSE: Defines CodingAgent, a BaseAgent that takes every BaseAgent keyword unchanged plus a required root_dir, four optional fetch keys, and a write_text rewrite limit (max_rewrite_lines, 300 by default), and preloads seven tools over one root folder: bash, read_lines, write_text, replace_text, glob, grep, and one web-fetch tool picked by the key passed.
 ROLE IN CODEBASE: Exported by vidbyte/agents/__init__.py and the root vidbyte package; builds on vidbyte/agents/base.py (BaseAgent), vidbyte/lib/dataclasses/coding.py (CodingAgentSettings), and vidbyte/tools/toolsets/coding.py (CodingAgentTools).
 ARCHITECTURE NOTE: CodingAgent only gathers its own arguments into one validated CodingAgentSettings, builds CodingAgentTools from it, and hands everything to BaseAgent.__init__; it overrides no BaseAgent method, so runs, forks, sessions, and JevAgent specialist checks behave exactly as for a BaseAgent holding the same tools and policy.
 FUNCTION INVENTORY: CodingAgent.__init__ is the narrated main function and the only method.
@@ -37,6 +37,7 @@ class CodingAgent(BaseAgent):
         tavily_api_key: str | None = None,
         tools: Sequence[object] | Tools = (),
         permission_policy: PermissionPolicy | None = None,
+        max_rewrite_lines: int | None = 300,
         **kwargs: Any,
     ) -> None:
         # @intent coding-tools-run-by-default
@@ -49,10 +50,12 @@ class CodingAgent(BaseAgent):
         policy = PermissionPolicy.allow_all() if permission_policy is None else permission_policy
 
         # Check every argument in one validated record before BaseAgent
-        # builds anything, so a bad root folder or key fails here.
+        # builds anything, so a bad root folder, key, or limit fails
+        # here.
         settings = CodingAgentSettings(
             root_dir=root_dir,
             permission_policy=policy,
+            max_rewrite_lines=max_rewrite_lines,
             tools=tools.all() if isinstance(tools, Tools) else tuple(tools),
             firecrawl_api_key=firecrawl_api_key,
             browserbase_api_key=browserbase_api_key,
@@ -61,7 +64,8 @@ class CodingAgent(BaseAgent):
         )
 
         # Build the seven coding tools over the root folder, which the
-        # record has already resolved to an absolute path.
+        # record has already resolved to an absolute path. write_text
+        # refuses to replace an existing file over max_rewrite_lines.
         coding_tools = CodingAgentTools(settings)
         self.root_dir = Path(settings.root_dir)
 

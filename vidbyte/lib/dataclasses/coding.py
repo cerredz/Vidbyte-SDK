@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/dataclasses/coding.py
 
-PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, and the permission policy.
+PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, and the write_text rewrite limit.
 ROLE IN CODEBASE: Built by vidbyte/agents/coding.py (CodingAgent.__init__) and read by vidbyte/tools/toolsets/coding.py (CodingAgentTools); exported by the root vidbyte package.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
-FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy.
+FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
 KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools.
@@ -17,13 +17,14 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vidbyte.lib.dataclasses.filesystem import OverwriteLineLimit
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.errors import ConfigurationError
 
 
 @dataclass(frozen=True, slots=True)
 class CodingAgentSettings:
-    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, and the policy.
+    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, the policy, and the rewrite limit.
 
     root_dir is typed Path | str because the record must see the raw
     value: Path("") is the current folder, so converting first would
@@ -33,6 +34,7 @@ class CodingAgentSettings:
 
     root_dir: Path | str
     permission_policy: PermissionPolicy
+    max_rewrite_lines: int | None
     tools: tuple[object, ...] = ()
     firecrawl_api_key: str | None = field(default=None, repr=False)
     browserbase_api_key: str | None = field(default=None, repr=False)
@@ -50,6 +52,11 @@ class CodingAgentSettings:
 
         # Check the caller's tools and the policy every call runs under.
         self._check_tools_and_policy()
+
+        # Check the rewrite limit with the same rule write_text's own
+        # config uses: None turns it off, and a number is the most lines
+        # an existing file may have and still be replaced whole.
+        OverwriteLineLimit(self.max_rewrite_lines, "max_rewrite_lines")
 
     def _resolved_root(self) -> Path:
         """Return root_dir as an absolute path, or raise when it is not an existing directory."""
