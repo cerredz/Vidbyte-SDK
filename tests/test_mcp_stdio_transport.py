@@ -21,8 +21,10 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 from vidbyte.lib.errors import McpProtocolError
 from vidbyte.tools.mcp.transport import McpStdioTransport, build_child_env
@@ -453,6 +455,91 @@ class McpStdioTransportHardeningTests(unittest.IsolatedAsyncioTestCase):
         """Empty command sequences raise ValueError at construction."""
         with self.assertRaises(ValueError):
             McpStdioTransport([])
+
+
+class _SpawnRefused(Exception):
+    """Sentinel raised by the patched spawn so a test can stop right after argv is chosen."""
+
+
+class McpStdioTransportWindowsLauncherTests(unittest.IsolatedAsyncioTestCase):
+    """On Windows a bare program name is resolved through PATH and PATHEXT like a shell does."""
+
+    async def _spawned_argv(self, command: tuple[str, ...], which_result: str | None) -> tuple[str, ...]:
+        """Start a transport as if on Windows and return the argv it asked the OS to spawn."""
+        captured: list[tuple[str, ...]] = []
+
+        async def fake_spawn(*argv: str, **_kwargs: object) -> None:
+            captured.append(argv)
+            raise _SpawnRefused()
+
+        with (
+            mock.patch("vidbyte.tools.mcp.transport.sys.platform", "win32"),
+            mock.patch("vidbyte.tools.mcp.transport.shutil.which", return_value=which_result) as which,
+            mock.patch("vidbyte.tools.mcp.transport.asyncio.create_subprocess_exec", fake_spawn),
+        ):
+            with self.assertRaises(_SpawnRefused):
+                await McpStdioTransport(command).start()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][1:], command[1:])
+        if captured[0][0] != command[0]:
+            self.assertEqual(which.call_args_list, [mock.call(command[0])])
+        return captured[0]
+
+    async def test_bare_npx_is_spawned_through_its_resolved_cmd_launcher(self) -> None:
+        argv = await self._spawned_argv(("npx", "-y", "pkg"), "C:\\nodejs\\npx.CMD")
+        self.assertEqual(argv, ("C:\\nodejs\\npx.CMD", "-y", "pkg"))
+
+    async def test_unresolvable_name_is_spawned_unchanged(self) -> None:
+        argv = await self._spawned_argv(("no-such-server", "--flag"), None)
+        self.assertEqual(argv, ("no-such-server", "--flag"))
+
+    async def test_resolution_is_skipped_off_windows(self) -> None:
+        captured: list[tuple[str, ...]] = []
+
+        async def fake_spawn(*argv: str, **_kwargs: object) -> None:
+            captured.append(argv)
+            raise _SpawnRefused()
+
+        with (
+            mock.patch("vidbyte.tools.mcp.transport.sys.platform", "linux"),
+            mock.patch("vidbyte.tools.mcp.transport.shutil.which", return_value="/usr/bin/npx") as which,
+            mock.patch("vidbyte.tools.mcp.transport.asyncio.create_subprocess_exec", fake_spawn),
+        ):
+            with self.assertRaises(_SpawnRefused):
+                await McpStdioTransport(("npx", "-y", "pkg")).start()
+        which.assert_not_called()
+        self.assertEqual(captured, [("npx", "-y", "pkg")])
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows .cmd launcher behavior")
+    async def test_cmd_shim_on_path_starts_a_real_server(self) -> None:
+        """A server reachable only through a .cmd shim on PATH answers a real request."""
+        server = textwrap.dedent(
+            """
+            import json, sys
+            for line in sys.stdin:
+                msg = json.loads(line)
+                sys.stdout.write(json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": {"echo": msg["method"]},
+                }) + "\\n")
+                sys.stdout.flush()
+            """
+        ).strip()
+        with tempfile.TemporaryDirectory() as shim_dir:
+            server_path = os.path.join(shim_dir, "server.py")
+            with open(server_path, "w", encoding="utf-8") as handle:
+                handle.write(server)
+            with open(os.path.join(shim_dir, "vidbytefakemcp.cmd"), "w", encoding="utf-8") as handle:
+                handle.write(f'@echo off\r\n"{sys.executable}" -u "{server_path}"\r\n')
+            path = shim_dir + os.pathsep + os.environ.get("PATH", "")
+            with mock.patch.dict(os.environ, {"PATH": path}):
+                transport = McpStdioTransport(("vidbytefakemcp",), request_timeout=10.0)
+                try:
+                    result = await transport.request("initialize", {})
+                    self.assertEqual(result["echo"], "initialize")
+                finally:
+                    await transport.close()
 
 
 class McpStdioTransportLoopBindingTests(unittest.TestCase):

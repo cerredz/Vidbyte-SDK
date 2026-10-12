@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import sys
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
@@ -192,8 +193,15 @@ class McpStdioTransport:
             child_env = build_child_env(self.env)
             # Subprocess pipes only work on the loop that opens them, so remember which one that is.
             self._loop = asyncio.get_running_loop()
+            program, *arguments = self.command
+            # @intent windows-launchers-resolve-like-a-shell
+            # Windows only appends .exe to a bare program name, but npm launchers such as npx are
+            # .cmd files, so look the name up through PATH and PATHEXT first, as a shell would.
+            if sys.platform == "win32":
+                program = shutil.which(program) or program
             self._process = await asyncio.create_subprocess_exec(
-                *self.command,
+                program,
+                *arguments,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
