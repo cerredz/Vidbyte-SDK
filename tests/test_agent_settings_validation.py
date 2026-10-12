@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from vidbyte import Agent
 from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
 from vidbyte.agents.fallback import AgentFallback
 from vidbyte.agents.settings import AgentFallbackSettings
 from vidbyte.config import YamlLoader
+from vidbyte.lib.constants.jev import VIDBYTE_API_KEY_PREFIX
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, FallbackModel
 from vidbyte.lib.dataclasses.config import AgentSettings, ToolDefinition
 from vidbyte.lib.enums import ModelProvider
@@ -63,6 +66,17 @@ class FallbackApiKeyInheritanceTests(unittest.TestCase):
     def test_other_provider_prefix_does_not_receive_the_agent_key(self) -> None:
         (entry,) = self.resolve("anthropic/claude-z")
         self.assertEqual((entry.provider, entry.model, entry.api_key, entry.temperature), ("anthropic", "claude-z", None, 0.3))
+
+    def test_a_vidbyte_key_follows_a_prefixed_backup_only_to_a_managed_provider(self) -> None:
+        # @intent vidbyte-key-may-cross-to-a-managed-provider: the gateway serves Kimi with the same Vidbyte key, but not GLM.
+        vidbyte_key = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
+        primary = FallbackModel(provider="deepseek", model="deepseek-chat", api_key=vidbyte_key)
+        with patch.dict(os.environ, {}, clear=True):
+            managed, unmanaged = self.resolve("kimi/kimi-k2.7-code", "glm/glm-5.2", primary=primary)
+            (vendor,) = self.resolve("kimi/kimi-k2.7-code")
+        self.assertEqual((managed.provider, managed.api_key), ("kimi", vidbyte_key))
+        self.assertEqual((unmanaged.provider, unmanaged.api_key), ("glm", None))
+        self.assertEqual((vendor.provider, vendor.api_key), ("kimi", None))
 
     def test_enum_or_cased_primary_provider_still_counts_as_same_provider(self) -> None:
         for provider in (ModelProvider.OPENAI, "OpenAI"):

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from vidbyte.lib.dataclasses.agents import FallbackModel
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.models import ProviderModelRegistry
 
 if TYPE_CHECKING:
     from vidbyte.agents.fallback import AgentFallback
@@ -156,9 +157,10 @@ class AgentFallbackSettings:
     def _inherited_api_key(primary: FallbackModel, provider: str) -> str | None:
         # @intent fallback-key-never-crosses-providers
         # Sending the primary vendor's secret to another vendor leaks it and fails auth exactly
-        # when the fallback is needed; None lets the target provider read its own env key.
+        # when the fallback is needed; None lets the target provider read its own env key. A Vidbyte key
+        # is no vendor's secret and the gateway serves every managed provider, so it follows such a backup.
         primary_provider = primary.provider.value if isinstance(primary.provider, ModelProvider) else str(primary.provider)
-        if primary_provider.strip().lower() != provider.strip().lower():
+        if primary_provider.strip().lower() != provider.strip().lower() and not ProviderModelRegistry.vidbyte_key_follows_provider(primary.api_key, provider):
             return None
         return primary.api_key
 
