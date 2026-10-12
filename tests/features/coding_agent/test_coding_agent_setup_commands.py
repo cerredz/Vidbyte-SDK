@@ -31,6 +31,7 @@ SYSTEM_PROMPT = "You are a careful engineer. SYSTEM-PROMPT-MARKER."
 USER_MESSAGE = "Fix the failing test. USER-MESSAGE-MARKER"
 AGENTS_HEADER = "### [coding:agents_md]"
 SETUP_HEADER = "### [coding:setup_results] Setup command results"
+NOTES_HEADER = "### [coding:progress_notes]"
 ZONE_HEADER = "## Context Window Primitives"
 OFFLINE_MODEL = {"provider": "openai", "model_name": "gpt-4.1-mini"}
 
@@ -87,14 +88,14 @@ def _forbid_processes(monkeypatch: pytest.MonkeyPatch) -> list[object]:
 
 @needs_bash
 def test_two_passing_commands_show_two_passed_lines_between_the_earlier_sections_and_the_user_message(coding_agent_cls, script_model, tmp_path) -> None:
-    # Both commands run, in order, and the model sees one passed line each, after AGENTS.md and before the user message.
+    # Both commands run, in order, and the model sees one passed line each, after AGENTS.md, before the progress notes, and before the user message.
     (tmp_path / "AGENTS.md").write_bytes(b"# Rules\nUse uv.\n")
 
     agent = _agent(coding_agent_cls, tmp_path, setup_commands=("echo one > one.txt", "cat one.txt > two.txt"))
     system, prompt = _first_request(agent, script_model)
 
     assert (tmp_path / "two.txt").read_text(encoding="utf-8").strip() == "one"
-    assert system.index(SYSTEM_PROMPT) < system.index(AGENTS_HEADER) < system.index(SETUP_HEADER)
+    assert system.index(SYSTEM_PROMPT) < system.index(AGENTS_HEADER) < system.index(SETUP_HEADER) < system.index(NOTES_HEADER)
     assert f"These commands ran in {tmp_path.resolve()} before this conversation started:" in system
     assert "1. `echo one > one.txt`: passed (exit 0, " in system
     assert "2. `cat one.txt > two.txt`: passed (exit 0, " in system
@@ -163,7 +164,7 @@ def test_empty_setup_commands_add_no_section_and_start_no_process(coding_agent_c
     # Edge case: the default runs nothing, so the request is what it was before this feature.
     started = _forbid_processes(monkeypatch)
 
-    agent = _agent(coding_agent_cls, tmp_path)
+    agent = _agent(coding_agent_cls, tmp_path, progress_notes=False)
     system, _prompt = _first_request(agent, script_model)
 
     assert started == []

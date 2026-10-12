@@ -38,9 +38,11 @@ EXPECTED_SIGNATURE = {
     "permission_policy": None,
     # AGENTS.md loading: the switch, and the caller's manager the coding context sections go ahead of.
     "load_agents": True,
-    "context_manager": None,
     # Setup commands: run once at construction; empty runs nothing.
     "setup_commands": (),
+    # Progress notes: the switch for the agent's own .vidbyte/coding-agent/progress.md section.
+    "progress_notes": True,
+    "context_manager": None,
 }
 
 # BaseAgent keywords that RunState exports, so a pass-through mistake shows up as a state difference.
@@ -121,7 +123,7 @@ def test_coding_agent_adds_only_a_constructor_with_root_keys_tools_and_policy(co
 
 def test_coding_agent_exports_the_same_state_as_an_equivalent_base_agent(coding_agent_cls, tmp_path) -> None:
     # INV-2 / INV-7 / INV-8 / §9.1: pass-through keywords keep their meaning, the prompt is untouched, and no key or root enters RunState.
-    coding = coding_agent_cls(root_dir=tmp_path, tavily_api_key="tvly-test-key", **copy.deepcopy(PARITY_KEYWORDS))
+    coding = coding_agent_cls(root_dir=tmp_path, tavily_api_key="tvly-test-key", progress_notes=False, **copy.deepcopy(PARITY_KEYWORDS))
     plain = BaseAgent(tools=coding.tools.all(), permission_policy=PermissionPolicy.allow_all(), **copy.deepcopy(PARITY_KEYWORDS))
 
     assert coding.export_state() == plain.export_state()

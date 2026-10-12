@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
 KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. setup_commands="uv sync" is rejected rather than run one character at a time, which is why setup_commands keeps its raw type until __post_init__ checks it. CodingContextSectionText does not cap its content; each loader bounds its own text.
 RELATED DOCS: docs/spec/coding-agent/spec.md; vidbyte/agents/README.md (Coding Agent)
-TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_agents_md.py, and tests/features/coding_agent/test_coding_agent_setup_commands.py
+TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_setup_commands.py, and tests/features/coding_agent/test_coding_agent_progress_notes.py
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ class CodingAgentSettings:
     tavily_api_key: str | None = field(default=None, repr=False)
     load_agents: bool = True
     setup_commands: Sequence[str] = ()
+    progress_notes: bool = True
 
     def __post_init__(self) -> None:
         # Check the root folder and keep its absolute path, so a later
@@ -112,6 +113,8 @@ class CodingAgentSettings:
         """Raise unless every context-section switch is a real bool, not a truthy stand-in such as 1 or "yes"."""
         if not isinstance(self.load_agents, bool):
             raise ConfigurationError("CodingAgent load_agents must be True or False.", details={"parameter": "load_agents", "load_agents_type": type(self.load_agents).__name__})
+        if not isinstance(self.progress_notes, bool):
+            raise ConfigurationError("CodingAgent progress_notes must be True or False.", details={"parameter": "progress_notes", "progress_notes_type": type(self.progress_notes).__name__})
 
     def _checked_setup_commands(self) -> tuple[str, ...]:
         """Return setup_commands as a tuple, or raise unless it is a list or tuple of non-blank command strings."""

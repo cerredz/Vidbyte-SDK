@@ -9,12 +9,13 @@ The model sees, in order:
 3. `coding:environment`: reserved for the environment-context section;
 4. `coding:repo_map`: reserved for the map.md section;
 5. `coding:setup_results`: the setup commands' pass/fail note, from `SetupCommandsLoader` in `setup_commands.py`, which runs the commands while the agent is built;
-6. the caller's own context-manager primitives, in the caller's order and placements;
-7. the context body, then the user's message.
+6. `coding:progress_notes`: the agent's own notes file, `.vidbyte/coding-agent/progress.md`, from `ProgressNotesLoader` in `progress_notes.py`;
+7. the caller's own context-manager primitives, in the caller's order and placements;
+8. the context body, then the user's message.
 
 ## The contract
 
-- **Order** comes from one enum, `CodingContextSection` in `vidbyte/lib/enums/coding.py`. Declaration order is render order, and each member's value is the section's primitive id. Every member that a later feature needs is already declared.
+- **Order** comes from one enum, `CodingContextSection` in `vidbyte/lib/enums/coding.py`. Declaration order is render order, and each member's value is the section's primitive id. A new kind of section appends its own member where the model should see it, as `PROGRESS_NOTES` did.
 - **A section** is a `CodingContextSectionText(section, title, content, source=None)` record from `vidbyte/lib/dataclasses/coding.py`. It checks itself: the section must be a `CodingContextSection`, the title and content must be non-blank text, and the source, when given, must be non-blank text.
 - **A loader** is a class with one classmethod, `load(settings: CodingAgentSettings) -> CodingContextSectionText | None`. It reads whatever it needs from the validated settings record, including its own on/off switch, and returns `None` when it has nothing to add. It does its work once, at construction. A loader bounds its own text; the record does not cap it.
 - **The window**, `CodingContextWindow.build(sections, context_manager)`, ignores `None` entries and fails with `ConfigurationError` on anything that is not a section record, on a section kind given twice, or on a `context_manager` that is not a `ContextManager`. With no sections it returns the caller's manager, the same object, or `None`, so the request is exactly a plain `BaseAgent`'s. Otherwise it returns a new manager: the sections first, at `TOP_OF_CONTEXT`, then the caller's primitives with their own placements, plus the caller's plain items and metadata. It never changes the caller's manager. A caller primitive whose id equals a placed section's id is not copied; the section wins.
@@ -35,4 +36,5 @@ If the section has its own switch, that switch is part of the feature, not of th
 - Do not add a section to the system prompt string, and do not write to `ContextManager`'s private registry; `scripts/check_context_write_paths.py` fails CI on private access.
 - When a section is loaded and the caller passed a `context_manager`, the agent renders a new manager. Tools bound to the caller's manager object, such as `ContextWindowFactory` tools, keep writing to the caller's object, which that agent no longer shows.
 - `fork()` keeps every section, because it copies the agent's manager. `BaseAgent.restore()` does not bring sections back.
-- `SetupCommandsLoader` is the one loader with side effects: it runs commands, so construction blocks until they finish. It reuses `BashTool.find_bash()`, `BashTool.not_found_message()`, and the `BASH_*` time limits instead of copying them, and it uses the synchronous `subprocess` module because the constructor may run inside an event loop.
+- `SetupCommandsLoader` runs commands, so construction blocks until they finish. It reuses `BashTool.find_bash()`, `BashTool.not_found_message()`, and the `BASH_*` time limits instead of copying them, and it uses the synchronous `subprocess` module because the constructor may run inside an event loop.
+- `ProgressNotesLoader` is the one loader that writes files itself: it creates `.vidbyte/coding-agent/progress.md` from a template and `.vidbyte/coding-agent/.gitignore` holding `*`, each only when missing, and never overwrites either. It never touches `.vidbyte/` itself, because other tools write there. Any `OSError` there, such as a read-only root, means no section rather than a failed construction, because the switch is on by default.
