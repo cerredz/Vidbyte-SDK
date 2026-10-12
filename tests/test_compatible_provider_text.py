@@ -1,9 +1,9 @@
 """FILE: tests/test_compatible_provider_text.py
 
-PURPOSE: Regression tests for OpenAICompatibleProvider chat-completion text extraction.
-ROLE IN CODEBASE: Keeps a plain text turn sent with "tool_calls": [] from losing its text.
+PURPOSE: Regression tests for OpenAICompatibleProvider chat-completion text extraction and error messages.
+ROLE IN CODEBASE: Keeps a plain text turn sent with "tool_calls": [] from losing its text, and Mistral's error message from being dropped.
 ARCHITECTURE NOTE: Drives run_text() through an async scripted transport with one canned body.
-FUNCTION INVENTORY: _ScriptedTransport fakes HTTP; CompatibleToolCallTextTests checks text vs tool-call turns.
+FUNCTION INVENTORY: _ScriptedTransport fakes HTTP; CompatibleToolCallTextTests checks text vs tool-call turns; CompatibleErrorMessageTests checks error bodies.
 COMMON MODIFICATION PATTERNS: Add a canned message per OpenAI-compatible response shape worth pinning.
 WHAT NOT TO DO: Do not call real provider endpoints or require API keys from the environment.
 KNOWN EDGE CASES: vLLM-style servers and some OpenRouter upstreams send "tool_calls": [] on text turns.
@@ -18,7 +18,8 @@ import json
 import unittest
 from collections.abc import Mapping
 
-from vidbyte.lib.http import HttpResponse
+from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.http import HttpResponse, HttpResponseParser
 from vidbyte.providers.compatible import MiniMaxProvider, MistralProvider
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.xai import XAIProvider
@@ -71,6 +72,23 @@ class CompatibleToolCallTextTests(unittest.TestCase):
         self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": "Paris"}), "Paris")
         self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": mid_answer}), mid_answer)
         self.assertEqual(self._text(MiniMaxProvider, call_turn), "")
+
+
+class CompatibleErrorMessageTests(unittest.TestCase):
+    """Verify a failed response's vendor message reaches ProviderRequestError."""
+
+    def _message(self, body: Mapping[str, object]) -> str:
+        response = HttpResponse(status_code=400, body=json.dumps(body), headers={})
+        with self.assertRaises(ProviderRequestError) as caught:
+            HttpResponseParser().parse_json_response(response, provider="mistral")
+        return caught.exception.message
+
+    def test_mistral_top_level_error_message_is_reported(self) -> None:
+        """Mistral's documented top-level message is reported; an "error" envelope still wins; a non-string message stays generic."""
+        mistral = {"object": "error", "message": "Invalid model: mistral-nope", "type": "invalid_request_error", "param": "model", "code": "unknown_model"}
+        self.assertEqual(self._message(mistral), "Invalid model: mistral-nope")
+        self.assertEqual(self._message({"error": {"message": "X"}, "message": "Y"}), "X")
+        self.assertEqual(self._message({"message": {"detail": []}}), "Provider request failed.")
 
 
 if __name__ == "__main__":

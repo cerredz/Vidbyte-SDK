@@ -40,7 +40,10 @@ class HttpResponseParser:
             return message if isinstance(message, str) else None
         if isinstance(error, str):
             return error
-        return None
+        # @intent mistral-top-level-error-message: Mistral documents every error body as
+        # {"object": "error", "message": ...} with the message at top level, so read it when there is no "error" envelope.
+        message = parsed.get("message")
+        return message if isinstance(message, str) and message.strip() else None
 
 
 __all__ = [
