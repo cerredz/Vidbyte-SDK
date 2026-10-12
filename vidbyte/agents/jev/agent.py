@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: JevAgent is opinionated by design; callers cannot replace its
 COMMON MODIFICATION PATTERNS: Build a new feature's run-time object here from JevAgentSettings and pass it through _runtime_extension_kwargs; report its outcome through JevResponse so it appears on `response`. Output connectors come only from JevAgentSettings.outputs; the bulk-work, clone, swarm, and continuation agents built here never get them.
 KNOWN EDGE CASES: Jev's TypeSafe model is not the reply-generating model; settings validation prevents that provider mix-up. A specialist must reply through BaseAgent.generate_reply, the hook that adds its usage to this agent's run total, so any other agent is rejected at construction. `response` describes only the most recent run and is replaced when the next run starts.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_compute.py, tests/features/agent_output_connectors/test_output_connectors_agent_wiring.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 PURPOSE: Defines OutputHttp and OutputSmtp, which send one connector request and map the outcome to a DeliveryReceipt.
 ROLE IN CODEBASE: Called by every connector's send in this package; HTTP goes through vidbyte/lib/http/transport.py, email through stdlib smtplib.
-ARCHITECTURE NOTE: The only place delivery outcomes become error codes, so the INV-11 code grammar and the retry policy live in one module.
+ARCHITECTURE NOTE: Turns every HTTP and SMTP outcome into a receipt error code and owns the retry policy; the dispatcher adds only the deadline's network code and unexpected:<Type> for a connector bug.
 COMMON MODIFICATION PATTERNS: A new HTTP connector builds an OutputRequest and calls OutputHttp.post; it never calls HttpTransport itself.
 KNOWN EDGE CASES: A 2xx without a usable https link is FAILED invalid_response; a partial SMTP refusal is FAILED, since a retry would duplicate the mail; a QUIT reply after the send never changes the receipt.
 RELATED DOCS: vidbyte/lib/outputs/README.md
