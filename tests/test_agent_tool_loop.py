@@ -247,6 +247,61 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(tool_result_idx, "no tool result message found in messages")
         self.assertLess(assistant_idx, tool_result_idx, "assistant turn must precede tool result")
 
+    async def test_openai_chat_id_less_tool_call_is_echoed_with_its_result_id(self) -> None:
+        # @intent id-less-tool-call-pairs-by-name
+        @tool
+        def read(path: str) -> str:
+            """Read a file."""
+            return "content"
+
+        for missing_id in ({}, {"id": ""}):
+            with self.subTest(missing_id=missing_id):
+                runner = ToolCallingRunner(
+                    [
+                        FakeResponse(
+                            "",
+                            {
+                                "choices": [
+                                    {
+                                        "message": {
+                                            "role": "assistant",
+                                            "content": None,
+                                            "tool_calls": [
+                                                {**missing_id, "type": "function", "function": {"name": "read", "arguments": '{"path": "f.py"}'}}
+                                            ],
+                                        }
+                                    }
+                                ]
+                            },
+                        ),
+                        FakeResponse(
+                            "",
+                            {
+                                "choices": [
+                                    {
+                                        "message": {
+                                            "role": "assistant",
+                                            "content": None,
+                                            "tool_calls": [
+                                                {"id": "call_2", "type": "function", "function": {"name": "isDone", "arguments": '{"final_answer": "done"}'}}
+                                            ],
+                                        }
+                                    }
+                                ]
+                            },
+                        ),
+                    ]
+                )
+                agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
+                with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+                    await agent.arun("task")
+
+                second_call_messages = runner.calls[1]["kwargs"]["messages"]
+                assistant = next(m for m in second_call_messages if isinstance(m.get("tool_calls"), list))
+                tool_result = next(m for m in second_call_messages if m.get("role") == "tool")
+                self.assertEqual(tool_result["tool_call_id"], "read")
+                self.assertEqual(assistant["tool_calls"][0]["id"], tool_result["tool_call_id"])
+
     async def test_anthropic_assistant_turn_precedes_tool_result_in_messages(self) -> None:
         @tool
         def read(path: str) -> str:
