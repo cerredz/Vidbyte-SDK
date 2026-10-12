@@ -20,10 +20,10 @@ started: 2026-10-11 17:36
 | S4 adversarial review | done | 2026-10-11 | 2026-10-11 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 httpx INFO log leaks secret URLs) / 3 Major (R-2 str destination, R-3 SMTP thread holds sync run past deadline, R-4 duplicated email rule) / 11 Minor; 0 refuted (1 sub-claim) |
 | S5 repair loop | done (converged at iteration 1) | 2026-10-11 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | merge ba83c953 (origin/main, no conflicts); 12 findings fixed one commit each; HEAD ed1dd67b; 340/340; SDK-LINT PASS; run_ci source 3743 passed; full run_ci CI passed (re-run by orchestrator at ed1dd67b); Semgrep 0; remote ci 38211917706 + static-policy 38211919803 success @1348b728; review.md 0 open |
 | S5 re-review | done (round 1/2) | 2026-10-12 | 2026-10-12 | reports/S5-rereview.md | SOUND: 0 Blocker / 0 Major / 2 Minor (R-C1 Telegram ctor raise not recorded as deviation; R-C2 E302 blank line email.py:32); all 12 fixes hold; merge clean; §4 snippet byte-equal |
-| S6 PR | running | 2026-10-12 | | | |
+| S6 PR | body written; reopened S5 for 2 Minors | 2026-10-12 | | reports/S6-pr-author.md | PR #882 retitled (no [WIP]), draft, 1 mermaid, spec pr-open @ae6115f4; ci 38215600229 + static 38215602359 success @ae6115f4; AC-18/AC-24 proofs exist on branch |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 (iteration 2 = S6 follow-ups) · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-11 17:36 — Slug `agent-output-connectors`, branch `feat/agent-output-connectors`, worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-output-connectors` — pipeline defaults; SDK AGENTS.md defines no override.
@@ -61,6 +61,8 @@ started: 2026-10-11 17:36
 - 2026-10-12 — Re-review SOUND → loop converged. Applied the two trivial Minors anyway (one blank line; one §17 deviation bullet) by resuming the repair-1 agent instead of a fresh iteration: both are mechanical, no finding needs verification, and a fresh agent's orientation would cost more than the fix. Logged as a polish pass, not counted as iteration 2.
 
 - 2026-10-12 — Polish pass done @12729d09 (R-C2 blank line ad4ed50a; R-C1 §17 deviation 0ca19568); 340 passed, SDK-LINT PASS, run_ci source 3743 passed; remote ci 38214072413 + static-policy 38214075610 success @12729d09. Test-tree check corrected: pack diff vs 7f3bb7ff empty, `git diff ba83c953..HEAD -- tests/` empty (non-pack differences vs 7f3bb7ff are main's, via the merge). Spec status → verified.
+
+- 2026-10-12 — S6 spot-check passed. S6 OPEN ITEMS name two Minor code defects: (a) `EmailOutput(to=[])` error names `recipients` not `to` (email.py:50, dataclasses/outputs.py:112-113; AC-20 says name the parameter); (b) `OutputDeliveryError` repair hint (errors/base.py:215) says `deliver(failed, …)` but `err.failed` is receipts → `unexpected:AttributeError` when followed. Per skill, code defects found at S6 go back to S5: test author adds the AC-20 `to=[]` case (red) → fresh repair agent iteration 2 (catch-up merge of origin/main, 7 commits incl. #885 coding.py, #889 runtime.py; fix a + b) → resume S6 author to refresh the body.
 
 ## User replies (verbatim)
 - (none yet)
