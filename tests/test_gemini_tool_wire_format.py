@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 import unittest
+from enum import Enum, IntEnum
+from typing import Literal, Optional
 
+from pydantic import BaseModel
+
+from vidbyte import tool
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec
 from vidbyte.lib.tools import ToolsFormatter
 
@@ -49,7 +54,8 @@ class GeminiToolSchemaTests(unittest.TestCase):
         parameters = ToolsFormatter.to_gemini_tool(_spec_with_schema(schema))["function_declarations"][0]["parameters"]
         self.assertEqual(parameters["required"], ["n"])
         self.assertEqual(parameters["properties"]["n"]["minimum"], 1)
-        self.assertEqual(parameters["properties"]["n"]["enum"], [1, 2])
+        # Gemini's Schema.enum is a string list, so integer values travel as their JSON text.
+        self.assertEqual(parameters["properties"]["n"]["enum"], ["1", "2"])
 
     def test_recursive_ref_terminates(self) -> None:
         schema = {
@@ -164,6 +170,96 @@ class GeminiArrayItemsTests(unittest.TestCase):
         schema = {"type": "object", "properties": {"x": {"type": "array"}}}
         openai = ToolsFormatter.to_openai_tool(_spec_with_schema(schema))
         self.assertNotIn("items", json.dumps(openai))
+
+
+class Level(IntEnum):
+    LOW = 1
+    HIGH = 2
+
+
+class Mood(str, Enum):
+    CALM = "calm"
+    LOUD = "loud"
+
+
+@tool
+def file_ticket(
+    priority: Literal[1, 2, 3],
+    level: Level,
+    weight: Literal[0.5, 1.5],
+    mood: Mood,
+    tag: Literal["a", None],
+    maybe: Optional[Literal[1, 2]] = None,
+) -> str:
+    """File a ticket."""
+    return "filed"
+
+
+class TicketReport(BaseModel):
+    title: str
+    priority: Literal[1, 2, 3]
+
+
+def _first_gemini_request(**agent_options: object) -> dict:
+    # Runs a Gemini agent over a fake transport and returns the first request body it sends.
+    from unittest.mock import patch
+
+    from vidbyte import Agent
+    from vidbyte.lib.http import HttpTransport
+    from vidbyte.lib.http.transport import HttpResponse
+
+    sent: list = []
+    done = {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "isDone", "args": {"final_answer": '{"title": "t", "priority": 1}'}}}]}}]}
+
+    async def fake_gemini(self, *, json_body=None, **kwargs) -> HttpResponse:
+        sent.append(json_body or {})
+        return HttpResponse(status_code=200, body=json.dumps(done), headers={})
+
+    agent = Agent(name="r", system_prompt="s", provider="gemini", model_name="gemini-3.5-flash", api_key="g", **agent_options)
+    with patch.object(HttpTransport, "request", fake_gemini):
+        agent.run("go")
+    return sent[0]
+
+
+class GeminiEnumValueTests(unittest.TestCase):
+    """Gemini's Schema.enum is a list of strings; typed enum values fail the request with a 400."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        body = _first_gemini_request(tools=[file_ticket])
+        declarations = [d for entry in body["tools"] for d in entry.get("function_declarations", [])]
+        cls.properties = next(d for d in declarations if d["name"] == "file_ticket")["parameters"]["properties"]
+
+    def test_int_literal_values_become_strings_and_keep_their_type(self) -> None:
+        self.assertEqual(self.properties["priority"]["type"], "integer")
+        self.assertEqual(self.properties["priority"]["enum"], ["1", "2", "3"])
+
+    def test_int_enum_from_defs_becomes_strings(self) -> None:
+        level = self.properties["level"]
+        self.assertNotIn("$ref", level)
+        self.assertEqual(level["type"], "integer")
+        self.assertEqual(level["enum"], ["1", "2"])
+
+    def test_float_literal_values_become_strings(self) -> None:
+        self.assertEqual(self.properties["weight"]["type"], "number")
+        self.assertEqual(self.properties["weight"]["enum"], ["0.5", "1.5"])
+
+    def test_optional_int_literal_any_of_branch_becomes_strings(self) -> None:
+        self.assertEqual(self.properties["maybe"]["anyOf"][0], {"enum": ["1", "2"], "type": "integer"})
+
+    def test_string_enum_and_nullable_literal_are_unchanged(self) -> None:
+        self.assertEqual(self.properties["mood"]["enum"], ["calm", "loud"])
+        self.assertEqual(self.properties["tag"]["enum"], ["a", None])
+
+    def test_response_schema_int_literal_becomes_strings(self) -> None:
+        body = _first_gemini_request(output_schema=TicketReport)
+        priority = body["generationConfig"]["responseSchema"]["properties"]["priority"]
+        self.assertEqual(priority["type"], "integer")
+        self.assertEqual(priority["enum"], ["1", "2", "3"])
+
+    def test_other_providers_keep_typed_enum_values(self) -> None:
+        openai = ToolsFormatter.to_openai_tool(file_ticket.spec())["function"]["parameters"]
+        self.assertEqual(openai["properties"]["priority"]["enum"], [1, 2, 3])
 
 
 class GeminiToolResultRoleTests(unittest.TestCase):
