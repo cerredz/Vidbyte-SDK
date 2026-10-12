@@ -80,10 +80,22 @@ class FinishReviewAction(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class FinishReview:
-    """Outcome of AgentRuntime.review_finish_attempt for one proposed final answer."""
+    """Outcome of AgentMiddleware.review_finish for one finish attempt that the output contracts accepted."""
 
     action: FinishReviewAction = FinishReviewAction.ACCEPT
     feedback: str = ""
+
+    def __post_init__(self) -> None:
+        # @intent continue-feedback-is-never-empty
+        # The runtime sends a continue review's feedback to the model as
+        # the reason it may not finish yet, so a blank one would send an
+        # empty message and leave the model guessing.
+        if not isinstance(self.action, FinishReviewAction):
+            raise ValueError(f"FinishReview action must be a FinishReviewAction, got {self.action!r}.")
+        if not isinstance(self.feedback, str):
+            raise ValueError(f"FinishReview feedback must be a string, got {type(self.feedback).__name__}.")
+        if self.action is FinishReviewAction.CONTINUE and not self.feedback.strip():
+            raise ValueError("FinishReview feedback must be non-blank text when the action is continue.")
 
     @classmethod
     def accept(cls) -> "FinishReview":
@@ -97,7 +109,7 @@ class FinishReview:
 
     @classmethod
     def stop(cls, feedback: str) -> "FinishReview":
-        """Reject the finish attempt and end the run with FINISH_REVIEW_REJECTED."""
+        """Reject the finish attempt and end the run with the proposed answer and CONTRACT_UNSATISFIED; feedback is not sent to the model."""
         return cls(action=FinishReviewAction.STOP, feedback=feedback)
 
 
