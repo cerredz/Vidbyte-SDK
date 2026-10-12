@@ -139,7 +139,9 @@ class OpenAICompatibleProvider:
         first = choices[0]
         message = first.get("message") if isinstance(first, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
+        # @intent empty-tool-calls-is-a-text-turn
+        # vLLM-style servers send "tool_calls": [] on plain text turns; only real calls carry no text.
+        if isinstance(message, dict) and isinstance(message.get("tool_calls"), list) and len(message["tool_calls"]) > 0:
             return ""
         if not isinstance(content, str):
             raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
