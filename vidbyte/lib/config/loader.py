@@ -164,10 +164,13 @@ class YamlLoader:
         tool_settings_raw = loop_raw.pop("tool_settings", None)
         output_contracts_raw = loop_raw.pop("output_contracts", None)
         tool_settings = ToolSettings(**tool_settings_raw) if tool_settings_raw else None
+        # @intent lib-loader-builds-output-contracts
+        # YAML only yields plain mappings, so each contract is built into its floor before the loop settings read it.
+        output_contracts = YamlLoader._build_output_contracts(output_contracts_raw, path)
         loop = AgentLoopSettings(
             **loop_raw,
             tool_settings=tool_settings,
-            output_contracts=output_contracts_raw if output_contracts_raw else (),
+            output_contracts=output_contracts,
         )
         tools_raw = raw.get("tools", [])
         tools = tuple(
@@ -219,6 +222,32 @@ class YamlLoader:
             metadata=dict(raw.get("metadata", {})),
         )
         return descriptor
+
+    @staticmethod
+    def _build_output_contracts(raw_contracts: Any, path: str | Path) -> tuple[Any, ...]:
+        # Builds each `{type: <FloorName>, ...}` mapping into its concrete floor, naming the file and position on failure.
+        from vidbyte.agents import contracts
+
+        # The abstract base is never satisfiable and SchemaConformance comes from output_schema, so neither is nameable here.
+        floors = {name: getattr(contracts, name) for name in contracts.__all__ if name not in {"OutputContract", "SchemaConformance"}}
+        if raw_contracts and not isinstance(raw_contracts, (list, tuple)):
+            raise ConfigurationError("'loop.output_contracts' must be a list of contract mappings.", details={"path": str(path), "field": "loop.output_contracts", "actual_type": type(raw_contracts).__name__})
+        built: list[Any] = []
+        for index, item in enumerate(raw_contracts or ()):
+            field = f"loop.output_contracts[{index}]"
+            if isinstance(item, contracts.OutputContract):
+                built.append(item)
+                continue
+            payload = dict(item) if isinstance(item, dict) else {}
+            name = payload.pop("type", None)
+            builder = floors.get(name) if isinstance(name, str) else None
+            if builder is None:
+                raise ConfigurationError(f"'{field}' must be a mapping whose 'type' is one of {sorted(floors)}.", details={"path": str(path), "field": field, "actual_value": repr(name), "expected": sorted(floors)})
+            try:
+                built.append(builder(**payload))
+            except (TypeError, ValueError, ConfigurationError) as exc:
+                raise ConfigurationError(f"'{field}' is invalid: {exc}", details={"path": str(path), "field": field}) from exc
+        return tuple(built)
 
     @staticmethod
     def _build_harness(raw: dict[str, Any], path: str | Path) -> HarnessDescriptor:
