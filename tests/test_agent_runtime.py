@@ -1231,6 +1231,18 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
                     self.assertEqual(result.content, "ANSWER")
                     self.assertEqual(runner.calls, 1)
 
+    def test_actor_answers_a_user_prompt_of_exit_instead_of_hanging(self) -> None:
+        # [Regression] A user prompt of "exit" was dropped as an exit signal, so coordinator mode waited forever.
+        for prompt in ("exit", " Exit\n"):
+            for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+                with self.subTest(prompt=prompt, topology=topology):
+                    runner = AnswerRunner()
+                    runtime = ActorRuntime(topology=topology, include_actors=[])
+                    agent = build_test_agent(name="r", system_prompt="s", runtime=runtime, runner=runner)
+                    result = asyncio.run(asyncio.wait_for(agent.arun(prompt), timeout=5))
+                    self.assertEqual(result.content, "ANSWER")
+                    self.assertEqual(runner.calls, 1)
+
     def test_actor_quiescence_waits_for_an_actor_that_is_still_working(self) -> None:
         # [Regression] Quiescence ended the run while the root actor was still awaiting its model call.
         agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(termination_mode="quiescence", include_actors=[]), runner=SlowAnswerRunner())
