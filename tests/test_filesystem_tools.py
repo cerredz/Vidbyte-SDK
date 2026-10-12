@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import unittest
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.catalog import Tools
@@ -334,6 +337,35 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(result.output, "true")
             gone = run(ExistsTool(config).execute(ToolCall("exists", {"path": "b.txt"})))
             self.assertEqual(gone.output, "false")
+
+    def test_move_performs_case_only_rename_when_resolve_canonicalizes_case(self) -> None:
+        # Simulate Windows, where resolve() of an existing entry returns its on-disk spelling.
+        original = FileSystemPermissions.resolve_scoped_path
+
+        def canonical_case(config: FileSystemToolConfig, path: str | Path) -> Path:
+            resolved = original(config, path)
+            if resolved.parent.is_dir():
+                for entry in resolved.parent.iterdir():
+                    if entry.name.casefold() == resolved.name.casefold():
+                        return entry
+            return resolved
+
+        with TemporaryDirectory() as tmp, patch.object(FileSystemPermissions, "resolve_scoped_path", side_effect=canonical_case):
+            root = Path(tmp)
+            (root / "Readme.md").write_text("r")
+            (root / "Src").mkdir()
+            (root / "a.txt").write_text("a")
+            tool = MoveTool(FileSystemToolConfig(root=tmp, allow_write=True))
+            file_result = run(tool.execute(ToolCall("move", {"source": "Readme.md", "destination": "README.md"})))
+            dir_result = run(tool.execute(ToolCall("move", {"source": "Src", "destination": "src"})))
+            other_result = run(tool.execute(ToolCall("move", {"source": "a.txt", "destination": "b.txt"})))
+            same_result = run(tool.execute(ToolCall("move", {"source": "b.txt", "destination": "b.txt"})))
+            for result in (file_result, dir_result, other_result, same_result):
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(Path(file_result.output).name, "README.md")
+            self.assertEqual(Path(dir_result.output).name, "src")
+            self.assertEqual(Path(same_result.output).name, "b.txt")
+            self.assertEqual(sorted(os.listdir(tmp)), ["README.md", "b.txt", "src"])
 
     def test_delete_then_exists(self) -> None:
         with TemporaryDirectory() as tmp:
