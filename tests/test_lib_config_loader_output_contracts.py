@@ -3,7 +3,8 @@
 PURPOSE:
     Regression tests for the descriptor loader exported from vidbyte.lib.config: a
     `loop.output_contracts` list in an agent YAML is built into concrete floor objects,
-    and an unknown floor type fails as a ConfigurationError carrying the file path.
+    and an unknown floor type fails as a ConfigurationError carrying the file path; a
+    `loop.tool_error_policy` mapping is built into a ToolErrorPolicy.
 
 ROLE IN CODEBASE:
     Exercises YamlLoader._construct_base_agent and YamlLoader._build_output_contracts in
@@ -36,6 +37,7 @@ import unittest
 from pathlib import Path
 
 from vidbyte.agents.contracts import MinToolCalls
+from vidbyte.agents.settings import ToolErrorPolicy, UnrecoverableAction
 from vidbyte.lib.config import YamlLoader
 from vidbyte.lib.errors import ConfigurationError
 
@@ -57,6 +59,15 @@ class LibConfigLoaderOutputContractsTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError) as caught:
                 YamlLoader().load_agent(unknown)
             self.assertEqual(caught.exception.details.get("path"), str(unknown))
+
+    def test_builds_tool_error_policy_from_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            policy_file = Path(folder) / "policy.yaml"
+            policy_file.write_text("name: researcher\nsystem_prompt: Research things.\nloop:\n  tool_error_policy:\n    max_retries_per_tool_call: 2\n    on_unrecoverable: abort_run\n", encoding="utf-8")
+            policy = YamlLoader().load_agent(policy_file).loop.tool_error_policy
+            self.assertIsInstance(policy, ToolErrorPolicy)
+            self.assertEqual(policy.max_retries_per_tool_call, 2)
+            self.assertEqual(policy.on_unrecoverable, UnrecoverableAction.ABORT_RUN)
 
 
 if __name__ == "__main__":
