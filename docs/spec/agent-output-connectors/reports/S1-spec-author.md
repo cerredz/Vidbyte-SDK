@@ -427,3 +427,22 @@ Self-check (r7):
 - The Proof column is identical.
 - No stale "ninth method" claim or old hint paraphrase remains.
 - Frontmatter: `revision: 7`, `updated: 2026-10-12`, `status: pr-open`.
+
+## Revision r8 (re-review 2 and repair 3 follow-ups, orchestrator-directed alignment)
+
+This revision follows `reports/S5-rereview-2.md` (RR2-C1) and `reports/S5-repair-3.md`. Status stays `pr-open`, and the `pr:` line is unchanged. Nothing under `tests/` or `vidbyte/` changed, and neither did `test-plan.md`, `review.md`, `pr-body.md`, or the §6.2 Proof column (I diffed it).
+
+Changes:
+- **RR2-C1.** §9.2, AC-24's Then cell, EC-42, and §12.3 row 25 now carry the caution clause from the code literal in `git show 563efc51 -- vidbyte/lib/errors/base.py`. The clause reads: if a failed receipt's `error_code` is `network`, `invalid_response`, `smtp_error`, or `smtp_recipients_refused`, or starts with `http_5`, that output may already have been delivered, so check its destination first.
+  - In the first three places I kept the README's note that `network` includes a send that passed the deadline. I added references to EC-4, EC-5, EC-24, EC-47, and D-21.
+  - The zip recipe is unchanged.
+- **EC-46.** The row now expects FAILED `smtp_error` instead of `network`. smtplib raises the greeting read timeout as `SMTPServerDisconnected`, which is an `SMTPException`, and `OutputSmtp.send` catches `SMTPException` before `OSError`. Repair-3's probe confirms this.
+  - Before editing, I ran `grep -rn "2465" tests/features/agent_output_connectors`. Its only hit is FEATURE.md:110's list of accepted behaviors, which pins no error code, so there was no reason to stop.
+- **§16:** adds the rows RR2-C1 and "EC-46 fix". §17 gets an r8 row.
+
+Self-check (r8):
+- Headings are unchanged.
+- The IDs have no duplicates, gaps, or undefined references, and the counts are unchanged.
+- The Proof column is identical.
+- The old network-only caution survives only in the S4-R11 history row.
+- Frontmatter: `revision: 8`, `updated: 2026-10-12`, `status: pr-open`.
