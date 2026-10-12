@@ -56,6 +56,9 @@ class FailureMetadataNormalizer:
         "unknown_tool": FailureCode.TOOL_NOT_FOUND,
         "permission_denied": FailureCode.TOOL_PERMISSION_DENIED,
         "middleware_denied": FailureCode.TOOL_PERMISSION_DENIED,
+        "tool_settings_denied": FailureCode.TOOL_PERMISSION_DENIED,
+        "tool_settings_max_calls_per_tool": FailureCode.TOOL_PERMISSION_DENIED,
+        "allowed_tools_denied": FailureCode.TOOL_PERMISSION_DENIED,
         "timeout": FailureCode.TOOL_TIMEOUT,
         "validation_error": FailureCode.TOOL_ARGUMENTS_INVALID,
         "invalid_arguments": FailureCode.TOOL_ARGUMENTS_INVALID,
@@ -66,7 +69,8 @@ class FailureMetadataNormalizer:
     }
     # @intent tool-error-codes-cover-known-metadata-error-tokens
     # "mcp_error" (vidbyte/tools/mcp/client.py) is mapped alongside the vidbyte/tools/executor.py
-    # and vidbyte/agents/runtime.py ToolResult.metadata["error"] tokens; a token with no entry here
+    # and vidbyte/agents/runtime.py ToolResult.metadata["error"] tokens, including the
+    # vidbyte/agents/settings/tool.py ToolSettings.denial refusals; a token with no entry here
     # is simply left uncounted by _append_tool_context_failures rather than misclassified.
 
     @classmethod
