@@ -103,6 +103,11 @@ class TraceController(TracerBase):
         elif name.startswith("algorithm."):
             detail = TraceDetail.VERBOSE
             component = "algorithms"
+        elif name.startswith(("runtime.search.", "runtime.actor.")):
+            # @intent runtime-spans-route-to-factory-component
+            # Search/actor runtime spans use the component their factories declare, so `search=`/`actor=` profile settings apply.
+            detail = TraceDetail.VERBOSE
+            component = name.split(".")[1]
         elif name.startswith("runtime."):
             detail = TraceDetail.VERBOSE
             component = "runtimes"
