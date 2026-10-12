@@ -638,10 +638,12 @@ class ToolsFormatter:
             args = {}
         if not isinstance(args, Mapping):
             raise ValueError("Gemini function call args must be an object")
+        # @intent gemini-call-id-comes-from-the-function-call
+        # Gemini puts the call id inside functionCall, not on the Part, so read it there first.
         return ToolCall(
             str(function_call.get("name", "")),
             dict(args),
-            call_id=str(raw_call.get("id") or "") or None,
+            call_id=str(function_call.get("id") or raw_call.get("id") or "") or None,
         )
 
     @staticmethod

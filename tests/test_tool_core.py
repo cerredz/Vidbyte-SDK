@@ -444,6 +444,28 @@ class ToolCoreTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             ToolsFormatter.parse_gemini_tool_call({"functionCall": {"name": "ping", "args": [1, 2]}})
 
+    def test_tools_formatter_keeps_gemini_call_id_from_function_call(self) -> None:
+        """A Gemini call id inside functionCall survives parsing of a whole response."""
+        # @intent gemini-call-id-comes-from-the-function-call
+        # Gemini puts the id inside functionCall and a Part has none, so the parser must read it there.
+        response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"functionCall": {"id": "fc-1", "name": "a", "args": {}}},
+                            {"functionCall": {"id": "fc-2", "name": "b", "args": {}}},
+                            {"functionCall": {"name": "c", "args": {}}},
+                        ]
+                    }
+                }
+            ]
+        }
+
+        calls = ToolsFormatter.parse_tool_calls(response, "gemini")
+
+        self.assertEqual([(call.tool_name, call.call_id) for call in calls], [("a", "fc-1"), ("b", "fc-2"), ("c", None)])
+
 
 class LookupOrderTool(BaseTool):
     """Tool that declares its arguments only through a raw input_schema."""
