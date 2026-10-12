@@ -6,11 +6,11 @@ The SDK records per-call model token counts and USD cost so callers can trust ru
 
 ## Contract
 
-Token counts are non-negative integers. A negative count anywhere in a recognized usage payload corrupts metering and leaves no priced model record. OpenRouter's reported USD cost overrides table pricing only if it is finite and non-negative; otherwise use a registered rate, or remain unpriced if no rate exists.
+A provider that bills an HTTP 200 whose reply has no usable text still appears on the bill: the text adapter puts the usage on its ProviderResponseError and the agent runtime records it as a failed call before retrying, falling back or raising. Token counts are non-negative integers. A negative count anywhere in a recognized usage payload corrupts metering and leaves no priced model record. OpenRouter's reported USD cost overrides table pricing only if it is finite and non-negative; otherwise use a registered rate, or remain unpriced if no rate exists.
 
 ## Actors / Callers
 
-`UsageTracker.record_call`, `record_billed_failure`, `ProviderUsage` subclasses, and users reading `UsageRollup`.
+`UsageTracker.record_call`, `record_billed_failure`, `ProviderUsage` subclasses, the provider text adapters and agent runtime that feed them, and users reading `UsageRollup`.
 
 ## Inputs and Preconditions
 
@@ -35,14 +35,17 @@ Only the local model pricing registry, no provider calls.
 ## Known Failure Modes
 
 The common integer parser accepted negative counts; OpenRouter's optional cost parser accepted negative values, NaN and infinity.
+A billed 200 with no usable text (an Anthropic refusal with empty content, Gemini spending its budget on thinking) raised without its usage, so the charge was dropped even when a fallback model then answered.
 
 ## Historical Regressions
 
 2026-10-07: an offline OpenAI call with -1,000,000 input tokens produced a negative USD total marked complete; OpenRouter's `usage.cost=Infinity` was marked complete without a pricebook entry.
 
+2026-10-12: an Anthropic refusal billed 1,000 input and 3 output tokens, then a Gemini fallback answered; the run reported only the Gemini cost ($0.001545 of $0.003575).
+
 ## Test Suite Map
 
-`test_usage_contract.py` covers base token parsing, nested token fields, billed failures, OpenRouter fallback and valid overrides. Run `python -m pytest -q tests/features/sdk_model_usage`.
+`test_usage_contract.py` covers base token parsing, nested token fields, billed failures, OpenRouter fallback and valid overrides. `test_billed_unusable_replies.py` covers the usage each text adapter keeps on an unusable-reply error and an agent run that bills a refusal and then a fallback answer. Run `python -m pytest -q tests/features/sdk_model_usage`.
 
 ## Omitted Testing Strategies
 

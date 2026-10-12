@@ -9,7 +9,9 @@ This folder probes model-token accounting with offline, provider-shaped response
 - `README.md` describes the scope and test ownership.
 - `FEATURE.md` defines valid counters, reported-cost fallback, and fail-closed outcomes.
 - `test_usage_contract.py` records malformed and valid model calls through the real usage tracker.
+- `test_billed_unusable_replies.py` checks that a billed 200 with no usable text stays on the bill, at the adapter and through an agent fallback.
 
 ## Logs
 
 - 2026-10-07 - Negative OpenAI input tokens produced a negative, complete rollup; infinite OpenRouter reported cost also produced a complete non-finite rollup.
+- 2026-10-12 - A billed Anthropic refusal followed by a Gemini fallback answer reported only the Gemini cost; the refusal is now recorded as a failed call.

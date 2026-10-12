@@ -29,7 +29,15 @@ class OpenAIProvider:
         config = self._text_config_for(config)
         response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/responses", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_text_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_response_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
+        usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
+        try:
+            text = self._extract_response_text(parsed)
+        except ProviderResponseError as exc:
+            # A billed 200 with no usable text keeps its usage on the error so the caller can still bill it.
+            if usage is not None:
+                exc.details["usage"] = dict(usage)
+            raise
+        return TextModelResponse(provider=self.provider, model=config.model, text=text, raw=parsed, usage=usage)
 
     async def run_image(self, *, prompt: str, transport: HttpTransport, config: ImageModelConfig | None = None) -> ImageModelResponse:
         # Execute OpenAI image generation endpoint with generation controls.

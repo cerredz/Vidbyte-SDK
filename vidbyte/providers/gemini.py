@@ -26,7 +26,15 @@ class GeminiProvider:
         model = quote(config.model, safe="")
         response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/models/{model}:generateContent", headers=self._create_headers(config), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_text(parsed), raw=parsed, usage=parsed.get("usageMetadata") if isinstance(parsed.get("usageMetadata"), dict) else None)
+        usage = parsed.get("usageMetadata") if isinstance(parsed.get("usageMetadata"), dict) else None
+        try:
+            text = self._extract_text(parsed)
+        except ProviderResponseError as exc:
+            # A billed 200 with no usable text keeps its usage on the error so the caller can still bill it.
+            if usage is not None:
+                exc.details["usage"] = dict(usage)
+            raise
+        return TextModelResponse(provider=self.provider, model=config.model, text=text, raw=parsed, usage=usage)
 
     def _config(self, config: TextModelConfig | None) -> TextModelConfig:
         resolved = config or self._text_config
