@@ -3,7 +3,7 @@
 PURPOSE: Prove the agent-side linking rules: which replies are skipped, how a reply becomes a title and a body, how render replaces that rule, that every connector is attempted concurrently with receipts in configured order, that a stalled destination is cut off by the deadline, and that the error carries its diagnostic packet and cause.
 ROLE IN CODEBASE: Integration tests of vidbyte.agents.output.dispatcher.OutputDispatcher.deliver and OutputShaping (through deliver), with real Slack, GitHub, and webhook connectors over the scripted HTTP seam.
 ARCHITECTURE NOTE: OutputDispatcher and OutputShaping are the logic under test and are never replaced; ScriptedConnector stands in only where a test needs a caller-written connector that waits, signals, or raises.
-FUNCTION INVENTORY: test_stopped_or_blank_reply_* and test_finished_reply_* (AC-8, INV-9); test_default_shaping_* (AC-11 a-c, INV-13, EC-17); test_render_* (AC-11 d-e, EC-16); test_connector_bug_* (EC-36); test_sends_run_concurrently_* (AC-19, INV-6); test_destination_that_never_answers_* (AC-6 e, EC-47); test_delivery_error_carries_* (D-20, A003); test_resending_only_the_failed_* (AC-24); test_two_replies_delivered_at_once_* (EC-27).
+FUNCTION INVENTORY: test_stopped_or_blank_reply_* and test_finished_reply_* (AC-8, INV-9); test_default_shaping_* (AC-11 a-c, INV-13, EC-17); test_render_* (AC-11 d-e, EC-16); test_send_that_returns_anything_but_a_delivery_receipt_* (AC-11 f, EC-16, S4 R-2); test_connector_bug_* (EC-36); test_sends_run_concurrently_* (AC-19, INV-6); test_destination_that_never_answers_* (AC-6 e, EC-47); test_delivery_error_carries_* (D-20, A003); test_resending_only_the_failed_* (AC-24); test_two_replies_delivered_at_once_* (EC-27).
 COMMON MODIFICATION PATTERNS: Add a shaping case as one row of SHAPING_CASES; add a skip case as one stop reason; assert on recorded wire requests and receipts.
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock OutputShaping, OutputText, or OutputDispatcher. 2. Do not sleep to prove concurrency; gate with asyncio.Event. 3. Do not rely on the 35 s production deadline; patch the dispatcher module's constant.
 KNOWN EDGE CASES: The concurrency test would deadlock if sends ran one after another, so it shortens the deadline as a backstop and wraps the call in a safety timeout. A blank reply and a stopped run both skip every connector with no request, and nothing is raised.
@@ -181,6 +181,23 @@ async def test_render_that_raises_fails_its_connector_and_chains_the_delivery_er
 
     assert receipt_rows(info.value.receipts) == [("github_issue", "failed", None, "unexpected:KeyError"), ("slack", "sent", None, None)]
     assert info.value.__cause__ is failure
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("returned", [None, "sent"], ids=["none", "str"])
+async def test_send_that_returns_anything_but_a_delivery_receipt_fails_only_its_connector(output_api, fake_http, returned) -> None:
+    # AC-11 (f) / EC-16 / INV-11 / S4 R-2: checked like render's value, so the code is never unexpected:NoneType and the error has a cause.
+    fake_http.answer("hooks.slack.com", (200, "ok"))
+    careless = ScriptedConnector(output_api.OutputDestination.WEBHOOK, result=returned)
+    reply = build_reply("Checkout total ignores coupons.")
+
+    with pytest.raises(output_api.OutputDeliveryError) as info:
+        await output_api.OutputDispatcher.deliver((careless, output_api.SlackOutput(webhook_url=SLACK_URL)), reply, reply.metadata)
+
+    assert receipt_rows(info.value.receipts) == [("webhook", "failed", None, "unexpected:ConfigurationError"), ("slack", "sent", None, None)]
+    assert isinstance(info.value.__cause__, ConfigurationError)
+    assert reply.metadata["deliveries"] == info.value.receipts
+    assert len(careless.contents) == 1
 
 
 @pytest.mark.asyncio

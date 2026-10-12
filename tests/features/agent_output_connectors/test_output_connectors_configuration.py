@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every connector is built through the public constructor with 
 FUNCTION INVENTORY: test_invalid_connector_argument_* (AC-20, INV-21, EC-13); test_invalid_outputs_value_* (AC-20, EC-14, EC-15); test_two_connectors_for_the_same_destination_* (EC-15); test_slack_credential_* (AC-2, INV-5, EC-11, EC-12); test_every_connector_reads_its_own_environment_variable_* (§9.3, FR-7); test_every_connector_without_a_credential_* (INV-5, EC-11); test_explicit_credential_is_stripped_*; test_credential_rotated_* (EC-37).
 COMMON MODIFICATION PATTERNS: Add an invalid argument as one INVALID_ARGUMENTS row naming the parameter the message must contain.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read a real environment variable; the autouse fixture clears all eleven. 2. Do not assert a full message except the documented missing-credential one.
-KNOWN EDGE CASES: A blank explicit argument falls through to the environment variable. A whitespace-only variable counts as missing. Two different instances for the same destination are allowed; the same instance twice is not.
+KNOWN EDGE CASES: A blank explicit argument falls through to the environment variable. A whitespace-only variable counts as missing. Two different instances for the same destination are allowed; the same instance twice is not. A URL urlsplit cannot parse, or whose port is not a number in range, raises ValueError inside the standard library, which must become ConfigurationError. The OutputConnector protocol check only sees that `destination` exists, so its type is a separate check.
 RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/agent-output-connectors/spec.md (§6.1 INV-5, INV-21; §6.2 AC-2, AC-20; §9.3)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors/test_output_connectors_configuration.py
 """
@@ -33,6 +33,7 @@ from tests.features.agent_output_connectors.factories import (
     SMTP_PASSWORD,
     TELEGRAM_TOKEN,
     AnswerRunner,
+    ScriptedConnector,
     build_reply,
 )
 from vidbyte.lib.errors import ConfigurationError
@@ -48,6 +49,10 @@ INVALID_ARGUMENTS = [
     pytest.param("SlackOutput", {"webhook_url": "http://hooks.slack.com/services/T000/B000/S3CRETplain"}, "webhook_url", id="slack-http-scheme"),
     pytest.param("SlackOutput", {"webhook_url": "hooks.slack.com/services/T000/B000/S3CRETnoscheme"}, "webhook_url", id="slack-no-scheme"),
     pytest.param("SlackOutput", {"webhook_url": "https://"}, "webhook_url", id="slack-no-host"),
+    # AC-20 / EC-13 (r6, S4 R-15): urlsplit or .port raises ValueError here; it must surface as ConfigurationError without the value.
+    pytest.param("SlackOutput", {"webhook_url": "https://[::1/services/T000/B000/S3CRETipv6"}, "webhook_url", id="slack-unparseable-ipv6-host"),
+    pytest.param("SlackOutput", {"webhook_url": "https://hooks.slack.com:abc/services/T000/B000/S3CRETport"}, "webhook_url", id="slack-non-numeric-port"),
+    pytest.param("SlackOutput", {"webhook_url": "https://hooks.slack.com:70000/services/T000/B000/S3CRETport"}, "webhook_url", id="slack-port-out-of-range"),
     pytest.param("DiscordOutput", {"webhook_url": "ftp://discord.com/api/webhooks/000/S3CRETdiscord"}, "webhook_url", id="discord-ftp-scheme"),
     pytest.param("TeamsOutput", {"webhook_url": "http://default000.environment.api.powerplatform.com/S3CRETteams"}, "webhook_url", id="teams-http-scheme"),
     pytest.param("GoogleChatOutput", {"webhook_url": "http://chat.googleapis.com/v1/spaces/AAAA/messages?key=S3CRETkey"}, "webhook_url", id="google-chat-http-scheme"),
@@ -101,12 +106,15 @@ def _invalid_outputs(output_api) -> dict[str, object]:
         "mapping": {"slack": slack},
         "not-iterable": 7,
         "same-instance-twice": [slack, slack],
+        # A caller-written connector that passes the protocol's attribute check but names its destination with a plain str.
+        "destination-not-an-enum": [ScriptedConnector("pagerduty")],
     }
 
 
-@pytest.mark.parametrize("case", ["bare-string", "bare-bytes", "single-connector", "connector-class", "plain-object", "mapping", "not-iterable", "same-instance-twice"])
+@pytest.mark.parametrize("case", ["bare-string", "bare-bytes", "single-connector", "connector-class", "plain-object", "mapping", "not-iterable", "same-instance-twice", "destination-not-an-enum"])
 def test_invalid_outputs_value_is_rejected_when_the_agent_is_built(output_api, case) -> None:
     # AC-20 / INV-21 / EC-14 / EC-15: the alternative is iterating characters, a deep TypeError, or posting every reply twice.
+    # destination-not-an-enum (S4 R-2): accepted, it would lose every receipt and raise a bare ConfigurationError after the run.
     runner = AnswerRunner("unused")
 
     with pytest.raises(ConfigurationError) as info:

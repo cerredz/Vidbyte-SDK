@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Most tests script HttpTransport._send_once (fake_http). The r
 FUNCTION INVENTORY: test_slack_answer_maps_to_* (AC-6 a-d, INV-10, EC-2 to EC-5); test_success_range_* (§9.2 success range); test_mixed_failures_* (AC-7, EC-41); test_error_body_* (INV-11 token grammar); test_redirect_is_not_followed_* (AC-25, EC-35); test_response_over_the_size_ceiling_* (EC-34).
 COMMON MODIFICATION PATTERNS: Add a status row to ATTEMPT_TABLE or a body row to TOKEN_TABLE; keep expected attempt counts literal.
 WHAT NOT TO DO IN THIS FILE: 1. Do not let a request leave the process; MockTransport answers every httpx request. 2. Do not assert on exception text; codes are the contract.
-KNOWN EDGE CASES: A 429 body that is a valid token would produce http_429:<token>, so the 429 rows use an empty body. MockTransport is installed by replacing httpx.AsyncClient for the test, which HttpTransport looks up on each request.
+KNOWN EDGE CASES: A 429 body that is a valid token would produce http_429:<token>, so the 429 rows use an empty body. MockTransport is installed by the conftest httpx_destination fixture, which replaces httpx.AsyncClient for the test; HttpTransport looks it up on each request.
 RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/agent-output-connectors/spec.md (§6.1 INV-10, INV-11; §6.2 AC-6, AC-7, AC-25; §6.3 EC-34, EC-35)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors/test_output_connectors_http_failures.py
 """
@@ -28,7 +28,6 @@ from tests.features.agent_output_connectors.factories import (
     receipt_rows,
 )
 from vidbyte.lib.errors import ProviderRequestError
-from vidbyte.lib.http import transport as transport_module
 
 
 def _network_error(excerpt: str = "ConnectError: connection reset by peer") -> ProviderRequestError:
@@ -123,31 +122,6 @@ async def test_error_body_becomes_a_token_only_when_the_whole_body_is_one_safe_t
 
     assert receipt_rows([receipt]) == [("slack", "failed", None, error_code)]
     assert SECRET_MARKER not in repr(receipt)
-
-
-class _Requests(list):
-    """Recorded httpx requests plus the per-host scripted responses."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.routes: dict[str, httpx.Response] = {}
-
-
-@pytest.fixture
-def httpx_destination(monkeypatch: pytest.MonkeyPatch) -> _Requests:
-    # Gives every httpx client an in-memory transport, so the real _send_once, redirect policy, and size ceiling run offline.
-    requests = _Requests()
-    real_client = httpx.AsyncClient
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return requests.routes.get(request.url.host, httpx.Response(599, text="unexpected host"))
-
-    def client_factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
-        return real_client(*args, transport=httpx.MockTransport(handler), **kwargs)
-
-    monkeypatch.setattr(transport_module.httpx, "AsyncClient", client_factory)
-    return requests
 
 
 @pytest.mark.asyncio

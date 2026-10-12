@@ -3,10 +3,10 @@
 PURPOSE: Domain-shaped test data and offline fakes for the agent-output-connectors pack: placeholder credentials, the eleven-destination table, a scripted HTTP destination, a scripted SMTP server, scripted model turns, a caller-written connector, and reply and receipt helpers.
 ROLE IN CODEBASE: Imported by conftest.py (which turns these into fixtures) and by the pack's test modules as tests.features.agent_output_connectors.factories; builds on vidbyte.lib.http.transport.HttpResponse and the AgentMessage record.
 ARCHITECTURE NOTE: Nothing here imports a feature module at module level; ScriptedConnector imports the receipt record lazily, so a missing feature fails each test instead of aborting collection. The HTTP fake JSON-encodes each body exactly as the real _send_once does, so a body that cannot reach the wire fails here too.
-FUNCTION INVENTORY: ConnectorCase.build / build_without_credential construct one destination; CONNECTOR_CASES maps each OutputDestination value to its case; HttpScript.answer / respond / sends_to script and record HTTP attempts; SmtpScript.fail / check script SMTP failures, with ScriptedSmtp and ScriptedSmtpSsl mirroring smtplib's constructors; AnswerRunner replays isDone turns (optionally repeating the last one); ScriptedConnector is a structural OutputConnector; build_reply builds a finished AgentMessage; receipt_rows flattens receipts.
+FUNCTION INVENTORY: ConnectorCase.build / build_without_credential construct one destination; CONNECTOR_CASES maps each OutputDestination value to its case; HttpScript.answer / respond / sends_to script and record HTTP attempts; HttpxRequests.handle records and answers requests that reach an httpx.MockTransport; SmtpScript.fail / hold / check / answer_quit script SMTP failures, a stalled step, and the QUIT reply, with ScriptedSmtp and ScriptedSmtpSsl mirroring smtplib's constructors, __exit__, and quit; AnswerRunner replays isDone turns (optionally repeating the last one); ScriptedConnector is a structural OutputConnector whose send can return any value; build_reply builds a finished AgentMessage; receipt_rows flattens receipts.
 COMMON MODIFICATION PATTERNS: Add a destination by adding one ConnectorCase row and its key to HTTP_DESTINATION_KEYS; keep wire expectations in the test module that asserts them, not here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not stub or re-implement OutputDispatcher, OutputShaping, OutputText, OutputArguments, a connector, or a record. 2. Do not open sockets or read real credentials. 3. Do not import this module as a bare `factories`; always use the dotted path so there is one module object.
-KNOWN EDGE CASES: Every placeholder credential contains SECRET_MARKER, so one substring scan finds any leaked fragment. Response queues do not repeat unless asked, so an unexpected retry fails loudly. The SMTP fakes mirror the real constructor signatures, so passing context= to plain SMTP fails as it would in production. Telegram's wire secret is the token inside the URL path; Jira's is the Basic header built from email and token.
+KNOWN EDGE CASES: Every placeholder credential contains SECRET_MARKER, so one substring scan finds any leaked fragment. Response queues do not repeat unless asked, so an unexpected retry fails loudly. The SMTP fakes mirror the real constructor signatures, so passing context= to plain SMTP fails as it would in production; like smtplib, the fake __exit__ raises SMTPResponseException when QUIT is not answered 221, while quit() returns the reply. A held SMTP step gives up after HOLD_SAFETY_SECONDS, so a run that waits for the worker thread fails slowly instead of hanging. Telegram's wire secret is the token inside the URL path; Jira's is the Basic header built from email and token.
 RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/agent-output-connectors/spec.md (§9.2, §9.3, §13)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors
 """
@@ -17,12 +17,15 @@ import asyncio
 import base64
 import importlib
 import json
+import smtplib
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from types import ModuleType
 from typing import Any
+
+import httpx
 
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.enums import ModelProvider
@@ -145,6 +148,19 @@ class HttpScript:
         return HttpResponse(status_code=status, body=body, headers={})
 
 
+class HttpxRequests(list):
+    """Requests that reached an in-memory httpx.MockTransport, plus the response scripted for each host."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.routes: dict[str, httpx.Response] = {}
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        # Records the request, then answers with its host's scripted response, or 599 for a host no test expected.
+        self.append(request)
+        return self.routes.get(request.url.host, httpx.Response(599, text="unexpected host"))
+
+
 @dataclass
 class SmtpSession:
     """What one scripted SMTP connection saw, in order."""
@@ -162,22 +178,45 @@ class SmtpSession:
 
 
 class SmtpScript:
-    """A scripted SMTP server: records each connection and fails at the step a test names."""
+    """A scripted SMTP server: records each connection, fails or stalls at the step a test names, and answers QUIT as told."""
+
+    # How long a held step waits for its gate; a backstop so a broken implementation fails the test instead of hanging it.
+    HOLD_SAFETY_SECONDS = 10.0
 
     def __init__(self) -> None:
         self.sessions: list[SmtpSession] = []
         self.refused: dict[str, tuple[int, bytes]] = {}
+        # The reply to QUIT: a (code, text) pair, or an exception such as SMTPServerDisconnected for a dropped connection.
+        self.quit_reply: tuple[int, bytes] | BaseException = (221, b"2.0.0 closing connection")
+        # Set once a held step stops waiting, whether the test opened the gate or the backstop ran out.
+        self.released = threading.Event()
         self._fail_on: str | None = None
         self._failure: BaseException | None = None
+        self._hold_on: str | None = None
+        self._gate = threading.Event()
 
     def fail(self, step: str, error: BaseException) -> None:
         # Makes the named step ("connect", "starttls", "login", "send_message") raise error.
         self._fail_on, self._failure = step, error
 
+    def hold(self, step: str) -> threading.Event:
+        # Makes the named step block its worker thread until the test sets the returned gate: a server that stalls mid-session.
+        self._hold_on = step
+        return self._gate
+
     def check(self, step: str) -> None:
-        # Raises the scripted failure when this step is the one a test chose.
+        # Stalls at a held step, then raises the scripted failure when this step is the one a test chose.
+        if self._hold_on == step:
+            self._gate.wait(self.HOLD_SAFETY_SECONDS)
+            self.released.set()
         if self._fail_on == step and self._failure is not None:
             raise self._failure
+
+    def answer_quit(self) -> tuple[int, bytes]:
+        # Plays the scripted QUIT reply: returns it, or raises it when it is an exception.
+        if isinstance(self.quit_reply, BaseException):
+            raise self.quit_reply
+        return self.quit_reply
 
 
 UNSET_TIMEOUT = object()
@@ -202,7 +241,15 @@ class ScriptedSmtp:
         return self
 
     def __exit__(self, *exc_info: object) -> bool:
-        self.session.steps.append("close")
+        # Mirrors smtplib.SMTP.__exit__: send QUIT, raise SMTPResponseException on any reply but 221, ignore a dropped connection, always close.
+        try:
+            code, text = self._quit()
+            if code != 221:
+                raise smtplib.SMTPResponseException(code, text)
+        except smtplib.SMTPServerDisconnected:
+            pass
+        finally:
+            self.session.steps.append("close")
         return False
 
     def ehlo(self, name: str = "") -> tuple[int, bytes]:
@@ -233,8 +280,15 @@ class ScriptedSmtp:
         return dict(self.script.refused)
 
     def quit(self) -> tuple[int, bytes]:
-        self.session.steps.append("close")
-        return 221, b"bye"
+        # Mirrors smtplib.SMTP.quit: send QUIT, return the reply whatever its code, then close; a dropped connection raises.
+        try:
+            return self._quit()
+        finally:
+            self.session.steps.append("close")
+
+    def _quit(self) -> tuple[int, bytes]:
+        self.session.steps.append("quit")
+        return self.script.answer_quit()
 
     def close(self) -> None:
         self.session.steps.append("close")
@@ -279,13 +333,18 @@ class AnswerRunner:
 class ScriptedConnector:
     """A caller-written connector: satisfies OutputConnector structurally (no BaseOutput) and records each send."""
 
-    def __init__(self, destination: Any, *, render: Callable[[AgentMessage], object] | None = None, error: BaseException | None = None, wait_for: asyncio.Event | None = None, signal: asyncio.Event | None = None, finished: list[str] | None = None) -> None:
+    # Default for `result`: send reports a SENT receipt for its own destination.
+    SENT = object()
+
+    def __init__(self, destination: Any, *, render: Callable[[AgentMessage], object] | None = None, error: BaseException | None = None, wait_for: asyncio.Event | None = None, signal: asyncio.Event | None = None, finished: list[str] | None = None, result: object = SENT) -> None:
+        # result replaces the SENT receipt with any value, such as None from a send that forgot to return its receipt.
         self.destination = destination
         self._render = render
         self._error = error
         self._wait_for = wait_for
         self._signal = signal
         self._finished = finished
+        self._result = result
         self.contents: list[object] = []
 
     @property
@@ -303,6 +362,8 @@ class ScriptedConnector:
             self._signal.set()
         if self._finished is not None:
             self._finished.append(self.destination.value)
+        if self._result is not self.SENT:
+            return self._result
         records = importlib.import_module("vidbyte.lib.dataclasses.outputs")
         enums = importlib.import_module("vidbyte.lib.enums.outputs")
         return records.DeliveryReceipt(destination=self.destination, status=enums.DeliveryStatus.SENT)

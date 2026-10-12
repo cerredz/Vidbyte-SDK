@@ -1,9 +1,9 @@
 """FILE: tests/features/agent_output_connectors/test_output_connectors_security.py
 
-PURPOSE: Prove credentials stay where they belong and model output cannot steer delivery: no credential appears in any rendered surface even when the destination echoes it back, each credential travels only in its own destination's request, the model's structured output cannot change a URL, repo, or recipient, and path-shaped repo or site values are rejected before they build a URL.
-ROLE IN CODEBASE: Security tests across BaseOutput.__repr__, the vidbyte.lib.dataclasses.outputs records, OutputHttp.post error mapping, OutputDeliveryError, JevAgentSettings, BaseAgent.export_state, and the connectors' URL construction.
-ARCHITECTURE NOTE: Every placeholder credential contains SECRET_MARKER, so one substring scan covers every surface; Jira's Basic header and Telegram's path token are scanned in their wire form too.
-FUNCTION INVENTORY: test_no_surface_shows_the_credential_* (AC-3, INV-4, NFR-4); test_records_mask_* (INV-4, §9.1); test_each_credential_travels_only_* (INV-4, T-4); test_model_output_cannot_* (INV-3, T-2); test_path_shaped_* (D-19).
+PURPOSE: Prove credentials stay where they belong and model output cannot steer delivery: no credential appears in any rendered surface even when the destination echoes it back, each credential travels only in its own destination's request, no credential-bearing URL reaches httpx's request log, the model's structured output cannot change a URL, repo, or recipient, and path-shaped repo or site values are rejected before they build a URL.
+ROLE IN CODEBASE: Security tests across BaseOutput.__repr__, the vidbyte.lib.dataclasses.outputs records, OutputHttp.post error mapping and its httpx log guard, OutputDeliveryError, JevAgentSettings, BaseAgent.export_state, and the connectors' URL construction.
+ARCHITECTURE NOTE: Every placeholder credential contains SECRET_MARKER, so one substring scan covers every surface; Jira's Basic header and Telegram's path token are scanned in their wire form too. The log test keeps the real _send_once over httpx.MockTransport (httpx_destination), because httpx writes its request log below _send_once.
+FUNCTION INVENTORY: test_no_surface_shows_the_credential_* (AC-3, INV-4, NFR-4); test_records_mask_* (INV-4, §9.1); test_each_credential_travels_only_* (INV-4, T-4); test_url_credential_never_reaches_the_httpx_request_log_* (INV-4, EC-41, T-1, S4 R-1); test_model_output_cannot_* (INV-3, T-2); test_path_shaped_* (D-19).
 COMMON MODIFICATION PATTERNS: When a new surface can hold a reply or connector (a trace, a checkpoint), add it to the scanned surfaces in test_no_surface_shows_the_credential_*.
 WHAT NOT TO DO IN THIS FILE: 1. Do not use a credential without SECRET_MARKER. 2. Do not weaken a scan to a single surface; a leak is usually in the one nobody checked.
 KNOWN EDGE CASES: The failing destination echoes the credential in its error body or SMTP reply on purpose. export_state serializes history, so a leaked receipt or metadata value would show there.
@@ -14,8 +14,10 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connect
 from __future__ import annotations
 
 import json
+import logging
 import smtplib
 
+import httpx
 import pytest
 from pydantic import BaseModel
 
@@ -30,6 +32,8 @@ from tests.features.agent_output_connectors.factories import (
     SMTP_PASSWORD,
     WEBHOOK_URL,
     AnswerRunner,
+    build_reply,
+    receipt_rows,
 )
 from vidbyte.agents.jev import JevAgentSettings
 from vidbyte.lib.errors import ConfigurationError
@@ -107,6 +111,42 @@ def test_each_credential_travels_only_in_its_own_destinations_request(output_api
         assert CONNECTOR_CASES[key].wire_secret in send["url"] or CONNECTOR_CASES[key].wire_secret in send["headers"].values()
         others = [other for other in HTTP_DESTINATION_KEYS if other != key and CONNECTOR_CASES[other].credential in wire]
         assert others == [], f"{key} request carries the credential of {others}"
+
+
+# The six destinations whose request URL carries the credential (Telegram's in its path), with the exact host each posts to.
+URL_CREDENTIAL_HOSTS = [
+    pytest.param("slack", "hooks.slack.com", id="slack"),
+    pytest.param("discord", "discord.com", id="discord"),
+    pytest.param("teams", "default000.environment.api.powerplatform.com", id="teams"),
+    pytest.param("google_chat", "chat.googleapis.com", id="google-chat"),
+    pytest.param("telegram", "api.telegram.org", id="telegram"),
+    pytest.param("webhook", "hook.eu1.make.com", id="webhook"),
+]
+OWN_REQUEST_URL = "https://api.example.com/v1/reports"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("key", "host"), URL_CREDENTIAL_HOSTS)
+async def test_url_credential_never_reaches_the_httpx_request_log_while_the_callers_own_requests_still_do(output_api, httpx_destination, caplog, key, host) -> None:
+    # INV-4 / EC-41 / T-1 / S4 R-1: httpx logs "HTTP Request: POST <url>" at INFO, and for these destinations the URL is the secret.
+    # The real _send_once runs over MockTransport, because a scripted _send_once never reaches httpx's own log call.
+    # INFO is set on the root logger, as a caller would, not on "httpx", so a guard that raises httpx's own level is caught too.
+    caplog.set_level(logging.INFO)
+    case = CONNECTOR_CASES[key]
+    status, body = case.success
+    httpx_destination.routes[host] = httpx.Response(status, text=body)
+    httpx_destination.routes["api.example.com"] = httpx.Response(200, json={"ok": True})
+
+    receipt = await case.build(output_api).send(build_reply("Nightly scan: no regressions."), output_api.OutputContent("Nightly scan", "No regressions."))
+    # The caller's own httpx request, made after the send and outside it, must still be logged: the guard is scoped, not a global mute.
+    async with httpx.AsyncClient() as client:
+        await client.post(OWN_REQUEST_URL, json={"report": "nightly"})
+
+    assert receipt_rows([receipt]) == [(key, "sent", None, None)]
+    assert [request.url.host for request in httpx_destination] == [host, "api.example.com"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert [message for message in messages if SECRET_MARKER in message] == []
+    assert any(message.startswith(f"HTTP Request: POST {OWN_REQUEST_URL}") for message in messages), messages
 
 
 class _SteeringReport(BaseModel):

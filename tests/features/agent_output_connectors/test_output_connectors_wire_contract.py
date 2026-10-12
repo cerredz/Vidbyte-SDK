@@ -3,8 +3,8 @@
 PURPOSE: Prove each HTTP connector sends exactly the request its vendor documents (method, URL, auth form, version header, body keys, transport limits) and reads the created object's link the documented way; and that delivered text is safe and sized: mass mentions neutralized, bodies capped with the marker, titles kept to one 250-character line, webhook structured payloads JSON-safe.
 ROLE IN CODEBASE: Contract tests of the eleven connectors in vidbyte/lib/outputs/ (through vidbyte.agents.output), OutputText (through the connectors), and OutputHttp's link check (D-21), against spec §9.2 table (a).
 ARCHITECTURE NOTE: Each connector is driven directly with connector.send(reply, OutputContent(...)) for exact wire checks, or through OutputDispatcher.deliver when the shaping rule is part of the promise; the only fake is the single HTTP send (and the SMTP classes for the email subject).
-FUNCTION INVENTORY: test_each_http_connector_sends_its_documented_request (AC-17, FR-15); test_created_object_link_* (D-21, EC-22); test_channel_wide_mentions_* and test_notion_mention_tags_* (AC-9, INV-12, EC-6); test_body_at_its_cap_* / test_body_over_its_cap_* / test_jira_description_* / test_destinations_without_a_documented_cap_* (INV-14); test_slack_escapes_after_truncation_* (§9.2 helpers); test_long_reply_* (AC-10, EC-7); test_title_newlines_* (EC-18); test_webhook_structured_* (§9.2 webhook row, EC-40).
-COMMON MODIFICATION PATTERNS: When a vendor contract changes, update its row in WIRE_ROWS from the vendor reference page and the spec together; never loosen a row to match code.
+FUNCTION INVENTORY: test_each_http_connector_sends_its_documented_request (AC-17, FR-15); test_created_object_link_* (D-21, EC-22); test_channel_wide_mentions_* and test_notion_mention_tags_* (AC-9, INV-12, EC-6); test_body_at_its_cap_* / test_body_over_its_cap_* / test_jira_description_* / test_destinations_without_a_documented_cap_* (INV-14); test_slack_escapes_after_truncation_* (§9.2 helpers); test_long_reply_* (AC-10, EC-7); test_title_newlines_* (EC-18); test_long_first_line_becomes_*_at_every_titled_destination and test_title_whitespace_runs_* (INV-15 for GitHub, Linear, Jira, Notion, and email; S4 R-14); test_webhook_structured_* (§9.2 webhook row, EC-40).
+COMMON MODIFICATION PATTERNS: When a vendor contract changes, update its row in WIRE_ROWS from the vendor reference page and the spec together; never loosen a row to match code. A new destination with a title gets a HTTP_TITLE_OF entry, so the one-line title rule covers it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import the constants module to build an expected wire value; wire literals are written out so a wrong constant is caught. 2. Do not compare header names case-insensitively; HttpTransport adds its own lowercase content-type default.
 KNOWN EDGE CASES: chat_text drops the title when the body's first line already is the title. Slack escapes after truncation, so a capped body has no escapable characters here. Jira's ADF paragraphs come from the truncated body, so the marker becomes its own paragraph. Notion and Linear identifiers are lowercase dashed UUIDs, so normalization cannot change them.
 RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/agent-output-connectors/spec.md (§9.2 wire contract table, D-21; §6.1 INV-12, INV-14, INV-15)
@@ -282,6 +282,56 @@ async def test_title_newlines_collapse_to_one_line_so_they_cannot_inject_an_emai
     assert str(session.message["Subject"]) == "Weekly report Bcc: x@evil.com"
     assert session.message["Bcc"] is None
     assert session.login == ("bot@acme.com", SMTP_PASSWORD)
+
+
+# Where each titled HTTP destination puts its title (spec §9.2 table (a)); email's title is the Subject header.
+HTTP_TITLE_OF = {
+    "github_issue": lambda body: body["title"],
+    "linear_issue": lambda body: body["variables"]["input"]["title"],
+    "jira_issue": lambda body: body["fields"]["summary"],
+    "notion_page": lambda body: body["properties"]["title"]["title"][0]["text"]["content"],
+}
+TITLED_KEYS = (*HTTP_TITLE_OF, "email")
+
+
+async def _delivered_title(output_api, fake_http, fake_smtp, key: str, reply) -> str:
+    # Delivers one reply through the shaping rule to one titled destination and returns the title it sent.
+    case = CONNECTOR_CASES[key]
+    if key != "email":
+        fake_http.answer(case.host, case.success)
+
+    receipts = await output_api.OutputDispatcher.deliver((case.build(output_api),), reply, reply.metadata)
+
+    assert [row[1] for row in receipt_rows(receipts)] == ["sent"]
+    if key == "email":
+        [session] = fake_smtp.sessions
+        return str(session.message["Subject"])
+    [send] = fake_http.sends
+    return HTTP_TITLE_OF[key](send["json_body"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", TITLED_KEYS)
+async def test_long_first_line_becomes_a_250_character_one_line_title_at_every_titled_destination(output_api, fake_http, fake_smtp, key) -> None:
+    # AC-10 / EC-7 / INV-15 / S4 R-14: Jira, Linear, and Notion sending the raw 400-character title passed the GitHub-and-email-only test.
+    paragraph = " ".join(f"word{index:04d}" for index in range(60))[:400]
+    reply = build_reply(f"{paragraph}\nSecond line of the report.")
+
+    title = await _delivered_title(output_api, fake_http, fake_smtp, key, reply)
+
+    assert title == paragraph[:250]
+    assert "[truncated]" not in title
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", TITLED_KEYS)
+async def test_title_whitespace_runs_and_newlines_collapse_to_one_space_at_every_titled_destination(output_api, fake_http, fake_smtp, key) -> None:
+    # EC-18 / INV-15 / T-2 / S4 R-14: every run of whitespace, CR and LF included, becomes one space before the title is sent.
+    reply = build_reply('{"title": "x", "body": "y"}', structured={"title": "Weekly report\r\n\r\nBcc:\tx@evil.com", "body": "All checks passed."})
+
+    title = await _delivered_title(output_api, fake_http, fake_smtp, key, reply)
+
+    assert title == "Weekly report Bcc: x@evil.com"
 
 
 class _TimedReport(BaseModel):

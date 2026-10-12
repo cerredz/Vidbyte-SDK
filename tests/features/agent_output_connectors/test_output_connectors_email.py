@@ -1,12 +1,12 @@
 """FILE: tests/features/agent_output_connectors/test_output_connectors_email.py
 
-PURPOSE: Prove EmailOutput sends one plain-text message over verified TLS, off the event loop, with the documented connection sequence, never retries, never falls back to plaintext, and maps every SMTP failure to the INV-11 codes; and that a username with no "@" needs an explicit sender.
-ROLE IN CODEBASE: Contract tests of vidbyte/lib/outputs/email.py EmailOutput and vidbyte/lib/outputs/delivery.py OutputSmtp, through the smtplib module that delivery.py imports.
-ARCHITECTURE NOTE: fake_smtp replaces smtplib.SMTP and smtplib.SMTP_SSL on the module object delivery.py imports, with classes that keep the real constructor signatures and record each step; asyncio.to_thread runs for real, so the recorded thread proves the session left the event loop.
-FUNCTION INVENTORY: test_default_port_* (AC-16 a, INV-18, INV-19); test_port_465_* (AC-16 b); test_smtp_failure_maps_to_* (AC-16 c-f, EC-24 to EC-26); test_partial_refusal_* (AC-16 d, EC-24); test_username_without_an_at_sign_* (AC-16 apikey case); test_explicit_sender_*.
+PURPOSE: Prove EmailOutput sends one plain-text message over verified TLS, off the event loop, with the documented connection sequence, never retries, never falls back to plaintext, and maps every SMTP failure to the INV-11 codes; that the receipt is fixed once the server accepted the message, whatever QUIT answers; that sync run() returns at the delivery deadline even while an SMTP session stalls; and that a username with no "@" needs an explicit sender.
+ROLE IN CODEBASE: Contract tests of vidbyte/lib/outputs/email.py EmailOutput and vidbyte/lib/outputs/delivery.py OutputSmtp, through the smtplib module that delivery.py imports, plus BaseAgent.run with the dispatcher's deadline shortened.
+ARCHITECTURE NOTE: fake_smtp replaces smtplib.SMTP and smtplib.SMTP_SSL on the module object delivery.py imports, with classes that keep the real constructor signatures, __exit__, and quit, and record each step; the worker thread runs for real, so the recorded thread proves the session left the event loop.
+FUNCTION INVENTORY: test_default_port_* (AC-16 a, INV-18, INV-19); test_port_465_* (AC-16 b); test_smtp_failure_maps_to_* (AC-16 c-f, EC-24 to EC-26); test_partial_refusal_* (AC-16 d, EC-24); test_quit_reply_after_the_server_accepted_* (EC-48, S4 R-12); test_sync_run_returns_at_the_delivery_deadline_* (NFR-2, EC-47, INV-19, S4 R-3); test_username_without_an_at_sign_* (AC-16 apikey case); test_explicit_sender_*.
 COMMON MODIFICATION PATTERNS: Add a failure as one SMTP_FAILURES row (step, exception, code); keep the one-connection assertion on every row.
-WHAT NOT TO DO IN THIS FILE: 1. Do not open a socket; socket.create_connection refuses during these tests. 2. Do not use a real mailbox address or password.
-KNOWN EDGE CASES: SMTPRecipientsRefused is raised only when every recipient is refused; a partial refusal is the dict send_message returns. SMTPNotSupportedError on STARTTLS must stop before login, or the password would travel in cleartext. set_content adds a trailing newline to the text body.
+WHAT NOT TO DO IN THIS FILE: 1. Do not open a socket; socket.create_connection refuses during these tests. 2. Do not use a real mailbox address or password. 3. Do not assert elapsed time; the stalled-session test proves the deadline by ordering against a threading.Event.
+KNOWN EDGE CASES: SMTPRecipientsRefused is raised only when every recipient is refused; a partial refusal is the dict send_message returns. SMTPNotSupportedError on STARTTLS must stop before login, or the password would travel in cleartext. set_content adds a trailing newline to the text body. smtplib's own __exit__ raises SMTPResponseException when QUIT is not answered 221, after the mail was accepted. A run() that wrongly waits for the SMTP thread fails the stalled-session test only after SmtpScript.HOLD_SAFETY_SECONDS.
 RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/agent-output-connectors/spec.md (§6.1 INV-18, INV-19; §6.2 AC-16; §9.2 EmailOutput row)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors/test_output_connectors_email.py
 """
@@ -20,9 +20,11 @@ import threading
 
 import pytest
 
+from tests.agent_test_support import build_test_agent
 from tests.features.agent_output_connectors.factories import (
     SECRET_MARKER,
     SMTP_PASSWORD,
+    AnswerRunner,
     build_reply,
     receipt_rows,
 )
@@ -123,6 +125,53 @@ async def test_partial_refusal_returned_by_send_message_is_failed_recipients_ref
     assert receipt_rows([receipt]) == [("email", "failed", None, "smtp_recipients_refused")]
     [session] = fake_smtp.sessions
     assert session.message["To"] == "ops@acme.com, ghost@acme.com"
+
+
+# (QUIT reply or exception, recipients send_message refused, expected status, expected error code)
+QUIT_FAILURES = [
+    pytest.param((250, b"2.0.0 OK"), {}, "sent", None, id="quit-answers-250"),
+    pytest.param((421, b"4.4.2 closing transmission channel"), {}, "sent", None, id="quit-answers-421"),
+    pytest.param(smtplib.SMTPServerDisconnected("Connection unexpectedly closed"), {}, "sent", None, id="connection-dropped-at-quit"),
+    pytest.param((421, b"4.4.2 closing transmission channel"), {"ghost@acme.com": (550, b"5.1.1 No such user")}, "failed", "smtp_recipients_refused", id="partial-refusal-then-quit-421"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("quit_reply", "refused", "status", "error_code"), QUIT_FAILURES)
+async def test_quit_reply_after_the_server_accepted_the_message_never_changes_the_receipt(output_api, fake_smtp, quit_reply, refused, status, error_code) -> None:
+    # EC-48 / S4 R-12: the receipt is decided once send_message returns; a false FAILED smtp_421 invites a resend that mails twice.
+    fake_smtp.quit_reply = quit_reply
+    fake_smtp.refused = refused
+    to = ("ops@acme.com", "ghost@acme.com") if refused else "ops@acme.com"
+
+    receipt = await _send(output_api, _gmail(output_api, to=to))
+
+    assert receipt_rows([receipt]) == [("email", status, None, error_code)]
+    [session] = fake_smtp.sessions
+    assert "send_message" in session.steps
+    assert session.steps[-1] == "close"
+
+
+def test_sync_run_returns_at_the_delivery_deadline_without_waiting_for_a_stalled_smtp_session(output_api, fake_smtp, dispatcher_module, monkeypatch) -> None:
+    # NFR-2 / EC-47 / INV-19 / S4 R-3: on Python 3.11 asyncio.run joins the loop's default executor with no timeout, so a session there holds run().
+    # Ordering, not timing: the server stalls until the test opens the gate, and the gate opens only after run() has returned.
+    monkeypatch.setattr(dispatcher_module, "OUTPUT_DELIVERY_DEADLINE_SECONDS", 0.5)
+    gate = fake_smtp.hold("send_message")
+    agent = build_test_agent(name="nightly", system_prompt="Summarize the nightly scan.", runner=AnswerRunner("Nightly scan: no regressions."), outputs=[_gmail(output_api)])
+
+    try:
+        with pytest.raises(output_api.OutputDeliveryError) as info:
+            agent.run("Run the nightly scan")
+        # Only a run() that waited for the worker thread can see the stalled step already over (released by the safety backstop).
+        session_was_over_before_run_returned = fake_smtp.released.is_set()
+    finally:
+        gate.set()
+        if fake_smtp.sessions:
+            # Let the worker finish the session it started, so no thread from this test outlives it.
+            fake_smtp.released.wait(fake_smtp.HOLD_SAFETY_SECONDS)
+
+    assert not session_was_over_before_run_returned, "run() waited for the SMTP worker thread instead of returning at the deadline"
+    assert receipt_rows(info.value.receipts) == [("email", "failed", None, "network")]
 
 
 def test_username_without_an_at_sign_and_no_sender_is_rejected_naming_sender(output_api) -> None:

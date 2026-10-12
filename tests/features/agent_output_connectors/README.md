@@ -17,18 +17,19 @@ The implementations belong in `vidbyte/agents/output/` (the `OutputConnector` co
 
 - `README.md` explains the boundary of the pack and routes changes to their owners.
 - `FEATURE.md` states the contract, the failure inventory the tests were chosen from, and the strategies deliberately omitted.
-- `conftest.py` imports the feature lazily (`output_api`, `output_constants`, `dispatcher_module`), clears the eleven credential variables, and installs the scripted HTTP send (`fake_http`) and the scripted SMTP server (`fake_smtp`). It also parametrizes over destinations (`http_case`, `any_case`).
+- `conftest.py` imports the feature lazily (`output_api`, `output_constants`, `dispatcher_module`), clears the eleven credential variables, and installs the scripted HTTP send (`fake_http`), the in-memory httpx transport (`httpx_destination`), and the scripted SMTP server (`fake_smtp`). It also parametrizes over destinations (`http_case`, `any_case`).
 - `factories.py` holds the placeholder credentials, the eleven-destination table, the HTTP and SMTP fakes, the offline model runner, a caller-written connector, and the reply and receipt helpers.
 - `test_output_connectors_acceptance.py` runs the spec's own snippet and the caller-visible outcomes end to end. Start here for a caller-visible regression.
 - `test_output_connectors_agent_wiring.py` checks forks, `AgentTool`, export and restore, `JevAgentSettings`, `CodingAgent`, cancellation, drained follow-ups, capped runs, and a caller-written connector.
 - `test_output_connectors_dispatch.py` checks the skip rule, title and body shaping, `render`, concurrency and receipt order, the per-connector deadline, the error's diagnostic packet, and resending only the failed connectors.
 - `test_output_connectors_wire_contract.py` checks each destination's exact request, link extraction, mention neutralizing, body caps, one-line titles, and the webhook's structured payload.
 - `test_output_connectors_http_failures.py` checks retries, error codes, redirects, and the response size ceiling.
-- `test_output_connectors_email.py` checks the SMTP sequence, TLS, the worker thread, and every SMTP failure code.
+- `test_output_connectors_email.py` checks the SMTP sequence, TLS, the worker thread, every SMTP failure code, the QUIT reply after acceptance, and sync `run()` at the deadline.
 - `test_output_connectors_configuration.py` checks argument validation, the `outputs` value, and credential resolution from arguments and environment variables.
-- `test_output_connectors_security.py` checks that credentials never reach a rendered surface or another destination, and that model output cannot steer delivery.
+- `test_output_connectors_security.py` checks that credentials never reach a rendered surface, httpx's request log, or another destination, and that model output cannot steer delivery.
 - `test_output_connectors_contract.py` checks the public names, enums, records, constants, import layering, and the required documentation.
 
 ## Logs
 
 - 2026-10-11 - The pack was written red before implementation from the agent-output-connectors spec - every test fails until `vidbyte/agents/output/` and `vidbyte/lib/outputs/` exist.
+- 2026-10-11 - Tests were added for the S4 review findings R-1, R-2, R-3, R-12, R-14, and R-15 - each new case was red against the first implementation (R-14's by mutation) and passes once its fix lands.

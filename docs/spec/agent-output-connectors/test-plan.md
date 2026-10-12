@@ -2,7 +2,7 @@
 
 Spec: `docs/spec/agent-output-connectors/spec.md` r3 · Framework: pytest 8.3.5 + pytest-asyncio 1.3.0 (httpx 0.28.1 for `MockTransport`) · Prior art copied: `tests/features/coding_agent/` (pack layout, A001 headers, lazy feature fixtures), `tests/test_web_operation_client_retry.py` (`HttpTransport._send_once` + `transport_module.asyncio.sleep` seam), `tests/agent_test_support.py` (`build_test_agent`, `bind_test_runner`), `tests/test_restore_output_schema.py` (scripted structured runs, `restore`).
 
-Pack: `tests/features/agent_output_connectors/` — `FEATURE.md`, `README.md`, `conftest.py`, `factories.py`, and nine test modules. In the table, `acceptance.py` means `test_output_connectors_acceptance.py`, and likewise for `agent_wiring`, `dispatch`, `wire_contract`, `http_failures`, `email`, `configuration`, `security`, and `contract`. 86 test functions, 313 collected cases (destination and boundary tables are parametrized).
+Pack: `tests/features/agent_output_connectors/` — `FEATURE.md`, `README.md`, `conftest.py`, `factories.py`, and nine test modules. In the table, `acceptance.py` means `test_output_connectors_acceptance.py`, and likewise for `agent_wiring`, `dispatch`, `wire_contract`, `http_failures`, `email`, `configuration`, `security`, and `contract`. 86 test functions, 313 collected cases (destination and boundary tables are parametrized). S4 additions (bound to spec r6): 6 new test functions and 4 new rows in existing tables, for 92 functions and 340 cases; their rows are at the end of the coverage map, prefixed `S4`.
 
 ## Coverage map
 | Spec ID | Test (file → name) | Level | Failure it catches (input + state → wrong output) | How it could pass vacuously, and why it does not |
@@ -102,6 +102,13 @@ Pack: `tests/features/agent_output_connectors/` — `FEATURE.md`, `README.md`, `
 | NFR-6 | AC-1 test | acceptance | See AC-1. | See AC-1. |
 | NFR-7 | contract.py → `test_lib_output_modules_never_import_a_higher_layer_or_raw_http`, `test_agent_side_output_modules_import_only_the_standard_library_and_vidbyte_lib` | contract | `vidbyte/lib` importing `vidbyte.agents` (even inside a function); `agents/output` importing `vidbyte.agents.base` (cycle); raw `httpx`. | AST scan of every module (not just module level); the expected module files must exist first. |
 | NFR-8 | AC-26 tests | contract | See AC-26. | See AC-26. |
+| S4 R-1 · INV-4, EC-41, T-1 | security.py → `test_url_credential_never_reaches_the_httpx_request_log_while_the_callers_own_requests_still_do` (×6: slack, discord, teams, google-chat, telegram, webhook) | security | Root logging at INFO, then one output send over the real `_send_once` → httpx's `HTTP Request: POST <url>` record carries the webhook URL or the Telegram token. | It would pass if httpx never logged in the test (a scripted `_send_once`, or capture not working). Here the real `_send_once` runs over `MockTransport`, the receipt must be SENT, and the caller's own `httpx.AsyncClient` request after the send must appear in the captured log. That last check also fails a guard that mutes httpx globally (raised level, `disabled`, `propagate=False`) or never resets its flag. |
+| S4 R-2 · AC-20, INV-21, EC-14 | configuration.py → `test_invalid_outputs_value_is_rejected_when_the_agent_is_built[destination-not-an-enum]` | boundary | A caller-written connector whose `destination` is the `str` `"pagerduty"` → accepted at construction; after the run, a bare `ConfigurationError`, no receipts, no `OutputDeliveryError`. | `runner.calls == 0` proves the rejection came before any model call; the message must contain `outputs`. |
+| S4 R-2 · AC-11 (f), EC-16, INV-11 | dispatch.py → `test_send_that_returns_anything_but_a_delivery_receipt_fails_only_its_connector` (×2: none, str) | integration | `send` returns `None` (or a `str`) → FAILED `unexpected:NoneType` (or `unexpected:str`) with no cause, outside the INV-11 grammar. | Exact receipt rows; the Slack receipt survives; `__cause__` must be a `ConfigurationError`; the connector was called once; metadata holds the same receipts. |
+| S4 R-3 · NFR-2, EC-47, INV-19 | email.py → `test_sync_run_returns_at_the_delivery_deadline_without_waiting_for_a_stalled_smtp_session` | concurrency | Sync `run()` with an email output whose SMTP server stalls → `run()` blocks until the worker thread ends, because `asyncio.run` joins the loop's default executor with no timeout (Python 3.11). | Ordering, not timing. The stalled step (`SmtpScript.hold("send_message")`) is released only after `run()` has returned, or by the 10 s `HOLD_SAFETY_SECONDS` backstop. The test reads `released` before opening the gate, so only a `run()` that waited for the thread sees it set. The receipt must be FAILED `network`. |
+| S4 R-12 · EC-48 | email.py → `test_quit_reply_after_the_server_accepted_the_message_never_changes_the_receipt` (×4: quit-answers-250, quit-answers-421, connection-dropped-at-quit, partial-refusal-then-quit-421) | integration | QUIT answered 250 or 421 after `send_message` returned → FAILED `smtp_250` or `smtp_421` for a delivered email, inviting a resend that mails twice. | The fake now mirrors smtplib's real `__exit__` (raises `SMTPResponseException` on non-221, swallows a disconnect) and `quit()` (returns the reply; a disconnect raises), so the test bites whichever close the fix uses. The dropped-connection row passes today; it fails a fix that calls `quit()` unsuppressed or suppresses only `SMTPResponseException`. |
+| S4 R-14 · INV-15, AC-10, EC-7, EC-18 | wire_contract.py → `test_long_first_line_becomes_a_250_character_one_line_title_at_every_titled_destination`, `test_title_whitespace_runs_and_newlines_collapse_to_one_space_at_every_titled_destination` (×5 each: github_issue, linear_issue, jira_issue, notion_page, email) | contract | Jira, Linear, or Notion sends `content.title` raw: 400 characters, or with CR, LF, or tab runs. | The current code is right, so these pass today; they are proven by mutation. Dropping `single_line` from Jira, Linear, or Notion fails both tests for that destination, and cutting the title without collapsing whitespace fails the whitespace test. |
+| S4 R-15 · AC-20, INV-21, EC-13 | configuration.py → `test_invalid_connector_argument_is_rejected_at_construction_naming_the_parameter_and_no_secret[slack-unparseable-ipv6-host]`, `[slack-non-numeric-port]`, `[slack-port-out-of-range]` | boundary | `https://[::1/…` → bare `ValueError` from `urlsplit`; a `:abc` or `:70000` port → accepted, then FAILED `unexpected:InvalidURL` after the run. | Each URL carries `SECRET_MARKER`, so the existing no-echo checks on the message and `details` bite; the message must name `webhook_url`. The r6 literals (`https://[::1/x`, `https://hooks.slack.com:abc/x`) have the same shape. |
 
 ## Tests deliberately NOT written
 | Candidate | Why it would not earn its keep |
@@ -173,6 +180,41 @@ $ PYTHONPATH=$(pwd) python -m pytest -q
 
 Lint (new files staged first): `python lint/run.py` → `SDK-LINT: PASS` (A001 stays at its 643 allowance).
 
+## S4 additions (red run against the first implementation)
+Bootstrap: none (deps present globally); PYTHONPATH=$(pwd). Code under test: S3_HEAD `9463c348` (worktree HEAD `a270e6ed`, spec r6; `vidbyte/` unchanged since S3).
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors
+16 failed, 324 passed in 11.67s
+```
+
+All 313 earlier cases pass. The 16 failures are all new cases, grouped by reason (`--tb=line`):
+```
+6  security.py:148   assert ['HTTP Request: POST https://…S3CRET… "HTTP/1.1 200 OK"'] == []        R-1 (slack, discord, teams, google-chat, telegram, webhook)
+1  urllib/parse.py   ValueError: Invalid IPv6 URL                                                R-15 slack-unparseable-ipv6-host
+2  configuration:89  Failed: DID NOT RAISE ConfigurationError                                    R-15 slack-non-numeric-port, slack-port-out-of-range
+1  configuration:120 Failed: DID NOT RAISE ConfigurationError                                    R-2 destination-not-an-enum
+2  dispatch.py:197   'unexpected:NoneType' / 'unexpected:str' != 'unexpected:ConfigurationError'  R-2 send returns None / str
+3  email.py:149      ('email','failed',None,'smtp_250' | 'smtp_421' | 'smtp_421') != expected     R-12 quit 250, quit 421, partial refusal then 421
+1  email.py:173      AssertionError: run() waited for the SMTP worker thread instead of returning at the deadline   R-3
+```
+
+The other 11 new cases pass today, on purpose. Ten are the R-14 title cases: the code is right, and the gap was coverage. The eleventh is the R-12 `connection-dropped-at-quit` row: smtplib's own `__exit__` already swallows a disconnect, and the row guards a fix that switches to `quit()`.
+
+Whole suite: `PYTHONPATH=$(pwd) python -m pytest -q` → `16 failed, 3527 passed, 12 skipped in 33.84s`. Every failure is one of the 16 above.
+
+Proof that each red is for the stated reason: a throwaway copy of the tree had the r6 fixes applied (scratchpad only, never committed). On it, the pack passes (`340 passed`) and so does the whole suite (`3543 passed, 12 skipped`). Leaving out one fix at a time turns red exactly that fix's cases: R-1 → 6, R-2 → 3, R-3 → 1, R-12 → 3, R-15 → 3. Sixteen wrong-fix mutations of the fixed copy were run, and all 16 were caught:
+- R-1: the filter ignores the flag; the flag is never reset; httpx's level is raised; the logger is disabled; propagation is turned off.
+- R-2: no `destination` check; no receipt check.
+- R-3: back to `asyncio.to_thread`; `run_in_executor(None, …)`.
+- R-12: `quit()` called unsuppressed; suppression of `SMTPResponseException` only.
+- R-15: `.port` never read.
+- R-14: Jira, Linear, or Notion sends the raw title (3 mutations); Jira cuts the title without collapsing it.
+
+The stalled-SMTP test passed 25 of 25 repeated runs on the fixed copy.
+
+Lint (files staged first): `python lint/run.py` → `SDK-LINT: PASS`.
+
 ## Notes for the implementer
 - **Names the tests import** (spec §8.5, §9.2, §12.3): `vidbyte.agents.output` (18 names in `__all__`, incl. `OutputDispatcher`), `vidbyte.agents.output.connector.OutputShaping`, `vidbyte.agents.output.dispatcher` (module attribute `OUTPUT_DELIVERY_DEADLINE_SECONDS`, imported by name), `vidbyte.lib.outputs` (`BaseOutput`, `OutputArguments`, `OutputText`, `OutputHttp`, `OutputSmtp`, 11 connectors), `vidbyte.lib.outputs.delivery.smtplib` (import `smtplib` as a module), `vidbyte.lib.dataclasses.outputs` (`OutputContent`, `DeliveryReceipt`, `OutputRequest`, `SmtpSettings`), `vidbyte.lib.enums` (`OutputDestination`, `DeliveryStatus`), `vidbyte.lib.errors.OutputDeliveryError`, `vidbyte.lib.constants.outputs`, the 17 root exports, `BaseAgent(outputs=)`, `BaseAgent.restore(outputs=)`, `JevAgentSettings(outputs=)`.
 - **Files the layering test expects**: `vidbyte/lib/outputs/{__init__,base,text,delivery,slack,discord,teams,google_chat,telegram,email,github,linear,jira,notion,webhook}.py` and `vidbyte/agents/output/{__init__,connector,dispatcher}.py` (§12.3 rows 4–18, 20–22).
@@ -182,3 +224,10 @@ Lint (new files staged first): `python lint/run.py` → `SDK-LINT: PASS` (A001 s
 - **Queue semantics**: outside a run, `agent._queued_prompts` is the pending list the next run claims; the AC-18 and INV-7 tests hold that list object and assert it is emptied. Clear it in the inline `except BaseException` block for every exception, not only cancellation.
 - **Shaping details the tests pin**: `structured_field` reads a `Mapping` with `.get` and anything else with `getattr`; a non-`str` or blank field counts as missing; `chat_text` returns the body alone when `OutputText.first_line(body) == title`; Slack escapes after truncation; Jira paragraphs come from the truncated body's non-blank lines.
 - **Validated against a throwaway prototype** written outside the repo from the spec alone: all 313 cases pass on it, the full suite passes with it (3516 passed), and 72 single-point mutations of it were run, 71 caught (the survivor, dropping the explicit single-connector check, is equivalent because a connector is not iterable and still raises the `outputs` error). Nothing from the prototype is committed.
+- **For the S4 repair (r6 names)**:
+  - **R-1.** The log test sets INFO on the root logger, not on `httpx`, and expects the caller's own `httpx.AsyncClient` request to stay logged. So the guard must be the r6 one: `_OUTPUT_POST_ACTIVE` set around `HttpTransport().request(...)` and reset in a `finally`, plus `OutputHttp._keep_log_record` added to `logging.getLogger("httpx")` at import. Changing the logger's level, `disabled`, or `propagate` fails the test.
+  - **R-3.** The test patches `dispatcher_module.OUTPUT_DELIVERY_DEADLINE_SECONDS` to 0.5 and holds the SMTP `send_message` step on a `threading.Event`. Only a session on `_SMTP_EXECUTOR` (not `asyncio.to_thread`, not `run_in_executor(None, …)`) lets sync `run()` return first. A wrong fix fails after the 10 s backstop and does not hang.
+  - **R-12.** The SMTP fake now behaves like smtplib on close. `__exit__` raises `SMTPResponseException` on a non-221 QUIT and ignores a disconnect. `quit()` returns the reply, and a disconnect raises `SMTPServerDisconnected`. Whether you close with `with` or with `quit()`, suppress `smtplib.SMTPException` and `OSError` around QUIT only. Login and send errors must still map as before.
+  - **R-2.** The `destination` check must run in `OutputDispatcher.connectors` (the agent build), and its message must contain `outputs`. A non-`DeliveryReceipt` `send` result must raise `ConfigurationError` inside `_deliver_one`, so it becomes FAILED `unexpected:ConfigurationError` and the cause of `OutputDeliveryError`.
+  - **R-15.** `https_url` must map a `ValueError` from `urlsplit` or `.port` to a `ConfigurationError` naming the parameter, with no value in the message or `details`.
+  - **R-4, R-9.** `OUTPUT_EMAIL_ADDRESS_PATTERN`, `JIRA_ISSUE_PATH`, and `JIRA_BROWSE_PATH` are not imported by any test. The existing address and Jira wire tests cover their behavior.
