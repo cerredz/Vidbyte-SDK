@@ -12,6 +12,7 @@ Key Functions:
     - get_default_endpoint: Retrieves the default endpoint for a provider.
     - resolve_api_key: Resolves explicit API key or retrieves environment variable.
     - find_vidbyte_api_key: Returns the Vidbyte key the text key fall-through selects, or None for BYOK.
+    - vidbyte_key_follows_provider: Reports whether a key is a Vidbyte key the gateway serves for a provider.
     - resolve_vidbyte_api_key: Resolves and checks the live Vidbyte key a managed call sends.
     - resolve_endpoint: Resolves explicit endpoint or defaults to standard URL.
     - get_supported_providers: Gets list of supported provider strings.
@@ -190,6 +191,17 @@ class ProviderModelRegistry:
         if p_enum not in VIDBYTE_MANAGED_TEXT_PROVIDERS:
             return None
         return os.environ.get(VIDBYTE_API_KEY_ENV_VAR, "").strip() or None
+
+    @classmethod
+    def vidbyte_key_follows_provider(cls, api_key: object, provider: str) -> bool:
+        """Return True when api_key is a Vidbyte key and the Vidbyte gateway serves provider, so the key may follow a vendor switch."""
+        # @intent vidbyte-key-may-cross-to-a-managed-provider
+        # A Vidbyte key is not a vendor secret: it only ever goes to the
+        # gateway, which serves every managed provider with it. A vendor
+        # key, or any key for a provider the gateway does not serve, stays put.
+        if not isinstance(api_key, str) or not api_key.strip().startswith(VIDBYTE_API_KEY_PREFIX):
+            return False
+        return cls.resolve_provider(provider) in VIDBYTE_MANAGED_TEXT_PROVIDERS
 
     @classmethod
     def resolve_vidbyte_api_key(cls, explicit_key: str | None) -> str:

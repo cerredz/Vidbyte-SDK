@@ -24,6 +24,7 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.settings import AgentFallbackSettings, AgentLoopSettings
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.runners import Runner
 from vidbyte.tools.base import _ToolWrapper
 from vidbyte.tools.catalog import Tools
@@ -110,9 +111,11 @@ class AgentForker:
         # @intent fork-key-never-crosses-providers
         # Sending the parent vendor's secret to another vendor leaks it and fails auth; None lets the
         # child's provider read its own env key. Same-provider forks (or a child with no known vendor) keep the key.
-        if child_provider and child_provider != parent_provider:
+        # A Vidbyte key is no vendor's secret and the gateway serves every managed provider, so it follows such a child.
+        api_key = agent.runner_config.api_key
+        if child_provider and child_provider != parent_provider and not ProviderModelRegistry.vidbyte_key_follows_provider(api_key, child_provider):
             return None
-        return agent.runner_config.api_key
+        return api_key
 
     @staticmethod
     def _fallback(agent: BaseAgent, settings: AgentForkSettings, child_provider: str, parent_provider: str) -> Sequence[str | FallbackModel] | AgentFallbackSettings | None:
