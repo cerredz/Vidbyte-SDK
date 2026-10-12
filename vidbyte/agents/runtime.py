@@ -540,9 +540,18 @@ class AgentRuntime:
                 # costs a review.
                 review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state))
                 if review.action is FinishReviewAction.STOP:
+                    # Same as contract exhaustion above: the end-of-run hooks see the reply the caller gets.
+                    state.messages = [*messages, self._assistant_message(last_assistant_output)] if last_assistant_output and last_assistant_output.strip() else messages
                     return await self._finish_result(self._unverified_finish_result(last_assistant_output or "", state), state)
                 if review.action is FinishReviewAction.CONTINUE:
-                    messages.extend((self._assistant_message(last_assistant_output or ""), {"role": "user", "content": review.feedback}))
+                    # Same as a contract rejection above: skip an empty draft, then end the iteration through the after-iteration hooks.
+                    if last_assistant_output and last_assistant_output.strip():
+                        messages.append(self._assistant_message(last_assistant_output))
+                    messages.append({"role": "user", "content": review.feedback})
+                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
+                    if decision.action is not MiddlewareAction.CONTINUE:
+                        abort_result = self._middleware_abort_result(decision, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+                        return await self._finish_result(abort_result, state)
                     continue
                 final = self._final_result(
                     output=last_assistant_output,
