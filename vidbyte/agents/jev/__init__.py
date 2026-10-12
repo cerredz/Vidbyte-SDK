@@ -118,7 +118,16 @@ from vidbyte.lib.dataclasses.jev import (
     JevTargetOutcomeItem,
     JevUsageReport,
 )
-from vidbyte.lib.dataclasses.skills import SkillDocument
+from vidbyte.lib.dataclasses.skills import (
+    AnthropicSkill,
+    GitHubSkill,
+    InlineSkill,
+    LocalSkill,
+    OpenAISkill,
+    SkillDocument,
+    SkillEntry,
+    SkillsShSkill,
+)
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
@@ -136,6 +145,7 @@ from vidbyte.lib.enums.jev import (
     JevScopeUniverse,
     JevSkillStatus,
 )
+from vidbyte.lib.enums.skills import SkillSourceType, SkillUnavailableReason
 
 __all__ = [
     "JevAgent",
@@ -252,6 +262,15 @@ __all__ = [
     "JevSkillsOutcome",
     "JevSkillStatus",
     "SkillDocument",
+    "AnthropicSkill",
+    "GitHubSkill",
+    "InlineSkill",
+    "LocalSkill",
+    "OpenAISkill",
+    "SkillEntry",
+    "SkillsShSkill",
+    "SkillSourceType",
+    "SkillUnavailableReason",
     "JevSelfReviewEvidence",
     "JevSpecialist",
     "JevTargetOutcome",
