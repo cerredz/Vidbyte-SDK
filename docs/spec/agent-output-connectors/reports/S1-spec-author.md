@@ -375,3 +375,36 @@ Self-check (r5):
 - **IDs:** no duplicates, no undefined references, and no gaps. The counts are unchanged from r4.
 - **Stale wording:** "inline" and `*_MENTION_TOKEN` now appear only in the §16 and §17 history and the r5 rename table.
 - **Frontmatter:** `revision: 5`, `updated: 2026-10-11`, `status: tests-written`.
+
+## Revision r6 (S4 verified review, orchestrator-directed alignment)
+
+The orchestrator directed this alignment with `review.md` (S4 verified review, verdict MERGEABLE AFTER FIXES) before repair starts. It is not a review round. Status stays `reviewed`. Nothing under `tests/` or `vidbyte/` changed, and neither did `test-plan.md`, `review.md`, or the §6.2 Proof column; I diffed the Proof column to confirm. Each item is recorded in §16 as S4-R<n>.
+
+Changes, one per item:
+- **S4-R1 (Blocker), the httpx log leak.** Row 7 now specifies the log guard. A module-level `_OUTPUT_POST_ACTIVE: ContextVar[bool]` in `delivery.py` (precedent `vidbyte/lib/usage_ledger.py:39`) is set around `HttpTransport().request` in `OutputHttp.post` and reset in `finally`. `OutputHttp._keep_log_record` is added once at import to `logging.getLogger("httpx")` and drops `HTTP Request:` records while the flag is set. The user's own httpx requests are still logged. There is no `import httpx`, no `transport.py` edit, and no level change. INV-4 (new bullet for log records), EC-41, T-1, §8.2, §12.4 (a new Credentials line and the httpx-import line), and §13 (a Logs seam) are updated.
+- **S4-R2 (Major).** A non-`OutputDestination` `destination` is rejected in `connectors()`, with a message containing `outputs` (INV-21, AC-20 Given, EC-14, row 22). A `send` that returns a non-`DeliveryReceipt` is FAILED `unexpected:ConfigurationError`, mirroring the render check (AC-11 (f), EC-16, §8.5 `_deliver_one` step 5, row 22).
+- **S4-R3 (Major).** SMTP runs on a module-level `_SMTP_EXECUTOR = ThreadPoolExecutor()` in `email.py`, through `loop.run_in_executor`. Updated: INV-19, FR-17, NFR-1 (`concurrent.futures`), NFR-2, §5 node L, §8.2, the §8.5 sketch comment and narration, rows 7 and 13, §12.4, §13, and EC-47. INV-19 and EC-47 state that a timed-out email may still be delivered later, which is already accepted under EC-19 and EC-47.
+- **S4-R4 (Major).** Row 2 adds `OUTPUT_EMAIL_ADDRESS_PATTERN = r"[^\s,]*@[^\s,]*"`, and rows 3 and 5 and the §8.5 sketch say both `_is_address` and `OutputArguments.address` `re.fullmatch` it. The optional `OUTPUT_HTTPS_PREFIX` is added, and the https checks stay different (D-19 vs §9.1 and D-21).
+- **S4-R5.** INV-2 is reworded so that a `render` that raises or returns a non-`OutputContent` makes zero sends, and its receipt is FAILED.
+- **S4-R9.** `JIRA_ISSUE_PATH` and `JIRA_BROWSE_PATH` are named in row 2 and used in row 16 and the §9.2 Jira row.
+- **S4-R11 (wording only).** A one-sentence resend caution is added in §9.2, AC-24 (Then), and EC-42.
+- **S4-R12.** New EC-48 covers a non-221 QUIT after acceptance: the receipt is unchanged. Row 7 decides the receipt once `send_message` returns and closes under `contextlib.suppress(smtplib.SMTPException, OSError)`.
+- **S4-R13 [scope-adding].** Not specified (rule 9). It is optional Q-11, default No, not built. New EC-49 states the limitation.
+- **S4-R15.** `https_url` reads `urlsplit(value).port` in a `try` and re-raises `ValueError` as `ConfigurationError` `from None` (row 5, INV-21, AC-20 Given, EC-13, and the §12.4 S002 sites).
+- **S4-R6, R7, R8, R10, R14** need no spec change and are left to the repair agent and the test author. They are recorded in one §16 row.
+
+New IDs: EC-48, EC-49, and Q-11, plus case (f) in AC-11. There are no new AC or INV IDs.
+
+Facts I checked for r6:
+- `vidbyte/` has no `ThreadPoolExecutor`, `run_in_executor`, `addFilter`, or `logging.Filter` (Grep). §8.2 says so and cites the standard-library APIs.
+- I read Python 3.11.0's `asyncio.runners.Runner.close`. It calls `loop.shutdown_default_executor()` with no timeout. `concurrent.futures.thread` registers `threading._register_atexit(_python_exit)`, so interpreter exit still joins a dedicated executor's workers. INV-19 states this.
+- The `vidbyte/lib/usage_ledger.py:39` precedent is `_ACTIVE_LEDGER: ContextVar[UsageLedger | None]`.
+- A002 policy tokens (`lint/rules/a002_intent_comments.py:25-48`) do not force `# @intent` on `_keep_log_record`. Row 7 asks for one anyway, because it is the redaction policy.
+- I probed httpx: a non-ASCII header value raises `UnicodeEncodeError`. With `MockTransport`, a CR/LF or control character in a header is sent without error, but I did not check the real h11 path. So EC-49 covers only the verified non-ASCII header case, and Q-11 asks about both kinds of character, as directed.
+
+Self-check (r6):
+- **Section headings:** unchanged.
+- **IDs:** no duplicates, no undefined references, and no gaps. EC now runs to 49 and Q to 11. The never-referenced list only shrank: EC-13, EC-16, and EC-41 are now cited.
+- **Proof column:** identical to r5.
+- **`asyncio.to_thread`:** it now appears only as "never `to_thread`", the `fetch.py` precedent, or history (§16, the r6 symbol table).
+- **Frontmatter:** `revision: 6`, `updated: 2026-10-11`, `status: reviewed`.
