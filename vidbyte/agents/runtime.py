@@ -645,6 +645,8 @@ class AgentRuntime:
                     # output is usually the part that matters.
                     review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state, tool_call=call, tool_result=result))
                     if review.action is FinishReviewAction.STOP:
+                        # The run ends here too, so its end-of-run hooks skip the refusal, as the accepted finish's below do.
+                        state.messages = finished_messages
                         return await self._finish_result(self._unverified_finish_result(result.output or "", state), state)
                     if review.action is FinishReviewAction.CONTINUE:
                         messages.append({"role": "user", "content": review.feedback})
