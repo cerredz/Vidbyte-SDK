@@ -341,6 +341,22 @@ class SessionTraceTests(unittest.TestCase):
         start_types = [(event["type"], event.get("name")) for event in inner.events if event["type"].startswith("start")]
         self.assertEqual(start_types, [("start_trace", "workflow"), ("start_span", "agent.run")])
 
+    def test_session_closes_each_context_the_way_it_was_opened(self) -> None:
+        # Verifies a non-agent trace inside a session ends as a trace while a converted agent.run still ends as a span.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=TraceProfile.default())
+        with tracer.session("workflow"):
+            step = tracer.start_trace("etl.load", rows=3)
+            tracer.end_trace(step, output="loaded")
+            run = tracer.start_trace("agent.run", agent_name="a")
+            tracer.end_trace(run, output="ok")
+        opened = {id(event["context"]): (event["name"], event["type"]) for event in inner.events if event["type"].startswith("start")}
+        closed = [(*opened[id(event["context"])], event["type"]) for event in inner.events if event["type"].startswith("end")]
+        self.assertEqual(
+            closed,
+            [("etl.load", "start_trace", "end_trace"), ("agent.run", "start_span", "end_span"), ("workflow", "start_trace", "end_trace")],
+        )
+
     def test_session_rejects_nested_active_session(self) -> None:
         # Verifies nested sessions on one controller fail loudly.
         tracer = Trace.session(RecordingTracer(), profile=TraceProfile.default())

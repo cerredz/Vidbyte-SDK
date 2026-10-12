@@ -194,13 +194,6 @@ class SessionTraceController(TraceController):
             return self.start_span(name, **attributes)
         return super().start_trace(name, **attributes)
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        # Ends child agent traces as spans while an emitted session root remains open.
-        root = self._live_root
-        if root is None or context is root:
-            return super().end_trace(context, output=output, error=error)
-        return super().end_span(context, output=output, error=error)
-
     def session(self, name: str | None = None, **attributes: Any) -> _SessionContext:
         # Returns a sync context manager for one active session root.
         return _SessionContext(self, name=name, attributes=attributes)
