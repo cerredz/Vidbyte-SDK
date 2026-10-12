@@ -281,6 +281,13 @@ def test_declared_dependencies_read_manifests_with_a_byte_order_mark(tmp_path, n
     assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ("httpx", "flask", "rich", "react", "vitest")
 
 
+def test_declared_dependencies_read_a_utf16_requirements_file(tmp_path, no_bash, monkeypatch) -> None:
+    # Regression: Windows PowerShell 5.1's > (as in pip freeze > requirements.txt) writes UTF-16 with a BOM, which pip reads; decoding it as UTF-8 gave no names.
+    _write_files(tmp_path, {"requirements.txt": b"\xff\xfe" + "flask\r\nrich\r\n".encode("utf-16-le")})
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ("flask", "rich")
+
+
 @pytest.mark.parametrize(
     "line",
     ["https://example.com/pkg-1.0-py3-none-any.whl", "git+https://example.com/pkg.git", "git+https://example.com/pkg.git  # pinned fork", "./local/path", "../sibling/pkg", "pkg-1.0.tar.gz#sha256=abc", "--index-url https://example.com/simple"],

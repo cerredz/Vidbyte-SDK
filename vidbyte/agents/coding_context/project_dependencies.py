@@ -13,6 +13,7 @@ TESTS: tests/features/coding_agent/test_coding_agent_environment.py
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import re
@@ -69,9 +70,14 @@ class ProjectDependencies:
                 raw = handle.read(CODING_ENVIRONMENT_MANIFEST_MAX_BYTES)
         except OSError:
             return ""
-        # "utf-8-sig" drops the byte-order mark Windows PowerShell writes,
-        # which npm and pip accept but tomllib, json, and the name match do not.
-        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode("utf-8-sig", errors="replace")
+        # @intent powershell-utf16-manifests-are-read
+        # Windows PowerShell 5.1's > and Out-File write UTF-16 with a
+        # byte-order mark, as in pip freeze > requirements.txt, which pip
+        # reads; "utf-16" reads that mark and drops it. "utf-8-sig" drops
+        # the UTF-8 mark it writes for -Encoding utf8, which npm and pip
+        # accept but tomllib, json, and the name match do not.
+        encoding = "utf-16" if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
+        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode(encoding, errors="replace")
 
     @staticmethod
     def _toml(text: str) -> dict[str, Any]:
