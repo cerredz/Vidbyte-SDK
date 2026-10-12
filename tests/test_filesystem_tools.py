@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.filesystem import (
@@ -33,6 +34,7 @@ from vidbyte.tools.filesystem import (
     WriteTextTool,
     ZipTool,
 )
+from vidbyte.tools.filesystem._base_tool import EDIT_DIFF_MAX_LINES
 from vidbyte.tools.types import ToolCall, ToolStatus
 
 
@@ -408,6 +410,7 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "hello"})))
             result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "nope", "replacement": "x"})))
             self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertNotIn("@@", result.output)
 
     def test_replace_text_multiple_matches_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -487,6 +490,114 @@ class FileSystemToolNullOptionalArgumentTests(unittest.TestCase):
                     self.assertEqual(result.status, ToolStatus.ERROR)
 
 
+class FailingWriteBackend(LocalFileSystemBackend):
+    """A local backend whose writes fail the way a read-only file does."""
+
+    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+        raise PermissionError("[Errno 13] Permission denied")
+
+
+def changed_lines(output: str) -> list[str]:
+    # The diff's removed and added lines, after the path line and
+    # the ---/+++ file headers.
+    return [line for line in output.split("\n")[3:] if line.startswith(("-", "+"))]
+
+
+class EditToolDiffTests(unittest.TestCase):
+    def test_replace_text_on_crlf_file_diffs_only_the_edited_line(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.py"
+            target.write_bytes(b"def f():\r\n    x = 1\r\n    return 2\r\n\r\nprint(f())\r\n")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.py", "search": "return 2", "replacement": "return 3"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output.split("\n")[0], result.metadata["path"])
+            self.assertEqual(changed_lines(result.output), ["-    return 2", "+    return 3"])
+            self.assertEqual(target.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
+
+    def test_replace_text_diff_shows_which_of_two_similar_blocks_was_hit(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.py").write_text("def first():\n    value = 1\n    return value\n\ndef second():\n    value = 1\n    return value\n", encoding="utf-8")
+            call = ToolCall("replace_text", {"path": "f.py", "search": "def second():\n    value = 1", "replacement": "def second():\n    value = 2"})
+            result = run(ReplaceTextTool(config).execute(call))
+            lines = result.output.split("\n")
+            self.assertEqual(lines[3], "@@ -3,5 +3,5 @@")
+            self.assertIn(" def second():", lines)
+            self.assertEqual(changed_lines(result.output), ["-    value = 1", "+    value = 2"])
+
+    def test_write_text_new_file_reports_line_count_instead_of_a_diff(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "new.txt", "content": "a\nb\nc\n"})))
+            self.assertEqual(result.output, f"{result.metadata['path']}\ncreated, 3 lines")
+
+    def test_identical_rewrite_and_same_text_replacement_report_no_changes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.txt").write_text("keep\n", encoding="utf-8")
+            written = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "keep\n"})))
+            replaced = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "keep", "replacement": "keep"})))
+            for result in (written, replaced):
+                self.assertEqual(result.output, f"{result.metadata['path']}\nno changes")
+
+    def test_failed_write_returns_its_error_without_a_diff(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True, backend=FailingWriteBackend())
+            target = Path(tmp) / "f.txt"
+            target.write_text("old\n", encoding="utf-8")
+            calls = (
+                (WriteTextTool(config), ToolCall("write_text", {"path": "f.txt", "content": "new\n"})),
+                (ReplaceTextTool(config), ToolCall("replace_text", {"path": "f.txt", "search": "old", "replacement": "new"})),
+            )
+            for tool, call in calls:
+                with self.subTest(tool=tool.name):
+                    result = run(tool.execute(call))
+                    self.assertEqual(result.status, ToolStatus.ERROR)
+                    self.assertEqual(result.output, "[Errno 13] Permission denied")
+            self.assertEqual(target.read_text(encoding="utf-8"), "old\n")
+
+    def test_diff_is_cut_after_the_cap_with_a_count_of_the_rest(self) -> None:
+        # The diff is 4 lines (---, +++, @@, -old) plus one + line per
+        # new line, so the first case fills the cap exactly.
+        exact, over = EDIT_DIFF_MAX_LINES - 4, 200
+        for new_lines, expected_last in ((exact, f"+line {exact - 1}"), (over, f"[diff truncated: {4 + over - EDIT_DIFF_MAX_LINES} more lines]")):
+            with self.subTest(new_lines=new_lines), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                Path(tmp, "f.txt").write_text("old\n", encoding="utf-8")
+                content = "".join(f"line {index}\n" for index in range(new_lines))
+                result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": content})))
+                lines = result.output.split("\n")
+                self.assertEqual(lines[-1], expected_last)
+                self.assertEqual(len(lines), 1 + min(4 + new_lines, EDIT_DIFF_MAX_LINES + 1))
+                self.assertEqual(Path(tmp, "f.txt").read_text(encoding="utf-8"), content)
+
+    def test_utf8_edit_diffs_the_exact_characters(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.txt").write_text("menu: café\n", encoding="utf-8")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "café", "replacement": "naïve 🙂"})))
+            self.assertEqual(changed_lines(result.output), ["-menu: café", "+menu: naïve 🙂"])
+
+    def test_missing_final_newline_does_not_join_diff_lines(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.txt").write_text("alpha beta", encoding="utf-8")
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.txt", "search": "beta", "replacement": "gamma"})))
+            marker = "\\ No newline at end of file"
+            self.assertEqual(result.output.split("\n")[3:], ["@@ -1 +1 @@", "-alpha beta", marker, "+alpha gamma", marker])
+
+    def test_write_text_over_non_utf8_file_still_writes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.txt"
+            target.write_bytes(b"caf\xe9\n")
+            result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "café\n"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output.split("\n")[1], "no diff: the old file is not valid utf-8 text")
+            self.assertEqual(target.read_text(encoding="utf-8"), "café\n")
+
+
 class WriteTextOverwriteLimitTests(unittest.TestCase):
     """max_overwrite_lines: write_text may not replace an existing file with more lines than the limit."""
 
@@ -563,7 +674,7 @@ class WriteTextOverwriteLimitTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             plain = WriteTextTool(FileSystemToolConfig(root=tmp)).spec().description
             limited = WriteTextTool(FileSystemToolConfig(root=tmp, max_overwrite_lines=1500)).spec().description
-            self.assertEqual(plain, "Write text content to a file at the given path inside the configured root.")
+            self.assertEqual(plain, "Write text content to a file at the given path inside the configured root. The result shows a diff of the change, or the line count of a new file.")
             self.assertTrue(limited.startswith(plain))
             self.assertIn("1,500 lines", limited)
             self.assertIn("replace_text", limited)
