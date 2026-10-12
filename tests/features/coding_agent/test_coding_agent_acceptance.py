@@ -110,7 +110,7 @@ async def test_caller_read_only_policy_denies_bash_and_write_without_side_effect
         ],
         final_answer="stayed read-only",
     )
-    agent = build_test_agent(name="coder", system_prompt="Inspect only.", root_dir=tmp_path, permission_policy=policy, runner=runner, agent_type=coding_agent_cls)
+    agent = build_test_agent(name="coder", system_prompt="Inspect only.", root_dir=tmp_path, permission_policy=policy, progress_notes=False, runner=runner, agent_type=coding_agent_cls)
 
     reply = await agent.arun("Try to change something.")
 

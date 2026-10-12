@@ -22,6 +22,7 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - `test_coding_agent_contract.py` checks the constructor contract: public names, the subclass surface, export and restore parity, caller tools, identity errors, and root validation and pinning.
 - `test_coding_agent_web_fetch.py` checks fetch-key selection, authentication, confinement and secrecy, and the keyed fetch view against the bare priced tool.
 - `test_coding_agent_agents_md.py` checks the loading of the root folder's AGENTS.md file end to end on the request the model receives, and `CodingContextWindow`, the shared helper later sections build on. Start here when the model does not see the repository's rules.
+- `test_coding_agent_progress_notes.py` checks the agent's own progress notes file: created when missing and never overwritten, hidden from git without hiding other tools' files, shown last, carried from one run to the next, and skipped on a root that cannot be written. Start here when a run does not see the last run's notes.
 - `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop, a fetch key read only from the named environment variable, and clean failures for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` checks `BashTool`'s input and output contract: the spec, validation, streams, `cwd`, argv, stdin, spawn errors, decoding, the output cap, and the bash lookup.
 - `test_bash_tool_process_bounds.py` checks the time limit, process-group kill, cancellation and pipe cleanup on real processes. Start here for a hang or a leftover process.
@@ -30,3 +31,4 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 
 - 2026-10-10 - The pack was written red before implementation from spec r3 - every test fails at import until `vidbyte/agents/coding.py` and `vidbyte/tools/builtins/bash.py` exist.
 - 2026-10-11 - `AGENTS.md` loading and the shared coding context window were added (`test_coding_agent_agents_md.py`); `test_coding_agent_contract.py`'s `EXPECTED_SIGNATURE` gained `load_agents` and `context_manager`.
+- 2026-10-11 - Progress notes were added (`test_coding_agent_progress_notes.py`); `EXPECTED_SIGNATURE` gained `progress_notes`, and the tests that assert an exact request, an empty root, or export parity with `BaseAgent` pass `progress_notes=False`.
