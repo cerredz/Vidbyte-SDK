@@ -60,7 +60,7 @@ class HttpFetcher:
                 details={"url": url, "status_code": exc.status_code, "excerpt": exc.response_excerpt},
             ) from exc
         raw = response.raw_bytes if response.raw_bytes is not None else response.body.encode("utf-8")
-        return FetchResponse(status_code=response.status_code, body_bytes=raw, content_type=_header(response.headers, "content-type"))
+        return FetchResponse(status_code=response.status_code, body_bytes=raw, content_type=_header(response.headers, "content-type"), url=response.url)
 
 
 __all__ = [
