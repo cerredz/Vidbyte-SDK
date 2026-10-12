@@ -105,9 +105,9 @@ class OutputCapTests(unittest.TestCase):
     """Checks INV-9: every managed body carries a cap, the caller's own value always wins, and extra_body is never rewritten."""
 
     def test_managed_body_carries_the_default_cap_or_the_callers_exact_value_in_each_dialects_field(self) -> None:
-        # AC-8 (a)(b): unset gives 8,192 (not Anthropic's BYOK 1,024, not absent); 100 catches max(N, 8192) and 20,000 catches min(N, 8192).
+        # AC-8 (a)(b): unset gives 32,768 (not Anthropic's BYOK 1,024, not absent); 100 catches max(N, 32768) and 40,000 catches min(N, 32768).
         for provider in MANAGED_MODELS:
-            for requested, expected in ((None, 8192), (100, 100), (20_000, 20_000)):
+            for requested, expected in ((None, 32768), (100, 100), (40_000, 40_000)):
                 with self.subTest(provider=provider.value, max_output_tokens=requested):
                     body = native_body(managed_call(provider, max_output_tokens=requested))
                     cap = cap_of(provider, body)
@@ -122,7 +122,7 @@ class OutputCapTests(unittest.TestCase):
         self.assertEqual(native_body(gemini), {"contents": [{"role": "user", "parts": [{"text": "Hi"}]}], "generationConfig": {"temperature": 0.2}})
         xai = managed_call(ModelProvider.XAI, extra_body={"max_completion_tokens": 2000})
         self.assertEqual(len(xai.requests), 1)
-        self.assertEqual(native_body(xai), {"model": "grok-4.5", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 8192, "max_completion_tokens": 2000})
+        self.assertEqual(native_body(xai), {"model": "grok-4.5", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 32768, "max_completion_tokens": 2000})
 
 
 class TimeoutFloorTests(unittest.TestCase):

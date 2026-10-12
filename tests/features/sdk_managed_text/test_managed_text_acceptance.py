@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Acceptance layer of tests/features/sdk_managed_text/ (spec AC-
 ARCHITECTURE NOTE: Only the inner HTTP transport is scripted. Expected requests are spelled as literals from spec section 4 or recorded from the real adapter in BYOK state, never recomputed from production constants.
 COMMON MODIFICATION PATTERNS: When the gateway serves a new provider, add it to MANAGED_MODELS in managed_text_fixtures.py; the per-provider test picks it up. When the README section is reworded, keep the facts this module checks.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not read the developer's real environment; every test clears it.
-KNOWN EDGE CASES: Gemini carries the model only in its URL, so its managed body has no "model" key. Anthropic's BYOK default cap is 1,024 while managed calls default to 8,192.
+KNOWN EDGE CASES: Gemini carries the model only in its URL, so its managed body has no "model" key. Anthropic's BYOK default cap is 1,024 while managed calls default to 32,768.
 RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 4, 6.2 and 9.2.
 TESTS: python -m pytest tests/features/sdk_managed_text/test_managed_text_acceptance.py
 """
@@ -72,7 +72,7 @@ class ManagedTextAcceptanceTests(unittest.TestCase):
         [sent] = gateway.requests
         self.assertEqual(sent["method"], "POST")
         self.assertEqual(sent["url"], GATEWAY_URL)
-        self.assertEqual(sent["json_body"], {"provider": "openai", "model": "gpt-5.5", "body": {"model": "gpt-5.5", "input": "Say hi in one word.", "max_output_tokens": 8192}})
+        self.assertEqual(sent["json_body"], {"provider": "openai", "model": "gpt-5.5", "body": {"model": "gpt-5.5", "input": "Say hi in one word.", "max_output_tokens": 32768}})
         self.assertEqual(header(sent, "authorization"), f"Bearer {VIDBYTE_KEY}")
         self.assertEqual(header(sent, "content-type"), "application/json")
         self.assertRegex(idempotency_key(sent) or "", KEY_PATTERN)
@@ -84,10 +84,10 @@ class ManagedTextAcceptanceTests(unittest.TestCase):
                 gateway = ScriptedGateway(provider_answer(provider, text="Hi"))
                 with patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True):
                     response = TextModelRunner(TextModelConfig(provider=provider.value, model=model), transport=gateway).run(PROMPT, system="Be brief.")
-                # The oracle: the same adapter in BYOK state with the config managed mode pins (cap 8,192, timeout 630 s).
+                # The oracle: the same adapter in BYOK state with the config managed mode pins (cap 32,768, timeout 630 s).
                 vendor = ScriptedGateway(provider_answer(provider, text="Hi"))
                 with patch.dict(os.environ, {}, clear=True):
-                    TextModelRunner(TextModelConfig(provider=provider, model=model, api_key="sk-byok-oracle", max_output_tokens=8192, timeout_seconds=630.0), transport=vendor).run(PROMPT, system="Be brief.")
+                    TextModelRunner(TextModelConfig(provider=provider, model=model, api_key="sk-byok-oracle", max_output_tokens=32768, timeout_seconds=630.0), transport=vendor).run(PROMPT, system="Be brief.")
 
                 self.assertEqual(len(gateway.requests), 1)
                 [sent] = gateway.requests
@@ -101,7 +101,7 @@ class ManagedTextAcceptanceTests(unittest.TestCase):
                 self.assertEqual(sent.get("idempotency_key"), idempotency_key(sent))
                 if provider is ModelProvider.GEMINI:
                     self.assertNotIn("model", sent["json_body"]["body"])
-                    self.assertEqual(sent["json_body"]["body"]["generationConfig"]["maxOutputTokens"], 8192)
+                    self.assertEqual(sent["json_body"]["body"]["generationConfig"]["maxOutputTokens"], 32768)
                 self.assertIs(response.provider, provider)
                 self.assertEqual(response.model, model)
                 self.assertEqual(response.text, "Hi")
@@ -183,7 +183,7 @@ class ManagedAgentTests(unittest.IsolatedAsyncioTestCase):
         envelope = gateway.requests[0]["json_body"]
         self.assertEqual((envelope["provider"], envelope["model"]), ("openai", "gpt-5.5"))
         self.assertIn("tools", envelope["body"])
-        self.assertEqual(envelope["body"]["max_output_tokens"], 8192)
+        self.assertEqual(envelope["body"]["max_output_tokens"], 32768)
         self.assertEqual(header(gateway.requests[0], "authorization"), f"Bearer {VIDBYTE_KEY}")
 
 

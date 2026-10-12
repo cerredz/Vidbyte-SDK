@@ -11,7 +11,7 @@ A developer who holds only a Vidbyte key (`VIDBYTE_API_KEY=vb_live_…`), or who
 - A managed call sends `POST https://vidbyte-backend.onrender.com/api/v1/models/generate` with exactly three headers (`authorization: Bearer <vb_live_ key>`, `content-type: application/json`, `Idempotency-Key: <32 lowercase hex>`) and the body `{"provider", "model", "body"}`, where `body` is the adapter's own BYOK body for the pinned config. No request goes anywhere else.
 - A 409, a 502, or an answer that is not a JSON object is re-sent at most twice with the same key and envelope, after 0.5 s and 1.0 s, and only while the call's one deadline (its own timeout, at least 630 s, counted from the first POST) still covers the wait. Each attempt keeps the full timeout, and the error states how many re-sends the call made. Nothing else is retried, including a missing response.
 - Every managed failure is `ProviderRequestError(provider="vidbyte")` with no response excerpt, no chained exception, and no byte of the gateway or provider body.
-- A managed config has a non-secret placeholder as `resolved_api_key()`, refuses a custom endpoint and unmanaged providers, carries an output cap (8,192 unless the caller set one), and waits at least 630 s per attempt.
+- A managed config has a non-secret placeholder as `resolved_api_key()`, refuses a custom endpoint and unmanaged providers, carries an output cap (32,768 unless the caller set one), and waits at least 630 s per attempt.
 
 ## Actors / Callers
 
