@@ -100,7 +100,7 @@ def test_missing_or_blank_map_md_adds_no_section(coding_agent_cls, script_model,
     if raw is not None:
         (tmp_path / "MAP.md").write_bytes(raw)
 
-    agent = _agent(coding_agent_cls, tmp_path)
+    agent = _agent(coding_agent_cls, tmp_path, progress_notes=False)
     system, _prompt = _first_request(agent, script_model)
 
     assert agent.context_manager is None
@@ -147,7 +147,7 @@ def test_load_map_false_never_touches_the_file(coding_agent_cls, tmp_path) -> No
     # FR-3: a MAP.md that would fail construction is never looked at when loading is off.
     (tmp_path / "MAP.md").mkdir()
 
-    agent = _agent(coding_agent_cls, tmp_path, load_map=False)
+    agent = _agent(coding_agent_cls, tmp_path, load_map=False, progress_notes=False)
 
     assert agent.context_manager is None
 

@@ -85,7 +85,7 @@ reply = await agent.arun(
 
 ## Coding Agent
 
-`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool. By default it also shows the folder's `AGENTS.md` and `MAP.md` to the model.
+`CodingAgent` is a `BaseAgent` that takes every `BaseAgent` keyword unchanged plus a required `root_dir`, and starts with seven tools over that folder: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool. By default it also shows the folder's `AGENTS.md` and `MAP.md` to the model, and keeps its own progress notes file.
 
 ```python
 from vidbyte import CodingAgent
@@ -97,6 +97,8 @@ agent = CodingAgent(
     firecrawl_api_key="fc-your-key",  # optional; picks the web-fetch provider
     load_agents=True,                 # default; shows my-project/AGENTS.md to the model
     load_map=True,                    # default; shows my-project/MAP.md to the model
+    setup_commands=["uv sync"],       # optional; run once in my-project before the first turn
+    progress_notes=True,              # default; keeps my-project/.vidbyte/coding-agent/progress.md
     provider="openai",
     model_name="gpt-4.1",
 )
@@ -110,7 +112,11 @@ When it is built, the agent reads `<root_dir>/AGENTS.md`, or a case variant such
 
 The agent reads `<root_dir>/MAP.md` (or `map.md`) the same way, with the same rules and cap, and shows it right after `AGENTS.md`. `MAP.md` is a convention for repositories that a `CodingAgent` works in: a short, human-written map of where things live, such as the main folders, the entry points, and where new code goes, so the model can open the right file instead of spending its first turns on `ls` and `find`. Other names, such as `REPO_MAP.md`, are not read. Pass `load_map=False` to turn it off; `load_map` must be a real `bool`.
 
-`CodingContextWindow` (`vidbyte/agents/coding_context/`) places the text and owns the order of everything a `CodingAgent` adds after the system prompt: `AGENTS.md`, then the environment context, the repository map, and setup-command results as those features land, then the content of your own `context_manager`. It never changes your manager: when a section is loaded, the agent gets a new manager with your content after the sections. Adding a section takes three steps, described in that folder's README:
+`setup_commands`, a list of command strings such as `["uv sync", "npm ci"]`, run once while the agent is built, in order, each as `bash -c <command>` in `root_dir`, so the environment is ready before the first turn. Construction waits for them, up to the bash tool's 600-second limit each. The first command that fails, times out, or cannot start stops the run, and the rest are not run. Nothing raises: the model gets a short note after `AGENTS.md` and `MAP.md` and before the progress notes, with one line per command and, for the failed one, the last 30 lines of its output (at most 8,192 bytes). Without bash, nothing runs and the note says so. A bare string such as `setup_commands="uv sync"` fails with a `ConfigurationError`. The commands are not run again by `run()`, `fork()`, or `restore()`.
+
+The agent also keeps its own notes file, `<root_dir>/.vidbyte/coding-agent/progress.md`, so a second run picks up where the first stopped. When it is built, the agent creates the file from a short template (Done, Next, Decisions) if it is missing, and creates `.vidbyte/coding-agent/.gitignore` holding `*` so git never sees that folder. Your own `.gitignore`, `.vidbyte/` itself, and other tools' files there (such as vidbyte-cli's task board) are never touched. Neither file is ever overwritten. The notes, capped at 32,768 bytes, are shown last among the sections, after a short instruction to read them first and to update them with `write_text` or `replace_text` after each meaningful step. They are read once, when the agent is built. If the root folder cannot be written, for example a read-only checkout, the agent gets no notes section and construction still succeeds. Pass `progress_notes=False` to turn this off; nothing is then created. `progress_notes` must be a real `bool`.
+
+`CodingContextWindow` (`vidbyte/agents/coding_context/`) places the text and owns the order of everything a `CodingAgent` adds after the system prompt: `AGENTS.md`, then the environment context as that feature lands, then the repository map (`MAP.md`), then the setup-command results, then the progress notes, then the content of your own `context_manager`. It never changes your manager: when a section is loaded, the agent gets a new manager with your content after the sections. Adding a section takes three steps, described in that folder's README:
 
 1. Write one loader class in its own file in `vidbyte/agents/coding_context/`, with `load(settings) -> CodingContextSectionText | None`.
 2. Return the section's reserved `CodingContextSection` member (`ENVIRONMENT`, `REPO_MAP`, or `SETUP_RESULTS`); the enum's order is the render order.
