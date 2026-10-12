@@ -3,7 +3,7 @@
 PURPOSE: Prove CodingAgent's verify_command end to end: the run may finish only when the command exits with code 0, a failure goes back to the model as "Not done yet" feedback, and after max_verify_attempts failures the run ends with the model's last answer marked contract_unsatisfied instead of raising.
 ROLE IN CODEBASE: Drives vidbyte.CodingAgent through BaseAgent's real tool loop (AgentRuntime, MiddlewarePipeline.review_finish, VerifyCommandMiddleware) with an offline scripted model and real bash subprocesses; also unit-tests FinishReview and the pipeline's default review.
 ARCHITECTURE NOTE: Only the model is replaced. Each test scripts the model's turns, either an isDone tool call or a plain text answer, so both finish paths are covered, and counts command runs through a log file the command itself appends to. Commands are portable between Linux bash and Git for Windows bash.
-FUNCTION INVENTORY: ReplayRunner replays scripted turns; tool_turn, finish_turn, and text_turn build them; ScriptedReviewer replays finish reviews and records the after-iteration and end-of-run hooks; _finish builds either finish turn by path; _verify_log counts command runs; _tool_feedback and _user_feedback read what the model was shown. Tests cover construction (invalid arguments, missing bash, middleware wiring), FinishReview and the pipeline, and run behavior (pass, fail then fix, never fixed, output cap, timeout, working directory, the model's own bash calls, contracts first, a fresh count per run, a plain BaseAgent, and the hooks and messages around a refused finish).
+FUNCTION INVENTORY: ReplayRunner replays scripted turns; tool_turn, finish_turn, and text_turn build them; ScriptedReviewer replays finish reviews and records the after-iteration and end-of-run hooks; _finish builds either finish turn by path; _verify_log counts command runs; _tool_feedback and _user_feedback read what the model was shown. Tests cover construction (invalid arguments, missing bash, middleware wiring), FinishReview and the pipeline, and run behavior (pass, fail then fix, never fixed, output cap, timeout, working directory, the model's own bash calls, contracts first, a fresh count per run, a plain BaseAgent, and the hooks and messages around a refused or stopped finish).
 COMMON MODIFICATION PATTERNS: Script one more turn per scenario and assert on reply.content, reply.metadata, the log file, and the messages the model was sent, never on private agent state.
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock BashTool, the runtime, or the middleware; they are the seams under test. 2. Do not use a real API key or open a socket.
 KNOWN EDGE CASES: The isDone path shows feedback as the isDone tool result; the text path shows it as a user message after the model's own answer. On Windows a timed-out command keeps running after the call returns (BashTool EC-14), so the timeout test sleeps only briefly there.
@@ -537,3 +537,24 @@ async def test_stopped_text_answer_reaches_the_end_of_run_hooks(tmp_path) -> Non
     assert reply.content == "Done."
     assert reply.metadata["stop_reason"] == "contract_unsatisfied"
     assert reviewer.after_run_messages[-1] == {"role": "assistant", "content": "Done."}
+
+
+@pytest.mark.asyncio
+async def test_stopped_is_done_finish_hides_the_provisional_refusal_from_the_end_of_run_hooks(tmp_path) -> None:
+    # A review that ends an isDone finish ends the run, so the
+    # end-of-run hooks see the conversation as contract exhaustion
+    # shows it: the model's isDone call last, with no provisional
+    # "not accepted yet" answer after it.
+    reviewer = ScriptedReviewer(FinishReview.stop("Never verified."))
+    runner = ReplayRunner(finish_turn("Done."))
+    agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_type=BaseAgent, middleware=(reviewer,))
+
+    reply = await agent.arun("Do the task.")
+
+    assert reply.content == "Done."
+    assert reply.metadata["stop_reason"] == "contract_unsatisfied"
+    assert "not accepted yet" not in json.dumps(reviewer.after_run_messages)
+    assert [message for message in reviewer.after_run_messages if message.get("role") == "tool"] == []
+    last = reviewer.after_run_messages[-1]
+    assert last["role"] == "assistant"
+    assert [call["function"]["name"] for call in last["tool_calls"]] == ["isDone"]
