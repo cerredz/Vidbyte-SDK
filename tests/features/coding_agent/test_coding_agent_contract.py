@@ -37,6 +37,7 @@ EXPECTED_SIGNATURE = {
     "tools": (),
     "permission_policy": None,
     "readonly_paths": (),
+    "max_rewrite_lines": 300,
 }
 
 # BaseAgent keywords that RunState exports, so a pass-through mistake shows up as a state difference.
