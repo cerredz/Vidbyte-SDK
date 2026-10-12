@@ -114,3 +114,80 @@ A throwaway prototype was written from the spec alone in the session scratchpad,
 5. **AC-12 `AgentTool(agent)` fails as written for an agent without a name** (`ToolSpec.name cannot be empty`). The test passes `agent_metadata=AgentMetadata(name=...)`.
 6. **The AC-23 / INV-7 inline `_notify_session_exception(exc)` cannot be observed through `session.run`.** `Session.run` notifies the session itself. Only a direct `agent.run` on a bound agent proves the inline block does it, and a separate test covers that.
 7. **AC-20 `outputs=SlackOutput(...)` cannot be told apart from the generic "not iterable" rejection.** Both raise the `outputs` error, so a dedicated single-connector check is untestable (the equivalent mutant above).
+
+## Addendum: S4 follow-up (2026-10-11)
+
+The coordinator asked for failing tests for the defects S4 confirmed. Inputs:
+- `review.md`;
+- `reports/S4-findings-verifier.md`;
+- spec r6 (`a270e6ed`): §16 S4-R1 to S4-R15, INV-2, INV-4, INV-15, INV-19, INV-21, AC-10, AC-11 (f), AC-16, AC-20, EC-13, EC-14, EC-16, EC-41, EC-47, EC-48, EC-49, NFR-2, §13, and §12.3 rows 2, 5, 7, 13, 16, and 22.
+
+The code under test is S3_HEAD `9463c348`; nothing under `vidbyte/` was touched. The work produced two commits:
+- `45ba29cc` test(outputs): add failing tests for S4 findings [R-1, R-2, R-3, R-12, R-14, R-15]
+- `975f8d9d` docs(spec): record S4 test proof for agent-output-connectors. This commit extends only the AC-10, AC-11, and AC-20 Proof cells.
+
+### Tests added
+The pack grows by 6 test functions and 27 cases, from 313 to 340 cases.
+
+| Finding | Test (file → name [case ids]) | Red today because |
+|---|---|---|
+| R-1 Blocker | security.py → `test_url_credential_never_reaches_the_httpx_request_log_while_the_callers_own_requests_still_do` [slack, discord, teams, google-chat, telegram, webhook] | httpx's `HTTP Request: POST https://…S3CRET…` INFO record is captured |
+| R-2 | configuration.py → `test_invalid_outputs_value_is_rejected_when_the_agent_is_built[destination-not-an-enum]` | `DID NOT RAISE ConfigurationError` |
+| R-2 | dispatch.py → `test_send_that_returns_anything_but_a_delivery_receipt_fails_only_its_connector` [none, str] | `unexpected:NoneType` / `unexpected:str` instead of `unexpected:ConfigurationError` |
+| R-3 | email.py → `test_sync_run_returns_at_the_delivery_deadline_without_waiting_for_a_stalled_smtp_session` | `run() waited for the SMTP worker thread instead of returning at the deadline` |
+| R-12 | email.py → `test_quit_reply_after_the_server_accepted_the_message_never_changes_the_receipt` [quit-answers-250, quit-answers-421, partial-refusal-then-quit-421; connection-dropped-at-quit passes today] | FAILED `smtp_250` / `smtp_421` for an accepted mail |
+| R-14 | wire_contract.py → `test_long_first_line_becomes_a_250_character_one_line_title_at_every_titled_destination`, `test_title_whitespace_runs_and_newlines_collapse_to_one_space_at_every_titled_destination` [github_issue, linear_issue, jira_issue, notion_page, email] | Pass today, because the code is correct and the gap was coverage; proven by mutation instead (below) |
+| R-15 | configuration.py → `test_invalid_connector_argument_is_rejected_at_construction_naming_the_parameter_and_no_secret` [slack-unparseable-ipv6-host, slack-non-numeric-port, slack-port-out-of-range] | bare `ValueError: Invalid IPv6 URL`; `DID NOT RAISE` for both ports |
+
+No test was added for R-4, as directed: the AC-16 and AC-20 address cases cover it. R-5 to R-11 and R-13 need no test from me, because they are wording, placement, or not-built items.
+
+### Fixtures extended
+No existing assertion was changed or removed.
+- `factories.py`, `SmtpScript`:
+  - `quit_reply` holds a `(code, text)` pair or an exception.
+  - `hold(step)` returns a `threading.Event` gate.
+  - `released` is set when a held step stops waiting.
+  - `HOLD_SAFETY_SECONDS = 10.0`.
+  - `answer_quit()` plays the scripted reply.
+- `factories.py`, `ScriptedSmtp`:
+  - `__exit__` now behaves like `smtplib.SMTP.__exit__`: it sends QUIT, raises `SMTPResponseException` on a non-221 reply, swallows a disconnect, and always closes.
+  - `quit()` behaves like `smtplib.SMTP.quit`: it returns the reply, and a disconnect raises.
+  - Both record a `quit` step before `close`.
+  - With the default 221 reply, every earlier test behaves as before.
+- `factories.py`, other changes:
+  - `ScriptedConnector(result=…)` lets `send` return any value.
+  - `HttpxRequests` holds the MockTransport recorder and router.
+- `conftest.py`: the `httpx_destination` fixture moved here unchanged from `test_output_connectors_http_failures.py`, which now uses it under the same name.
+
+### Red output (exact)
+```
+$ PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors
+16 failed, 324 passed in 11.67s
+$ PYTHONPATH=$(pwd) python -m pytest -q
+16 failed, 3527 passed, 12 skipped in 33.84s
+$ python lint/run.py
+SDK-LINT: PASS        # A001 643 = allowance; lint/baseline.json untouched
+```
+The grouped reasons are in `test-plan.md` → "S4 additions". All 313 earlier cases pass. Every failure is one of the 16 new cases.
+
+### Validation
+The r6 fixes were applied to a throwaway copy of the tree in the scratchpad. That copy was never committed.
+- **Fixed copy.** The pack passes (`340 passed`), and so does the whole suite (`3543 passed, 12 skipped`).
+- **One fix left out at a time.** Exactly that fix's cases turn red: R-1 → 6, R-2 → 3, R-3 → 1, R-12 → 3, R-15 → 3.
+- **Wrong-fix mutations.** All 16 were caught:
+  - R-1: five ways to silence or mis-scope the httpx guard;
+  - R-2: either check missing;
+  - R-3: `asyncio.to_thread`, and `run_in_executor(None, …)`;
+  - R-12: `quit()` unsuppressed, and suppressing only `SMTPResponseException`; both are caught by the `connection-dropped-at-quit` row that passes today;
+  - R-15: `.port` never read;
+  - R-14: Jira, Linear, or Notion sends the raw title (3 mutations), and Jira cuts the title without collapsing whitespace.
+- **Determinism.** The stalled-SMTP test passed 25 of 25 runs on the fixed copy.
+
+### Deviations from the brief
+1. **R-1 sets INFO on the root logger instead of `caplog.set_level(logging.INFO, logger="httpx")`.** A level set on `httpx` would mask a wrong fix that raises httpx's own level at import, because caplog would override it. With INFO on the root, that mutation is caught. httpx's logger level is NOTSET in this suite, and no test sets it.
+2. **R-15 values contain `SECRET_MARKER`**: `https://[::1/services/T000/B000/S3CRETipv6` and `https://hooks.slack.com:abc/services/T000/B000/S3CRETport`. This makes the table's no-echo checks bite. They have the same shape as the r6 literals in AC-20 and EC-13. I also added an out-of-range port row, because INV-21 and row 5 name "a number in range".
+3. **The R-3 test is ordering-based, with a 10 s backstop on the held step.** On the current code it fails after about 10 s, and it never hangs. On a fixed copy it takes about 0.5 s, the shortened deadline. It never asserts elapsed time.
+
+### Spec items found (none blocking)
+- **R-1, R-3, and R-12 have no AC row.** Their proof is INV-4/EC-41, NFR-2/EC-47/INV-19, and EC-48, so no Proof cell names them. AC-3's surface list does not include logs.
+- **AC-20 needs a parameterized fixture for its new destination case.** Its "a caller-written connector whose `destination` is the `str` `"pagerduty"`" case needs `ScriptedConnector("pagerduty")`.
