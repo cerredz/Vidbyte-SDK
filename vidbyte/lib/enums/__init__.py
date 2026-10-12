@@ -49,6 +49,7 @@ from vidbyte.lib.enums.codex import (
     CodexThreadSource,
     CodexThreadStartSource,
 )
+from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
 from vidbyte.lib.enums.cot_events import (
@@ -152,6 +153,7 @@ __all__ = [
     "CodexSandbox",
     "CodexThreadSource",
     "CodexThreadStartSource",
+    "CodingContextSection",
     "CompositionDivisionValidity",
     "ConsistencyStatus",
     "ContextMinimalFanoutSkill",

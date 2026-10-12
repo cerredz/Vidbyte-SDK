@@ -75,7 +75,8 @@ def test_edits_of_a_protected_file_are_denied_and_name_the_file_and_pattern(codi
         ("replace_text", {"path": PROTECTED, "search": "== 3", "replacement": "== 4"}),
     ]
 
-    _, states, messages = _run(coding_agent_cls, script_model, project, calls, readonly_paths=[pattern])
+    # progress_notes=False: the notes file would add files to the before/after snapshot.
+    _, states, messages = _run(coding_agent_cls, script_model, project, calls, readonly_paths=[pattern], progress_notes=False)
 
     assert states == ("denied", "denied", "succeeded")
     assert _files(project) == before
@@ -101,7 +102,8 @@ def test_every_spelling_of_a_protected_path_is_denied(coding_agent_cls, script_m
     path = str(project / PROTECTED) if spelling == "<absolute>" else spelling
     before = _files(project)
 
-    _, states, messages = _run(coding_agent_cls, script_model, project, [("write_text", {"path": path, "content": "pass\n"})], readonly_paths=("tests/**",))
+    # progress_notes=False: the notes file would add files to the before/after snapshot.
+    _, states, messages = _run(coding_agent_cls, script_model, project, [("write_text", {"path": path, "content": "pass\n"})], readonly_paths=("tests/**",), progress_notes=False)
 
     assert states == ("denied", "succeeded")
     assert _files(project) == before
