@@ -227,6 +227,26 @@ class StreamingTextRunnerTests(unittest.TestCase):
 
         self.assertEqual(chunks, ["valid"])
 
+    def test_valid_json_that_is_not_an_object_is_silently_skipped(self) -> None:
+        # Hidden failure: an SSE payload such as null, 42 or [] parses as JSON but is not an
+        # event object, so it must be skipped like malformed JSON instead of crashing the stream
+        odd_lines = ["null", "42", "[]"]
+        cases = [
+            (ModelProvider.OPENAI, "gpt-4o", _openai_delta),
+            (ModelProvider.ANTHROPIC, "claude-3-haiku-20240307", _anthropic_delta),
+        ]
+        for provider, model, delta in cases:
+            with self.subTest(provider=provider.value):
+                transport = FakeStreamingTransport([delta("first"), *odd_lines, delta("second")])
+                runner = StreamingTextModelRunner(
+                    TextModelConfig(provider=provider, model=model, api_key="key"),
+                    transport=transport,
+                )
+
+                chunks = list(runner.stream("Test"))
+
+                self.assertEqual(chunks, ["first", "second"])
+
 
 if __name__ == "__main__":
     unittest.main()
