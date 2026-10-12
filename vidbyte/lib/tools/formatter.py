@@ -177,7 +177,8 @@ class ToolsFormatter:
         which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
         place and unsupported keywords are dropped. A list-valued ``type`` (for example
         ``["string", "null"]``) is also rejected, so it is collapsed to a single type, and an
-        array without ``items`` is rejected, so it gets ``items: {}`` (any item).
+        array without ``items`` is rejected, so it gets ``items: {}`` (any item). ``enum`` is a
+        list of strings, so int, float and bool enum values are written as their JSON text.
         """
         defs = dict(schema.get("$defs") or {})
         root = {key: value for key, value in schema.items() if key != "$defs"}
@@ -186,8 +187,8 @@ class ToolsFormatter:
     @staticmethod
     def _gemini_node(node: Mapping[str, Any], defs: Mapping[str, Any], seen: tuple[str, ...]) -> dict[str, Any]:
         # Expands $ref against $defs, keeps only Gemini-supported keywords, collapses
-        # list-valued types, gives item-less arrays an any-item schema and words dropped
-        # bounds into the description, depth-first.
+        # list-valued types, gives item-less arrays an any-item schema, writes enum values
+        # as strings and words dropped bounds into the description, depth-first.
         kept: dict[str, Any] = {}
         for key, value in node.items():
             if key not in ToolsFormatter._GEMINI_SCHEMA_KEYWORDS:
@@ -195,6 +196,7 @@ class ToolsFormatter:
             kept[key] = ToolsFormatter._gemini_keyword_value(key, value, defs, seen)
         kept = ToolsFormatter._gemini_single_type(kept)
         kept = ToolsFormatter._gemini_array_items(kept)
+        kept = ToolsFormatter._gemini_enum_strings(kept)
         kept = ToolsFormatter._gemini_fold_bounds(node, kept)
         ref = node.get("$ref")
         if not isinstance(ref, str):
@@ -257,6 +259,18 @@ class ToolsFormatter:
                 for branch in branches
             ]
         return patched
+
+    @staticmethod
+    def _gemini_enum_strings(kept: dict[str, Any]) -> dict[str, Any]:
+        # @intent gemini-enum-values-are-strings
+        # Gemini's Schema.enum is a list of strings, so an int or float enum (Literal[1, 2], an
+        # IntEnum) fails the whole request with a 400. Gemini's own docs write an integer enum as
+        # strings under the declared type, so each non-string value becomes its JSON text (1 -> "1",
+        # True -> "true") and the type stays. None is left alone: Literal[..., None] is accepted as-is.
+        values = kept.get("enum")
+        if not isinstance(values, list) or all(isinstance(value, str) or value is None for value in values):
+            return kept
+        return {**kept, "enum": [value if isinstance(value, str) or value is None else json.dumps(value) for value in values]}
 
     @staticmethod
     def _gemini_fold_bounds(node: Mapping[str, Any], kept: dict[str, Any]) -> dict[str, Any]:
