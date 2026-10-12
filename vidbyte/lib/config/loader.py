@@ -50,20 +50,38 @@ _SUPPORTED_EXTENSIONS = frozenset({".yaml", ".yml"})
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
     """SafeLoader variant that rejects duplicate mapping keys."""
 
+    def __init__(self, stream: Any) -> None:
+        # Starts each load with no recorded own-pair counts; yaml nodes hash by identity.
+        super().__init__(stream)
+        self._own_pair_counts: dict[yaml.nodes.MappingNode, int] = {}
+
+    def flatten_mapping(self, node: yaml.nodes.MappingNode) -> None:
+        # Records how many pairs the mapping wrote itself before its merge keys are flattened away.
+        self._own_pair_counts.setdefault(node, sum(1 for key_node, _ in node.value if key_node.tag != "tag:yaml.org,2002:merge"))
+        super().flatten_mapping(node)
+
     def construct_mapping(self, node: yaml.nodes.MappingNode, deep: bool = False) -> dict[Any, Any]:
         # Builds a mapping while detecting and rejecting duplicate keys.
+        # @intent yaml-merge-keys-are-resolved
+        # `<<` pairs are flattened in front of the mapping's own pairs, as SafeLoader does, so an own key may override a
+        # merged one; own counts are recorded at first flatten because a parent's merge can flatten an anchored child
+        # before the child itself is constructed.
+        self.flatten_mapping(node)
+        merged_count = len(node.value) - self._own_pair_counts[node]
         mapping: dict[Any, Any] = {}
-        for key_node, value_node in node.value:
+        own_keys: set[Any] = set()
+        for index, (key_node, value_node) in enumerate(node.value):
             key = self.construct_object(key_node, deep=deep)
             if not isinstance(key, (str, int, float, bool, type(None))):
                 key = str(key)
-            if key in mapping:
-                raise yaml.constructor.ConstructorError(
-                    None, None,
-                    f"Duplicate key {key!r} is not allowed",
-                    key_node.start_mark,
-                )
-            mapping[key] = value_node
+            if index >= merged_count:
+                if key in own_keys:
+                    raise yaml.constructor.ConstructorError(
+                        None, None,
+                        f"Duplicate key {key!r} is not allowed",
+                        key_node.start_mark,
+                    )
+                own_keys.add(key)
             mapping[key] = value_node
         result: dict[Any, Any] = {}
         for key, value_node in mapping.items():
