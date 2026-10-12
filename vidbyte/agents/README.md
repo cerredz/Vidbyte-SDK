@@ -254,6 +254,7 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
+- `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
 - `types.py`: agent messages, input envelopes, cards, and specs.
 
