@@ -177,12 +177,14 @@ class McpStudioServer:
             return _EOF()
         if not line:
             return _EOF()
-        line_str = line.decode("utf-8").strip()
-        if not line_str:
-            return _SKIP()
+        # @intent undecodable-stdin-line-is-a-parse-error
+        # A line that is not valid UTF-8 is malformed input like bad JSON: reply -32700 and keep serving.
         try:
+            line_str = line.decode("utf-8").strip()
+            if not line_str:
+                return _SKIP()
             request = json.loads(line_str)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._write_response(McpSchema.mcp_error_response(None, JSONRPC_PARSE_ERROR, "Parse error"))
             return _SKIP()
         if not isinstance(request, Mapping):
