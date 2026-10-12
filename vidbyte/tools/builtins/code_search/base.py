@@ -17,6 +17,7 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.tools.filesystem import LineEndings
 from vidbyte.tools.base import BaseTool
 
 
@@ -107,4 +108,6 @@ class BaseCodeSearchTool(BaseTool):
 
     def read_text_lines(self, path: Path) -> list[str]:
         """Read a text file into split lines using UTF-8 replacement."""
-        return path.read_text(encoding="utf-8", errors="replace").splitlines()
+        # @intent code-search-numbers-lines-as-on-disk
+        # Split at "\n" only, so grep's line numbers match read_lines and grep -n.
+        return LineEndings.split_bare_lines(path.read_text(encoding="utf-8", errors="replace"))

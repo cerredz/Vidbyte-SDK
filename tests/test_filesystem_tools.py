@@ -264,6 +264,26 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(result.status, ToolStatus.SUCCESS)
             self.assertEqual(result.output, "b\nc")
 
+    def test_read_lines_numbers_a_form_feed_line_as_one_line(self) -> None:
+        # A ^L page break line is one line on disk, as in grep -n and the
+        # edit diffs, and the text read back is exact enough to edit with.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.c").write_text("int a;\n\f\nint b;\nint c;\n", encoding="utf-8")
+            line4 = run(ReadLinesTool(config).execute(ToolCall("read_lines", {"path": "f.c", "start": 4, "end": 4})))
+            self.assertEqual(line4.output, "int c;")
+            head = run(ReadLinesTool(config).execute(ToolCall("read_lines", {"path": "f.c", "start": 1, "end": 3})))
+            self.assertEqual(head.output, "int a;\n\f\nint b;")
+            edit = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.c", "search": head.output, "replacement": "int z;"})))
+            self.assertEqual(edit.status, ToolStatus.SUCCESS, edit.output)
+
+    def test_read_lines_drops_crlf_endings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "f.txt").write_bytes(b"a\r\nb\r\nc")
+            result = run(ReadLinesTool(config).execute(ToolCall("read_lines", {"path": "f.txt"})))
+            self.assertEqual(result.output, "a\nb\nc")
+
     def test_read_lines_returns_empty_output_when_start_beyond_eof(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
