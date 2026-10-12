@@ -8,7 +8,8 @@ Purpose:
 Architecture:
     - ToolErrorPolicyMiddleware: Classifies tool errors and returns retry,
       abort, or continue decisions.
-    - _ToolErrorPolicyRunState: Per-run counters stored in MiddlewareContext.run_state.
+    - _ToolErrorPolicyRunState: Per-run counters stored in MiddlewareContext.run_state,
+      keyed by the instance.
 Relations:
     Used by BaseAgent when AgentLoopSettings.tool_error_policy is configured.
 """
@@ -18,6 +19,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from vidbyte.agents.settings import ToolErrorPolicy, UnrecoverableAction
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
@@ -44,7 +46,10 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Initializes fresh counters for one run.
-        ctx.run_state[self.__class__] = _ToolErrorPolicyRunState()
+        # @intent middleware-state-is-per-instance
+        # Keyed by the instance, not the class, so a second policy never adds its errors or retries to this one's counters.
+        run_state: dict[Any, Any] = ctx.run_state
+        run_state[self] = _ToolErrorPolicyRunState()
         return MiddlewareDecision.continue_()
 
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
@@ -55,6 +60,10 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
             return MiddlewareDecision.continue_()
         state = self._state_for(ctx)
         kind = self._error_kind(ctx.tool_result.metadata)
+        # @intent refused-calls-are-not-tool-errors
+        # A call refused by policy never ran, so it neither counts toward the error budget nor aborts the run, and is never retried.
+        if kind in _DENIED_ERROR_KINDS:
+            return MiddlewareDecision.continue_()
         retryable = self._retryable(ctx.tool_result.metadata)
         state.total_errors += 1
         if self._circuit_breaker_tripped(state):
@@ -67,10 +76,11 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
 
     def _state_for(self, ctx: MiddlewareContext) -> _ToolErrorPolicyRunState:
         # Returns existing run state or creates it for direct hook-level tests.
-        state = ctx.run_state.get(self.__class__)
+        run_state: dict[Any, Any] = ctx.run_state
+        state = run_state.get(self)
         if not isinstance(state, _ToolErrorPolicyRunState):
             state = _ToolErrorPolicyRunState()
-            ctx.run_state[self.__class__] = state
+            run_state[self] = state
         return state
 
     def _should_retry(self, ctx: MiddlewareContext, kind: str, retryable: bool | None, state: _ToolErrorPolicyRunState) -> bool:
@@ -168,7 +178,14 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
         # Reads the structured error kind with compatibility fallbacks for current metadata strings.
         data = dict(metadata or {}) if isinstance(metadata, Mapping) else {}
         raw = str(data.get("error") or data.get("error_type") or "execution_error").strip().lower()
-        aliases = {"validation": "invalid_arguments", "validation_error": "invalid_arguments"}
+        # @intent policy-error-kinds-match-the-model-visible-kind
+        # Mirrors ToolsFormatter._normalized_error_kind so retry_on matches the kind the model is shown.
+        aliases = {
+            "validation": "invalid_arguments",
+            "validation_error": "invalid_arguments",
+            "argument_error": "invalid_arguments",
+            "arguments_error": "invalid_arguments",
+        }
         return aliases.get(raw, raw or "execution_error")
 
     @staticmethod

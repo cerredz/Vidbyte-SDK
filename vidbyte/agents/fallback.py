@@ -84,20 +84,25 @@ class AgentFallback:
 
         if spec is None:
             return None
-        settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=tuple(spec))
+        # @intent agent-fallback-rejects-a-bare-string
+        # Hand the spec over untouched so the settings guard sees a bare string before tuple() splits it into letters.
+        settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=spec)
         return settings.to_fallback(primary=cls._primary_model(runner_config, agent_name), timeout_seconds=runner_config.timeout_seconds)
 
     @staticmethod
     def _primary_model(runner_config: AgentRunnerConfig, agent_name: str) -> FallbackModel:
         # Chain index 0 is the agent's own runner identity; a chain needs a primary to fall back from.
-        if not runner_config.provider or not runner_config.model_name:
+        # @intent fallback-primary-reads-prefixed-model
+        # A primary given as 'deepseek/deepseek-chat' with no provider runs fine, so read it the way the runner does.
+        provider, model_name, _ = Runner._normalize_provider_and_model(runner_config.provider, runner_config.model_name)
+        if not provider or not model_name:
             raise ConfigurationError(
                 f"Agent {agent_name} declares a fallback chain but no provider/model_name to fall back from.",
                 details={"agent": agent_name, "provider": runner_config.provider, "model_name": runner_config.model_name},
             )
         return FallbackModel(
-            provider=runner_config.provider,
-            model=runner_config.model_name,
+            provider=provider,
+            model=model_name,
             api_key=runner_config.api_key,
             temperature=runner_config.temperature,
         )

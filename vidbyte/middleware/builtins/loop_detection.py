@@ -101,7 +101,10 @@ class LoopDetectionMiddleware(AgentMiddleware):
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Initialize a fresh per-run call history deque and output-count dict in ctx.run_state."""
-        ctx.run_state[self.__class__] = _LoopDetectionRunState(
+        # @intent middleware-state-is-per-instance
+        # Keyed by the instance, not the class, so a second detector never double-counts calls or resizes this one's window.
+        run_state: dict[Any, Any] = ctx.run_state
+        run_state[self] = _LoopDetectionRunState(
             call_history=collections.deque(maxlen=self.window),
             output_counts={},
         )
@@ -113,12 +116,13 @@ class LoopDetectionMiddleware(AgentMiddleware):
             return MiddlewareDecision.continue_()
         if self.skip_internal_tools and ctx.tool_is_internal:
             return MiddlewareDecision.continue_()
-        state: _LoopDetectionRunState = ctx.run_state.get(self.__class__) or _LoopDetectionRunState(
+        run_state: dict[Any, Any] = ctx.run_state
+        state: _LoopDetectionRunState = run_state.get(self) or _LoopDetectionRunState(
             call_history=collections.deque(maxlen=self.window)
         )
         key = self._make_key(ctx.tool_call.tool_name, ctx.tool_call.arguments)
         state.call_history.append(key)
-        ctx.run_state[self.__class__] = state
+        run_state[self] = state
         consecutive = self._count_consecutive_tail(key, state.call_history)
         if consecutive >= self.max_repeated_calls:
             return MiddlewareDecision.abort(
@@ -139,14 +143,15 @@ class LoopDetectionMiddleware(AgentMiddleware):
             return MiddlewareDecision.continue_()
         if self.skip_internal_tools and ctx.tool_is_internal:
             return MiddlewareDecision.continue_()
-        state: _LoopDetectionRunState = ctx.run_state.get(self.__class__) or _LoopDetectionRunState(
+        run_state: dict[Any, Any] = ctx.run_state
+        state: _LoopDetectionRunState = run_state.get(self) or _LoopDetectionRunState(
             call_history=collections.deque(maxlen=self.window)
         )
         result = ctx.tool_result
         output_key = self._make_output_key(result.tool_name, result.output)
         count = state.output_counts.get(output_key, 0) + 1
         state.output_counts[output_key] = count
-        ctx.run_state[self.__class__] = state
+        run_state[self] = state
         output_hash = output_key.split(":", 1)[1] if ":" in output_key else output_key
         metadata = {
             "tool_name": result.tool_name,

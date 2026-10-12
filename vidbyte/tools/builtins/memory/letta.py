@@ -64,7 +64,7 @@ class LettaAddArchivalMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_post(
-                url=f"{self._base_url}/v1/agents/{agent_id}/archival-memory",
+                url=f"{self._base_url}/v1/agents/{self._path_id(agent_id)}/archival-memory",
                 headers=self._auth_headers("Bearer"),
                 body={"text": text},
             )
@@ -114,7 +114,7 @@ class LettaSearchArchivalMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_get(
-                url=f"{self._base_url}/v1/agents/{agent_id}/archival-memory",
+                url=f"{self._base_url}/v1/agents/{self._path_id(agent_id)}/archival-memory",
                 headers=self._auth_headers("Bearer"),
                 params={"query": query, "limit": limit},
             )
@@ -164,7 +164,7 @@ class LettaDeleteArchivalMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_delete(
-                url=f"{self._base_url}/v1/agents/{agent_id}/archival-memory/{memory_id}",
+                url=f"{self._base_url}/v1/agents/{self._path_id(agent_id)}/archival-memory/{self._path_id(memory_id)}",
                 headers=self._auth_headers("Bearer"),
             )
         except Exception as exc:
@@ -215,7 +215,7 @@ class LettaGetMemoryBlockTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_get(
-                url=f"{self._base_url}/v1/agents/{agent_id}/memory/block/{block_name}",
+                url=f"{self._base_url}/v1/agents/{self._path_id(agent_id)}/memory/block/{self._path_id(block_name)}",
                 headers=self._auth_headers("Bearer"),
             )
         except Exception as exc:

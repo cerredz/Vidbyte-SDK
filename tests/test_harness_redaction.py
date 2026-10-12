@@ -34,8 +34,15 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import dataclass
 
 from vidbyte.harnesses.serialization import HarnessRedactor, HarnessSecretPolicy
+
+
+@dataclass
+class _DeployReport:
+    service: str
+    api_key: str
 
 
 class HarnessRedactorFreeTextTests(unittest.TestCase):
@@ -62,6 +69,22 @@ class HarnessRedactorFreeTextTests(unittest.TestCase):
 
         self.assertEqual(HarnessRedactor().redact(record), record)
 
+    def test_quoted_key_and_auth_scheme_credentials_are_redacted(self) -> None:
+        cases = {
+            '{"url": "x", "api_key": "S3-json"}': "S3-json",
+            "{'url': 'x', 'api_key': 'S6-repr'}": "S6-repr",
+            '{"password": "S7-json", "n": 1}': "S7-json",
+            "Authorization: Bearer S5-bearer": "S5-bearer",
+            "authorization=Basic S8-basic then": "S8-basic",
+        }
+        redactor = HarnessRedactor()
+
+        for text, secret in cases.items():
+            self.assertNotIn(secret, redactor.redact(text), text)
+            self.assertNotIn(secret, redactor.safe_error_message(text), text)
+        self.assertEqual(redactor.redact('{"password": "S7-json", "n": 1}'), '{"password=<redacted>, "n": 1}')
+        self.assertEqual(redactor.redact("tokens used: 42"), "tokens used: 42")
+
     def test_error_message_scrub_matches_value_scrub(self) -> None:
         text = "Connect with api_key=sk-live-9f8e7d6c5b4a and password: hunter2 then retry"
         redactor = HarnessRedactor()
@@ -82,6 +105,24 @@ class HarnessSecretPolicyCamelCaseTests(unittest.TestCase):
         safe = HarnessRedactor().redact({"accessToken": "tok_camel123", "maxTokens": 5})
 
         self.assertEqual(safe, {"maxTokens": 5})
+
+    def test_dataclass_credential_field_is_scrubbed_like_mapping_key(self) -> None:
+        redactor = HarnessRedactor()
+
+        safe = redactor.redact(_DeployReport(service="billing", api_key="sk_live_DEPLOY_KEY_123"))
+
+        self.assertEqual(safe, {"service": "billing"})
+        self.assertEqual(safe, redactor.redact({"service": "billing", "api_key": "sk_live_DEPLOY_KEY_123"}))
+
+
+class HarnessSecretPolicyAcronymTests(unittest.TestCase):
+    def test_acronym_camel_case_credential_keys_are_secret(self) -> None:
+        for key in ("AWSSecretKey", "AWSAccessKeyId", "MyAPIKey", "JWTToken", "APIToken", "IDToken"):
+            self.assertTrue(HarnessSecretPolicy.is_secret_key(key), key)
+
+    def test_acronym_ordinary_keys_are_not_secret(self) -> None:
+        for key in ("HTTPStatus", "URLPath", "XMLParser", "APIKeyName"):
+            self.assertFalse(HarnessSecretPolicy.is_secret_key(key), key)
 
 
 if __name__ == "__main__":

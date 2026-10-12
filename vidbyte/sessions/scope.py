@@ -22,6 +22,10 @@ class SessionScope:
     """Decides which session ids a caller is permitted to read or operate on."""
 
     def __init__(self, *, allow_ids: Sequence[str] = (), all_runs: bool = False) -> None:
+        # @intent name-lists-reject-bare-strings
+        # sessions(session.id) is a str, so set() would allow its characters and deny the very session meant.
+        if isinstance(allow_ids, (str, bytes)):
+            raise ValueError("SessionScope allow_ids must be a list of session ids (e.g. SessionScope.sessions([session.id])), not a single string.")
         # Hold an allowlist (which can grow) and an all-runs override.
         self._allow_ids: set[str] = set(allow_ids)
         self._all_runs = all_runs

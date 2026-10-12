@@ -54,6 +54,10 @@ class ForkTool(_SessionBuiltinTool):
         if not session_id:
             return self._fork_bound(checkpoint_id)
         resolved_session_id = self._resolve_session_id(session_id)
+        # @intent own-session-id-means-bound-thread
+        # Naming the bound session (by id or a tag that resolves to it) forks the live session, because Session.fork_from cannot see it and a self-named fork would drop its tags.
+        if self._session is not None and resolved_session_id == self._session.id:
+            return self._fork_bound(checkpoint_id)
         if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
         return self._fork_other(resolved_session_id, checkpoint_id)

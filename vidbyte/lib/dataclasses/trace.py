@@ -4,7 +4,7 @@ PURPOSE: Defines the user-visible continual trace schema and configuration contr
 ROLE IN CODEBASE: Consumed by vidbyte/trace/continual/{agent,middleware}.py, rendered into a model-facing JSON Schema by vidbyte/tools/continual_trace.py, and re-exported by vidbyte.trace and vidbyte.__init__ for public use.
 ARCHITECTURE NOTE: TraceMode/TraceFieldType/TraceField/TraceSchema/TraceOption are configuration contracts only; none of them execute a trace update. TraceField.fields/.items let an OBJECT/ARRAY field declare a nested shape recursively, validated and depth-capped once, on TraceField itself, so every construction path (from_model, a raw mapping, or direct construction) is provably within bounds.
 COMMON MODIFICATION PATTERNS: Add a new leaf TraceFieldType by extending _annotation_to_type. Add a new way to declare nested shape by extending _field_from_annotation, keeping the depth cap and OBJECT/ARRAY-only validation on TraceField itself rather than duplicating it in the builder.
-KNOWN EDGE CASES: A plain dict[str, Any] or list[dict[str, Any]] annotation still maps to an opaque OBJECT/ARRAY with fields/items left None — only a nested BaseModel (or list[BaseModel]) annotation triggers the recursive builder. A list[SubModel] item's description falls back to a generated string when SubModel has no docstring. Optional[X] / X | None (and list[X | None] items) map as plain X; a multi-type union such as int | str still maps to STRING.
+KNOWN EDGE CASES: A plain dict[str, Any] or list[dict[str, Any]] annotation still maps to an opaque OBJECT/ARRAY with fields/items left None — only a nested BaseModel (or list[BaseModel]) annotation triggers the recursive builder. A list[SubModel] item's description falls back to a generated string when SubModel has no docstring. Optional[X] / X | None (and list[X | None] items) map as plain X; a multi-type union such as int | str still maps to STRING. An Enum or Literal field keeps its allowed values in TraceField.enum when they are JSON scalars of one type; a mixed-type vocabulary, and a list[SomeEnum] item, still map without one.
 RELATED DOCS: docs/design/nested-continual-trace-shapes.md, docs/design/continual-trace-agent.md, skills/vidbyte-sdk/continual-tracing.md
 TESTS: tests/test_continual_trace.py, scripts/test-continual-trace.py
 """
@@ -52,6 +52,7 @@ class TraceField(BaseModel):
     type: TraceFieldType = TraceFieldType.STRING
     fields: Mapping[str, "TraceField"] | None = None
     items: "TraceField | None" = None
+    enum: tuple[bool | int | float | str, ...] | None = None
 
     @model_validator(mode="after")
     def _validate_shape(self) -> "TraceField":
@@ -64,6 +65,8 @@ class TraceField(BaseModel):
             raise ValueError("TraceField.fields is only valid when type is OBJECT")
         if self.items is not None and self.type is not TraceFieldType.ARRAY:
             raise ValueError("TraceField.items is only valid when type is ARRAY")
+        if self.enum is not None and not self.enum:
+            raise ValueError("TraceField.enum cannot be empty")
         if self._nesting_depth() > MAX_TRACE_FIELD_NESTING_DEPTH:
             raise ValueError(f"TraceField nesting exceeds the maximum depth of {MAX_TRACE_FIELD_NESTING_DEPTH}")
         return self
@@ -122,7 +125,12 @@ class TraceSchema:
 
     def describe_fields(self) -> str:
         # Renders typed field descriptions for trace-agent prompts.
-        return "\n".join(f"- {name} ({spec.type.value}): {spec.description}" for name, spec in self.fields.items())
+        return "\n".join(f"- {name} ({spec.type.value}{self._vocabulary_hint(spec)}): {spec.description}" for name, spec in self.fields.items())
+
+    @staticmethod
+    def _vocabulary_hint(spec: TraceField) -> str:
+        # Returns the allowed-values suffix for a field with a closed vocabulary, or nothing.
+        return f", one of: {', '.join(str(value) for value in spec.enum)}" if spec.enum else ""
 
     @classmethod
     def _normalized_fields(cls, fields: Mapping[str, Any]) -> dict[str, TraceField]:
@@ -167,6 +175,11 @@ class TraceSchema:
         annotation = cls._unwrap_optional(annotation)
         origin = typing.get_origin(annotation)
         target = origin if origin is not None else annotation
+        # @intent trace-field-keeps-its-vocabulary
+        # An Enum or Literal field only validates against its closed set, so the allowed values ride along to the tool schema and the updateTrace gate.
+        allowed_values = cls._allowed_values(annotation, origin)
+        if allowed_values:
+            return TraceField(description=description, type=cls._annotation_to_type(type(allowed_values[0])), enum=allowed_values)
         if isinstance(target, type) and issubclass(target, BaseModel):
             return TraceField(description=description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(target, depth=depth + _CHILD_DEPTH_STEP))
         # @intent abstract-collection-trace-field-is-array
@@ -191,12 +204,28 @@ class TraceSchema:
         return TraceField(description=item_description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(item_target, depth=depth + _CHILD_DEPTH_STEP))
 
     @staticmethod
+    def _allowed_values(annotation: Any, origin: Any) -> tuple[Any, ...] | None:
+        # Returns an Enum's or Literal's values when they are all JSON scalars of one type; anything else has no closed vocabulary.
+        if origin is typing.Literal:
+            values = tuple(arg for arg in typing.get_args(annotation) if arg is not None)
+        elif isinstance(annotation, type) and issubclass(annotation, Enum):
+            values = tuple(member.value for member in annotation)
+        else:
+            return None
+        value_types = {type(value) for value in values}
+        return values if len(value_types) == 1 and value_types <= {bool, int, float, str} else None
+
+    @staticmethod
     def _unwrap_optional(annotation: Any) -> Any:
-        # Returns X for Optional[X] / X | None; any other annotation, including a multi-type union, passes through unchanged.
-        if typing.get_origin(annotation) not in (typing.Union, types.UnionType):
-            return annotation
-        members = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
-        return members[0] if len(members) == 1 else annotation
+        # Returns X for Optional[X] / X | None / Annotated[X, ...]; any other annotation, including a multi-type union, passes through unchanged.
+        # @intent inner-annotated-trace-field-keeps-its-type
+        # Pydantic strips only the outer Annotated, so Annotated[X, Field(...)] left inside an Optional or a list argument is peeled to X and maps like the outer spelling.
+        if typing.get_origin(annotation) is typing.Annotated:
+            annotation = typing.get_args(annotation)[0]
+        if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+            members = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+            annotation = members[0] if len(members) == 1 else annotation
+        return typing.get_args(annotation)[0] if typing.get_origin(annotation) is typing.Annotated else annotation
 
     @staticmethod
     def _annotation_to_type(annotation: Any) -> TraceFieldType:

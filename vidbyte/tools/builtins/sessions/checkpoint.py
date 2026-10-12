@@ -58,6 +58,11 @@ class CheckpointTool(_SessionBuiltinTool):
         if not session_id:
             return self._checkpoint_bound(label)
         resolved_session_id = self._resolve_session_id(session_id)
+        # @intent own-session-id-means-bound-thread
+        # Naming the bound session (by id or tag) must checkpoint through Session, because a direct store
+        # write skips the session's head and the labeled checkpoint would orphan off the turn chain.
+        if self._session is not None and resolved_session_id == self._session.id:
+            return self._checkpoint_bound(label)
         if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
         return self._checkpoint_other(resolved_session_id, label)

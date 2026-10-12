@@ -12,9 +12,10 @@ ROLE IN CODEBASE:
     here because sessions sit below harnesses and may not import them.
 
 ARCHITECTURE NOTE:
-    A static-policy class with no SDK dependencies: camelCase words are split,
-    keys are lower-cased, non-alphanumeric runs collapse to "_", and the result
-    must equal a known credential name or end in a credential suffix.
+    A static-policy class with no SDK dependencies: camelCase words (and an
+    acronym run before its next word, as in AWSSecretKey) are split, keys are
+    lower-cased, non-alphanumeric runs collapse to "_", and the result must
+    equal a known credential name or end in a credential suffix.
 
 FUNCTION INVENTORY:
     CredentialKeyPolicy.is_secret_key(key) -> bool: True for credential names
@@ -75,8 +76,10 @@ class CredentialKeyPolicy:
     def is_secret_key(cls, key: str) -> bool:
         # Matches exact normalized credential names without misclassifying words such as author.
         # @intent camelcase-credential-keys-are-secrets
-        # Split camelCase words first so accessToken is read as access_token, not accesstoken.
-        words = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(key))
+        # Split camelCase words first so accessToken is read as access_token, not accesstoken,
+        # and split an acronym run before its next word so AWSSecretKey is read as aws_secret_key.
+        words = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", str(key))
+        words = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", words)
         normalized = re.sub(r"[^a-z0-9]+", "_", words.lower()).strip("_")
         return normalized in cls._SECRET_KEYS or normalized.endswith(cls._SECRET_SUFFIXES)
 

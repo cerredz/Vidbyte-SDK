@@ -290,6 +290,29 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.ERROR)
         self.assertIn("strings", result.output)
 
+    async def test_native_array_command_parses_like_json_text(self) -> None:
+        """[Hidden Assumption] A native command array must reach attach exactly like its JSON text form."""
+        captured_commands: list[list[str]] = []
+
+        async def capture_attach(command, *, name=None, permission=McpToolPermission.EXECUTE, timeout=30.0):
+            captured_commands.append(command)
+            return agent
+
+        agent = BaseAgent(name="a", system_prompt=".")
+        tool = AttachMcpServerTool()
+        tool.bind_agent(agent)
+
+        with patch.object(agent, "attach_mcp_server", side_effect=capture_attach):
+            text = await tool.execute(ToolCall("attach_mcp_server", {"command": '["python", "-u", "server.py"]'}))
+            native = await tool.execute(ToolCall("attach_mcp_server", {"command": ["python", "-u", "server.py"]}))
+            bad = await tool.execute(ToolCall("attach_mcp_server", {"command": ["python", 1]}))
+
+        self.assertEqual(text.status, ToolStatus.SUCCESS)
+        self.assertEqual(native.status, ToolStatus.SUCCESS)
+        self.assertEqual(captured_commands, [["python", "-u", "server.py"], ["python", "-u", "server.py"]])
+        self.assertEqual(bad.status, ToolStatus.ERROR)
+        self.assertIn("strings", bad.output)
+
     async def test_successful_attach_returns_tool_names_in_summary(self) -> None:
         """[Silent Failure] Summary must include all bridged tool names, not a truncated list."""
         agent = BaseAgent(name="a", system_prompt=".")

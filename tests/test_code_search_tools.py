@@ -110,6 +110,16 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pkg/auth.py", result.output)
         self.assertNotIn("node_modules", result.output)
 
+    async def test_empty_ignore_patterns_ignores_nothing(self) -> None:
+        """An explicit empty ignore_patterns searches every directory; only None uses the defaults."""
+        (self.root / "node_modules" / "leftpad").mkdir(parents=True)
+        (self.root / "node_modules" / "leftpad" / "index.js").write_text("eval(s)\n", encoding="utf-8")
+        call = ToolCall("grep", {"pattern": "eval"})
+        default = await GrepTool(self.root).execute(call)
+        self.assertNotIn("node_modules", default.output)
+        result = await GrepTool(self.root, ignore_patterns=[]).execute(call)
+        self.assertIn("node_modules/leftpad/index.js:1", result.output)
+
     async def test_truncation_notice_only_when_a_hit_was_cut(self) -> None:
         """Exactly max_results hits are not truncated; one more hit is."""
         root = self.root / "exact"

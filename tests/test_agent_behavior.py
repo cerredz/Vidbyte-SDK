@@ -72,10 +72,23 @@ def behavior_from_probe(probe: RunProbe) -> Behavior:
 
 
 class StructuredPayload(BaseModel):
-    """Pydantic payload used to verify model_dump structured traversal."""
+    """Pydantic payload used to verify pydantic structured traversal."""
 
     answer: str
     items: list[dict[str, Any]]
+
+
+class StructuredCustomer(BaseModel):
+    """Nested pydantic model used to verify structured fields resolve as themselves."""
+
+    tier: str
+
+
+class StructuredTicket(BaseModel):
+    """Pydantic payload whose fields hold nested pydantic models."""
+
+    customer: StructuredCustomer
+    tags: list[StructuredCustomer]
 
 
 class StubAgent:
@@ -587,11 +600,22 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.output.structured_contains_keys(["a", "c"]))
 
     def test_structured_pydantic_model_dump(self) -> None:
-        # [Hidden Assumption] Pydantic structured objects are supported through model_dump().
+        # [Hidden Assumption] Pydantic structured objects are supported through their model fields.
         payload = StructuredPayload(answer="yes", items=[{"title": "First"}])
         b = behavior_from_probe(RunProbe(structured=payload))
         self.assertTrue(b.output.structured_field_equals("answer", "yes"))
         self.assertTrue(b.output.structured_field_exists("items.0.title"))
+
+    def test_structured_pydantic_nested_model_resolves_as_itself(self) -> None:
+        # [Silent Failure] A nested pydantic field resolves to the reply's own model, not a dumped dict.
+        payload = StructuredTicket(customer=StructuredCustomer(tier="gold"), tags=[StructuredCustomer(tier="vip")])
+        b = behavior_from_probe(RunProbe(structured=payload))
+        self.assertTrue(b.output.structured_field_type("customer", StructuredCustomer))
+        self.assertTrue(b.output.structured_field_equals("customer", payload.customer))
+        self.assertTrue(b.output.structured_field_matches("customer", lambda c: c.tier == "gold"))
+        self.assertTrue(b.output.structured_field_type("tags.0", StructuredCustomer))
+        self.assertTrue(b.output.structured_field_equals("customer.tier", "gold"))
+        self.assertTrue(b.output.structured_contains_keys(["customer", "tags"]))
 
     # --- EfficiencyBehavior Category G ---
 
@@ -780,6 +804,16 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_iterations")).efficiency.did_not_stop_on_budget())
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_tool_calls")).efficiency.did_not_stop_on_budget())
         self.assertFalse(behavior_from_probe(RunProbe(stop_reason="max_tokens")).efficiency.did_not_stop_on_budget())
+
+    def test_efficiency_did_not_stop_on_budget_covers_timeout_and_tool_settings_budgets(self) -> None:
+        # [Hidden Assumption] the wall-clock timeout and ToolSettings hard budgets are budget stops too.
+        # @intent budget-stop-covers-every-runtime-budget
+        for reason in ("timeout", "max_calls_per_iteration", "max_identical_calls", "sliding_window_max_calls", "max_consecutive_failures", "max_error_calls"):
+            with self.subTest(reason=reason):
+                self.assertFalse(behavior_from_probe(RunProbe(stop_reason=reason)).efficiency.did_not_stop_on_budget())
+        for reason in ("final_response", "is_done", "middleware_abort"):
+            with self.subTest(reason=reason):
+                self.assertTrue(behavior_from_probe(RunProbe(stop_reason=reason)).efficiency.did_not_stop_on_budget())
 
     def test_efficiency_stopped_normally_within_iterations(self) -> None:
         # [Hidden Failure] stopped_normally_within_iterations requires normal stop and iteration bound.

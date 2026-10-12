@@ -37,6 +37,10 @@ _UNENFORCEABLE: Mapping[str, str] = {
     "maxLength": "at most {value} characters",
     "minimum": "no less than {value}",
     "maximum": "no greater than {value}",
+    # @intent exclusive-bounds-are-bounds-too
+    # Pydantic emits gt/lt as exclusiveMinimum/exclusiveMaximum; left unfolded, Gemini drops them silently.
+    "exclusiveMinimum": "greater than {value}",
+    "exclusiveMaximum": "less than {value}",
     "multipleOf": "a multiple of {value}",
     "pattern": "matching the pattern {value}",
 }

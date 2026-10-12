@@ -31,7 +31,9 @@ class PostgresSessionStore(ProviderSessionStore):
         self._sessions_table = f"{table_prefix}sessions"
         self._checkpoints_table = f"{table_prefix}checkpoints"
         try:
-            self._conn = self._psycopg.connect(dsn)
+            # @intent postgres-store-survives-failed-statement
+            # Every method runs one statement, so autocommit keeps a failed one from aborting all later work.
+            self._conn = self._psycopg.connect(dsn, autocommit=True)
         except Exception as exc:
             raise SessionStoreError("Failed to connect to PostgreSQL.", details={"provider": "postgres"}) from exc
         self._ensure_schema()

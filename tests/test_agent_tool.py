@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import unittest
+from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents.base import BaseAgent
@@ -167,6 +168,34 @@ class AgentToolExecuteTests(unittest.IsolatedAsyncioTestCase):
         tool = AgentTool(_make_agent(agent_metadata=meta))
         result = await tool.execute(ToolCall("named_agent", {}))
         self.assertEqual(result.metadata.get("agent_name"), "named_agent")
+
+    async def test_execute_closes_child_mcp_servers_after_its_run_even_when_it_fails(self) -> None:
+        # @intent internal-forks-close-their-mcp-servers
+        # [Resource Leak] Each delegation's child reconnected the agent's MCP servers and was dropped without closing them.
+        from vidbyte.agents.types import AgentMessage
+
+        class SpyChild:
+            def __init__(self, fail: bool) -> None:
+                self.fail = fail
+                self.events: list[str] = []
+
+            async def generate_reply(self, prompt: str) -> AgentMessage:
+                self.events.append("run")
+                if self.fail:
+                    raise RuntimeError("child crashed")
+                return AgentMessage(sender="worker", recipient="parent", content="ok")
+
+            async def close_mcp_servers(self) -> None:
+                self.events.append("close")
+
+        for fail, status in ((False, "success"), (True, "error")):
+            agent = _make_agent()
+            child = SpyChild(fail)
+            with patch.object(agent, "fork", return_value=child):
+                result = await AgentTool(agent).execute(ToolCall("worker", {}))
+
+            self.assertEqual(result.status.value, status)
+            self.assertEqual(child.events, ["run", "close"])
 
     async def test_static_serialize_context_empty(self) -> None:
         result = AgentTool._serialize_context("", [])

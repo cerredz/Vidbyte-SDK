@@ -122,8 +122,6 @@ The agent also keeps its own notes file, `<root_dir>/.vidbyte/coding-agent/progr
 2. Return the section's reserved `CodingContextSection` member (`ENVIRONMENT`, `REPO_MAP`, or `SETUP_RESULTS`); the enum's order is the render order.
 3. Add `<Loader>.load(settings)` to the `sections` tuple in `CodingAgent.__init__`.
 
-To run one task from a terminal, use `vidbyte-sdk coding run --root-dir my-project --provider openai --model gpt-4.1 "Fix the failing test."`; it prints only the final reply. A fetch key is never a flag value: `--firecrawl-key-env NAME` (or the Browserbase, Parallel, or Tavily twin) names the environment variable that holds it.
-
 - The default policy allows every tool, including tools you add; pass `permission_policy=PermissionPolicy()` for a read-only agent.
 - `bash` is not confined to `root_dir`, and it runs unsandboxed with the inherited environment. The SDK undoes nothing a tool did, so keep the folder under version control.
 - A background process must redirect both its standard output and its standard error, or the call waits for the time limit and the process is killed.

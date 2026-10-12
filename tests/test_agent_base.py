@@ -7,10 +7,10 @@ from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgen
 from vidbyte.context import ContextManager, ContextWindow, ContextWindowPlacement, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.lib.errors import AgentExecutionError, AgentForkConfigurationError, ToolRegistrationError
+from vidbyte.lib.errors import AgentExecutionError, AgentForkConfigurationError, ConfigurationError, ToolRegistrationError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
-from vidbyte.tools import ToolSpec
+from vidbyte.tools import Tools, ToolSpec
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.types import ToolCallContext
 
@@ -108,6 +108,13 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("direct:task", reply.content)
         self.assertEqual(reply.metadata["runner_type"], "text")
 
+    async def test_bare_string_capabilities_is_rejected(self) -> None:
+        # [Silent Failure] A bare string must not reach the manager roster as one capability per character
+        with self.assertRaisesRegex(ConfigurationError, "BaseAgent.capabilities must be a list"):
+            build_test_agent(name="worker", system_prompt="S.", runner=EchoRunner(), capabilities="web research")
+        agent = build_test_agent(name="worker", system_prompt="S.", runner=EchoRunner(), capabilities=["web research"])
+        self.assertEqual(agent.card().capabilities, ("web research",))
+
     async def test_runner_config_tool_helpers_and_fork(self) -> None:
         tool = FakeTool()
         agent = BaseAgent.from_run_id(
@@ -145,6 +152,27 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.tools.names(), ("search",))
         self.assertEqual(agent.fork(AgentForkSettings(name="child")).tools.names(), ("search",))
         self.assertEqual(tuple(agent.export_state().tool_names), ("search",))
+
+    async def test_tools_catalog_inside_tool_list_is_flattened(self) -> None:
+        # A Tools catalog inside a plain tools list adds its tools, as Tools([...]) does, instead of being dropped.
+        shared = Tools([FakeTool("b"), FakeTool("c")])
+        agent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("a"), shared])
+
+        self.assertEqual(agent.tools.names(), ("a", "b", "c"))
+        self.assertEqual(agent.card().tool_names, ("a", "b", "c"))
+        forked = agent.fork(AgentForkSettings(name="child"))
+        self.assertEqual(forked.tools.names(), ("a", "b", "c"))
+        self.assertEqual(forked.card().tool_names, ("a", "b", "c"))
+
+    async def test_add_tool_adds_the_tools_of_a_tools_catalog(self) -> None:
+        # add_tool(Tools([...])) adds the catalog's tools, as the tools list does, not one opaque 'Tools' item.
+        agent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("a")])
+
+        agent.add_tool(Tools([FakeTool("b"), FakeTool("c")]))
+
+        self.assertEqual(agent.tools.names(), ("a", "b", "c"))
+        self.assertEqual(agent.card().tool_names, ("a", "b", "c"))
+        self.assertNotIn("Tools", agent.card().tool_names)
 
     async def test_agent_fork_preserves_middleware(self) -> None:
         middleware = FakeMiddleware()
@@ -193,6 +221,16 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         child = parent.fork(AgentForkSettings(name="child", drop_tools=(" drop ",)))
 
         self.assertEqual(child.tools.names(), ("keep",))
+
+    async def test_drop_tools_reaches_a_tools_catalog_inside_the_tools_list(self) -> None:
+        # A catalog nested in the tools list is the same tools as the flat list, so drop_tools must remove from it too.
+        keep, drop, other = FakeTool("keep"), FakeTool("drop"), FakeTool("other")
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[keep, drop, other])
+        flat = parent.fork(AgentForkSettings(name="flat", tools=[keep, drop, other], drop_tools=["drop"]))
+        nested = parent.fork(AgentForkSettings(name="nested", tools=[Tools([keep, drop]), other], drop_tools=["drop"]))
+
+        self.assertEqual(nested.tools.names(), flat.tools.names())
+        self.assertNotIn("drop", nested.tools.names())
 
     async def test_agent_fork_clones_stateful_add_tools(self) -> None:
         # Stateful add_tools entries should be cloned before the child binds them.
@@ -371,6 +409,21 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         await agent.arun("next")
 
         self.assertNotIn("INPUT_PLACED_PRIMITIVE", repr(runner.captured_options[-1]))
+
+    async def test_context_manager_metadata_reaches_the_model(self) -> None:
+        # [Silent Failure] ContextManager(metadata=...) must reach the model's run metadata, the request's manager over the agent's
+        runner = OptionCaptureRunner()
+        agent_manager = ContextManager(metadata={"tenant": "AGENT-TENANT", "region": "AGENT-REGION"})
+        agent = build_test_agent(name="ctx", system_prompt="S.", runner=runner, context_manager=agent_manager)
+
+        await agent.arun("first")
+        await agent.arun(AgentInput(prompt="second", context_manager=ContextManager(metadata={"tenant": "REQUEST-TENANT"})))
+
+        first, second = repr(runner.captured_options[0]), repr(runner.captured_options[1])
+        self.assertIn("AGENT-TENANT", first)
+        self.assertIn("REQUEST-TENANT", second)
+        self.assertNotIn("AGENT-TENANT", second)
+        self.assertIn("AGENT-REGION", second)
 
 
 class AgentRunSequentiallySyncTests(unittest.TestCase):
