@@ -24,6 +24,7 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - `test_coding_agent_agents_md.py` checks the loading of the root folder's AGENTS.md file end to end on the request the model receives, and `CodingContextWindow`, the shared helper later sections build on. Start here when the model does not see the repository's rules.
 - `test_coding_agent_setup_commands.py` checks the setup commands end to end on the request the model receives: order, stop at the first failure, the time limit, the working directory, no bash, the empty default, validation, and the capped output tail. Start here when setup ran wrong or its note is missing.
 - `test_coding_agent_progress_notes.py` checks the agent's own progress notes file: created when missing and never overwritten, hidden from git without hiding other tools' files, shown last, carried from one run to the next, and skipped on a root that cannot be written. Start here when a run does not see the last run's notes.
+- `test_coding_agent_max_rewrite_lines.py` checks that `max_rewrite_lines` reaches `write_text`: the default 300 refuses a 301-line rewrite and the run goes on, `None` turns it off, and bad values fail at construction.
 - `test_bash_tool_contract.py` checks `BashTool`'s input and output contract: the spec, validation, streams, `cwd`, argv, stdin, spawn errors, decoding, the output cap, and the bash lookup.
 - `test_bash_tool_process_bounds.py` checks the time limit, process-group kill, cancellation and pipe cleanup on real processes. Start here for a hang or a leftover process.
 
@@ -33,3 +34,4 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - 2026-10-11 - `AGENTS.md` loading and the shared coding context window were added (`test_coding_agent_agents_md.py`); `test_coding_agent_contract.py`'s `EXPECTED_SIGNATURE` gained `load_agents` and `context_manager`.
 - 2026-10-11 - Setup commands were added (`test_coding_agent_setup_commands.py`); `EXPECTED_SIGNATURE` gained `setup_commands`.
 - 2026-10-11 - Progress notes were added (`test_coding_agent_progress_notes.py`); `EXPECTED_SIGNATURE` gained `progress_notes`, and the tests that assert an exact request, an empty root, or export parity with `BaseAgent` pass `progress_notes=False`.
+- 2026-10-11 - Added `test_coding_agent_max_rewrite_lines.py` for the `max_rewrite_lines` keyword (write_text may not replace a big existing file).

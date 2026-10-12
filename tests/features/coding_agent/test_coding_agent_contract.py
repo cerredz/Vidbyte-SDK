@@ -36,6 +36,7 @@ EXPECTED_SIGNATURE = {
     "tavily_api_key": None,
     "tools": (),
     "permission_policy": None,
+    "max_rewrite_lines": 300,
     # AGENTS.md loading: the switch, and the caller's manager the coding context sections go ahead of.
     "load_agents": True,
     # Setup commands: run once at construction; empty runs nothing.

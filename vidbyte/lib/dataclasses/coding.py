@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/dataclasses/coding.py
 
-PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, the context-section switches, and the setup commands. Also defines CodingContextSectionText, one section of the CodingAgent context window.
+PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the caller's own tools, the permission policy, the write_text rewrite limit, the context-section switches, and the setup commands. Also defines CodingContextSectionText, one section of the CodingAgent context window.
 ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools) and by the section loaders in vidbyte/agents/coding_context/, and exported by the root vidbyte package. CodingContextSectionText is returned by each section loader and read by CodingContextWindow (vidbyte/agents/coding_context/window.py).
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
-FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; _check_context_switches checks the section switches; _checked_setup_commands checks the setup commands and returns them as a tuple. CodingContextSectionText.__post_init__ checks the section kind and the text fields.
+FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_tools_and_policy checks the caller's tools and the policy; _check_context_switches checks the section switches; _checked_setup_commands checks the setup commands and returns them as a tuple; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses. CodingContextSectionText.__post_init__ checks the section kind and the text fields.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools. A context section with its own on/off switch adds one bool field here and one isinstance check in _check_context_switches.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
 KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. setup_commands="uv sync" is rejected rather than run one character at a time, which is why setup_commands keeps its raw type until __post_init__ checks it. CodingContextSectionText does not cap its content; each loader bounds its own text.
@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vidbyte.lib.dataclasses.filesystem import OverwriteLineLimit
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.errors import ConfigurationError
@@ -25,7 +26,7 @@ from vidbyte.lib.errors import ConfigurationError
 
 @dataclass(frozen=True, slots=True)
 class CodingAgentSettings:
-    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, the policy, and the section switches.
+    """Validated CodingAgent arguments: the root folder, at most one fetch key, the caller's tools, the policy, the rewrite limit, and the section switches.
 
     root_dir is typed Path | str because the record must see the raw
     value: Path("") is the current folder, so converting first would
@@ -38,6 +39,7 @@ class CodingAgentSettings:
 
     root_dir: Path | str
     permission_policy: PermissionPolicy
+    max_rewrite_lines: int | None
     tools: tuple[object, ...] = ()
     firecrawl_api_key: str | None = field(default=None, repr=False)
     browserbase_api_key: str | None = field(default=None, repr=False)
@@ -58,6 +60,11 @@ class CodingAgentSettings:
 
         # Check the caller's tools and the policy every call runs under.
         self._check_tools_and_policy()
+
+        # Check the rewrite limit with the same rule write_text's own
+        # config uses: None turns it off, and a number is the most lines
+        # an existing file may have and still be replaced whole.
+        OverwriteLineLimit(self.max_rewrite_lines, "max_rewrite_lines")
 
         # Check the switches that turn context sections on or off: each
         # must be a real bool, so a string such as "no" cannot turn
