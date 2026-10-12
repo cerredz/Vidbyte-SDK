@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
 import time
 import uuid
@@ -143,6 +144,10 @@ class SyncHttpTransport:
             raise ProviderRequestError("Provider request failed.", provider="http", status_code=exc.code, response_excerpt=error_body[:500]) from exc
         except URLError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-request-bytes-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; read timeouts and dropped connections must not escape raw.
+        except (OSError, http.client.HTTPException) as exc:
+            raise ProviderRequestError("HTTP response failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def upload_multipart(self, *, url: str, headers: Mapping[str, str], fields: Mapping[str, str], file_field: str, file_bytes: bytes, file_name: str, file_content_type: str, timeout_seconds: float = 120.0) -> HttpResponse:
         # Send a multipart/form-data POST with text fields and one binary file field.
