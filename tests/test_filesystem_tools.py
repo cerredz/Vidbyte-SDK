@@ -403,6 +403,22 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             self.assertIn("'recursive' must be a boolean (true/false)", result.output)
             self.assertTrue(Path(tmp, "reports", "q1.txt").exists())
 
+    def test_delete_refuses_the_configured_root_and_keeps_its_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            Path(tmp, "notes.txt").write_text("keep", encoding="utf-8")
+            Path(tmp, "reports").mkdir()
+            Path(tmp, "reports", "q1.txt").write_text("gone", encoding="utf-8")
+            for path in (".", ""):
+                result = run(DeleteTool(config).execute(ToolCall("delete", {"path": path, "recursive": True})))
+                self.assertEqual(result.status, ToolStatus.ERROR, path)
+                self.assertIn("root itself cannot be deleted", result.output)
+            self.assertTrue(Path(tmp, "notes.txt").exists())
+            result = run(DeleteTool(config).execute(ToolCall("delete", {"path": "reports", "recursive": True})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertFalse(Path(tmp, "reports").exists())
+            self.assertTrue(Path(tmp, "notes.txt").exists())
+
     def test_make_dir_null_flags_use_documented_defaults(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
