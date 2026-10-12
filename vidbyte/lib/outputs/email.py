@@ -29,6 +29,7 @@ from vidbyte.lib.outputs.text import OutputText
 # stalled server would hold run() past the delivery deadline.
 _SMTP_EXECUTOR = ThreadPoolExecutor()
 
+
 class EmailOutput(BaseOutput):
     """Mails each reply as a plain-text email over verified TLS."""
 
