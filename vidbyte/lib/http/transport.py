@@ -46,6 +46,7 @@ class HttpResponse:
     headers: Mapping[str, str]
     raw_bytes: bytes | None = None
     attempts: int = 1
+    url: str | None = None  # URL the body was finally read from, after any redirects; None when not tracked.
 
 
 class HttpTransport:
@@ -138,7 +139,7 @@ class SyncHttpTransport:
                 raw = response.read()
                 if response.status < 200 or response.status >= 300:
                     raise ProviderRequestError("Provider returned non-2xx for binary request.", provider="http", status_code=response.status, response_excerpt=raw.decode("utf-8", errors="replace")[:500])
-                return HttpResponse(status_code=response.status, body="", headers=dict(response.headers.items()), raw_bytes=raw)
+                return HttpResponse(status_code=response.status, body="", headers=dict(response.headers.items()), raw_bytes=raw, url=getattr(response, "url", None))
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
             raise ProviderRequestError("Provider request failed.", provider="http", status_code=exc.code, response_excerpt=error_body[:500]) from exc

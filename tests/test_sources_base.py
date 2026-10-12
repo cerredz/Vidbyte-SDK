@@ -15,12 +15,15 @@ Relations:
 from __future__ import annotations
 
 import asyncio
+import http.server
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from vidbyte.lib.dataclasses import ToolCall
+from vidbyte.lib.dataclasses.sources import FetchResponse
 from vidbyte.lib.errors import SourceFetchError, SourcePinMismatchError, SourceSecurityError
 from vidbyte.lib.http.transport import SyncHttpTransport
 from vidbyte.sources import (
@@ -53,6 +56,37 @@ class CountingFetcher:
     def fetch(self, url: str):
         self.calls += 1
         return self._inner.fetch(url)
+
+
+class RedirectingFetcher:
+    """Fake fetcher that reports its bytes as read from a fixed final URL, as after a redirect."""
+
+    def __init__(self, final_url: str) -> None:
+        self._final_url = final_url
+
+    def fetch(self, url: str) -> FetchResponse:
+        return FetchResponse(status_code=200, body_bytes=b"# x\n", url=self._final_url)
+
+
+class _RedirectHandler(http.server.BaseHTTPRequestHandler):
+    """Local test server: /a answers 302 to /b, and /b answers 200 with a tiny markdown body."""
+
+    def do_GET(self) -> None:
+        if self.path == "/a":
+            self.send_response(302)
+            self.send_header("Location", "/b")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        body = b"# b\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/markdown")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
 
 
 class SourcesBaseTests(unittest.TestCase):
@@ -287,6 +321,32 @@ class SourcesBaseTests(unittest.TestCase):
             fetcher = ChainedFetcher([HttpFetcher(), InMemoryFetcher({url: _DATA})])
             result = DocumentSource(fetcher=fetcher).load(ArtifactRef(url=url))
         self.assertEqual(result.items[0].title, "Title")
+
+    def test_redirect_off_the_allowlist_is_refused(self) -> None:
+        # @intent redirect-target-is-allowlisted
+        # [Hidden Assumption] An allowlisted URL that redirects to an unlisted host must not load that host's bytes.
+        source = DocumentSource(fetcher=RedirectingFetcher("https://evil.example/x"), allowlist=UrlAllowlist(allowed_hosts=frozenset({"good.com"})))
+        with self.assertRaises(SourceSecurityError):
+            source.load(ArtifactRef(url="https://good.com/start"))
+
+    def test_redirect_within_the_allowlist_still_loads(self) -> None:
+        # [Edge Case] A same-site move to another allowlisted URL is not refused.
+        source = DocumentSource(fetcher=RedirectingFetcher("https://good.com/moved"), allowlist=UrlAllowlist(allowed_hosts=frozenset({"good.com"})))
+        result = source.load(ArtifactRef(url="https://good.com/start"))
+        self.assertEqual(result.items[0].title, "x")
+
+    def test_httpfetcher_reports_the_final_url_after_a_redirect(self) -> None:
+        # [Hidden Assumption] urllib follows the 302 itself; FetchResponse.url must name where the bytes came from.
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _RedirectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            response = HttpFetcher(timeout_seconds=10).fetch(f"http://127.0.0.1:{server.server_address[1]}/a")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(response.body_bytes, b"# b\n")
+        self.assertTrue(response.url.endswith("/b"), response.url)
 
     def test_direct_http_fetch_tool_reports_fetch_failed_for_file_url(self) -> None:
         # [Edge Case] A model-supplied file:// URL is a clean fetch_failed result, not an execution error.
