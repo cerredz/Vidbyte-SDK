@@ -225,6 +225,31 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
                 self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
                 self.assertEqual(target.read_bytes(), new)
 
+    def test_write_text_with_crlf_spelled_content_keeps_file_line_endings(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # Content the model spells with CRLF lands in the file's own endings once:
+        # a CRLF file never gets CR CR LF, and an LF file stays LF.
+        for old, new in ((b"a = 1\r\nb = 2\r\n", b"a = 1\r\nb = 22\r\n"), (b"a = 1\nb = 2\n", b"a = 1\nb = 22\n")):
+            with self.subTest(old=old), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                target = Path(tmp) / "f.txt"
+                target.write_bytes(old)
+                result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "a = 1\r\nb = 22\r\n"})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(target.read_bytes(), new)
+                self.assertNotIn("-a = 1", result.output)
+
+    def test_replace_text_with_crlf_spelled_search_and_replacement_on_crlf_file(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.ini"
+            target.write_bytes(b"[a]\r\nx=1\r\ny=2\r\n")
+            call = ToolCall("replace_text", {"path": "f.ini", "search": "[a]\r\nx=1", "replacement": "[a]\r\nx=10\r\nz=3"})
+            result = run(ReplaceTextTool(config).execute(call))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(target.read_bytes(), b"[a]\r\nx=10\r\nz=3\r\ny=2\r\n")
+
     def test_write_text_over_non_utf8_crlf_file_still_writes_and_keeps_crlf(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -336,6 +361,17 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
                 target.write_bytes(initial)
                 result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": "c\n"})))
                 self.assertEqual(result.status, ToolStatus.SUCCESS)
+                self.assertEqual(target.read_bytes(), expected, name)
+
+    def test_append_text_with_crlf_spelled_content_keeps_file_line_endings(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, initial, expected in (("lf.txt", b"a\n", b"a\nb\nc\n"), ("crlf.txt", b"a\r\n", b"a\r\nb\r\nc\r\n")):
+                target = Path(tmp) / name
+                target.write_bytes(initial)
+                result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": "b\r\nc\r\n"})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
                 self.assertEqual(target.read_bytes(), expected, name)
 
     def test_append_text_tolerates_undecodable_bytes_in_existing_file(self) -> None:

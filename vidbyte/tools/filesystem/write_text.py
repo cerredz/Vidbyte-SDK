@@ -49,6 +49,9 @@ class WriteTextTool(FileSystemTool):
             # Describe the change while the old file is still on disk. A
             # new file gets its line count, not a diff that repeats it.
             exists = self.backend.stat(target).is_file
+            # @intent model-crlf-text-keeps-file-endings
+            # An existing file is written in its own endings below, so CRLF the model spelled is first made LF, to land once.
+            content = LineEndings.to_lf(content) if exists else content
             change = self._edit_diff(target, content) if exists else f"created, {len(LineEndings.split_lines(content))} lines"
             # @intent write-keeps-file-line-endings
             # Replace an existing file in its own line endings so the rewrite

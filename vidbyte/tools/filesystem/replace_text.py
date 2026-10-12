@@ -37,6 +37,9 @@ class ReplaceTextTool(FileSystemTool):
             content = self.backend.read_text(target, encoding=self._config.encoding)
             # Remember the file's own line endings so the edit does not rewrite every line.
             newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding))
+            # @intent model-crlf-text-keeps-file-endings
+            # The file reads back as LF and is written in its own endings, so CRLF the model spelled is made LF to match and land once.
+            search, replacement = LineEndings.to_lf(search), LineEndings.to_lf(replacement)
             # @intent unique-edit-counts-overlapping-matches
             count = SubstringCounter.count_overlapping(content, search)
             if count != 1:
