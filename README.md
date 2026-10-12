@@ -211,6 +211,93 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
+### Vidbyte-managed text calls
+
+A Vidbyte API key lets text calls run without a provider account. In
+Vidbyte-managed mode the SDK sends each call to Vidbyte's model gateway, which
+calls the provider with Vidbyte's own provider key. Vidbyte bills you the
+provider cost plus a **2% fee**. Calls made with your own provider key (BYOK)
+go straight to the provider, and Vidbyte does not bill them.
+
+With `VIDBYTE_API_KEY=vb_live_<your key>` set and no `OPENAI_API_KEY`, the
+code is the same as with your own key:
+
+```python
+from vidbyte.lib.config import TextModelConfig, TextModelMode
+from vidbyte.lib.runners import TextModelRunner
+
+runner = TextModelRunner(TextModelConfig(provider="openai", model="gpt-5.5"))
+response = runner.run("Say hi in one word.")
+print(response.text, response.usage)  # the provider's own answer and usage
+
+claude = TextModelRunner(  # managed even when ANTHROPIC_API_KEY is also set
+    TextModelConfig(provider="anthropic", model="claude-sonnet-5", mode=TextModelMode.VIDBYTE_MANAGED)
+)
+```
+
+**Turning it on and off**
+
+- **On:** set `VIDBYTE_API_KEY`, pass a Vidbyte key as `api_key`, or set
+  `mode=TextModelMode.VIDBYTE_MANAGED`. Agents use managed mode too, because
+  they send their model calls through `TextModelRunner`.
+- **Off for one provider:** set that provider's own key, such as
+  `OPENAI_API_KEY`. In the default mode, a provider key always wins over
+  `VIDBYTE_API_KEY`.
+- **Off everywhere:** unset `VIDBYTE_API_KEY` and do not set
+  `mode=TextModelMode.VIDBYTE_MANAGED`. Managed Jev calls need the same
+  variable, so they stop working too.
+- **Per provider:** the choice is made for each provider separately. While
+  `VIDBYTE_API_KEY` is set, every managed provider that has no key of its own
+  is billed through Vidbyte. This includes calls made by fallback, fork, and
+  aggregation children of an agent.
+
+**What managed mode serves and refuses**
+
+- **Providers:** OpenAI, Anthropic, Gemini, xAI, DeepSeek, and Kimi. Other
+  providers stay on your own key: `VIDBYTE_API_KEY` is ignored for them, and
+  a Vidbyte key passed as `api_key`, or managed mode, with another provider
+  is refused before a request is sent.
+- **Output cap:** every managed request carries an output-token cap. When
+  `max_output_tokens` is not set, the SDK sends 8,192. If you pass a
+  `generationConfig` in `extra_body` for Gemini, it replaces the one the SDK
+  builds, so it must include `maxOutputTokens`. For xAI, DeepSeek, and Kimi,
+  set the cap with `max_output_tokens`, not `max_completion_tokens` in
+  `extra_body`.
+- **Request size:** the gateway refuses a request over 2,000,000 bytes,
+  measured as JSON with non-ASCII characters escaped. Shorten the context, or
+  use your own provider key.
+- **Streaming:** `StreamingTextModelRunner` refuses managed mode. Use
+  `TextModelRunner`, or set the provider's own key to stream.
+- **Refused request fields:** hosted (non-function) tools, any service tier
+  (`service_tier`), body fields outside the gateway's allowed lists, Gemini
+  snake_case keys, a `model` key in a Gemini body, and OpenAI
+  `previous_response_id` and `conversation`.
+- **Provider accounts:** managed calls run under Vidbyte's provider accounts.
+  Provider-side stored state, such as OpenAI stored responses and Gemini
+  cached content, lives in those accounts, not in yours.
+
+**Waits, retries, and billing**
+
+- **Wait per attempt:** one managed attempt can wait up to 630 s
+  (10.5 minutes), because the gateway gives a long generation up to 600 s.
+- **Retries:** when the gateway answers 409 or 502, or Vidbyte's hosting edge
+  answers with a page that is not a JSON object, the SDK sends the call again,
+  up to two more times. Each retry carries the same `Idempotency-Key`, so the
+  gateway normally answers it from its saved result instead of billing it
+  again; only an outage of the gateway's replay store can bill a retry twice.
+- **Retry deadline:** retries stop when the call's own timeout (630 s at the
+  minimum), counted from its first request, has no time left for the next
+  wait. Each attempt still gets its full timeout, so the worst case for one
+  call is about 21 minutes, and a slow 502 is sent again at most once.
+- **No retry:** a network failure or a timeout is not retried. The error says
+  that Vidbyte may already have billed the call.
+- **Outer timeouts:** an agent timeout shorter than 630 s can cancel a call
+  that Vidbyte still completes and bills. An example is the 120 s default
+  stage limit of the prosecutor/defender/judge algorithm.
+- **Error messages:** managed errors never repeat the gateway's or the
+  provider's response text, because that text could hold a key. They name the
+  provider, the HTTP status, and what to do next.
+
 ### JevAgent assumption reconciliation
 
 JevAgent continuation checks are opt-in. `ASSUMPTIONS_RECONCILED` adds a finish check for explicit, consequential assumptions that later run evidence changes; it asks whether dependent work was revisited, including whether the work became irrelevant. It does not treat an unverified premise, a plan change alone, or a tool error as a qualifying assumption.

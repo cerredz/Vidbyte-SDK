@@ -13,7 +13,7 @@ from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
 from vidbyte.lib.dataclasses.harness_descriptor import HarnessDescriptor
 from vidbyte.lib.dataclasses.model_configs import AudioModelConfig, DecisionModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
-from vidbyte.lib.enums import DecisionModelMode, ModelProvider
+from vidbyte.lib.enums import DecisionModelMode, ModelProvider, TextModelMode
 
 __all__ = [
     "ALL_PRESETS",
@@ -31,6 +31,7 @@ __all__ = [
     "McpPresetDefinition",
     "ModelProvider",
     "TextModelConfig",
+    "TextModelMode",
     "TEXTUAL_SOURCE_CONTENT_TYPES",
     "UNTRUSTED_CONTENT_BEGIN",
     "UNTRUSTED_CONTENT_END",

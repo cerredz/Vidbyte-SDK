@@ -1,15 +1,19 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names. Cumulative obligations preserve requirements across the supplied chronological user turns. Discovered-item coverage inventories bounded recorded outputs and checks requested per-item processing.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
+PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names. Cumulative obligations preserve requirements across the supplied chronological user turns. Discovered-item coverage inventories bounded recorded outputs and checks requested per-item processing. The Vidbyte-managed generative gateway values (key prefix and format, provider set, default output cap, timeout floor, placeholder key) also live here, beside the managed Jev gateway constants.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values. `vidbyte/lib/registries/models.py`, `vidbyte/lib/dataclasses/model_configs.py`, `vidbyte/lib/http/vidbyte_gateway.py`, and `vidbyte/lib/runners/text.py` read the managed generative gateway values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
-COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
-KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-agent-scaffold.py, and tests/test_jev_done.py.
+COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself. Change a managed generative gateway value (route, key prefix and format, provider set, output cap, timeout floor) only when the backend gateway contract changes, together with the README managed-mode section and tests/features/sdk_managed_text/.
+KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only. VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS is the gateway's 600 s total upstream deadline plus 30 s, so lowering it lets the SDK give up on a call Vidbyte may still complete and bill. VIDBYTE_API_KEY_PREFIX must stay the only spelling of the live-key prefix (lint C020). VIDBYTE_MANAGED_KEY_PLACEHOLDER is not a secret; adapters send it to vendors in managed state.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md, docs/spec/managed-generative-models/spec.md (sections 8.5 and 9.3).
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-agent-scaffold.py, tests/test_jev_done.py, and tests/features/sdk_managed_text/.
 """
 
 from __future__ import annotations
+
+import re
+
+from vidbyte.lib.enums.model_provider import ModelProvider
 
 # Models and endpoints (https://docs.typesafe.ai/models.md). `jev-latest` and `jev-preview`
 # are aliases; the response reports the versioned ID (currently `jev-1.13.0`) that answered.
@@ -50,6 +54,37 @@ JEV_MANAGED_RUN_ID_HEADER: str = "X-Vidbyte-Run-Id"
 JEV_MANAGED_RUN_ID_PREFIX: str = "jev:"
 JEV_MANAGED_RUN_ID_PATTERN: str = r"^[A-Za-z0-9._:-]{1,128}$"
 JEV_IDEMPOTENCY_KEY_HEADER: str = "Idempotency-Key"
+
+# Vidbyte-managed generative text calls go through one gateway route.
+# The key prefix is the platform contract's api_key_prefix (lint C020
+# keeps this the only spelling); the key format and its env var are
+# shared by the managed Jev and the managed text configs.
+VIDBYTE_API_KEY_PREFIX: str = "vb_live_"
+VIDBYTE_API_KEY_PATTERN: str = rf"{re.escape(VIDBYTE_API_KEY_PREFIX)}[A-Za-z0-9_-]{{32,}}"
+VIDBYTE_API_KEY_ENV_VAR: str = "VIDBYTE_API_KEY"
+# The one generative route, on the contract's live host (C018), which
+# every managed text call posts to whatever its provider.
+VIDBYTE_GENERATIVE_GATEWAY_ENDPOINT: str = "https://vidbyte-backend.onrender.com/api/v1/models/generate"
+# The six providers the generative gateway dispatches: cerredz/Vidbyte
+# backend spec r3 section 9.2.8 at commit a14b37e7e (spec.md A-1).
+VIDBYTE_MANAGED_TEXT_PROVIDERS: frozenset[ModelProvider] = frozenset({
+    ModelProvider.OPENAI,
+    ModelProvider.ANTHROPIC,
+    ModelProvider.GEMINI,
+    ModelProvider.XAI,
+    ModelProvider.DEEPSEEK,
+    ModelProvider.KIMI,
+})
+# The gateway refuses a body without an output-token cap and injects
+# none, so a managed call without max_output_tokens sends this one.
+VIDBYTE_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS: int = 8_192
+# The gateway gives one upstream call up to 600 s in total; 30 s more
+# covers its admission, hold, and metering, so the SDK never gives up
+# on a call Vidbyte may still complete and bill.
+VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS: float = 630.0
+# A non-secret stand-in that provider adapters put in their vendor auth
+# header in managed state, so the Vidbyte key never reaches a vendor.
+VIDBYTE_MANAGED_KEY_PLACEHOLDER: str = "vidbyte-managed"
 
 # HTTP statuses the API documents (https://docs.typesafe.ai/api.md#errors).
 JEV_STATUS_REQUEST_TIMEOUT: int = 408
