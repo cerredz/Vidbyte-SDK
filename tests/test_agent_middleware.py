@@ -7,10 +7,10 @@ from vidbyte.agents import AgentLoopSettings, AgentRuntime, BaseAgent, ToolError
 from vidbyte.agents.fallback import AgentFallback
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, FallbackModel
 from vidbyte.lib.errors import ProviderRequestError
-from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
+from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.middleware.builtins import ModelRetryMiddleware, ToolErrorPolicyMiddleware, ToolPolicyMiddleware
+from vidbyte.middleware.builtins import ModelRetryMiddleware, RuntimeLimitMiddleware, ToolErrorPolicyMiddleware, ToolPolicyMiddleware
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.trace import Trace, TraceProfile
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools, tool
@@ -92,6 +92,14 @@ class AbortBeforeRunMiddleware(AgentMiddleware):
         return MiddlewareDecision.abort("blocked_before_run")
 
 
+class StringDenyMiddleware(AgentMiddleware):
+    async def before_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        # A policy ported from JSON returns the plain string spelling of the action.
+        if ctx.tool_call is not None and ctx.tool_call.tool_name == "lookup":
+            return MiddlewareDecision(action="deny_tool", reason="lookup_blocked")  # type: ignore[arg-type]
+        return MiddlewareDecision.continue_()
+
+
 class HookRecorderMiddleware(AgentMiddleware):
     def __init__(self) -> None:
         self.hooks: list[str] = []
@@ -128,6 +136,15 @@ class HookRecorderMiddleware(AgentMiddleware):
 
     async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         self.hooks.append(ctx.hook.value)
+        return MiddlewareDecision.continue_()
+
+
+class AfterRunModelCallCountMiddleware(AgentMiddleware):
+    def __init__(self) -> None:
+        self.model_call_count: int | None = None
+
+    async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        self.model_call_count = ctx.model_call_count
         return MiddlewareDecision.continue_()
 
 
@@ -251,6 +268,37 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(tool_instance.executed)
         self.assertEqual(result.metadata["tool_call_states"], ("denied", "succeeded"))
 
+    async def test_string_spelled_deny_decision_still_blocks_the_tool(self) -> None:
+        # @intent middleware-action-is-one-canonical-enum
+        tool_instance = ExecutableTool()
+        runner = FakeRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        runtime = self._runtime(tools=Tools([tool_instance]), middleware=(StringDenyMiddleware(),))
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=self._context(runtime),
+        )
+
+        self.assertFalse(tool_instance.executed)
+        self.assertEqual(result.output, "done")
+        self.assertEqual(result.metadata["tool_call_states"], ("denied", "succeeded"))
+
+    def test_decision_coerces_string_action_to_enum_member(self) -> None:
+        # @intent middleware-action-is-one-canonical-enum
+        self.assertIs(MiddlewareDecision(action="deny_tool", reason="x").action, MiddlewareAction.DENY_TOOL)  # type: ignore[arg-type]
+        self.assertIs(MiddlewareDecision(action="abort_run", reason="x").action, MiddlewareAction.ABORT_RUN)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            MiddlewareDecision(action="block", reason="x")  # type: ignore[arg-type]
+
     async def test_model_retry_middleware_retries_runner_exception(self) -> None:
         runner = FakeRunner(
             [
@@ -302,6 +350,41 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "from flash")
         self.assertEqual((len(primary.calls), len(backup.calls)), (3, 1))
         self.assertTrue(result.metadata["fallback"]["used"])
+
+    async def test_fallback_switch_keeps_the_runs_model_call_count(self) -> None:
+        # @intent model-call-count-survives-fallback-switch
+        # The failed model's request still counts after the switch, so after_run sees both requests and a cap of one stops the backup.
+        unavailable = ProviderRequestError("503 Service Unavailable", provider="deepseek", status_code=503)
+        for limit, expected_calls, expected_stop in ((None, (1, 1), "is_done"), (1, (1, 0), "middleware_abort")):
+            primary = FakeRunner([unavailable])
+            backup = FakeRunner(
+                [FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "from flash"}'}]})]
+            )
+
+            class _FakeChain(AgentFallback):
+                def build_runner(self, index: int) -> object:
+                    return backup
+
+            recorder = AfterRunModelCallCountMiddleware()
+            middleware = (recorder,) if limit is None else (RuntimeLimitMiddleware(max_model_calls=limit), recorder)
+            runtime = AgentRuntime(
+                agent_name="worker",
+                system_prompt="Work.",
+                tools=Tools(),
+                permission_policy=PermissionPolicy(),
+                middleware=middleware,
+                fallback=_FakeChain([FallbackModel("deepseek", "deepseek-v4-pro"), FallbackModel("deepseek", "deepseek-v4-flash")]),
+            )
+
+            result = await runtime.arun(
+                "task",
+                handle=RunnerHandle(runner=primary, provider="deepseek", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                context=self._context(runtime),
+            )
+
+            self.assertEqual((len(primary.calls), len(backup.calls)), expected_calls)
+            self.assertEqual(recorder.model_call_count, sum(expected_calls))
+            self.assertEqual(result.metadata["stop_reason"], expected_stop)
 
     async def test_tool_error_policy_retries_idempotent_transient_tool_error(self) -> None:
         flaky = FlakyTool(permission=ToolPermission.READ)

@@ -37,7 +37,7 @@ from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.tools import ToolActivity, ToolParameter
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, TaskContextItem, TrajectoryCheckpointAlgorithm
+from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, DocumentContextItem, TaskContextItem, TextContextItem, TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
@@ -58,6 +58,17 @@ class FakeRunner:
     def __init__(self, responses: list[FakeResponse]) -> None:
         self.responses = list(responses)
         self.calls: list[dict] = []
+
+
+class RecordingRunner:
+    """Offline runner that records every model request and answers without tool calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def run(self, prompt: str, **kwargs: object) -> FakeResponse:
+        self.calls.append({"prompt": prompt, "kwargs": kwargs})
+        return FakeResponse("ok", {"output_text": "ok"})
 
 
 class WriteTool(BaseTool):
@@ -197,6 +208,43 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(context.permissions.can_read_files)
         self.assertEqual(context.context_items[0].goal, "preserve context")
         self.assertEqual(tuple(tool.name for tool in context.tools), ("isDone",))
+
+    def test_runtime_renders_each_context_item_once(self) -> None:
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Agent system.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+        )
+        manager = ContextManager()
+        manager.add(TextContextItem(title="Managed", content="MARKER-MANAGER"))
+        context = runtime.build_context(
+            "task",
+            base_context=StrategyContext(context_items=[TaskContextItem(goal="MARKER-CALLER")]),
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+            context_items=(DocumentContextItem(source="spec.md", content="MARKER-AGENT"),),
+            context_manager=manager,
+        )
+
+        system = runtime._build_system_string(context)
+        for marker in ("MARKER-AGENT", "MARKER-MANAGER", "MARKER-CALLER"):
+            self.assertEqual(system.count(marker), 1, marker)
+
+    async def test_base_context_history_reaches_the_model_like_history_argument(self) -> None:
+        # [Regression] BaseContext(history=...) passed as context= was dropped while history= reached the model.
+        earlier = AgentMessage(sender="customer", recipient="support", content="HISTMARK order 1234 is late")
+        requests: dict[str, str] = {}
+        for form, options in (("history", {"history": [earlier]}), ("context", {"context": StrategyContext(history=(earlier,))})):
+            runner = RecordingRunner()
+            agent = build_test_agent(name="support", system_prompt="Help.", runner=runner)
+            await agent.arun("any update?", **options)
+            requests[form] = str(runner.calls)
+
+        self.assertEqual(requests["history"].count("HISTMARK"), 1)
+        self.assertEqual(requests["context"].count("HISTMARK"), 1)
 
     def test_runtime_builds_non_agentic_context_without_internal_tools(self) -> None:
         @tool

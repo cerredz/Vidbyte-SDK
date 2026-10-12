@@ -464,6 +464,34 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(parent.fork(settings).runner_config.api_key, "sk-deepseek-SECRET")
 
+    def test_same_vendor_fork_keeps_key_of_provider_prefixed_parent(self) -> None:
+        # @intent fork-reads-prefixed-parent-provider: "deepseek/deepseek-chat" runs on DeepSeek, so a DeepSeek child keeps the key.
+        parent = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_key="PARENTKEY")
+
+        # No DeepSeek key in the environment, so only the inherited key can authenticate the same-vendor child.
+        with patch.dict(os.environ):
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            same_vendor = parent.fork(AgentForkSettings(provider="deepseek", model_name="deepseek-reasoner"))
+            cross_vendor = parent.fork(AgentForkSettings(provider="gemini", model_name="gemini-2.5-flash"))
+
+        self.assertEqual(same_vendor.runner_config.api_key, "PARENTKEY")
+        self.assertIsNone(cross_vendor.runner_config.api_key)
+
+    def test_fork_whose_prefixed_model_switches_vendor_drops_key_and_keeps_backup_vendor(self) -> None:
+        # @intent fork-reads-prefixed-child-provider: with no provider set, "gemini/gemini-3.5-flash" moves the child to Gemini.
+        combined = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_key="PARENTKEY", fallback=["deepseek-reasoner"])
+        split = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_key="PARENTKEY")
+
+        with patch.dict(os.environ):
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            switched = combined.fork(AgentForkSettings(model_name="gemini/gemini-3.5-flash"))
+            # A split parent's inherited provider pins the child to DeepSeek, so it keeps the key.
+            stays = split.fork(AgentForkSettings(model_name="gemini/gemini-3.5-flash"))
+
+        self.assertIsNone(switched.runner_config.api_key)
+        self.assertEqual(switched.fallback.models[1].identity(), "deepseek/deepseek-reasoner")
+        self.assertEqual(stays.runner_config.api_key, "PARENTKEY")
+
     def test_cross_provider_fork_keeps_parent_fallback_providers(self) -> None:
         # @intent fork-keeps-resolved-fallback-providers: a bare DeepSeek backup must not become an Anthropic model.
         parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-pro", api_key="sk-deepseek-SECRET", timeout_seconds=30.0, fallback=["deepseek-v4-flash"])

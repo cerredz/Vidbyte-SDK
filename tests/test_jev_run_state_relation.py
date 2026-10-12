@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
 import unittest
 from collections.abc import Mapping
 from typing import Any
@@ -494,18 +495,22 @@ class JevRunStateRelationRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(with_done_check.continuation)
 
     async def test_legacy_mode_keeps_per_run_begin_semantics(self) -> None:
-        agent, _, state_runner = _agent(preflight=(), checks=(JevDoneCheck.MULTI_PART,))
-        assert isinstance(agent.run_state, JevRunState) and not isinstance(agent.run_state, JevRunStateRelation)
-        first = _record(with_sections=False)
-        agent.run_state.record = first
-        agent.run_state.request = "old request"
-        agent.run_state.rendered = "old rendered"
-        await agent.arun("A new request.")
-        self.assertEqual(state_runner.calls, ["A new request."])
-        self.assertEqual(agent.run_state.request, "A new request.")
-        self.assertNotEqual(agent.response.run_state, first)
-        self.assertEqual(agent.response.results, {})
-        self.assertIsNotNone(agent.continuation)
+        # One agent turn here runs on an unbound runner. A developer's
+        # VIDBYTE_API_KEY would make it managed and send a live POST to
+        # the gateway, so the key is blanked for this test only.
+        with patch.dict(os.environ, {"VIDBYTE_API_KEY": ""}):
+            agent, _, state_runner = _agent(preflight=(), checks=(JevDoneCheck.MULTI_PART,))
+            assert isinstance(agent.run_state, JevRunState) and not isinstance(agent.run_state, JevRunStateRelation)
+            first = _record(with_sections=False)
+            agent.run_state.record = first
+            agent.run_state.request = "old request"
+            agent.run_state.rendered = "old rendered"
+            await agent.arun("A new request.")
+            self.assertEqual(state_runner.calls, ["A new request."])
+            self.assertEqual(agent.run_state.request, "A new request.")
+            self.assertNotEqual(agent.response.run_state, first)
+            self.assertEqual(agent.response.results, {})
+            self.assertIsNotNone(agent.continuation)
 
     async def test_related_specialist_request_reports_preserved_record_before_delegation(self) -> None:
         specialist_runner = ScriptedGenerativeRunner("specialist reply")

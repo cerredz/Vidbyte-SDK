@@ -104,7 +104,7 @@ class AttachMcpServerTool(BaseTool):
             )
 
         raw_command = call.arguments.get("command", "")
-        command = self._parse_command(str(raw_command))
+        command = self._parse_command(raw_command)
         if command is None:
             return ToolResult.error(
                 self.name,
@@ -156,13 +156,17 @@ class AttachMcpServerTool(BaseTool):
             metadata={"source": "mcp_attach", "tool_count": len(tool_names)},
         )
 
-    def _parse_command(self, raw: str) -> list[str] | None:
-        """Parse a JSON-encoded command string into a validated list of strings."""
-        try:
-            parsed = json.loads(raw)
-        except (json.JSONDecodeError, ValueError) as exc:
-            self._last_parse_error = f"command is not valid JSON: {exc}"
-            return None
+    def _parse_command(self, raw: object) -> list[str] | None:
+        """Parse a JSON-encoded command string or native array into a validated list of strings."""
+        # @intent mcp-command-accepts-json-text-or-array
+        # Lenient providers send the array natively; stringifying it would yield a Python repr, not JSON.
+        parsed = raw
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, ValueError) as exc:
+                self._last_parse_error = f"command is not valid JSON: {exc}"
+                return None
         if not isinstance(parsed, list) or len(parsed) == 0:
             self._last_parse_error = "command must be a non-empty JSON array."
             return None

@@ -24,6 +24,7 @@ from vidbyte.lib.dataclasses.failure import Failure, RecoveryAttempt, RecoveryBi
 from vidbyte.lib.dataclasses.failure_recovery import FailureRouterSettings
 from vidbyte.lib.enums.failure import FailureCode, FailureDisposition, FailurePhase, FailureStatus, RuleErrorMode
 from vidbyte.lib.errors import FailureRaisedError
+from vidbyte.lib.tools.formatter import ToolsFormatter
 from vidbyte.sessions.failure.rules import FailureRule
 
 _EMPTY_COUNT = 0
@@ -165,7 +166,10 @@ class FailureMetadataNormalizer:
         for call in calls:
             result = getattr(call, "result", None)
             result_metadata = getattr(result, "metadata", {})
-            error = str(result_metadata.get("error", "")) if isinstance(result_metadata, Mapping) else ""
+            raw = (result_metadata.get("error") or result_metadata.get("error_type")) if isinstance(result_metadata, Mapping) else None
+            # @intent ledger-tool-error-kinds-match-the-model-visible-kind
+            # Normalize the token as ToolsFormatter does for the model; an absent token stays uncounted.
+            error = ToolsFormatter._normalized_error_kind(raw) if raw else ""
             code = cls._TOOL_ERROR_CODES.get(error)
             if code is not None:
                 counts[code] = counts.get(code, _EMPTY_COUNT) + 1

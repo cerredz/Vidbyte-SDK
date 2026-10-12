@@ -65,7 +65,9 @@ class HarnessSecretPolicy(CredentialKeyPolicy):
 class HarnessRedactor:
     """The single redaction pass applied to every value bound for a TrajectorySink."""
 
-    _ERROR_ASSIGNMENT = re.compile(r"(?i)\b(api[_-]?key|private[_-]?key|secret[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential|authorization)\s*[:=]\s*([^\s,;]+)")
+    # @intent quoted-and-scheme-credentials-are-redacted
+    # JSON/repr keys ("api_key": "x") and "Authorization: Bearer x" are the same assignment, so the value itself must be scrubbed.
+    _ERROR_ASSIGNMENT = re.compile(r"(?i)\b(api[_-]?key|private[_-]?key|secret[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential|authorization)[\"']?\s*[:=]\s*(?:(?:bearer|basic)\s+)?(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+)")
 
     def redact(self, value: Any) -> Any:
         # Projects arbitrary capture data into a recursively scrubbed JSON-safe value.
@@ -125,7 +127,9 @@ class HarnessRedactor:
         if isinstance(value, (set, frozenset)):
             return [self._safe(item, active) for item in sorted(value, key=repr)]
         if is_dataclass(value) and not isinstance(value, type):
-            return {item.name: self._safe(getattr(value, item.name), active) for item in fields(value)}
+            # @intent dataclass-credential-fields-are-scrubbed
+            # A dataclass field is the same record as a mapping key, so credential-named fields are dropped exactly as _safe_mapping drops them.
+            return {item.name: self._safe(getattr(value, item.name), active) for item in fields(value) if not HarnessSecretPolicy.is_secret_key(item.name)}
         return self._safe_exported_object(value, active)
 
     def _safe_mapping(self, value: Mapping[Any, Any], active: set[int]) -> dict[str, Any]:

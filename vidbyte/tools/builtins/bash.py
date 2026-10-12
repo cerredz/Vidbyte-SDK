@@ -1,9 +1,9 @@
 """FILE: vidbyte/tools/builtins/bash.py
 
 PURPOSE: Defines BashTool, a minimal unsandboxed tool that runs one model-supplied command per call as `bash -c <command>` in a fresh process started in a root folder, and returns the combined output and the exit code.
-ROLE IN CODEBASE: Exported by vidbyte/tools/builtins/__init__.py, preloaded by vidbyte/agents/coding.py (CodingAgent), and executed by vidbyte/agents/runtime.py after the agent's PermissionPolicy allows EXECUTE.
+ROLE IN CODEBASE: Exported by vidbyte/tools/builtins/__init__.py, preloaded by vidbyte/agents/coding.py (CodingAgent), and executed by vidbyte/agents/runtime.py after the agent's PermissionPolicy allows EXECUTE. vidbyte/agents/coding_context/setup_commands.py (SetupCommandsLoader) reuses find_bash, not_found_message, and the BASH_* time limits to run CodingAgent's setup commands. vidbyte/middleware/builtins/verify_command.py also executes one directly to run CodingAgent's verification command.
 ARCHITECTURE NOTE: The command reaches bash through asyncio.create_subprocess_exec as one argv item, never a shell string; bash runs in its own session (POSIX process group) with stdin closed and stderr merged into stdout. One time limit, BASH_TIMEOUT_SECONDS, covers reading the output to its end and waiting for the exit; only the first BASH_MAX_OUTPUT_BYTES are kept and the rest is read and counted. On timeout or cancellation the command is stopped (POSIX: the whole process group is killed), the wait for exit after the kill is bounded by BASH_KILL_GRACE_SECONDS, and the subprocess transport is closed, so every call returns. A command that finishes on its own is never killed. The four BASH_* constants are read as module globals at call time.
-FUNCTION INVENTORY: BashTool.__init__ resolves the root and the executable once; _find_bash picks the executable per OS; spec declares the model-facing contract; validate_call requires a non-blank command string; execute is the narrated main function; _spawn starts bash; _collect reads the bounded output and waits for the exit; _stop kills, waits within the grace bound, and closes the pipe; _render builds the completed-command result.
+FUNCTION INVENTORY: BashTool.__init__ resolves the root and the executable once; executable reports that lookup (VerifyCommandMiddleware reads it to fail at construction); find_bash picks the executable per OS; not_found_message says bash is missing and how to install it; spec declares the model-facing contract; validate_call requires a non-blank command string; execute is the narrated main function; _spawn starts bash; _collect reads the bounded output and waits for the exit; _stop kills, waits within the grace bound, and closes the pipe; _render builds the completed-command result.
 COMMON MODIFICATION PATTERNS: Change a bound by editing its BASH_* constant here; add a new stop path by routing it through _stop so the kill, the bounded wait, and the pipe close stay together; keep execute's helpers flat (none calls another).
 WHAT NOT TO DO IN THIS FILE: 1. No shell=True, asyncio.create_subprocess_shell, or os.system. 2. No SandboxTransport; the tool is unsandboxed by the user's decision. 3. No environment filtering; commands inherit the parent environment. 4. No persistent shell session between calls. 5. No unbounded process.wait(); every wait sits under BASH_TIMEOUT_SECONDS or BASH_KILL_GRACE_SECONDS.
 KNOWN EDGE CASES: On Windows the bash on PATH can be the WSL launcher, so only Git for Windows' bin/bash.exe found next to git is used. On Windows the kill stops only Git's bash launcher, so a timed-out or cancelled command may keep running after the call returns. On POSIX a descendant that leaves the process group (setsid) survives the group kill. A background process that still holds the output pipe makes the call wait for the time limit, where it is killed. Python 3.12+ Process.wait() returns only after every pipe closes, which is why both waits are bounded. When a stop leaves such an orphan, the parent still closes its end of the pipe before the call returns.
@@ -43,10 +43,15 @@ class BashTool(BaseTool):
         # Resolves the root and the bash executable once; a missing bash
         # is reported per call, never raised here.
         self.root_dir = Path(root_dir).resolve()
-        self._executable = self._find_bash()
+        self._executable = self.find_bash()
+
+    @property
+    def executable(self) -> str | None:
+        """Return the bash executable resolved at construction, or None when this platform has none."""
+        return self._executable
 
     @staticmethod
-    def _find_bash() -> str | None:
+    def find_bash() -> str | None:
         """Return the bash executable this platform should run, or None when there is none."""
         # @intent windows-bash-is-git-for-windows
         # On Windows the bash found on PATH is often the WSL launcher
@@ -64,6 +69,12 @@ class BashTool(BaseTool):
             return None
         candidates = (folder / "bin" / "bash.exe" for folder in Path(git).resolve().parents[:3])
         return next((str(candidate) for candidate in candidates if candidate.is_file()), None)
+
+    @staticmethod
+    def not_found_message() -> str:
+        """Return the message that bash was not found, with this platform's install hint."""
+        hint = "Install Git for Windows and put git on PATH; this tool runs the bin/bash.exe that Git for Windows installs." if sys.platform == "win32" else "Install bash and put it on PATH."
+        return f"bash was not found. {hint}"
 
     def spec(self) -> ToolSpec:
         """Declare the bash tool, its single command parameter, and its EXECUTE permission."""
@@ -103,8 +114,7 @@ class BashTool(BaseTool):
         # model how the developer can fix it.
         executable = self._executable
         if executable is None:
-            hint = "Install Git for Windows and put git on PATH; this tool runs the bin/bash.exe that Git for Windows installs." if sys.platform == "win32" else "Install bash and put it on PATH."
-            return ToolResult.error(self.name, f"bash was not found. {hint}", metadata={"error": "bash_not_found"})
+            return ToolResult.error(self.name, self.not_found_message(), metadata={"error": "bash_not_found"})
 
         # Start bash in the root folder; a command the operating system
         # refuses to start comes back as an error result.

@@ -77,9 +77,18 @@ class AnthropicUsage(ProviderUsage):
         # Prices input, cache-write, cache-read, and output as separate buckets.
         if pricing is None or self.total_tokens is None:
             return None
-        input_rate, output_rate, _ = self.effective_rates(pricing)
-        cache_write_rate = pricing.cache_write_per_million or input_rate
-        cache_read_rate = pricing.cache_read_per_million or input_rate
+        # @intent anthropic-cache-rates-follow-shared-pricing
+        # A 0.0 rate is a priced free bucket (only None falls back), and both cache
+        # rates scale with the active input tier, exactly as effective_rates prices
+        # cache reads for every other provider.
+        input_rate, output_rate, cache_read_rate = self.effective_rates(pricing)
+        cache_write_rate = pricing.cache_write_per_million
+        if cache_write_rate is None:
+            cache_write_rate = input_rate
+        # @intent free-base-rate-never-divides
+        # A 0.0 base input rate (a free model) leaves the tier ratio undefined, so its cache rate applies unscaled.
+        elif pricing.input_per_million != 0.0:
+            cache_write_rate = cache_write_rate * (input_rate / pricing.input_per_million)
         return (
             (self.input_tokens or 0) * input_rate
             + (self.cache_creation_input_tokens or 0) * cache_write_rate

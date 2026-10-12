@@ -145,6 +145,18 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([msg.content for msg in agent.captured.history], ["two", "three"])
         self.assertEqual(agent.captured.tools.names(), ("beta", "gamma"))
 
+    async def test_drop_only_fork_does_not_grant_unnamed_extra_toolsets(self) -> None:
+        # @intent fork-extras-are-opt-in
+        # A drop-only fork pulled in every configured extra toolset although none was named.
+        agent = StubAgent()
+        tool = ForkConversationTool(extra_toolsets={"admin": Tools([NamedTool("delete_user")])})
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", drop_tool_names=["beta"]))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(agent.captured.tools.names(), ("alpha",))
+
     async def test_null_history_mode_falls_back_to_default_chain(self) -> None:
         # A JSON-null history_mode means "not given": context_window's mode applies, else "full", never "none".
         cases = (
@@ -352,6 +364,22 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
                 self.assertEqual(agent.captured.agent_loop_settings.allowed_tools, tuple(requested))
+
+    async def test_null_loop_settings_fields_keep_parent_values(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A null allowed_tools gave the child an empty gate that denied every tool, and a null max_tokens failed the fork.
+        agent = StubAgent()
+        agent.agent_loop_settings = AgentLoopSettings(max_iterations=3, max_tokens=4000, allowed_tools=("alpha",))
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", loop_settings={"max_iterations": 2, "allowed_tools": None, "max_tokens": None}))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        settings = agent.captured.agent_loop_settings
+        self.assertEqual(settings.allowed_tools, ("alpha",))
+        self.assertEqual(settings.max_tokens, 4000)
+        self.assertEqual(settings.max_iterations, 2)
 
     async def test_depth_cap_prevents_recursive_fork_construction(self) -> None:
         # Depth cap should be checked before parent.fork is called.

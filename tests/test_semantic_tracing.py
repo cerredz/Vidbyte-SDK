@@ -323,6 +323,25 @@ class SessionTraceTests(unittest.TestCase):
         tracer.end_trace(root, output="ok")
         self.assertEqual([event["type"] for event in inner.events], ["start_trace", "end_trace"])
 
+    def test_session_keeps_nested_agent_run_under_caller_tool_span(self) -> None:
+        # Verifies a session does not lift an agent run nested in a tool call up to the session root.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=TraceProfile.verbose())
+        with tracer.session("workflow"):
+            outer = tracer.start_trace("agent.run", agent_name="orchestrator")
+            tool_call = tracer.start_span("tool.call", tool_name="researcher")
+            nested = tracer.start_trace("agent.run", agent_name="child")
+            tracer.end_trace(nested, output="child")
+            tracer.end_span(tool_call, output="tool")
+            tracer.end_trace(outer, output="outer")
+        session_root = next(event["context"] for event in inner.events if event["type"] == "start_trace")
+        runs = [event for event in inner.events if event["type"] == "start_span" and event["name"] == "agent.run"]
+        self.assertEqual(len(runs), 2)
+        self.assertIs(runs[0]["parent"], session_root)
+        self.assertIs(runs[1]["parent"], tool_call.provider_context)
+        ends = [event["type"] for event in inner.events if event["type"].startswith("end")]
+        self.assertEqual(ends, ["end_span", "end_span", "end_span", "end_trace"])
+
 
 class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_default_profile_records_core_and_default_spans(self) -> None:

@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.filesystem import (
     AppendTool,
@@ -280,6 +281,16 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             result = run(ReadTextTool(config).execute(ToolCall("read_text", {"path": "f.txt"})))
             self.assertIn("two", result.output)
 
+    def test_append_text_keeps_existing_file_line_endings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, initial, expected in (("lf.txt", b"a\nb\n", b"a\nb\nc\n"), ("crlf.txt", b"a\r\nb\r\n", b"a\r\nb\r\nc\r\n")):
+                target = Path(tmp) / name
+                target.write_bytes(initial)
+                result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": "c\n"})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS)
+                self.assertEqual(target.read_bytes(), expected, name)
+
     def test_copy_then_move(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -474,6 +485,89 @@ class FileSystemToolNullOptionalArgumentTests(unittest.TestCase):
                 with self.subTest(arguments=arguments):
                     result = run(TreeTool(config).execute(ToolCall("tree", arguments)))
                     self.assertEqual(result.status, ToolStatus.ERROR)
+
+
+class WriteTextOverwriteLimitTests(unittest.TestCase):
+    """max_overwrite_lines: write_text may not replace an existing file with more lines than the limit."""
+
+    def _write(self, tmp: str, limit: int | None, path: str = "f.py", content: str = "new\n"):
+        config = FileSystemToolConfig(root=tmp, allow_write=True, max_overwrite_lines=limit)
+        return run(WriteTextTool(config).execute(ToolCall("write_text", {"path": path, "content": content})))
+
+    def test_file_at_the_limit_is_replaced_and_one_line_over_is_refused_untouched(self) -> None:
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp, "f.py")
+            target.write_bytes(b"line\n" * 300)
+            self.assertEqual(self._write(tmp, 300).status, ToolStatus.SUCCESS)
+            self.assertEqual(target.read_text(encoding="utf-8"), "new\n")
+
+            original = b"line\n" * 301
+            target.write_bytes(original)
+            result = self._write(tmp, 300)
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertEqual(target.read_bytes(), original)
+            for expected in ("f.py", "301 lines", "300-line limit", "replace_text"):
+                self.assertIn(expected, result.output)
+            self.assertNotIn("delete", result.output.lower())
+
+    def test_new_file_of_any_size_is_written(self) -> None:
+        with TemporaryDirectory() as tmp:
+            result = self._write(tmp, 1, path="big.py", content="x\n" * 10_000)
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(Path(tmp, "big.py").read_bytes().count(b"\n"), 10_000)
+
+    def test_replace_text_still_edits_a_file_over_the_limit(self) -> None:
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp, "f.py")
+            target.write_bytes(b"keep\n" * 500 + b"old\n")
+            config = FileSystemToolConfig(root=tmp, allow_write=True, max_overwrite_lines=10)
+            result = run(ReplaceTextTool(config).execute(ToolCall("replace_text", {"path": "f.py", "search": "old", "replacement": "new"})))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(target.read_bytes(), b"keep\n" * 500 + b"new\n")
+
+    def test_no_limit_by_default_or_with_none(self) -> None:
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp, "f.py")
+            for config in (FileSystemToolConfig(root=tmp, allow_write=True), FileSystemToolConfig(root=tmp, allow_write=True, max_overwrite_lines=None)):
+                with self.subTest(max_overwrite_lines=config.max_overwrite_lines):
+                    self.assertIsNone(config.max_overwrite_lines)
+                    target.write_bytes(b"line\n" * 5_000)
+                    result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.py", "content": "new\n"})))
+                    self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                    self.assertEqual(target.read_text(encoding="utf-8"), "new\n")
+
+    def test_line_count_handles_no_trailing_newline_crlf_and_invalid_utf8(self) -> None:
+        cases = {
+            "no trailing newline": (b"a\nb\nc", 3),
+            "crlf": (b"a\r\nb\r\nc\r\n", 3),
+            "invalid utf-8": (b"\xff\xfe\n\x80abc\n\xc3\n", 3),
+        }
+        for label, (data, lines) in cases.items():
+            with self.subTest(label), TemporaryDirectory() as tmp:
+                target = Path(tmp, "f.py")
+                target.write_bytes(data)
+                refused = self._write(tmp, lines - 1)
+                self.assertEqual(refused.status, ToolStatus.ERROR)
+                self.assertIn(f"{lines} lines", refused.output)
+                self.assertEqual(target.read_bytes(), data)
+                self.assertEqual(self._write(tmp, lines).status, ToolStatus.SUCCESS)
+
+    def test_invalid_limits_raise_configuration_error_naming_the_field(self) -> None:
+        with TemporaryDirectory() as tmp:
+            for bad in (0, -1, True, 2.5, "300"):
+                with self.subTest(bad=bad), self.assertRaises(ConfigurationError) as caught:
+                    FileSystemToolConfig(root=tmp, max_overwrite_lines=bad)
+                self.assertIn("max_overwrite_lines", str(caught.exception))
+
+    def test_spec_mentions_the_limit_only_when_one_is_set(self) -> None:
+        with TemporaryDirectory() as tmp:
+            plain = WriteTextTool(FileSystemToolConfig(root=tmp)).spec().description
+            limited = WriteTextTool(FileSystemToolConfig(root=tmp, max_overwrite_lines=1500)).spec().description
+            self.assertEqual(plain, "Write text content to a file at the given path inside the configured root.")
+            self.assertTrue(limited.startswith(plain))
+            self.assertIn("1,500 lines", limited)
+            self.assertIn("replace_text", limited)
+            self.assertNotIn("replace_text", plain)
 
 
 class FileSystemToolImportTests(unittest.TestCase):

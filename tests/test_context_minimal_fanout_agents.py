@@ -12,12 +12,16 @@ TESTS: python -m pytest tests/test_context_minimal_fanout_agents.py
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
+from vidbyte.agents import BaseAgent
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.paradigms import AgentRoleSettings, ContextMinimalFanoutParadigm, ContextMinimalFanoutSettings
 from vidbyte.paradigms.context_minimal_fanout.types import ContextFile, EnvironmentContext, PromptSplitPlan, SplitPrompt
 from vidbyte.tools.builtins.output_schema import OutputSchemaBuilder
+from vidbyte.tools.security import PermissionDecision, PermissionPolicy
+from vidbyte.tools.types import ToolCall, ToolPermission
 
 
 class _Resp:
@@ -71,6 +75,35 @@ class ContextMinimalFanoutAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(runner.prompts), 1)
         self.assertIn("Add a feature.", runner.prompts[0])
         self.assertIn("repo uses pytest", environment.to_prompt_block())
+
+
+class ImplementationWritePermissionTests(unittest.TestCase):
+    """implementation_include_write=True must let implementation agents run the patch tool they are given."""
+
+    def _implementer(self, **overrides: object) -> BaseAgent:
+        paradigm = ContextMinimalFanoutParadigm(replace(_settings(), include_minimal_toolset=True, **overrides))
+        return paradigm._build_implementation_agent(SplitPrompt(id="p1", title="Part one", prompt="Do part one."), paradigm.settings)
+
+    def _patch_decision(self, agent: BaseAgent) -> PermissionDecision:
+        spec = next(spec for spec in agent.tools.specs() if spec.name == "patch_file")
+        return agent.permission_policy.check(spec, ToolCall(tool_name="patch_file"))
+
+    def test_default_settings_allow_the_patch_tool(self) -> None:
+        agent = self._implementer()
+        self.assertEqual(self._patch_decision(agent), PermissionDecision.ALLOW)
+        self.assertNotIn(ToolPermission.EXECUTE, agent.permission_policy.allowed)
+
+    def test_caller_supplied_permission_policy_is_kept(self) -> None:
+        policy = PermissionPolicy()
+        role = replace(_settings().implementation, agent_options={"permission_policy": policy})
+        agent = self._implementer(implementation=role)
+        self.assertIs(agent.permission_policy, policy)
+        self.assertEqual(self._patch_decision(agent), PermissionDecision.DENY)
+
+    def test_write_disabled_adds_no_write_grant(self) -> None:
+        agent = self._implementer(implementation_include_write=False)
+        self.assertNotIn("patch_file", [spec.name for spec in agent.tools.specs()])
+        self.assertNotIn(ToolPermission.WRITE, agent.permission_policy.allowed)
 
 
 class SnapshotNullTextTests(unittest.TestCase):
