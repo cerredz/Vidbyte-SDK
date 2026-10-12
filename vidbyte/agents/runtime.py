@@ -1274,6 +1274,9 @@ class AgentRuntime:
             succeeded = result.status.value == "success"
             if not succeeded:
                 error_type = str(dict(result.metadata).get("error_type") or dict(result.metadata).get("error") or "ToolExecutionError")
+                # @intent count-returned-tool-timeouts
+                # A tool that returns a timeout error (bash at its limit) counts as timed out, the same as a raised one.
+                timed_out = dict(result.metadata).get("error") == "timeout"
             self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})

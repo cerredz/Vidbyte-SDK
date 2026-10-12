@@ -929,6 +929,16 @@ class SlowTool(BaseTool):
         return ToolResult.success("slow_tool", "should not reach here")
 
 
+class ReturnedTimeoutTool(BaseTool):
+    """Tool that returns a timeout error instead of raising, the way BashTool reports a command stopped at its limit."""
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="returned_timeout", description="Returns a timeout error.")
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult.error("returned_timeout", "command timed out", metadata={"error": "timeout"})
+
+
 class RetryOnceMiddleware(AgentMiddleware):
     """Retry the first model error after a fixed backoff, then let later errors propagate."""
 
@@ -1028,6 +1038,31 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
         timed_out_calls = [call for call in tool_calls if call.timed_out]
         self.assertEqual(len(timed_out_calls), 1)
         self.assertEqual(timed_out_calls[0].tool_name, "slow_tool")
+
+    async def test_returned_tool_timeout_is_recorded_with_timed_out_true(self) -> None:
+        """A tool that returns metadata error=timeout counts as timed out, like one stopped by ToolSettings."""
+        runner = FakeRunner(
+            [
+                _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "returned_timeout", "arguments": "{}", "call_id": "call_1"}]}),
+                _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+            ]
+        )
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([ReturnedTimeoutTool()]), permission_policy=PermissionPolicy())
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        record = next(call for call in runtime.speed_tracker.tool_calls if call.tool_name == "returned_timeout")
+        self.assertTrue(record.timed_out)
+        self.assertEqual(record.error_type, "timeout")
+        rollup = runtime.speed_tracker.rollup()
+        self.assertEqual(rollup.tool_call_stats.timed_out_count, 1)
+        tool_stats = next(stats for stats in rollup.tool_stats if stats.tool_name == "returned_timeout")
+        self.assertEqual(tool_stats.timed_out_count, 1)
 
     async def test_settings_denials_are_recorded_like_a_middleware_denial(self) -> None:
         """A ToolSettings or allowed_tools refusal reaches speed stats as one failed call, exactly like a middleware denial."""
