@@ -190,4 +190,4 @@ The r6 fixes were applied to a throwaway copy of the tree in the scratchpad. Tha
 
 ### Spec items found (none blocking)
 - **R-1, R-3, and R-12 have no AC row.** Their proof is INV-4/EC-41, NFR-2/EC-47/INV-19, and EC-48, so no Proof cell names them. AC-3's surface list does not include logs.
-- **AC-20 needs a parameterized fixture for its new destination case.** Its "a caller-written connector whose `destination` is the `str` `"pagerduty"`" case needs `ScriptedConnector("pagerduty")`.
+- **AC-20's `"pagerduty"` case cannot use a built-in connector.** Every built-in connector has an enum `destination`, so the case uses the pack's caller-written `ScriptedConnector("pagerduty")`. This is not a spec defect.
