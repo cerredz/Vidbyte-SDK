@@ -305,6 +305,24 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(responses[1]["error"]["code"], JSONRPC_PARSE_ERROR)
         self.assertEqual(responses[2]["result"], {})
 
+    async def test_run_answers_too_deeply_nested_line_with_parse_error_and_keeps_serving(self) -> None:
+        depth = 100_000
+        nested = b"[" * depth + b"]" * depth
+        lines = [
+            b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n',
+            b'{"jsonrpc":"2.0","id":2,"method":"ping","params":{"x":' + nested + b"}}\n",
+            b'{"jsonrpc":"2.0","id":3,"method":"ping"}\n',
+        ]
+        stdin = io.BytesIO(b"".join(lines))
+        stdout = io.BytesIO()
+        fake_sys = SimpleNamespace(platform="win32", stdin=SimpleNamespace(buffer=stdin), stdout=SimpleNamespace(buffer=stdout))
+        with mock.patch.object(server_core, "sys", fake_sys):
+            await McpStudioServer().run()
+        responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
+        self.assertEqual([response["id"] for response in responses], [1, None, 3])
+        self.assertEqual(responses[1]["error"]["code"], JSONRPC_PARSE_ERROR)
+        self.assertEqual(responses[2]["result"], {})
+
     async def test_ping_returns_empty_result(self) -> None:
         response = await self._dispatch(McpStudioServer(), "ping", request_id=9)
         self.assertEqual(response, {"jsonrpc": "2.0", "id": 9, "result": {}})
