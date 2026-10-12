@@ -1,15 +1,15 @@
 ---
 spec: agent-output-connectors
 title: Agent output connectors
-status: verified         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open          # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-output-connectors
 branch: feat/agent-output-connectors
 base_commit: db3988ffdb4d580021ec4dae995281135f8f0a0f
 created: 2026-10-11
-updated: 2026-10-11
-pr: https://github.com/cerredz/Vidbyte-SDK/pull/882  # filled at S3 (draft) and finalized at S6
+updated: 2026-10-12
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/882
 ---
 
 # Spec: Agent output connectors
@@ -1392,6 +1392,7 @@ New-file count: rows 1–23, which is 23 files (21 `.py` and 2 READMEs). That ma
 | r5 | 2026-10-11 | S3 blocker (orchestrator decision) | S3-1: reversed R-13 because lint rule S008 leaves `_generate_reply` no headroom. Delivery is in a private `BaseAgent._deliver_outputs`, called under `if self.outputs:`, and the existing last-trace lines move into `_record_last_trace`. The base.py budget is now 35 added lines, and the measured counts are 10 / 9 / 50. S3-2: the lint-forced renames `*_MENTION_TOKEN` → `*_MENTION_PREFIX` and the new `OUTPUT_ERROR_TOKEN_MAX_CHARS`. No public name, feature, or control changed; status stays `tests-written`. |
 | r5 | 2026-10-11 | S3 implement | All 36 §12.3 rows built as specified (row 27 in the r5 shape: `_generate_reply` measures 10 / 9 / 50, S008 stays at 19); 313/313 feature tests, `python lint/run.py`, `python scripts/run_ci.py`, and the §11 Semgrep scan pass; draft PR #882. |
 | r6 | 2026-10-11 | S4 verified review (orchestrator-directed alignment) | Aligned with review.md before repair. R-1: httpx log guard (a `ContextVar` flag plus a filter on the `httpx` logger in `delivery.py`; INV-4, EC-41, T-1, row 7). R-2: a non-enum `destination` is rejected at construction, and a non-receipt `send` result is FAILED `unexpected:ConfigurationError` (INV-21, AC-11 (f), AC-20, EC-14, EC-16, row 22). R-3: SMTP runs on a dedicated `ThreadPoolExecutor` through `run_in_executor` (INV-19, FR-17, NFR-1, NFR-2, §5, §8.2, §8.5, rows 7 and 13, §12.4, §13, EC-47). R-4: `OUTPUT_EMAIL_ADDRESS_PATTERN` and `OUTPUT_HTTPS_PREFIX`. R-5: INV-2. R-9: `JIRA_ISSUE_PATH`, `JIRA_BROWSE_PATH`. R-11: resend caution (§9.2, AC-24, EC-42). R-12: EC-48. R-13: Q-11 and EC-49, not built. R-15: `https_url` maps `ValueError` (INV-21, AC-20, EC-13, row 5). R-6, R-7, R-8, R-10, and R-14 need no spec change. No test, Proof cell, or code changed; status stays `reviewed`. |
+| r6 | 2026-10-12 | S6 PR | Finalized for review. The PR body (`pr-body.md`) is written from the code; §5 still matches the code, so it is unchanged. Status set to `pr-open`. |
 
 **Implementation deviations** (S3; none changes the public API or a tested behavior):
 
