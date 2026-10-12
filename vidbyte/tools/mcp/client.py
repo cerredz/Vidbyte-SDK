@@ -20,6 +20,10 @@ from vidbyte.tools.mcp.types import McpToolDefinition
 from vidbyte.tools.mcp.transport import McpTransport
 from vidbyte.tools.types import ToolResult
 
+# @intent mcp-tools-list-reads-every-page
+# Upper bound on tools/list pages read in one discovery, a guard against a server that never stops paging.
+_MAX_TOOLS_LIST_PAGES = 100
+
 
 class McpClient:
     """Minimal MCP client for tool discovery and calls."""
@@ -45,13 +49,25 @@ class McpClient:
         self.initialized = True
 
     async def list_tools(self) -> tuple[McpToolDefinition, ...]:
-        """Return remote tool definitions from tools/list."""
+        """Return remote tool definitions from every tools/list page."""
         await self.initialize()
-        result = await self.transport.request("tools/list")
-        raw_tools = result.get("tools", ())
+        raw_tools: list[Any] = []
+        seen_cursors: list[str] = []
+        # @intent mcp-tools-list-reads-every-page
+        # A paginating server sends later tools only for its nextCursor, so follow it page by page; the first
+        # request carries no params, and a repeated cursor or the page cap stops a server that never stops paging.
+        while len(seen_cursors) < _MAX_TOOLS_LIST_PAGES:
+            params = {"cursor": seen_cursors[-1]} if seen_cursors else None
+            result = await self.transport.request("tools/list", params)
+            if not isinstance(result.get("tools"), list):
+                break
+            raw_tools.extend(result["tools"])
+            cursor = result.get("nextCursor")
+            if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+                break
+            seen_cursors.append(cursor)
+        # Turn each well-formed remote entry into a tool definition and drop nameless ones.
         tools: list[McpToolDefinition] = []
-        if not isinstance(raw_tools, list):
-            return ()
         for item in raw_tools:
             if not isinstance(item, Mapping):
                 continue

@@ -9,7 +9,7 @@ Purpose:
 Architecture:
     - Local Python child scripts over stdio act as deterministic MCP peers.
     - IsolatedAsyncioTestCase scenarios cover concurrent, hang, crash, malformed,
-      notification, env, and close paths.
+      notification, oversized-line, env, and close paths.
 Relations:
     - vidbyte/tools/mcp/transport.py
     - docs/design/harden-mcp-stdio-transport.md
@@ -381,6 +381,32 @@ class McpStdioTransportHardeningTests(unittest.IsolatedAsyncioTestCase):
                 await hanging
             result = await transport.request("second")
             self.assertTrue(result["ok"])
+        finally:
+            await transport.close()
+
+    async def test_response_line_over_64_kib_is_delivered_and_transport_stays_open(self) -> None:
+        """A multi-megabyte response line (base64 image data) neither fails nor closes the transport."""
+        command = _python_child(
+            """
+            import json, sys
+            for line in sys.stdin:
+                msg = json.loads(line)
+                data = "A" * (2 * 1024 * 1024) if msg["method"] == "big" else ""
+                sys.stdout.write(json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": {"method": msg["method"], "data": data},
+                }) + "\\n")
+                sys.stdout.flush()
+            """
+        )
+        transport = McpStdioTransport(command, request_timeout=10.0)
+        try:
+            big = await transport.request("big")
+            self.assertEqual(len(big["data"]), 2 * 1024 * 1024)
+            after = await transport.request("after")
+            self.assertEqual(after["method"], "after")
+            self.assertFalse(transport.closed)
         finally:
             await transport.close()
 

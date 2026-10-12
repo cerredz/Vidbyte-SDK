@@ -6,6 +6,7 @@ Purpose:
     Verifies dynamic remote schema conversion and native ToolResult normalization.
 Architecture:
     - FakeTransport: Deterministic MCP transport.
+    - PagedFakeTransport / McpClientPaginationTests: tools/list follows nextCursor across pages.
     - McpBridgeTests: Discovery, registration, execution, and permission tests.
     - McpBridgeSchemaTests: Remote input schemas reach provider tool declarations intact.
 Relations:
@@ -60,6 +61,56 @@ class FakeTransport:
             args = dict((params or {}).get("arguments", {}))
             return {"content": [{"type": "text", "text": args.get("text", "")}]}
         raise AssertionError(method)
+
+
+class PagedFakeTransport(FakeTransport):
+    """Fake transport whose tools/list follows a cursor map; other methods fall back to FakeTransport."""
+
+    def __init__(self, pages: Mapping[str | None, Mapping[str, Any]]) -> None:
+        """Store one tools/list page per cursor (None is the first page)."""
+        super().__init__()
+        self.pages = pages
+        self.list_params: list[Mapping[str, Any] | None] = []
+
+    async def request(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]:
+        """Serve the page for the requested cursor."""
+        if method != "tools/list":
+            return await super().request(method, params)
+        self.methods.append(method)
+        self.list_params.append(params)
+        return self.pages[(params or {}).get("cursor")]
+
+
+class McpClientPaginationTests(unittest.IsolatedAsyncioTestCase):
+    """tools/list discovery reads every page a paginating server offers."""
+
+    async def test_list_tools_follows_next_cursor_across_pages(self) -> None:
+        transport = PagedFakeTransport(
+            {
+                None: {"tools": [{"name": "echo"}], "nextCursor": "p2"},
+                "p2": {"tools": [{"name": "image"}], "nextCursor": "p3"},
+                "p3": {"tools": [{"name": "ping"}]},
+            }
+        )
+        tools = await McpClient(transport).list_tools()
+        self.assertEqual([tool.name for tool in tools], ["echo", "image", "ping"])
+        # The first request is unchanged (no params); later ones carry the server's cursor.
+        self.assertEqual(transport.list_params, [None, {"cursor": "p2"}, {"cursor": "p3"}])
+
+    async def test_list_tools_stops_on_a_repeated_cursor(self) -> None:
+        transport = PagedFakeTransport(
+            {
+                None: {"tools": [{"name": "echo"}], "nextCursor": "loop"},
+                "loop": {"tools": [{"name": "ping"}], "nextCursor": "loop"},
+            }
+        )
+        tools = await McpClient(transport).list_tools()
+        self.assertEqual([tool.name for tool in tools], ["echo", "ping"])
+        self.assertEqual(len(transport.list_params), 2)
 
 
 class McpBridgeTests(unittest.IsolatedAsyncioTestCase):

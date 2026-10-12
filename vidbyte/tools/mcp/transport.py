@@ -61,6 +61,10 @@ _WINDOWS_ENV_KEYS: tuple[str, ...] = (
 )
 
 _DEFAULT_STDERR_MAX_BYTES = 64 * 1024
+# @intent mcp-stdio-reads-large-lines
+# One JSON-RPC response is one stdout line, and image/audio results carry base64 payloads that can run to
+# megabytes, so asyncio's 64 KiB default line limit would kill the reader; allow lines up to 64 MiB.
+_STDOUT_LINE_LIMIT_BYTES = 64 * 1024 * 1024
 _DEFAULT_REQUEST_TIMEOUT = 30.0
 _DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 
@@ -194,6 +198,9 @@ class McpStdioTransport:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=child_env,
+                # @intent mcp-stdio-reads-large-lines
+                # Raise the stdout line limit so one large result does not close the transport for good.
+                limit=_STDOUT_LINE_LIMIT_BYTES,
             )
             self._stdout_task = asyncio.create_task(
                 self._stdout_reader(),
