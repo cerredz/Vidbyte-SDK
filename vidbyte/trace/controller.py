@@ -127,7 +127,9 @@ class TraceController(TracerBase):
             component = "sessions"
         elif name.startswith("agent."):
             component = "agents"
-            detail = TraceDetail.STANDARD if name == "agent.stop" else TraceDetail.MINIMAL
+            # @intent minimal-profile-keeps-only-agent-run
+            # Only agent.run is a core minimal span; agent.stop, agent.fallback, and any other agent.* span are standard detail.
+            detail = TraceDetail.MINIMAL if name == "agent.run" else TraceDetail.STANDARD
         policy = ParentPolicy.ROOT if root else ParentPolicy.CURRENT
         return SpanSpec(name=name, kind=kind, component=component, detail=detail, parent_policy=policy, attributes=dict(attributes))
 
