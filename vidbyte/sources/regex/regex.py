@@ -47,8 +47,11 @@ class DocumentRegex:
 class LlmsTxtRegex:
     """Regex helpers for the llms.txt grammar."""
 
+    # @intent llms-txt-url-keeps-balanced-parens
+    # CommonMark link destinations may contain a balanced pair of parentheses (e.g. Microsoft Learn "(v=vs.85)"
+    # and Wikipedia "_(computing)" URLs), so the url must not stop at the first ')'.
     LINK_BULLET: ClassVar[re.Pattern[str]] = re.compile(
-        r"^\s*-\s*\[(?P<text>[^\]]+)\]\((?P<url>[^)]*)\)\s*(?:[:\-\u2013\u2014]\s*(?P<note>.*))?$"
+        r"^\s*-\s*\[(?P<text>[^\]]+)\]\((?P<url>(?:[^()]|\([^()]*\))*)\)\s*(?:[:\-\u2013\u2014]\s*(?P<note>.*))?$"
     )
     LINK_BULLET_PREFIX: ClassVar[re.Pattern[str]] = re.compile(r"^\s*-\s*\[")
 
