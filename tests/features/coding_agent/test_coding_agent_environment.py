@@ -388,8 +388,9 @@ def test_installed_dependency_folders_are_listed(tmp_path, no_bash, monkeypatch)
         ({"repo/.git": "gitdir: \0broken\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
         ({"repo/.git/HEAD": "\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
         ({"repo/.git/HEAD": "ref: refs/heads/\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
+        ({"repo/.git/HEAD": "ref: refs/heads/.invalid\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
     ],
-    ids=["branch-from-a-subfolder", "worktree-gitdir-file", "detached", "broken-gitdir", "empty-head", "empty-branch-name"],
+    ids=["branch-from-a-subfolder", "worktree-gitdir-file", "detached", "broken-gitdir", "empty-head", "empty-branch-name", "reftable-placeholder"],
 )
 def test_git_head_is_read_from_git_files(tmp_path, no_bash, monkeypatch, layout, state, ref, line) -> None:
     # Hidden assumption: the root may be a subfolder, a worktree whose .git is a file, a detached checkout, or a broken .git that must not raise.
