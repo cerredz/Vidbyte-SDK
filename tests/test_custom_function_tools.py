@@ -145,6 +145,30 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("value", result.output)
         self.assertEqual(calls, [])
 
+    async def test_null_for_defaulted_argument_uses_the_default(self) -> None:
+        # @intent null-optional-arg-means-default
+        @tool
+        def search(
+            query: str,
+            limit: int = 5,
+            lang: Annotated[str, Field(min_length=2)] = "en",
+            page: int | None = 3,
+        ) -> str:
+            return f"{query}:{limit}:{lang}:{page}"
+
+        call = ToolCall("search", {"query": "x", "limit": None, "lang": None, "page": None})
+        result = await search.execute(call)
+
+        # A null for a defaulted parameter that rejects None means "leave it out"; one that accepts None keeps None.
+        self.assertIsNone(search.validate_call(call))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.output, "x:5:en:None")
+
+        # A required parameter still rejects null.
+        missing = ToolCall("search", {"query": None})
+        self.assertIn("query", search.validate_call(missing) or "")
+        self.assertEqual((await search.execute(missing)).status, ToolStatus.ERROR)
+
     def test_bad_varargs_signature_is_rejected(self) -> None:
         with self.assertRaises(TypeError):
 
