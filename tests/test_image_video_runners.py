@@ -53,6 +53,23 @@ class ImageVideoRunnerTests(unittest.TestCase):
         self.assertEqual(response.images[0].b64_json, "abc")
         self.assertEqual(transport.requests[0]["url"], "https://api.x.ai/v1/images/generations")
 
+    def test_xai_image_runner_sends_image_count(self) -> None:
+        transport = FakeTransport([{"data": [{"b64_json": "a"}, {"b64_json": "b"}, {"b64_json": "c"}]}, {"data": [{"b64_json": "a"}]}])
+        counted = ImageModelRunner(
+            ImageModelConfig(provider=ModelProvider.XAI, model="grok-image-test", api_key="key", n=3),
+            transport=transport,
+        )
+        default = ImageModelRunner(
+            ImageModelConfig(provider=ModelProvider.XAI, model="grok-image-test", api_key="key"),
+            transport=transport,
+        )
+
+        counted.run("draw")
+        default.run("draw")
+
+        self.assertEqual(transport.requests[0]["json_body"]["n"], 3)
+        self.assertNotIn("n", transport.requests[1]["json_body"])
+
     def test_openai_video_runner_creates_and_checks_jobs(self) -> None:
         transport = FakeTransport(
             [
