@@ -344,3 +344,34 @@ Self-check (r4):
 - **Section headings** are unchanged.
 - **IDs:** no duplicates, no undefined references, and no gaps. The counts are unchanged from r3.
 - **Frontmatter:** `revision: 4`, `updated: 2026-10-11`, `status: approved`.
+
+## Revision r5 (S3 blocker, orchestrator decision)
+
+S3 stopped at §12.3 row 27 (`reports/S3-implementer.md`, "Blocker"). Lint rule S008 (Ruff C901 ≤ 10, PLR0912 ≤ 12, PLR0915 ≤ 50; ratcheted at 19) leaves `BaseAgent._generate_reply` no headroom: the base commit is already at complexity 10 and 50 statements. The inline block from R-13 pushes it to 12 and 57.
+
+The orchestrator decided to reverse R-13. r5 applies that decision and the lint-forced renames. Status stays `tests-written`. Nothing under `tests/` or `vidbyte/`, nothing in `test-plan.md`, and nothing in the §6.2 Proof column changed. I diffed the Proof column to confirm.
+
+Changes:
+- **S3-1, the reversal of R-13.** Delivery moves into a private `BaseAgent._deliver_outputs(reply, metadata)`, which holds the `try` / `except BaseException` block.
+  - The block clears the claimed queue, notifies the session, and re-raises.
+  - The three existing last-trace lines move, with unchanged behavior, into `_record_last_trace(metadata)`.
+  - These edits are in §2, §5, INV-7 (only the location of the block), AC-23's Then cell, D-3, D-4, §8.5, §11 (S008 19 added to the baselines), W-9, row 27, and §12.4. §12.4 also gets a new S008 line.
+  - The base.py budget goes from 25 to 35 added lines (row 27, NFR-3, NG-11, and §11 conflict 1). It now counts the moved trace lines.
+  - The R-13 row in §16 is marked "reversed in r5 (S3-1)". A new S3-1 row records the evidence.
+- **Placement of the guard (my call, measured).** `_generate_reply` keeps `if self.outputs:` before `await self._deliver_outputs(...)`. Without it, `_generate_reply` would add an await for agents without outputs, and INV-22 says it "adds no await" and must hold as written.
+  - I measured with Ruff on a copy of base.py in the scratchpad; the repo was not touched.
+  - Guarded: complexity 10, branches 9, statements 50. These equal the base commit, so there is no S008 finding at the real limits.
+  - Unguarded call: 9 / 8 / 49. That matches the orchestrator's measurement, but it breaks INV-22's wording.
+- **S3-2, lint-forced renames.**
+  - `GOOGLE_CHAT_MENTION_TOKEN` became `GOOGLE_CHAT_MENTION_PREFIX`, and `NOTION_MENTION_TOKEN` became `NOTION_MENTION_PREFIX`. They are renamed in row 2, the §9.2 helper lines, and A-6.
+  - `OUTPUT_ERROR_TOKEN_PATTERN` is now built from the new `OUTPUT_ERROR_TOKEN_MAX_CHARS = 64`, which row 2 names. The pattern's value is unchanged.
+  - Row 2 now cites S054 / S105.
+- **The other S3 deviations.**
+  - The canonical lowercase UUID from `identifier()`, the shaping fallback when the first line is blank, and the lowercase header-key check are all consistent with §8.5, INV-13, and §9.1, so I left them in S3's list.
+  - Deviation 2, typing `optional_callable`'s `value` as `Callable[...] | None`, differs from the §8.5 signature `value: object`. I report it as a CONFLICT for the orchestrator and did not edit it.
+
+Self-check (r5):
+- **Section headings** are unchanged.
+- **IDs:** no duplicates, no undefined references, and no gaps. The counts are unchanged from r4.
+- **Stale wording:** "inline" and `*_MENTION_TOKEN` now appear only in the §16 and §17 history and the r5 rename table.
+- **Frontmatter:** `revision: 5`, `updated: 2026-10-11`, `status: tests-written`.
