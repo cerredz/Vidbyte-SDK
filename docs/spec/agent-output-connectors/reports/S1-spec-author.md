@@ -308,3 +308,39 @@ All seven findings are **Accepted**. None is disputed, so no new open question r
 - **Budget:** §8.4 still equals §12.3 rows 1–23. There are 14 config keys; the deadline is an operational constant, not a user knob.
 - **Stale symbols:** `_deliver_outputs` and `JIRA_SITE_SUFFIX` appear only in §16.
 - **§14** now forbids building Q-8, Q-9, or Q-10.
+
+## Revision r4 (S2 test-author feedback)
+
+The coordinator asked me to align the spec with seven defects found by the S2 test author (`reports/S2-test-author.md`, "Spec defects found"; `test-plan.md`, "Notes for the implementer"). This is not a review round. I changed nothing under `tests/`, nothing in `test-plan.md`, and nothing in the §6.2 Proof column (checked by diffing that column before and after). No contract name, feature, field, or control changed, and `status: approved` stays.
+
+All seven defects are Accepted and logged in §16 as S2-1 to S2-7:
+
+- **S2-1:** AC-18 and INV-7 now say that the queued-prompt list the run claimed at its start is cleared (`base.py:392-395`, `792-795`), on every exception the inline block catches.
+- **S2-2:** AC-19 is now event-gated: concurrent sends, and receipts in configured order. The wall-clock bound is gone.
+- **S2-3:** §13 now explains where `follow_redirects`, the retry arguments, `idempotency_key`, and the size ceiling are applied. It also says AC-25 and EC-34 use `httpx.MockTransport` through `transport_module.httpx.AsyncClient`.
+- **S2-4:** AC-4's scripted model returns the same invalid answer on every call, because the runtime re-prompts.
+- **S2-5:** AC-12 uses a named agent (`AgentMetadata(name=...)`).
+- **S2-6:** AC-23 is split into (a) `session.run` and (b) a direct `agent.run` on a session-bound agent.
+- **S2-7:** row 22 drops the dedicated single-connector check, and AC-20 says that the not-iterable check covers it.
+
+I confirmed the eight structural items the test author asserts:
+
+| Item | What is asserted | Where it is stated |
+|---|---|---|
+| (a) | the missing-credential message | row 5 |
+| (b) | the failure summary message | row 22 |
+| (c) | the masked repr | §8.5 and row 5 |
+| (d) | `follow_redirects=False` and `max_response_bytes` | row 7 and §9.2 |
+| (e) | `import smtplib` as a module, and the SMTP client used as a context manager | row 7 already said `with`; I added the module import to row 7 |
+| (f) | the deadline read as a module global | added to row 22 |
+| (g) | Slack escapes after truncation; Jira paragraphs come from the non-blank lines of the truncated body | §9.2 |
+| (h) | layering | §12.2, NFR-7, and §12.4 now allow `vidbyte/agents/output/` to import its own modules, and the forbidden HTTP client list adds `aiohttp` |
+
+Items (a) to (d) and (g) were already stated where shown. Item (h) needed a wording fix. The old text said "`vidbyte.lib.*` and the standard library only", which would have forbidden `dispatcher.py` from importing `connector.py`. The design itself is unchanged.
+
+None of the eight items contradicts the spec, so there are no CONFLICT items.
+
+Self-check (r4):
+- **Section headings** are unchanged.
+- **IDs:** no duplicates, no undefined references, and no gaps. The counts are unchanged from r3.
+- **Frontmatter:** `revision: 4`, `updated: 2026-10-11`, `status: approved`.
