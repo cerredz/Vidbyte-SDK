@@ -184,12 +184,15 @@ class BaseAgentRuntimeLoopState:
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None, agent_catalog: Callable[[], Tools] | None = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
         self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
+        # Reads the owning agent's live catalog, so a tool it adds mid-run (attach_mcp_server) joins this run.
+        self._agent_catalog = agent_catalog
+        self._agent_catalog_seen = tools
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id
@@ -683,10 +686,12 @@ class AgentRuntime:
                 return await self._finish_result(result, state)
             catalog = self.tools
             await self._after_tool_iteration(state, messages)
+            # Bring in tools the agent added to or removed from its own catalog during this iteration.
+            self._adopt_agent_catalog()
             if self.tools is not catalog:
                 # @intent a-replaced-catalog-reaches-the-next-model-call
-                # Schemas are resolved once per run, so a hook that replaced the catalog (JevRuntime adding launch_swarm)
-                # needs them resolved again; an untouched catalog keeps the schemas already resolved.
+                # Schemas are resolved once per run, so a hook that replaced the catalog (JevRuntime adding launch_swarm,
+                # or the agent attaching an MCP server) needs them resolved again; an untouched catalog keeps them.
                 tool_schemas = self._resolve_tool_schemas(state.provider)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
@@ -907,6 +912,18 @@ class AgentRuntime:
         # @intent iterations-can-be-observed-mid-run
         # A decision made while the agent works (JevRuntime's compute checkpoint) needs the live loop state after each
         # iteration's tool calls, and must run only once the middleware has let the loop continue, so it is called last.
+
+    def _adopt_agent_catalog(self) -> None:
+        """Apply the agent's own catalog changes since the last look to this run's catalog."""
+        # @intent a-tool-the-agent-adds-mid-run-reaches-the-next-iteration
+        # attach_mcp_server promises its tools from the next iteration, so the run applies the agent's adds and removals as
+        # a difference, keeping its own additions (isDone, Jev's tools) and any tool selection, and never replacing a name it has.
+        current = self._agent_catalog() if self._agent_catalog is not None else self._agent_catalog_seen
+        if current is self._agent_catalog_seen:
+            return
+        previous, self._agent_catalog_seen = self._agent_catalog_seen, current
+        catalog = self.tools.without(tool for tool in previous if tool not in current)
+        self.tools = catalog.extend(tool for tool in current if tool not in previous and tool.name not in catalog)
 
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
