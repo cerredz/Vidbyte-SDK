@@ -32,7 +32,7 @@ from vidbyte.middleware.builtins import (
 )
 from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
 from vidbyte.middleware.builtins.token_budget import TOKEN_BUDGET_FINAL_RESPONSE_NOTICE
-from vidbyte.tools import Tools, tool
+from vidbyte.tools import BaseTool, ToolPermission, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -963,6 +963,58 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
         await runtime.arun("task", handle=handle, context=context)
         self.assertIn("tool output truncated by ToolSettings", runner.seen_tool_output)
         self.assertIn(REPEATED_OUTPUT_LOOP_NOTICE, runner.seen_tool_output)
+
+
+    async def test_hidden_tool_retries_count_as_one_output(self) -> None:
+        # @intent hidden-retries-count-once
+        # [Hidden Failure] One model call retried silently is one output, in either middleware order; three model calls still abort.
+        async def run(lookups: int, loop_first: bool) -> tuple[str, int]:
+            failing = _UpstreamErrorLookup()
+            loop = LoopDetectionMiddleware(hard_max_repeated_outputs=3)
+            retry = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_retries_per_tool_call=2, retry_backoff_base_seconds=0))
+            runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([failing]), permission_policy=PermissionPolicy(), middleware=(loop, retry) if loop_first else (retry, loop))
+            context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+            handle = RunnerHandle(runner=_ScriptedLookupRunner(lookups), provider="openai", invoke=_invoke_scripted_lookup, extract_text=lambda response: response.text, extract_metadata=lambda response: {"raw": response.raw})
+            result = await runtime.arun("task", handle=handle, context=context)
+            return result.metadata["stop_reason"], failing.executions
+
+        for loop_first in (True, False):
+            with self.subTest(loop_first=loop_first):
+                self.assertEqual(await run(1, loop_first), ("final_response", 3))
+                stop_reason, _ = await run(3, loop_first)
+                self.assertEqual(stop_reason, "middleware_abort")
+
+
+class _UpstreamErrorLookup(BaseTool):
+    """Read-only lookup that always fails with a retryable upstream error."""
+
+    def __init__(self) -> None:
+        self.executions = 0
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="lookup", description="Lookup a value.", permission=ToolPermission.READ)
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.executions += 1
+        return ToolResult.error("lookup", "upstream unavailable", metadata={"error": "upstream_error"})
+
+
+class _ScriptedLookupRunner:
+    """Fake model that makes `lookups` separate lookup calls, one per turn, then answers."""
+
+    def __init__(self, lookups: int) -> None:
+        self.lookups = lookups
+        self.turns = 0
+
+
+async def _invoke_scripted_lookup(runner: _ScriptedLookupRunner, prompt: str, **kwargs: object) -> SimpleNamespace:
+    # Each lookup turn carries its own call_id, as a real provider's separate tool calls would.
+    del prompt, kwargs
+    runner.turns += 1
+    if runner.turns > runner.lookups:
+        return SimpleNamespace(text="Done.", raw={})
+    call = {"type": "function_call", "name": "lookup", "arguments": "{}", "call_id": f"fc_{runner.turns}"}
+    return SimpleNamespace(text="", raw={"output": [call]})
 
 
 class _RepeatingLookupRunner:
