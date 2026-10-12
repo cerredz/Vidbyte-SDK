@@ -1,12 +1,12 @@
 """FILE: tests/features/jev_skills_preload/test_skill_sources_security.py
 
-PURPOSE: Pin the secret and side-effect rules of skill sources: tokens and keys never appear in a repr, result, response, request URL, or log and travel only in their own host's header; a Vidbyte key, padded or not, from an entry or an environment fallback, is never sent; redirects are never followed; and loading never starts a process, opens a socket outside the transport, fetches what a skill mentions, or writes to disk.
-ROLE IN CODEBASE: Covers spec AC-11, AC-12, AC-13, AC-22, INV-12 to INV-15, INV-18, NFR-5, D-10, D-30, T-1 to T-3 and EC-71, EC-77, EC-89, EC-91 for vidbyte/lib/dataclasses/skills.py, vidbyte/agents/skills/ (github, vendor, fetch, loader), and the JevAgent response.
-ARCHITECTURE NOTE: Secrets are distinctive fake strings so any echo is easy to find; the non-vacuity checks prove each one was really used where it belongs, so its absence elsewhere is meaningful. Process and socket entry points are replaced with recorders that also refuse, following tests/features/coding_agent/test_coding_agent_web_fetch.py.
-FUNCTION INVENTORY: test_secrets_never_leave_their_own_request_header; test_vidbyte_key_never_reaches_github; test_vidbyte_key_never_reaches_a_vendor; test_redirect_is_never_followed; test_loading_runs_no_process_and_fetches_nothing_a_skill_mentions; test_archive_member_paths_never_write_to_disk; test_settings_repr_hides_secrets_before_any_run.
+PURPOSE: Pin the secret and side-effect rules of skill sources: tokens and keys never appear in a repr, result, response, request URL, or log and travel only in their own host's header; a Vidbyte key, padded or not, from an entry or an environment fallback, is never sent; a token or key an HTTP header cannot carry is auth_failed before any request and never echoed; redirects are never followed; and loading never starts a process, opens a socket outside the transport, fetches what a skill mentions, or writes to disk.
+ROLE IN CODEBASE: Covers spec AC-11, AC-12, AC-13, AC-22, INV-9, INV-12 to INV-15, INV-18, NFR-5, D-10, D-30, T-1 to T-3 and EC-71, EC-77, EC-89, EC-91, EC-118, EC-119 for vidbyte/lib/dataclasses/skills.py, vidbyte/agents/skills/ (github, vendor, fetch, loader), and the JevAgent response.
+ARCHITECTURE NOTE: Secrets are distinctive fake strings so any echo is easy to find; the non-vacuity checks prove each one was really used where it belongs, so its absence elsewhere is meaningful. Process and socket entry points are replaced with recorders that also refuse, following tests/features/coding_agent/test_coding_agent_web_fetch.py. One test restores the real HttpTransport._send_once and replaces httpx.AsyncClient.send instead, because httpx encodes header values in build_request, which the conftest fake skips.
+FUNCTION INVENTORY: test_secrets_never_leave_their_own_request_header; test_vidbyte_key_never_reaches_github; test_vidbyte_key_never_reaches_a_vendor; test_credential_a_header_cannot_carry_is_auth_failed_before_any_request; test_credential_a_header_can_carry_is_still_sent; test_unencodable_credential_is_auth_failed_through_real_header_encoding; test_redirect_is_never_followed; test_loading_runs_no_process_and_fetches_nothing_a_skill_mentions; test_archive_member_paths_never_write_to_disk; test_settings_repr_hides_secrets_before_any_run.
 COMMON MODIFICATION PATTERNS: A new credentialed source adds its secret to the AC-11 table and its prefix cases to the Vidbyte-key tables.
 WHAT NOT TO DO IN THIS FILE: 1. Do not use a real key or token; the vb_live_ values are fakes (C020 does not scan tests). 2. Do not loosen the "zero requests" checks to "no successful request".
-KNOWN EDGE CASES: A padded " vb_live_..." value must be stripped before the prefix check (R-18). httpx keeps x-api-key across origins on a redirect, which is why a vendor 3xx is a failure and not a hop.
+KNOWN EDGE CASES: A padded " vb_live_..." value must be stripped before the prefix check (R-18). httpx keeps x-api-key across origins on a redirect, which is why a vendor 3xx is a failure and not a hop. The header-safe rule is "after stripping, isascii() and isprintable()": an internal space and a tilde pass; a tab, a newline, DEL, and any non-ASCII character fail. Which detail wins when a value also has the Vidbyte prefix is deliberately not pinned (EC-118).
 RELATED DOCS: docs/spec/jev-skill-sources/spec.md (sections 6.1 secrets, 9.2 failure mapping, 10)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/jev_skills_preload/test_skill_sources_security.py
 """
@@ -24,11 +24,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from vidbyte import JevAgentSettings, JevAlignmentSettings
 from vidbyte.lib.dataclasses.skills import SkillDocument
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.http.transport import HttpTransport
 
 FEATURE_MISSING: ImportError | None = None
 try:
@@ -58,6 +60,24 @@ OPENAI_ENV_KEY = "sk-proj-SECRET-openai-env-fake"
 SECRETS = (GITHUB_ENTRY_TOKEN, GITHUB_ENV_TOKEN, ANTHROPIC_KEY, OPENAI_ENV_KEY)
 VIDBYTE_KEY = "vb_live_FAKE0000000000000000000000000000"
 
+# The real single-attempt send, taken at import, before the conftest's autouse fake replaces it for each test.
+REAL_SEND_ONCE = HttpTransport.__dict__["_send_once"]
+
+# source -> (environment fallback, entry field the detail names, credential prefix) for EC-118 and EC-119.
+CREDENTIAL_SOURCES = {
+    "github": ("GITHUB_TOKEN", "token=", "ghp_"),
+    "anthropic": ("ANTHROPIC_API_KEY", "api_key=", "sk-ant-"),
+    "openai": ("OPENAI_API_KEY", "api_key=", "sk-proj-"),
+}
+CREDENTIAL_PATHS = [(source, where) for source in CREDENTIAL_SOURCES for where in ("entry", "env")]
+CREDENTIAL_PATH_IDS = [f"{source} {CREDENTIAL_SOURCES[source][1] if where == 'entry' else CREDENTIAL_SOURCES[source][0]}" for source, where in CREDENTIAL_PATHS]
+
+# Characters outside U+0020-U+007E that an HTTP header cannot carry: printable non-ASCII letters (which an
+# isprintable-only check misses), an invisible non-ASCII one, and ASCII controls (which an isascii-only check misses).
+UNSAFE_CHARACTERS = [("curly quote", "\u2019"), ("accented letter", "\u00e9"), ("zero-width space", "\u200b"), ("tab", "\t"), ("newline", "\n"), ("delete", "\x7f")]
+# Distinctive halves around the bad character, so any part of the value echoed in a detail or repr is found.
+UNSAFE_LEFT, UNSAFE_RIGHT = "HDRleftHALF", "HDRrightHALF"
+
 
 @pytest.fixture(autouse=True)
 def _feature_present() -> None:
@@ -69,6 +89,21 @@ def _feature_present() -> None:
 
 def _skill_file(name: str, body: str = "Body.") -> bytes:
     return f"---\nname: {name}\ndescription: The {name} skill.\n---\n{body}\n".encode()
+
+
+def _credentialed_entry(source: str, value: str | None) -> Any:
+    # One entry of the source's class; value None leaves the credential to the environment fallback.
+    if source == "github":
+        return GitHubSkill(name="pdf", repo="acme/skills", ref=SHA, path="skills/pdf", token=value)
+    entry_class = AnthropicSkill if source == "anthropic" else OpenAISkill
+    return entry_class(name="notes", skill_id="skill_x", version="1", api_key=value)
+
+
+def _first_request_url(source: str) -> str:
+    # The one URL each _credentialed_entry asks first: a pinned SHA and path skip GitHub's lookups.
+    if source == "github":
+        return f"{API}/repos/acme/skills/contents/skills/pdf/SKILL.md?ref={SHA}"
+    return f"{ANTHROPIC if source == 'anthropic' else OPENAI}/skills/skill_x/versions/1/content"
 
 
 @pytest.mark.asyncio
@@ -144,6 +179,79 @@ async def test_vidbyte_key_never_reaches_a_vendor(monkeypatch: pytest.MonkeyPatc
     assert "vidbyte" in result.detail.lower() and VIDBYTE_KEY not in result.detail
     await agent.arun("Run two.")
     assert fake_http.sent == []
+
+
+@pytest.mark.parametrize(("case", "bad"), UNSAFE_CHARACTERS, ids=[row[0] for row in UNSAFE_CHARACTERS])
+@pytest.mark.parametrize(("source", "where"), CREDENTIAL_PATHS, ids=CREDENTIAL_PATH_IDS)
+@pytest.mark.asyncio
+async def test_credential_a_header_cannot_carry_is_auth_failed_before_any_request(monkeypatch: pytest.MonkeyPatch, fake_http: Any, source: str, where: str, case: str, bad: str) -> None:
+    # EC-118, EC-119, D-30, INV-9, INV-14: without the guard httpx raises UnicodeEncodeError in build_request (or h11
+    # refuses a control character at send) outside every catch. No routes are registered, so any request also fails.
+    env_var, field_name, prefix = CREDENTIAL_SOURCES[source]
+    unsafe, usable = f"{prefix}{UNSAFE_LEFT}{bad}{UNSAFE_RIGHT}", f"{prefix}usableFAKE0000"
+    # The entry's own value wins even over a usable environment value, so the guard must not fall back to it.
+    monkeypatch.setenv(env_var, usable if where == "entry" else unsafe)
+    loader = SkillLoader((_credentialed_entry(source, unsafe if where == "entry" else None),))
+    (first,) = await loader.load()
+    assert first.reason is SkillUnavailableReason.AUTH_FAILED, first
+    assert fake_http.sent == []
+    assert field_name in first.detail and env_var in first.detail, first.detail
+    assert "header" in first.detail.lower() or "character" in first.detail.lower(), first.detail
+    for half in (UNSAFE_LEFT, UNSAFE_RIGHT):
+        assert half not in first.detail and half not in repr(first)
+    # Remembered, as EC-77: a usable value set after the miss is not read by this loader.
+    monkeypatch.setenv(env_var, usable)
+    (second,) = await loader.load()
+    assert second.reason is SkillUnavailableReason.AUTH_FAILED
+    assert fake_http.sent == []
+
+
+@pytest.mark.parametrize("source", list(CREDENTIAL_SOURCES))
+@pytest.mark.asyncio
+async def test_credential_a_header_can_carry_is_still_sent(fake_http: Any, source: str) -> None:
+    # EC-118, EC-119 boundary: U+0020 to U+007E passes the guard, so an internal space and a tilde (the last allowed
+    # character) reach the vendor unchanged; an over-strict guard would refuse a working key.
+    prefix = CREDENTIAL_SOURCES[source][2]
+    credential = f"{prefix}with space~FAKE"
+    fake_http.answer(_first_request_url(source), fake_http.reply(200, _skill_file("notes")))
+    (resolution,) = await SkillLoader((_credentialed_entry(source, credential),)).load()
+    assert resolution.document is not None, resolution
+    (request,) = fake_http.sent
+    if source == "anthropic":
+        assert request.headers.get("x-api-key") == credential
+    else:
+        assert request.headers.get("authorization") == f"Bearer {credential}"
+
+
+@pytest.mark.parametrize(("source", "where", "bad"), [("github", "entry", "\u2019"), ("openai", "env", "\u2013")], ids=["github token= with a curly quote", "OPENAI_API_KEY with an en dash"])
+@pytest.mark.asyncio
+async def test_unencodable_credential_is_auth_failed_through_real_header_encoding(monkeypatch: pytest.MonkeyPatch, source: str, where: str, bad: str) -> None:
+    # EC-118, EC-119, INV-9: the pack's fake replaces HttpTransport._send_once, where httpx's build_request encodes
+    # headers, so it cannot see this bug. Here the real _send_once runs and only httpx.AsyncClient.send is replaced;
+    # a missing guard surfaces as the UnicodeEncodeError that escaped SkillLoader.load and failed every run.
+    env_var, _, prefix = CREDENTIAL_SOURCES[source]
+    unsafe = f"{prefix}{UNSAFE_LEFT}{bad}{UNSAFE_RIGHT}"
+    reached_send: list[str] = []
+
+    async def refuse_connection(client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any) -> httpx.Response:
+        reached_send.append(str(request.url))
+        raise httpx.ConnectError("the test refuses every connection", request=request)
+
+    monkeypatch.setattr(HttpTransport, "_send_once", REAL_SEND_ONCE)
+    monkeypatch.setattr(httpx.AsyncClient, "send", refuse_connection)
+    # Non-vacuity: httpx cannot encode this value as a header, and a usable credential does reach send on this
+    # real path, ending as a transient connection failure.
+    with pytest.raises(UnicodeEncodeError):
+        httpx.Request("GET", _first_request_url(source), headers={"authorization": f"Bearer {unsafe}"})
+    (control,) = await SkillLoader((_credentialed_entry(source, f"{prefix}usableFAKE0000"),)).load()
+    assert control.reason is SkillUnavailableReason.FETCH_FAILED and reached_send == [_first_request_url(source)]
+    reached_send.clear()
+    if where == "env":
+        monkeypatch.setenv(env_var, unsafe)
+    (resolution,) = await SkillLoader((_credentialed_entry(source, unsafe if where == "entry" else None),)).load()
+    assert resolution.reason is SkillUnavailableReason.AUTH_FAILED, resolution
+    assert reached_send == []
+    assert UNSAFE_LEFT not in repr(resolution) and UNSAFE_RIGHT not in repr(resolution)
 
 
 @pytest.mark.asyncio

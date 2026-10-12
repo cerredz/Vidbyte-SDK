@@ -77,6 +77,8 @@ MALFORMED_FILES = [
     ("no opening line", f"name: pdf\ndescription: Reads PDFs.\n---\n{BODY_MARKER}\n".encode(), ("---",)),
     ("blank line before the opening line", b"\n" + _file("name: pdf\ndescription: Reads PDFs."), ("---",)),
     ("two byte-order marks", BOM + BOM + _file("name: pdf\ndescription: Reads PDFs."), ("---",)),
+    # EC-25 vs EC-27: only trailing spaces after the delimiter are allowed, so a space before it is not `---`.
+    ("space before the opening line", b" " + _file("name: pdf\ndescription: Reads PDFs."), ("---",)),
     ("opening line never closed", f"---\nname: pdf\ndescription: Reads PDFs.\n{BODY_MARKER}\n".encode(), ("clos",)),
     ("frontmatter is not YAML", _file("name: [unclosed\ndescription: Reads PDFs."), ("yaml",)),
     ("frontmatter is a list", _file("- name\n- description"), ("yaml", "mapping")),

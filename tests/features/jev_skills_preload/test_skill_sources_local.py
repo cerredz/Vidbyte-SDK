@@ -3,7 +3,7 @@
 PURPOSE: Pin LocalSkill loading from disk: the exact SKILL.md body under a folder-name label, not_found for every shape of missing file (remembered, with the absolute path), fetch_failed for read errors (retried on the next load), the SKILL.md size cap, the folder pinned at construction, symlinks followed, and the read kept off the event loop.
 ROLE IN CODEBASE: Covers spec AC-4, INV-5, INV-11, INV-12, INV-18, FR-7, D-6, D-15, D-21, D-23 and EC-15 to EC-22, EC-24 for vidbyte/agents/skills/local.py through vidbyte/agents/skills/loader.py, with one JevAgent run for the AC-4 result fields.
 ARCHITECTURE NOTE: Files are real, under tmp_path; SkillLoader, SkillMarkdown, and the entry records run unpatched. Only LocalSkillResolver.read_capped is replaced, and only to raise an OSError that Windows cannot produce on demand.
-FUNCTION INVENTORY: test_local_skill_loads_the_exact_body_under_its_folder_name; test_missing_skill_file_is_not_found_naming_the_absolute_path; test_not_found_is_remembered_until_a_new_loader; test_read_error_is_fetch_failed_and_read_again_next_load; test_skill_file_over_the_cap_is_too_large_and_at_the_cap_loads; test_relative_path_reads_the_folder_pinned_at_construction; test_symlinked_folder_and_file_are_followed; test_disk_read_runs_off_the_event_loop_thread.
+FUNCTION INVENTORY: test_local_skill_loads_the_exact_body_under_its_folder_name; test_missing_skill_file_is_not_found_naming_the_absolute_path; test_not_found_is_remembered_until_a_new_loader; test_remembered_not_found_says_to_create_a_new_agent_after_fixing; test_read_error_is_fetch_failed_and_read_again_next_load; test_skill_file_over_the_cap_is_too_large_and_at_the_cap_loads; test_relative_path_reads_the_folder_pinned_at_construction; test_symlinked_folder_and_file_are_followed; test_disk_read_runs_off_the_event_loop_thread.
 COMMON MODIFICATION PATTERNS: A new missing-file shape adds a row to the not_found table; a new read error adds a case beside PermissionError.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write SKILL.md with text mode; CRLF must reach the parser unchanged. 2. Do not assert the exact detail sentence; assert the path, file name, error class, and numbers the spec names.
 KNOWN EDGE CASES: NTFS is case-insensitive, so the lowercase skill.md case only runs where the filesystem is case-sensitive. Creating symlinks on Windows may need privileges; that test skips when it cannot create one.
@@ -153,6 +153,24 @@ async def test_not_found_is_remembered_until_a_new_loader(tmp_path: Path, write_
     assert loader.documents() == (None,)
     (fresh,) = await SkillLoader((entry,)).load()
     assert fresh.document is not None and fresh.document.text == "Installed later.\n"
+
+
+@pytest.mark.asyncio
+async def test_remembered_not_found_says_to_create_a_new_agent_after_fixing(tmp_path: Path, write_skill: Callable[..., Path]) -> None:
+    # EC-24, EC-16, Q-1: the miss is remembered, so a developer who fixes the path and reruns sees the same
+    # not_found; the detail must say a new agent is needed, and must still name the absolute path.
+    folder = tmp_path / "skills" / "pdf"
+    loader = SkillLoader((LocalSkill(name="pdf", path=folder),))
+    (first,) = await loader.load()
+    write_skill(folder, body="Installed later.\n")
+    (second,) = await loader.load()
+    for resolution in (first, second):
+        assert resolution.reason is SkillUnavailableReason.NOT_FOUND
+        assert _names_path(resolution.detail, folder.absolute()), resolution.detail
+        # Judge only the SDK's own words: the temporary path can hold any word, including the test's name.
+        wording = resolution.detail.replace(str(folder.absolute()), "").replace(folder.absolute().as_posix(), "").lower()
+        assert "agent" in wording, resolution.detail
+        assert any(word in wording for word in ("new", "create", "fresh")), resolution.detail
 
 
 @pytest.mark.asyncio

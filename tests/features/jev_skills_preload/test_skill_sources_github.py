@@ -3,7 +3,7 @@
 PURPOSE: Pin GitHubSkill loading: one commit lookup and at most one tree listing per (repo, ref, token) group, raw SKILL.md fetches labelled with the SHA, the status map for every step (remembered or retried as the spec says), ref and path handling, the shallowest-match tree search, per-entry isolation of failures, the raw-file cap, and token precedence.
 ROLE IN CODEBASE: Covers spec AC-7, INV-7, INV-8, FR-9, NFR-3, D-10, D-11, D-18, D-21, D-31 and EC-52 to EC-71, EC-112, EC-117 for vidbyte/agents/skills/github.py through vidbyte/agents/skills/loader.py.
 ARCHITECTURE NOTE: Every request is answered by the conftest's URL-routed fake of HttpTransport._send_once, so the real transport's retry loop, the real SkillFetch step, SkillMarkdown, and the loader's memory all run. "Remembered" is observed as a second load that sends nothing.
-FUNCTION INVENTORY: test_one_repo_and_ref_share_one_commit_lookup_and_one_tree_listing; test_commit_lookup_status_is_mapped_for_every_entry_in_the_group; test_raw_file_failure_stays_with_its_own_entry; test_full_sha_skips_the_lookup_and_other_refs_are_one_encoded_segment; test_tree_search_takes_the_shallowest_exact_folder; test_tree_search_without_a_match_or_with_a_tie_explains_path; test_truncated_tree_affects_only_entries_without_path; test_unusable_lookup_or_listing_is_fetch_failed_and_retried_next_load; test_raw_file_cap_is_inclusive; test_token_precedence_and_stripping; test_different_tokens_never_share_a_group.
+FUNCTION INVENTORY: test_one_repo_and_ref_share_one_commit_lookup_and_one_tree_listing; test_commit_lookup_status_is_mapped_for_every_entry_in_the_group; test_raw_file_failure_stays_with_its_own_entry; test_full_sha_skips_the_lookup_and_other_refs_are_one_encoded_segment; test_tree_search_takes_the_shallowest_exact_folder; test_tree_search_without_a_match_or_with_a_tie_explains_path; test_truncated_tree_affects_only_entries_without_path; test_unusable_lookup_or_listing_is_fetch_failed_and_retried_next_load; test_well_formed_listing_without_the_skill_stays_not_found; test_raw_file_cap_is_inclusive; test_token_precedence_and_stripping; test_different_tokens_never_share_a_group.
 COMMON MODIFICATION PATTERNS: A new status rule adds a row to STATUS_ROWS with its reason, whether it is remembered, how many attempts the transport makes, and the words the detail must hold.
 WHAT NOT TO DO IN THIS FILE: 1. Do not let any request reach api.github.com; the fake raises on an unrouted URL. 2. Do not assert the order of concurrent raw fetches, only their counts.
 KNOWN EDGE CASES: 429, 500, 502, 503, and 504 are retried once by the transport, 529 and every 3xx are not. A 403 is a rate limit only with x-ratelimit-remaining: 0 or a retry-after header. Response header names are lowercase, as httpx gives them.
@@ -218,6 +218,13 @@ UNUSABLE_ROWS = [
     ("tree nests 2000 levels", SHA, '{"sha": "x", "tree": ' + "[" * 2000 + "]" * 2000 + "}", UNEXPECTED),
     ("tree connection error", SHA, "connection", (*UNREACHABLE, "path=")),
     ("tree keeps answering 503", SHA, 503, ("503",)),
+    # EC-68 (r5, S4-R-1): a tree list whose items are not all objects with a text path. The first row is what
+    # Python 3.12+ parses the 2000-level body to, so these rows pin the rule on every Python version.
+    ("tree items are lists as 3.12 parses 2000 levels", SHA, json.dumps({"sha": "x", "tree": [[[]]]}), UNEXPECTED),
+    ("tree items are not objects", SHA, json.dumps({"sha": SHA, "tree": [1, "a", None]}), UNEXPECTED),
+    ("tree item has no path", SHA, json.dumps({"sha": SHA, "tree": [{"type": "blob"}]}), UNEXPECTED),
+    ("tree item path is not text", SHA, json.dumps({"sha": SHA, "tree": [{"path": 7, "type": "blob"}]}), UNEXPECTED),
+    ("one usable item beside a list item", SHA, json.dumps({"sha": SHA, "tree": [{"path": "skills/pdf/SKILL.md", "type": "blob"}, []]}), UNEXPECTED),
 ]
 
 
@@ -241,6 +248,29 @@ async def test_unusable_lookup_or_listing_is_fetch_failed_and_retried_next_load(
     await loader.load()
     assert fake_http.count(commit_url()) == 2
     assert len(fake_http.sent) == 2 * first_round
+
+
+# (case, tree items that are all objects with a text path but hold no pdf/SKILL.md blob)
+WELL_FORMED_TREES = [
+    ("empty tree", []),
+    ("folders and a submodule only", [{"path": "skills", "type": "tree", "mode": "040000"}, {"path": "skills/pdf", "type": "tree", "mode": "040000"}, {"path": "vendor/lib", "type": "commit", "mode": "160000"}]),
+]
+
+
+@pytest.mark.parametrize(("case", "items"), WELL_FORMED_TREES, ids=[row[0] for row in WELL_FORMED_TREES])
+@pytest.mark.asyncio
+async def test_well_formed_listing_without_the_skill_stays_not_found(fake_http: Any, case: str, items: list[dict[str, str]]) -> None:
+    # EC-62, EC-68: the item check refuses only items that are not objects with a text path. An empty tree, or
+    # folder and submodule entries, are a real answer, so the miss stays not_found and is remembered.
+    fake_http.answer(commit_url(), fake_http.reply(200, SHA))
+    fake_http.answer(tree_url(), fake_http.reply(200, json.dumps({"sha": SHA, "tree": items, "truncated": False})))
+    loader = SkillLoader((GitHubSkill(name="pdf", repo=REPO),))
+    (resolution,) = await loader.load()
+    assert resolution.reason is SkillUnavailableReason.NOT_FOUND, resolution
+    assert "path=" in resolution.detail
+    sent = len(fake_http.sent)
+    await loader.load()
+    assert len(fake_http.sent) == sent
 
 
 @pytest.mark.asyncio
