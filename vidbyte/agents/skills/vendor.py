@@ -72,10 +72,10 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
 
     async def resolve(self, entries: tuple[VendorSkillT, ...]) -> tuple[SkillResolution, ...]:
         # @intent vendor-skill-download
-        # The key is checked before any request, and only the vendor's own
-        # host ever receives it. "latest" falls back to the version the
-        # skill record names, once, and only when the content route
-        # refuses "latest" itself.
+        # The key is checked before any request, and only the
+        # vendor's own host ever receives it. "latest" falls
+        # back to the version the skill record names, once, and
+        # only when the content route refuses "latest" itself.
         (entry,) = entries
         # Pick the key: the entry's own, else the vendor's variable.
         key = self._key(entry)
@@ -85,8 +85,9 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
         # Download the version the entry names.
         version = entry.version
         answer = await self.fetch.get(url=self._content_url(entry, version), headers=headers, max_bytes=SKILL_DOWNLOAD_MAX_BYTES, step=SkillFetchStep.VENDOR_CONTENT)
-        # When the vendor does not accept "latest" as a version, read the
-        # newest version from the skill record and download that one.
+        # When the vendor does not accept "latest"
+        # as a version, read the newest version from
+        # the skill record and download that one.
         if self._refused_latest(entry, answer):
             record_answer = await self.fetch.get(url=self._record_url(entry), headers=headers, max_bytes=SKILL_DOWNLOAD_MAX_BYTES, step=SkillFetchStep.VENDOR_METADATA)
             record = self._classify(record_answer, entry, version, SkillFetchStep.VENDOR_METADATA)
@@ -110,10 +111,11 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
 
     def _key(self, entry: VendorSkillT) -> str | SkillResolution:
         # @intent vendor-key-guard
-        # The registry strips the entry key and the environment value, and
-        # the stripped value is the one checked and sent. A Vidbyte key is
-        # never sent to a vendor, even when it sits in the vendor variable.
-        # A header carries only printable ASCII, so a key with any other
+        # The registry strips the entry key and the environment
+        # value, and the stripped value is the one checked and
+        # sent. A Vidbyte key is never sent to a vendor, even
+        # when it sits in the vendor variable. A header carries
+        # only printable ASCII, so a key with any other
         # character is refused here instead of crashing the run.
         try:
             key = ProviderModelRegistry.resolve_api_key(self.PROVIDER, entry.api_key)
@@ -136,17 +138,19 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
     @staticmethod
     def _refused_latest(entry: VendorSkillT, answer: HttpResponse | SkillResolution) -> bool:
         # @intent vendor-latest-fallback-trigger
-        # Only these three answers mean "latest is not a version here"; an
-        # auth, rate-limit, or server failure never triggers the fallback.
+        # Only these three answers mean "latest is not
+        # a version here"; an auth, rate-limit, or
+        # server failure never triggers the fallback.
         refusals = (HTTPStatus.BAD_REQUEST, HTTPStatus.NOT_FOUND, HTTPStatus.UNPROCESSABLE_ENTITY)
         return entry.version == SKILL_VENDOR_LATEST_VERSION and isinstance(answer, HttpResponse) and answer.status_code in refusals
 
     def _classify(self, answer: HttpResponse | SkillResolution, entry: VendorSkillT, version: str, step: SkillFetchStep) -> HttpResponse | SkillResolution:
         # @intent vendor-status-map
-        # A 2xx answer passes through; every other status becomes a reason
-        # that names its fix, looked up by the integer status because
-        # HTTPStatus(529) raises. A version the skill record named that is
-        # missing means the content route itself was not found (A-1).
+        # A 2xx answer passes through; every other status
+        # becomes a reason that names its fix, looked up by
+        # the integer status because HTTPStatus(529) raises.
+        # A version the skill record named that is missing
+        # means the content route itself was not found (A-1).
         if isinstance(answer, SkillResolution):
             return answer
         status = answer.status_code
@@ -188,11 +192,12 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
 
     def _skill_markdown(self, body: bytes) -> bytes | SkillResolution:
         # @intent vendor-archive-read
-        # A bare SKILL.md is used as is (capped). A zip is read in memory:
-        # exactly one SKILL.md at the root or one folder deep, not
-        # encrypted, stored or deflated only (the bzip2 and lzma decoders
-        # never see untrusted bytes), and its declared size checked before
-        # it is inflated. Every corrupt-archive error becomes INVALID_SKILL.
+        # A bare SKILL.md is used as is (capped). A zip is read in
+        # memory: exactly one SKILL.md at the root or one folder
+        # deep, not encrypted, stored or deflated only (the bzip2
+        # and lzma decoders never see untrusted bytes), and its
+        # declared size checked before it is inflated. Every
+        # corrupt-archive error becomes INVALID_SKILL.
         if body.removeprefix(codecs.BOM_UTF8).startswith(SKILL_MARKDOWN_DELIMITER.encode()):
             if len(body) > SKILL_MARKDOWN_MAX_BYTES:
                 return SkillResolution(reason=SkillUnavailableReason.TOO_LARGE, detail=f"The SKILL.md from {self.host} is {len(body)} bytes, over the {SKILL_MARKDOWN_MAX_BYTES}-byte SKILL_MARKDOWN_MAX_BYTES cap.")

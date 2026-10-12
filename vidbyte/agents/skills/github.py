@@ -56,9 +56,9 @@ class _GitHubAnswer:
     @staticmethod
     def failure(response: HttpResponse, *, step: SkillFetchStep, target: str) -> SkillResolution | None:
         # @intent github-status-map
-        # Each status names its fix and never echoes the body. Lookups use
-        # the integer status, because HTTPStatus(529) raises. A 403 is the
-        # rate limit only when GitHub's limit headers say so.
+        # Each status names its fix and never echoes the body. Lookups
+        # use the integer status, because HTTPStatus(529) raises. A 403
+        # is the rate limit only when GitHub's limit headers say so.
         status = response.status_code
         if HTTPStatus.OK <= status < HTTPStatus.MULTIPLE_CHOICES:
             return None
@@ -95,20 +95,20 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
 
     async def resolve(self, entries: tuple[GitHubSkill, ...]) -> tuple[SkillResolution, ...]:
         # @intent github-shared-lookups
-        # One commit lookup and at most one tree listing serve the whole
-        # group, so five skills from one repository cost seven requests.
-        # The token is checked before any request: a Vidbyte key is never
-        # sent to GitHub, and a token a header cannot carry is refused
-        # instead of crashing the run. A shared step's failure applies to
-        # exactly the entries that needed it.
+        # One commit lookup and at most one tree listing serve the
+        # whole group, so five skills from one repository cost seven
+        # requests. The token is checked before any request: a Vidbyte
+        # key is never sent to GitHub, and a token a header cannot
+        # carry is refused instead of crashing the run. A shared step's
+        # failure applies to exactly the entries that needed it.
         first = entries[0]
         # Pick the token: the entry's own, else GITHUB_TOKEN, stripped.
         token = self._token(first)
         if token is not None and token.startswith(VIDBYTE_API_KEY_PREFIX):
             refused = SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail="The GitHub token is a Vidbyte API key, and a Vidbyte key is never sent to GitHub; set GITHUB_TOKEN or token= to a GitHub token, or leave both unset for public repositories.")
             return (refused,) * len(entries)
-        # An HTTP header carries only printable ASCII, so a token with any
-        # other character is refused before a request is built.
+        # An HTTP header carries only printable ASCII, so a token with
+        # any other character is refused before a request is built.
         if token is not None and not (token.isascii() and token.isprintable()):
             refused = SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail="The GitHub token holds a character an HTTP header cannot carry (only printable ASCII is allowed); fix the entry's token= or GITHUB_TOKEN.")
             return (refused,) * len(entries)
@@ -135,8 +135,9 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
 
     @staticmethod
     def _token(entry: GitHubSkill) -> str | None:
-        # The entry's token wins; GITHUB_TOKEN is read only at load time.
-        # Both are stripped, and the stripped value is the one sent.
+        # The entry's token wins; GITHUB_TOKEN is
+        # read only at load time. Both are stripped,
+        # and the stripped value is the one sent.
         raw = entry.token if entry.token is not None else os.environ.get(GITHUB_CREDENTIAL_ENV_VAR)
         stripped = (raw or "").strip()
         return stripped or None
@@ -187,8 +188,9 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
 
     @staticmethod
     def _search(paths: tuple[str, ...] | SkillResolution, entry: GitHubSkill, sha: str) -> str | SkillResolution:
-        # The shallowest folder named exactly after the skill wins, as npx
-        # skills does; a tie cannot be decided, so it asks for path=.
+        # The shallowest folder named exactly after
+        # the skill wins, as npx skills does; a tie
+        # cannot be decided, so it asks for path=.
         if isinstance(paths, SkillResolution):
             return paths
         suffix = f"/{entry.name}/{SKILL_MARKDOWN_FILE_NAME}"
@@ -204,8 +206,8 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
 
     async def _raw_document(self, entry: GitHubSkill, folder: str | SkillResolution, sha: str, auth: dict[str, str]) -> SkillResolution:
         # @intent github-raw-file
-        # The file is read at the pinned commit with the SKILL.md cap, and
-        # a failure here belongs to this entry alone.
+        # The file is read at the pinned commit with the SKILL.md
+        # cap, and a failure here belongs to this entry alone.
         if isinstance(folder, SkillResolution):
             return folder
         file_path = f"{folder}/{SKILL_MARKDOWN_FILE_NAME}"

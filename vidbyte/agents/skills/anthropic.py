@@ -32,7 +32,8 @@ class AnthropicSkillResolver(VendorSkillResolver[AnthropicSkill]):
     SOURCE_TYPE: ClassVar[SkillSourceType] = SkillSourceType.ANTHROPIC
 
     def _headers(self, key: str) -> dict[str, str]:
-        # Anthropic reads the key from x-api-key, never from authorization.
+        # Anthropic reads the key from
+        # x-api-key, never from authorization.
         return {"x-api-key": key, "anthropic-version": ANTHROPIC_SKILLS_API_VERSION, "anthropic-beta": ANTHROPIC_SKILLS_BETA}
 
 

@@ -32,8 +32,9 @@ class LocalSkillResolver(SkillResolver[LocalSkill]):
 
     @staticmethod
     def read_capped(path: Path) -> tuple[bytes, int] | None:
-        # Returns at most the cap's bytes and the file's true size, or None
-        # when no regular file is at path; other OSErrors propagate.
+        # Returns at most the cap's bytes and the
+        # file's true size, or None when no regular
+        # file is at path; other OSErrors propagate.
         if not path.is_file():
             return None
         with path.open("rb") as handle:
@@ -42,14 +43,14 @@ class LocalSkillResolver(SkillResolver[LocalSkill]):
 
     async def resolve(self, entries: tuple[LocalSkill, ...]) -> tuple[SkillResolution, ...]:
         # @intent local-skill-read
-        # A missing file is the developer's to fix, so it is remembered; a
-        # read error such as a permission problem is FETCH_FAILED, so a fix
-        # takes effect on the next run without a restart.
+        # A missing file is the developer's to fix, so it is remembered;
+        # a read error such as a permission problem is FETCH_FAILED, so
+        # a fix takes effect on the next run without a restart.
         (entry,) = entries
         folder = Path(entry.path)
         skill_file = folder / SKILL_MARKDOWN_FILE_NAME
-        # Read SKILL.md in a worker thread so a slow disk never blocks the
-        # other sources.
+        # Read SKILL.md in a worker thread so a
+        # slow disk never blocks the other sources.
         try:
             read = await asyncio.to_thread(LocalSkillResolver.read_capped, skill_file)
         except OSError as error:

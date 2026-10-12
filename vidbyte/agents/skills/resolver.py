@@ -26,7 +26,8 @@ class SkillResolver(ABC, Generic[SkillEntryT]):
     """Turns a group of one source's entries into one SkillResolution per entry, in order."""
 
     def group_key(self, entry: SkillEntryT) -> Hashable:
-        # Entries with equal keys share lookups; by default each entry is its own group.
+        # Entries with equal keys share lookups;
+        # by default each entry is its own group.
         return entry
 
     @abstractmethod

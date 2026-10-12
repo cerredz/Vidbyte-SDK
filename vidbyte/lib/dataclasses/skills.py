@@ -133,7 +133,8 @@ class InlineSkill(SkillEntry):
     type: SkillSourceType = field(default=SkillSourceType.INLINE, init=False)
 
     def _validate_source(self) -> None:
-        # The text is kept exactly as written; only blank values are refused.
+        # The text is kept exactly as written;
+        # only blank values are refused.
         SkillText.require(self.description, "InlineSkill.description")
         SkillText.require(self.text, "InlineSkill.text")
 

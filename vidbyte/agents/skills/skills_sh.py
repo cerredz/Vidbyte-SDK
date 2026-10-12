@@ -38,9 +38,10 @@ class SkillsShSkillResolver(SkillResolver[SkillsShSkill]):
 
     async def resolve(self, entries: tuple[SkillsShSkill, ...]) -> tuple[SkillResolution, ...]:
         # @intent skills-sh-installed-read
-        # The SDK only reads what npx skills installed; it never installs.
-        # A missing install is remembered with the command that fixes it,
-        # and a lock naming another source refuses a same-named fork.
+        # The SDK only reads what npx skills installed; it
+        # never installs. A missing install is remembered
+        # with the command that fixes it, and a lock
+        # naming another source refuses a same-named fork.
         (entry,) = entries
         folder = Path(entry.directory) / entry.name
         skill_file = folder / SKILL_MARKDOWN_FILE_NAME
@@ -54,8 +55,9 @@ class SkillsShSkillResolver(SkillResolver[SkillsShSkill]):
         raw, total_bytes = read
         if total_bytes > SKILL_MARKDOWN_MAX_BYTES:
             return (SkillResolution(reason=SkillUnavailableReason.TOO_LARGE, detail=f"{skill_file} is {total_bytes} bytes, over the {SKILL_MARKDOWN_MAX_BYTES}-byte SKILL_MARKDOWN_MAX_BYTES cap."),)
-        # In the default layout, read the project's lock entry for this
-        # skill; any problem with the lock means there is nothing to check.
+        # In the default layout, read the project's
+        # lock entry for this skill; any problem with
+        # the lock means there is nothing to check.
         lock_path = self._lock_path(Path(entry.directory))
         try:
             lock_read = await asyncio.to_thread(LocalSkillResolver.read_capped, lock_path) if lock_path is not None else None
@@ -84,9 +86,10 @@ class SkillsShSkillResolver(SkillResolver[SkillsShSkill]):
     @staticmethod
     def _lock_record(read: tuple[bytes, int] | None, name: str) -> dict[object, object] | None:
         # @intent skills-sh-lock-absent-on-doubt
-        # Mirrors npx skills: a lock it would not trust (unreadable, over
-        # the cap, not JSON, nested too deeply, a missing or non-number
-        # version below 1, no skills object) counts as absent.
+        # Mirrors npx skills: a lock it would not trust
+        # (unreadable, over the cap, not JSON, nested
+        # too deeply, a missing or non-number version
+        # below 1, no skills object) counts as absent.
         if read is None:
             return None
         raw, total_bytes = read

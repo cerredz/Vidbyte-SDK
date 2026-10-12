@@ -86,8 +86,10 @@ class JevAlignmentSettings:
 
     def _normalized_skills(self) -> tuple[SkillEntry | SkillDocument, ...]:
         # @intent names-uniquely-identify-response-results
-        # JevAgent.response exposes each decision by the configured name. Duplicate names would make two
-        # different candidate bodies indistinguishable to callers, whichever source each came from.
+        # JevAgent.response exposes each decision by the
+        # configured name. Duplicate names would make two
+        # different candidate bodies indistinguishable to
+        # callers, whichever source each came from.
         """Normalize caller strings, keep skill entries unchanged, and require unique stable names for every skill."""
         if isinstance(self.skills, (str, bytes)):
             raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillEntry, SkillDocument, or string values, not a string.")

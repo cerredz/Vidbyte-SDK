@@ -64,7 +64,9 @@ class JevSkillsPreload(JevPreload):
 
     def __init__(self, *, skills: tuple[SkillEntry | SkillDocument, ...], decision: DecisionModelConfig, threshold: float, response: JevResponse) -> None:
         # @intent validated-settings-cross-the-preload-boundary
-        # JevAgent passes already-normalized skills, a validated decision configuration and threshold, and the response writer for this run.
+        # JevAgent passes already-normalized skills, a
+        # validated decision configuration and threshold,
+        # and the response writer for this run.
         self.skills = skills
         self.decision = decision
         self.threshold = threshold
@@ -77,22 +79,24 @@ class JevSkillsPreload(JevPreload):
         # @intent each-candidate-has-an-independent-result
         # An answer only ever decides its own skill, and a skill Jev never answered for is unavailable rather than a no.
         # Load every skill first. Skills loaded on an earlier run cost
-        # nothing, and a skill that cannot load stays unavailable with the
-        # loader's reason, so one broken source never stops the run.
+        # nothing, and a skill that cannot load stays unavailable with
+        # the loader's reason, so one broken source never stops the run.
         resolutions = await self.loader.load()
         loaded = {index: document for index, document in enumerate(self.loader.documents(), start=JEV_SKILL_INDEX_BASE) if document is not None}
-        # Start every skill as unavailable. A skill that never loaded keeps
-        # the loader's reason and has no description or label to show; a
-        # loaded skill counts as unanswered until Jev answers for it.
+        # Start every skill as unavailable. A skill that
+        # never loaded keeps the loader's reason and has
+        # no description or label to show; a loaded skill
+        # counts as unanswered until Jev answers for it.
         results = {
             index: self._score_skill(index, loaded[index], {})
             if index in loaded
             else JevSkillResult(name=skill.name, description=None, source=None, status=JevSkillStatus.UNAVAILABLE, reason=resolution.reason, detail=resolution.detail)
             for index, (skill, resolution) in enumerate(zip(self.skills, resolutions, strict=True), start=JEV_SKILL_INDEX_BASE)
         }
-        # Split the loaded skills into requests small enough for Jev. A
-        # skill too large to send even on its own joins no batch, so it is
-        # marked too large for this request instead of being cut short.
+        # Split the loaded skills into requests small
+        # enough for Jev. A skill too large to send even on
+        # its own joins no batch, so it is marked too large
+        # for this request instead of being cut short.
         batches = self._build_batches(message)
         results.update(self._unbatched(batches))
         # Ask Jev about every batch at the same time, one request per batch, so waiting does not grow with the batch count.
@@ -160,9 +164,9 @@ class JevSkillsPreload(JevPreload):
 
     def _unbatched(self, batches: tuple[JevSkillBatch, ...]) -> dict[int, JevSkillResult]:
         # @intent too-large-is-decided-per-request
-        # Whether a skill fits depends on this run's request, so a loaded
-        # skill in no batch is too large for this run only and is never
-        # remembered as a load failure.
+        # Whether a skill fits depends on this run's request,
+        # so a loaded skill in no batch is too large for this
+        # run only and is never remembered as a load failure.
         detail = "too large to send to Jev with this request: a batch holding only this skill must fit JEV_SKILLS_MAX_REQUEST_JSON_BYTES request bytes and JEV_SKILLS_MAX_STATE_AND_QUESTION_JSON_BYTES state-and-question bytes; shorten SKILL.md or the request"
         batched = {index for batch in batches for index in batch.indices}
         return {
@@ -173,8 +177,9 @@ class JevSkillsPreload(JevPreload):
 
     def _failed_batch(self, batch: JevSkillBatch, detail: str) -> dict[int, JevSkillResult]:
         # @intent failed-batch-fails-only-its-own-skills
-        # Every skill in a batch whose answer cannot be used is unavailable
-        # with the same detail; other batches keep their own outcomes.
+        # Every skill in a batch whose answer cannot
+        # be used is unavailable with the same detail;
+        # other batches keep their own outcomes.
         documents = self.loader.documents()
         return {
             index: JevSkillResult(name=skill.name, description=skill.description, source=skill.source, status=JevSkillStatus.UNAVAILABLE, reason=SkillUnavailableReason.DECISION_FAILED, detail=detail)

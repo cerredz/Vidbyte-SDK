@@ -63,11 +63,11 @@ SKILLS_SH_SKILLS_FOLDER = "skills"
 SKILLS_SH_LOCK_FILE_NAME = "skills-lock.json"
 SKILLS_SH_LOCK_MIN_VERSION = 1
 
-# GitHub REST API host, the environment variable that holds the token,
-# and the accept headers that ask for a bare commit SHA, a JSON tree, and
-# a raw file. The variable constant is not called GITHUB_TOKEN_ENV_VAR:
-# lint S054 (ruff S105) reads any name containing _TOKEN_ that is given
-# a string as a hard-coded password.
+# GitHub REST API host, the environment variable that holds the
+# token, and the accept headers that ask for a bare commit SHA, a
+# JSON tree, and a raw file. The variable constant is not called
+# GITHUB_TOKEN_ENV_VAR: lint S054 (ruff S105) reads any name
+# containing _TOKEN_ that is given a string as a hard-coded password.
 GITHUB_API_BASE_URL = "https://api.github.com"
 GITHUB_CREDENTIAL_ENV_VAR = "GITHUB_TOKEN"
 GITHUB_ACCEPT_SHA = "application/vnd.github.sha"

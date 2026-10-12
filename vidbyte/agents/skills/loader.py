@@ -32,9 +32,9 @@ class SkillLoader:
     """Resolves a fixed tuple of entries lazily and remembers every non-transient result."""
 
     def __init__(self, entries: tuple[SkillEntry | SkillDocument, ...]) -> None:
-        # Nothing is read here. A caller's SkillDocument is already
-        # resolved, so it is remembered at once and can be batched before
-        # any run.
+        # Nothing is read here. A caller's SkillDocument
+        # is already resolved, so it is remembered at
+        # once and can be batched before any run.
         self.entries = entries
         self.memory: dict[SkillEntry | SkillDocument, SkillResolution] = {entry: SkillResolution(document=entry) for entry in entries if isinstance(entry, SkillDocument)}
         self.resolvers: dict[SkillSourceType, SkillResolver[Any]] = {
@@ -48,12 +48,14 @@ class SkillLoader:
 
     async def load(self) -> tuple[SkillResolution, ...]:
         # @intent skill-loader-memory
-        # Remembered entries cost nothing; only transient failures are
-        # asked again. A crash or cancellation propagates before anything
-        # is remembered, and a remembered resolution is never replaced, so
-        # every load agrees with documents() even when loads overlap.
-        # Group the entries not yet remembered, so entries that share
-        # lookups (one GitHub repository, ref, and token) resolve together.
+        # Remembered entries cost nothing; only transient
+        # failures are asked again. A crash or cancellation
+        # propagates before anything is remembered, and a
+        # remembered resolution is never replaced, so every
+        # load agrees with documents() even when loads overlap.
+        # Group the entries not yet remembered, so
+        # entries that share lookups (one GitHub
+        # repository, ref, and token) resolve together.
         groups = self._pending_groups()
         # Resolve every group at the same time.
         answers = await asyncio.gather(*(self.resolvers[kind].resolve(tuple(group)) for (kind, _), group in groups.items()), return_exceptions=True)

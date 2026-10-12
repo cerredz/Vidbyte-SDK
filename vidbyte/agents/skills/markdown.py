@@ -25,8 +25,8 @@ class SkillMarkdown:
 
     @staticmethod
     def parse(raw: bytes, *, name: str, source: str) -> SkillResolution:
-        # Read the file as strict UTF-8, so a damaged byte never becomes a
-        # silently different instruction.
+        # Read the file as strict UTF-8, so a damaged byte
+        # never becomes a silently different instruction.
         text = SkillMarkdown._decode(raw)
         if text is None:
             return SkillMarkdown._invalid("SKILL.md is not valid UTF-8 text.")
@@ -40,8 +40,8 @@ class SkillMarkdown:
         fields = SkillMarkdown._load(frontmatter)
         if isinstance(fields, str):
             return SkillMarkdown._invalid(fields)
-        # The frontmatter must say what the skill is called and what it is
-        # for; Jev decides relevance from the description.
+        # The frontmatter must say what the skill is called and what
+        # it is for; Jev decides relevance from the description.
         title, description = fields.get("name"), fields.get("description")
         if not isinstance(title, str) or not title.strip():
             return SkillMarkdown._invalid("SKILL.md frontmatter needs a non-blank text name field.")
@@ -63,9 +63,9 @@ class SkillMarkdown:
 
     @staticmethod
     def _split(text: str) -> tuple[str, str] | str:
-        # Returns (frontmatter, body), or the detail that explains why the
-        # delimiter lines are wrong. Trailing spaces on a delimiter line are
-        # allowed; anything before `---` is not.
+        # Returns (frontmatter, body), or the detail that explains
+        # why the delimiter lines are wrong. Trailing spaces on a
+        # delimiter line are allowed; anything before `---` is not.
         lines = text.splitlines(keepends=True)
         if not lines or lines[0].rstrip() != SKILL_MARKDOWN_DELIMITER:
             return "SKILL.md must start with a '---' line that opens its frontmatter."
@@ -77,9 +77,10 @@ class SkillMarkdown:
     @staticmethod
     def _load(frontmatter: str) -> dict[object, object] | str:
         # @intent skill-markdown-safe-yaml
-        # Hostile YAML must end as data: the safe loader builds no objects,
-        # and the three caught classes cover bad syntax, impossible dates,
-        # and deep nesting. The detail never quotes the YAML error.
+        # Hostile YAML must end as data: the safe loader
+        # builds no objects, and the three caught classes
+        # cover bad syntax, impossible dates, and deep
+        # nesting. The detail never quotes the YAML error.
         try:
             fields = yaml.safe_load(frontmatter)
         except (yaml.YAMLError, ValueError, RecursionError):

@@ -3756,8 +3756,9 @@ class JevSkillResult:
         if self.source is not None and (not isinstance(self.source, str) or not self.source.strip()):
             raise ConfigurationError("JevSkillResult.source must be None or non-blank text.")
         # @intent skill-result-explains-unavailable
-        # A caller must always learn why a skill was not offered, and only
-        # unavailable skills carry a reason, so the two can never disagree.
+        # A caller must always learn why a skill was not
+        # offered, and only unavailable skills carry a
+        # reason, so the two can never disagree.
         if self.reason is not None and not isinstance(self.reason, SkillUnavailableReason):
             raise ConfigurationError("JevSkillResult.reason must be a SkillUnavailableReason or None.")
         if (self.reason is not None) != unavailable:

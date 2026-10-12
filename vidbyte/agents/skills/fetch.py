@@ -38,16 +38,18 @@ class SkillFetch:
 
     async def get(self, *, url: str, headers: Mapping[str, str], max_bytes: int, step: SkillFetchStep) -> HttpResponse | SkillResolution:
         # @intent skill-fetch-bounded-step
-        # Every skill request goes through the shared transport with fixed
-        # bounds and no redirects, inside one deadline for the whole step.
-        # Only failures that left no HTTP answer become resolutions here;
-        # each resolver maps statuses, so every answer is handed back.
+        # Every skill request goes through the shared transport
+        # with fixed bounds and no redirects, inside one
+        # deadline for the whole step. Only failures that left
+        # no HTTP answer become resolutions here; each resolver
+        # maps statuses, so every answer is handed back.
         host = urlsplit(url).hostname or url
         # The tree listing is the one step an entry can skip, so its
         # failures say how.
         hint = " Set path= on the entry to skip the tree listing." if step is SkillFetchStep.GITHUB_TREE else ""
-        # Send the request with the fixed timeout, one retry on retryable
-        # statuses, and the size cap of what this step downloads.
+        # Send the request with the fixed timeout,
+        # one retry on retryable statuses, and the
+        # size cap of what this step downloads.
         deadline = asyncio.timeout(SKILL_FETCH_DEADLINE_SECONDS)
         try:
             async with deadline:
@@ -62,7 +64,8 @@ class SkillFetch:
                     follow_redirects=False,
                 )
         except ProviderRequestError as error:
-            # No usable answer arrived: unreachable, or a body over the cap.
+            # No usable answer arrived:
+            # unreachable, or a body over the cap.
             return self._refused(error, host, step, max_bytes, hint)
         except TimeoutError:
             # Only this step's own deadline is an expected failure; any
@@ -74,9 +77,10 @@ class SkillFetch:
     @staticmethod
     def _refused(error: ProviderRequestError, host: str, step: SkillFetchStep, max_bytes: int, hint: str) -> SkillResolution:
         # @intent skill-fetch-transport-failure
-        # A missing status is a connection failure or timeout; a 2xx status
-        # means the body was over the cap (permanent); any other status
-        # means an oversized error body (transient). Never echo the excerpt.
+        # A missing status is a connection failure or timeout;
+        # a 2xx status means the body was over the cap
+        # (permanent); any other status means an oversized
+        # error body (transient). Never echo the excerpt.
         status = error.status_code
         if status is None:
             return SkillResolution(reason=SkillUnavailableReason.FETCH_FAILED, detail=f"Could not reach {host} during {step.value} (the connection failed or timed out); retried on the next run.{hint}")
@@ -87,8 +91,9 @@ class SkillFetch:
     @staticmethod
     def _expired(host: str, step: SkillFetchStep, hint: str) -> SkillResolution:
         # @intent skill-fetch-deadline
-        # A server that keeps the step open past the deadline is treated
-        # like an unreachable one: FETCH_FAILED, retried on the next run.
+        # A server that keeps the step open past the
+        # deadline is treated like an unreachable
+        # one: FETCH_FAILED, retried on the next run.
         return SkillResolution(reason=SkillUnavailableReason.FETCH_FAILED, detail=f"{host} did not finish {step.value} within SKILL_FETCH_DEADLINE_SECONDS ({SKILL_FETCH_DEADLINE_SECONDS} s); retried on the next run.{hint}")
 
 
