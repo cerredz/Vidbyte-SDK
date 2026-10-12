@@ -15,7 +15,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-12 16:20 | 2026-10-12 16:50 | reports/S0-scout.md | base 52aab816; code-map 4 sections |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 2026-10-12 16:52 | | reports/S1-spec-author.md | spec r1 e201a52b; review round 1 running |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -51,3 +51,10 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - Existing tests use fake keys like "main-key", "PARENTKEY", "sk-explicit" that a strict classifier would reject; existing tests pin provider-key-wins-in-AUTO, `api_key=vb_live_` switching, BYOK streaming in AUTO, and the 402 "provider key" wording. — *source:* S0
 - Unverified: whether C017 still classifies the gateway request as API_KEY with a second header (`python lint/run.py --rule C017`). — *source:* S0
 - Vidbyte-SDK PRs get no automatic checks: `gh workflow run CI --ref feat/byok-api-keys` and `gh workflow run "Static policy" --ref feat/byok-api-keys`; required `Source / Python 3.11`, `Source / Python 3.12`, `Package`. — *source:* orchestrator memory
+- Spec r1 contract names: `ProviderKeyMatcher.provider_of / normalize / key_for / providers` in new `vidbyte/lib/registries/provider_keys.py`; `TextModelConfig.credentials()` → `TextCredentials(mode, provider_api_key, vidbyte_api_key)` with `.uses_gateway`, `.relays`; `VIDBYTE_PROVIDER_KEY_HEADER`; `TextModelMode.DIRECT`; agent kwargs `api_keys`, `vidbyte_api_key`, `model_mode`; `VidbyteGatewayTransport(..., provider_api_key=)`. — *source:* S1 author
+- Import cycle (D-21): `vidbyte.lib.dataclasses.agents` loads before the registries package, so it imports the matcher inside `__post_init__`; everyone else imports from `vidbyte.lib.registries.provider_keys`. — *source:* S1 author
+- C017: add the header by subscript with the imported constant right after the `Idempotency-Key` line; never `.update()`. — *source:* S1 author
+- Today's fake test keys ("sk-mock", "test-key", "main-key") are refused by the classifier; build classifiable fakes at runtime and avoid scanner patterns (`AIza`+35 chars, `T3BlbkFJ`); spec §13 lists safe shapes. — *source:* S1 author
+- Test seam: sibling pack `tests/features/sdk_managed_text/`; mock only `vidbyte.lib.runners.text.HttpTransport` and sleep; `patch.dict(os.environ, ..., clear=True)`; import feature symbols inside each test. Failure-message table G must keep every fact `test_managed_text_failures.py:126-146` checks. — *source:* S1 author
+- `base.py` may grow by at most 25 net lines (spec budget). Tests running a real `TextModelRunner` in AUTO without a Vidbyte key now fail at construction; expect stragglers beyond §13's list. — *source:* S1 author
+- origin/main moved to 3ed3c627 after base 52aab816; rebase at S6. — *source:* S1 author
