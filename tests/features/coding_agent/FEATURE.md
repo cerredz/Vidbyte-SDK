@@ -169,6 +169,7 @@ These are the failure inventory the tests were chosen from, given as input → w
 ## Historical Regressions
 
 - 2026-10-12, #885 follow-up: the environment section dropped every Poetry 2 dependency (`name (>=1)`) and every bare requirements.txt name followed by an inline comment, because the name match allowed only `[ < > = ! ~ ; @` or the end after a name. Pinned by `test_declared_dependencies_read_parenthesized_versions_and_inline_comments` and `test_requirement_lines_that_are_not_names_give_no_names`.
+- 2026-10-12, #885 follow-up: a manifest saved with a UTF-8 byte-order mark (Windows PowerShell's default) gave no `pyproject.toml` or `package.json` names and lost the first `requirements.txt` name, because manifests were decoded as plain `utf-8`. Pinned by `test_declared_dependencies_read_manifests_with_a_byte_order_mark`.
 
 The feature was specified in `docs/spec/coding-agent/spec.md` r3. The S1 review found the Windows launcher orphan (EC-14), the pipe-holding descendants (EC-28 to EC-30) and the transport leak (INV-26) before any code existed.
 

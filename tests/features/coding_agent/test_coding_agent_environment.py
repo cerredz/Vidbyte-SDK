@@ -270,6 +270,17 @@ def test_declared_dependencies_read_parenthesized_versions_and_inline_comments(t
     assert "- Declared dependencies: requests, pydantic, httpx, rich, ruff, mypy, pytest, hypothesis, coverage, black\n" in item.to_context_text()
 
 
+def test_declared_dependencies_read_manifests_with_a_byte_order_mark(tmp_path, no_bash, monkeypatch) -> None:
+    # Regression: Windows PowerShell writes UTF-8 with a BOM, which npm and pip accept; the BOM used to break TOML and JSON parsing and hide the first requirements.txt name.
+    bom = b"\xef\xbb\xbf"
+    pyproject = bom + b'[project]\ndependencies = ["httpx>=0.27"]\n'
+    requirements = bom + b"flask\nrich\n"
+    package_json = bom + json.dumps({"dependencies": {"react": "^19"}, "devDependencies": {"vitest": "^2"}}).encode("utf-8")
+    _write_files(tmp_path, {"pyproject.toml": pyproject, "requirements.txt": requirements, "package.json": package_json})
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ("httpx", "flask", "rich", "react", "vitest")
+
+
 @pytest.mark.parametrize(
     "line",
     ["https://example.com/pkg-1.0-py3-none-any.whl", "git+https://example.com/pkg.git", "git+https://example.com/pkg.git  # pinned fork", "./local/path", "../sibling/pkg", "pkg-1.0.tar.gz#sha256=abc", "--index-url https://example.com/simple"],

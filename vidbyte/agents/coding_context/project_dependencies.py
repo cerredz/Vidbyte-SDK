@@ -64,7 +64,9 @@ class ProjectDependencies:
                 raw = handle.read(CODING_ENVIRONMENT_MANIFEST_MAX_BYTES)
         except OSError:
             return ""
-        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode("utf-8", errors="replace")
+        # "utf-8-sig" drops the byte-order mark Windows PowerShell writes,
+        # which npm and pip accept but tomllib, json, and the name match do not.
+        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode("utf-8-sig", errors="replace")
 
     @staticmethod
     def _toml(text: str) -> dict[str, Any]:
