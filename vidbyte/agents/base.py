@@ -599,6 +599,13 @@ class BaseAgent(McpAttachableMixin):
                     "worker_model": self.runtime_config_obj.worker_model,
                 }
             )
+            include = self.runtime_config_obj.include_actors
+            if include is not None:
+                # @intent restore-keeps-actor-set
+                # Store the chosen actors as registered role names, keeping only the ones restore can find again.
+                from vidbyte.lib.registries.actors import actor_registry
+                registered = actor_registry.all()
+                config["include_actors"] = [actor.role_name for actor in include if registered.get(str(getattr(actor, "role_name", "")).lower()) is actor]
         return config
 
     def _export_loop_settings(self) -> dict[str, Any]:
@@ -756,12 +763,17 @@ class BaseAgent(McpAttachableMixin):
             AgentRuntimeType.ACTOR_MODEL_P2P,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
         ):
+            # @intent restore-keeps-actor-set
+            # Map saved role names back to actor classes; an older checkpoint without the key keeps the default actors.
+            from vidbyte.agents.runtimes.actor.actor import actor_registry
+            names = state.runtime_config.get("include_actors")
             return ActorRuntime(
                 topology=runtime_type,
                 dynamic_actors=bool(state.runtime_config.get("dynamic_actors", False)),
                 max_loop=int(state.runtime_config.get("max_loop", 20)),
                 termination_mode=str(state.runtime_config.get("termination_mode", "coordinator")),
                 worker_model=state.runtime_config.get("worker_model"),
+                include_actors=None if names is None else [actor_registry.get(name) for name in names],
             )
         return runtime_type
 
