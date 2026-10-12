@@ -48,6 +48,8 @@ class TraceController(TracerBase):
         if semantic is None or semantic.suppressed:
             self._pop_context(semantic)
             return
+        # @intent end-trace-matches-open-mode
+        # Close the context the way it was opened, so a session's converted agent.run ends as a span and any other trace as a trace.
         if semantic.metadata.get("as_trace"):
             self.inner.end_trace(semantic.provider_context or SpanContext(), output=output, error=error)
         else:
