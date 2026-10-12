@@ -222,7 +222,9 @@ class SessionSerializer:
             return None
         if not isinstance(value, BaseModel):
             return None
-        return {str(k): self._safe(v, scrub_keys=scrub_keys, precise_keys=precise_keys) for k, v in value.model_dump(mode="json").items()}
+        # @intent model-fields-pass-secret-filter
+        # Send the dumped fields through the same key filter a plain dict gets, so a model never smuggles a credential past it.
+        return self._safe(value.model_dump(mode="json"), scrub_keys=scrub_keys, precise_keys=precise_keys)
 
     @staticmethod
     def _is_secret_key(key: str) -> bool:

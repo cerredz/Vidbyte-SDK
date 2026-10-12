@@ -12,6 +12,8 @@ from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
+from pydantic import BaseModel
+
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte import Agent, Trace, TraceProfile
 from vidbyte.agents import AgentForkSettings, BaseAgent
@@ -59,6 +61,13 @@ from vidbyte.tools.types import ToolCall
 # ---------------------------------------------------------------------------
 # Test doubles
 # ---------------------------------------------------------------------------
+class _WebhookConfig(BaseModel):
+    # A pydantic value whose field names look like credentials, as a developer might put in metadata.
+    url: str
+    api_key: str
+    auth_token: str
+
+
 class FakeAgent:
     """Minimal stand-in implementing the surface Session uses."""
 
@@ -216,6 +225,16 @@ class SerializerTests(unittest.TestCase):
         out = self.s.message_to_dict(message)
         self.assertNotIn("auth_token", out["metadata"])
         self.assertEqual(out["metadata"]["ok"], 1)
+
+    def test_pydantic_model_fields_get_the_same_secret_filter_as_a_dict(self) -> None:  # [Silent Failure]
+        # A model in metadata must lose its credential fields exactly like the same data as a dict,
+        # while a structured reply (scrub_keys=False) still keeps every field name.
+        config = _WebhookConfig(url="https://hooks.example", api_key="SECRET-KEY", auth_token="SECRET-TOKEN")
+        out = self.s.message_to_dict(AgentMessage(sender="a", recipient="o", content="c", metadata={"as_model": config, "as_dict": config.model_dump()}, structured=config))
+        self.assertEqual(out["metadata"]["as_model"], {"url": "https://hooks.example"})
+        self.assertEqual(out["metadata"]["as_model"], out["metadata"]["as_dict"])
+        self.assertNotIn("SECRET-KEY", json.dumps(out["metadata"]))
+        self.assertEqual(out["structured"], config.model_dump(mode="json"))
 
     def test_marks_non_json_metadata_without_raising(self) -> None:  # [Hidden Failure]
         message = AgentMessage(sender="a", recipient="o", content="c", metadata={"obj": object()})
