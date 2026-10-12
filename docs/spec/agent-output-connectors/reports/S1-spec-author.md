@@ -2,7 +2,7 @@
 
 - **Stage:** S1 spec author
 - **Date:** 2026-10-11
-- **Spec:** `docs/spec/agent-output-connectors/spec.md`, revision r2 (r1 at `6248fc96`; r2 in the commit that adds the "Revision r2" section below)
+- **Spec:** `docs/spec/agent-output-connectors/spec.md`, revision r3, `status: approved` (r1 at `6248fc96`, r2 at `7158ee2b`, r3 in the commit that adds the "Revision r3" section below)
 - **Commit (r1):** `6248fc96`
 
 The r1 run wrote and committed only `spec.md`; the orchestrator committed this report. The r2 run, at the end of this file, changed only `spec.md` and this report and committed both. It created no source, test, or stub files. It ran no gate and installed nothing.
@@ -212,7 +212,7 @@ Public names and the 17 root exports are unchanged. `vidbyte.agents.output` stil
 - `AgentStopReason` has 17 members (`vidbyte/lib/dataclasses/agents.py:51-70`). INV-9 names the rejected-answer stops too: `contract_unsatisfied`, `finish_review_rejected`, `tool_settings_denied`, and `error`.
 - The precedent `NORMAL_STOP_REASONS` is at `vidbyte/evals/behavior/stop.py:32`.
 - Reflexion forwards the inner run's stop reason, defaulting to `final_response` (`vidbyte/context/algorithms/reflexion.py:125-131`).
-- There is no `stop_reason` under `vidbyte/agents/jev/` or `vidbyte/lib/jev/`.
+- There is no `stop_reason` under `vidbyte/agents/jev/` or `vidbyte/lib/jev/`. _(Corrected in r3: the literal string is absent, but normal Jev replies still carry it, because `JevRuntime` subclasses `AgentRuntime` and `JevResponse.delegated` copies the specialist's metadata. Only `JevResponse.stopped` has none. See R-15.)_
 - A002 splits identifiers on `_` and `.` and matches whole words (`lint/rules/a002_intent_comments.py:69-75`). So `OutputSmtp._client` needs no `# @intent`, and r1's listing of it was dropped. `_link` (which reads `request`) and `_deliver_one` (which calls `send`) do need one.
 - A006 excludes `__init__.py` files from its graph (`a006_directed_dependency_graph.py:65-67`).
 - The Protocol precedent is `vidbyte/sessions/store.py:29-30`.
@@ -243,3 +243,68 @@ Public names and the 17 root exports are unchanged. `vidbyte.agents.output` stil
 - **Names:** they agree across §4, §8.5, §9.2, §12.3, and §16. r1 symbols appear only in the §16 rename table.
 - **Status:** `status: draft`, `revision: 2`, not approved (that comes after round 2).
 - **No test cases** appear anywhere in the spec.
+
+## Revision r3 (S1 review round 2, final; approved)
+
+The review (`reports/S1-spec-review-r2.md`, commit `81f9ae35`) returned SOUND WITH FIXES: 0 Blocker, 2 Major, 5 Minor. It found the r2 layout correct and cycle-free, and I left it unchanged. The 23 files, 26 classes, 17 root exports, Protocol plus `BaseOutput`, and every R-1 to R-11 fix are all as they were.
+
+The spec frontmatter now reads `status: approved` and `revision: 3`. The two review rounds are the approval.
+
+### Dispositions
+
+All seven findings are **Accepted**. None is disputed, so no new open question replaces a fix.
+
+| ID | Severity | Change |
+|---|---|---|
+| R-12 | Major | Added `OutputArguments.matching(value, pattern, *, parameter)` and `OutputArguments.address(value, *, parameter)`, plus the constants `GITHUB_REPO_PATTERN` and `JIRA_SITE_PATTERN`. Rows 13, 14, and 16 call them with `to`, `sender`, `repo`, `site`, and `email`, so every AC-20 error names the constructor parameter. AC-20 adds `email="jira-bot"`. |
+| R-13 | Major | Removed `BaseAgent._deliver_outputs`. Delivery is now an inline `try` / `except BaseException` block in `_generate_reply`, mirroring `base.py:920-927`. |
+| R-14 | Minor | INV-12 and FR-13 now cover channel-wide and mass mentions only. GitHub `@user` / `@org/team` and Telegram `@username` are an accepted limitation (T-2, EC-6, row 19). Q-10 is scope-adding and not built. |
+| R-15 | Minor | INV-9 and EC-38 now cite `JevResponse.stopped`. EC-44 adds (b) a delegated reply copies the specialist's `deliveries` and (c) a proposer whose delivery fails is a failed proposer. AC-21's Given now excludes sub-agents with outputs. Rows 19, 23, and 34 are updated. |
+| R-16 | Minor | D-1 now weighs `vidbyte/providers/tracing/` as the runner-up's precedent. It decides on `lib/http/` adjacency and the model-vendor namespace, and the false README claim is gone. The choice is unchanged. |
+| R-17 | Minor | §12.4: S051 must not be REGRESSED (baseline 259), and the I001 output filtered to touched paths must be empty. `base.py` imports are added without re-sorting the block. §11 lists S051 259. |
+| R-18 | Minor | I took option (a), because the conversation set the latency bound. `_deliver_one` wraps `send` in `asyncio.wait_for(..., OUTPUT_DELIVERY_DEADLINE_SECONDS)` (35 s). The wait's `TimeoutError` becomes FAILED `network`. The precedent is `aggregation.py:114`. This adds EC-47, A-16, and AC-6 (e). |
+
+### Symbols moved or renamed in r3
+
+- **`BaseAgent._deliver_outputs`:** removed, replaced by the inline block in `_generate_reply`.
+- **`JIRA_SITE_SUFFIX`:** renamed to `JIRA_SITE_PATTERN`.
+- **New:**
+  - `OutputArguments.matching` and `OutputArguments.address`;
+  - the constants `GITHUB_REPO_PATTERN` and `OUTPUT_DELIVERY_DEADLINE_SECONDS`.
+- **Unchanged:** public names, root exports, the file budget, and the class count.
+
+### Facts checked for r3
+
+- `vidbyte/providers/README.md:46` lists `tracing/`. `TracerBase` is at `vidbyte/lib/tracing/base.py:16`. LangSmith reads `LANGSMITH_API_KEY` from the environment (`langsmith.py:38`).
+- In `vidbyte/agents/jev/response.py`:
+  - `JevResponse.delegated` (128-132) passes `metadata=reply.metadata`;
+  - `stopped` (134-137) builds a result with no `stop_reason`.
+- In `aggregation.py`:
+  - proposers run under `gather(return_exceptions=True)` at line 89;
+  - each proposer is bounded by `asyncio.wait_for` at line 114;
+  - `_collect_candidates` raises `AggregateExecutionError` below `min_successful` (116-132).
+- `lint/baseline.json` has S051 at 259.
+
+### New assumption
+
+- **A-16.** That a healthy destination finishes within 35 s, including the 429 path. If it does not, the receipt reads FAILED `network` while the post may still land. The fix is to raise the constant.
+
+### Self-check (r3)
+
+- **Section headings** are identical to r2 and the template.
+- **IDs:** no duplicates, no undefined references, and no gaps. The counts:
+
+  | ID | Count | ID | Count |
+  |---|---|---|---|
+  | G | 4 | D | 22 |
+  | NG | 12 | W | 12 |
+  | INV | 28 | T | 5 |
+  | AC | 26 | A | 16 (A-14 withdrawn) |
+  | EC | 47 | Q | 10 (0 blocking) |
+  | FR | 20 | | |
+  | NFR | 8 | | |
+
+- **Traceability:** every AC still appears in a W row.
+- **Budget:** §8.4 still equals §12.3 rows 1–23. There are 14 config keys; the deadline is an operational constant, not a user knob.
+- **Stale symbols:** `_deliver_outputs` and `JIRA_SITE_SUFFIX` appear only in §16.
+- **§14** now forbids building Q-8, Q-9, or Q-10.
