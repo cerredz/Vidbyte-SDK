@@ -188,9 +188,10 @@ def _stringify_output(value: object) -> str:
     # @intent tool-model-output-is-json
     # default= never sees dict keys, so Enum/date keys and mixed int/str keys raise above; normalize keys the way
     # the equivalent model's JSON mode does, letting _json_default turn read-only mappings into objects and other
-    # unknown leaves into str(), and fall back to a repr only if that still fails.
+    # unknown leaves into str(), and fall back to a repr only if that still fails. Nested models dump by alias here
+    # too (see _json_default).
     try:
-        return json.dumps(to_jsonable_python(value, by_alias=False, fallback=_json_default), sort_keys=True)
+        return json.dumps(to_jsonable_python(value, by_alias=True, fallback=_json_default), sort_keys=True)
     except (TypeError, ValueError):
         return str(value)
 
@@ -200,8 +201,11 @@ def _json_default(value: object) -> object:
     # Models and dataclass instances become JSON objects so output_schema validation sees fields, not a repr string.
     # Other leaves (Enum, datetime, UUID, set) take pydantic's JSON-mode value, so a dict or dataclass return
     # serializes exactly like the equivalent model; only types pydantic cannot serialize fall back to str().
+    # @intent tool-model-output-round-trips
+    # A model dumps by alias, its own JSON form (the one model_json_schema describes and model_validate accepts), so a
+    # tool returning its declared output_schema type passes its own output check; models without aliases are unchanged.
     if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
+        return value.model_dump(mode="json", by_alias=True)
     # @intent read-only-mappings-are-json-objects
     # A frozen record often holds a MappingProxyType; asdict cannot deep-copy one and pydantic cannot serialize one,
     # so read fields shallowly and turn any non-dict Mapping into a dict, letting json.dumps recurse through both.
