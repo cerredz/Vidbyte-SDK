@@ -1165,6 +1165,16 @@ class AnswerRunner:
         return FakeResponse("ANSWER", {})
 
 
+class UsageAnswerRunner(AnswerRunner):
+    """AnswerRunner whose replies carry provider usage, so each billed call can be metered."""
+
+    def run(self, prompt: str, **_: object) -> FakeResponse:
+        self.calls += 1
+        response = _ProviderTaggedResponse("ANSWER", {}, provider="openai", model="fake")
+        response.usage = {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}
+        return response
+
+
 class NonLinearRuntimeRegressionTests(unittest.TestCase):
     """Drives BaseAgent through the non-linear runtimes end to end with an offline runner."""
 
@@ -1195,6 +1205,17 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
         # [Regression] A reply that completed the run during the quiescence poll was set again.
         result, _ = self._run(ActorRuntime(termination_mode="quiescence", include_actors=[]))
         self.assertEqual(result.content, "ANSWER")
+
+    def test_actor_model_calls_reach_the_run_usage_ledger(self) -> None:
+        # @intent actor-calls-are-metered
+        # [Regression] Actor calls were billed but never recorded, so get_usage() of an actor-runtime agent was empty.
+        runner = UsageAnswerRunner()
+        agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(include_actors=[]), runner=runner)
+        agent.run("q")
+        usage = agent.get_usage()
+        self.assertEqual(runner.calls, 1)
+        self.assertEqual(len(usage.calls), 1)
+        self.assertEqual((usage.input_tokens, usage.output_tokens, usage.total_tokens), (100, 20, 120))
 
 if __name__ == "__main__":
     unittest.main()

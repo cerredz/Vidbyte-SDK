@@ -36,6 +36,7 @@ from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.lib.tracing import TracerBase
+from vidbyte.lib.usage_ledger import active_usage_ledger
 from vidbyte.context.window import ContextWindowAlgorithm
 from vidbyte.middleware import AgentMiddleware
 
@@ -167,6 +168,11 @@ class BaseActorRuntime(ABC):
         assert self._handle is not None
         try:
             raw_result = await self._handle.invoke(prompt, context=actor_context, **call_options)
+            # @intent actor-calls-are-metered
+            # Every actor call is billed, so it lands on the run's usage ledger; the actor task copied that ledger when it was spawned.
+            ledger = active_usage_ledger()
+            if ledger is not None:
+                ledger.record_call(raw_result)
             output = self._handle.extract_text(raw_result)
             self._end_semantic_span(span, output=output)
             return output
