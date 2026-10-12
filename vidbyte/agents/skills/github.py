@@ -46,6 +46,7 @@ from vidbyte.lib.enums.skills import (
     SkillSourceType,
     SkillUnavailableReason,
 )
+from vidbyte.lib.http.parser import HttpResponseParser
 from vidbyte.lib.http.transport import HttpResponse
 
 
@@ -111,7 +112,7 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
         if token is not None and not (token.isascii() and token.isprintable()):
             refused = SkillResolution(reason=SkillUnavailableReason.AUTH_FAILED, detail="The GitHub token holds a character an HTTP header cannot carry (only printable ASCII is allowed); fix the entry's token= or GITHUB_TOKEN.")
             return (refused,) * len(entries)
-        auth = {"authorization": f"Bearer {token}"} if token else {}
+        auth = HttpResponseParser().bearer_headers(token) if token else {}
         # Pin the ref to one commit so every file comes from the same
         # snapshot; a full SHA needs no lookup.
         sha = await self._commit_sha(first, auth)
