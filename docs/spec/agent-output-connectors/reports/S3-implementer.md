@@ -1,180 +1,14 @@
 # S3 · Implementer report: agent-output-connectors
 
-**Status: BLOCKED at §12.3 row 27 (P4).** The `BaseAgent._generate_reply` delivery block that D-3/D-4 prescribe regresses lint rule S008. The repo's hard rules (no baseline raise, no suppression) and the spec (inline block, no new `BaseAgent` method, R-13) cannot both hold, so this needs a decision.
+- **Status:** DONE. All 36 §12.3 rows are built, and every local gate passes.
+- **Draft PR:** https://github.com/cerredz/Vidbyte-SDK/pull/882 (draft, placeholder body).
+- **Spec:** r5, with frontmatter `status: implemented` and `pr:` set. §17 has the S3 row and an "Implementation deviations" list.
+- **Dispatched CI (not waited on):** `ci.yml` run 38194285572 and `static-policy.yml` run 38194287162, both on `feat/agent-output-connectors`.
+- **Row-27 blocker (S3-1):** resolved by the orchestrator's option 2, as spec r5 describes. `_generate_reply` measures 10 / 9 / 50, the same as the base commit, so S008 stays at its baseline of 19.
 
-- Branch `feat/agent-output-connectors`, base `db3988ff`.
-- Started at `3e43d27a`; 26 row commits so far, plus this report. Nothing has been pushed and no PR exists, because half-done work is not pushed.
-- Inputs read: spec r4, test-plan, request, code-map. No other file under `docs/` was read.
-- The drift check against `origin/main` found 7 new commits (#865–#871). Of the spec's paths, only `vidbyte/lib/dataclasses/trace.py` changed, and that change is unrelated. No structural drift.
+## Commits (S3 only, in §12.6 order)
 
-## Blocker
-
-### What happens
-
-Spec row 27 tells me to add the inline block, under one narration comment, after `self._assert_schema_satisfied(result)`:
-
-```
-if self.outputs:
-    try:
-        await OutputDispatcher.deliver(...)
-    except BaseException as exc:
-        <clear the queued prompts>
-        <notify the session>
-        raise
-```
-
-S008 (`bounded-function-complexity`: ruff C901 > 10, PLR0912 > 12, PLR0915 > 50) is ratcheted at 19 findings. `_generate_reply` on the base commit already sits exactly at two of its limits. Measured with `ruff --select C901,PLR0912,PLR0915` and the limits set to 1, so the raw counts show:
-
-| `_generate_reply` variant | C901 (limit 10) | PLR0912 (limit 12) | PLR0915 (limit 50) | S008 |
-|---|---|---|---|---|
-| base commit `db3988ff` | 10 | 9 | 50 | 19 = allowance |
-| spec row 27 inline block | 12 | 11 | 57 | **21, REGRESSED** |
-| block moved into a new `_deliver_outputs` method, one call line | 10 | 9 | 51 | 20, REGRESSED |
-| new `_deliver_outputs` method, plus the existing 3-line last-trace block extracted into `_record_last_trace` | 9 | 8 | 49 | 19, passes |
-
-Any statement added to `_generate_reply` regresses PLR0915. The only versions that pass without a baseline change also remove existing statements from that function.
-
-### Evidence
-
-The full lint run with the spec's block applied (`python lint/run.py`; everything was `git add`-ed first):
-
-```
-S008   bounded-function-complexity                21     19 REGRESSED
-S008 REGRESSED: 21 finding(s), allowance 19.
-SDK-LINT: FAIL
-```
-
-`python lint/run.py --rule S008 --all` reports two findings that are not in the baseline:
-
-```
-vidbyte/agents/base.py line 826 violates C901: `_generate_reply` is too complex (12 > 10).
-vidbyte/agents/base.py line 826 violates PLR0915: Too many statements (57 > 50).
-```
-
-With the block applied, everything else passed:
-- the feature pack: 307 passed, and the 6 failures all wait on P5 docs and root exports;
-- the touched area's existing suites: 292 passed.
-
-### Options
-
-1. **Keep the spec's design and raise the S008 baseline from 19 to 21.**
-   - The spec stays as written: D-3, D-4, and R-13 hold, and `base.py` gets 16 added lines.
-   - Cost: two new debt findings in the SDK's most central function. It needs your explicit permission, because the hard rules say "never raise a lint baseline" and "never touch `lint/baseline.json`".
-2. **Move delivery into one new `BaseAgent._deliver_outputs(reply, metadata)` method, and extract the existing last-trace lines into `_record_last_trace(metadata)`.**
-   - The extracted lines are `base.py` 917–919 on the base commit: `if self._trace_option ... self.last_trace = ...`. The extraction does not change behavior.
-   - Every gate stays green with no baseline change. The measured counts are 9 / 8 / 49.
-   - Cost: this reverses D-3/D-4 and review R-13 ("BaseAgent gains no new method").
-     - The call path becomes `_generate_reply` → `_deliver_outputs` → `_notify_session_exception`, which is two hops. That is the same shape as the existing `_assert_schema_satisfied`.
-     - It touches three lines of `_generate_reply` that no spec row lists.
-3. **Send the design back to S1** for a different place to put delivery.
-   - Cost: a spec round-trip. A spec-level change also has to keep INV-26 (delivery sits between the schema check and the drain) and INV-22 (no added await when `outputs` is empty).
-
-**RECOMMENDATION: Option 2.** S008 exists to stop exactly this function from growing, and the hard rules forbid baseline changes. Option 2 keeps INV-1, INV-7, INV-20, INV-22, and INV-26 unchanged and adds no new concept. Its helper has the same shape as `_assert_schema_satisfied`. Its only cost is overturning R-13's "no new method" preference.
-
-### How to resume
-
-Rows 27, 28, and 30 were implemented and tested, then reverted to a clean tree, because 28 and 30 pass `outputs=` to `BaseAgent` and fail without row 27.
-
-- **Under option 1:** apply the patch below unchanged.
-- **Under option 2:** apply it, then move the `if self.outputs: try/except` block into `_deliver_outputs` and the three last-trace lines into `_record_last_trace`. Keep the narration comment and the `# @intent failed-run-leaves-no-queued-prompts` block in the helper.
-
-<details><summary>WIP patch for rows 27, 28, and 30 (apply with <code>git apply</code>)</summary>
-
-```diff
-diff --git a/vidbyte/agents/base.py b/vidbyte/agents/base.py
---- a/vidbyte/agents/base.py
-+++ b/vidbyte/agents/base.py
-@@ -34,6 +34,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
- from typing import TYPE_CHECKING, Any
- 
- from vidbyte.agents.mixins import McpAttachableMixin
-+from vidbyte.agents.output.connector import OutputConnector
-+from vidbyte.agents.output.dispatcher import OutputDispatcher
- from vidbyte.agents.pricing import UsageRollup, UsageTracker
- from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
- from vidbyte.agents.contracts import floors as contract_floors
-@@ -112,6 +114,7 @@ class BaseAgent(McpAttachableMixin):
-         handoff: Handoff | None = None,
-         trace_option: TraceOption | None = None,
-         fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None,
-+        outputs: Sequence[OutputConnector] = (),
-     ) -> None:
-         if not name:
-             raise AgentExecutionError("Agent name cannot be empty.")
-@@ -229,6 +232,7 @@ class BaseAgent(McpAttachableMixin):
-         self.max_tool_rounds = self.agent_loop_settings.max_iterations
-         self.system_prompt = system_prompt
-         self.middleware = tuple(middleware)
-+        self.outputs = OutputDispatcher.connectors(outputs)
-         self.description = description or "General purpose agent."
-         # @intent name-lists-reject-bare-strings
-         # A bare string is itself a sequence, so tuple() would hand the manager one capability per character.
-@@ -541,7 +545,7 @@ class BaseAgent(McpAttachableMixin):
-         )
- 
-     @classmethod
--    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None) -> BaseAgent:
-+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, outputs: Sequence[OutputConnector] = ()) -> BaseAgent:
-         """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
-         from vidbyte.sessions.serialization import SessionSerializer
-         serializer = SessionSerializer()
-@@ -569,6 +573,7 @@ class BaseAgent(McpAttachableMixin):
-             trace=trace,
-             output_schema=cls._restore_output_schema(state, output_schema),
-             permission_policy=cls._restore_permission_policy(state),
-+            outputs=outputs,
-         )
-         child.history = [serializer.message_from_dict(item) for item in state.history]
-         cls._record_resume_tool_mismatch(child, state.tool_names)
-@@ -929,6 +934,17 @@ class BaseAgent(McpAttachableMixin):
-         # @intent failed-run-leaves-no-queued-prompts
-         # A run that fails its schema raises before the drain, so its queued follow-ups never run.
-         self._assert_schema_satisfied(result)
-+        # Deliver the validated reply to the agent's outputs, if any.
-+        if self.outputs:
-+            try:
-+                await OutputDispatcher.deliver(self.outputs, reply, metadata)
-+            except BaseException as exc:
-+                # @intent failed-run-leaves-no-queued-prompts
-+                # A failed or cancelled delivery skips the drain: its
-+                # follow-ups never run, and the session sees the error.
-+                self._queued_prompts.clear()
-+                self._notify_session_exception(exc)
-+                raise
-         if self._queued_prompts and not self._draining_queued_prompts:
-             await self._drain_queued_prompts(metadata)
-         return reply
-diff --git a/vidbyte/agents/fork.py b/vidbyte/agents/fork.py
---- a/vidbyte/agents/fork.py
-+++ b/vidbyte/agents/fork.py
-@@ -78,6 +78,9 @@ class AgentForker:
-             trace_option=settings.trace_option if settings.trace_option is not None else agent._trace_option,
-             # Backups the parent named by bare model name keep the parent's provider, even when the child switches.
-             fallback=cls._fallback(agent, settings, child_provider, parent_provider),
-+            # @intent forks-never-deliver
-+            # SDK-built forks never post to the parent's outputs.
-+            outputs=(),
-         )
-         # A dropped tool stays dropped for every later fork, including tools the child bridges from MCP servers.
-         child._fork_dropped_tool_names = agent._fork_dropped_tool_names | frozenset(settings.drop_tools)
-diff --git a/vidbyte/agents/jev/agent.py b/vidbyte/agents/jev/agent.py
---- a/vidbyte/agents/jev/agent.py
-+++ b/vidbyte/agents/jev/agent.py
-@@ -99,6 +99,7 @@ class JevAgent(BaseAgent):
-             model_name=settings.model_name,
-             temperature=settings.temperature,
-             timeout_seconds=settings.timeout_seconds,
-+            outputs=settings.outputs,
-         )
- 
-     @property
-```
-
-Row 30 also adds one header sentence to `vidbyte/agents/jev/agent.py`, appended to the end of `COMMON MODIFICATION PATTERNS`: "Output connectors come only from JevAgentSettings.outputs; the bulk-work, clone, swarm, and continuation agents built here never get them."
-
-</details>
-
-## Commits so far, in §12.6 order
+`git log origin/main..HEAD --oneline` also lists the S0–S2 spec and test commits, which are not repeated here.
 
 | SHA | Row | Subject |
 |---|---|---|
@@ -188,99 +22,141 @@ Row 30 also adds one header sentence to `vidbyte/agents/jev/agent.py`, appended 
 | `341ffcd7` | 6 | `OutputText` |
 | `4035d639` | 7 | `OutputHttp` and `OutputSmtp` |
 | `7c53507e` | 4 | provider base exports |
-| `26bd9eed` … `5b6a18c7` | 8–18 | the eleven connectors, one commit each |
+| `26bd9eed`, `b12daf3d`, `ff2fd34b`, `ee34d69c`, `3a436e71`, `44d46b76`, `5629fdaa`, `873cc1c7`, `eef057a1`, `ccb53d7d`, `5b6a18c7` | 8–18 | Slack, Discord, Teams, Google Chat, Telegram, email, GitHub, Linear, Jira, Notion, webhook |
 | `64b32f9b` | 4 | connector exports |
 | `a0b1c0cd` | 21 | `OutputConnector` and `OutputShaping` |
 | `960f626d` | 22 | `OutputDispatcher` |
 | `f1e767b9` | 20 | the `vidbyte.agents.output` package (18 names) |
 | `d0e34971` | 29 | `JevAgentSettings.outputs` |
-
-## §12.3 checklist
-
-**Done (P1–P3 complete; P4 partial):**
-- [x] Rows 1, 2, 3, 24, 25, 26 (P1).
-- [x] Rows 4, 5, 6, 7 (P2).
-- [x] Rows 8–18 and row 4's connector exports (P3).
-- [x] Rows 21, 22, 20, 29 (P4).
-
-**Blocked:**
-- [ ] Row 27 (`base.py`).
-
-**Reverted until row 27 lands:**
-- [ ] Row 28 (`fork.py`).
-- [ ] Row 30 (`jev/agent.py`).
-
-**Not started (P5):**
-- [ ] Rows 31 and 32: root exports, then the contract regeneration.
-- [ ] Rows 19, 23, 33–36: the two READMEs, the agents, Jev, and lib README edits, and REPO_MAP.
+| `1b26a42b` | — | BLOCKED-round report |
+| `4346dfb5` | 27 | `outputs=` on `BaseAgent`, `_deliver_outputs`, `_record_last_trace` (cites S008, S3-1) |
+| `498a566c` | 28 | forks get `outputs=()` |
+| `7a17fc09` | 30 | `JevAgent` passes `settings.outputs` |
+| `839e8e33` | 31 | 17 root exports |
+| `7fedbbc5` | 32 | `contracts/sdk-public-api.json` regenerated (separate commit, C016) |
+| `90db7eb1` | 19 | `vidbyte/lib/outputs/README.md` |
+| `f03454bd` | 23 | `vidbyte/agents/output/README.md` |
+| `b0b9378a` | 33 | `vidbyte/agents/README.md` section and Key Modules line |
+| `7838376e` | 34 | `vidbyte/agents/jev/README.md` paragraph |
+| `154339bb` | 35 | `vidbyte/lib/README.md` Key Modules line |
+| `fa430c8f` | 36 | `REPO_MAP.md` folder entries |
+| `f55f3a7f` | — | spec frontmatter: draft PR and `status: implemented` |
+| `58238a64` | — | spec §17 S3 row and implementation deviations |
 
 ## Data flow, as built
 
-- **The agent side (`vidbyte/agents/output/`):**
-  - `OutputDispatcher.connectors` validates `outputs`. It rejects a str, bytes, or Mapping; anything non-iterable (`from exc`); a class; a non-connector; and the same instance twice. Every message contains the word `outputs`.
-  - `OutputDispatcher.deliver` works in this order:
-    1. It runs `OutputShaping.is_deliverable`. If that is false, every connector gets a SKIPPED receipt.
-    2. Otherwise it gathers `_deliver_one` for every connector with `return_exceptions=True` and re-raises any non-`Exception` result.
-    3. It builds the receipts with `_receipt` over `zip(strict=True)` and stores them at `metadata["deliveries"]`.
-    4. If any receipt failed, it raises `OutputDeliveryError` chained `from` the first `Exception`.
-  - `_deliver_one` runs render, or else `OutputShaping.content`, then checks the type. It then runs `asyncio.wait_for(send, OUTPUT_DELIVERY_DEADLINE_SECONDS)`, reading the module global at call time. A `TimeoutError` becomes FAILED `network`.
-- **The provider side (`vidbyte/lib/outputs/`):**
-  - Each connector resolves its credential once (`OutputArguments.credential`).
-  - In `send`, it builds one `OutputRequest` and calls `OutputHttp.post`. `EmailOutput` instead builds an `EmailMessage` and runs `asyncio.to_thread(OutputSmtp.send, ...)`.
-  - `OutputHttp.post` is the only caller of `HttpTransport().request(...)`, with exactly the §9.2 arguments.
-  - The INV-11 code grammar lives in `_error_code`. The D-21 link check lives in `_link`, which adds the prefix before the `https://` check.
+1. **Construction.** `BaseAgent(outputs=...)`, or `JevAgentSettings(outputs=...)` passed on by `JevAgent`, runs `OutputDispatcher.connectors`, which validates the value into a tuple of distinct connector instances (`vidbyte/agents/output/dispatcher.py`, `vidbyte/agents/base.py`, `vidbyte/agents/jev/settings.py`, `vidbyte/agents/jev/agent.py`).
+2. **Credentials.** Each connector resolves its credential once in `__init__` through `OutputArguments`: the explicit argument first, then the environment variable (`vidbyte/lib/outputs/base.py`).
+3. **Forks and restore.** `AgentForker.fork` passes `outputs=()` (`vidbyte/agents/fork.py`). `BaseAgent.restore(state, outputs=...)` re-attaches only what the caller passes. `export_state` is unchanged.
+4. **The run.** `_generate_reply` records the reply, calls `_record_last_trace(metadata)`, runs the handoff, notifies the session, and runs `_assert_schema_satisfied`. Then, `if self.outputs:`, it awaits `self._deliver_outputs(reply, metadata)`, before the queued-prompt drain (`vidbyte/agents/base.py`).
+5. **Failure handling.** `_deliver_outputs` awaits `OutputDispatcher.deliver(self.outputs, reply, metadata)`. On any `BaseException`, it clears `_queued_prompts`, calls `_notify_session_exception`, and re-raises.
+6. **Dispatch.** `OutputDispatcher.deliver` works in this order:
+   1. The skip rule (`OutputShaping.is_deliverable`): a blank reply, or a stop reason other than `final_response` or `is_done`, gives every connector a SKIPPED receipt.
+   2. It gathers `_deliver_one` for every connector with `return_exceptions=True` and re-raises any non-`Exception` result.
+   3. It builds the receipts in configured order and stores them at `metadata["deliveries"]`.
+   4. If any receipt failed, it raises `OutputDeliveryError` chained from the first `Exception`.
+7. **One connector.** `_deliver_one` runs `render`, or `OutputShaping.content`, and checks that the result is `OutputContent`. It then runs `asyncio.wait_for(send, OUTPUT_DELIVERY_DEADLINE_SECONDS)`; a timeout becomes FAILED `network` (`vidbyte/agents/output/connector.py`).
+8. **HTTP send.** Each HTTP connector's `send` shapes text with `OutputText` and builds one `OutputRequest`. `OutputHttp.post` sends it through `HttpTransport().request` with the §9.2 arguments, and maps the result to a receipt through `_error_code` and `_link` (`vidbyte/lib/outputs/*.py`, `delivery.py`, `text.py`).
+9. **Email send.** `EmailOutput.send` builds an `EmailMessage` and runs `asyncio.to_thread(OutputSmtp.send, ...)`, which uses STARTTLS, or implicit TLS on port 465 (`email.py`, `delivery.py`).
+10. **Public surface.** `vidbyte.agents.output` exports 18 names and the root `vidbyte` exports 17. `contracts/sdk-public-api.json` lists 623 exports.
 
-## Deviations from the spec (all small; none changes behavior or the public API)
+## §12.3 checklist
 
-1. **S054/S105 false positives** ("possible hardcoded password" on names containing `TOKEN`).
-   - The spec's `GOOGLE_CHAT_MENTION_TOKEN = "<users/"`, `NOTION_MENTION_TOKEN = "<mention-"`, and `OUTPUT_ERROR_TOKEN_PATTERN = r"[a-z]..."` raised S054 from 3 to 6.
-   - **Mention constants:** renamed to `GOOGLE_CHAT_MENTION_PREFIX` and `NOTION_MENTION_PREFIX`. No test references them, and "prefix" is the more accurate name.
-   - **`OUTPUT_ERROR_TOKEN_PATTERN`:** the test pins this name and value, so it is now derived from a new named bound, `OUTPUT_ERROR_TOKEN_MAX_CHARS = 64`: `rf"[a-z][a-z0-9_]{{0,{OUTPUT_ERROR_TOKEN_MAX_CHARS - 1}}}"`. The value is identical and the contract test passes.
-   - No suppression and no baseline change. `lib/constants/outputs.py` now has 48 names in `__all__` (the spec listed 47, plus this one).
-2. **`OutputArguments.optional_callable`:** the parameter is typed `Callable[[AgentMessage], OutputContent] | None` instead of `object`. This avoids a `cast` under `disallow_any_generics`, and the runtime check is unchanged.
-3. **`OutputArguments.identifier`:** returns the canonical dashed lowercase UUID, `str(uuid.UUID(...))`. The test ids are already canonical.
-4. **`OutputShaping.content`:** ends with `OutputContent(title or reply.sender, body)`. When there is no structured title, the first-line rule applies only if `structured is None`, exactly as INV-13 says. The `or reply.sender` also covers a heading-only first line such as `"###"`, which would otherwise raise.
-5. **`OutputRequest` header keys must be lowercase.** This is validated, as §9.1's "keys lowercase" asks.
+- [x] P1: rows 1, 2, 3, 24, 25, 26.
+- [x] P2: rows 4, 5, 6, 7.
+- [x] P3: rows 8–18, and row 4's connector exports.
+- [x] P4: rows 21, 22, 20, 29, 27, 28, 30.
+- [x] P5: row 31, then row 32 in its own commit, then rows 19, 23, 33, 34, 35, 36.
 
-**Pre-existing, not changed:** `vidbyte/lib/errors/__init__.py` already had an I001 (unsorted import block) on the base commit. The new name went in at its alphabetical position, and the untouched block was not re-sorted (NG-11 spirit). S051 is not regressed.
+**Mechanical check.** Every CREATE row shows `A` and every MODIFY row shows `M` in `git diff --name-status db3988ff..HEAD`. The diff contains no other file outside the spec folder and the S2 tests.
+
+**§12.4.** Every item is satisfied, except one pre-existing exception. On the base commit, `vidbyte/lib/errors/__init__.py` already reports I001 at line 22 (reproduced on `git show db3988ff:...`). It was left unsorted. Other checks:
+- **I001 filter:** clean for every new file and for `jev/settings.py`, `errors/base.py`, `enums/__init__.py`, and `vidbyte/__init__.py`.
+- **72-column comments:** the awk check prints nothing for any new file or any added comment line.
+- **Imports:** nothing under `vidbyte/lib/` imports `vidbyte.agents` at runtime, and `vidbyte/agents/output/` imports nothing from `vidbyte.agents` outside itself.
+- **HTTP clients:** no `httpx`, `requests`, `aiohttp`, `http.client`, or `urllib.request` under `vidbyte/lib/outputs/`.
+- **Diff scan:** no `TODO`, `noqa`, or `type: ignore` in the diff.
+
+**§12.5.** Every action is done. `llms.txt` and `artifacts/file_index.md` are untouched.
+
+**§6.2.** No Proof cell was blank. All 26 already name tests, and AC-22 names the gate commands, so there was no SHA to fill in.
+
+## Deviations (also recorded under spec §17)
+
+1. **`OutputArguments.optional_callable`:** the parameter is typed `Callable[[AgentMessage], OutputContent] | None` instead of `object` (§8.5). This avoids a `cast` under mypy's `disallow_any_generics`, and the runtime check is unchanged. The orchestrator accepted it.
+2. **`OutputArguments.identifier`:** returns the canonical lowercase, dashed UUID.
+3. **`OutputShaping.content`:** falls back to `reply.sender` whenever no title is found (`title or reply.sender`).
+4. **`OutputRequest`:** rejects header keys that are not lowercase.
+5. **Pre-existing I001 in `vidbyte/lib/errors/__init__.py`:** left as it was on the base commit. S051 is at 258 against a baseline of 259.
+
+The `*_MENTION_PREFIX` names and `OUTPUT_ERROR_TOKEN_MAX_CHARS` were deviations in the BLOCKED round. Spec r5 adopted them, so they are no longer deviations.
 
 ## Files outside §12.3
 
-None.
+None, apart from the spec folder itself: `spec.md` frontmatter and §17, and this report.
 
 ## Budget (§8.4)
 
-- **New `.py` files:** 21 of 21. Both READMEs are still pending.
-- **Classes:** 26 of 26.
-  - 16 provider: `BaseOutput`, `OutputArguments`, `OutputText`, `OutputHttp`, `OutputSmtp`, and the 11 connectors.
-  - 3 agent-side: `OutputConnector`, `OutputShaping`, `OutputDispatcher`.
-  - 4 records, 2 enums, and 1 error.
-- **New dependencies:** 0.
-- **`vidbyte.agents.output.__all__`:** 18 names. Root exports are pending (row 31).
+- **New files:** 23 of 23 (21 `.py` and 2 READMEs).
+- **Classes:** 26 of 26 in 19 modules. That is 25 classes in 18 new modules, plus `OutputDeliveryError` in `vidbyte/lib/errors/base.py`.
+- **New dependencies:** 0. `pyproject.toml` is unchanged.
+- **Exports:** 17 root exports and 18 names in `vidbyte.agents.output`.
+- **`vidbyte/agents/base.py`:** +29 / −4 lines against a limit of 35 added lines, including the 3 moved last-trace lines.
+- **Module sizes:** the largest new module is 149 lines; connector modules are 77 lines at most.
 
-## Gates on the committed HEAD (rows 27, 28, and 30 reverted)
+## Gates (final lines)
 
-- `python lint/run.py` (everything staged), final lines:
-  ```
-  S063 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S063 --all
+1. **Feature pack:** `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors`
+   ```
+   313 passed in 1.71s
+   ```
+2. **Touched suites:** fork isolation, durable sessions, fork tool, Jev agent, queued-prompt usage, both restore suites, session failures, workflow forks, the CodingAgent contract, and the README size limit.
+   ```
+   294 passed in 2.36s
+   ```
+3. **S008 measurement** (`ruff --select C901,PLR0912,PLR0915` with all limits set to 1), `_generate_reply`:
+   ```
+   C901 `_generate_reply` is too complex (10 > 1)
+   PLR0912 Too many branches (9 > 1)
+   PLR0915 Too many statements (50 > 1)
+   ```
+   The base commit measures the same 10 / 9 / 50.
+4. **Lint:** `python lint/run.py`
+   ```
+   S063 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S063 --all
 
-  S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
+   S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
 
-  SDK-LINT: PASS
-  ```
-  S008 shows `19 19 RATCHETED`. S054 shows `3 3 RATCHETED`.
-- `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors`: `45 failed, 268 passed in 1.71s`. Every failure waits on a row not yet built:
-  - 37 × `BaseAgent.__init__() got an unexpected keyword argument 'outputs'` (row 27);
-  - 2 × `'... object has no attribute 'outputs'` (rows 27 and 30);
-  - 1 × root `ImportError` and 1 × root-names assertion (row 31);
-  - 4 × README or doc assertions (rows 19, 23, 33, and 36).
-- The touched area's existing suites: fork isolation, durable sessions, fork tool, Jev agent, queued-prompt usage, the two restore suites, session failures, workflow forks, and the CodingAgent contract. Result: `292 passed in 2.32s`, both with and without the WIP patch.
-- `python -m mypy --config-file lint/mypy.ini` on the new lib modules prints no errors for them. S009 shows `349 350 IMPROVED`.
-- `scripts/run_ci.py` was not run, because the work is incomplete. Push, CI dispatch, and the draft PR were not done, by design.
+   SDK-LINT: PASS
+   ```
+   S008 shows `19 19 RATCHETED`. S054 shows `3 3 RATCHETED`. S009 shows `349 350 IMPROVED`. A009 is `0 0 CLEAN`. No rule is REGRESSED, and no baseline was touched.
+5. **Source stage:** `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`
+   ```
+   ====================== 3516 passed, 12 skipped in 29.73s ======================
+   CI passed.
+   ```
+6. **Full gate:** `python scripts/run_ci.py` with PYTHONPATH unset (lint, compileall, the context and trace checks, pytest, sdist and wheel build, isolated install, and smoke)
+   ```
+   No broken requirements found.
+   Installed vidbyte-sdk 0.2.1 passed smoke checks.
+   CI passed.
+   ```
+7. **Contract check:** `python scripts/generate-sdk-public-api.py --check`
+   ```
+   contracts/sdk-public-api.json is current at 839e8e33a369743d0643463137f05a6b5eb39282 (vidbyte-sdk 0.2.1, 623 exports).
+   ```
+8. **Semgrep 1.170.1 (§11):** run from a dedicated scratchpad venv, with the venv's `Scripts` first on PATH, because the global install is broken by mcp 2.x.
+   ```
+   1/1: ✓ All tests passed
+   Ran 1 rule on 896 files: 0 findings.
+   ```
 
 ## Tricky parts for the next agent
 
-- **72-column comments.** The limit counts the indentation: `awk 'length($0) > 72' <file> | grep -E '^\s*#'` must print nothing. Most of the new comment blocks needed rewrapping.
-- **Import sorting.** Ruff isort wraps an import once it is longer than 88 characters. Run `ruff check --select I001 --fix` only on files you created. Never run it on `base.py` or `errors/__init__.py`, which have pre-existing findings.
-- **`email.py` in `vidbyte/lib/outputs/`** does not shadow the standard library, because imports are absolute. `delivery.py` imports `smtplib` as a module so that the test fakes can patch `delivery.smtplib.SMTP`.
-- **Python's `write_text` on Windows writes CRLF.** Git's autocrlf normalizes it, so diffs stay clean.
+- **`_generate_reply` is exactly at the S008 limit (10 / 9 / 50).** Any added statement or branch there regresses S008. The `if self.outputs:` guard is what keeps INV-22 (an agent without outputs adds no await). The unguarded call would measure 9 / 8 / 49.
+- **`_deliver_outputs` calls `_notify_session_exception` itself,** because the runtime `try` in `_generate_reply` has already closed. AC-23(b) proves this for an agent run directly. `Session.run` also captures the failure, and AC-23(a) checks it is captured once.
+- **Cancellation:** `deliver` re-raises a `CancelledError` that `gather` returns, and `_deliver_outputs` catches it as a `BaseException`, clears the run's queued prompts, and re-raises (AC-18).
+- **The delivery deadline** is read from the module global at call time, so tests can monkeypatch `dispatcher.OUTPUT_DELIVERY_DEADLINE_SECONDS`.
+- **README facts:** `vidbyte/lib/outputs/README.md` states only facts verified in spec §9.2's catalog (a). For example, it names only Gmail's SMTP host, because the other hosts were not verified; it links each provider's SMTP page instead.
+- **Pre-existing, not ours:** `python scripts/test-github-content-readmes.py` reports 110/114, with all 4 failures in `vidbyte/harnesses/README.md`. That script is not part of `run_ci`.
+- **Windows line endings:** the working tree is CRLF and git normalizes it. New READMEs were written with LF and are normalized on commit.
