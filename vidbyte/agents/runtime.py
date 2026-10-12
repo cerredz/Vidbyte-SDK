@@ -403,6 +403,7 @@ class AgentRuntime:
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
             state.run_state["_speed_fallback_index"] = fallback_index
+            state.run_state["_speed_call_dispatched_at"] = call_dispatched_at
             try:
                 raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(
                     handle,
@@ -469,7 +470,7 @@ class AgentRuntime:
             self.speed_tracker.record_call(
                 RecordModelCallInput(
                     response=raw_result,
-                    dispatched_at=call_dispatched_at,
+                    dispatched_at=state.run_state.pop("_speed_call_dispatched_at", call_dispatched_at),
                     input_tokens=usage_record.usage.input_tokens if usage_record is not None else None,
                     output_tokens=usage_record.usage.output_tokens if usage_record is not None else None,
                     retry_count=max(AGENT_SPEED_ZERO_COUNT, state.model_call_count - model_call_count_before - AGENT_SPEED_FIRST_INDEX),
@@ -777,6 +778,9 @@ class AgentRuntime:
                 if decision.action is MiddlewareAction.RETRY:
                     if decision.sleep_seconds:
                         await self._sleep_for_model_retry(decision.sleep_seconds, retry_index=retry_ordinal + AGENT_SPEED_FIRST_RETRY_INDEX)
+                    # @intent retried-success-times-its-own-attempt
+                    # The retried attempt starts after the backoff, so its success record never overlaps the failure or the wait.
+                    state.run_state["_speed_call_dispatched_at"] = self.speed_tracker.now()
                     retry_ordinal += AGENT_SPEED_FIRST_INDEX
                     continue
                 if decision.action is MiddlewareAction.ABORT_RUN:

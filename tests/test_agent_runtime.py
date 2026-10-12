@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import unittest
 from typing import Literal
+from unittest.mock import patch
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,7 @@ from vidbyte.agents import AgentRuntime
 from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.lib.dataclasses.middleware import MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.tools import ToolActivity, ToolParameter
@@ -927,6 +929,42 @@ class SlowTool(BaseTool):
         return ToolResult.success("slow_tool", "should not reach here")
 
 
+class RetryOnceMiddleware(AgentMiddleware):
+    """Retry the first model error after a fixed backoff, then let later errors propagate."""
+
+    def __init__(self, sleep_seconds: float) -> None:
+        self._sleep_seconds = sleep_seconds
+        self.retried = False
+
+    async def on_model_error(self, ctx) -> MiddlewareDecision:
+        if self.retried:
+            return MiddlewareDecision.continue_()
+        self.retried = True
+        return MiddlewareDecision.retry("transient", sleep_seconds=self._sleep_seconds)
+
+
+class FlakyModelOnFakeClock:
+    """Model whose first attempt fails; every attempt and sleep advances a manual clock instead of wall time."""
+
+    def __init__(self, attempt_seconds: float) -> None:
+        self._attempt_seconds = attempt_seconds
+        self._now = 0.0
+        self.attempts = 0
+
+    def now(self) -> float:
+        return self._now
+
+    async def sleep(self, seconds: float) -> None:
+        self._now += seconds
+
+    async def invoke(self, runner: object, prompt: str, **kwargs: object) -> FakeResponse:
+        self._now += self._attempt_seconds
+        self.attempts += 1
+        if self.attempts == 1:
+            raise RuntimeError("transient provider failure")
+        return _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]})
+
+
 class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Verifies AgentRuntime records model-call and tool-call speed through the real loop."""
 
@@ -1011,6 +1049,35 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(write_tool.executed)
                 write_stats = next(stats for stats in runtime.speed_tracker.rollup().tool_stats if stats.tool_name == "write")
                 self.assertEqual((write_stats.tool_call_count, write_stats.failed_tool_call_count), (1, 1))
+
+    async def test_retried_success_is_timed_from_its_own_attempt_after_the_backoff(self) -> None:
+        """[Regression] The success after a retry was timed from the first attempt, overlapping the failure and backoff."""
+        model = FlakyModelOnFakeClock(attempt_seconds=0.2)
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([]),
+            permission_policy=PermissionPolicy(),
+            middleware=[RetryOnceMiddleware(sleep_seconds=0.5)],
+            speed_tracker=AgentSpeedTracker(clock=model.now),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        # The retry backoff advances the fake clock instead of sleeping for real.
+        with patch.object(runtime.middleware, "sleep", model.sleep):
+            await runtime.arun(
+                "task",
+                handle=RunnerHandle(runner=model, provider="openai", invoke=model.invoke, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                context=context,
+            )
+
+        stats = runtime.speed_tracker.rollup()
+        failed = next(call for call in runtime.speed_tracker.calls if not call.succeeded)
+        succeeded = next(call for call in runtime.speed_tracker.calls if call.succeeded)
+        self.assertGreaterEqual(succeeded.dispatched_at, failed.completed_at)
+        self.assertGreaterEqual(succeeded.dispatched_at, stats.retry_waits[0].completed_at)
+        self.assertAlmostEqual(succeeded.duration_ms, 200.0)
+        self.assertAlmostEqual(stats.run_stats.overlap_ms, 0.0)
 
 
 class AnswerRunner:
