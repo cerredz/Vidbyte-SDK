@@ -121,7 +121,10 @@ class CreateHandoffTool(BaseTool):
         if raw_extra is not None and (extra := str(raw_extra).strip()):
             instructions_parts.append(f"Instructions: {extra}")
         instructions = "\n".join(instructions_parts) or None
-        return Handoff(title=title, sections=normalized, instructions=instructions, primitive_id=primitive_id)
+        # @intent tool-written-handoff-is-filled
+        # The sections hold content the model produced, so build the handoff through Handoff.fill like the
+        # auto-handoff path does; otherwise handoff_is_filled() reports a written handoff as an empty spec.
+        return Handoff(title=title, instructions=instructions, primitive_id=primitive_id).fill(normalized)
 
     def _next_primitive_id(self) -> str:
         """Return a stable, monotonic primitive id scoped to the bound agent's run."""
