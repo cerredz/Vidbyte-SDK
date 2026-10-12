@@ -4,7 +4,7 @@ PURPOSE: Defines OutputDispatcher, which links an agent's finished reply to each
 ROLE IN CODEBASE: BaseAgent validates outputs with connectors() and calls deliver() after the schema check; callers also use deliver() to resend failed outputs.
 ARCHITECTURE NOTE: Stateless static methods; connectors run concurrently, each under its own deadline, and receipts keep configured order.
 COMMON MODIFICATION PATTERNS: Keep provider details out of here; a new destination is a new class in vidbyte/lib/outputs/.
-KNOWN EDGE CASES: Cancellation propagates unchanged; an ordinary exception from render or send fails only that connector as unexpected:<Type>.
+KNOWN EDGE CASES: Cancellation propagates unchanged; an ordinary exception from render or send, or a value of the wrong type from either, fails only that connector as unexpected:<Type>.
 RELATED DOCS: vidbyte/agents/output/README.md
 TESTS: tests/features/agent_output_connectors/test_output_connectors_dispatch.py
 """
@@ -23,7 +23,7 @@ from vidbyte.lib.constants.outputs import (
 )
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.outputs import DeliveryReceipt, OutputContent
-from vidbyte.lib.enums.outputs import DeliveryStatus
+from vidbyte.lib.enums.outputs import DeliveryStatus, OutputDestination
 from vidbyte.lib.errors import ConfigurationError, OutputDeliveryError
 
 
@@ -44,6 +44,8 @@ class OutputDispatcher:
                 raise ConfigurationError(f"outputs[{index}] is the class {item.__name__}; pass an instance such as {item.__name__}(...).")
             if not isinstance(item, OutputConnector):
                 raise ConfigurationError(f"outputs[{index}] is a {type(item).__name__}, not an output connector.")
+            if not isinstance(item.destination, OutputDestination):
+                raise ConfigurationError(f"outputs[{index}].destination must be an OutputDestination, got {type(item.destination).__name__}")
         if len({id(item) for item in items}) != len(items):
             raise ConfigurationError("outputs lists the same connector instance twice; each one would post every reply again.")
         return items
@@ -89,9 +91,12 @@ class OutputDispatcher:
         if not isinstance(content, OutputContent):
             raise ConfigurationError(f"{type(connector).__name__}.render must return OutputContent, got {type(content).__name__}.")
         try:
-            return await asyncio.wait_for(connector.send(reply, content), OUTPUT_DELIVERY_DEADLINE_SECONDS)
+            receipt = await asyncio.wait_for(connector.send(reply, content), OUTPUT_DELIVERY_DEADLINE_SECONDS)
         except TimeoutError:
             return DeliveryReceipt(connector.destination, DeliveryStatus.FAILED, error_code=OUTPUT_ERROR_NETWORK)
+        if not isinstance(receipt, DeliveryReceipt):
+            raise ConfigurationError(f"{type(connector).__name__}.send must return DeliveryReceipt, got {type(receipt).__name__}.")
+        return receipt
 
     @staticmethod
     def _receipt(connector: OutputConnector, result: DeliveryReceipt | BaseException) -> DeliveryReceipt:
