@@ -30,7 +30,6 @@ from vidbyte.lib.constants.jev import VIDBYTE_API_KEY_PREFIX
 from vidbyte.lib.constants.skills import (
     SKILL_ARCHIVE_ENCRYPTED_FLAG,
     SKILL_ARCHIVE_MAGIC,
-    SKILL_ARCHIVE_MARKDOWN_COUNT,
     SKILL_ARCHIVE_MAX_DEPTH,
     SKILL_DOWNLOAD_MAX_BYTES,
     SKILL_MARKDOWN_FILE_NAME,
@@ -202,14 +201,15 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
         try:
             with zipfile.ZipFile(io.BytesIO(body)) as archive:
                 members = [info for info in archive.infolist() if PurePosixPath(info.filename).name.lower() == SKILL_MARKDOWN_FILE_NAME.lower() and len(PurePosixPath(info.filename).parent.parts) <= SKILL_ARCHIVE_MAX_DEPTH]
-                if len(members) != SKILL_ARCHIVE_MARKDOWN_COUNT:
-                    return SkillResolution(reason=SkillUnavailableReason.INVALID_SKILL, detail=f"The zip archive from {self.host} holds {len(members)} SKILL.md files at its root or one folder deep; exactly one is required.")
-                (member,) = members
-                if member.flag_bits & SKILL_ARCHIVE_ENCRYPTED_FLAG or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
-                    return SkillResolution(reason=SkillUnavailableReason.INVALID_SKILL, detail=f"The SKILL.md in the zip archive from {self.host} is encrypted or compressed with a method other than stored or deflate.")
-                if member.file_size > SKILL_MARKDOWN_MAX_BYTES:
-                    return SkillResolution(reason=SkillUnavailableReason.TOO_LARGE, detail=f"The SKILL.md in the zip archive from {self.host} declares {member.file_size} bytes, over the {SKILL_MARKDOWN_MAX_BYTES}-byte SKILL_MARKDOWN_MAX_BYTES cap.")
-                return archive.read(member)
+                match members:
+                    case [member] if member.flag_bits & SKILL_ARCHIVE_ENCRYPTED_FLAG or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                        return SkillResolution(reason=SkillUnavailableReason.INVALID_SKILL, detail=f"The SKILL.md in the zip archive from {self.host} is encrypted or compressed with a method other than stored or deflate.")
+                    case [member] if member.file_size > SKILL_MARKDOWN_MAX_BYTES:
+                        return SkillResolution(reason=SkillUnavailableReason.TOO_LARGE, detail=f"The SKILL.md in the zip archive from {self.host} declares {member.file_size} bytes, over the {SKILL_MARKDOWN_MAX_BYTES}-byte SKILL_MARKDOWN_MAX_BYTES cap.")
+                    case [member]:
+                        return archive.read(member)
+                    case _:
+                        return SkillResolution(reason=SkillUnavailableReason.INVALID_SKILL, detail=f"The zip archive from {self.host} holds {len(members)} SKILL.md files at its root or one folder deep; exactly one is required.")
         except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, ValueError):
             return SkillResolution(reason=SkillUnavailableReason.INVALID_SKILL, detail=f"The zip archive from {self.host} is damaged and could not be read.")
 
