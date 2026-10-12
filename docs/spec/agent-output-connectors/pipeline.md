@@ -18,12 +18,12 @@ started: 2026-10-11 17:36
 | S2 tests | done | 2026-10-11 | 2026-10-11 | reports/S2-test-author.md | 86 tests / 313 cases in tests/features/agent_output_connectors/ (9 modules); red `21 failed, 292 errors`; test commit d90400d2; S2_HEAD 72fc2002; 7 spec defects → spec r4 @f3229734; status tests-written @5e79413f |
 | S3 implement | done | 2026-10-11 | 2026-10-11 | reports/S3-implementer.md | S3_HEAD 9463c348; draft PR #882; 313/313 green (re-run by orchestrator); SDK-LINT PASS; run_ci source 3516 passed + full CI passed; budget 23/23 files, 26/26 classes, 0 deps; ci.yml 38194285572 in progress, static-policy 38194287162 success (both at fa430c8f; later commits docs-only) |
 | S4 adversarial review | done | 2026-10-11 | 2026-10-11 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 httpx INFO log leaks secret URLs) / 3 Major (R-2 str destination, R-3 SMTP thread holds sync run past deadline, R-4 duplicated email rule) / 11 Minor; 0 refuted (1 sub-claim) |
-| S5 repair loop | running (iteration 1) | 2026-10-11 | | | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done (converged at iteration 1) | 2026-10-11 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | merge ba83c953 (origin/main, no conflicts); 12 findings fixed one commit each; HEAD ed1dd67b; 340/340; SDK-LINT PASS; run_ci source 3743 passed; full run_ci CI passed (re-run by orchestrator at ed1dd67b); Semgrep 0; remote ci 38211917706 + static-policy 38211919803 success @1348b728; review.md 0 open |
+| S5 re-review | running (round 1/2) | 2026-10-12 | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-11 17:36 — Slug `agent-output-connectors`, branch `feat/agent-output-connectors`, worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-output-connectors` — pipeline defaults; SDK AGENTS.md defines no override.
@@ -54,6 +54,9 @@ started: 2026-10-11 17:36
 - 2026-10-11 — ci.yml 38194285572 at fa430c8f (S3 code) completed success (Source 3.11, 3.12, Package).
 
 - 2026-10-12 — Session restarted mid repair-1; the agent had made no commits (tree clean at 78321115). Resumed the same agent. origin/main moved 25 commits (#759, #768-#772, #769, #873-#886); overlap with our diff: vidbyte/agents/README.md, vidbyte/agents/fork.py, vidbyte/lib/enums/__init__.py; base.py not touched by main. Added step 0 to iteration 1: `git merge origin/main` (never rebase), resolve, regenerate the public-API contract if needed, then fix findings on the merged base.
+
+- 2026-10-12 — Repair-1 spot-check passed: tree clean; pack test diff vs 7f3bb7ff empty; non-pack test diffs vs merge-base empty (only main's); every repair commit cites R-n; HEAD == origin; remote green. R-5/R-13/R-14 statuses closed by the repair agent at my request (resolved outside repair: spec r6 / Q-11 / test author). Orchestrator full `python scripts/run_ci.py` at ed1dd67b: `CI passed.`
+- 2026-10-12 — main 5 commits ahead again (#767, #888, #887, #746, #763), no overlap with our files → PR still mergeable; no second catch-up merge needed before S6 unless GitHub reports a conflict.
 
 ## User replies (verbatim)
 - (none yet)
@@ -96,4 +99,6 @@ started: 2026-10-11 17:36
 - R-1 test sets INFO on the ROOT logger and requires the caller's own httpx request to still log — fix must not touch httpx level/disabled/propagate and must reset `_OUTPUT_POST_ACTIVE` — *source:* S2 S4-follow-up
 - R-3 test fails (10 s backstop, no hang) with `asyncio.to_thread` or `run_in_executor(None, …)`; needs module `_SMTP_EXECUTOR` — *source:* S2 S4-follow-up
 - R-12: suppress `smtplib.SMTPException`/`OSError` around QUIT only, after `send_message` returns — *source:* S2 S4-follow-up
+- Semgrep in Git Bash: put the semgrep venv on PATH via `cygpath -u` (a `C:/…` entry splits on the colon and the broken global pysemgrep runs) — *source:* S5 repair-1
+- S009 reads 350/350 after the merge because main added the finding; identical finding sets at ba83c953 and HEAD — *source:* S5 repair-1
 - Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
