@@ -148,8 +148,11 @@ class EnvironmentLoader:
                 head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
             except (OSError, ValueError):
                 return GitHeadState.UNREADABLE, None
+            # @intent empty-branch-name-is-unreadable
+            # "ref: refs/heads/" names no branch, so it reads like an empty HEAD.
             if head.startswith("ref: refs/heads/"):
-                return GitHeadState.BRANCH, head.removeprefix("ref: refs/heads/")
+                branch = head.removeprefix("ref: refs/heads/")
+                return (GitHeadState.BRANCH, branch) if branch else (GitHeadState.UNREADABLE, None)
             return (GitHeadState.DETACHED, head) if head else (GitHeadState.UNREADABLE, None)
         return GitHeadState.NOT_A_REPOSITORY, None
 
