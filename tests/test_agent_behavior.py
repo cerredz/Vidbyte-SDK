@@ -587,6 +587,10 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(behavior_from_probe(RunProbe(output="I can't help with that.")).output.refused())
         self.assertTrue(behavior_from_probe(RunProbe(output="I cannot comply.")).output.refused())
         self.assertTrue(behavior_from_probe(RunProbe(output="I'm unable to do that.")).output.refused())
+        # @intent refusal-contractions-accept-typographic-apostrophe
+        self.assertTrue(behavior_from_probe(RunProbe(output="I can’t help with that.")).output.refused())
+        self.assertTrue(behavior_from_probe(RunProbe(output="I’m unable to do that.")).output.refused())
+        self.assertTrue(behavior_from_probe(RunProbe(output="I won’t do that.")).output.refused())
         self.assertFalse(behavior_from_probe(RunProbe(output="I can help with that.")).output.refused())
         self.assertTrue(behavior_from_probe(RunProbe(output="Maybe this is likely correct.")).output.contains_hedging())
         self.assertTrue(behavior_from_probe(RunProbe(output="I think it works.")).output.contains_hedging())

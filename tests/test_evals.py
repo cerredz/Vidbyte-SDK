@@ -489,6 +489,13 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(numeric._parse_number("5 eggs"), 5.0)
         self.assertEqual(numeric._parse_number("3em"), 3.0)
 
+    async def test_numeric_grader_reads_unicode_minus_sign(self) -> None:
+        # Tests that a negative number typeset with the Unicode minus sign keeps its sign.
+        # @intent unicode-minus-is-a-sign
+        numeric = NumericMatchGrader()
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=-5), "The low is −5.")).passed)
+        self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=5), "The low is −5.")).passed)
+
     async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
         # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
         # @intent json-bool-is-not-number

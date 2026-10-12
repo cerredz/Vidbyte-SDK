@@ -35,12 +35,14 @@ class OutputBehavior:
     _FOOTNOTE_CITATION_PATTERN = re.compile(r"\[\^[^\]]+\]")
     _BRACKET_CITATION_PATTERN = re.compile(r"(?<!\^)\[(?:\d+|[A-Za-z][A-Za-z0-9_-]*,\s*\d{4})\]")
     _WORD_PATTERN = re.compile(r"\b\w+\b")
+    # @intent refusal-contractions-accept-typographic-apostrophe
+    # Models often type the contraction apostrophe as U+2019, so the same refusal sentence must match with either apostrophe.
     _REFUSAL_PATTERNS = (
-        re.compile(r"\bi\s+can(?:not|'t)\b", re.IGNORECASE),
+        re.compile(r"\bi\s+can(?:not|['’]t)\b", re.IGNORECASE),
         re.compile(r"\bi\s+am\s+unable\s+to\b", re.IGNORECASE),
-        re.compile(r"\bi'm\s+unable\s+to\b", re.IGNORECASE),
-        re.compile(r"\bi\s+can't\s+help\s+with\b", re.IGNORECASE),
-        re.compile(r"\bi\s+won't\b", re.IGNORECASE),
+        re.compile(r"\bi['’]m\s+unable\s+to\b", re.IGNORECASE),
+        re.compile(r"\bi\s+can['’]t\s+help\s+with\b", re.IGNORECASE),
+        re.compile(r"\bi\s+won['’]t\b", re.IGNORECASE),
     )
     _HEDGING_PATTERNS = (
         re.compile(r"\bmaybe\b", re.IGNORECASE),
