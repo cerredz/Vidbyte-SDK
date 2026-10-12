@@ -16,6 +16,8 @@ Architecture:
     - GatedMcpTransport / OverlappingLazyAttachTests: an attach held open by a gate, proving overlapping
       first runs on one agent wait for the in-flight lazy attach and all see its tools, and that a run
       cancelled mid-attach re-queues its servers (closing any it started) so a later run attaches them.
+    - McpPresetExportTests: every named `*MCP` preset constant in vidbyte.tools.mcp.presets is also
+      exported from vidbyte.tools.mcp, so a growing preset catalog cannot drift from the package surface.
 Relations:
     - vidbyte/agents/mixins.py
     - vidbyte/agents/base.py
@@ -32,7 +34,10 @@ from vidbyte.agents import BaseAgent
 from vidbyte.lib.errors import McpAttachmentError, McpInitializeError, ToolRegistrationError
 from vidbyte.pipelines import SequentialPipeline
 from vidbyte.tools import ToolCall, ToolPermission, Tools, tool
+from vidbyte.lib.config.mcp_presets import ALL_PRESETS
 from vidbyte.tools.executor import ToolExecutor
+import vidbyte.tools.mcp as mcp_package
+import vidbyte.tools.mcp.presets as mcp_presets_module
 from vidbyte.tools.mcp.presets import McpPresetConfigurationError, McpPresetRegistry
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
 from vidbyte.tools.security import PermissionPolicy
@@ -576,6 +581,19 @@ class OverlappingLazyAttachTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(MockMcpStdioTransport.instances), 1)
         self.assertEqual({prompt: "remote_mini" in names for prompt, names in runner.offered.items()}, {"request 1": True, "request 2": True})
+
+
+class McpPresetExportTests(unittest.TestCase):
+    def test_every_named_preset_constant_is_exported_from_the_mcp_package(self) -> None:
+        """Each `*MCP` preset in presets.__all__ is importable from vidbyte.tools.mcp and listed in its __all__."""
+        preset_names = [name for name in mcp_presets_module.__all__ if name.endswith("MCP")]
+
+        missing_attributes = [name for name in preset_names if not hasattr(mcp_package, name)]
+        missing_from_all = [name for name in preset_names if name not in mcp_package.__all__]
+
+        self.assertEqual(len(preset_names), len(ALL_PRESETS))
+        self.assertEqual(missing_attributes, [])
+        self.assertEqual(missing_from_all, [])
 
 
 if __name__ == "__main__":
