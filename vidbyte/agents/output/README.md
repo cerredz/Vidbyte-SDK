@@ -95,5 +95,7 @@ except OutputDeliveryError as err:
     receipts = await OutputDispatcher.deliver(failed, err.reply, {})
 ```
 
-A FAILED `network` receipt, and an email that passed the deadline, may
-already have been delivered, so check that destination before resending it.
+If a FAILED receipt's `error_code` is `network` (which includes a send that
+passed the deadline), `invalid_response`, `smtp_error`, or
+`smtp_recipients_refused`, or starts with `http_5`, that output may already
+have been delivered, so check its destination before resending it.
