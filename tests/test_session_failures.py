@@ -114,6 +114,15 @@ class _RefundCallRunner:
         return SimpleNamespace(text="", raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]})
 
 
+class _PlainAnswerRunner:
+    """Offline runner that answers in plain text with no tool calls, so the run finishes on its first reply."""
+
+    def run(self, _prompt: str, **_options: object) -> SimpleNamespace:
+        # Return one OpenAI-style plain assistant message without network access.
+        text = "v2 notes: TODO fill in"
+        return SimpleNamespace(text=text, raw={"choices": [{"message": {"role": "assistant", "content": text}}]})
+
+
 class _DenyRefundMiddleware(AgentMiddleware):
     """Middleware that refuses every refund call, the reference refusal for ledger comparisons."""
 
@@ -474,6 +483,22 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(refunded, [])
                 self.assertEqual([(item.code, item.status, item.disposition) for item in session.failures.history()], [(code, FailureStatus.TERMINAL, FailureDisposition.RAISE)])
                 self.assertEqual(raised.exception.failure.id, session.failures.history()[0].id)
+
+    async def test_review_finish_stop_rule_refuses_the_finish(self) -> None:  # [Silent Failure]
+        # @intent review-finish-rules-are-evaluated
+        # Verify a stop rule declared on review_finish runs, is recorded, and keeps the run from ending as a normal answer.
+        calls: list[int] = []
+
+        def no_todo(_context):
+            calls.append(1)
+            return Failure(code=FailureCode.ACTION_POLICY_VIOLATION, source="no_todo", phase=FailurePhase.ACTION)
+
+        session = Session(build_test_agent(name="notes", system_prompt="Write release notes.", runner=_PlainAnswerRunner()))
+        session.failures.add_rule(rule(code=FailureCode.ACTION_POLICY_VIOLATION, on=MiddlewareHook.REVIEW_FINISH, on_match=FailureDisposition.STOP)(no_todo))
+        reply = await session.arun("write the notes")
+        self.assertEqual(calls, [1])
+        self.assertEqual(len(session.failures.history(code=FailureCode.ACTION_POLICY_VIOLATION)), 1)
+        self.assertEqual(reply.metadata.get("stop_reason"), "contract_unsatisfied")
 
     async def test_settings_refusals_record_tool_runtime_cause_like_middleware(self) -> None:  # [Silent Failure]
         # @intent ledger-records-every-refusal-kind
