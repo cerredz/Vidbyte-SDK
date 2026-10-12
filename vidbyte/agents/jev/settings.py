@@ -14,6 +14,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from vidbyte.agents.output.connector import OutputConnector
+from vidbyte.agents.output.dispatcher import OutputDispatcher
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
     JEV_BULK_WORK_AGENTS,
@@ -135,6 +137,7 @@ class JevAgentSettings:
     agents: tuple[JevSpecialist, ...] = ()
     bulk_work: JevBulkSettings = field(default_factory=JevBulkSettings)
     alignment: JevAlignmentSettings = field(default_factory=JevAlignmentSettings)
+    outputs: tuple[OutputConnector, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -164,6 +167,7 @@ class JevAgentSettings:
         if not isinstance(self.alignment, JevAlignmentSettings):
             raise ConfigurationError("JevAgentSettings.alignment must be a JevAlignmentSettings instance.")
         self._validate_agents()
+        object.__setattr__(self, "outputs", OutputDispatcher.connectors(self.outputs))
 
     def _validate_agents(self) -> None:
         # Freezes the specialists in the order given, which is also the order Jev reads their options.
