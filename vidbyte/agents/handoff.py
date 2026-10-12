@@ -214,6 +214,10 @@ class HandoffAgent(BaseAgent):
         # Parse all "## Title" blocks, then sort them into spec sections and model-invented extras.
         parsed = self._parse_all_blocks(text)
         wanted = {title.lower(): title for title in self.spec.section_titles()}
+        # @intent freeform-handoff-keeps-markdown-sections
+        # A free-form spec names no sections, so keep every header the model wrote, as the JSON path does.
+        if not wanted:
+            return dict(parsed), {}
         sections = self._empty_sections()
         extra: dict[str, str] = {}
         for header, body in parsed.items():
