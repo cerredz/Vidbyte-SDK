@@ -147,6 +147,17 @@ class ToolsFormatter:
     _GEMINI_SCHEMA_MAPS: frozenset[str] = frozenset({"properties"})
     # Keywords whose value is itself a subschema (or a list of them).
     _GEMINI_SCHEMA_NODES: frozenset[str] = frozenset({"items", "anyOf"})
+    # Keywords that only mean something for one type. When a type list becomes anyOf branches,
+    # each follows its type into that branch, because Gemini rejects the whole request over, for
+    # example, `properties` on a node with no object type.
+    _GEMINI_TYPE_KEYWORDS: Mapping[str, frozenset[str]] = {
+        "object": frozenset({"properties", "required", "propertyOrdering"}),
+        "array": frozenset({"items", "minItems", "maxItems"}),
+        "string": frozenset({"minLength", "maxLength", "pattern"}),
+        "number": frozenset({"minimum", "maximum"}),
+        "integer": frozenset({"minimum", "maximum"}),
+    }
+    _GEMINI_BRANCH_ONLY_KEYWORDS: frozenset[str] = frozenset().union(*_GEMINI_TYPE_KEYWORDS.values())
     # Bounds Gemini's schema cannot carry, mapped to the clause that says them in words instead.
     # Wording matches the output-schema fold in vidbyte/providers/output_schema.py.
     _GEMINI_FOLDED_BOUNDS: Mapping[str, str] = {
@@ -229,6 +240,9 @@ class ToolsFormatter:
         # Gemini's Schema.type is one enum value, so a JSON Schema type list such as
         # ["string", "null"] (common from zod-built MCP servers) fails the whole request.
         # "null" becomes nullable, one remaining type stays a plain type, several become anyOf.
+        # With several, each type-only keyword (properties, items, maxLength, ...) moves into the
+        # branch of its own type; none may stay on the typeless outer node, so one whose type is
+        # not in the list, or any of them when the node already has its own anyOf, is dropped.
         types = kept.get("type")
         if not isinstance(types, list):
             return kept
@@ -239,7 +253,12 @@ class ToolsFormatter:
         if len(names) == 1:
             collapsed["type"] = names[0]
         elif names:
-            collapsed.setdefault("anyOf", [{"type": name} for name in names])
+            branches = [
+                {"type": name, **{key: value for key, value in kept.items() if key in ToolsFormatter._GEMINI_TYPE_KEYWORDS.get(name, ())}}
+                for name in names
+            ]
+            collapsed = {key: value for key, value in collapsed.items() if key not in ToolsFormatter._GEMINI_BRANCH_ONLY_KEYWORDS}
+            collapsed.setdefault("anyOf", branches)
         return collapsed
 
     @staticmethod

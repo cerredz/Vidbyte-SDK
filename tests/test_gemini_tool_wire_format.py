@@ -262,6 +262,55 @@ class GeminiEnumValueTests(unittest.TestCase):
         self.assertEqual(openai["properties"]["priority"]["enum"], [1, 2, 3])
 
 
+_OBJECT_ONLY_KEYWORDS = ("properties", "required", "propertyOrdering")
+_ARRAY_ONLY_KEYWORDS = ("items", "minItems", "maxItems")
+
+
+def _misplaced_type_keywords(node: object, path: str = "$") -> list[str]:
+    # Walks every schema node and names each one carrying object or array keywords without that type.
+    if not isinstance(node, dict):
+        return []
+    found = [f"{path}.{key}" for key in _OBJECT_ONLY_KEYWORDS if key in node and node.get("type") != "object"]
+    found += [f"{path}.{key}" for key in _ARRAY_ONLY_KEYWORDS if key in node and node.get("type") != "array"]
+    for name, sub in (node.get("properties") or {}).items():
+        found += _misplaced_type_keywords(sub, f"{path}.properties.{name}")
+    found += _misplaced_type_keywords(node.get("items"), f"{path}.items")
+    for index, branch in enumerate(node.get("anyOf") or []):
+        found += _misplaced_type_keywords(branch, f"{path}.anyOf[{index}]")
+    return found
+
+
+class GeminiTypeListKeywordTests(unittest.TestCase):
+    """A type list split into anyOf branches must carry each type-only keyword in its own branch."""
+
+    def _reduce(self, node: dict) -> dict:
+        schema = {"type": "object", "properties": {"v": node}}
+        return ToolsFormatter.to_gemini_tool(_spec_with_schema(schema))["function_declarations"][0]["parameters"]
+
+    def test_object_keywords_move_into_the_object_branch(self) -> None:
+        parameters = self._reduce({"type": ["object", "string"], "properties": {"a": {"type": "string"}}, "required": ["a"]})
+        self.assertEqual(_misplaced_type_keywords(parameters), [])
+        self.assertEqual(
+            parameters["properties"]["v"],
+            {"anyOf": [{"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]}, {"type": "string"}]},
+        )
+
+    def test_array_keywords_move_into_the_array_branch(self) -> None:
+        parameters = self._reduce({"type": ["array", "string"], "items": {"type": "integer"}, "maxItems": 3})
+        self.assertEqual(_misplaced_type_keywords(parameters), [])
+        self.assertEqual(parameters["properties"]["v"], {"anyOf": [{"type": "array", "items": {"type": "integer"}, "maxItems": 3}, {"type": "string"}]})
+
+    def test_fork_conversation_declaration_has_no_typeless_object_keywords(self) -> None:
+        from vidbyte.tools.builtins.fork import ForkConversationTool
+
+        parameters = ToolsFormatter.to_gemini_tool(ForkConversationTool().spec())["function_declarations"][0]["parameters"]
+        self.assertEqual(_misplaced_type_keywords(parameters), [])
+        self.assertEqual(parameters["properties"]["handoff"]["anyOf"][0]["type"], "object")
+
+    def test_nullable_single_type_is_unchanged(self) -> None:
+        self.assertEqual(self._reduce({"type": ["string", "null"], "maxLength": 5})["properties"]["v"], {"type": "string", "maxLength": 5, "nullable": True})
+
+
 class GeminiToolResultRoleTests(unittest.TestCase):
     """generateContent accepts only 'user' and 'model' turns."""
 
