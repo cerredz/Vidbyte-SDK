@@ -34,6 +34,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.output.connector import OutputConnector
+from vidbyte.agents.output.dispatcher import OutputDispatcher
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.contracts import floors as contract_floors
@@ -112,6 +114,7 @@ class BaseAgent(McpAttachableMixin):
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
         fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None,
+        outputs: Sequence[OutputConnector] = (),
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -229,6 +232,7 @@ class BaseAgent(McpAttachableMixin):
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
+        self.outputs = OutputDispatcher.connectors(outputs)
         self.description = description or "General purpose agent."
         # @intent name-lists-reject-bare-strings
         # A bare string is itself a sequence, so tuple() would hand the manager one capability per character.
@@ -541,7 +545,7 @@ class BaseAgent(McpAttachableMixin):
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None) -> BaseAgent:
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, outputs: Sequence[OutputConnector] = ()) -> BaseAgent:
         """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
@@ -569,6 +573,7 @@ class BaseAgent(McpAttachableMixin):
             trace=trace,
             output_schema=cls._restore_output_schema(state, output_schema),
             permission_policy=cls._restore_permission_policy(state),
+            outputs=outputs,
         )
         child.history = [serializer.message_from_dict(item) for item in state.history]
         cls._record_resume_tool_mismatch(child, state.tool_names)
@@ -914,9 +919,7 @@ class BaseAgent(McpAttachableMixin):
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
-        if self._trace_option is not None and self._trace_option.enabled:
-            trace_artifact = metadata.get("trace")
-            self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
+        self._record_last_trace(metadata)
         if self._handoff_spec is not None:
             try:
                 await self._run_auto_handoff(metadata)
@@ -929,9 +932,31 @@ class BaseAgent(McpAttachableMixin):
         # @intent failed-run-leaves-no-queued-prompts
         # A run that fails its schema raises before the drain, so its queued follow-ups never run.
         self._assert_schema_satisfied(result)
+        # Deliver the validated reply to the agent's outputs, if any.
+        if self.outputs:
+            await self._deliver_outputs(reply, metadata)
         if self._queued_prompts and not self._draining_queued_prompts:
             await self._drain_queued_prompts(metadata)
         return reply
+
+    def _record_last_trace(self, metadata: dict[str, Any]) -> None:
+        # Keep this run's trace artifact when tracing is enabled.
+        if self._trace_option is not None and self._trace_option.enabled:
+            trace_artifact = metadata.get("trace")
+            self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
+
+    async def _deliver_outputs(self, reply: AgentMessage, metadata: dict[str, Any]) -> None:
+        # Send the reply to every output; any failure is re-raised.
+        try:
+            await OutputDispatcher.deliver(self.outputs, reply, metadata)
+        except BaseException as exc:
+            # @intent failed-run-leaves-no-queued-prompts
+            # A failed or cancelled delivery skips the drain, so its
+            # queued follow-ups never run. The runtime try has closed
+            # by now, so the session hears of the error only here.
+            self._queued_prompts.clear()
+            self._notify_session_exception(exc)
+            raise
 
     def _close_failed_reply(self, exc: BaseException, trace_ctx: Any) -> None:
         # Notifies the session, finalizes the root trace and speed run, and clears the active prompt for a failed reply.
