@@ -55,7 +55,7 @@ class LocalSkillResolver(SkillResolver[LocalSkill]):
         except OSError as error:
             return (SkillResolution(reason=SkillUnavailableReason.FETCH_FAILED, detail=f"Could not read {skill_file} ({type(error).__name__}); it is read again on the next run."),)
         if read is None:
-            return (SkillResolution(reason=SkillUnavailableReason.NOT_FOUND, detail=f"No {SKILL_MARKDOWN_FILE_NAME} file at {skill_file}; point path= at the folder that holds it."),)
+            return (SkillResolution(reason=SkillUnavailableReason.NOT_FOUND, detail=f"No {SKILL_MARKDOWN_FILE_NAME} file at {skill_file}; point path= at the folder that holds it. This agent remembers the miss, so create a new agent after fixing it."),)
         # Refuse a file over the cap instead of sending part of it.
         raw, total_bytes = read
         if total_bytes > SKILL_MARKDOWN_MAX_BYTES:
