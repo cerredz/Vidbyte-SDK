@@ -9,6 +9,22 @@ and the rest) live lower down in [`vidbyte/lib/outputs/`](../../lib/outputs/READ
 so they never import the agent layer; that README has the provider reference,
 credentials, and limits.
 
+## Non-Goals
+
+- **No model-driven, MCP, or OAuth delivery.** Delivery runs in code after
+  the run, never as a tool the model calls, and every destination takes one
+  pasted credential.
+- **No delivery from agents the SDK builds.** Forks, `as_tool()` children,
+  MultiAgent workers, and Jev's internal agents never deliver.
+  `CodexHarnessAgent`, `MultiAgent`, `AggregateAgent`, `Session.resume`,
+  `Session.fork_from`, and YAML agent config take no `outputs`, and a
+  user-built sub-agent's own `outputs` are neither stripped nor rejected.
+- **No retries beyond HTTP 429.** There is no outbox, queue, or resend
+  helper, and receipts are not saved in session checkpoints, because a
+  duplicate post is worse than a reported failure.
+- **No per-reply opt-out.** A `render` that returns anything but
+  `OutputContent` fails that connector; it does not skip it.
+
 ## Modules
 
 - `connector.py`: `OutputConnector`, the runtime-checkable protocol (a
