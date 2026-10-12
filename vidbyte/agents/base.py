@@ -1531,7 +1531,9 @@ class BaseAgent(McpAttachableMixin):
         )
         if self.context_manager is not None:
             manager.extend(self.context_manager.items())
-        if input_context_manager is not None:
+        # @intent shared-context-manager-items-once
+        # A manager supplied both on the agent and for this run is one source, so add its items only once.
+        if input_context_manager is not None and input_context_manager is not self.context_manager:
             manager.extend(input_context_manager.items())
         return manager
 
