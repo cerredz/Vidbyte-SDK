@@ -1,7 +1,7 @@
 ---
 spec: agent-output-connectors
 title: Agent output connectors
-status: tests-written    # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: implemented      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-output-connectors
@@ -9,7 +9,7 @@ branch: feat/agent-output-connectors
 base_commit: db3988ffdb4d580021ec4dae995281135f8f0a0f
 created: 2026-10-11
 updated: 2026-10-11
-pr:                      # filled at S3 (draft) and finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/882  # filled at S3 (draft) and finalized at S6
 ---
 
 # Spec: Agent output connectors
