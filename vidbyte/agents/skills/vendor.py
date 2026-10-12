@@ -32,6 +32,7 @@ from vidbyte.lib.constants.skills import (
     SKILL_ARCHIVE_MAGIC,
     SKILL_ARCHIVE_MAX_DEPTH,
     SKILL_DOWNLOAD_MAX_BYTES,
+    SKILL_MARKDOWN_DELIMITER,
     SKILL_MARKDOWN_FILE_NAME,
     SKILL_MARKDOWN_MAX_BYTES,
     SKILL_VENDOR_LATEST_VERSION,
@@ -192,7 +193,7 @@ class VendorSkillResolver(SkillResolver[VendorSkillT]):
         # encrypted, stored or deflated only (the bzip2 and lzma decoders
         # never see untrusted bytes), and its declared size checked before
         # it is inflated. Every corrupt-archive error becomes INVALID_SKILL.
-        if body.removeprefix(codecs.BOM_UTF8).startswith(b"---"):
+        if body.removeprefix(codecs.BOM_UTF8).startswith(SKILL_MARKDOWN_DELIMITER.encode()):
             if len(body) > SKILL_MARKDOWN_MAX_BYTES:
                 return SkillResolution(reason=SkillUnavailableReason.TOO_LARGE, detail=f"The SKILL.md from {self.host} is {len(body)} bytes, over the {SKILL_MARKDOWN_MAX_BYTES}-byte SKILL_MARKDOWN_MAX_BYTES cap.")
             return body

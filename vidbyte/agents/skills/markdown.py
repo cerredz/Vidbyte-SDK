@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import yaml
 
+from vidbyte.lib.constants.skills import SKILL_MARKDOWN_DELIMITER
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillResolution
 from vidbyte.lib.enums.skills import SkillUnavailableReason
-
-_DELIMITER = "---"
 
 
 class SkillMarkdown:
@@ -68,10 +67,10 @@ class SkillMarkdown:
         # delimiter lines are wrong. Trailing spaces on a delimiter line are
         # allowed; anything before `---` is not.
         lines = text.splitlines(keepends=True)
-        if not lines or lines[0].rstrip() != _DELIMITER:
+        if not lines or lines[0].rstrip() != SKILL_MARKDOWN_DELIMITER:
             return "SKILL.md must start with a '---' line that opens its frontmatter."
         for index in range(1, len(lines)):
-            if lines[index].rstrip() == _DELIMITER:
+            if lines[index].rstrip() == SKILL_MARKDOWN_DELIMITER:
                 return "".join(lines[1:index]), "".join(lines[index + 1 :])
         return "SKILL.md opens its frontmatter with '---' but never closes it with a second '---' line."
 

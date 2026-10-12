@@ -21,6 +21,10 @@ from vidbyte.lib.enums.skills import SkillUnavailableReason
 # regard to case.
 SKILL_MARKDOWN_FILE_NAME = "SKILL.md"
 
+# The line that opens and closes a SKILL.md's YAML frontmatter; a
+# vendor body that starts with it is a bare SKILL.md, not a zip.
+SKILL_MARKDOWN_DELIMITER = "---"
+
 # 1 MiB per SKILL.md, about ten times the largest measured community
 # SKILL.md, so one file cannot fill the agent's context.
 SKILL_MARKDOWN_MAX_BYTES = 1_048_576
@@ -128,6 +132,7 @@ __all__ = [
     "SKILL_FETCH_RETRY_COUNT",
     "SKILL_FETCH_TIMEOUT_SECONDS",
     "SKILL_LABEL_HASH_CHARS",
+    "SKILL_MARKDOWN_DELIMITER",
     "SKILL_MARKDOWN_FILE_NAME",
     "SKILL_MARKDOWN_MAX_BYTES",
     "SKILL_NAME_FORBIDDEN_CHARACTERS",
