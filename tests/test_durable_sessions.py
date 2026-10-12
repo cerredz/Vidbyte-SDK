@@ -528,6 +528,32 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(store.get_meta(session.id).head_id, original[0].id)
                     self.assertEqual(store.get_meta(copy_id).head_id, copied[0].id)
 
+    async def test_own_id_import_after_copy_into_same_store_mints_fresh_checkpoint_ids(self) -> None:  # [Silent Failure]
+        # @intent bundle-copy-never-shares-checkpoint-ids
+        # Importing the copy first and then the bundle under its own id must not hijack the copy's checkpoints.
+        with tempfile.TemporaryDirectory() as source_root, tempfile.TemporaryDirectory() as target_root:
+            for name, source, target in (("memory", InMemorySessionStore(), InMemorySessionStore()), ("file", FileSessionStore(source_root), FileSessionStore(target_root))):
+                with self.subTest(store=name):
+                    session = Session(FakeAgent(), store=source)
+                    await session.arun("one")
+                    await session.arun("two")
+                    bundle = session.export()
+
+                    copy_id = SessionBundleImporter(target).import_bundle(bundle, new_id=f"se_sandbox_{name}")
+                    own_id = SessionBundleImporter(target).import_bundle(bundle)
+                    copied = target.history(copy_id)
+                    owned = target.history(own_id)
+
+                    self.assertEqual(own_id, session.id)
+                    self.assertEqual(len(copied), 2)
+                    self.assertEqual(len(owned), 2)
+                    self.assertTrue(all(c.session_id == copy_id for c in copied))
+                    self.assertTrue(all(c.session_id == own_id for c in owned))
+                    self.assertFalse({c.id for c in copied} & {c.id for c in owned})
+                    self.assertEqual(target.get_meta(copy_id).head_id, copied[-1].id)
+                    self.assertEqual(target.head(own_id).session_id, own_id)
+                    self.assertEqual(target.head(copy_id).session_id, copy_id)
+
     async def test_imports_file_bundle_into_memory_store_with_same_id_when_absent(self) -> None:  # [Hidden Failure]
         # Verify file-to-memory import preserves the original id when no collision exists.
         with tempfile.TemporaryDirectory() as root:
@@ -909,6 +935,21 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         next_start = len(runner.prompts)
         await session.arun("fetch next")
         self.assertNotIn("SOURCE-OWN-CONTENT", " ".join(runner.prompts[next_start:]))
+
+    async def test_edit_drops_tool_outputs_of_removed_turns(self) -> None:  # [Silent Failure]
+        # @intent edit-drops-tool-call-memory
+        # A turn removed by edit() must not leak its tool outputs into later requests.
+        runner = FetchThenDoneRunner(["A", "B", "C"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=InMemorySessionStore())
+        await session.arun("fetch A")
+        await session.arun("fetch B")
+        self.assertIn("SOURCE-B-CONTENT", str(agent._tool_call_contexts))
+        session.edit(lambda h: h[:-1])
+        self.assertEqual(agent._tool_call_contexts, [])
+        turn_three_start = len(runner.prompts)
+        await session.arun("fetch C")
+        self.assertNotIn("SOURCE-B-CONTENT", " ".join(runner.prompts[turn_three_start:]))
 
     def test_rewind_tolerates_agent_without_tool_memory(self) -> None:  # [Hidden Assumption]
         # Compatible agents without tool-call memory still rewind cleanly.

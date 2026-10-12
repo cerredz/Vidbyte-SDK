@@ -7,6 +7,7 @@ Purpose:
 Architecture:
     - EchoTool: Minimal test tool.
     - EchoActivity: Bounded activity annotation used by the binding tests.
+    - Phase, StrictActivity: Strict enum/datetime annotation for JSON-mode validation.
     - ToolActivityTests: Binding, validation, and argument-separation tests.
     - ToolCustomizationTests: Dataclass validation, immutable description overrides, and wrapper composition.
     - ToolCoreTests: Registry, spec rendering, validation, and execution tests.
@@ -17,9 +18,11 @@ Relations:
 
 from __future__ import annotations
 
+import datetime
+import enum
 import unittest
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.dataclasses import ToolCustomization
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
@@ -43,6 +46,21 @@ class EchoActivity(BaseModel):
     """Bounded annotation describing why the echo tool was called."""
 
     reason: str = Field(min_length=1, max_length=40)
+
+
+class Phase(str, enum.Enum):
+    """Closed set of phases a strict activity annotation reports."""
+
+    PLAN = "plan"
+    ACT = "act"
+
+
+class StrictActivity(BaseModel):
+    """Strict annotation whose enum and datetime fields arrive as JSON strings."""
+
+    model_config = ConfigDict(strict=True)
+    phase: Phase
+    at: datetime.datetime
 
 
 class EchoTool(BaseTool):
@@ -200,6 +218,26 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(TypeError):
             prepared.activity.payload["reason"] = "tampered"
+
+    async def test_strict_activity_schema_accepts_the_models_json_spellings(self) -> None:
+        """A strict schema validates the model's JSON annotation in JSON mode and stays strict."""
+        # @intent activity-annotation-validates-in-json-mode
+        tool = EchoTool()
+        bound = tool.with_activity(ToolActivity(schema=StrictActivity, description="Report the phase."))
+        executor = ToolExecutor(Tools([bound]))
+        annotation = {"phase": "plan", "at": "2026-10-11T09:30:00"}
+
+        prepared = Tools([bound]).prepare_call(ToolCall("echo", {"text": "hi", "activity": annotation}))
+        result = await executor.execute_call(ToolCall("echo", {"text": "hi", "activity": annotation}))
+
+        self.assertEqual(dict(prepared.activity.payload), annotation)
+        self.assertEqual(result.output, "hi")
+        rejected = await executor.execute_call(
+            ToolCall("echo", {"text": "hi", "activity": {"phase": "plan", "at": 1760175000}})
+        )
+        self.assertEqual(rejected.metadata["error"], "validation_error")
+        self.assertIn("at", rejected.output)
+        self.assertEqual(tool.executed_arguments, [{"text": "hi"}])
 
 
 class ToolCustomizationTests(unittest.IsolatedAsyncioTestCase):

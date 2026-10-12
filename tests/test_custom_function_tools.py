@@ -10,7 +10,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, Strict
+from pydantic.alias_generators import to_camel
 
 from vidbyte import tool, vidbyte_tool
 from vidbyte.agents import AgentRuntime
@@ -80,6 +81,24 @@ class OrderRecord:
     tags: Mapping[str, str]
 
 
+class AliasedOrder(BaseModel):
+    order_id: str = Field(alias="orderId")
+    total_cents: int = Field(alias="totalCents")
+
+
+class CamelOrder(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel)
+    order_id: str
+    total_cents: int
+
+
+class StrictFilter(BaseModel):
+    model_config = ConfigDict(strict=True)
+    priority: Priority
+    due: date
+    window: tuple[int, int]
+
+
 def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -144,6 +163,30 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.ERROR)
         self.assertIn("value", result.output)
         self.assertEqual(calls, [])
+
+    async def test_null_for_defaulted_argument_uses_the_default(self) -> None:
+        # @intent null-optional-arg-means-default
+        @tool
+        def search(
+            query: str,
+            limit: int = 5,
+            lang: Annotated[str, Field(min_length=2)] = "en",
+            page: int | None = 3,
+        ) -> str:
+            return f"{query}:{limit}:{lang}:{page}"
+
+        call = ToolCall("search", {"query": "x", "limit": None, "lang": None, "page": None})
+        result = await search.execute(call)
+
+        # A null for a defaulted parameter that rejects None means "leave it out"; one that accepts None keeps None.
+        self.assertIsNone(search.validate_call(call))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(result.output, "x:5:en:None")
+
+        # A required parameter still rejects null.
+        missing = ToolCall("search", {"query": None})
+        self.assertIn("query", search.validate_call(missing) or "")
+        self.assertEqual((await search.execute(missing)).status, ToolStatus.ERROR)
 
     def test_bad_varargs_signature_is_rejected(self) -> None:
         with self.assertRaises(TypeError):
@@ -285,6 +328,41 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(defaulted.output, "Oslo:1")
         self.assertEqual(calls, [("Rome", 3), ("Oslo", 1)])
 
+    async def test_strict_arguments_accept_the_models_json_spellings(self) -> None:
+        # @intent tool-arguments-validate-in-json-mode
+        received: list[tuple[StrictFilter, date]] = []
+
+        @tool
+        def find(criteria: StrictFilter, day: Annotated[date, Strict()]) -> str:
+            """Find tickets."""
+            received.append((criteria, day))
+            return "ok"
+
+        arguments = {"criteria": {"priority": "high", "due": "2026-10-11", "window": [9, 17]}, "day": "2026-10-12"}
+        call = ToolCall("find", json.loads(json.dumps(arguments)))
+
+        self.assertIsNone(find.validate_call(call))
+        result = await find.execute(call)
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(received, [(StrictFilter(priority=Priority.HIGH, due=date(2026, 10, 11), window=(9, 17)), date(2026, 10, 12))])
+
+    async def test_strict_arguments_keep_strictness_and_python_objects(self) -> None:
+        # JSON mode is still strict, and a call built in code with Python objects still validates in Python mode.
+        @tool
+        def find(criteria: StrictFilter, day: Annotated[date, Strict()]) -> str:
+            """Find tickets."""
+            return f"{criteria.priority.value}:{day.isoformat()}"
+
+        loose = ToolCall("find", {"criteria": {"priority": "high", "due": "2026-10-11", "window": "9-17"}, "day": "2026-10-12"})
+        rejected = await find.execute(loose)
+        self.assertEqual(rejected.status, ToolStatus.ERROR)
+        self.assertEqual(rejected.metadata["error_type"], "validation")
+        self.assertIn("criteria.window", find.validate_call(loose) or "")
+
+        built = StrictFilter(priority=Priority.LOW, due=date(2026, 1, 2), window=(1, 2))
+        accepted = await find.execute(ToolCall("find", {"criteria": built, "day": date(2026, 1, 3)}))
+        self.assertEqual(accepted.output, "low:2026-01-03")
+
 
 class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
     # @intent tool-model-output-is-json
@@ -424,6 +502,34 @@ class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
         result = await self._run(report, output_schema=None)
 
         self.assertEqual(result.output, '{"a": {"z": true}, "b": [1, 2.5, null]}')
+
+    # @intent tool-model-output-round-trips
+    # A camelCase API model returned as its own output_schema must pass the check, so models dump by alias.
+    async def test_aliased_model_passes_its_own_output_schema(self) -> None:
+        def field_alias() -> AliasedOrder:
+            return AliasedOrder(orderId="A-1", totalCents=4200)
+
+        def camel() -> CamelOrder:
+            return CamelOrder(orderId="A-1", totalCents=4200)
+
+        def nested() -> dict[str, Any]:
+            # A non-string key forces the key-normalizing second pass, which must also dump models by alias.
+            return {"orders": {1: CamelOrder(orderId="A-1", totalCents=4200)}}
+
+        def quote() -> Quote:
+            # Control: a model without aliases serializes exactly as before.
+            return Quote(sku="A1", price=9.5)
+
+        for func, schema in ((field_alias, AliasedOrder), (camel, CamelOrder)):
+            result = await self._run(func, output_schema=schema)
+
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output, '{"orderId": "A-1", "totalCents": 4200}')
+            self.assertEqual(schema.model_validate_json(result.output), func())
+        nested_result = await self._run(nested, output_schema=None)
+        self.assertEqual(nested_result.output, '{"orders": {"1": {"orderId": "A-1", "totalCents": 4200}}}')
+        quote_result = await self._run(quote)
+        self.assertEqual(quote_result.output, '{"price": 9.5, "sku": "A1"}')
 
     async def test_wrong_shape_still_fails_its_output_schema(self) -> None:
         def quote() -> Passenger:

@@ -50,7 +50,7 @@ Middleware is **deterministic runtime policy code** injected into the agent loop
 
 ### Lifecycle Hooks
 
-`AgentMiddleware` exposes nine hooks. Each is `async def hook(self, ctx: MiddlewareContext) -> MiddlewareDecision`:
+`AgentMiddleware` exposes ten hooks. Each is `async def hook(self, ctx: MiddlewareContext) -> MiddlewareDecision`, except `review_finish`, which returns a `FinishReview`:
 
 | Hook | Called When |
 |------|------------|
@@ -63,6 +63,7 @@ Middleware is **deterministic runtime policy code** injected into the agent loop
 | `after_tool_call` | After a tool executes or is denied |
 | `after_iteration` | After each iteration completes |
 | `after_run` | Before the final result is returned |
+| `review_finish` | At each finish attempt the output contracts accepted; accept, continue with feedback, or stop |
 
 The full hook lifecycle, available `MiddlewareContext` fields, and the built-in catalog with arguments are documented in [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md).
 

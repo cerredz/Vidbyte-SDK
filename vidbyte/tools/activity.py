@@ -21,11 +21,12 @@ Relations:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from vidbyte.lib.dataclasses.tools import ACTIVITY_ARGUMENT_KEY
 from vidbyte.lib.errors import ToolRegistrationError
@@ -126,7 +127,7 @@ class ActivityToolFormatter:
     def _capture(activity: ToolActivity, raw: object) -> ToolCallActivity | None:
         # Normalizes a model-authored annotation through its schema, or returns None when invalid.
         try:
-            model = activity.schema.model_validate(raw)
+            model = ActivityToolFormatter._validate(activity, raw)
         except ValidationError:
             return None
         return ToolCallActivity(payload=model.model_dump(mode="json"), metadata=activity.metadata)
@@ -135,13 +136,24 @@ class ActivityToolFormatter:
     def _validation_detail(activity: ToolActivity, raw: object) -> str:
         # Renders a bounded, model-readable reason why an annotation failed its schema.
         try:
-            activity.schema.model_validate(raw)
+            ActivityToolFormatter._validate(activity, raw)
         except ValidationError as exc:
             return "; ".join(
                 f"{'.'.join(str(part) for part in error['loc']) or ACTIVITY_ARGUMENT_KEY}: {error['msg']}"
                 for error in exc.errors()
             )[: ActivityToolFormatter._MAX_VALIDATION_DETAIL_CHARS]
         return "annotation did not reach the tool"
+
+    @staticmethod
+    def _validate(activity: ToolActivity, raw: object) -> BaseModel:
+        # @intent activity-annotation-validates-in-json-mode
+        # The model writes the annotation as JSON, so it validates in Pydantic's JSON mode: a strict=True schema's
+        # Python mode rejects the JSON spellings of enums and datetimes. A value JSON cannot hold keeps Python mode.
+        try:
+            text = json.dumps(raw, allow_nan=False)
+        except (TypeError, ValueError):
+            return activity.schema.model_validate(raw)
+        return activity.schema.model_validate_json(text)
 
     @staticmethod
     def _without_activity_key(arguments: Mapping[str, Any]) -> dict[str, Any]:

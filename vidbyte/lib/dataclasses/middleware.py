@@ -42,6 +42,7 @@ class MiddlewareHook(str, Enum):
     AFTER_TOOL_CALL = "after_tool_call"
     AFTER_ITERATION = "after_iteration"
     AFTER_RUN = "after_run"
+    REVIEW_FINISH = "review_finish"
 
 
 class MiddlewareAction(str, Enum):

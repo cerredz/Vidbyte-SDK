@@ -24,7 +24,7 @@ All middleware classes subclass the abstract base `AgentMiddleware` and override
 
 ## 2. The Hook Lifecycle
 
-An agent runs within `AgentRuntime` and triggers middleware hooks at nine discrete execution stages. The following table details the hooks, when they execute, and what contextual facts are available:
+An agent runs within `AgentRuntime` and triggers middleware hooks at ten discrete execution stages. The following table details the hooks, when they execute, and what contextual facts are available:
 
 | Hook Name | Triggers When | Available Context Fields |
 | :--- | :--- | :--- |
@@ -37,6 +37,7 @@ An agent runs within `AgentRuntime` and triggers middleware hooks at nine discre
 | `after_tool_call` | After the tool has finished executing or has been denied. | All `before_tool_call` fields, plus `tool_result` |
 | `after_iteration` | At the end of an iteration loop, after tool executions are processed. | All iteration-accumulated counts and timings |
 | `after_run` | Before the agent runtime returns the final response payload. | All run-level accumulated statistics |
+| `review_finish` | At each finish attempt (a plain answer or an `isDone` call) that the output contracts accepted. Returns a `FinishReview`, not a `MiddlewareDecision`: `accept()`, `continue_with(feedback)` (the model reads `feedback` and keeps working), or `stop(feedback)` (the run ends with the model's answer and `contract_unsatisfied`). The first non-accept wins; no events; exceptions end the run regardless of `fail_closed`. | All `before_iteration` fields; on the `isDone` path also `tool_call` and `tool_result` |
 
 ---
 
