@@ -143,6 +143,10 @@ class OpenAICompatibleProvider:
         # vLLM-style servers send "tool_calls": [] on plain text turns; only real calls carry no text.
         if isinstance(message, dict) and isinstance(message.get("tool_calls"), list) and len(message["tool_calls"]) > 0:
             return ""
+        # @intent chunked-content-answers-with-its-text-chunks
+        # Mistral reasoning models send content as a list of chunks; the answer is the text chunks, never the thinking.
+        if isinstance(content, list):
+            return "".join(chunk["text"] for chunk in content if isinstance(chunk, dict) and chunk.get("type") == "text" and isinstance(chunk.get("text"), str))
         if not isinstance(content, str):
             raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
         return content
