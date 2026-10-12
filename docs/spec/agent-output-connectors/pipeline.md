@@ -53,6 +53,8 @@ started: 2026-10-11 17:36
 - 2026-10-11 — S2 test author added S4 tests @45ba29cc (+27 cases → 340; red `16 failed, 324 passed`, re-run by orchestrator; vidbyte/ untouched; no existing assertion removed; httpx_destination fixture moved to conftest). New test-tree baseline S2_HEAD_2 = 7f3bb7ff; S5/S6 diff tests against it.
 - 2026-10-11 — ci.yml 38194285572 at fa430c8f (S3 code) completed success (Source 3.11, 3.12, Package).
 
+- 2026-10-12 — Session restarted mid repair-1; the agent had made no commits (tree clean at 78321115). Resumed the same agent. origin/main moved 25 commits (#759, #768-#772, #769, #873-#886); overlap with our diff: vidbyte/agents/README.md, vidbyte/agents/fork.py, vidbyte/lib/enums/__init__.py; base.py not touched by main. Added step 0 to iteration 1: `git merge origin/main` (never rebase), resolve, regenerate the public-API contract if needed, then fix findings on the merged base.
+
 ## User replies (verbatim)
 - (none yet)
 
