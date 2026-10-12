@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: resolve is the one narrated main; its step leaves (_commit_sh
 FUNCTION INVENTORY: _GitHubAnswer.failure(response, *, step, target) -> SkillResolution | None; GitHubSkillResolver.group_key(entry) -> Hashable; GitHubSkillResolver.resolve(entries) -> tuple[SkillResolution, ...]; GitHubSkillResolver._token(entry) -> str | None; GitHubSkillResolver._commit_sha(entry, auth) -> str | SkillResolution; GitHubSkillResolver._tree_paths(repo, sha, auth) -> tuple[str, ...] | SkillResolution; GitHubSkillResolver._search(paths, entry, sha) -> str | SkillResolution; GitHubSkillResolver._raw_document(entry, folder, sha, auth) -> SkillResolution.
 COMMON MODIFICATION PATTERNS: A status GitHub starts using for a known condition joins the dict in _GitHubAnswer.failure. A change to how a folder is found by name changes _search only.
 WHAT NOT TO DO IN THIS FILE: 1. Do not follow redirects or read a Location header. 2. Do not send a token that starts with the Vidbyte key prefix, and never put any token in a URL, label, or detail. 3. Do not call HTTPStatus(status): 529 is not a member. 4. Do not echo a response body. 5. Do not mix entries with different tokens in one group.
-KNOWN EDGE CASES: A 403 with x-ratelimit-remaining "0" or a retry-after header is GitHub's rate limit (RATE_LIMITED, transient); any other 403 is AUTH_FAILED. A 3xx means the repository moved (NOT_FOUND, remembered). A commit answer that is not a 40-character SHA and a tree that is not usable JSON are network faults (FETCH_FAILED, transient). A truncated tree, or two folders of the same name at the shallowest depth, is INVALID_SKILL for the searched entries only. A SKILL.md at the repository root is not supported (spec Q-6).
+KNOWN EDGE CASES: A 403 with x-ratelimit-remaining "0" or a retry-after header is GitHub's rate limit (RATE_LIMITED, transient); any other 403 is AUTH_FAILED. A 3xx means the repository moved (NOT_FOUND, remembered). A commit answer that is not a 40-character SHA, a tree that is not usable JSON, and a tree whose items are not all objects with a text path (what a 2,000-level nested body parses to on Python 3.12+) are network faults (FETCH_FAILED, transient). A truncated tree, or two folders of the same name at the shallowest depth, is INVALID_SKILL for the searched entries only. A SKILL.md at the repository root is not supported (spec Q-6).
 RELATED DOCS: vidbyte/agents/skills/README.md; docs/spec/jev-skill-sources/spec.md (D-10, D-11, D-18, D-21, D-30, D-31, section 9.2)
 TESTS: tests/features/jev_skills_preload/test_skill_sources_github.py; tests/features/jev_skills_preload/test_skill_sources_security.py
 """
@@ -155,8 +155,10 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
 
     async def _tree_paths(self, repo: str, sha: str, auth: dict[str, str]) -> tuple[str, ...] | SkillResolution:
         # @intent github-tree-listing
-        # A listing that is not usable JSON is a network fault (transient);
-        # a truncated one cannot prove a folder is the only match, so the
+        # A listing that is not usable JSON, or whose items are not all
+        # objects with a text path, is a network fault (transient): its
+        # items cannot be searched, so a miss there proves nothing. A
+        # truncated one cannot prove a folder is the only match, so the
         # searched entries are told to pass path= (permanent).
         target = f"{repo}@{sha[:SKILL_LABEL_HASH_CHARS]}"
         answer = await self.fetch.get(url=f"{GITHUB_API_BASE_URL}/repos/{repo}/git/trees/{sha}?recursive=1", headers={"accept": GITHUB_ACCEPT_JSON, **auth}, max_bytes=SKILL_DOWNLOAD_MAX_BYTES, step=SkillFetchStep.GITHUB_TREE)
@@ -170,11 +172,11 @@ class GitHubSkillResolver(SkillResolver[GitHubSkill]):
         except (ValueError, RecursionError):
             listing = None
         tree = listing.get("tree") if isinstance(listing, dict) else None
-        if not isinstance(listing, dict) or not isinstance(tree, list):
+        if not isinstance(listing, dict) or not isinstance(tree, list) or not all(isinstance(item, dict) and isinstance(item.get("path"), str) for item in tree):
             return SkillResolution(reason=SkillUnavailableReason.FETCH_FAILED, detail=f"GitHub gave an unexpected answer to {SkillFetchStep.GITHUB_TREE.value} for {target}; retried on the next run. Set path= on the entry to skip the tree listing.")
         if listing.get("truncated") is True:
             return SkillResolution(reason=SkillUnavailableReason.INVALID_SKILL, detail=f"GitHub truncated the tree listing of {target}, so the skill folder cannot be found by name; pass path= with the skill's folder.")
-        return tuple(item["path"] for item in tree if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("path"), str))
+        return tuple(item["path"] for item in tree if item.get("type") == "blob")
 
     @staticmethod
     def _search(paths: tuple[str, ...] | SkillResolution, entry: GitHubSkill, sha: str) -> str | SkillResolution:
