@@ -12,10 +12,12 @@ TESTS: tests/features/agent_output_connectors/test_output_connectors_http_failur
 from __future__ import annotations
 
 import json
+import logging
 import re
 import smtplib
 import ssl
 from collections.abc import Mapping
+from contextvars import ContextVar
 from email.message import EmailMessage
 from uuid import uuid4
 
@@ -40,6 +42,10 @@ from vidbyte.lib.enums.outputs import DeliveryStatus, OutputDestination
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
 
+# True only inside OutputHttp.post, so the httpx log filter below hides
+# that send's request line and leaves every other request's line alone.
+_OUTPUT_POST_ACTIVE: ContextVar[bool] = ContextVar("vidbyte_output_post_active", default=False)
+
 
 class OutputHttp:
     """Sends one connector's HTTPS JSON request and maps the response to a receipt."""
@@ -51,6 +57,9 @@ class OutputHttp:
         # Only a 429 is retried: the destination did not process it, so
         # a retry cannot post a reply twice. Redirects are refused, so a
         # credential header never reaches a second host.
+        # Mark the send so httpx's request log line, whose URL can be
+        # the credential, is dropped for this send only.
+        active = _OUTPUT_POST_ACTIVE.set(True)
         try:
             response = await HttpTransport().request(
                 method="POST",
@@ -67,6 +76,8 @@ class OutputHttp:
         except ProviderRequestError:
             # No answer arrived, or the answer was too big.
             return DeliveryReceipt(destination, DeliveryStatus.FAILED, error_code=OUTPUT_ERROR_NETWORK)
+        finally:
+            _OUTPUT_POST_ACTIVE.reset(active)
         # Any status outside 2xx is a failure the destination reported.
         if not OUTPUT_HTTP_SUCCESS_MIN <= response.status_code <= OUTPUT_HTTP_SUCCESS_MAX:
             return DeliveryReceipt(destination, DeliveryStatus.FAILED, error_code=OutputHttp._error_code(response))
@@ -105,6 +116,15 @@ class OutputHttp:
             return None
         link = request.link_prefix + node
         return link if link.startswith("https://") else None
+
+    @staticmethod
+    def _keep_log_record(record: logging.LogRecord) -> bool:
+        # @intent output-request-log-hides-the-url
+        # httpx logs every request's full URL at INFO, and for Slack,
+        # Discord, Teams, Google Chat, Telegram, and webhooks that URL
+        # is the credential. Only lines from an output send are dropped,
+        # so the caller's own httpx requests still log.
+        return not (_OUTPUT_POST_ACTIVE.get() and record.getMessage().startswith("HTTP Request:"))
 
 
 class OutputSmtp:
@@ -145,5 +165,9 @@ class OutputSmtp:
             return smtplib.SMTP_SSL(settings.host, settings.port, timeout=OUTPUT_TIMEOUT_SECONDS, context=ssl.create_default_context())
         return smtplib.SMTP(settings.host, settings.port, timeout=OUTPUT_TIMEOUT_SECONDS)
 
+
+# Registered once, at import; the logger is found by name, so this
+# module never imports httpx.
+logging.getLogger("httpx").addFilter(OutputHttp._keep_log_record)
 
 __all__ = ["OutputHttp", "OutputSmtp"]
