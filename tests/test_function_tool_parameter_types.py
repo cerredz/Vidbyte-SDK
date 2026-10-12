@@ -1,14 +1,14 @@
-"""Context Protocol Header
+"""FILE: tests/test_function_tool_parameter_types.py
 
-Description:
-    Tests the type labels that @tool gives each parameter of a decorated function.
-Purpose:
-    Verifies the tool docs sent to the model name a type, never a Python repr of the JSON schema.
-Architecture:
-    - Color: Enum parameter that Pydantic emits as a $ref.
-    - FunctionToolParameterTypeTests: Label checks on the spec and its rendered prompt text.
-Relations:
-    Related to vidbyte.tools.function_tool and vidbyte.lib.dataclasses.tools.
+PURPOSE: Regression tests for the type labels @tool gives each parameter of a decorated function.
+ROLE IN CODEBASE: Keeps the tool docs sent to the model naming a type, never a Python repr of the JSON schema.
+ARCHITECTURE NOTE: Builds a @tool spec, reads its ToolParameter labels, and renders to_prompt_str.
+FUNCTION INVENTORY: Color is an enum parameter Pydantic emits as a $ref; FunctionToolParameterTypeTests checks labels and prompt text.
+COMMON MODIFICATION PATTERNS: Add a parameter per new schema shape whose label _parameter_type_label must produce.
+WHAT NOT TO DO: Do not assert the provider input_schema here; @tool still sends Pydantic's schema unchanged.
+KNOWN EDGE CASES: Pydantic emits Optional[X] and X | None as anyOf [X, null] with no top-level type.
+RELATED DOCS: vidbyte/tools/README.md
+TESTS: Run with python -m pytest -q tests/test_function_tool_parameter_types.py.
 """
 
 from __future__ import annotations
