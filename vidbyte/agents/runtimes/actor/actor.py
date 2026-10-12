@@ -94,7 +94,10 @@ class AgentActor:
     async def on_receive(self, message: ActorMessage) -> str | None:
         """Invoked when a new message is received. Formulates a prompt and invokes completion."""
         # Check for task completion signals or exit signals to prevent infinite execution.
-        if "terminate_task" in message.state or message.content.strip().lower() == "exit":
+        # @intent user-prompt-exit-is-answered-not-swallowed
+        # The caller's own prompt (sent by "system") is always answered, even "exit", so the run never waits forever.
+        is_exit_signal = message.sender != "system" and message.content.strip().lower() == "exit"
+        if "terminate_task" in message.state or is_exit_signal:
             return None
 
         prompt = self.compile_prompt(message)
