@@ -3,7 +3,7 @@
 PURPOSE: Pin CodingAgent's environment section: the OS family and version, date, working directory, project files with their languages and package managers, declared dependencies, installed dependency folders, git branch, shell, and what bash reports reach the model as an EnvironmentContextItem after AGENTS.md and before the user message, and a missing bash, a failed probe, or a malformed manifest never raises.
 ROLE IN CODEBASE: Drives vidbyte.CodingAgent through BaseAgent's real run loop with the offline scripted model from conftest.py; calls EnvironmentLoader (vidbyte/agents/coding_context/environment.py) directly where sys.platform must be simulated, and builds EnvironmentContextItem (vidbyte/context/primitives/documents.py) and CodingContextSectionItem (vidbyte/lib/dataclasses/coding.py) on their own for their checks.
 ARCHITECTURE NOTE: Most tests replace bash with this Python interpreter and the probe script with a short Python program that prints the probe's raw tab-separated records, so the real subprocess, temporary-file, parsing, and timeout path runs on every OS without depending on which tools the host has. The probe cache in vidbyte/agents/coding_context/environment_probe.py is reset for those tests. One test runs the host's real bash.
-FUNCTION INVENTORY: test_environment_is_shown_* (position and facts in the request); test_windows_* (Git Bash line); test_missing_bash_* (no bash); test_failed_probe_* (timeout, non-zero exit); test_probe_keeps_only_finished_records (cut output); test_load_environment_false_* and test_load_environment_must_be_* (the switch); test_planted_secret_* (secrecy); test_project_files_* (markers, languages, package managers); test_declared_dependencies_*, test_malformed_manifests_*, and test_blank_manifest_keys_* (manifests); test_installed_dependency_folders_* ; test_git_head_* (branches); test_probe_runs_once_* (cache); test_caller_environment_item_* and test_environment_item_rejects_* (the primitive alone); test_section_item_* (CodingContextSectionItem); test_real_bash_* (integration).
+FUNCTION INVENTORY: test_environment_is_shown_* (position and facts in the request); test_windows_* (Git Bash line); test_missing_bash_* (no bash); test_failed_probe_* (timeout, non-zero exit); test_probe_keeps_only_finished_records (cut output); test_load_environment_false_* and test_load_environment_must_be_* (the switch); test_planted_secret_* (secrecy); test_project_files_* (markers, languages, package managers); test_declared_dependencies_*, test_malformed_manifests_*, test_deeply_nested_manifests_*, and test_blank_manifest_keys_* (manifests); test_installed_dependency_folders_* ; test_git_head_* (branches); test_probe_runs_once_* (cache); test_caller_environment_item_* and test_environment_item_rejects_* (the primitive alone); test_section_item_* (CodingContextSectionItem); test_real_bash_* (integration).
 COMMON MODIFICATION PATTERNS: A new fact adds one field assertion and one rendered-line assertion to the first test; a new failure path adds a case to test_failed_probe_*; a new manifest adds a file to test_declared_dependencies_*.
 WHAT NOT TO DO IN THIS FILE: 1. Do not depend on which tools the host has outside the real-bash test. 2. Do not patch sys.platform while a CodingAgent is built; patch it only around EnvironmentLoader.load.
 KNOWN EDGE CASES: The date assertion could fail if the test runs across midnight. The timeout case leaves the fake probe sleeping for a few seconds after the call returns, because killing it is not waited on.
@@ -328,6 +328,19 @@ def test_malformed_manifests_give_no_names_and_never_raise(tmp_path, no_bash, mo
 
     assert item.dependencies == ()
     assert "Declared dependencies" not in item.to_context_text()
+
+
+@pytest.mark.parametrize(
+    "files",
+    [{"pyproject.toml": "x = " + "[" * 5000 + "]" * 5000 + "\n"}, {"package.json": "[" * 50000 + "]" * 50000}],
+    ids=["deep-toml", "deep-json"],
+)
+def test_deeply_nested_manifests_give_no_names_and_never_raise(coding_agent_cls, tmp_path, no_bash, monkeypatch, files) -> None:
+    # Regression: the TOML and JSON parsers raise RecursionError on deep nesting, which used to escape CodingAgent construction.
+    _write_files(tmp_path, files)
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ()
+    assert _item(_agent(coding_agent_cls, tmp_path, progress_notes=False)).dependencies == ()
 
 
 @pytest.mark.parametrize(

@@ -76,17 +76,21 @@ class ProjectDependencies:
     @staticmethod
     def _toml(text: str) -> dict[str, Any]:
         """Return text parsed as TOML, or an empty table when it is not valid TOML."""
+        # @intent deeply-nested-manifest-gives-no-name
+        # The parser raises RecursionError on input nested thousands deep; that is malformed too.
         try:
             return tomllib.loads(text)
-        except tomllib.TOMLDecodeError:
+        except (tomllib.TOMLDecodeError, RecursionError):
             return {}
 
     @staticmethod
     def _json(text: str) -> dict[str, Any]:
         """Return text parsed as a JSON object, or an empty table when it is not one."""
+        # @intent deeply-nested-manifest-gives-no-name
+        # The parser raises RecursionError on input nested thousands deep; that is malformed too.
         try:
             data = json.loads(text) if text else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             return {}
         return data if isinstance(data, dict) else {}
 
