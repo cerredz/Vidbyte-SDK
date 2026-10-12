@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
 from vidbyte import Agent, AggregateAgent, DebugTracer, ProposerSpec, Trace, TraceController, TraceProfile
+from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
@@ -63,6 +64,17 @@ class DoneRunner:
         # Returns a minimal OpenAI-compatible tool-call response.
         raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "{self.final_answer}"}}'}]}
         return types.SimpleNamespace(text="", raw=raw, metadata={})
+
+
+class TextAnswerRunner:
+    """Runner that answers every call with fixed plain text, as actor runtime completions expect."""
+
+    def __init__(self) -> None:
+        self._config = types.SimpleNamespace(provider="xai", model="grok-test")
+
+    def run(self, prompt: str, **kwargs: object) -> object:
+        # Returns a plain-text response with no tool calls.
+        return types.SimpleNamespace(text="ANSWER", raw={}, metadata={})
 
 
 class LookupThenDoneRunner:
@@ -461,6 +473,30 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("runtime.iteration", names)
         self.assertEqual(names.count("tool.call"), 2)
         self.assertIn("parser.tool_calls", names)
+        self.assertEqual(problems, [])
+
+    async def test_actor_runtime_verbose_profile_never_opens_a_span_under_a_closed_parent(self) -> None:
+        # @intent spans-never-open-under-a-closed-parent
+        # Verifies actor task spans attach to the open run span, not the spawn span that ended when the task was created.
+        events: list[dict[str, Any]] = []
+        tracer = Trace.profile(Trace.debug(events), TraceProfile.verbose())
+        runtime = ActorRuntime(include_actors=[], max_loop=3)
+        agent = build_test_agent(name="coord", system_prompt="Coordinate.", runner=TextAnswerRunner(), trace=tracer, runtime=runtime)
+        reply = await asyncio.wait_for(agent.generate_reply("hello"), 20)
+        open_contexts: list[SpanContext] = []
+        problems: list[str] = []
+        for event in events:
+            if event["type"] == "start_span" and not any(event["parent"] is context for context in open_contexts):
+                problems.append(str(event["name"]))
+            if event["type"] in {"start_trace", "start_span"}:
+                open_contexts.append(event["context"])
+            if event["type"] in {"end_trace", "end_span"}:
+                open_contexts = [context for context in open_contexts if context is not event["context"]]
+        names = [event.get("name") for event in events if event["type"] == "start_span"]
+        self.assertEqual(reply.content, "ANSWER")
+        self.assertIn("runtime.actor.spawn", names)
+        self.assertIn("runtime.actor.llm", names)
+        self.assertIn("runtime.actor.message", names)
         self.assertEqual(problems, [])
 
     async def test_tool_call_attributes_include_arguments(self) -> None:

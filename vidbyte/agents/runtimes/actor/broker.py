@@ -103,9 +103,11 @@ class BaseActorRuntime(ABC):
         """Registers an instantiated AgentActor and schedules its reactive loop."""
         span = self._start_semantic_span("runtime.actor.spawn", actor_id=actor.actor_id, actor_type=actor.__class__.__name__)
         self._actors[actor.actor_id] = actor
+        # @intent spans-never-open-under-a-closed-parent
+        # Close the spawn span before creating the task: the task copies the current span stack, so its spans must see the open run span.
+        self._end_semantic_span(span, output=actor.actor_id)
         task = asyncio.create_task(actor.start())
         self._tasks.append(task)
-        self._end_semantic_span(span, output=actor.actor_id)
         return actor
 
     def build_context(
