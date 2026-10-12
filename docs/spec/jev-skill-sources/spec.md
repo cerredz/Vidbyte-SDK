@@ -1,7 +1,7 @@
 ---
 spec: jev-skill-sources
 title: JevAgent skill sources — declarative skill entries resolved under the hood
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-jev-skill-sources
@@ -93,28 +93,37 @@ The output shown is for a machine where `npx skills add` was never run and `ANTH
 
 ```mermaid
 flowchart TD
-  A[JevAgent.__init__] -->|settings.alignment.skills| B[JevAlignmentSettings: validate entries, unique names]
-  B -->|entries| C[JevSkillsPreload.__init__ builds SkillLoader once]
-  R[JevAgent.arun] --> G{gate stop or specialist?}
-  G -->|yes| X[return: no source contacted, results empty]
-  G -->|no| P[JevRuntime._preload_skills]
-  P --> L[JevSkillsPreload.run calls SkillLoader.load]
-  L -->|pending entries grouped by type and group key| M[(remembered resolutions)]
-  L -->|concurrently, one call per group| S1[InlineSkillResolver]
-  L --> S2[LocalSkillResolver: disk in a worker thread]
-  L --> S3[SkillsShSkillResolver: installed copy + skills-lock.json]
-  L --> S4[GitHubSkillResolver: SHA, tree once, raw SKILL.md]
-  L --> S5[Anthropic and OpenAI resolvers: version zip or bare SKILL.md in memory]
-  S2 & S3 & S4 & S5 -->|raw SKILL.md bytes| MD[SkillMarkdown.parse]
-  S1 & MD -->|SkillResolution per entry| L
-  L -->|remember success + permanent failure| M
-  L -->|resolutions in settings order| SEED[seed JevSkillResult per entry]
-  SEED --> BB[_build_batches reads loader.documents]
-  BB -->|JevSkillBatch| J[DecisionModelHelper.arun per batch]
-  J -->|answers| SC[_score_skill]
-  SC -->|JevSkillsOutcome| RESP[JevResponse.skills]
-  SC -->|selected documents| AP[_append_selected: run context]
-  AP --> MAIN[main agent loop]
+  A["JevAgent(settings)"] --> B["JevAlignmentSettings._normalized_skills:<br/>strings become SkillDocument, entries pass through, names unique"]
+  B --> C["JevSkillsPreload.__init__ builds one SkillLoader, no I/O"]
+  R["JevAgent.arun(message)"] --> G{"JevRuntime._arun_metered:<br/>gate stop or specialist?"}
+  G -->|yes| X["return: no source contacted, skill results empty"]
+  G -->|no| P["JevRuntime._preload_skills calls JevSkillsPreload.run"]
+  P --> L["SkillLoader.load: entries not yet remembered,<br/>grouped by type and group_key"]
+  L -->|"asyncio.gather, one resolve per group"| IN["InlineSkillResolver"]
+  L --> LO["LocalSkillResolver:<br/>read_capped in a worker thread"]
+  L --> SH["SkillsShSkillResolver:<br/>installed SKILL.md and skills-lock.json check"]
+  L --> GH["GitHubSkillResolver:<br/>token guard, commit SHA, tree once, raw SKILL.md"]
+  L --> VE["Anthropic and OpenAI resolvers over VendorSkillResolver:<br/>key guard, content, latest fallback, zip or bare file"]
+  GH -->|"every request"| FE["SkillFetch.get:<br/>HttpTransport.request, no redirects, 25 s step deadline"]
+  VE -->|"every request"| FE
+  LO --> MD["SkillMarkdown.parse"]
+  SH --> MD
+  GH --> MD
+  VE --> MD
+  IN --> RS["one SkillResolution per entry"]
+  MD --> RS
+  RS --> M[("loader memory: documents and permanent failures, never replaced")]
+  RS --> SEED["results in settings order: an unloaded entry is UNAVAILABLE<br/>with the loader's reason and detail"]
+  SEED --> BB["_build_batches over loader.documents()"]
+  BB --> UB["_unbatched: a loaded skill in no batch is TOO_LARGE"]
+  BB --> J["DecisionModelHelper.arun, one per batch, concurrently"]
+  J -->|"VidbyteSdkError or no token counts"| FB["_failed_batch: DECISION_FAILED"]
+  J --> SC["_score_skill: SELECTED, SKIPPED, or DECISION_FAILED"]
+  UB --> OUT["JevResponse.skills: JevSkillsOutcome, no skill text"]
+  FB --> OUT
+  SC --> OUT
+  OUT --> AP["_append_selected: selected texts appended to this run's system prompt"]
+  AP --> MAIN["main agent loop"]
 ```
 
 ```mermaid
@@ -970,6 +979,7 @@ Auth on every outbound call is the source's own (GitHub token, vendor key) and i
 | r4 | 2026-10-12 | S1 revision (S2 findings) | Test-author findings S2-1 to S2-7, wording and pinning only, every edit checked against the committed tests at `d01e0afa`: programming errors reach `arun` as `AgentExecutionError` chained from the original, cancellation stays `CancelledError` (INV-9, AC-15, EC-9, EC-96, EC-97, §5); symlink loop is `not_found` (EC-17/EC-19); folded description either reading (EC-31); invalid `SkillResolution` raises `ConfigurationError` (§9.1); lock without a numeric `version` is absent (D-17, EC-43); vendor label rule (D-21); S2-7 no change. No name, signature, budget (§8.4), §12.3 row, or Proof cell changed; status stays approved |
 | r4 | 2026-10-12 | S3 implement | All §12.3 rows except 29 built in 25 commits `ae4d205a`..`429c77e9` on base `bd6d54d4`; tests unchanged since `d01e0afa`; lint PASS, both `run_ci.py` stages pass; draft PR #904. Spec text unchanged except frontmatter, the AC-17 and AC-21 Proof cells, and this section |
 | r5 | 2026-10-12 | S1 revision (S4 spec-text findings) | S4-R-2: new EC-118 (GitHub) and EC-119 (vendors), a credential that is not `isascii()` and `isprintable()` after stripping is `auth_failed` with no request, remembered; D-30 clause, §9.2 credential row, FR-9, FR-10, rows 15–16, §12.4. S4-R-1: EC-68 and §9.2 add tree items that are not objects with a text `path` (`fetch_failed`, not remembered), row 15. S4-R-14: §12.4 A001 item limited to new files plus `vidbyte/lib/enums/skills.py`. S4-R-4: no change (implementation fix). No name, signature, reason, §8.4, §8.5, or Proof cell changed; status stays reviewed |
+| r5 | 2026-10-12 | S6 PR | finalized for review: frontmatter `status: pr-open`; the §5 flowchart replaced with the PR's flowchart of the shipped code, which adds the `JevRuntime._arun_metered` gate, `SkillFetch.get`, the credential guards, `_unbatched` (`TOO_LARGE`), and `_failed_batch` (`DECISION_FAILED`), which r5's chart left out; the §5 sequence diagram and prose are unchanged. The S6 deviations list in `pr-body.md` adds R-8's guarded `match` (it supersedes S3 deviation 2: `SKILL_ARCHIVE_MARKDOWN_COUNT` is gone), R-5's `SkillText.require_version` and `require_folder`, R-13's `SKILL_MARKDOWN_DELIMITER`, and R-RC1 (a tokened GitHub request also sends `content-type: application/json` from `bearer_headers`; §9.2 deliberately left unchanged) |
 
 **Implementation deviations (S3)**
 
