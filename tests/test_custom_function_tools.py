@@ -10,7 +10,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from vidbyte import tool, vidbyte_tool
 from vidbyte.agents import AgentRuntime
@@ -78,6 +79,17 @@ class OrderOut(BaseModel):
 class OrderRecord:
     id: str
     tags: Mapping[str, str]
+
+
+class AliasedOrder(BaseModel):
+    order_id: str = Field(alias="orderId")
+    total_cents: int = Field(alias="totalCents")
+
+
+class CamelOrder(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel)
+    order_id: str
+    total_cents: int
 
 
 def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -448,6 +460,34 @@ class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
         result = await self._run(report, output_schema=None)
 
         self.assertEqual(result.output, '{"a": {"z": true}, "b": [1, 2.5, null]}')
+
+    # @intent tool-model-output-round-trips
+    # A camelCase API model returned as its own output_schema must pass the check, so models dump by alias.
+    async def test_aliased_model_passes_its_own_output_schema(self) -> None:
+        def field_alias() -> AliasedOrder:
+            return AliasedOrder(orderId="A-1", totalCents=4200)
+
+        def camel() -> CamelOrder:
+            return CamelOrder(orderId="A-1", totalCents=4200)
+
+        def nested() -> dict[str, Any]:
+            # A non-string key forces the key-normalizing second pass, which must also dump models by alias.
+            return {"orders": {1: CamelOrder(orderId="A-1", totalCents=4200)}}
+
+        def quote() -> Quote:
+            # Control: a model without aliases serializes exactly as before.
+            return Quote(sku="A1", price=9.5)
+
+        for func, schema in ((field_alias, AliasedOrder), (camel, CamelOrder)):
+            result = await self._run(func, output_schema=schema)
+
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(result.output, '{"orderId": "A-1", "totalCents": 4200}')
+            self.assertEqual(schema.model_validate_json(result.output), func())
+        nested_result = await self._run(nested, output_schema=None)
+        self.assertEqual(nested_result.output, '{"orders": {"1": {"orderId": "A-1", "totalCents": 4200}}}')
+        quote_result = await self._run(quote)
+        self.assertEqual(quote_result.output, '{"price": 9.5, "sku": "A1"}')
 
     async def test_wrong_shape_still_fails_its_output_schema(self) -> None:
         def quote() -> Passenger:
