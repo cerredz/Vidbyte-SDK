@@ -1,6 +1,6 @@
 feat(outputs): agents deliver each finished reply to Slack, email, issue trackers, Notion, and webhooks
 ## Summary
-An agent can now send each finished reply to eleven destinations: Slack, Discord, Microsoft Teams, Google Chat, Telegram, email over SMTP (Gmail, Microsoft 365, SendGrid, SES, any SMTP server), GitHub Issues, Linear, Jira Cloud, Notion, and any HTTPS webhook (Make, n8n, Pipedream, Zapier, Power Automate). The developer passes connectors as `outputs=[...]` to `Agent`, `BaseAgent`, or `CodingAgent`, or as `JevAgentSettings.outputs`, and each connector takes one pasted credential: the argument first, then its environment variable, otherwise a `ConfigurationError` that names the variable. The decision that matters most: delivery is plain SDK code that runs once, after the reply passes the output-schema check and is recorded, so the model never sees a key or picks a destination, and a blank or stopped run sends nothing. All connectors send at once under a 35 s deadline, only HTTP 429 is retried, each destination gets one receipt in `reply.metadata["deliveries"]`, and any failure raises `OutputDeliveryError` after every send has finished. The contract and dispatcher live in `vidbyte/agents/output/` and the provider classes in `vidbyte/lib/outputs/`, with no new dependency, no OAuth, and no MCP (spec: `docs/spec/agent-output-connectors/spec.md`, r6).
+An agent can now send each finished reply to eleven destinations: Slack, Discord, Microsoft Teams, Google Chat, Telegram, email over SMTP (Gmail, Microsoft 365, SendGrid, SES, any SMTP server), GitHub Issues, Linear, Jira Cloud, Notion, and any HTTPS webhook (Make, n8n, Pipedream, Zapier, Power Automate). The developer passes connectors as `outputs=[...]` to `Agent`, `BaseAgent`, or `CodingAgent`, or as `JevAgentSettings.outputs`, and each connector takes one pasted credential: the argument first, then its environment variable, otherwise a `ConfigurationError` that names the variable. The decision that matters most: delivery is plain SDK code that runs once, after the reply passes the output-schema check and is recorded, so the model never sees a key or picks a destination, and a blank or stopped run sends nothing. All connectors send at once under a 35 s deadline, only HTTP 429 is retried, each destination gets one receipt in `reply.metadata["deliveries"]`, and any failure raises `OutputDeliveryError` after every send has finished. The contract and dispatcher live in `vidbyte/agents/output/` and the provider classes in `vidbyte/lib/outputs/`, with no new dependency, no OAuth, and no MCP (spec: `docs/spec/agent-output-connectors/spec.md`, r8).
 
 ## How to use what this PR introduces
 ```python
@@ -88,8 +88,8 @@ Configuration is checked when the connector and the agent are built, so a missin
 | `vidbyte/agents/output/connector.py` | New. `OutputConnector` protocol, plus `OutputShaping`: the skip rule and the default title and body. |
 | `vidbyte/agents/output/dispatcher.py` | New. `OutputDispatcher`: validates `outputs`, sends to every connector at once under the deadline, records receipts, and raises on failure. |
 | `vidbyte/agents/output/__init__.py` | New. Public names, including `OutputDispatcher` for resending failed outputs. |
-| `vidbyte/agents/output/README.md` | New. When delivery runs, skip rules, forks and sub-agents, failure behavior, and the resend recipe. |
-| `vidbyte/lib/outputs/base.py` | New. `BaseOutput` (masked `repr`, optional `render`) and `OutputArguments` (credential lookup and argument checks). |
+| `vidbyte/agents/output/README.md` | New. When delivery runs, skip rules, forks and sub-agents, failure behavior, the resend recipe, and which failure codes to check before resending. |
+| `vidbyte/lib/outputs/base.py` | New. `BaseOutput` (masked `repr`, optional `render`) and `OutputArguments` (credential lookup and argument checks; `non_empty` makes an empty list name its own parameter). |
 | `vidbyte/lib/outputs/delivery.py` | New. `OutputHttp.post` (one JSON POST, 429-only retry, no redirects, link check, httpx log filter) and `OutputSmtp.send` (one verified-TLS session). |
 | `vidbyte/lib/outputs/text.py` | New. `OutputText`: first line, chat text, truncation with a marker, one-line titles. |
 | `vidbyte/lib/outputs/slack.py` | New. Incoming-webhook message; escapes `&`, `<`, `>` so `<!channel>` cannot ping. |
@@ -97,7 +97,7 @@ Configuration is checked when the connector and the agent are built, so a missin
 | `vidbyte/lib/outputs/teams.py` | New. Workflows webhook with one Adaptive Card `TextBlock`. |
 | `vidbyte/lib/outputs/google_chat.py` | New. Space-webhook message; neutralizes `<users/`. |
 | `vidbyte/lib/outputs/telegram.py` | New. Bot `sendMessage` with no `parse_mode`. |
-| `vidbyte/lib/outputs/email.py` | New. `EmailOutput` over stdlib `smtplib` on its own `_SMTP_EXECUTOR` thread pool. |
+| `vidbyte/lib/outputs/email.py` | New. `EmailOutput` over stdlib `smtplib` on its own `_SMTP_EXECUTOR` thread pool; `to=[]` fails naming `to`. |
 | `vidbyte/lib/outputs/github.py` | New. One issue per reply in a fixed repo, with fixed labels; receipt URL is `html_url`. |
 | `vidbyte/lib/outputs/linear.py` | New. GraphQL `issueCreate`; success requires the returned issue URL. |
 | `vidbyte/lib/outputs/jira.py` | New. Jira Cloud issue with an ADF description; the link is built from the returned key. |
@@ -109,7 +109,7 @@ Configuration is checked when the connector and the agent are built, so a missin
 | `vidbyte/lib/dataclasses/outputs.py` | New. `OutputContent`, `DeliveryReceipt`, `OutputRequest`, `SmtpSettings`, each validated in `__post_init__`. |
 | `vidbyte/lib/enums/outputs.py` | New. `OutputDestination` (11 members) and `DeliveryStatus`. |
 | `vidbyte/lib/enums/__init__.py` | Exports the two enums. |
-| `vidbyte/lib/errors/base.py` | New `OutputDeliveryError(AgentExecutionError)` with `.reply`, `.receipts`, `.failed`, and the diagnostic packet. |
+| `vidbyte/lib/errors/base.py` | New `OutputDeliveryError(AgentExecutionError)` with `.reply`, `.receipts`, `.failed`, and the diagnostic packet. Its resend hint gives the working recipe (zip `agent.outputs` with `err.receipts`) and the failure codes that may already have been delivered. |
 | `vidbyte/lib/errors/__init__.py` | Exports `OutputDeliveryError`. |
 | `vidbyte/__init__.py` | 17 new root exports: the contract, the 11 connectors, records, enums, and the error. |
 | `contracts/sdk-public-api.json` | Regenerated for the 17 exports (623 total). |
@@ -117,8 +117,8 @@ Configuration is checked when the connector and the agent are built, so a missin
 | `vidbyte/agents/jev/README.md` | Documents `JevAgentSettings.outputs` and specialist behavior. |
 | `vidbyte/lib/README.md` | Lists `outputs/`. |
 | `REPO_MAP.md` | Entries for `vidbyte/agents/output/` and `vidbyte/lib/outputs/`. |
-| `tests/features/agent_output_connectors/` (13 files) | Feature test pack: FEATURE.md, README, `conftest.py` and `factories.py`, and 9 test modules (acceptance, wiring, configuration, contract, dispatch, email, HTTP failures, security, wire contract); 92 test functions, 340 cases. |
-| `docs/spec/agent-output-connectors/` | Request, spec r6, test plan, review, verify log, code map, stage reports, and this PR body. |
+| `tests/features/agent_output_connectors/` (13 files) | Feature test pack: FEATURE.md, README, `conftest.py` and `factories.py`, and 9 test modules (acceptance, wiring, configuration, contract, dispatch, email, HTTP failures, security, wire contract); 92 test functions, 341 cases. |
+| `docs/spec/agent-output-connectors/` | Request, spec r8, test plan, review, verify log, code map, stage reports, and this PR body. |
 
 ## Acceptance criteria → proof
 All test names are in `tests/features/agent_output_connectors/`.
@@ -143,7 +143,7 @@ All test names are in `tests/features/agent_output_connectors/`.
 | AC-17 | Each HTTP connector sends exactly its documented request; a 2xx with no usable link is FAILED. | `test_output_connectors_wire_contract.py::test_each_http_connector_sends_its_documented_request`, `::test_created_object_link_that_is_missing_or_unsafe_makes_a_2xx_response_failed_invalid_response` |
 | AC-18 | Cancellation passes through unwrapped and drops the run's queued prompts. | `test_output_connectors_agent_wiring.py::test_cancellation_during_delivery_propagates_unwrapped_and_clears_the_runs_queued_prompts` |
 | AC-19 | Sends run at the same time; receipts keep configured order. | `test_output_connectors_dispatch.py::test_sends_run_concurrently_and_receipts_keep_configured_order_not_finish_order` |
-| AC-20 | Every invalid `outputs` value or connector argument fails at construction, naming the parameter and never the secret. | `test_output_connectors_configuration.py::test_invalid_connector_argument_is_rejected_at_construction_naming_the_parameter_and_no_secret`, `::test_invalid_outputs_value_is_rejected_when_the_agent_is_built` |
+| AC-20 | Every invalid `outputs` value or connector argument fails at construction, naming the parameter and never the secret. | `test_output_connectors_configuration.py::test_invalid_connector_argument_is_rejected_at_construction_naming_the_parameter_and_no_secret` (including `[email-empty-to]`), `::test_invalid_outputs_value_is_rejected_when_the_agent_is_built` |
 | AC-21 | An agent without outputs behaves exactly as before. | `test_output_connectors_acceptance.py::test_agent_without_outputs_runs_exactly_as_before_and_writes_no_deliveries_key`; full suite in `run_ci` (below) |
 | AC-22 | Lint, CI, contract, and Semgrep pass; no dependency added. | Verification table below; `git diff origin/main...HEAD -- pyproject.toml` is empty |
 | AC-23 | A session records the turn and captures the delivery failure once, via `session.run` and via a direct `agent.run`. | `test_output_connectors_acceptance.py::test_session_records_the_turn_and_captures_the_delivery_failure_before_it_reaches_the_caller`, `::test_agent_bound_to_a_session_reports_its_own_delivery_failure_when_run_directly` |
@@ -152,21 +152,24 @@ All test names are in `tests/features/agent_output_connectors/`.
 | AC-26 | Docs: one dated provider row per destination, `outputs=` documented, REPO_MAP entries, READMEs under 40,000 characters. | `test_output_connectors_contract.py::test_docs_provider_reference_has_one_dated_row_with_an_official_link_per_destination`, `::test_docs_describe_outputs_in_the_agent_readme_and_both_folders_in_the_repo_map`, `::test_docs_new_folder_readmes_stay_within_40000_characters` |
 
 ## Verification
-Code last changed at `ad4ed50a`; every commit after it changes only `docs/`. The local gates below ran at `b18ac7d1`.
+Code last changed at `563efc51`; every later commit changes only `docs/spec/agent-output-connectors/`. The local gates below ran on that code (verify-log iteration 3); I re-ran the feature pack and the §4 snippet at `1f5338da`.
 | Gate | Command | Result |
 |---|---|---|
-| Feature pack | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors` | `340 passed in 2.54s` |
-| Lint | `python lint/run.py` (inside `run_ci`) | `SDK-LINT: PASS`; no rule regressed, seven improved (A002 703→638, A007 255→254, C012 24→23, S001 59→56, S010 5→0, S025 263→261, S051 259→258) |
-| Full local gate | `python scripts/run_ci.py` (PYTHONPATH unset; source and package stages) | `3743 passed, 13 skipped in 29.58s` · `No broken requirements found.` · `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` |
+| Feature pack | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors` | `341 passed in 3.88s` |
+| Lint | `python lint/run.py` | `S009 RATCHETED: 350 known finding(s).` · `S051 IMPROVED 259 -> 258` · `SDK-LINT: PASS` (no rule regressed) |
+| Source stage | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | `3824 passed, 13 skipped in 32.31s` · `CI passed.` |
+| Full local gate | `python scripts/run_ci.py` (PYTHONPATH unset; source and package stages) | `3824 passed, 13 skipped in 32.78s` · `No broken requirements found.` · `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` |
 | Public API contract | `python scripts/generate-sdk-public-api.py --check` | `contracts/sdk-public-api.json is current at 839e8e33… (vidbyte-sdk 0.2.1, 623 exports).` |
-| Semgrep 1.170.1 | `semgrep --test …typed-mapping-boundary-policy…` · `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `1/1: ✓ All tests passed` · `Ran 1 rule on 908 files: 0 findings.` (exit 0) |
-| Remote `ci.yml` | dispatched on `b58a022a`, run 38215147873 | success. Source / Python 3.11: `3738 passed, 18 skipped` · `CI passed.` Source / Python 3.12: `3738 passed, 18 skipped` · `CI passed.` Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` |
-| Remote `static-policy.yml` | dispatched on `b58a022a`, run 38215150030 | success. `1/1: ✓ All tests passed` · `Ran 1 rule on 908 files: 0 findings.` |
+| Semgrep 1.170.1 | `semgrep --test …typed-mapping-boundary-policy…` · `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `1/1: ✓ All tests passed` · `Ran 1 rule on 911 files: 0 findings.` |
+| Remote `ci.yml` | dispatch pending on this commit | pending |
+| Remote `static-policy.yml` | dispatch pending on this commit | pending |
 
-Remote CI on this repo runs only when dispatched, so `gh pr checks` lists nothing; the run IDs above are the checks. Later commits on this branch change only files under `docs/spec/agent-output-connectors/`. `main` is now 7 commits ahead (#746, #763, #767, #885, #887, #888, #889). `git merge-tree` shows a clean merge. A throwaway merge of current `main` passes the feature pack and the coding-agent pack (`610 passed, 12 skipped`) and `python lint/run.py` (`SDK-LINT: PASS`).
+Remote CI on this repo runs only when it is dispatched, so `gh pr checks` lists nothing; the run IDs above are the checks. They cover the last code-bearing commit `563efc51` plus every docs commit up to the one dispatched. The next commit only writes these run IDs into this file, so it was not dispatched again.
+
+The branch is 5 commits behind `main` (#856, #891, #892, #893, #894). `git merge-tree` shows a clean merge. Catch up at merge time. #891 edits `vidbyte/agents/base.py` (it wraps `generate_reply`, not `_generate_reply`), so re-measure lint S008 on `_generate_reply` after the merge: it sits exactly at its limit (10 / 9 / 50).
 
 ## Adversarial review
-15 findings confirmed by an independent verifier across three lenses (spec conformance, repo conventions, engineering), 14 fixed, 1 waived. R-13 (reject non-ASCII credentials) adds scope, so it became optional question Q-11 and was not built. A final conformance re-review returned SOUND; its two Minors were closed in `0ca19568` and `ad4ed50a`. Full record: `docs/spec/agent-output-connectors/review.md`.
+15 findings confirmed by an independent verifier across three lenses (spec conformance, repo conventions, engineering), 14 fixed, 1 waived. R-13 (reject non-ASCII credentials) adds scope, so it became optional question Q-11 and was not built. Two later conformance re-reviews both returned SOUND; the history table below lists every later finding and its fix. Full record: `docs/spec/agent-output-connectors/review.md`.
 | ID | Finding | Fixed in |
 |---|---|---|
 | R-1 (Blocker) | httpx logged `HTTP Request: POST <full URL>` at INFO; for six connectors that URL is the credential. | `228c0fdc`: a `ContextVar` flag around each output POST plus a filter on the `httpx` logger drops only those lines; the caller's own httpx requests still log. |
@@ -176,21 +179,36 @@ Remote CI on this repo runs only when dispatched, so `gh pr checks` lists nothin
 
 Minors fixed: R-6 `0cb2dbc8`, R-7 `540b8501`, R-8 `a432dcde`, R-9 `e41c535f`, R-10 `ad96036f`, R-11 `a9230d46`, R-12 `50eb32c9`, R-15 `fa4a67bb`; R-5 in spec r6 (`a270e6ed`); R-14 by added tests (`45ba29cc`).
 
+Review history after that first round:
+| Round | Result | Fixed in |
+|---|---|---|
+| Re-review 1 (conformance) | SOUND. 2 Minor: R-C1 (the Telegram deviation was not recorded in the spec) and R-C2 (one missing blank line). | `0ca19568`, `ad4ed50a` |
+| S6 PR author | 2 Minor. S6-1: `EmailOutput(to=[])` named the record field `recipients`, not `to`. S6-2: the `OutputDeliveryError` resend hint passed receipts where connectors are needed. | sent to repair 2 |
+| Repair 2 | Merged `main` (`d4100704`, 8 commits, no conflicts). S6-1 fixed with `OutputArguments.non_empty`, so the error reads "to must list at least one value."; its test case `[email-empty-to]` was added first (`4b063c28`). S6-2 fixed: the hint gives the working zip recipe. | S6-1 `5b437f24`, S6-2 `2334385b` |
+| Re-review 2 (conformance) | SOUND. 0 Blocker, 0 Major, 2 Minor: RR2-C1 and RR2-C2. | the next two rows |
+| Repair 3 | RR2-C1 fixed. The resend caution named only `network`; it now also names `invalid_response`, `smtp_error`, `smtp_recipients_refused`, and codes starting with `http_5`, because each can follow a post the destination already stored. | `563efc51` |
+| S6 refresh | RR2-C2 fixed. This PR body still called S6-1 and S6-2 open, and its Telegram rationale no longer matched spec §17. | this refresh |
+
 ## Deviations from the spec
-- **Delivery sits in a helper, not inline (S3-1).** Spec r3 put the delivery `try` block inline in `BaseAgent._generate_reply`. That function was already at the lint S008 limit (complexity 10, 50 statements), so the code calls a private `_deliver_outputs` and moves three existing last-trace lines into `_record_last_trace`. The function still measures 10 / 9 / 50. Spec r5 adopted this, so r6 matches the code.
+- **Delivery sits in a helper, not inline (S3-1).** Spec r3 put the delivery `try` block inline in `BaseAgent._generate_reply`. That function was already at the lint S008 limit (complexity 10, 50 statements), so the code calls a private `_deliver_outputs` and moves three existing last-trace lines into `_record_last_trace`. The function still measures 10 / 9 / 50. Spec r5 adopted this, so the current spec (r8) matches the code.
 - **`OutputArguments.optional_callable`** types its parameter as the `render` callable, not `object` (§8.5), so mypy needs no `cast`. The runtime check is the same.
 - **`OutputArguments.identifier`** returns the canonical lowercase, dashed UUID, so `team_id` and `parent_page_id` always go out in one form. The spec was silent on this.
 - **`OutputShaping.content`** falls back to the agent name whenever no title is found, including a body like `"###"` whose first line is empty after the heading marks are removed.
 - **`OutputRequest`** rejects a header name that is not lowercase. This enforces the spec's "keys lowercase" rule at the record boundary.
 - **`vidbyte/lib/errors/__init__.py`** keeps its existing unsorted-import finding. The new name was added in place, not re-sorted, so lint S051 does not regress.
-- **`TelegramOutput.__init__`** checks the `chat_id` type inline. It is the only connector constructor that raises by itself (§12.4 says none do), because a one-caller check was not worth a new `OutputArguments` method.
+- **`TelegramOutput.__init__`** checks the `chat_id` type inline. It is the only connector constructor that raises by itself (§12.4 says none do). It stays inline even though `OutputArguments` has since gained `non_empty`: `non_empty` exists because `EmailOutput` needs the error to name its own parameter (`to`) rather than a record field, while Telegram's int-or-string check has one caller.
 
 All seven are recorded in spec §17. None changes the public API or a tested behavior.
 
+The spec was also corrected after review, so none of these is an open deviation:
+- **`OutputArguments.non_empty`** (S6-1) is named in spec r7 (§8.5, §12.3 rows 5 and 13).
+- **The resend caution** (RR2-C1) lists the same failure codes in spec r8 (§9.2, AC-24, EC-42) as in the code's hint and both READMEs.
+- **EC-46** was a spec error, not a code change. For `EmailOutput(port=2465)` it predicted FAILED `network`. smtplib raises the greeting timeout as `SMTPServerDisconnected`, so the code gives FAILED `smtp_error`, and spec r8 now says so.
+
 ## Follow-ups
-- **Optional additions, not built (spec Q-8 to Q-11).** Q-8: reject a Jev specialist whose agent has its own outputs, to prevent double posts. Q-9: an `implicit_tls` flag on `EmailOutput` for ports other than 465 (for example SES 2465). Q-10: neutralize per-user `@mentions` in GitHub and Telegram text. Q-11: reject non-ASCII or control characters in credentials at construction.
-- **Known limitations, documented in the READMEs.** A 429 retry ignores `Retry-After`. An email or a FAILED `network` send may still arrive after the deadline. Receipts are not saved in session checkpoints (Q-6). GitHub `@user` and Telegram `@username` in model text notify that person.
-- **Small observations from writing this PR, not fixed.** `EmailOutput(to=[])` raises a `ConfigurationError` that names `recipients` instead of `to`. `OutputDispatcher.deliver` does not check its `outputs` argument, so passing `err.failed` (receipts) instead of connectors gives `unexpected:AttributeError` receipts. The README's resend recipe does it correctly.
+- **Optional additions, not built (spec Q-8 to Q-11; each defaults to No).** Q-8: reject a Jev specialist whose agent has its own outputs, to prevent double posts. Q-9: an `implicit_tls` flag on `EmailOutput` for ports other than 465 (for example SES 2465). Q-10: neutralize per-user `@mentions` in GitHub and Telegram text. Q-11: reject non-ASCII or control characters in credentials at construction.
+- **Known limitations, documented in the READMEs.** A 429 retry ignores `Retry-After`. A FAILED receipt whose code is `network` (including a send past the deadline), `invalid_response`, `smtp_error`, `smtp_recipients_refused`, or `http_5…` may already have been delivered, so check the destination before resending. Receipts are not saved in session checkpoints (Q-6). GitHub `@user` and Telegram `@username` in model text notify that person.
+- **Catch up with `main` at merge time.** The branch is 5 behind (#891, #856, #892–#894) and `git merge-tree` is clean. After the merge, re-measure lint S008 on `_generate_reply`.
 - **Next destinations.** GitLab Issues has the same shape as `GitHubIssueOutput`; spec §9.2 (b) lists the other "qualifies, below the cut" rows.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
