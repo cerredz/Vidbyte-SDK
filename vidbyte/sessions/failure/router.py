@@ -226,14 +226,21 @@ class FailureMetadataNormalizer:
     @staticmethod
     def _deduplicate(failures: Sequence[Failure]) -> tuple[Failure, ...]:
         # Deduplicate code/source pairs when runtime metadata exposes the same stop twice.
-        seen: set[tuple[FailureCode, str]] = set()
+        positions: dict[tuple[FailureCode, str], int] = {}
         result: list[Failure] = []
         for failure in failures:
             key = (FailureCode.from_value(failure.code), failure.source)
-            if key in seen:
+            if key not in positions:
+                positions[key] = len(result)
+                result.append(failure)
                 continue
-            seen.add(key)
-            result.append(failure)
+            # @intent one-stop-one-routable-failure
+            # A tool_settings_denied stop shares its code and source with the observed denied-call
+            # aggregate; keep the routable stop in the aggregate's slot so the handler still runs once.
+            kept = result[positions[key]]
+            kept_routable = kept.status is FailureStatus.EXHAUSTED or kept.disposition is FailureDisposition.ROUTE
+            if not kept_routable and (failure.status is FailureStatus.EXHAUSTED or failure.disposition is FailureDisposition.ROUTE):
+                result[positions[key]] = failure
         return tuple(result)
 
 
