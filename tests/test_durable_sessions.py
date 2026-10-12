@@ -729,6 +729,30 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         session = Session(FakeAgent(), store=store, tags=("billing",))
         self.assertEqual([meta.session_id for meta in store.list_sessions(tag="billing")], [session.id])
 
+    async def test_explicit_existing_session_id_is_refused_and_left_intact(self) -> None:  # [Silent Failure]
+        # @intent new-session-never-overwrites-a-session
+        # Re-using a stored id must fail before any write, so the session keeps its head, status, created_at, and tags and still resumes.
+        with tempfile.TemporaryDirectory() as root:
+            for name, store in (("memory", InMemorySessionStore()), ("file", FileSessionStore(root))):
+                with self.subTest(store=name):
+                    session = Session(FakeAgent(), store=store, session_id="customer-42", tags=("acme",))
+                    await session.arun("one")
+                    session.complete()
+                    before = store.get_meta("customer-42")
+
+                    with self.assertRaisesRegex(SessionError, r"customer-42.*Session\.resume") as raised:
+                        Session(FakeAgent(), store=store, session_id="customer-42")
+
+                    self.assertEqual(raised.exception.details, {"session_id": "customer-42"})
+                    self.assertEqual(store.get_meta("customer-42"), before)
+                    self.assertEqual(before.head_id, session.head)
+                    self.assertEqual(before.status, SessionStatus.COMPLETED)
+                    self.assertEqual(before.tags, ("acme",))
+                    self.assertEqual(Session.resume(store, "customer-42").head, session.head)
+                    fresh = Session(FakeAgent(), store=store, session_id="customer-43")
+                    self.assertEqual(store.get_meta(fresh.id).head_id, None)
+                    self.assertEqual(store.get_meta(fresh.id).status, SessionStatus.ACTIVE)
+
     def test_usage_empty_session_returns_zero_rollup(self) -> None:  # [Edge Case]
         # Verify usage() is safe before any checkpoint exists.
         session = Session(FakeAgent(), store=InMemorySessionStore())

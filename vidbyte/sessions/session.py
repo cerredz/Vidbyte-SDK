@@ -98,7 +98,7 @@ class Session:
         }
 
     def __init__(self, agent: "BaseAgent", *, store: SessionStore | None = None, session_id: str | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = (), parent_session_id: str | None = None, _existing: bool = False) -> None:
-        # Bind the agent/store/id and either record initial meta or adopt an existing session.
+        # Bind the agent/store/id and either record initial meta for a new id or adopt an existing session.
         if not getattr(agent, "session_persistence_supported", True):
             raise SessionError("This agent type does not support durable session persistence.", details={"agent_type": type(agent).__name__})
         self._agent = agent
@@ -119,6 +119,7 @@ class Session:
             self._adopt_existing_head()
             self._adopt_existing_tags()
         else:
+            self._assert_session_absent()
             self._write_initial_meta()
         self._bind_session_tools()
 
@@ -340,6 +341,15 @@ class Session:
         stored = self._store.put(checkpoint)
         self._head_id = stored.id
         return stored
+
+    def _assert_session_absent(self) -> None:
+        # @intent new-session-never-overwrites-a-session
+        # Initial meta would reset an existing session's head, status, and tags, stranding its checkpoints; refuse before writing.
+        try:
+            self._store.get_meta(self._session_id)
+        except SessionNotFoundError:
+            return
+        raise SessionError(f"Session {self._session_id!r} already exists; continue it with Session.resume(store, session_id).", details={"session_id": self._session_id})
 
     def _write_initial_meta(self) -> None:
         # Record an empty ACTIVE session so it lists and round-trips before the first run.
