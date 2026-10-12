@@ -6,7 +6,7 @@ An SDK caller builds `CodingAgent` with one constructor call and gets a `BaseAge
 
 ## Contract
 
-`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, max_rewrite_lines=300, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. `max_rewrite_lines` (an int of at least 1, or `None` for no limit) makes `write_text` refuse, with an error result that points to `replace_text`, to replace an existing file with more lines than the limit; the file is left untouched and the `write_text` description names the limit. Behaviour other than construction is `BaseAgent`'s own.
+`CodingAgent(*, name, system_prompt, root_dir, firecrawl_api_key=None, browserbase_api_key=None, parallel_api_key=None, tavily_api_key=None, tools=(), permission_policy=None, readonly_paths=(), max_rewrite_lines=300, **BaseAgent options)` registers, in this order: `bash`, `read_lines`, `write_text`, `replace_text`, `glob`, `grep`, and one web-fetch tool, followed by the caller's tools. `root_dir` is resolved once, at construction, to an absolute path. With no policy, the agent uses `PermissionPolicy.allow_all()`, and a caller's policy object is used as given. At most one fetch key may be supplied, and it must be a non-blank string. The key picks Firecrawl, Browserbase, Parallel or Tavily; with no key the tool is the unpriced direct fetch. `readonly_paths` is a list or tuple of non-blank `fnmatch` globs relative to `root_dir`; when it is non-empty, one `ReadonlyPathsMiddleware` is appended after the caller's middleware, and it denies `write_text` and `replace_text` on any file whose resolved, root-relative POSIX path matches (ignoring case on Windows), naming the file and the pattern. `max_rewrite_lines` (an int of at least 1, or `None` for no limit) makes `write_text` refuse, with an error result that points to `replace_text`, to replace an existing file with more lines than the limit; the file is left untouched and the `write_text` description names the limit. Behaviour other than construction is `BaseAgent`'s own.
 
 `BashTool(root_dir)` runs `bash -c <command>` in `root_dir` with stdin closed and stderr merged into stdout. A success result holds the decoded output, at most `BASH_MAX_OUTPUT_BYTES` bytes followed by an omitted-byte count, and ends with `exit code: <n>`. It returns `bash_not_found`, `spawn_failed` or `timeout` errors. One time limit, `BASH_TIMEOUT_SECONDS`, covers both reading and waiting. On a timeout or a cancellation, the command's process group is killed (POSIX) or Git's launcher is killed (Windows), then the tool waits at most `BASH_KILL_GRACE_SECONDS` and closes the pipe.
 
@@ -77,6 +77,12 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **Fetch view errors.** The model sees only the "Fetched N page(s)" summary and never the page text (AC-7). The view changes the schema or metadata, so the bill differs from the bare tool's (AC-7, INV-16, INV-20).
 - **Rewrite limit errors.** The default 300 never reaches `write_text`, so a model rewrites a big file from memory and drops code. `None` still limits, or a bad value (`0`, `True`, `2.5`, `"300"`) is accepted and sets a different limit.
 - **Tool list errors.** A caller tool silently shadows a built-in tool (AC-8). Caller tools are reordered or dropped (AC-9).
+- **Read-only path errors.**
+  - `readonly_paths="tests/**"` is split into one-character patterns that protect nothing.
+  - The raw `path` argument is matched, so `./tests/x.py`, `src/../tests/x.py`, an absolute path, or on Windows `tests\x.py` and `TESTS/x.py` edit a protected file.
+  - Only existing files are checked, so a new test file is written.
+  - A path the tool would reject (outside root) gets a denial instead of the tool's own error.
+  - The check runs before the caller's middleware, or is added when there are no patterns.
 - **Subclass errors.** `CodingAgent` overrides `BaseAgent` behaviour, or adds state that changes `export_state` (INV-1, INV-2). `restore` reports a tool mismatch or loses allow-all (AC-21).
 - **Bash spawn errors.**
   - `shell=True` or string interpolation mangles quotes or `$` (INV-9).
@@ -137,6 +143,7 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
   - An endless printer.
   - Closing the transport after `asyncio.run`.
   - Cancellation, both directly and through the runtime's tool timeout.
+- `test_coding_agent_readonly_paths.py` checks `readonly_paths` through the loop: both edit tools denied with the file unchanged and the path and pattern named, every path spelling and a new file, case on Windows, unprotected writes and protected reads, the outside-root error unchanged, no middleware by default, construction errors, and the caller's middleware first.
 
 Run everything with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent`.
 

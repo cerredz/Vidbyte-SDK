@@ -36,6 +36,7 @@ EXPECTED_SIGNATURE = {
     "tavily_api_key": None,
     "tools": (),
     "permission_policy": None,
+    "readonly_paths": (),
     "max_rewrite_lines": 300,
 }
 
