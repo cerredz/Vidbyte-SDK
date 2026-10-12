@@ -43,10 +43,18 @@ class OutputArguments:
 
     @staticmethod
     def https_url(value: str, *, parameter: str) -> str:
-        """Require an https:// URL with a host; the error never shows the URL, which can be the secret."""
-        if value.startswith(OUTPUT_HTTPS_PREFIX) and urlsplit(value).hostname:
+        """Require an https:// URL with a host and a well-formed port; the error never shows the URL, which can be the secret."""
+        message = f"{parameter} must be an https:// URL with a host and a valid port."
+        try:
+            parts = urlsplit(value)
+            # Reading the port parses it, so a malformed or out-of-range
+            # port fails here rather than at the first delivery.
+            host, _port = parts.hostname, parts.port
+        except ValueError:
+            raise ConfigurationError(message, details={"parameter": parameter}) from None
+        if value.startswith(OUTPUT_HTTPS_PREFIX) and host:
             return value
-        raise ConfigurationError(f"{parameter} must be an https:// URL with a host.", details={"parameter": parameter})
+        raise ConfigurationError(message, details={"parameter": parameter})
 
     @staticmethod
     def text(value: object, *, parameter: str) -> str:
