@@ -408,3 +408,22 @@ Self-check (r6):
 - **Proof column:** identical to r5.
 - **`asyncio.to_thread`:** it now appears only as "never `to_thread`", the `fetch.py` precedent, or history (§16, the r6 symbol table).
 - **Frontmatter:** `revision: 6`, `updated: 2026-10-11`, `status: reviewed`.
+
+## Revision r7 (S6 follow-ups, orchestrator-directed alignment)
+
+This revision brings the spec in line with repair iteration 2 (`reports/S5-repair-2.md`, review.md rows S6-1 and S6-2). Status stays `pr-open`, and the `pr:` line is unchanged. Nothing under `tests/` or `vidbyte/` changed, and neither did `test-plan.md`, `review.md`, or the §6.2 Proof column (I diffed it).
+
+Changes:
+- **§8.5:** adds `OutputArguments.non_empty(values: tuple[str, ...], *, parameter: str) -> tuple[str, ...]`. I read the signature from `vidbyte/lib/outputs/base.py:74` at 7fb2ac75.
+- **§12.3 row 5:** lists `non_empty` with the other static methods and gives its rule and message, `"{parameter} must list at least one value."`. `texts` still accepts an empty sequence, because GitHub's `labels=()` default goes through it.
+- **§12.3 row 13:** the `to` path is now `texts`, then `non_empty`, then `address`, so an empty list names `to` (the caller is `email.py:50`).
+- **§17 deviations:** the TelegramOutput bullet no longer claims there are only eight methods. `non_empty` exists because its caller needs the caller's parameter name. Telegram's int-or-string check stays a one-caller inline exception.
+- **S6-2:** row 25 paraphrased the old `repair_approaches` hint, `deliver(failed, …)`. It now gives the §9.2 / AC-24 zip recipe, with `failed_connectors`, a "not `err.failed`" note, and the network caution. §9.2, AC-24, and EC-42 already gave the working recipe, so they are unchanged.
+- **§16:** adds rows S6-1 and S6-2 (Minor, fixed in code, spec aligned in r7). §17 gets an r7 row.
+
+Self-check (r7):
+- Headings are unchanged.
+- The IDs have no duplicates, gaps, or undefined references, and the counts are unchanged.
+- The Proof column is identical.
+- No stale "ninth method" claim or old hint paraphrase remains.
+- Frontmatter: `revision: 7`, `updated: 2026-10-12`, `status: pr-open`.
