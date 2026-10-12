@@ -5,9 +5,9 @@ import dataclasses
 import inspect
 import json
 from collections.abc import Callable, Mapping
-from typing import Any, get_type_hints
+from typing import Annotated, Any, get_type_hints
 
-from pydantic import BaseModel, ValidationError, create_model
+from pydantic import BaseModel, TypeAdapter, ValidationError, create_model
 from pydantic_core import to_jsonable_python
 
 from vidbyte.tools.base import BaseTool
@@ -33,6 +33,7 @@ class FunctionTool(BaseTool):
         self._permission = permission
         self._output_schema = output_schema
         self.args_model = _build_args_model(func, self._name)
+        self._null_means_default = _null_means_default_fields(self.args_model)
         self._spec = self._build_spec()
         self.__name__ = self._name
         self.__doc__ = getattr(func, "__doc__", None)
@@ -51,14 +52,14 @@ class FunctionTool(BaseTool):
 
     def validate_call(self, call: ToolCall) -> str | None:
         try:
-            self.args_model.model_validate(dict(call.arguments))
+            self.args_model.model_validate(self._arguments(call))
         except ValidationError as exc:
             return _validation_message(exc)
         return None
 
     async def execute(self, call: ToolCall) -> ToolResult:
         try:
-            model = self.args_model.model_validate(dict(call.arguments))
+            model = self.args_model.model_validate(self._arguments(call))
         except ValidationError as exc:
             return ToolResult.failure(self.name, _validation_message(exc), metadata={"error_type": "validation"})
 
@@ -88,6 +89,17 @@ class FunctionTool(BaseTool):
                 "args_model": self.args_model.__name__,
             },
         )
+
+    def _arguments(self, call: ToolCall) -> dict[str, Any]:
+        # @intent null-optional-arg-means-default
+        # Models often send JSON null for an optional argument they mean to leave out; treat it exactly like an
+        # omitted key so the function's default applies instead of failing validation. A parameter whose type
+        # accepts None still receives None, and a required parameter still rejects null.
+        return {
+            name: value
+            for name, value in call.arguments.items()
+            if not (value is None and name in self._null_means_default)
+        }
 
     def _build_spec(self) -> ToolSpec:
         schema = self.args_model.model_json_schema()
@@ -136,6 +148,20 @@ def _build_args_model(func: Callable[..., Any], tool_name: str) -> type[BaseMode
 
     model_name = "".join(part.capitalize() for part in tool_name.replace("-", "_").split("_") if part) or "Custom"
     return create_model(f"{model_name}Args", **fields)
+
+
+def _null_means_default_fields(args_model: type[BaseModel]) -> frozenset[str]:
+    # Parameters with a default whose type rejects None; a null for one of them means "use the default".
+    names = set()
+    for name, field in args_model.model_fields.items():
+        if field.is_required():
+            continue
+        annotation: Any = Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation
+        try:
+            TypeAdapter(annotation).validate_python(None)
+        except ValidationError:
+            names.add(name)
+    return frozenset(names)
 
 
 def _docstring_summary(func: Callable[..., Any]) -> str:
