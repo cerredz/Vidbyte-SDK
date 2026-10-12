@@ -5,10 +5,11 @@ ROLE IN CODEBASE: Called by the OpenAI-compatible, Anthropic, and OpenAI Respons
 ARCHITECTURE NOTE: Shape-agnostic; each provider passes its own call-turn and user-turn predicates.
 FUNCTION INVENTORY: PromptPlacement.index(turns, is_call_turn, is_user_turn) -> int, plus the
     chat-shaped predicates is_chat_call_turn and is_chat_user_turn.
-COMMON MODIFICATION PATTERNS: Keep the rule in step with GeminiProvider._prompt_index.
-WHAT NOT TO DO: Do not import provider modules; predicates arrive as arguments.
+COMMON MODIFICATION PATTERNS: Keep the call-turn rule in step with GeminiProvider._prompt_index.
+WHAT NOT TO DO: Do not import provider modules; predicates arrive as arguments. Do not move the
+    prompt ahead of a leading assistant turn; only Gemini needs that, and it keeps its own rule.
 KNOWN EDGE CASES: A history whose first call is already introduced by a user turn appends.
-RELATED DOCS: vidbyte/providers/gemini.py (_prompt_index) applies the same rule to Gemini contents.
+RELATED DOCS: vidbyte/providers/gemini.py (_prompt_index) applies the call-turn rule to Gemini contents.
 TESTS: tests/test_prompt_opens_tool_exchange.py.
 """
 
@@ -28,13 +29,14 @@ class PromptPlacement:
         # The runtime hands this run's tool exchange in the history and the prompt that provoked
         # it separately, so appending the prompt sends the task again after the work it caused
         # and the model restarts instead of finishing. Slot the prompt in front of the first
-        # call turn that no user turn introduces, or in front of an assistant turn that opens
-        # the history; otherwise it appends, as GeminiProvider._prompt_index does for Gemini.
+        # call turn that no user turn introduces; otherwise it appends. A caller's history that
+        # opens with an assistant turn, such as a greeting, keeps it in front: unlike Gemini,
+        # whose _prompt_index also moves the prompt ahead of a leading model turn, these
+        # providers accept a history that starts with the assistant.
         # @intent prompt-opens-its-tool-exchange
         for position, turn in enumerate(turns):
-            if not (is_call_turn(turn) or (position == 0 and turn.get("role") == "assistant")):
-                continue
-            return len(turns) if position and is_user_turn(turns[position - 1]) else position
+            if is_call_turn(turn):
+                return len(turns) if position and is_user_turn(turns[position - 1]) else position
         return len(turns)
 
     @staticmethod

@@ -30,6 +30,8 @@ CHAT_CALL = {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "
 CHAT_RESULT = {"role": "tool", "tool_call_id": "c1", "content": "source"}
 ANTHROPIC_CALL = {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "read", "input": {}}]}
 ANTHROPIC_RESULT = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "source"}]}
+# A caller-supplied history may open with an assistant greeting; it must stay in front.
+GREETING = {"role": "assistant", "content": "Hi! I'm the front desk bot."}
 
 
 def _chat_wire(messages: list) -> list:
@@ -71,6 +73,19 @@ class CompatiblePromptOrderTests(unittest.TestCase):
         self.assertTrue(_is_prompt(wire[-1]))
         self.assertTrue(_is_prompt(_chat_wire([])[-1]))
 
+    def test_caller_greeting_stays_in_front_of_the_prompt(self) -> None:
+        wire = _chat_wire([GREETING])
+        self.assertEqual(wire[1:], [GREETING, {"role": "user", "content": PROMPT}])
+
+    def test_caller_conversation_opening_with_a_greeting_keeps_the_prompt_last(self) -> None:
+        history = [GREETING, {"role": "user", "content": "Do you sell gift cards?"}, {"role": "assistant", "content": "Yes, at the counter."}]
+        wire = _chat_wire(history)
+        self.assertEqual(wire[1:], [*history, {"role": "user", "content": PROMPT}])
+
+    def test_prompt_lands_between_a_caller_greeting_and_the_tool_round(self) -> None:
+        wire = _chat_wire([GREETING, CHAT_CALL, CHAT_RESULT])
+        self.assertEqual(wire[1:], [GREETING, {"role": "user", "content": PROMPT}, CHAT_CALL, CHAT_RESULT])
+
 
 class AnthropicPromptOrderTests(unittest.TestCase):
     def test_prompt_opens_a_tool_round(self) -> None:
@@ -82,6 +97,10 @@ class AnthropicPromptOrderTests(unittest.TestCase):
         wire = _anthropic_wire([{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "prior reply"}, ANTHROPIC_CALL, ANTHROPIC_RESULT])
         self.assertTrue(_is_prompt(wire[2]))
         self.assertEqual(wire[3], ANTHROPIC_CALL)
+
+    def test_prompt_lands_between_a_caller_greeting_and_the_tool_round(self) -> None:
+        wire = _anthropic_wire([GREETING, ANTHROPIC_CALL, ANTHROPIC_RESULT])
+        self.assertEqual(wire, [GREETING, {"role": "user", "content": PROMPT}, ANTHROPIC_CALL, ANTHROPIC_RESULT])
 
     def test_a_tool_result_does_not_introduce_a_call(self) -> None:
         # A tool_result turn carries role "user" but is not the user speaking, so the call still needs the prompt.
