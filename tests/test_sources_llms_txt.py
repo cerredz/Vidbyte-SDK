@@ -144,6 +144,16 @@ class LlmsTxtSourceTests(unittest.TestCase):
         for url in ("https://ex.com/quick.md", "https://ex.com/guide.md", "https://ex.com/changelog.md"):
             self.assertIn(url, content)
 
+    def test_list_form_trivial_selection_emits_index_only(self) -> None:
+        # [Regression] allow=["*"], deny=[] from config equals the default and must not fetch any link.
+        fetcher = InMemoryFetcher({"https://ex.com/llms.txt": _INDEX})
+        result = _source(fetcher=fetcher).load(
+            ArtifactRef(url="https://ex.com/llms.txt"),
+            selection=Selection(allow=["*"], deny=[], expand=False),
+        )
+        self.assertEqual(len(result.items), 1)
+        self.assertTrue(result.items[0].document_id.endswith(":000-index"))
+
     def test_expand_fetches_and_emits_per_link(self) -> None:
         # [Edge Case] Expansion emits the index plus one item per non-optional link, sorted.
         result = _source().load(ArtifactRef(url="https://ex.com/llms.txt"), selection=Selection(expand=True))

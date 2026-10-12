@@ -135,7 +135,10 @@ class SupermemorySearchMemoryTool(BaseMemoryTool):
         if not self._ok(status):
             return ToolResult.error(self.name, self._error_output(status, data), metadata={"provider": "supermemory"})
 
-        results = data.get("results", data)
+        # @intent memory-search-accepts-bare-list
+        # The backend may answer with a bare list or a {"results": [...]} object; check for the list first,
+        # because calling .get on a list fails and would hide every memory the search found.
+        results = data if isinstance(data, list) else data.get("results", data)
         return ToolResult.success(self.name, self._success_output(results), metadata={"provider": "supermemory", "count": len(results) if isinstance(results, list) else 0})
 
 
@@ -173,7 +176,7 @@ class SupermemoryDeleteMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_delete(
-                url=f"{self._base_url}/v3/documents/{document_id}",
+                url=f"{self._base_url}/v3/documents/{self._path_id(document_id)}",
                 headers=self._auth_headers("Bearer"),
             )
         except Exception as exc:

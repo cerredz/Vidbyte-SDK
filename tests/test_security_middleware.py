@@ -2,17 +2,20 @@
 
 Description:
     Comprehensive test suite for security middleware: CanaryTripwireMiddleware,
-    ConfusedDeputyGuardMiddleware, and HoneypotToolMiddleware.
+    ConfusedDeputyGuardMiddleware, HoneypotToolMiddleware, and padded tool-name
+    normalization in ToolPolicyMiddleware and HoneypotToolMiddleware.
 Purpose:
     Verifies edge cases, hidden failure modes, silent failures, and hidden
     assumptions for all three security middleware implementations.
 Architecture:
     - CanaryTripwireTests: 12 test cases covering canary injection and leak detection.
-    - ConfusedDeputyGuardTests: 19 test cases covering overlap ratio analysis.
+    - ConfusedDeputyGuardTests: 20 test cases covering overlap ratio analysis.
     - HoneypotToolTests: 7 test cases covering trap tool detection.
+    - ToolNameNormalizationTests: 4 test cases covering padded and blank tool names.
     - PipelineIntegrationTests: 3 integration tests for middleware composition.
 Relations:
-    Tests vidbyte.middleware.builtins.canary_tripwire, confused_deputy, honeypot_tool.
+    Tests vidbyte.middleware.builtins.canary_tripwire, confused_deputy, honeypot_tool,
+    tool_policy.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from vidbyte.middleware.builtins import (
     CanaryTripwireMiddleware,
     ConfusedDeputyGuardMiddleware,
     HoneypotToolMiddleware,
+    ToolPolicyMiddleware,
 )
 from vidbyte.middleware.pipeline import MiddlewarePipeline
 from vidbyte.tools import ToolCall, ToolResult, Tools, tool
@@ -655,6 +659,43 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "continue")
 
+    async def test_internal_tool_output_not_recorded_as_external(self) -> None:
+        # [Hidden Failure] A rejected isDone returns the model's own draft; publishing that draft is not injection.
+        mw = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.6)
+        run_state: dict = {}
+        await mw.before_run(MiddlewareContext(hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="Write a short note.", run_state=run_state))
+        draft = "Quarterly revenue grew twelve percent on stronger subscription renewals in the northern region."
+
+        await mw.after_tool_call(
+            MiddlewareContext(
+                hook=MiddlewareHook.AFTER_TOOL_CALL,
+                agent_name="worker",
+                tool_result=ToolResult.success("isDone", draft),
+                tool_is_internal=True,
+                run_state=run_state,
+            )
+        )
+        publish_ctx = MiddlewareContext(
+            hook=MiddlewareHook.BEFORE_TOOL_CALL,
+            agent_name="worker",
+            tool_call=ToolCall("publish", {"text": draft}),
+            run_state=run_state,
+        )
+        self.assertEqual((await mw.before_tool_call(publish_ctx)).action.value, "continue")
+
+        # The same text arriving from a real external tool still trips the guard.
+        await mw.after_tool_call(
+            MiddlewareContext(
+                hook=MiddlewareHook.AFTER_TOOL_CALL,
+                agent_name="worker",
+                tool_result=ToolResult.success("fetch_page", draft),
+                run_state=run_state,
+            )
+        )
+        decision = await mw.before_tool_call(publish_ctx)
+        self.assertEqual(decision.action.value, "abort_run")
+        self.assertEqual(decision.reason, "confused_deputy_detected")
+
     async def test_no_tool_outputs_accumulated_continues(self) -> None:
         # [Hidden Failure] First tool call before any results should continue.
         mw = ConfusedDeputyGuardMiddleware()
@@ -918,6 +959,52 @@ class HoneypotToolTests(unittest.IsolatedAsyncioTestCase):
         )
         decision = await mw.before_tool_call(ctx)
         self.assertEqual(decision.action.value, "continue")
+
+
+# ---------------------------------------------------------------------------
+# Tool Name Normalization Tests
+# ---------------------------------------------------------------------------
+
+
+class ToolNameNormalizationTests(unittest.IsolatedAsyncioTestCase):
+    async def _decide(self, policy: ToolPolicyMiddleware | HoneypotToolMiddleware, tool_name: str) -> str:
+        ctx = MiddlewareContext(
+            hook=MiddlewareHook.BEFORE_TOOL_CALL,
+            agent_name="worker",
+            tool_call=ToolCall(tool_name),
+        )
+        decision = await policy.before_tool_call(ctx)
+        return decision.action.value
+
+    async def test_padded_deny_entry_denies_the_real_tool_name(self) -> None:
+        # [Fail Open] A deny list split from "wipe_db, drop_table" must still block drop_table.
+        policy = ToolPolicyMiddleware(deny_tools="wipe_db, drop_table".split(","))
+        self.assertEqual(await self._decide(policy, "drop_table"), "deny_tool")
+        self.assertEqual(await self._decide(policy, "wipe_db"), "deny_tool")
+        self.assertEqual(await self._decide(policy, "search"), "continue")
+
+    async def test_padded_allow_entry_allows_the_real_tool_name(self) -> None:
+        # [Silent Failure] A padded allowlist entry must not deny the tool it names.
+        policy = ToolPolicyMiddleware(allow_tools=[" search "])
+        self.assertEqual(await self._decide(policy, "search"), "continue")
+        self.assertEqual(await self._decide(policy, "drop_table"), "deny_tool")
+
+    def test_blank_tool_name_is_rejected(self) -> None:
+        # [Hidden Assumption] A blank name is a config mistake and must fail loudly, like ToolSettings.
+        with self.assertRaisesRegex(ValueError, "deny_tools"):
+            ToolPolicyMiddleware(deny_tools=["wipe_db", "  "])
+        with self.assertRaisesRegex(ValueError, "allow_tools"):
+            ToolPolicyMiddleware(allow_tools=[""])
+        self.assertIsNone(ToolPolicyMiddleware().allow_tools)
+
+    async def test_padded_honeypot_trap_name_still_fires(self) -> None:
+        # [Fail Open] A trap list split from "admin_shell, export_all_users" must arm both traps.
+        honeypot = HoneypotToolMiddleware(trap_tool_names="admin_shell, export_all_users".split(","))
+        self.assertEqual(await self._decide(honeypot, "export_all_users"), "abort_run")
+        self.assertEqual(await self._decide(honeypot, "admin_shell"), "abort_run")
+        self.assertEqual(await self._decide(honeypot, "search"), "continue")
+        with self.assertRaisesRegex(ValueError, "blank"):
+            HoneypotToolMiddleware(trap_tool_names=["admin_shell", " "])
 
 
 # ---------------------------------------------------------------------------

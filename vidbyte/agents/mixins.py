@@ -40,6 +40,8 @@ class McpAttachableMixin:
 
     _mcp_handles: list[McpServerHandle]
     _pending_mcp_configs: list[McpServerConfig]
+    # Names a fork's drop_tools removed; bridged MCP tools with these names are never attached.
+    _fork_dropped_tool_names: frozenset[str] = frozenset()
     # Set only while one run is connecting pending servers; resolved and cleared when that attach ends.
     _mcp_attach_in_flight: asyncio.Future[None] | None = None
     tools: list[BaseTool]
@@ -66,9 +68,7 @@ class McpAttachableMixin:
             timeout=timeout,
         )
         handle = await attach_mcp_server(config)
-        self._mcp_handles.append(handle)
-        
-        self._attach_tools(handle.bridged_tools)
+        await self._register_mcp_handles([handle])
         return self
 
     async def attach_preset_mcp_server(self, preset_name: str, *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0, extra_args: Sequence[str] | None = None) -> McpAttachableMixin:
@@ -89,8 +89,7 @@ class McpAttachableMixin:
                 timeout=config.timeout,
             )
         handle = await attach_mcp_server(config)
-        self._mcp_handles.append(handle)
-        self._attach_tools(handle.bridged_tools)
+        await self._register_mcp_handles([handle])
         return self
 
     async def attach_mcp_servers(
@@ -103,6 +102,8 @@ class McpAttachableMixin:
         in this batch are closed and cleaned up before raising McpAttachmentError.
         If the batch is cancelled, the servers that already started are closed too,
         and the cancellation propagates; no server from the batch is attached.
+        If registering their tools fails (say, a tool name already taken), the batch is
+        undone and closed the same way and that error propagates unchanged.
         """
         if not servers:
             return self
@@ -138,10 +139,7 @@ class McpAttachableMixin:
                 causes=errors,
             )
 
-        for handle in handles:
-            self._mcp_handles.append(handle)
-            self._attach_tools(handle.bridged_tools)
-
+        await self._register_mcp_handles(handles)
         return self
 
     def with_mcp_server(
@@ -268,6 +266,7 @@ class McpAttachableMixin:
             name
             for handle in self._mcp_handles
             for name in handle.tool_names
+            if name not in self._fork_dropped_tool_names
         )
 
     def _mcp_configs_for_fork(self) -> tuple[McpServerConfig, ...]:
@@ -340,7 +339,27 @@ class McpAttachableMixin:
             if agent_tool_items is not None:
                 self._agent_tool_items = tuple(t for t in agent_tool_items if t not in bridged_tool_set)
 
+    async def _register_mcp_handles(self, handles: Sequence[McpServerHandle]) -> None:
+        # Records freshly started servers and attaches their tools, all of them or none.
+        try:
+            for handle in handles:
+                self._mcp_handles.append(handle)
+                self._attach_tools(handle.bridged_tools)
+        except Exception:
+            # Undo every tool and record of these servers, keeping the agent's own tools and older servers.
+            self._drop_mcp_tools(handles)
+            self._mcp_handles[:] = [h for h in self._mcp_handles if all(h is not mine for mine in handles)]
+            # @intent mcp-attach-registers-all-tools-or-none
+            # A tool that cannot be added (its name is taken) would leave these servers half attached and running,
+            # and a lazy retry would start another copy, so stop them too. A close error is dropped so it cannot
+            # replace the registration error being re-raised.
+            await asyncio.gather(*[h.close() for h in handles], return_exceptions=True)
+            raise
+
     def _attach_tools(self, tools: Sequence[BaseTool]) -> None:
+        # @intent fork-drop-tools-covers-inherited-mcp-tools
+        # A forked child replays the parent's MCP servers, so a tool its fork dropped would come back on connect.
+        tools = [tool for tool in tools if tool.spec().name not in self._fork_dropped_tool_names]
         add_tool = getattr(self, "add_tool", None)
         if callable(add_tool):
             for tool in tools:

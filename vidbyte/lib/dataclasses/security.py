@@ -34,6 +34,14 @@ class PermissionPolicy:
         {ToolPermission.SAFE, ToolPermission.READ}
     )
 
+    def __post_init__(self) -> None:
+        """Store the allow-list as ToolPermission members whatever spelling the caller used."""
+        # @intent tool-permission-is-one-canonical-enum
+        # State export reads permission.value, so a {"safe", "read"} policy must hold enum members.
+        if isinstance(self.allowed, (str, bytes)):
+            raise ValueError(f"PermissionPolicy.allowed must be a collection of permissions, not a single string: {self.allowed!r}")
+        object.__setattr__(self, "allowed", frozenset(ToolPermission(value) for value in self.allowed))
+
     def check(self, spec: ToolSpec, call: ToolCall) -> PermissionDecision:
         """Return whether the tool call is allowed by the current policy."""
         del call

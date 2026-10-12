@@ -234,13 +234,16 @@ class AgentRuntime:
         """Build the minimal context window passed into direct runners and strategies."""
         del message
         system_prompt = base_context.system_prompt if base_context and base_context.system_prompt else self.system_prompt
-        manager = ContextManager()
+        # @intent context-manager-metadata-reaches-the-model
+        # Seed the rebuilt manager with the caller's manager metadata, so the folded context carries it after the base context's own metadata.
+        manager = ContextManager(metadata=context_manager.metadata if context_manager is not None else {})
         if context_manager is not None:
             manager.extend(context_manager.items())
         manager.extend(context_items)
         managed_context = manager.to_context(base_context)
+        # Agent metadata and this call's metadata still win over the base context and manager metadata.
         metadata = {
-            **(dict(base_context.metadata) if base_context else {}),
+            **dict(managed_context.metadata),
             **dict(agent_metadata),
             **dict(input_metadata or {}),
         }
@@ -248,7 +251,9 @@ class AgentRuntime:
             metadata["modality"] = modality.value
         return BaseAgentContext(
             system_prompt=append_agentic_loop_prompt(system_prompt) if agentic_loop else system_prompt,
-            history=tuple(history) + tuple(agent_history),
+            # @intent base-context-history-reaches-the-model
+            # The caller's base context history is a context field like its memory and metadata, so it is kept, oldest turns first.
+            history=tuple(managed_context.history) + tuple(history) + tuple(agent_history),
             tools=(self.tools if agentic_loop else self.user_tools).specs(),
             file_paths=tuple(managed_context.file_paths),
             run_metadata=dict(managed_context.run_metadata),
@@ -259,7 +264,9 @@ class AgentRuntime:
             memory=managed_context.memory,
             permissions=managed_context.permissions,
             metadata=metadata,
-            context_items=tuple(managed_context.context_items),
+            # @intent context-items-render-once
+            # The manager's items are already folded into the typed fields above, so only the caller's own items stay here to avoid rendering them twice.
+            context_items=tuple(base_context.context_items) if base_context is not None else (),
         )
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
@@ -382,7 +389,9 @@ class AgentRuntime:
                 state.provider,
                 iteration_count=state.iteration_count,
                 tokens_used=state.tokens_used,
-                tool_call_count=state.tool_call_count,
+                # @intent internal-tools-never-spend-the-tool-budget
+                # The model-visible max_tool_calls usage reports the same non-internal count the budget enforces.
+                tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)),
             )
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
@@ -417,6 +426,8 @@ class AgentRuntime:
                 )
                 if transition is None:
                     raise
+                # The failed model's attempts were real provider requests, so the next model counts on from them.
+                state.model_call_count = state.run_state.get(AgentRuntimeStateKey.MODEL_CALL_COUNT.value, state.model_call_count)
                 handle, state.provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
                 state.messages = messages
@@ -428,6 +439,9 @@ class AgentRuntime:
                 )
                 continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
+            # @intent spans-never-open-under-a-closed-parent
+            # The iteration span is closed now, so the parser and tool spans below attach to the still-open run span.
+            active_trace_context = trace_context
             if isinstance(raw_result, AgentResult):
                 # state.model_response is still the PREVIOUS iteration's response here,
                 # which is exactly what this early-exit branch should report.
@@ -492,13 +506,29 @@ class AgentRuntime:
                     self._publish_contract_evaluations(state.run_state, counters)
                     unmet = self.output_contract.unmet(counters)
                     if unmet and self.output_contract.exhausted(rejections):
+                        # @intent exhausted-reply-reaches-end-of-run-hooks
+                        # The caller gets this reply, so the end-of-run hooks must see it too, as on the accepted finish;
+                        # an empty reply is skipped because some providers reject an assistant message with no content.
+                        state.messages = [*messages, self._assistant_message(last_assistant_output)] if last_assistant_output and last_assistant_output.strip() else messages
                         return await self._finish_result(
                             self._final_result(output=last_assistant_output or "", runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED),
                             state,
                         )
                     if unmet:
                         rejections += 1
+                        # @intent contract-feedback-follows-the-rejected-draft
+                        # The model must see what it wrote to revise it, as on the isDone path; an empty reply is skipped
+                        # because some providers reject an assistant message with no content.
+                        if last_assistant_output and last_assistant_output.strip():
+                            messages.append(self._assistant_message(last_assistant_output))
                         messages.append({"role": "user", "content": self.output_contract.feedback(unmet, counters)})
+                        # @intent rejected-finish-still-completes-its-iteration
+                        # A rejected answer still ends this iteration, so the after-iteration hooks run and may stop the run,
+                        # exactly as they do for a rejected isDone.
+                        decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
+                        if decision.action is not MiddlewareAction.CONTINUE:
+                            abort_result = self._middleware_abort_result(decision, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+                            return await self._finish_result(abort_result, state)
                         continue
                 final = self._final_result(
                     output=last_assistant_output,
@@ -542,7 +572,9 @@ class AgentRuntime:
                 if isinstance(processed, AgentResult):
                     return await self._finish_result(processed, state)
                 _, result = processed
-                if call.tool_name == IS_DONE_TOOL_NAME:
+                # @intent denied-finish-is-not-a-finish
+                # A denied isDone is answered like any denied call and the loop continues, so its error never becomes the reply.
+                if call.tool_name == IS_DONE_TOOL_NAME and result.status.value == "success":
                     decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
                     if decision.action is not MiddlewareAction.CONTINUE:
                         abort_result = self._middleware_abort_result(
@@ -644,6 +676,9 @@ class AgentRuntime:
             compaction_count += self._compaction_event_delta(decision)
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
             state.model_call_count += 1
+            # @intent model-call-count-survives-fallback-switch
+            # A failed model's error escapes without returning this count, so it is published for _arun_once's fallback switch to keep.
+            state.run_state[AgentRuntimeStateKey.MODEL_CALL_COUNT.value] = state.model_call_count
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
@@ -806,7 +841,9 @@ class AgentRuntime:
             self._middleware_context(
                 MiddlewareHook.AFTER_RUN,
                 state,
-                tool_call_count=int(dict(result.metadata).get("tool_call_count", 0)),
+                # @intent internal-tools-never-spend-the-tool-budget
+                # after_run reports the same non-internal count every other hook sees, so isDone never counts here either.
+                tool_call_count=len(self._non_internal_tool_contexts(dict(result.metadata).get("tool_calls", state.call_contexts))),
                 provider_messages=state.messages,
             )
         )
@@ -1013,7 +1050,9 @@ class AgentRuntime:
             message=state.message,
             iteration_count=state.iteration_count,
             model_call_count=state.model_call_count,
-            tool_call_count=tool_call_count if tool_call_count is not None else state.tool_call_count,
+            # @intent internal-tools-never-spend-the-tool-budget
+            # Middleware limits count the same non-internal calls as the runtime budget, so isDone never spends them.
+            tool_call_count=tool_call_count if tool_call_count is not None else len(self._non_internal_tool_contexts(state.call_contexts)),
             elapsed_seconds=max(0, self.middleware.clock() - state.started_at),
             tokens_used=state.tokens_used,
             agent_context=state.context,
@@ -1231,9 +1270,11 @@ class AgentRuntime:
         return max(0, tool.attempts_used(call, result))
 
     @staticmethod
-    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None) -> tuple[ToolCallContext, ToolResult]:
+    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
         # Converts a deny_tool middleware decision into a denied tool-call context.
-        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata, iteration_count=iteration_count)
+        # @intent denied-internal-tool-stays-internal
+        # A middleware-denied internal tool keeps the internal marker, exactly like the permission-denied path.
+        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata, iteration_count=iteration_count, tool_is_internal=tool_is_internal)
 
     @staticmethod
     def _denied_tool_result(call: ToolCall, provider: str, *, message: str, error: str, reason: str | None, metadata: Mapping[str, Any], iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
@@ -1542,7 +1583,7 @@ class AgentRuntime:
             # attempts out of the model-visible conversation history.
             if decision.action is MiddlewareAction.DENY_TOOL:
                 denied_started_at = self.speed_tracker.now()
-                context_record, result = self._middleware_denied_tool(call, state.provider, decision, iteration_count=state.iteration_count)
+                context_record, result = self._middleware_denied_tool(call, state.provider, decision, iteration_count=state.iteration_count, tool_is_internal=tool_is_internal)
                 self.speed_tracker.record_tool_call(
                     RecordToolCallInput(
                         tool_name=call.tool_name,
@@ -1561,7 +1602,8 @@ class AgentRuntime:
                     tool_call=call,
                     tool_result=result,
                     tool_is_internal=tool_is_internal,
-                    tool_call_count=state.tool_call_count + 1,
+                    # Count the call that just ran only when it is developer work, matching the runtime budget.
+                    tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)) + (0 if tool_is_internal else 1),
                     metadata=self._tool_call_middleware_metadata(state.metadata, call),
                 )
             )
@@ -1569,7 +1611,9 @@ class AgentRuntime:
                 break
             if after_decision.sleep_seconds:
                 await self.middleware.sleep(after_decision.sleep_seconds)
-        if after_decision.action is not MiddlewareAction.ABORT_RUN and call.tool_name != IS_DONE_TOOL_NAME:
+        # @intent denied-finish-is-not-a-finish
+        # Only a successful isDone is answered by the finish branch; a denied one must show the model its denial here.
+        if after_decision.action is not MiddlewareAction.ABORT_RUN and not (call.tool_name == IS_DONE_TOOL_NAME and result.status.value == "success"):
             # Show the model its view of the result, and remember that view on the record
             # so later runs replay what the model saw rather than the raw, unprotected output.
             visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision)
@@ -1626,7 +1670,9 @@ class AgentRuntime:
         # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
         # The budget is ToolSettings.max_calls or AgentRuntimeConfig.max_tool_calls (AgentLoopSettings.max_tool_calls), whichever is lower.
         limits = [limit for limit in (self.config.max_tool_calls, settings.max_calls if settings is not None else None) if limit is not None]
-        if not limits or len(call_contexts) < min(limits):
+        # @intent internal-tools-never-spend-the-tool-budget
+        # Loop-control calls such as isDone are the runtime's own, so only developer tool calls spend the budget.
+        if not limits or len(self._non_internal_tool_contexts(call_contexts)) < min(limits):
             return None
         return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
@@ -1775,8 +1821,10 @@ class AgentRuntime:
             content=result.output,
             source=call.tool_name,
         )
+        # @intent content-update-keeps-placement
+        # Refreshing the bound slot keeps the placement the model chose with context_move; a new slot still goes to the end.
         try:
-            self.context_manager.upsert(new_primitive)
+            self.context_manager.upsert_preserving_placement(new_primitive)
         except ValueError:
             return result
         from vidbyte.tools.types import ToolResult as TR
@@ -1811,7 +1859,9 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=contexts,
             )
-        if self.config.max_tool_calls is not None and len(contexts) >= self.config.max_tool_calls:
+        # @intent internal-tools-never-spend-the-tool-budget
+        # Loop-control calls such as isDone are the runtime's own, so only developer tool calls spend the budget.
+        if self.config.max_tool_calls is not None and len(self._non_internal_tool_contexts(contexts)) >= self.config.max_tool_calls:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_tool_calls.",
                 stop_reason=AgentStopReason.MAX_TOOL_CALLS,

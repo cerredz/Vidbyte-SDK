@@ -8,22 +8,28 @@ Architecture:
     - CountingFetcher: Wraps InMemoryFetcher to assert network calls (no-network guarantees).
     - SourcesBaseTests: unittest.TestCase covering every substrate scenario in the test plan.
 Relations:
-    Exercises vidbyte.sources.base and vidbyte.sources._fetch.
+    Exercises vidbyte.sources.base, vidbyte.sources._fetch, and the HttpFetcher scheme guard
+    that DirectHttpFetchTool relies on.
 """
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from vidbyte.lib.errors import SourcePinMismatchError, SourceSecurityError
+from vidbyte.lib.dataclasses import ToolCall
+from vidbyte.lib.errors import SourceFetchError, SourcePinMismatchError, SourceSecurityError
+from vidbyte.lib.http.transport import SyncHttpTransport
 from vidbyte.sources import (
     ArtifactRef,
     ChainedFetcher,
     DocumentSource,
     FileFetcher,
     FileSnapshotCache,
+    HttpFetcher,
     InMemoryFetcher,
     InMemorySnapshotCache,
     NullSnapshotCache,
@@ -32,6 +38,7 @@ from vidbyte.sources import (
     UrlAllowlist,
     sha256_hex,
 )
+from vidbyte.tools.builtins.operations.fetch import DirectHttpFetchTool
 
 _DATA = b"# Title\nbody text"
 
@@ -91,6 +98,23 @@ class SourcesBaseTests(unittest.TestCase):
                 allow.check(refused)
         allow.check("https://docs.acme.dev/x")
 
+    def test_allowlist_config_is_case_insensitive(self) -> None:
+        # [Hidden Assumption] Hosts and schemes are case-insensitive, so a capitalized policy still admits its own
+        # lowercase URLs, an unlisted host is still refused, and the default https-only allowlist is unchanged.
+        for allow in (
+            UrlAllowlist(allowed_hosts=frozenset({"Docs.Acme.dev"})),
+            UrlAllowlist(allowed_schemes=("HTTPS",), allowed_hosts=frozenset({"docs.acme.dev"})),
+        ):
+            allow.check("https://docs.acme.dev/llms.txt")
+            with self.assertRaises(SourceSecurityError):
+                allow.check("https://evil.example/llms.txt")
+        default = UrlAllowlist()
+        self.assertEqual(default.allowed_schemes, ("https",))
+        self.assertIsNone(default.allowed_hosts)
+        default.check("https://docs.acme.dev/llms.txt")
+        with self.assertRaises(SourceSecurityError):
+            default.check("http://docs.acme.dev/llms.txt")
+
     def test_size_guard_rejects_oversized_body(self) -> None:
         # [Edge Case] A body larger than max_bytes fails closed with nothing cached.
         fetcher = InMemoryFetcher({"https://ex.com/big.md": b"x" * 100})
@@ -108,6 +132,35 @@ class SourcesBaseTests(unittest.TestCase):
         result = source.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=sha256_hex(_DATA)))
         self.assertEqual(fetcher.calls, 0)
         self.assertEqual(len(result.items), 1)
+
+    def test_uppercase_pin_matches_same_bytes_cold_and_warm(self) -> None:
+        # [Hidden Assumption] A hex digest is case-insensitive: an UPPERCASE pin of the right bytes loads cold and
+        # from the pinned warm cache, while changed bytes under the same pin still fail closed.
+        upper_pin = sha256_hex(_DATA).upper()
+        cache = InMemorySnapshotCache()
+        cold = DocumentSource(fetcher=InMemoryFetcher({"https://ex.com/x.md": _DATA}), cache=cache)
+        self.assertEqual(len(cold.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=upper_pin)).items), 1)
+        fetcher = CountingFetcher({})
+        warm = DocumentSource(fetcher=fetcher, cache=cache)
+        self.assertEqual(len(warm.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=upper_pin)).items), 1)
+        self.assertEqual(fetcher.calls, 0)
+        changed = DocumentSource(fetcher=InMemoryFetcher({"https://ex.com/x.md": _DATA + b"!"}))
+        with self.assertRaises(SourcePinMismatchError):
+            changed.load(ArtifactRef(url="https://ex.com/x.md", expected_hash=upper_pin))
+
+    def test_string_pin_policy_is_served_from_pinned_warm_cache(self) -> None:
+        # [Silent Failure] A manifest's pin: "pinned" equals PinPolicy.PINNED, so it must hit the pinned warm cache
+        # with zero network I/O instead of silently re-fetching; an unknown spelling fails loudly at construction.
+        pin = sha256_hex(_DATA)
+        ref = ArtifactRef(url="https://ex.com/x.md", expected_hash=pin, pin="pinned")  # type: ignore[arg-type]
+        self.assertIs(ref.pin, PinPolicy.PINNED)
+        cache = InMemorySnapshotCache()
+        cache.put(pin, _DATA)
+        fetcher = CountingFetcher({})
+        self.assertEqual(len(DocumentSource(fetcher=fetcher, cache=cache).load(ref).items), 1)
+        self.assertEqual(fetcher.calls, 0)
+        with self.assertRaises(ValueError):
+            ArtifactRef(url="https://ex.com/x.md", pin="pinnned")  # type: ignore[arg-type]
 
     def test_live_policy_always_refetches(self) -> None:
         # [Hidden Assumption] PinPolicy.LIVE re-fetches even with a warm cache.
@@ -135,6 +188,21 @@ class SourcesBaseTests(unittest.TestCase):
         self.assertTrue(Selection().is_trivial)
         self.assertFalse(Selection(allow=("API*",)).is_trivial)
         self.assertFalse(Selection(deny=("x",)).is_trivial)
+
+    def test_selection_list_form_matches_tuple_form(self) -> None:
+        # [Regression] Lists from YAML/JSON config normalize to tuples, so allow=["*"] stays trivial.
+        listed = Selection(allow=["*"], deny=[])
+        self.assertTrue(listed.is_trivial)
+        self.assertEqual(listed, Selection())
+        self.assertEqual(hash(listed), hash(Selection()))
+        self.assertFalse(Selection(allow=["API*"]).is_trivial)
+        self.assertFalse(Selection(deny=["x"]).matches("x"))
+
+    def test_selection_rejects_bare_string_globs(self) -> None:
+        # [Silent Failure] A bare string would become one glob per character; refuse it.
+        for kwargs in ({"allow": "Docs*"}, {"deny": "secret"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(SourceSecurityError):
+                Selection(**kwargs)
 
     def test_sha256_hex_of_empty_bytes(self) -> None:
         # [Edge Case] The empty-bytes hash is the stable known constant.
@@ -191,6 +259,29 @@ class SourcesBaseTests(unittest.TestCase):
             source = DocumentSource(fetcher=FileFetcher(), allowlist=UrlAllowlist(allowed_schemes=("file",)))
             result = source.load(ArtifactRef(url=path.as_uri()))
             self.assertEqual(result.items[0].title, "Title")
+
+    def test_httpfetcher_refuses_file_and_schemeless_urls_before_any_request(self) -> None:
+        # [Hidden Assumption] HttpFetcher never opens a local file and only raises SourceFetchError.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "secret.md"
+            path.write_bytes(_DATA)
+            cases = ((path.as_uri(), "file"), ("docs.example.invalid/page", ""))
+            with mock.patch.object(SyncHttpTransport, "request_bytes") as request_bytes:
+                for url, scheme in cases:
+                    with self.assertRaises(SourceFetchError) as caught:
+                        HttpFetcher().fetch(url)
+                    self.assertEqual(caught.exception.details, {"url": url, "scheme": scheme})
+            request_bytes.assert_not_called()
+
+    def test_direct_http_fetch_tool_reports_fetch_failed_for_file_url(self) -> None:
+        # [Edge Case] A model-supplied file:// URL is a clean fetch_failed result, not an execution error.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "secret.md"
+            path.write_bytes(_DATA)
+            result = asyncio.run(DirectHttpFetchTool().execute(ToolCall("direct_http_fetch", {"url": path.as_uri()})))
+        self.assertEqual(result.status.value, "error")
+        self.assertEqual(result.metadata["error"], "fetch_failed")
+        self.assertNotIn("# Title", result.output)
 
 
 if __name__ == "__main__":

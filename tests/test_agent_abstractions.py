@@ -98,6 +98,12 @@ class TestTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res_doc.status, ToolStatus.SUCCESS)
         self.assertIn("ReAct Design Architecture", res_doc.output)
 
+    async def test_document_retrieval_null_top_k_uses_default(self) -> None:
+        omitted = await self.doc_retrieval.execute(ToolCall("document_retrieval", {"query": "a"}))
+        null = await self.doc_retrieval.execute(ToolCall("document_retrieval", {"query": "a", "top_k": None}))
+        self.assertEqual(omitted.output.count("Document ID:"), 2)
+        self.assertEqual(null.output.count("Document ID:"), 2)
+
     async def test_tool_executor_parser(self) -> None:
         text_block = (
             "Thought: I should calculate this first.\n"

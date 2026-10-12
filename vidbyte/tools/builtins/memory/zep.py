@@ -66,7 +66,7 @@ class ZepAddMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_post(
-                url=f"{self._base_url}/api/v2/sessions/{session_id}/memory",
+                url=f"{self._base_url}/api/v2/sessions/{self._path_id(session_id)}/memory",
                 headers=self._auth_headers("Api-Key"),
                 body={"messages": list(messages)},
             )
@@ -121,7 +121,7 @@ class ZepGetMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_get(
-                url=f"{self._base_url}/api/v2/sessions/{session_id}/memory",
+                url=f"{self._base_url}/api/v2/sessions/{self._path_id(session_id)}/memory",
                 headers=self._auth_headers("Api-Key"),
                 params=params or None,
             )
@@ -173,7 +173,7 @@ class ZepSearchMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_post(
-                url=f"{self._base_url}/api/v2/sessions/{session_id}/memory/search",
+                url=f"{self._base_url}/api/v2/sessions/{self._path_id(session_id)}/memory/search",
                 headers=self._auth_headers("Api-Key"),
                 body={"text": text, "limit": limit},
             )
@@ -224,7 +224,7 @@ class ZepDeleteSessionTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_delete(
-                url=f"{self._base_url}/api/v2/sessions/{session_id}",
+                url=f"{self._base_url}/api/v2/sessions/{self._path_id(session_id)}",
                 headers=self._auth_headers("Api-Key"),
             )
         except Exception as exc:

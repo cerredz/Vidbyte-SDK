@@ -51,7 +51,7 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError, UsageAccountingError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
@@ -182,7 +182,11 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.agents.fallback import AgentFallback
         self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
-        given_tools = tools.all() if isinstance(tools, Tools) else tuple(tools)
+        # @intent nested-tool-catalogs-are-flattened
+        # A Tools catalog inside a plain list adds its own tools in place, as Tools([...]) does, instead of being dropped.
+        given_tools = tools.all() if isinstance(tools, Tools) else tuple(
+            tool for item in tools for tool in (item.all() if isinstance(item, Tools) else (item,))
+        )
         # A built-in that already acts for another agent is swapped for this agent's own copy, as fork does.
         self._agent_tool_items = tuple(self._own_tool(item) for item in given_tools)
         unchanged = all(given is own for given, own in zip(given_tools, self._agent_tool_items, strict=True))
@@ -226,6 +230,13 @@ class BaseAgent(McpAttachableMixin):
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
         self.description = description or "General purpose agent."
+        # @intent name-lists-reject-bare-strings
+        # A bare string is itself a sequence, so tuple() would hand the manager one capability per character.
+        if isinstance(capabilities, (str, bytes)):
+            raise ConfigurationError(
+                "BaseAgent.capabilities must be a list of capability names, not a single string.",
+                details={"agent": name, "capabilities_type": type(capabilities).__name__},
+            )
         self.capabilities = tuple(capabilities)
         self.agent_metadata = agent_metadata or AgentMetadata()
         self.context_items = tuple(context_items)
@@ -270,6 +281,8 @@ class BaseAgent(McpAttachableMixin):
         # MCP Attachable State
         self._mcp_handles = []
         self._pending_mcp_configs = []
+        # Tool names a fork dropped; MCP servers this agent connects never re-add them.
+        self._fork_dropped_tool_names = frozenset()
 
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
@@ -318,15 +331,22 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def add_tool(self, tool: object) -> BaseAgent:
+        # @intent add-tool-flattens-a-tools-catalog
+        # A Tools catalog adds its own tools in place, as the tools list does, instead of one opaque item the model never sees.
+        given = tool.all() if isinstance(tool, Tools) else (tool,)
         # A built-in that already acts for another agent is swapped for this agent's own copy, as fork does.
-        tool = self._own_tool(tool)
+        added = tuple(self._own_tool(item) for item in given)
         # Register with the catalog first so a rejected tool leaves the agent unchanged.
-        try:
-            self.tools = self.tools.add(tool)
-        except TypeError:
-            pass
-        self._agent_tool_items = (*self._agent_tool_items, tool)
-        self._bind_agent_tool_context(tool)
+        catalog = self.tools
+        for item in added:
+            try:
+                catalog = catalog.add(item)
+            except TypeError:
+                pass
+        self.tools = catalog
+        self._agent_tool_items = (*self._agent_tool_items, *added)
+        for item in added:
+            self._bind_agent_tool_context(item)
         return self
 
     def as_tool(self) -> object:
@@ -772,6 +792,9 @@ class BaseAgent(McpAttachableMixin):
         if not self._draining_queued_prompts:
             claimed, self._pending_prompts = self._pending_prompts, []
             token = self._run_queue_var.set(claimed)
+            # @intent queued-replies-are-per-request
+            # Like last_reply, the drained follow-up replies describe only this request, so a request that drains nothing leaves none.
+            self.last_queued_replies = []
         try:
             parent = active_usage_ledger()
             if parent is None or parent is self._usage_tracker:
@@ -855,9 +878,11 @@ class BaseAgent(McpAttachableMixin):
             self._speed_tracker.record_run_end()
         except Exception as exc:
             self._close_failed_reply(exc, trace_ctx)
-            if isinstance(exc, UsageAccountingError):
+            if isinstance(exc, (UsageAccountingError, FailureRaisedError)):
                 # @intent usage-accounting-error-reaches-the-user
                 # A run that failed closed on usage must tell the user so, not surface as a generic reply failure.
+                # @intent raise-disposition-reaches-the-caller
+                # A Session rule that escalated to raise keeps its typed error, which is the caller's contract.
                 raise
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -1482,7 +1507,14 @@ class BaseAgent(McpAttachableMixin):
     def _merged_context_manager(self, input_context_manager: ContextManager | None) -> ContextManager | None:
         if self.context_manager is None and input_context_manager is None:
             return None
-        manager = ContextManager()
+        # @intent context-manager-metadata-reaches-the-model
+        # Carry each manager's metadata into the merged manager, the request's over the agent's, so it still reaches the model's run metadata.
+        manager = ContextManager(
+            metadata={
+                **(dict(self.context_manager.metadata) if self.context_manager is not None else {}),
+                **(dict(input_context_manager.metadata) if input_context_manager is not None else {}),
+            }
+        )
         if self.context_manager is not None:
             manager.extend(self.context_manager.items())
         if input_context_manager is not None:

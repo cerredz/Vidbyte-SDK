@@ -11,6 +11,8 @@ Key Functions:
     - get_api_key_env_var: Retrieves the API key environment variable name.
     - get_default_endpoint: Retrieves the default endpoint for a provider.
     - resolve_api_key: Resolves explicit API key or retrieves environment variable.
+    - find_vidbyte_api_key: Returns the Vidbyte key the text key fall-through selects, or None for BYOK.
+    - resolve_vidbyte_api_key: Resolves and checks the live Vidbyte key a managed call sends.
     - resolve_endpoint: Resolves explicit endpoint or defaults to standard URL.
     - get_supported_providers: Gets list of supported provider strings.
     - is_valid_provider: Reports whether a provider string is one the SDK offers.
@@ -37,10 +39,18 @@ Similar Files:
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.constants.jev import (
+    VIDBYTE_API_KEY_ENV_VAR,
+    VIDBYTE_API_KEY_PATTERN,
+    VIDBYTE_API_KEY_PREFIX,
+    VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
+    VIDBYTE_MANAGED_TEXT_PROVIDERS,
+)
 from vidbyte.lib.constants.runners import MODEL_PROVIDER_RUNNER_TYPE_MAP, MODEL_RUNNER_TYPE_MAP
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -159,6 +169,42 @@ class ProviderModelRegistry:
             return env_value.strip()
         p_name = provider.value if isinstance(provider, ModelProvider) else provider
         raise ConfigurationError(f"Missing API key for provider {p_name}. Pass api_key or set {env_var}.")
+
+    @classmethod
+    def find_vidbyte_api_key(cls, provider: ModelProvider | str, explicit_key: str | None) -> str | None:
+        """Return the Vidbyte key the text key fall-through selects, or None when the call stays on the caller's own provider key."""
+        # @intent byok-key-wins-and-vidbyte-key-fills-in-last
+        # A provider key the caller holds keeps that provider
+        # unbilled, so steps 1-2 are managed only for a
+        # Vidbyte-prefixed key, and VIDBYTE_API_KEY fills in
+        # only for a provider the gateway serves.
+        if explicit_key is not None and not isinstance(explicit_key, str):
+            return None
+        explicit = (explicit_key or "").strip()
+        if explicit:
+            return explicit if explicit.startswith(VIDBYTE_API_KEY_PREFIX) else None
+        env_value = os.environ.get(cls.get_api_key_env_var(provider), "").strip()
+        if env_value:
+            return env_value if env_value.startswith(VIDBYTE_API_KEY_PREFIX) else None
+        p_enum = provider if isinstance(provider, ModelProvider) else ModelProvider(provider)
+        if p_enum not in VIDBYTE_MANAGED_TEXT_PROVIDERS:
+            return None
+        return os.environ.get(VIDBYTE_API_KEY_ENV_VAR, "").strip() or None
+
+    @classmethod
+    def resolve_vidbyte_api_key(cls, explicit_key: str | None) -> str:
+        """Return the live Vidbyte key a managed call sends: the explicit key, otherwise VIDBYTE_API_KEY, both stripped."""
+        # @intent managed-key-is-a-checked-live-vidbyte-key
+        # The gateway admits only live keys, so a missing or malformed
+        # key fails here, before any request, with the messages the
+        # managed Jev path has always raised; text and Jev share it.
+        key = ((explicit_key or "").strip() or os.environ.get(VIDBYTE_API_KEY_ENV_VAR, "")).strip()
+        details = {"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND}
+        if not key:
+            raise ConfigurationError(f"Missing Vidbyte API key. Pass api_key or set {VIDBYTE_API_KEY_ENV_VAR}.", details=details)
+        if re.fullmatch(VIDBYTE_API_KEY_PATTERN, key) is None:
+            raise ConfigurationError(f"The managed Vidbyte API key must be a live key in the {VIDBYTE_API_KEY_PREFIX} format.", details=details)
+        return key
 
     @classmethod
     def resolve_endpoint(cls, provider: ModelProvider | str, explicit_endpoint: str | None) -> str:

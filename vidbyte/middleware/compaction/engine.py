@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.lib.dataclasses.context import ContextMessage
@@ -421,12 +421,14 @@ class ContextCompactionEngine:
         return ToolResult(tool_name=result.tool_name, status=result.status, output=output, metadata={**dict(result.metadata), **dict(metadata)})
 
     def _string_tuple(self, value: object) -> tuple[str, ...]:
-        # Converts scalar or sequence option values into a tuple of strings.
+        # Converts scalar or collection option values into a tuple of strings.
         if value is None:
             return ()
         if isinstance(value, str):
             return (value,)
-        if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        # @intent name-collections-are-collections
+        # A set or frozenset of names is not a Sequence, and str() of it would become one bogus name that matches nothing.
+        if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, Mapping)):
             return tuple(str(item) for item in value)
         return (str(value),)
 

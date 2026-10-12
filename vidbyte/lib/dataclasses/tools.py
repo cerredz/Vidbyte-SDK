@@ -131,6 +131,9 @@ class ToolSpec:
             raise ValueError("ToolSpec.name cannot be empty")
         if not self.description.strip():
             raise ValueError("ToolSpec.description cannot be empty")
+        # @intent tool-permission-is-one-canonical-enum
+        # Denials and prompts read permission.value, so the plain "execute" spelling becomes the enum here.
+        object.__setattr__(self, "permission", ToolPermission(self.permission))
 
     def required_parameter_names(self) -> tuple[str, ...]:
         """Return the names of parameters that must be supplied in calls."""
@@ -279,6 +282,12 @@ class ToolResult:
     status: ToolStatus
     output: str
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Store status as the ToolStatus member even when a tool passes its plain string."""
+        # @intent tool-status-is-one-canonical-enum
+        # The runtime reads status.value and middleware compares with `is`, so "success" becomes the enum here.
+        object.__setattr__(self, "status", ToolStatus(self.status))
 
     @classmethod
     def success(

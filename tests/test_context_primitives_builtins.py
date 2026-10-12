@@ -226,6 +226,21 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("Invalid placement", result.output)
 
+    async def test_recite_refuses_slot_id_equal_to_source_id(self) -> None:
+        """Verify context_recite never upserts its copy over the source primitive."""
+        manager = ContextManager()
+        manager.upsert(PlanContextItem(primitive_id="plan:current", title="Plan", steps=("step A",)), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
+        tool = ContextReciteTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_recite", arguments={"primitive_id": "plan:current", "slot_id": "plan:current"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("slot_id must differ", result.output)
+        stored = manager.get_by_id("plan:current")
+        assert stored is not None
+        self.assertEqual(stored.title, "Plan")
+        self.assertEqual(manager.placement_for("plan:current"), ContextWindowPlacement.TOP_OF_CONTEXT)
+
     async def test_context_window_tools_returns_create_and_management_tools(self) -> None:
         """Verify the factory returns generated create tools plus management tools."""
         manager = ContextManager()
@@ -359,6 +374,23 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
         assert stored is not None
         self.assertIn("new body", stored.to_context_text())
         self.assertNotIn("old body", stored.to_context_text())
+
+    async def test_upsert_update_keeps_placement_chosen_by_context_move(self) -> None:
+        # @intent content-update-keeps-placement: rewriting a primitive's content must not undo a context_move.
+        manager = ContextManager()
+        upsert = ContextUpsertTool(manager)
+        move = ContextMoveTool(manager)
+        await upsert.execute(ToolCall(tool_name="context_upsert", arguments={"primitive_id": "plan:current", "content": "Step one", "primitive_type": "plan"}))
+        await move.execute(ToolCall(tool_name="context_move", arguments={"primitive_id": "plan:current", "placement": "top_of_context"}))
+
+        result = await upsert.execute(ToolCall(tool_name="context_upsert", arguments={"primitive_id": "plan:current", "content": "Step two", "primitive_type": "plan"}))
+
+        self.assertEqual(result.status.value, "success", result.output)
+        self.assertEqual(manager.placement_for("plan:current"), ContextWindowPlacement.TOP_OF_CONTEXT)
+        stored = manager.get_by_id("plan:current")
+        assert stored is not None
+        self.assertIn("Step two", stored.to_context_text())
+        self.assertNotIn("Step one", stored.to_context_text())
 
     async def test_null_primitive_type_and_title_behave_like_omitted(self) -> None:
         # @intent null-optional-arg-means-default: null type means "text" and null title means the type default.

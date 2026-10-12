@@ -10,8 +10,10 @@ Architecture:
     - VideoModelConfig: dataclass for video generation tasks.
     - DecisionModelConfig: dataclass for calibrated decision models (TypeSafe Jev).
 Key Functions:
-    - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry.
+    - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry; in managed state it returns the non-secret placeholder instead.
     - resolved_endpoint: Resolves provider endpoint by delegating to ProviderModelRegistry.
+    - is_vidbyte_managed: Reports whether a TextModelConfig routes through the Vidbyte gateway.
+    - resolved_vidbyte_api_key: Resolves the live Vidbyte key a managed TextModelConfig sends.
 Relations:
     Used by runners, agents, and strategies to initialize model executions.
 Similar Files:
@@ -20,8 +22,6 @@ Similar Files:
 
 from __future__ import annotations
 
-import os
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,8 +36,10 @@ from vidbyte.lib.constants.jev import (
     JEV_TIMEOUT_FLOOR_SECONDS,
     VIDBYTE_JEV_GATEWAY_ENDPOINT,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
+    VIDBYTE_MANAGED_KEY_PLACEHOLDER,
+    VIDBYTE_MANAGED_TEXT_PROVIDERS,
 )
-from vidbyte.lib.enums import DecisionModelMode, ModelProvider
+from vidbyte.lib.enums import DecisionModelMode, ModelProvider, TextModelMode
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.registries.models import ProviderModelRegistry
 
@@ -46,7 +48,7 @@ from vidbyte.lib.registries.models import ProviderModelRegistry
 class TextModelConfig:
     provider: ModelProvider | str
     model: str
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)
     system: str | None = None
     messages: tuple[Mapping[str, Any], ...] = ()
     temperature: float | None = None
@@ -64,6 +66,17 @@ class TextModelConfig:
     extra_body: Mapping[str, Any] | None = None
     endpoint: str | None = None
     timeout_seconds: float = 60.0
+    mode: TextModelMode = TextModelMode.AUTO
+
+    def __post_init__(self) -> None:
+        """Reject a mode that is not the enum, and what explicit managed mode can never serve, as soon as the config is built."""
+        # @intent text-mode-shape-fails-at-construction
+        # AUTO reads no environment here: TextModelRunner rebuilds
+        # the config on every call, so validate() settles AUTO once.
+        if not isinstance(self.mode, TextModelMode):
+            raise ConfigurationError("mode must be a TextModelMode value.")
+        if self.mode is TextModelMode.VIDBYTE_MANAGED:
+            self._require_managed_shape(self.normalized_provider())
 
     def normalized_provider(self) -> ModelProvider:
         # Convert strings to the canonical provider enum at the SDK boundary.
@@ -79,10 +92,52 @@ class TextModelConfig:
         self._validate_top_p()
         self._validate_positive_int(self.max_output_tokens, field_name="max_output_tokens")
         self._validate_positive_float(self.timeout_seconds, field_name="timeout_seconds")
-        self.resolved_api_key()
+        provider = self.normalized_provider()
+        # @intent managed-state-is-checked-before-any-request
+        # A managed config must suit the gateway and hold a live Vidbyte
+        # key, because that key must never follow a caller URL or reach
+        # a provider the gateway does not serve.
+        if self.is_vidbyte_managed():
+            self._require_managed_shape(provider)
+            self.resolved_vidbyte_api_key()
+            return
+        # A BYOK config resolves its provider key as before.
+        ProviderModelRegistry.resolve_api_key(provider, self.api_key)
+
+    def is_vidbyte_managed(self) -> bool:
+        """Return True in explicit managed mode, or when AUTO selects a Vidbyte key."""
+        # @intent vidbyte-key-selection-decides-managed-state
+        # The fall-through keeps a provider key the caller holds on
+        # BYOK, so only a selected Vidbyte key bills through Vidbyte.
+        if self.mode is TextModelMode.VIDBYTE_MANAGED:
+            return True
+        return ProviderModelRegistry.find_vidbyte_api_key(self.provider, self.api_key) is not None
+
+    def resolved_vidbyte_api_key(self) -> str:
+        """Return the checked live Vidbyte key this config's managed calls send to the gateway."""
+        # @intent explicit-managed-mode-never-reads-the-provider-key
+        # Explicit managed mode takes only api_key or VIDBYTE_API_KEY,
+        # so a provider key in the environment is never sent; AUTO takes
+        # the Vidbyte key its fall-through selected.
+        details = {"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND}
+        if self.mode is TextModelMode.VIDBYTE_MANAGED:
+            if self.api_key is not None and not isinstance(self.api_key, str):
+                raise ConfigurationError("api_key must be a string in VIDBYTE_MANAGED text mode.", details=details)
+            return ProviderModelRegistry.resolve_vidbyte_api_key(self.api_key)
+        selected = ProviderModelRegistry.find_vidbyte_api_key(self.provider, self.api_key)
+        if selected is None:
+            raise ConfigurationError("This TextModelConfig is not in Vidbyte-managed mode: no Vidbyte API key was selected.", details=details)
+        return ProviderModelRegistry.resolve_vidbyte_api_key(selected)
 
     def resolved_api_key(self) -> str:
-        # Resolve explicit keys before provider-specific environment variables.
+        # @intent managed-adapters-see-only-the-placeholder-key
+        # Adapters build vendor auth from this value, so in managed
+        # state they get a non-secret stand-in and the Vidbyte key never
+        # reaches a vendor, even when an adapter is called directly.
+        if self.is_vidbyte_managed():
+            return VIDBYTE_MANAGED_KEY_PLACEHOLDER
+        # Resolve explicit keys before provider-specific
+        # environment variables.
         return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
 
     def resolved_endpoint(self) -> str:
@@ -93,6 +148,17 @@ class TextModelConfig:
         # Model names are required by every provider adapter.
         if not self.model.strip():
             raise ConfigurationError("model must be non-empty.")
+
+    def _require_managed_shape(self, provider: ModelProvider) -> None:
+        """Refuse a custom endpoint and any provider the gateway does not serve, before a managed call can send the Vidbyte key."""
+        # @intent managed-key-stays-on-the-gateway
+        # The bearer key must never follow a caller URL or go to a
+        # vendor the gateway cannot bill.
+        if self.endpoint is not None and (not isinstance(self.endpoint, str) or self.endpoint.strip()):
+            raise ConfigurationError("A custom endpoint is not allowed in Vidbyte-managed text mode.")
+        if provider not in VIDBYTE_MANAGED_TEXT_PROVIDERS:
+            supported = ", ".join(sorted(managed.value for managed in VIDBYTE_MANAGED_TEXT_PROVIDERS))
+            raise UnsupportedProviderError(f"Vidbyte-managed text mode supports: {supported}.", details={"provider": provider.value})
 
     def _validate_temperature(self) -> None:
         # Most provider APIs accept temperature values in the inclusive 0-2 range.
@@ -394,13 +460,7 @@ class DecisionModelConfig:
         if self.mode is DecisionModelMode.VIDBYTE_MANAGED:
             if self.api_key is not None and not isinstance(self.api_key, str):
                 raise ConfigurationError("api_key must be a string in VIDBYTE_MANAGED decision mode.", details={"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
-            explicit_key = self.api_key.strip() if self.api_key is not None else ""
-            key = (explicit_key or os.environ.get("VIDBYTE_API_KEY", "")).strip()
-            if not key:
-                raise ConfigurationError("Missing Vidbyte API key. Pass api_key or set VIDBYTE_API_KEY.", details={"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
-            if re.fullmatch(r"vb_live_[A-Za-z0-9_-]{32,}", key) is None:
-                raise ConfigurationError("The managed Vidbyte API key must be a live key in the vb_live_ format.", details={"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
-            return key
+            return ProviderModelRegistry.resolve_vidbyte_api_key(self.api_key)
         # Resolves explicit TypeSafe keys before the provider-specific environment variable.
         # @intent explicit-key-wins-over-environment
         # Direct mode preserves the existing TypeSafe key resolution for standalone runners.
