@@ -90,6 +90,13 @@ class TraceRecorder:
         # Return a bounded copy of the tracer's recorded events when available.
         tracer = getattr(agent, "_tracer", None)
         events = getattr(tracer, "events", None)
+        # @intent full-trace-reaches-wrapped-debug-tracer
+        # Semantic wrappers (Trace.profile / Trace.session) hold the recording tracer under .inner, so follow it a few levels.
+        seen: set[int] = set()
+        while not isinstance(events, list) and tracer is not None and id(tracer) not in seen and len(seen) < 4:
+            seen.add(id(tracer))
+            tracer = getattr(tracer, "inner", None)
+            events = getattr(tracer, "events", None)
         if not isinstance(events, list):
             return None
         captured = [dict(event) for event in events[-_MAX_EVENTS:] if isinstance(event, Mapping)]

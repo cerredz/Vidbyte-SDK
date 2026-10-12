@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.agent_test_support import bind_test_runner, build_test_agent
-from vidbyte import Agent
+from vidbyte import Agent, Trace, TraceProfile
 from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
@@ -1102,6 +1102,29 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "answer-1")
         self.assertEqual(len(store.history(session.id)), 1)
         self.assertEqual(store.get(session.head).run_state.history[-1]["content"], "answer-1")
+
+    async def test_full_trace_captures_events_through_wrapped_debug_tracer(self) -> None:  # [Silent Failure]
+        # Verify trace="full" finds DebugTracer events under Trace.profile / Trace.session wrappers, and bare debug is unchanged.
+        builders = {
+            "bare": lambda ev: Trace.debug(ev),
+            "profile": lambda ev: Trace.profile(Trace.debug(ev), TraceProfile.default()),
+            "session": lambda ev: Trace.session(Trace.debug(ev), name="workflow"),
+        }
+        for label, build in builders.items():
+            with self.subTest(tracer=label):
+                events: list = []
+                store = InMemorySessionStore()
+                agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner(), trace=build(events))
+                session = agent.persist(store=store, trace="full")
+
+                await agent.arun("first")
+                await agent.arun("second")
+
+                captured = [checkpoint.trace_events for checkpoint in store.history(session.id)]
+                self.assertTrue(events)
+                self.assertEqual(len(captured), 2)
+                self.assertTrue(all(captured), captured)
+                self.assertTrue(all(dict(event) in events for event in captured[-1]))
 
     async def test_session_arun_does_not_double_persist_agent_hook(self) -> None:  # [Silent Failure]
         # Verify Session.arun() delegates to the agent hook without writing a second checkpoint.
