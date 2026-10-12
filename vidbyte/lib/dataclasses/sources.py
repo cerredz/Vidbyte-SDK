@@ -21,6 +21,7 @@ from typing import Generic, TypeVar
 
 from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.enums import PinPolicy
+from vidbyte.lib.errors import SourceSecurityError
 
 T = TypeVar("T")
 
@@ -43,6 +44,17 @@ class ArtifactRef:
     pin: PinPolicy = PinPolicy.PINNED
     content_type_hint: str | None = None
 
+    def __post_init__(self) -> None:
+        # @intent pinned-hash-is-case-insensitive-hex
+        # A SHA-256 hex digest means the same bytes in any letter case (PowerShell prints it uppercase), so store
+        # the pin in the lowercase form sha256_hex() produces; a blank pin is left untouched so it fails exactly as before.
+        if isinstance(self.expected_hash, str) and self.expected_hash.strip():
+            object.__setattr__(self, "expected_hash", self.expected_hash.strip().lower())
+        # @intent pin-policy-is-one-canonical-enum
+        # A manifest's `pin: pinned` equals PinPolicy.PINNED but is not that member, so the identity-gated pinned
+        # cache would skip it; store the member itself, and let an unknown spelling fail here with ValueError.
+        object.__setattr__(self, "pin", PinPolicy(self.pin))
+
 
 @dataclass(frozen=True, slots=True)
 class Selection:
@@ -51,6 +63,20 @@ class Selection:
     allow: tuple[str, ...] = ("*",)
     deny: tuple[str, ...] = ()
     expand: bool = False
+
+    def __post_init__(self) -> None:
+        # @intent name-lists-reject-bare-strings
+        # @intent selection-globs-are-one-canonical-tuple
+        # Config from YAML/JSON passes lists; store tuples so allow=["*"] is still trivial (no expansion),
+        # and refuse a bare string, which tuple() would split into one glob per character.
+        for field_name in ("allow", "deny"):
+            value = getattr(self, field_name)
+            if isinstance(value, (str, bytes)):
+                raise SourceSecurityError(
+                    f'Selection.{field_name} must be a collection of glob patterns (e.g. ("Docs*",)), not a single string.',
+                    details={"field": field_name, "value": value},
+                )
+            object.__setattr__(self, field_name, tuple(value))
 
     def selects(self, *names: str) -> bool:
         # True when any name matches an allow glob and no name matches a deny glob.

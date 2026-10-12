@@ -25,7 +25,7 @@ from vidbyte.context.handoff import EngineeringHandoff, Handoff, MinimalHandoff,
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import ConfigurationError, PermissionDeniedError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -156,6 +156,9 @@ class ForkConversationTool(BaseTool):
             "prompt": prompt,
             "system_prompt": self._optional_string(args.get("system_prompt")),
             "tools": self._resolve_tools(args.get("tool_names"), args.get("extra_toolset_names"), args.get("drop_tool_names")),
+            # @intent fork-tool-drop-names-cover-inherited-mcp-tools
+            # The child reconnects the parent's MCP servers, so the drop must also reach the fork itself, not just the catalog.
+            "drop_tools": self._coerce_string_tuple(args.get("drop_tool_names"), "drop_tool_names"),
             "history": self._resolve_history(history_mode, raw_last_n),
             "model": self._resolve_model(args.get("model")),
             "provider": self._resolve_provider(args.get("provider")),
@@ -183,6 +186,7 @@ class ForkConversationTool(BaseTool):
             name=request.get("name"),
             system_prompt=request.get("system_prompt"),
             tools=request.get("tools"),
+            drop_tools=request.get("drop_tools", ()),
             history=request.get("history"),
             model_name=request.get("model"),
             provider=request.get("provider"),
@@ -217,7 +221,9 @@ class ForkConversationTool(BaseTool):
             return None
         catalog = self._available_tools(extra_names)
         if raw_names is None:
-            selected = catalog
+            # @intent fork-extras-are-opt-in
+            # Without tool_names only the named extra toolsets join the parent's tools; a drop alone must not grant every extra.
+            selected = catalog if extra_names else self._agent.tools
         else:
             names = self._coerce_string_tuple(raw_names, "tool_names")
             selected = catalog.subset(names)
@@ -303,6 +309,10 @@ class ForkConversationTool(BaseTool):
             settings["compaction_trigger_tokens"] = context_window["compaction_trigger_tokens"]
         if "compaction_target_tokens" in context_window:
             settings["compaction_target_tokens"] = context_window["compaction_target_tokens"]
+        # @intent null-optional-arg-means-default
+        # A null loop field means "not given", exactly like an omitted key, so the child keeps the parent's value.
+        # An unknown field stays even when null, so the check below still refuses it.
+        settings = {field: value for field, value in settings.items() if value is not None or field not in _LOOP_SETTING_FIELDS}
         if not settings:
             return None
         values = {field: getattr(self._agent.agent_loop_settings, field, None) for field in _LOOP_SETTING_FIELDS}
@@ -333,9 +343,15 @@ class ForkConversationTool(BaseTool):
         }
 
     def _resolve_allowed_tools(self, raw_allowed_tools: Any) -> tuple[str, ...]:
-        # Validates the optional runtime allowed_tools gate against the selectable tool catalog.
+        # Validates the optional runtime allowed_tools gate against the selectable tool catalog and the parent's own gate.
         names = self._coerce_string_tuple(raw_allowed_tools, "allowed_tools")
         self._available_tools().subset(names)
+        # @intent fork-tool-allowed-tools-cannot-widen-parent-gate
+        # The child inherits the parent's allowed_tools gate, so an override may narrow it but never add a gated-out tool.
+        parent_gate = self._agent.agent_loop_settings.allowed_tools
+        widened = tuple(name for name in names if parent_gate is not None and name not in parent_gate)
+        if widened:
+            raise PermissionDeniedError(f"allowed_tools cannot widen the parent's allowed_tools gate: {', '.join(repr(name) for name in widened)}")
         return names
 
     def _resolve_runtime(self, raw_runtime: Any, raw_actor_runtime: Any) -> str | ActorRuntime | None:
@@ -476,7 +492,7 @@ class ForkConversationTool(BaseTool):
                         "context_window_budget": {"type": "integer", "minimum": 1, "description": "Maximum context-window token budget for the child."},
                         "compaction_trigger_tokens": {"type": "integer", "minimum": 1, "description": "Token threshold that triggers child context compaction."},
                         "compaction_target_tokens": {"type": "integer", "minimum": 1, "description": "Target token count after child context compaction."},
-                        "allowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Runtime-level allowed_tools gate for the child; each name must be in the selectable child tool catalog."},
+                        "allowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Runtime-level allowed_tools gate for the child; each name must be in the selectable child tool catalog and within the parent's own allowed_tools gate."},
                     },
                 },
                 "max_iterations": {"type": "integer", "minimum": 1, "description": "Convenience alias for loop_settings.max_iterations; cannot exceed the parent cap."},

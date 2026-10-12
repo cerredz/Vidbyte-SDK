@@ -93,6 +93,18 @@ class RestorePermissionPolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(restored.permission_policy, PermissionPolicy.allow_all())
 
+    def test_string_spelled_policy_exports_and_restores(self) -> None:  # [Hidden Assumption]
+        policy = PermissionPolicy(allowed=frozenset({"safe", "read", "execute"}))  # type: ignore[arg-type]
+        agent = Agent(name="x", system_prompt="sp", provider="openai", model_name="gpt-4.1", permission_policy=policy)
+
+        state = agent.export_state()
+        restored = Agent.restore(state)
+
+        self.assertEqual(policy.allowed, frozenset({ToolPermission.SAFE, ToolPermission.READ, ToolPermission.EXECUTE}))
+        self.assertTrue(all(isinstance(value, ToolPermission) for value in policy.allowed))
+        self.assertEqual(state.permission_policy, ("execute", "read", "safe"))
+        self.assertEqual(restored.permission_policy, policy)
+
     def test_serializer_round_trips_policy(self) -> None:  # [Hidden Assumption]
         agent = Agent(name="x", system_prompt="sp", provider="openai", model_name="gpt-4.1", permission_policy=PermissionPolicy(allowed=frozenset()))
         checkpoint = Checkpoint(id="c", session_id="s", parent_id=None, seq=0, created_at="t", run_state=agent.export_state())

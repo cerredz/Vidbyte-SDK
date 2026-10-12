@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from vidbyte.lib.tools.filesystem import LineEndings
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -28,7 +29,10 @@ class AppendTool(FileSystemTool):
             create_parents = self._resolve_bool_argument(call, "create_parents", default=False)
             self._require_write()
             target = self._path(path)
-            self.backend.append_text(target, content, encoding=self._config.encoding, create_parents=create_parents)
+            # @intent append-keeps-file-line-endings
+            # Append in the existing file's own line endings so it never ends up mixed; a new file keeps the platform default.
+            newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding)) if target.is_file() else None
+            self.backend.append_text(target, content, encoding=self._config.encoding, create_parents=create_parents, newline=newline)
             return ToolResult.success(self.name, str(target), metadata={"path": str(target), "encoding": self._config.encoding})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))

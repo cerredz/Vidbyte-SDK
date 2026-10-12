@@ -136,7 +136,9 @@ class ProviderUsage(ABC):
         cache_read_rate = pricing.cache_read_per_million
         if cache_read_rate is None:
             cache_read_rate = input_rate
-        else:
+        # @intent free-base-rate-never-divides
+        # A 0.0 base input rate (a free model) leaves the tier ratio undefined, so its cache rate applies unscaled.
+        elif pricing.input_per_million != 0.0:
             cache_read_rate = cache_read_rate * (input_rate / pricing.input_per_million)
         return input_rate, output_rate, cache_read_rate
 

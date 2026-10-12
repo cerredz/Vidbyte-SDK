@@ -28,10 +28,18 @@ if TYPE_CHECKING:
 class EfficiencyBehavior:
     """Predicates over tool-loop efficiency for a completed agent run."""
 
+    # @intent budget-stop-covers-every-runtime-budget
+    # The runtime's _budget_stop and the ToolSettings hard budgets both end runs on these reasons.
     _BUDGET_STOP_REASONS = {
         AgentStopReason.MAX_ITERATIONS.value,
         AgentStopReason.MAX_TOOL_CALLS.value,
         AgentStopReason.MAX_TOKENS.value,
+        AgentStopReason.TIMEOUT.value,
+        AgentStopReason.MAX_CALLS_PER_ITERATION.value,
+        AgentStopReason.MAX_IDENTICAL_CALLS.value,
+        AgentStopReason.SLIDING_WINDOW_MAX_CALLS.value,
+        AgentStopReason.MAX_CONSECUTIVE_FAILURES.value,
+        AgentStopReason.MAX_ERROR_CALLS.value,
     }
     _UNSUCCESSFUL_STATES = {ToolCallState.FAILED, ToolCallState.DENIED}
 

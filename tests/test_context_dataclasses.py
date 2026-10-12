@@ -75,6 +75,14 @@ class ContextDataclassTests(unittest.TestCase):
 
         self.assertIn("History:\nplain note\n{'role': 'user'}", body)
 
+    def test_response_renders_its_sender_when_one_is_set(self) -> None:
+        # A response's sender must reach the model, as history and artifacts keep theirs.
+        built = BaseContext(responses=[ContextResponse(content="the discount is 30%", sender="pricing-bot")]).build_context()
+        unattributed = BaseContext(responses=[ContextResponse(content="no sender here")]).build_context()
+
+        self.assertIn("Responses:\nResponse from pricing-bot:\nthe discount is 30%", built)
+        self.assertEqual(unattributed, "Responses:\nno sender here")
+
     def test_prompt_catalog_contains_reflexion_prompts(self) -> None:
         prompts = Prompts().family("reflexion")
         self.assertIn("agent_system_prompt", prompts)

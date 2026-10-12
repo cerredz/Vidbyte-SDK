@@ -4,7 +4,7 @@
 
 This folder checks the public promise of `vidbyte.CodingAgent` and `vidbyte.tools.builtins.BashTool`. One constructor call gives a model working file, search, shell and web-fetch tools over one root folder. Every shell call returns in bounded time with bounded output. A fetch key reaches only its own provider. A `verify_command` keeps the run going until the command passes. The tests drive the real `BaseAgent` tool loop, real file tools, real bash processes and the real provider clients. Only the model runner and the single provider HTTP send are faked.
 
-The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclasses/coding.py` (the argument checks), `vidbyte/tools/toolsets/coding.py` (the seven tools and the keyed fetch view), `vidbyte/tools/builtins/bash.py`, `vidbyte/middleware/builtins/verify_command.py` (the finish check), and `vidbyte/cli/coding.py` (the terminal command). The file tools these tests compose belong in `vidbyte/tools/filesystem/`, the search and fetch tools in `vidbyte/tools/builtins/`, and the permission check and the `review_finish` call at both finish points belong in `vidbyte/agents/runtime.py`.
+The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclasses/coding.py` (the argument checks), `vidbyte/tools/toolsets/coding.py` (the seven tools and the keyed fetch view), `vidbyte/tools/builtins/bash.py`, and `vidbyte/middleware/builtins/verify_command.py` (the finish check). The file tools these tests compose belong in `vidbyte/tools/filesystem/`, the search and fetch tools in `vidbyte/tools/builtins/`, and the permission check and the `review_finish` call at both finish points belong in `vidbyte/agents/runtime.py`.
 
 ## Non-Goals
 
@@ -22,7 +22,6 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - `test_coding_agent_contract.py` checks the constructor contract: public names, the subclass surface, export and restore parity, caller tools, identity errors, and root validation and pinning.
 - `test_coding_agent_web_fetch.py` checks fetch-key selection, authentication, confinement and secrecy, and the keyed fetch view against the bare priced tool.
 - `test_coding_agent_verify_command.py` checks `verify_command`: feedback and retries on both finish paths, the attempt limit and its metadata, argument checks, the output cap and time limit it inherits from bash, and that a plain `BaseAgent` finishes as before.
-- `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop, a fetch key read only from the named environment variable, and clean failures for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` checks `BashTool`'s input and output contract: the spec, validation, streams, `cwd`, argv, stdin, spawn errors, decoding, the output cap, and the bash lookup.
 - `test_bash_tool_process_bounds.py` checks the time limit, process-group kill, cancellation and pipe cleanup on real processes. Start here for a hang or a leftover process.
 

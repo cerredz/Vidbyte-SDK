@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from vidbyte import Agent
 from vidbyte.agents.contracts import MinToolCalls, MinToolCallsById
 from vidbyte.agents.fallback import AgentFallback
 from vidbyte.agents.settings import AgentFallbackSettings
@@ -38,6 +39,12 @@ class FallbackModelsBareStringTests(unittest.TestCase):
     def test_one_item_tuple_and_list_keep_their_single_model(self) -> None:
         self.assertEqual(AgentFallbackSettings(models=("deepseek-reasoner",)).models, ("deepseek-reasoner",))
         self.assertEqual(AgentFallbackSettings(models=["deepseek-reasoner"]).models, ("deepseek-reasoner",))
+
+    def test_agent_rejects_a_bare_string_fallback(self) -> None:
+        # @intent agent-fallback-rejects-a-bare-string
+        # fallback="gemini/gemini-3.5-flash" must fail like the settings do, not become 23 one-letter models.
+        with self.assertRaisesRegex(ConfigurationError, "models must be a sequence of models, not a string"):
+            Agent(**BASE, provider="deepseek", model_name="deepseek-chat", api_key="k", fallback="gemini/gemini-3.5-flash")
 
 
 
@@ -87,6 +94,17 @@ class FallbackRunnerTimeoutTests(unittest.TestCase):
         backup = FallbackModel(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-ant")
         chain = AgentFallback.from_spec([backup], runner_config=config, agent_name="researcher")
         self.assertEqual(chain.build_runner(1)._config.timeout_seconds, 300.0)
+
+
+class FallbackPrefixedPrimaryTests(unittest.TestCase):
+    def test_provider_prefixed_primary_model_builds_a_chain(self) -> None:
+        # @intent fallback-primary-reads-prefixed-model
+        # 'deepseek/deepseek-chat' with no provider runs on DeepSeek, so a fallback chain must read it the same way.
+        agent = Agent(**BASE, model_name="deepseek/deepseek-chat", api_key="sk-deepseek", fallback=["deepseek-reasoner", "gemini/gemini-3.5-flash"])
+        primary, bare, prefixed = agent.fallback.models
+        self.assertEqual((primary.provider, primary.model, primary.api_key), ("deepseek", "deepseek-chat", "sk-deepseek"))
+        self.assertEqual((bare.provider, bare.model, bare.api_key), ("deepseek", "deepseek-reasoner", "sk-deepseek"))
+        self.assertEqual((prefixed.provider, prefixed.model), ("gemini", "gemini-3.5-flash"))
 
 
 def build(**overrides: object) -> AgentSettings:
@@ -513,6 +531,30 @@ class AgentKwargsTests(unittest.TestCase):
         settings.to_agent_kwargs()["output_schema"]["type"] = "mutated"
 
         self.assertEqual(settings.output_schema["type"], "object")
+
+
+class HarnessAgentParamsTests(unittest.TestCase):
+    def test_harness_agent_params_reach_settings_and_the_built_agent(self) -> None:
+        # @intent harness-params-are-agent-hyperparameters
+        with tempfile.TemporaryDirectory() as folder:
+            loader = YamlLoader()
+            spec = loader.load_harness(self._write_harness(Path(folder), "params: {temperature: 0.2, max_tokens: 4096, custom_knob: 1}"))
+            settings = loader.load_harness_agent(spec, "planner")
+            agent = loader.build_agent(settings)
+            override = loader.load_harness_agent(loader.load_harness(self._write_harness(Path(folder), "temperature: 0.5\n    params: {temperature: 0.2}")), "planner")
+
+        self.assertEqual(settings.temperature, 0.2)
+        self.assertEqual(agent.runner_config.temperature, 0.2)
+        self.assertEqual(override.temperature, 0.5)
+
+    def _write_harness(self, folder: Path, extra: str) -> Path:
+        # Writes a one-agent harness document whose planner entry ends with the YAML under test.
+        path = folder / "harness.yaml"
+        path.write_text(
+            f"schema_version: 1\nharness:\n  type: research-swarm\nagents:\n  - name: planner\n    provider: deepseek\n    model: deepseek-chat\n    system_prompt: Plan.\n    {extra}\n",
+            encoding="utf-8",
+        )
+        return path
 
 
 class SystemPromptFileContainmentTests(unittest.TestCase):
