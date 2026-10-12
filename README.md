@@ -258,7 +258,7 @@ claude = TextModelRunner(  # managed even when ANTHROPIC_API_KEY is also set
   a Vidbyte key passed as `api_key`, or managed mode, with another provider
   is refused before a request is sent.
 - **Output cap:** every managed request carries an output-token cap. When
-  `max_output_tokens` is not set, the SDK sends 8,192. If you pass a
+  `max_output_tokens` is not set, the SDK sends 32,768. If you pass a
   `generationConfig` in `extra_body` for Gemini, it replaces the one the SDK
   builds, so it must include `maxOutputTokens`. For xAI, DeepSeek, and Kimi,
   set the cap with `max_output_tokens`, not `max_completion_tokens` in
