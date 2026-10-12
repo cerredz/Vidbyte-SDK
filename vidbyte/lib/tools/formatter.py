@@ -185,14 +185,18 @@ class ToolsFormatter:
 
         Two things break otherwise, and both fail the whole request rather than degrading:
         `$defs`/`$ref`, which Pydantic emits for any nested model, and `additionalProperties`,
-        which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
-        place and unsupported keywords are dropped. A list-valued ``type`` (for example
+        which ``_parameters_schema`` stamps on every spec-declared tool. Refs into `$defs` or
+        draft-07 `definitions` are expanded in place and unsupported keywords are dropped. A list-valued ``type`` (for example
         ``["string", "null"]``) is also rejected, so it is collapsed to a single type, and an
         array without ``items`` is rejected, so it gets ``items: {}`` (any item). ``enum`` is a
         list of strings, so int, float and bool enum values are written as their JSON text.
         """
-        defs = dict(schema.get("$defs") or {})
-        root = {key: value for key, value in schema.items() if key != "$defs"}
+        # @intent gemini-schema-expands-draft07-definitions
+        # Pydantic v1, zod-to-json-schema and hand-written schemas keep shared models under
+        # draft-07 `definitions` instead of `$defs`; read both so their refs still expand,
+        # letting `$defs` win when a name appears in both blocks.
+        defs = {**dict(schema.get("definitions") or {}), **dict(schema.get("$defs") or {})}
+        root = {key: value for key, value in schema.items() if key not in ("$defs", "definitions")}
         return ToolsFormatter._gemini_node(root, defs, ())
 
     @staticmethod
