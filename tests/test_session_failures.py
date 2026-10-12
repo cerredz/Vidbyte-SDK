@@ -157,6 +157,21 @@ class FailureContractsTests(unittest.TestCase):
         self.assertEqual([item.source for item in router.history()], ["two", "three"])
         self.assertEqual(len(router.history(code=FailureCode.ACTION_UNSAFE)), 1)
 
+    def test_capture_exception_dedups_by_identity_not_reused_id(self) -> None:  # [Silent Failure]
+        # @intent dedup-by-exception-identity-not-id
+        # Verify freed exceptions whose memory address is reused still record, while one object records once.
+        router = FailureRouter(object())
+        for index in range(5):
+            router.capture_exception(RuntimeError(f"turn {index}"))
+        self.assertEqual(len(router.history()), 5)
+        original = RuntimeError("runner failed")
+        first = router.capture_exception(original, source="agent")
+        wrapper = RuntimeError("session wrapper")
+        wrapper.__cause__ = original
+        self.assertIs(router.capture_exception(original, source="session"), first)
+        self.assertIs(router.capture_exception(wrapper, source="session"), first)
+        self.assertEqual(len(router.history()), 6)
+
     def test_disabled_router_does_not_record(self) -> None:  # [Hidden Assumption]
         # Verify disabled instrumentation has no policy side effects.
         router = FailureRouter(object(), enabled=False)
