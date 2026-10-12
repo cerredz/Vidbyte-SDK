@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -13,7 +14,7 @@ from unittest import mock
 
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte import Agent
-from vidbyte.agents import AgentForkSettings
+from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
@@ -29,6 +30,7 @@ from vidbyte.sessions.contracts import (
     TraceCapture,
 )
 from vidbyte.lib.errors import SessionUsageValidationError, VidbyteSdkError
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.sessions.errors import (
     CheckpointNotFoundError,
     SessionError,
@@ -1011,6 +1013,24 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         await session.arun("two")
         branch = session.fork(at=first)
         self.assertEqual(store.get_meta(branch.id).parent_session_id, session.id)
+
+    def test_live_fork_keeps_agent_key_and_never_stores_it(self) -> None:  # [Silent Failure]
+        # @intent live-fork-keeps-agent-key
+        # A tenant's branch must authenticate with the tenant's explicit key, not the server's env key, and the key stays out of checkpoints.
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
+            store = FileSessionStore(root)
+            agent = BaseAgent(name="tenant", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            session = Session(agent, store=store)
+            session.checkpoint()
+
+            branches = [session.fork(), session.batch_fork(1)[0].session]
+
+            for branch in branches:
+                config = branch.agent.runner_config
+                self.assertEqual(config.api_key, "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+            stored = "".join(path.read_text(encoding="utf-8") for path in Path(root).rglob("*") if path.is_file())
+            self.assertNotIn("sk-tenant-acme", stored)
 
     def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()

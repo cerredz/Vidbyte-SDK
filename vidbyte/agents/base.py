@@ -542,7 +542,7 @@ class BaseAgent(McpAttachableMixin):
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None) -> BaseAgent:
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None) -> BaseAgent:
         """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
@@ -556,6 +556,7 @@ class BaseAgent(McpAttachableMixin):
             provider=state.provider,
             model_name=state.model_name,
             temperature=state.temperature,
+            api_key=api_key,
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
             timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
