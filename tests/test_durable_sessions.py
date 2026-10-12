@@ -37,6 +37,7 @@ from vidbyte.sessions.errors import (
     CheckpointNotFoundError,
     SessionError,
     SessionNotFoundError,
+    SessionSerializationError,
     SessionStoreError,
     SessionVersionError,
 )
@@ -661,6 +662,24 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         SessionBundleImporter(target).import_bundle(SessionBundleExporter(source).export("se"), new_id="copy")
 
         self.assertEqual(target.history("copy")[0].seq, 0)
+
+    def test_import_of_damaged_compressed_member_raises_serialization_error(self) -> None:  # [Hidden Failure]
+        # @intent bundle-corrupt-member-is-session-serialization-error
+        # A damaged byte inside a checkpoint's deflate data must fail as SessionSerializationError, not raw zlib.error.
+        source = InMemorySessionStore()
+        source.put(_checkpoint("se", "c1"))
+        bundle = bytearray(SessionBundleExporter(source).export("se"))
+        with zipfile.ZipFile(BytesIO(bytes(bundle)), mode="r") as archive:
+            info = next(item for item in archive.infolist() if item.filename.startswith("checkpoints/"))
+        bundle[info.header_offset + 30 + len(info.filename.encode("utf-8")) + len(info.extra)] ^= 0xFF
+        target = InMemorySessionStore()
+
+        with self.assertRaises(SessionSerializationError) as caught:
+            SessionBundleImporter(target).import_bundle(bytes(bundle))
+
+        self.assertEqual(caught.exception.details, {"path": info.filename})
+        with self.assertRaises(SessionNotFoundError):
+            target.get_meta("se")
 
     def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
         # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
