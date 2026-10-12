@@ -20,7 +20,7 @@ started: 2026-10-11 17:36
 | S4 adversarial review | done | 2026-10-11 | 2026-10-11 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker (R-1 httpx INFO log leaks secret URLs) / 3 Major (R-2 str destination, R-3 SMTP thread holds sync run past deadline, R-4 duplicated email rule) / 11 Minor; 0 refuted (1 sub-claim) |
 | S5 repair loop | done (converged at iteration 1) | 2026-10-11 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | merge ba83c953 (origin/main, no conflicts); 12 findings fixed one commit each; HEAD ed1dd67b; 340/340; SDK-LINT PASS; run_ci source 3743 passed; full run_ci CI passed (re-run by orchestrator at ed1dd67b); Semgrep 0; remote ci 38211917706 + static-policy 38211919803 success @1348b728; review.md 0 open |
 | S5 re-review | done (round 1/2) | 2026-10-12 | 2026-10-12 | reports/S5-rereview.md | SOUND: 0 Blocker / 0 Major / 2 Minor (R-C1 Telegram ctor raise not recorded as deviation; R-C2 E302 blank line email.py:32); all 12 fixes hold; merge clean; §4 snippet byte-equal |
-| S6 PR | pending | | | | |
+| S6 PR | running | 2026-10-12 | | | |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
@@ -59,6 +59,8 @@ started: 2026-10-11 17:36
 - 2026-10-12 — main 5 commits ahead again (#767, #888, #887, #746, #763), no overlap with our files → PR still mergeable; no second catch-up merge needed before S6 unless GitHub reports a conflict.
 
 - 2026-10-12 — Re-review SOUND → loop converged. Applied the two trivial Minors anyway (one blank line; one §17 deviation bullet) by resuming the repair-1 agent instead of a fresh iteration: both are mechanical, no finding needs verification, and a fresh agent's orientation would cost more than the fix. Logged as a polish pass, not counted as iteration 2.
+
+- 2026-10-12 — Polish pass done @12729d09 (R-C2 blank line ad4ed50a; R-C1 §17 deviation 0ca19568); 340 passed, SDK-LINT PASS, run_ci source 3743 passed; remote ci 38214072413 + static-policy 38214075610 success @12729d09. Test-tree check corrected: pack diff vs 7f3bb7ff empty, `git diff ba83c953..HEAD -- tests/` empty (non-pack differences vs 7f3bb7ff are main's, via the merge). Spec status → verified.
 
 ## User replies (verbatim)
 - (none yet)
@@ -103,4 +105,5 @@ started: 2026-10-11 17:36
 - R-12: suppress `smtplib.SMTPException`/`OSError` around QUIT only, after `send_message` returns — *source:* S2 S4-follow-up
 - Semgrep in Git Bash: put the semgrep venv on PATH via `cygpath -u` (a `C:/…` entry splits on the colon and the broken global pysemgrep runs) — *source:* S5 repair-1
 - S009 reads 350/350 after the merge because main added the finding; identical finding sets at ba83c953 and HEAD — *source:* S5 repair-1
+- Test-baseline check after the catch-up merge: `git diff 7f3bb7ff..HEAD -- tests/features/agent_output_connectors` plus `git diff ba83c953..HEAD -- tests/`; a plain `7f3bb7ff..HEAD -- tests/` includes main's test files — *source:* S5 polish
 - Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
