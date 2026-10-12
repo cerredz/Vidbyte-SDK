@@ -156,7 +156,7 @@ def _null_means_default_fields(args_model: type[BaseModel]) -> frozenset[str]:
     for name, field in args_model.model_fields.items():
         if field.is_required():
             continue
-        annotation = Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation
+        annotation: Any = Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation
         try:
             TypeAdapter(annotation).validate_python(None)
         except ValidationError:
