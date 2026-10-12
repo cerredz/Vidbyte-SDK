@@ -1,31 +1,37 @@
 """FILE: vidbyte/lib/dataclasses/coding.py
 
-PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the verification command and its attempt limit, the caller's own tools, the permission policy, the read-only path patterns, the write_text rewrite limit, the context-section switches, and the setup commands; CodingVerification, the validated outcome so far of one run's verification command; and CodingContextSectionText, one section of the CodingAgent context window.
-ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools) and by the section loaders in vidbyte/agents/coding_context/, feeds its readonly_paths to vidbyte/middleware/builtins/readonly_paths.py, and is exported by the root vidbyte package. CodingContextSectionText is returned by each section loader and read by CodingContextWindow (vidbyte/agents/coding_context/window.py). CodingVerification is built by vidbyte/middleware/builtins/verify_command.py (VerifyCommandMiddleware) once per verification and kept in the run's run_state.
+PURPOSE: Defines CodingAgentSettings, the validated record of every CodingAgent constructor argument: the root folder, at most one web-fetch key, the verification command and its attempt limit, the caller's own tools, the permission policy, the read-only path patterns, the write_text rewrite limit, the context-section switches, and the setup commands; CodingVerification, the validated outcome so far of one run's verification command; CodingContextSectionText and CodingContextSectionItem, one section of the CodingAgent context window as text or as a ready context primitive; and EnvironmentProbeResult, what the environment section's bash probe reported.
+ROLE IN CODEBASE: CodingAgentSettings is built by vidbyte/agents/coding.py (CodingAgent.__init__), read by vidbyte/tools/toolsets/coding.py (CodingAgentTools) and by the section loaders in vidbyte/agents/coding_context/, feeds its readonly_paths to vidbyte/middleware/builtins/readonly_paths.py, and is exported by the root vidbyte package. CodingContextSectionText or CodingContextSectionItem is returned by each section loader and read by CodingContextWindow (vidbyte/agents/coding_context/window.py). CodingVerification is built by vidbyte/middleware/builtins/verify_command.py (VerifyCommandMiddleware) once per verification and kept in the run's run_state. EnvironmentProbeResult is returned by EnvironmentProbe (vidbyte/agents/coding_context/environment_probe.py) and read by EnvironmentLoader.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid and neither CodingAgent nor CodingAgentTools re-checks it. root_dir is stored as the resolved absolute Path, so a later change of the process working directory never moves the tools. Key fields are repr=False, so printing the record never shows a key.
-FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_verification checks verify_command and max_verify_attempts; _check_tools_and_policy checks the caller's tools and the policy; _readonly_paths checks the patterns and returns them as a tuple; _check_context_switches checks the section switches; _checked_setup_commands checks the setup commands and returns them as a tuple; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses. CodingContextSectionText.__post_init__ checks the section kind and the text fields. CodingVerification.__post_init__ checks attempts and last_exit_code, and passed is derived from last_exit_code.
+FUNCTION INVENTORY: CodingAgentSettings.__post_init__ is the narrated main function; _resolved_root checks and resolves root_dir; _check_fetch_keys checks the four keys; _check_verification checks verify_command and max_verify_attempts; _check_tools_and_policy checks the caller's tools and the policy; _readonly_paths checks the patterns and returns them as a tuple; _check_context_switches checks the section switches; _checked_setup_commands checks the setup commands and returns them as a tuple; max_rewrite_lines is checked by OverwriteLineLimit (vidbyte/lib/dataclasses/filesystem.py), the same rule FileSystemToolConfig uses. CodingContextSectionText.__post_init__ checks the section kind and the text fields; CodingContextSectionItem.__post_init__ checks the section kind and, with _is_primitive, the item's shape; EnvironmentProbeResult.__post_init__ checks each reported field. CodingVerification.__post_init__ checks attempts and last_exit_code, and passed is derived from last_exit_code.
 COMMON MODIFICATION PATTERNS: A new keyed fetch provider adds one key field here (repr=False), one row in _check_fetch_keys, and one row in CodingAgentTools.authenticate_tools. A context section with its own on/off switch adds one bool field here and one isinstance check in _check_context_switches. A new CodingAgent keyword adds one field and one check here, and its bounds go in vidbyte/lib/constants/coding.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.tools or vidbyte.agents; vidbyte/lib is the bottom layer.
-KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. readonly_paths keeps its raw type for the same reason: tuple("tests/**") would split a bare string into characters. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. setup_commands="uv sync" is rejected rather than run one character at a time, which is why setup_commands keeps its raw type until __post_init__ checks it. CodingContextSectionText does not cap its content; each loader bounds its own text. max_verify_attempts is checked even when verify_command is None. Whether bash exists is checked by VerifyCommandMiddleware, not here, because vidbyte/lib cannot import the bash tool.
-RELATED DOCS: docs/spec/coding-agent/spec.md; docs/design/coding-agent-verify-command.md; docs/design/coding-agent-readonly-paths.md; vidbyte/agents/README.md (Coding Agent)
-TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_map_md.py, tests/features/coding_agent/test_coding_agent_setup_commands.py, tests/features/coding_agent/test_coding_agent_progress_notes.py, tests/features/coding_agent/test_coding_agent_readonly_paths.py, and tests/features/coding_agent/test_coding_agent_verify_command.py
+KNOWN EDGE CASES: root_dir="" is rejected even though Path("") is the current folder, which is why root_dir keeps its raw type until __post_init__ checks it. readonly_paths keeps its raw type for the same reason: tuple("tests/**") would split a bare string into characters. Caller tools are only checked to be a tuple here; BaseAgent decides which items are tools. load_agents=1 is rejected even though 1 == True, so a stray int or string never flips a switch through truthiness. setup_commands="uv sync" is rejected rather than run one character at a time, which is why setup_commands keeps its raw type until __post_init__ checks it. CodingContextSectionText does not cap its content; each loader bounds its own text. CodingContextSectionItem checks its item by shape, not isinstance, because vidbyte/lib cannot import vidbyte.context. max_verify_attempts is checked even when verify_command is None. Whether bash exists is checked by VerifyCommandMiddleware, not here, because vidbyte/lib cannot import the bash tool.
+RELATED DOCS: docs/spec/coding-agent/spec.md; docs/design/coding-agent-verify-command.md; docs/design/coding-agent-readonly-paths.md; docs/design/coding-agent-environment-context.md; vidbyte/agents/README.md (Coding Agent)
+TESTS: tests/features/coding_agent/test_coding_agent_contract.py, tests/features/coding_agent/test_coding_agent_web_fetch.py, tests/features/coding_agent/test_coding_agent_agents_md.py, tests/features/coding_agent/test_coding_agent_environment.py, tests/features/coding_agent/test_coding_agent_map_md.py, tests/features/coding_agent/test_coding_agent_setup_commands.py, tests/features/coding_agent/test_coding_agent_progress_notes.py, tests/features/coding_agent/test_coding_agent_readonly_paths.py, and tests/features/coding_agent/test_coding_agent_verify_command.py
 """
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vidbyte.lib.constants.coding import (
     CODING_DEFAULT_MAX_VERIFY_ATTEMPTS,
     CODING_MIN_VERIFY_ATTEMPTS,
 )
+from vidbyte.lib.dataclasses.context import EnvironmentTool
 from vidbyte.lib.dataclasses.filesystem import OverwriteLineLimit
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from vidbyte.context.primitives import ContextItem
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +60,7 @@ class CodingAgentSettings:
     max_verify_attempts: int = CODING_DEFAULT_MAX_VERIFY_ATTEMPTS
     readonly_paths: Sequence[str] = ()
     load_agents: bool = True
+    load_environment: bool = True
     load_map: bool = True
     setup_commands: Sequence[str] = ()
     progress_notes: bool = True
@@ -151,6 +158,8 @@ class CodingAgentSettings:
         """Raise unless every context-section switch is a real bool, not a truthy stand-in such as 1 or "yes"."""
         if not isinstance(self.load_agents, bool):
             raise ConfigurationError("CodingAgent load_agents must be True or False.", details={"parameter": "load_agents", "load_agents_type": type(self.load_agents).__name__})
+        if not isinstance(self.load_environment, bool):
+            raise ConfigurationError("CodingAgent load_environment must be True or False.", details={"parameter": "load_environment", "load_environment_type": type(self.load_environment).__name__})
         if not isinstance(self.load_map, bool):
             raise ConfigurationError("CodingAgent load_map must be True or False.", details={"parameter": "load_map", "load_map_type": type(self.load_map).__name__})
         if not isinstance(self.progress_notes, bool):
@@ -248,4 +257,69 @@ class CodingContextSectionText:
             raise ConfigurationError(f"CodingContextSectionText {', '.join(blank)} must be a non-blank string.", details={"fields": blank})
 
 
-__all__ = ["CodingAgentSettings", "CodingContextSectionText", "CodingVerification"]
+@dataclass(frozen=True, slots=True)
+class CodingContextSectionItem:
+    """One section of a CodingAgent context window given as a context primitive that formats its own text.
+
+    A loader returns one of these when its facts are structured, as
+    EnvironmentLoader does with an EnvironmentContextItem. The window
+    places item under the primitive id section.value, so the loader
+    leaves item.primitive_id unset.
+    """
+
+    section: CodingContextSection
+    item: ContextItem
+
+    def __post_init__(self) -> None:
+        # Check the section kind, which decides where the item renders
+        # and which primitive id it is stored under.
+        if not isinstance(self.section, CodingContextSection):
+            raise ConfigurationError("CodingContextSectionItem section must be a CodingContextSection.", details={"field": "section", "section_type": type(self.section).__name__})
+
+        # Check that the item is a context primitive the window can
+        # place and render.
+        if not self._is_primitive(self.item):
+            raise ConfigurationError("CodingContextSectionItem item must be a context primitive dataclass with a primitive_id field, a title, and to_context_text().", details={"field": "item", "item_type": type(self.item).__name__})
+
+    @staticmethod
+    def _is_primitive(item: object) -> bool:
+        """Return whether item is a dataclass instance with a primitive_id field, a text title, and a to_context_text method."""
+        # @intent section-item-is-checked-by-shape
+        # vidbyte/lib cannot import the context layer, so the item is
+        # checked by the surface the window uses: dataclasses.replace
+        # on primitive_id, then the title and to_context_text().
+        if not dataclasses.is_dataclass(item) or isinstance(item, type):
+            return False
+        has_id = "primitive_id" in {entry.name for entry in dataclasses.fields(item)}
+        return has_id and isinstance(getattr(item, "title", None), str) and callable(getattr(item, "to_context_text", None))
+
+
+@dataclass(frozen=True, slots=True)
+class EnvironmentProbeResult:
+    """What one bash probe reported: the bash version and uname, the tools and system package managers on bash's PATH, and why it failed.
+
+    An empty record means no probe ran, because there was no bash.
+    error is set when the probe timed out, exited non-zero, or could
+    not start; the other fields still hold what it printed first.
+    """
+
+    bash_version: str | None = None
+    uname: str | None = None
+    tools: tuple[EnvironmentTool, ...] = ()
+    package_managers: tuple[str, ...] = ()
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        # Check each reported field, so the loader can hand them to the
+        # environment primitive unchanged.
+        texts = (("bash_version", self.bash_version), ("uname", self.uname), ("error", self.error))
+        wrong = [name for name, value in texts if value is not None and (not isinstance(value, str) or not value.strip())]
+        if not isinstance(self.tools, tuple) or not all(isinstance(tool, EnvironmentTool) for tool in self.tools):
+            wrong.append("tools")
+        if not isinstance(self.package_managers, tuple) or not all(isinstance(name, str) and name.strip() for name in self.package_managers):
+            wrong.append("package_managers")
+        if wrong:
+            raise ConfigurationError(f"EnvironmentProbeResult {', '.join(wrong)} has the wrong type or is blank.", details={"fields": wrong})
+
+
+__all__ = ["CodingAgentSettings", "CodingContextSectionItem", "CodingContextSectionText", "CodingVerification", "EnvironmentProbeResult"]

@@ -538,6 +538,27 @@ class RejectedFinishSiblingCallTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not executed", following[1]["content"])
         self.assertEqual(second_call_messages[second_call_messages.index(following[-1]) + 1]["role"], "user")
 
+    async def test_accepted_is_done_end_of_run_hooks_do_not_see_the_provisional_refusal(self) -> None:
+        # @intent accepted-finish-hides-provisional-refusal
+        # An accepted isDone finish must not reach the after-run hooks as a refused one.
+        @tool
+        def search(q: str) -> str:
+            """Search."""
+            return "hit"
+
+        captured = _CaptureAfterRunMessages()
+        runner = ToolCallingRunner([_chat_tool_turn(("call_1", "isDone", '{"final_answer": "done"}'), ("call_2", "search", '{"q": "a"}'))])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[search], middleware=[captured])
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            result = await agent.arun("task")
+
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+        self.assertEqual(result.content, "done")
+        self.assertTrue(captured.messages, "the after-run hook saw no conversation")
+        rendered = repr(captured.messages)
+        self.assertNotIn("not accepted", rendered)
+        self.assertNotIn("turned down", rendered)
+
     def _assert_tool_calls_answered(self, messages: list[dict]) -> list[dict]:
         """Assert every assistant tool_call id is answered by the contiguous tool messages that follow it; return them."""
         assistant_indices = [i for i, m in enumerate(messages) if isinstance(m.get("tool_calls"), list)]

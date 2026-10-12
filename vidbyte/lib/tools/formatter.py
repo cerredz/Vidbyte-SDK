@@ -147,6 +147,17 @@ class ToolsFormatter:
     _GEMINI_SCHEMA_MAPS: frozenset[str] = frozenset({"properties"})
     # Keywords whose value is itself a subschema (or a list of them).
     _GEMINI_SCHEMA_NODES: frozenset[str] = frozenset({"items", "anyOf"})
+    # Keywords that only mean something for one type. When a type list becomes anyOf branches,
+    # each follows its type into that branch, because Gemini rejects the whole request over, for
+    # example, `properties` on a node with no object type.
+    _GEMINI_TYPE_KEYWORDS: Mapping[str, frozenset[str]] = {
+        "object": frozenset({"properties", "required", "propertyOrdering"}),
+        "array": frozenset({"items", "minItems", "maxItems"}),
+        "string": frozenset({"minLength", "maxLength", "pattern"}),
+        "number": frozenset({"minimum", "maximum"}),
+        "integer": frozenset({"minimum", "maximum"}),
+    }
+    _GEMINI_BRANCH_ONLY_KEYWORDS: frozenset[str] = frozenset().union(*_GEMINI_TYPE_KEYWORDS.values())
     # Bounds Gemini's schema cannot carry, mapped to the clause that says them in words instead.
     # Wording matches the output-schema fold in vidbyte/providers/output_schema.py.
     _GEMINI_FOLDED_BOUNDS: Mapping[str, str] = {
@@ -176,7 +187,9 @@ class ToolsFormatter:
         `$defs`/`$ref`, which Pydantic emits for any nested model, and `additionalProperties`,
         which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
         place and unsupported keywords are dropped. A list-valued ``type`` (for example
-        ``["string", "null"]``) is also rejected, so it is collapsed to a single type.
+        ``["string", "null"]``) is also rejected, so it is collapsed to a single type, and an
+        array without ``items`` is rejected, so it gets ``items: {}`` (any item). ``enum`` is a
+        list of strings, so int, float and bool enum values are written as their JSON text.
         """
         defs = dict(schema.get("$defs") or {})
         root = {key: value for key, value in schema.items() if key != "$defs"}
@@ -185,13 +198,16 @@ class ToolsFormatter:
     @staticmethod
     def _gemini_node(node: Mapping[str, Any], defs: Mapping[str, Any], seen: tuple[str, ...]) -> dict[str, Any]:
         # Expands $ref against $defs, keeps only Gemini-supported keywords, collapses
-        # list-valued types and words dropped bounds into the description, depth-first.
+        # list-valued types, gives item-less arrays an any-item schema, writes enum values
+        # as strings and words dropped bounds into the description, depth-first.
         kept: dict[str, Any] = {}
         for key, value in node.items():
             if key not in ToolsFormatter._GEMINI_SCHEMA_KEYWORDS:
                 continue
             kept[key] = ToolsFormatter._gemini_keyword_value(key, value, defs, seen)
         kept = ToolsFormatter._gemini_single_type(kept)
+        kept = ToolsFormatter._gemini_array_items(kept)
+        kept = ToolsFormatter._gemini_enum_strings(kept)
         kept = ToolsFormatter._gemini_fold_bounds(node, kept)
         ref = node.get("$ref")
         if not isinstance(ref, str):
@@ -224,6 +240,9 @@ class ToolsFormatter:
         # Gemini's Schema.type is one enum value, so a JSON Schema type list such as
         # ["string", "null"] (common from zod-built MCP servers) fails the whole request.
         # "null" becomes nullable, one remaining type stays a plain type, several become anyOf.
+        # With several, each type-only keyword (properties, items, maxLength, ...) moves into the
+        # branch of its own type; none may stay on the typeless outer node, so one whose type is
+        # not in the list, or any of them when the node already has its own anyOf, is dropped.
         types = kept.get("type")
         if not isinstance(types, list):
             return kept
@@ -234,8 +253,43 @@ class ToolsFormatter:
         if len(names) == 1:
             collapsed["type"] = names[0]
         elif names:
-            collapsed.setdefault("anyOf", [{"type": name} for name in names])
+            branches = [
+                {"type": name, **{key: value for key, value in kept.items() if key in ToolsFormatter._GEMINI_TYPE_KEYWORDS.get(name, ())}}
+                for name in names
+            ]
+            collapsed = {key: value for key, value in collapsed.items() if key not in ToolsFormatter._GEMINI_BRANCH_ONLY_KEYWORDS}
+            collapsed.setdefault("anyOf", branches)
         return collapsed
+
+    @staticmethod
+    def _gemini_array_items(kept: dict[str, Any]) -> dict[str, Any]:
+        # @intent gemini-array-needs-items
+        # Gemini rejects the whole request ("items: missing field") when an array schema has no
+        # items, which is how every ToolParameter(type="array") renders. JSON Schema reads a
+        # missing items as "any item", so {} says the same thing in a form Gemini accepts.
+        # Array branches a collapsed type list just produced under anyOf get the same treatment.
+        patched = dict(kept)
+        if patched.get("type") == "array" and "items" not in patched:
+            patched["items"] = {}
+        branches = patched.get("anyOf")
+        if isinstance(branches, list):
+            patched["anyOf"] = [
+                {**branch, "items": {}} if isinstance(branch, Mapping) and branch.get("type") == "array" and "items" not in branch else branch
+                for branch in branches
+            ]
+        return patched
+
+    @staticmethod
+    def _gemini_enum_strings(kept: dict[str, Any]) -> dict[str, Any]:
+        # @intent gemini-enum-values-are-strings
+        # Gemini's Schema.enum is a list of strings, so an int or float enum (Literal[1, 2], an
+        # IntEnum) fails the whole request with a 400. Gemini's own docs write an integer enum as
+        # strings under the declared type, so each non-string value becomes its JSON text (1 -> "1",
+        # True -> "true") and the type stays. None is left alone: Literal[..., None] is accepted as-is.
+        values = kept.get("enum")
+        if not isinstance(values, list) or all(isinstance(value, str) or value is None for value in values):
+            return kept
+        return {**kept, "enum": [value if isinstance(value, str) or value is None else json.dumps(value) for value in values]}
 
     @staticmethod
     def _gemini_fold_bounds(node: Mapping[str, Any], kept: dict[str, Any]) -> dict[str, Any]:

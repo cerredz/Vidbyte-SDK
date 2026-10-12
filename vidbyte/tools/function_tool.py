@@ -52,14 +52,14 @@ class FunctionTool(BaseTool):
 
     def validate_call(self, call: ToolCall) -> str | None:
         try:
-            self.args_model.model_validate(self._arguments(call))
+            _validate_arguments(self.args_model, self._arguments(call))
         except ValidationError as exc:
             return _validation_message(exc)
         return None
 
     async def execute(self, call: ToolCall) -> ToolResult:
         try:
-            model = self.args_model.model_validate(self._arguments(call))
+            model = _validate_arguments(self.args_model, self._arguments(call))
         except ValidationError as exc:
             return ToolResult.failure(self.name, _validation_message(exc), metadata={"error_type": "validation"})
 
@@ -162,6 +162,18 @@ def _null_means_default_fields(args_model: type[BaseModel]) -> frozenset[str]:
         except ValidationError:
             names.add(name)
     return frozenset(names)
+
+
+def _validate_arguments(args_model: type[BaseModel], arguments: dict[str, Any]) -> BaseModel:
+    # @intent tool-arguments-validate-in-json-mode
+    # A model sends its arguments as JSON, so they validate in Pydantic's JSON mode: a strict=True model's Python mode
+    # rejects the JSON spellings of enums, dates and tuples. A call built in code may hold values JSON cannot (a model
+    # instance, a datetime, NaN); those arguments keep Python-mode validation.
+    try:
+        text = json.dumps(arguments, allow_nan=False)
+    except (TypeError, ValueError):
+        return args_model.model_validate(arguments)
+    return args_model.model_validate_json(text)
 
 
 def _docstring_summary(func: Callable[..., Any]) -> str:

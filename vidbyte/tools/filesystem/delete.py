@@ -27,6 +27,11 @@ class DeleteTool(FileSystemTool):
             recursive = self._resolve_bool_argument(call, "recursive", default=False)
             self._require_write()
             target = self._path(path)
+            # @intent delete-keeps-the-configured-root
+            # The scoped path may name the root itself (".", ""), which is fine for
+            # reading but would wipe the whole workspace here, so it is refused.
+            if target == self._config.resolved_root():
+                return ToolResult.error(self.name, "The configured root itself cannot be deleted; delete the entries inside it instead.")
             if not target.exists():
                 raise ToolExecutionError("Path does not exist.", details={"path": str(target)})
             self.backend.delete(target, recursive=recursive)

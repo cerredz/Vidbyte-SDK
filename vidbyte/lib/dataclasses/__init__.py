@@ -81,6 +81,7 @@ from vidbyte.lib.dataclasses.context import (
     ContextResponse,
     ContextState,
     ContextToolCall,
+    EnvironmentTool,
     ProgressLog,
 )
 from vidbyte.lib.dataclasses.continual_trace_descriptor import (
@@ -345,6 +346,7 @@ __all__ = [
     "DocumentContextItem",
     "EnvironmentContextItem",
     "EnvironmentDescriptor",
+    "EnvironmentTool",
     "EvaluationDecision",
     "EventHandler",
     "EvidenceCitationPayload",

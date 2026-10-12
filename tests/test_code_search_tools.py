@@ -57,6 +57,16 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pkg/auth.py:2", result.output)
         self.assertIn("return token.expiration", result.output)
 
+    async def test_grep_numbers_lines_at_newline_only(self) -> None:
+        """A form feed line or a U+2028 inside a string does not shift later line numbers."""
+        (self.root / "pkg" / "f.c").write_text("int a;\n\f\nint b;\nint c;\n", encoding="utf-8")
+        (self.root / "pkg" / "s.js").write_text('const s = "x y";\nlet n = 1;\n', encoding="utf-8")
+        tool = GrepTool(self.root)
+        c_result = await tool.execute(ToolCall("grep", {"pattern": "int c", "context_lines": 0}))
+        self.assertIn("pkg/f.c:4\n4: int c;", c_result.output)
+        js_result = await tool.execute(ToolCall("grep", {"pattern": "let n", "context_lines": 0}))
+        self.assertIn("pkg/s.js:2\n2: let n = 1;", js_result.output)
+
     async def test_grep_rejects_traversal(self) -> None:
         """Grep rejects subdirectories outside the configured root."""
         result = await GrepTool(self.root).execute(

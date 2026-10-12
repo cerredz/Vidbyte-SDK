@@ -47,7 +47,7 @@ MOONSHOT_CHAT_URL = "https://api.moonshot.ai/v1/chat/completions"
 EXPECTED_TEXT_CONFIG_FIELDS = [
     "provider", "model", "api_key", "system", "messages", "temperature", "top_p", "max_output_tokens", "stop_sequences", "response_format",
     "tools", "tool_choice", "tool_config", "safety_settings", "cached_content", "thinking_config", "metadata", "extra_body", "endpoint", "timeout_seconds",
-    "mode",
+    "mode", "prompt_index",
 ]
 
 

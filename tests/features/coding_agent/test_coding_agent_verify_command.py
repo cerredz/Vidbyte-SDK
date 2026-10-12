@@ -3,7 +3,7 @@
 PURPOSE: Prove CodingAgent's verify_command end to end: the run may finish only when the command exits with code 0, a failure goes back to the model as "Not done yet" feedback, and after max_verify_attempts failures the run ends with the model's last answer marked contract_unsatisfied instead of raising.
 ROLE IN CODEBASE: Drives vidbyte.CodingAgent through BaseAgent's real tool loop (AgentRuntime, MiddlewarePipeline.review_finish, VerifyCommandMiddleware) with an offline scripted model and real bash subprocesses; also unit-tests FinishReview and the pipeline's default review.
 ARCHITECTURE NOTE: Only the model is replaced. Each test scripts the model's turns, either an isDone tool call or a plain text answer, so both finish paths are covered, and counts command runs through a log file the command itself appends to. Commands are portable between Linux bash and Git for Windows bash.
-FUNCTION INVENTORY: ReplayRunner replays scripted turns; tool_turn, finish_turn, and text_turn build them; _finish builds either finish turn by path; _verify_log counts command runs; _tool_feedback and _user_feedback read what the model was shown. Tests cover construction (invalid arguments, missing bash, middleware wiring), FinishReview and the pipeline, and run behavior (pass, fail then fix, never fixed, output cap, timeout, working directory, the model's own bash calls, contracts first, a fresh count per run, and a plain BaseAgent).
+FUNCTION INVENTORY: ReplayRunner replays scripted turns; tool_turn, finish_turn, and text_turn build them; ScriptedReviewer replays finish reviews and records the after-iteration and end-of-run hooks; _finish builds either finish turn by path; _verify_log counts command runs; _tool_feedback and _user_feedback read what the model was shown. Tests cover construction (invalid arguments, missing bash, middleware wiring), FinishReview and the pipeline, and run behavior (pass, fail then fix, never fixed, output cap, timeout, working directory, the model's own bash calls, contracts first, a fresh count per run, a plain BaseAgent, and the hooks and messages around a refused or stopped finish).
 COMMON MODIFICATION PATTERNS: Script one more turn per scenario and assert on reply.content, reply.metadata, the log file, and the messages the model was sent, never on private agent state.
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock BashTool, the runtime, or the middleware; they are the seams under test. 2. Do not use a real API key or open a socket.
 KNOWN EDGE CASES: The isDone path shows feedback as the isDone tool result; the text path shows it as a user message after the model's own answer. On Windows a timed-out command keeps running after the call returns (BashTool EC-14), so the timeout test sleeps only briefly there.
@@ -27,7 +27,7 @@ from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentLoopSettings, MinToolCalls
 from vidbyte.agents.base import BaseAgent
 from vidbyte.lib.dataclasses.agents import FinishReview, FinishReviewAction
-from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.middleware.pipeline import MiddlewarePipeline
@@ -70,6 +70,27 @@ class RecordingReviewer(AgentMiddleware):
     async def review_finish(self, ctx: MiddlewareContext) -> FinishReview:
         self.calls += 1
         return self.review
+
+
+class ScriptedReviewer(AgentMiddleware):
+    """Middleware that replays scripted finish reviews, counts after-iteration hooks, and keeps what after_run saw."""
+
+    def __init__(self, *reviews: FinishReview, abort_after_iteration: bool = False) -> None:
+        self.reviews = list(reviews)
+        self.abort_after_iteration = abort_after_iteration
+        self.after_iteration_calls = 0
+        self.after_run_messages: list[Mapping[str, Any]] = []
+
+    async def review_finish(self, ctx: MiddlewareContext) -> FinishReview:
+        return self.reviews.pop(0) if self.reviews else FinishReview(action=FinishReviewAction.ACCEPT)
+
+    async def after_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        self.after_iteration_calls += 1
+        return MiddlewareDecision.abort("audit stop") if self.abort_after_iteration else MiddlewareDecision.continue_()
+
+    async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        self.after_run_messages = list(ctx.provider_messages)
+        return MiddlewareDecision.continue_()
 
 
 def tool_turn(name: str, arguments: Mapping[str, object]) -> SimpleNamespace:
@@ -454,3 +475,86 @@ async def test_plain_base_agent_finishes_as_before(tmp_path, path) -> None:
     assert reply.metadata["stop_reason"] == ("is_done" if path == "is_done" else "final_response")
     assert "verify_command" not in reply.metadata
     assert len(runner.requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", FINISH_PATHS)
+async def test_refused_finish_still_runs_the_after_iteration_hooks(tmp_path, path) -> None:
+    # A finish the review sends back still ends its iteration, so the
+    # after-iteration hooks run once per iteration on both paths, as
+    # they do for a finish the output contracts reject.
+    reviewer = ScriptedReviewer(FinishReview.continue_with("Not done yet: try again."))
+    runner = ReplayRunner(_finish(path, "Done."), _finish(path, "Done now."))
+    agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_type=BaseAgent, middleware=(reviewer,))
+
+    reply = await agent.arun("Do the task.")
+
+    assert reply.content == "Done now."
+    assert reviewer.after_iteration_calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", FINISH_PATHS)
+async def test_after_iteration_abort_stops_a_refused_finish(tmp_path, path) -> None:
+    # An after-iteration hook that stops the run stops it on a refused
+    # finish too, before the model is asked again.
+    reviewer = ScriptedReviewer(FinishReview.continue_with("Not done yet: try again."), abort_after_iteration=True)
+    runner = ReplayRunner(_finish(path, "Done."))
+    agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_type=BaseAgent, middleware=(reviewer,))
+
+    reply = await agent.arun("Do the task.")
+
+    assert reply.metadata["stop_reason"] == "middleware_abort"
+    assert len(runner.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_refused_empty_text_answer_sends_no_empty_assistant_message(tmp_path) -> None:
+    # Some providers reject an assistant message with no content, so a
+    # refused empty answer is left out and only the feedback follows.
+    reviewer = ScriptedReviewer(FinishReview.continue_with("Not done yet: say something."))
+    runner = ReplayRunner(text_turn(""), text_turn("Done."))
+    agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_type=BaseAgent, middleware=(reviewer,))
+
+    reply = await agent.arun("Do the task.")
+
+    assert reply.content == "Done."
+    messages = list(runner.requests[1]["messages"])
+    assert messages[-1] == {"role": "user", "content": "Not done yet: say something."}
+    assert [message for message in messages if message.get("role") == "assistant" and not str(message.get("content") or "").strip()] == []
+
+
+@pytest.mark.asyncio
+async def test_stopped_text_answer_reaches_the_end_of_run_hooks(tmp_path) -> None:
+    # A review that ends the run returns the model's answer, so the
+    # end-of-run hooks see that answer too, as on contract exhaustion.
+    reviewer = ScriptedReviewer(FinishReview.stop("Never verified."))
+    runner = ReplayRunner(text_turn("Done."))
+    agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_type=BaseAgent, middleware=(reviewer,))
+
+    reply = await agent.arun("Do the task.")
+
+    assert reply.content == "Done."
+    assert reply.metadata["stop_reason"] == "contract_unsatisfied"
+    assert reviewer.after_run_messages[-1] == {"role": "assistant", "content": "Done."}
+
+
+@pytest.mark.asyncio
+async def test_stopped_is_done_finish_hides_the_provisional_refusal_from_the_end_of_run_hooks(tmp_path) -> None:
+    # A review that ends an isDone finish ends the run, so the
+    # end-of-run hooks see the conversation as contract exhaustion
+    # shows it: the model's isDone call last, with no provisional
+    # "not accepted yet" answer after it.
+    reviewer = ScriptedReviewer(FinishReview.stop("Never verified."))
+    runner = ReplayRunner(finish_turn("Done."))
+    agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, agent_type=BaseAgent, middleware=(reviewer,))
+
+    reply = await agent.arun("Do the task.")
+
+    assert reply.content == "Done."
+    assert reply.metadata["stop_reason"] == "contract_unsatisfied"
+    assert "not accepted yet" not in json.dumps(reviewer.after_run_messages)
+    assert [message for message in reviewer.after_run_messages if message.get("role") == "tool"] == []
+    last = reviewer.after_run_messages[-1]
+    assert last["role"] == "assistant"
+    assert [call["function"]["name"] for call in last["tool_calls"]] == ["isDone"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+from vidbyte.lib.tools.filesystem.newlines import LineEndings
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -14,7 +15,7 @@ class WriteTextTool(FileSystemTool):
         # Declares the model-facing contract for writing text files.
         spec = ToolSpec(
             name="write_text",
-            description="Write text content to a file at the given path inside the configured root.",
+            description="Write text content to a file at the given path inside the configured root. The result shows a diff of the change, or the line count of a new file.",
             parameters=(
                 ToolParameter(name="path", type="string", description="Relative path to write."),
                 ToolParameter(name="content", type="string", description="Text content to write."),
@@ -45,8 +46,19 @@ class WriteTextTool(FileSystemTool):
             refusal = self._overwrite_refusal(path, target)
             if refusal is not None:
                 return ToolResult.error(self.name, refusal)
-            self.backend.write_text(target, content, encoding=self._config.encoding, create_parents=create_parents)
-            return ToolResult.success(self.name, str(target), metadata={"path": str(target), "encoding": self._config.encoding})
+            # Describe the change while the old file is still on disk. A
+            # new file gets its line count, not a diff that repeats it.
+            exists = self.backend.stat(target).is_file
+            change = self._edit_diff(target, content) if exists else f"created, {len(LineEndings.split_lines(content))} lines"
+            # @intent write-keeps-file-line-endings
+            # Replace an existing file in its own line endings so the rewrite
+            # does not flip every line; a new file keeps the platform default.
+            # Bytes the encoding cannot read are replaced only for this check,
+            # so a file that is not valid text can still be overwritten.
+            newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding, errors="replace")) if exists else None
+            self.backend.write_text(target, content, encoding=self._config.encoding, create_parents=create_parents, newline=newline)
+            # Show the model the path, then what its write changed.
+            return ToolResult.success(self.name, f"{target}\n{change}", metadata={"path": str(target), "encoding": self._config.encoding})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))
 

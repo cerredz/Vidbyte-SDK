@@ -9,6 +9,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
+from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
@@ -29,7 +30,15 @@ class OpenAIProvider:
         config = self._text_config_for(config)
         response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/responses", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_text_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_response_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
+        usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
+        try:
+            text = self._extract_response_text(parsed)
+        except ProviderResponseError as exc:
+            # A billed 200 with no usable text keeps its usage on the error so the caller can still bill it.
+            if usage is not None:
+                exc.details["usage"] = dict(usage)
+            raise
+        return TextModelResponse(provider=self.provider, model=config.model, text=text, raw=parsed, usage=usage)
 
     async def run_image(self, *, prompt: str, transport: HttpTransport, config: ImageModelConfig | None = None) -> ImageModelResponse:
         # Execute OpenAI image generation endpoint with generation controls.
@@ -177,8 +186,11 @@ class OpenAIProvider:
     def _create_input(self, config: TextModelConfig, prompt: str) -> str | list[Mapping[str, Any]]:
         # Preserve multi-turn Responses inputs when callers provide message history.
         if config.messages:
-            items = [item for message in config.messages for item in self._responses_items(message)]
-            return items + [{"role": "user", "content": prompt}]
+            # Put the prompt in front of the tool exchange it provoked, placed on the chat-shaped turns so an
+            # assistant note and the function_call items it splits into stay together behind the prompt.
+            history = [dict(message) for message in config.messages]
+            history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
+            return [item for message in history for item in self._responses_items(message)]
         return prompt
 
     @staticmethod

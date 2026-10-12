@@ -26,7 +26,15 @@ class GeminiProvider:
         model = quote(config.model, safe="")
         response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/models/{model}:generateContent", headers=self._create_headers(config), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_text(parsed), raw=parsed, usage=parsed.get("usageMetadata") if isinstance(parsed.get("usageMetadata"), dict) else None)
+        usage = parsed.get("usageMetadata") if isinstance(parsed.get("usageMetadata"), dict) else None
+        try:
+            text = self._extract_text(parsed)
+        except ProviderResponseError as exc:
+            # A billed 200 with no usable text keeps its usage on the error so the caller can still bill it.
+            if usage is not None:
+                exc.details["usage"] = dict(usage)
+            raise
+        return TextModelResponse(provider=self.provider, model=config.model, text=text, raw=parsed, usage=usage)
 
     def _config(self, config: TextModelConfig | None) -> TextModelConfig:
         resolved = config or self._text_config
@@ -57,27 +65,34 @@ class GeminiProvider:
     def _create_contents(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
         # Gemini supports alternating user/model turns through the contents array.
         history = [self._gemini_turn(message) for message in config.messages]
-        history.insert(self._prompt_index(history), {"role": "user", "parts": [{"text": prompt}]})
+        history.insert(self._prompt_index(history, config.prompt_index), {"role": "user", "parts": [{"text": prompt}]})
         # A model note followed by a model call is one model step, so they travel as one model turn.
         history = self._merge_model_turns(history)
         # Answers to one parallel function-call turn must travel together in a single user turn.
         return self._merge_function_responses(history)
 
-    def _prompt_index(self, history: list[Mapping[str, Any]]) -> int:
+    def _prompt_index(self, history: list[Mapping[str, Any]], boundary: int | None = None) -> int:
+        # @intent prompt-sits-at-the-run-boundary
+        # The runtime's run boundary wins as it does in PromptPlacement, unless the history opens with a model turn.
+        if boundary is not None and boundary <= len(history) and not (history and history[0].get("role") == "model"):
+            return boundary
         # The runtime appends this run's tool exchange to whatever history it was handed, but
         # the prompt that provoked that exchange arrives separately and would otherwise land
         # after it, leaving the functionCall turn with nothing in front of it. Gemini rejects
         # that outright: "function call turn comes immediately after a user turn or after a
         # function response turn". Slot the prompt in as that missing opening turn. A model turn
         # at the very start, text or call, has nothing in front of it either and gets the same
-        # treatment. A history whose model turns are already introduced is left alone and the
-        # prompt simply appends.
+        # treatment. A call right after a user turn (a function response is one too) belongs to
+        # an exchange that is already introduced, such as a replayed one or a later round, so
+        # scanning goes on past it; with no unintroduced model turn the prompt simply appends.
         # @intent gemini-prompt-opens-a-model-led-history
         # A rejected plain-text draft now opens this run's exchange, and Gemini refuses contents that start with a model turn.
         for index, turn in enumerate(history):
             if not (self._has_part(turn, "functionCall") or (index == 0 and turn.get("role") == "model")):
                 continue
-            return len(history) if index and history[index - 1].get("role") == "user" else index
+            if index and history[index - 1].get("role") == "user":
+                continue
+            return index
         return len(history)
 
     def _merge_model_turns(self, history: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:

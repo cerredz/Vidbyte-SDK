@@ -31,7 +31,8 @@ class AppendTool(FileSystemTool):
             target = self._path(path)
             # @intent append-keeps-file-line-endings
             # Append in the existing file's own line endings so it never ends up mixed; a new file keeps the platform default.
-            newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding)) if target.is_file() else None
+            # Bytes the encoding cannot read are replaced only for this check, so detection never makes the append fail.
+            newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding, errors="replace")) if target.is_file() else None
             self.backend.append_text(target, content, encoding=self._config.encoding, create_parents=create_parents, newline=newline)
             return ToolResult.success(self.name, str(target), metadata={"path": str(target), "encoding": self._config.encoding})
         except Exception as exc:

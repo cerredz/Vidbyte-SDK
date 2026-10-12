@@ -115,7 +115,7 @@ def test_agents_md_is_shown_after_the_system_prompt_and_before_the_user_message(
 
 def test_without_agents_md_the_request_equals_a_plain_base_agents(coding_agent_cls, script_model, tmp_path) -> None:
     # Silent failure: an agent with nothing to load must send exactly what it sent before this feature.
-    coding = _agent(coding_agent_cls, tmp_path, progress_notes=False)
+    coding = _agent(coding_agent_cls, tmp_path, load_environment=False, progress_notes=False)
     plain = BaseAgent(name="coder", system_prompt=SYSTEM_PROMPT, tools=coding.tools.all(), permission_policy=PermissionPolicy.allow_all(), **OFFLINE_MODEL)
 
     coding_request, coding_prompt = _first_request(coding, script_model)
@@ -131,7 +131,7 @@ def test_load_agents_false_shows_no_agents_md(coding_agent_cls, script_model, tm
     # FR-3: the switch turns the section off even when the file is there.
     _write(tmp_path / "AGENTS.md", RULES)
 
-    agent = _agent(coding_agent_cls, tmp_path, load_agents=False, progress_notes=False)
+    agent = _agent(coding_agent_cls, tmp_path, load_agents=False, load_environment=False, progress_notes=False)
     system = _system(agent, script_model)
 
     assert agent.context_manager is None
@@ -143,7 +143,7 @@ def test_load_agents_false_never_touches_the_file(coding_agent_cls, tmp_path) ->
     # FR-3: an AGENTS.md that would fail construction is never looked at when loading is off.
     (tmp_path / "AGENTS.md").mkdir()
 
-    agent = _agent(coding_agent_cls, tmp_path, load_agents=False, progress_notes=False)
+    agent = _agent(coding_agent_cls, tmp_path, load_agents=False, load_environment=False, progress_notes=False)
 
     assert agent.context_manager is None
 
@@ -178,7 +178,7 @@ def test_parent_folder_agents_md_is_not_searched(coding_agent_cls, tmp_path) -> 
     project = tmp_path / "project"
     project.mkdir()
 
-    agent = _agent(coding_agent_cls, project, progress_notes=False)
+    agent = _agent(coding_agent_cls, project, load_environment=False, progress_notes=False)
 
     assert agent.context_manager is None
 
@@ -217,7 +217,7 @@ def test_blank_file_adds_no_section(coding_agent_cls, script_model, tmp_path, ra
     # FR-9 edge: a file with nothing to say adds no section and no primitives zone.
     (tmp_path / "AGENTS.md").write_bytes(raw)
 
-    agent = _agent(coding_agent_cls, tmp_path, progress_notes=False)
+    agent = _agent(coding_agent_cls, tmp_path, load_environment=False, progress_notes=False)
 
     assert agent.context_manager is None
     assert ZONE_HEADER not in _system(agent, script_model)

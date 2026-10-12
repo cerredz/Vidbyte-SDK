@@ -3,7 +3,7 @@
 PURPOSE: Prove the caller-visible promise of CodingAgent end to end: one constructor gives a model seven tools that actually run under one root folder, a caller policy still wins, and a keyed WebFetch lets the model read what it fetched.
 ROLE IN CODEBASE: Drives vidbyte.CodingAgent through BaseAgent's real tool loop (AgentRuntime permission checks, ToolsFormatter, usage tracking) with an offline scripted model from conftest.py and real bash subprocesses.
 ARCHITECTURE NOTE: Only the model runner and the provider HTTP send are replaced; the file tools, the bash process, the permission policy, and the usage ledger are real. Bash commands are portable between Linux bash and Git for Windows bash.
-FUNCTION INVENTORY: test_spec_snippet_* runs spec §4 as written (AC-1); test_default_policy_* (AC-2); test_caller_read_only_policy_* (AC-3); test_keyed_fetch_* (AC-7); test_missing_bash_* (AC-17).
+FUNCTION INVENTORY: test_spec_snippet_* runs spec §4 as written (AC-1); test_default_policy_* (AC-2); test_model_sees_what_each_edit_changed_* (edit diffs reach the model); test_caller_read_only_policy_* (AC-3); test_keyed_fetch_* (AC-7); test_missing_bash_* (AC-17).
 COMMON MODIFICATION PATTERNS: Script one more tool call per scenario and assert on tool_call_states, files under root_dir, and the model-visible tool messages, never on private agent state.
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock BaseAgent, AgentRuntime, or the permission policy; they are the seams under test. 2. Do not use a real API key or open a socket; conftest.py fakes the HTTP send.
 KNOWN EDGE CASES: tool_call_states includes the final isDone call; a denied call never reaches the tool, so a denied bash leaves no file behind; Windows needs Git for Windows for every bash call here except the missing-bash case.
@@ -97,6 +97,28 @@ async def test_default_policy_lets_the_model_write_edit_and_run_bash_under_root(
     assert bash_name == "bash"
     assert bash_seen.splitlines()[0] == "alpha gamma"
     assert agent.permission_policy.allowed == frozenset(ToolPermission)
+
+
+@pytest.mark.asyncio
+async def test_model_sees_what_each_edit_changed_in_its_tool_messages(coding_agent_cls, script_model, tmp_path) -> None:
+    # The edit tools' change report must reach the model's next
+    # request, not stop at the tool result.
+    runner = script_model(
+        [
+            ("write_text", {"path": "notes.txt", "content": "title\nalpha beta\n"}),
+            ("replace_text", {"path": "notes.txt", "search": "beta", "replacement": "gamma"}),
+        ],
+        final_answer="edited",
+    )
+    agent = build_test_agent(name="coder", system_prompt="Edit files.", root_dir=tmp_path, runner=runner, agent_type=coding_agent_cls)
+
+    reply = await agent.arun("Change beta to gamma in notes.txt.")
+
+    assert reply.metadata["tool_call_states"] == ("succeeded", "succeeded", "succeeded")
+    (write_name, written), (replace_name, replaced) = runner.tool_messages()
+    assert (write_name, replace_name) == ("write_text", "replace_text")
+    assert written.splitlines()[1] == "created, 2 lines"
+    assert replaced.splitlines()[3:] == ["@@ -1,2 +1,2 @@", " title", "-alpha beta", "+alpha gamma"]
 
 
 @pytest.mark.asyncio

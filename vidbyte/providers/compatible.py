@@ -10,6 +10,7 @@ from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 # A reply that is one markdown fence from start to end; its body is unwrapped only when it is JSON.
@@ -31,7 +32,15 @@ class OpenAICompatibleProvider:
         config = self._config(config)
         response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/chat/completions", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_chat_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
+        usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
+        try:
+            text = self._extract_chat_text(parsed)
+        except ProviderResponseError as exc:
+            # A billed 200 with no usable text keeps its usage on the error so the caller can still bill it.
+            if usage is not None:
+                exc.details["usage"] = dict(usage)
+            raise
+        return TextModelResponse(provider=self.provider, model=config.model, text=text, raw=parsed, usage=usage)
 
     def _config(self, config: TextModelConfig | None) -> TextModelConfig:
         resolved = config or self._text_config
@@ -60,8 +69,10 @@ class OpenAICompatibleProvider:
         instructions = system or config.system
         if instructions:
             messages.append({"role": "system", "content": instructions})
-        messages.extend(dict(message) for message in config.messages)
-        messages.append({"role": "user", "content": prompt})
+        # Put the prompt in front of the tool exchange it provoked, so the newest turn is the work, not the task again.
+        history = [dict(message) for message in config.messages]
+        history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
+        messages.extend(history)
         return messages
 
     def _attach_sampling(self, payload: dict[str, Any], config: TextModelConfig) -> None:

@@ -9,6 +9,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.lib.util import PromptPlacement
 
 
 class AnthropicProvider:
@@ -24,7 +25,15 @@ class AnthropicProvider:
         config = self._config(config)
         response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/messages", headers=self._create_headers(config), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
+        usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
+        try:
+            text = self._extract_text(parsed)
+        except ProviderResponseError as exc:
+            # A billed 200 with no usable text keeps its usage on the error so the caller can still bill it.
+            if usage is not None:
+                exc.details["usage"] = dict(usage)
+            raise
+        return TextModelResponse(provider=self.provider, model=config.model, text=text, raw=parsed, usage=usage)
 
     def _config(self, config: TextModelConfig | None) -> TextModelConfig:
         resolved = config or self._text_config
@@ -58,8 +67,16 @@ class AnthropicProvider:
         return {"x-api-key": config.resolved_api_key(), "anthropic-version": "2023-06-01", "content-type": "application/json"}
 
     def _create_messages(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
-        # Preserve multi-turn history and append the current user prompt.
-        return [dict(message) for message in config.messages] + [{"role": "user", "content": prompt}]
+        # Preserve multi-turn history and put the prompt in front of the tool exchange it provoked.
+        history = [dict(message) for message in config.messages]
+        history.insert(PromptPlacement.index(history, is_call_turn=self._is_tool_use_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
+        return history
+
+    @staticmethod
+    def _is_tool_use_turn(turn: Mapping[str, Any]) -> bool:
+        # An assistant turn whose content carries a tool_use block is a tool call.
+        content = turn.get("content")
+        return turn.get("role") == "assistant" and isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_use" for block in content)
 
     def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
         # Anthropic uses a top-level system parameter rather than a system role.

@@ -128,7 +128,7 @@ from vidbyte.lib.dataclasses.speed import (
     RecordToolCallInput,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality
+from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, UsageKind
 from vidbyte.lib.errors import (
     AllModelsFailedError,
     PermissionDeniedError,
@@ -315,6 +315,10 @@ class AgentRuntime:
         # @intent after-hooks-see-run-conversation
         # Keep the live conversation on the loop state so the end-of-run hooks can show it to observers like the continual trace.
         state.messages = messages
+        # @intent prompt-sits-at-the-run-boundary
+        # Remember the caller's own messages, because this run's exchange starts right after them and the provider puts
+        # the task there. Only the runtime knows this: a rejected draft and its feedback look just like a caller's greeting and question.
+        caller_messages = tuple(messages)
         rejections = 0
         compaction_count = 0
         last_assistant_output: str | None = None
@@ -393,6 +397,7 @@ class AgentRuntime:
                 # @intent internal-tools-never-spend-the-tool-budget
                 # The model-visible max_tool_calls usage reports the same non-internal count the budget enforces.
                 tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)),
+                caller_messages=caller_messages,
             )
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
@@ -540,9 +545,18 @@ class AgentRuntime:
                 # costs a review.
                 review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state))
                 if review.action is FinishReviewAction.STOP:
+                    # Same as contract exhaustion above: the end-of-run hooks see the reply the caller gets.
+                    state.messages = [*messages, self._assistant_message(last_assistant_output)] if last_assistant_output and last_assistant_output.strip() else messages
                     return await self._finish_result(self._unverified_finish_result(last_assistant_output or "", state), state)
                 if review.action is FinishReviewAction.CONTINUE:
-                    messages.extend((self._assistant_message(last_assistant_output or ""), {"role": "user", "content": review.feedback}))
+                    # Same as a contract rejection above: skip an empty draft, then end the iteration through the after-iteration hooks.
+                    if last_assistant_output and last_assistant_output.strip():
+                        messages.append(self._assistant_message(last_assistant_output))
+                    messages.append({"role": "user", "content": review.feedback})
+                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
+                    if decision.action is not MiddlewareAction.CONTINUE:
+                        abort_result = self._middleware_abort_result(decision, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+                        return await self._finish_result(abort_result, state)
                     continue
                 final = self._final_result(
                     output=last_assistant_output,
@@ -621,7 +635,11 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
-                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    # @intent accepted-finish-hides-provisional-refusal
+                    # The end-of-run hooks of an accepted finish must not read the provisional refusal below as the outcome,
+                    # so they get the conversation as it stood before it.
+                    finished_messages = list(messages)
+                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages.
                     self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, "finish attempt not accepted yet; continue with the next message", metadata={"error": "finish_not_accepted"}), state.provider, MiddlewareDecision.continue_())
                     self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
                     # The same middleware review as a plain final
@@ -632,6 +650,8 @@ class AgentRuntime:
                     # output is usually the part that matters.
                     review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state, tool_call=call, tool_result=result))
                     if review.action is FinishReviewAction.STOP:
+                        # The run ends here too, so its end-of-run hooks skip the refusal, as the accepted finish's below do.
+                        state.messages = finished_messages
                         return await self._finish_result(self._unverified_finish_result(result.output or "", state), state)
                     if review.action is FinishReviewAction.CONTINUE:
                         messages.append({"role": "user", "content": review.feedback})
@@ -640,6 +660,8 @@ class AgentRuntime:
                     if await self._continue_finish_attempt(final, state, messages):
                         finish_attempt_continued = True
                         break
+                    # The run ends here with the finish accepted, so the end-of-run hooks read the conversation without the refusal.
+                    state.messages = finished_messages
                     return await self._finish_result(final, state)
 
             if finish_attempt_continued or contract_rejected:
@@ -738,6 +760,13 @@ class AgentRuntime:
                         error_type=type(exc).__name__,
                     )
                 )
+                # @intent billed-failed-call-stays-on-the-bill
+                # A provider can bill a 200 whose reply is unusable; the adapter puts that usage on the error, so it is
+                # recorded here before retry, fallback, or re-raise, the same way the decision runner records TypeSafe's.
+                details = getattr(exc, "details", None)
+                billed = details.get("usage") if isinstance(details, Mapping) else None
+                if isinstance(billed, Mapping):
+                    self.usage_tracker.record_billed_failure(str(getattr(handle.provider, "value", handle.provider)), self._speed_model_name(handle), billed, kind=UsageKind.GENERATIVE)
                 decision = await self.middleware.on_model_error(
                     self._middleware_context(MiddlewareHook.ON_MODEL_ERROR, state, error=exc)
                 )
@@ -1008,6 +1037,12 @@ class AgentRuntime:
             transformed["system"] = transform.system
         if transform.provider_messages is not None:
             transformed["messages"] = tuple(dict(message) for message in transform.provider_messages)
+            # @intent prompt-sits-at-the-run-boundary
+            # A rewritten list keeps the run boundary only while everything in front of it is unchanged; otherwise the
+            # provider places the prompt by the shape of the turns.
+            boundary = transformed.get("prompt_index")
+            if boundary is not None and transformed["messages"][:boundary] != tuple(call_options.get("messages", ()))[:boundary]:
+                transformed.pop("prompt_index")
         return transformed
 
     def _provider_messages_from_options(self, call_options: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
@@ -1462,8 +1497,8 @@ class AgentRuntime:
             return str(model_name)
         return None
 
-    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, iteration_count: int = 0, tokens_used: int | None = None, tool_call_count: int = 0) -> dict[str, Any]:
-        """Assemble per-iteration call options with system prompt, loop settings, primitives zone, tools, messages, and response format."""
+    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, iteration_count: int = 0, tokens_used: int | None = None, tool_call_count: int = 0, caller_messages: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
+        """Assemble per-iteration call options with system prompt, loop settings, primitives zone, tools, messages, prompt index, and response format."""
         call_options = dict(run_options)
         loop_settings_block = self._render_loop_settings_block(
             iteration_count=iteration_count,
@@ -1477,6 +1512,11 @@ class AgentRuntime:
         conversation_messages = self._build_conversation_messages(messages)
         if conversation_messages:
             call_options.setdefault("messages", conversation_messages)
+        # @intent prompt-sits-at-the-run-boundary
+        # Tell the provider where this run's own exchange begins, so the task goes in front of it and never after it.
+        boundary = self._run_boundary(conversation_messages, messages, caller_messages)
+        if boundary is not None:
+            call_options.setdefault("prompt_index", boundary)
         if self.output_schema is not None:
             call_options.setdefault("response_format", self._wire_schema())
         return call_options
@@ -1494,6 +1534,18 @@ class AgentRuntime:
             if isinstance(contract, SchemaConformance) and contract.schema is self.output_schema:
                 return contract.evaluate({contract.key: output})
         return self._schema_formatter.validate(output, self.output_schema)
+
+    @staticmethod
+    def _run_boundary(conversation: Sequence[Mapping[str, Any]], messages: Sequence[Mapping[str, Any]], caller_messages: Sequence[Mapping[str, Any]]) -> int | None:
+        """Return where this run's first own message sits in the sent conversation, or None when it cannot be told."""
+        # The caller's messages must still open the run's list as the same objects; a context-window algorithm or a
+        # fallback reset that rewrote them leaves the provider to its shape rule. So does a run with no turn of its own
+        # yet, which keeps the task after any end-of-conversation notes, as before.
+        caller_count = len(caller_messages)
+        if len(messages) <= caller_count or any(messages[index] is not caller for index, caller in enumerate(caller_messages)):
+            return None
+        first_own = messages[caller_count]
+        return next((index for index, message in enumerate(conversation) if message is first_own), None)
 
     def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """Assemble placed context-window conversation messages around runtime messages."""
@@ -1743,7 +1795,11 @@ class AgentRuntime:
         reason, meta = denial
         if settings is not None and settings.aborts_on_deny:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        denied_started_at = self.speed_tracker.now()
         context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta, iteration_count=iteration_count)
+        # @intent every-refused-call-reaches-speed-stats
+        # Speed stats count a refused call as one failed call whichever guardrail refused it, matching a middleware denial and the run's own counts.
+        self.speed_tracker.record_tool_call(RecordToolCallInput(tool_name=call.tool_name, started_at=denied_started_at, succeeded=False, error_type="ToolSettingsDenied", iteration_index=iteration_count))
         call_contexts.append(context_record)
         self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
         return context_record, result

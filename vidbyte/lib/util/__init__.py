@@ -7,8 +7,9 @@ PURPOSE:
 
 ROLE IN CODEBASE:
     Re-exports MathHelper from vidbyte/lib/util/math.py,
-    CredentialKeyPolicy from vidbyte/lib/util/credential_keys.py, and
-    SubstringCounter from vidbyte/lib/util/text.py. Imported by
+    CredentialKeyPolicy from vidbyte/lib/util/credential_keys.py,
+    SubstringCounter from vidbyte/lib/util/text.py, and PromptPlacement from
+    vidbyte/lib/util/prompt_placement.py. Imported by
     vidbyte/agents/speed/tracker.py and any future SDK code that needs the
     same general-purpose statistics.
 
@@ -45,6 +46,7 @@ from __future__ import annotations
 
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.lib.util.math import MathHelper
+from vidbyte.lib.util.prompt_placement import PromptPlacement
 from vidbyte.lib.util.text import SubstringCounter
 
-__all__ = ["CredentialKeyPolicy", "MathHelper", "SubstringCounter"]
+__all__ = ["CredentialKeyPolicy", "MathHelper", "PromptPlacement", "SubstringCounter"]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import difflib
 import shutil
 import zipfile
 from pathlib import Path
@@ -8,6 +7,7 @@ from pathlib import Path
 from vidbyte.lib.dataclasses import FileStat
 from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.tools.filesystem.backends.base import BaseFileSystemBackend
+from vidbyte.lib.tools.filesystem.newlines import LineEndings
 
 
 class LocalFileSystemBackend(BaseFileSystemBackend):
@@ -67,9 +67,8 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         return tuple(str(path.relative_to(root)) for path in sorted(root.rglob(pattern), key=lambda item: str(item).lower()))
 
     def diff_text(self, left: Path, right_content: str, *, encoding: str, label: str) -> str:
-        current = left.read_text(encoding=encoding).splitlines(keepends=True) if left.exists() else []
-        proposed = right_content.splitlines(keepends=True)
-        return "".join(difflib.unified_diff(current, proposed, fromfile=str(left), tofile=label))
+        current = left.read_text(encoding=encoding) if left.exists() else ""
+        return LineEndings.unified_diff(current, right_content, fromfile=str(left), tofile=label)
 
     def zip_path(self, source: Path, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)

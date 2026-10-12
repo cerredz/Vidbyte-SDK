@@ -11,6 +11,11 @@ Key Functions:
     - cached_input_tokens: Maps cache_read_input_tokens onto the shared accessor.
     - total_prompt_tokens: Sums all three input-side buckets (Anthropic's
       input_tokens alone excludes both cache buckets).
+    - _over_threshold: Compares that full prompt, not input_tokens, with a
+      model's prompt-length tier (Claude Haiku 5.5's 100K tier).
+    - cost_usd: Bills cache writes at the 5-minute cache-write rate, except the
+      cache_creation.ephemeral_1h_input_tokens part, which bills at 2x the
+      active input rate.
 Relations:
     Registered in vidbyte/agents/pricing/base.py; rates from PROVIDER_PRICING.
 Similar Files:
@@ -24,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vidbyte.agents.pricing.base import ProviderUsage
+from vidbyte.lib.constants.pricing import ANTHROPIC_CACHE_WRITE_1H_INPUT_MULTIPLIER
 from vidbyte.lib.registries.pricing import ModelPricing
 
 
@@ -73,6 +79,20 @@ class AnthropicUsage(ProviderUsage):
             return None
         return sum(part or 0 for part in parts)
 
+    def _over_threshold(self, pricing: ModelPricing) -> bool:
+        # True when the whole prompt crosses the prompt-length tier.
+        # @intent anthropic-tier-counts-cached-prompt
+        # Anthropic prices Haiku 5.5 by a prompt length that counts "all
+        # of its input tokens, including cache reads and cache writes",
+        # while input_tokens here excludes both, so a cache-heavy prompt
+        # would otherwise bill at the cheaper tier.
+        prompt_tokens = self.total_prompt_tokens
+        if pricing.threshold_tokens is None or prompt_tokens is None:
+            return False
+        if pricing.threshold_inclusive:
+            return prompt_tokens >= pricing.threshold_tokens
+        return prompt_tokens > pricing.threshold_tokens
+
     def cost_usd(self, pricing: ModelPricing | None) -> float | None:
         # Prices input, cache-write, cache-read, and output as separate buckets.
         if pricing is None or self.total_tokens is None:
@@ -89,9 +109,16 @@ class AnthropicUsage(ProviderUsage):
         # A 0.0 base input rate (a free model) leaves the tier ratio undefined, so its cache rate applies unscaled.
         elif pricing.input_per_million != 0.0:
             cache_write_rate = cache_write_rate * (input_rate / pricing.input_per_million)
+        # @intent anthropic-1h-cache-write-is-2x-input
+        # cache_write_rate is the 5-minute write; the cache_creation breakdown names the
+        # 1-hour part, which Anthropic bills at 2x the active input rate. With no
+        # breakdown every write stays at the 5-minute rate, as before.
+        cache_writes = self.cache_creation_input_tokens or 0
+        one_hour_writes = min(self.nested_int(self.raw, "cache_creation", "ephemeral_1h_input_tokens") or 0, cache_writes)
         return (
             (self.input_tokens or 0) * input_rate
-            + (self.cache_creation_input_tokens or 0) * cache_write_rate
+            + (cache_writes - one_hour_writes) * cache_write_rate
+            + one_hour_writes * input_rate * ANTHROPIC_CACHE_WRITE_1H_INPUT_MULTIPLIER
             + (self.cache_read_input_tokens or 0) * cache_read_rate
             + (self.output_tokens or 0) * output_rate
         ) / 1_000_000

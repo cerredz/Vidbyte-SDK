@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -13,7 +14,7 @@ from unittest import mock
 
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte import Agent
-from vidbyte.agents import AgentForkSettings
+from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
@@ -29,6 +30,7 @@ from vidbyte.sessions.contracts import (
     TraceCapture,
 )
 from vidbyte.lib.errors import SessionUsageValidationError, VidbyteSdkError
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.sessions.errors import (
     CheckpointNotFoundError,
     SessionError,
@@ -50,7 +52,7 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeOutputTool, ResumeReplaceTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -729,6 +731,50 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         session = Session(FakeAgent(), store=store, tags=("billing",))
         self.assertEqual([meta.session_id for meta in store.list_sessions(tag="billing")], [session.id])
 
+    async def test_explicit_existing_session_id_is_refused_and_left_intact(self) -> None:  # [Silent Failure]
+        # @intent new-session-never-overwrites-a-session
+        # Re-using a stored id must fail before any write, so the session keeps its head, status, created_at, and tags and still resumes.
+        with tempfile.TemporaryDirectory() as root:
+            for name, store in (("memory", InMemorySessionStore()), ("file", FileSessionStore(root))):
+                with self.subTest(store=name):
+                    session = Session(FakeAgent(), store=store, session_id="customer-42", tags=("acme",))
+                    await session.arun("one")
+                    session.complete()
+                    before = store.get_meta("customer-42")
+
+                    with self.assertRaisesRegex(SessionError, r"customer-42.*Session\.resume") as raised:
+                        Session(FakeAgent(), store=store, session_id="customer-42")
+
+                    self.assertEqual(raised.exception.details, {"session_id": "customer-42"})
+                    self.assertEqual(store.get_meta("customer-42"), before)
+                    self.assertEqual(before.head_id, session.head)
+                    self.assertEqual(before.status, SessionStatus.COMPLETED)
+                    self.assertEqual(before.tags, ("acme",))
+                    self.assertEqual(Session.resume(store, "customer-42").head, session.head)
+                    fresh = Session(FakeAgent(), store=store, session_id="customer-43")
+                    self.assertEqual(store.get_meta(fresh.id).head_id, None)
+                    self.assertEqual(store.get_meta(fresh.id).status, SessionStatus.ACTIVE)
+
+    async def test_labeled_checkpoint_keeps_completed_status_and_a_run_reopens(self) -> None:  # [Silent Failure]
+        # @intent bookmark-keeps-session-status
+        # A bookmark adds no turn, so a COMPLETED session stays COMPLETED; a real turn still continues the thread as ACTIVE.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+        session.checkpoint(label="draft")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+
+        session.complete()
+        archived = session.checkpoint(label="archived")
+
+        meta = store.get_meta(session.id)
+        self.assertIs(meta.status, SessionStatus.COMPLETED)
+        self.assertEqual(meta.head_id, archived)
+        self.assertEqual(store.get(archived).label, "archived")
+        await session.arun("two")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+
     def test_usage_empty_session_returns_zero_rollup(self) -> None:  # [Edge Case]
         # Verify usage() is safe before any checkpoint exists.
         session = Session(FakeAgent(), store=InMemorySessionStore())
@@ -936,6 +982,21 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         await session.arun("fetch next")
         self.assertNotIn("SOURCE-OWN-CONTENT", " ".join(runner.prompts[next_start:]))
 
+    async def test_edit_drops_tool_outputs_of_removed_turns(self) -> None:  # [Silent Failure]
+        # @intent edit-drops-tool-call-memory
+        # A turn removed by edit() must not leak its tool outputs into later requests.
+        runner = FetchThenDoneRunner(["A", "B", "C"])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[fetch])
+        session = Session(agent, store=InMemorySessionStore())
+        await session.arun("fetch A")
+        await session.arun("fetch B")
+        self.assertIn("SOURCE-B-CONTENT", str(agent._tool_call_contexts))
+        session.edit(lambda h: h[:-1])
+        self.assertEqual(agent._tool_call_contexts, [])
+        turn_three_start = len(runner.prompts)
+        await session.arun("fetch C")
+        self.assertNotIn("SOURCE-B-CONTENT", " ".join(runner.prompts[turn_three_start:]))
+
     def test_rewind_tolerates_agent_without_tool_memory(self) -> None:  # [Hidden Assumption]
         # Compatible agents without tool-call memory still rewind cleanly.
         agent = FakeAgent()
@@ -952,6 +1013,40 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         await session.arun("two")
         branch = session.fork(at=first)
         self.assertEqual(store.get_meta(branch.id).parent_session_id, session.id)
+
+    def test_live_fork_keeps_agent_key_and_never_stores_it(self) -> None:  # [Silent Failure]
+        # @intent live-fork-keeps-agent-key
+        # A tenant's branch must authenticate with the tenant's explicit key, not the server's env key, and the key stays out of checkpoints.
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
+            store = FileSessionStore(root)
+            agent = BaseAgent(name="tenant", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            session = Session(agent, store=store)
+            session.checkpoint()
+
+            branches = [session.fork(), session.batch_fork(1)[0].session]
+
+            for branch in branches:
+                config = branch.agent.runner_config
+                self.assertEqual(config.api_key, "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+            stored = "".join(path.read_text(encoding="utf-8") for path in Path(root).rglob("*") if path.is_file())
+            self.assertNotIn("sk-tenant-acme", stored)
+
+    def test_cold_resume_and_continue_take_the_agent_key(self) -> None:  # [Silent Failure]
+        # @intent resume-takes-the-agent-key
+        # A tenant's cold resume must authenticate with the re-supplied key, not the server's env key, as fork_from() already does.
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
+            store = FileSessionStore(root)
+            agent = BaseAgent(name="desk", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            session = Session(agent, store=store)
+            session.checkpoint()
+
+            resumed = [Session.resume(store, session.id, api_key="sk-tenant-acme"), Session.continue_(store, session.id, api_key="sk-tenant-acme")]
+
+            for live in resumed:
+                config = live.agent.runner_config
+                self.assertEqual(config.api_key, "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
 
     def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
@@ -1295,6 +1390,31 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(store.get(result.output).label, "pre-migrate")
                 following = bound.checkpoint()
                 self.assertEqual(store.get(following).parent_id, result.output)
+
+    async def test_checkpoint_on_completed_session_keeps_it_completed(self) -> None:  # [Silent Failure]
+        # @intent bookmark-keeps-session-status
+        # A reviewer bookmarking a finished research session must not reopen it, or resume_output can no longer read its answer.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FileSessionStore(tmp)
+            research = Session(FakeAgent(name="researcher"), store=store, tags=("research-q3",))
+            await research.arun("q3 findings")
+            research.complete()
+            reviewer = Session(FakeAgent(name="reviewer"), store=store)
+            await reviewer.arun("review")
+            scope = SessionScope.sessions([research.id])
+            checkpoint_tool, output_tool = CheckpointTool(store, scope=scope), ResumeOutputTool(store, scope=scope)
+            checkpoint_tool.bind_session(reviewer)
+            output_tool.bind_session(reviewer)
+
+            marked = await checkpoint_tool.execute(ToolCall(tool_name="checkpoint", arguments={"session_id": research.id, "label": "reviewed"}))
+            resumed = await output_tool.execute(ToolCall(tool_name="resume_output", arguments={"session_id": research.id}))
+
+            self.assertEqual(marked.status.value, "success")
+            self.assertEqual(store.get(marked.output).label, "reviewed")
+            self.assertIs(store.get_meta(research.id).status, SessionStatus.COMPLETED)
+            self.assertIn(research.id, [meta.session_id for meta in store.list_sessions(status=SessionStatus.COMPLETED)])
+            self.assertEqual(resumed.status.value, "success", resumed.output)
+            self.assertTrue(any("q3 findings" in str(message.content) for message in reviewer.agent.history))
 
     async def test_resume_tools_null_checkpoint_id_resumes_from_head(self) -> None:  # [Silent Failure]
         # A JSON null checkpoint_id means the omitted default: resume from the target session's head.
