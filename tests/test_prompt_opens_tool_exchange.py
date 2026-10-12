@@ -1,12 +1,13 @@
 """FILE: tests/test_prompt_opens_tool_exchange.py
 
 PURPOSE: Regression tests that the run's prompt is sent in front of the tool exchange it provoked.
-ROLE IN CODEBASE: Covers PromptPlacement and the OpenAI-compatible, Anthropic, and Responses request bodies.
+ROLE IN CODEBASE: Covers PromptPlacement and the OpenAI-compatible, Anthropic, and Responses request bodies;
+    the Gemini replay case lives in tests/test_gemini_tool_wire_format.py.
 ARCHITECTURE NOTE: Sends history through TextModelRunner/StreamingTextModelRunner with fake transports and
     reads the captured wire bodies; the agent test replays the runtime's second request the same way.
 COMMON MODIFICATION PATTERNS: Add a case per provider wire shape that carries tool calls.
 WHAT NOT TO DO: Do not call real provider endpoints or require API keys from the environment.
-KNOWN EDGE CASES: Anthropic tool_result turns carry role "user" but do not introduce a call.
+KNOWN EDGE CASES: A call after a user turn or tool result (replayed or a later round) is skipped.
 RELATED DOCS: vidbyte/providers/gemini.py (_prompt_index) holds the same rule for Gemini.
 TESTS: Run with python -m pytest -q tests/test_prompt_opens_tool_exchange.py.
 """
@@ -86,6 +87,20 @@ class CompatiblePromptOrderTests(unittest.TestCase):
         wire = _chat_wire([GREETING, CHAT_CALL, CHAT_RESULT])
         self.assertEqual(wire[1:], [GREETING, {"role": "user", "content": PROMPT}, CHAT_CALL, CHAT_RESULT])
 
+    def test_prompt_skips_a_replayed_exchange_and_opens_this_runs_round(self) -> None:
+        # The caller replays a transcript that already holds a tool exchange; only this run's round gets the prompt.
+        replayed = [{"role": "user", "content": "Hours on Sunday?"}, CHAT_CALL, CHAT_RESULT, {"role": "assistant", "content": "We're closed on Sunday."}]
+        wire = _chat_wire([*replayed, CHAT_CALL, CHAT_RESULT])
+        self.assertEqual(wire[1:], [*replayed, {"role": "user", "content": PROMPT}, CHAT_CALL, CHAT_RESULT])
+
+    def test_later_rounds_of_this_run_stay_behind_the_first(self) -> None:
+        wire = _chat_wire([CHAT_CALL, CHAT_RESULT, CHAT_CALL, CHAT_RESULT])
+        self.assertEqual(wire[1:], [{"role": "user", "content": PROMPT}, CHAT_CALL, CHAT_RESULT, CHAT_CALL, CHAT_RESULT])
+
+    def test_rejected_draft_alone_keeps_the_prompt_last(self) -> None:
+        draft = {"role": "assistant", "content": "draft"}
+        self.assertEqual(_chat_wire([draft])[1:], [draft, {"role": "user", "content": PROMPT}])
+
 
 class AnthropicPromptOrderTests(unittest.TestCase):
     def test_prompt_opens_a_tool_round(self) -> None:
@@ -102,11 +117,13 @@ class AnthropicPromptOrderTests(unittest.TestCase):
         wire = _anthropic_wire([GREETING, ANTHROPIC_CALL, ANTHROPIC_RESULT])
         self.assertEqual(wire, [GREETING, {"role": "user", "content": PROMPT}, ANTHROPIC_CALL, ANTHROPIC_RESULT])
 
-    def test_a_tool_result_does_not_introduce_a_call(self) -> None:
-        # A tool_result turn carries role "user" but is not the user speaking, so the call still needs the prompt.
-        wire = _anthropic_wire([{"role": "user", "content": "earlier"}, ANTHROPIC_RESULT, ANTHROPIC_CALL])
-        self.assertTrue(_is_prompt(wire[2]))
-        self.assertEqual(wire[3], ANTHROPIC_CALL)
+    def test_prompt_skips_a_replayed_exchange_and_opens_this_runs_round(self) -> None:
+        # The replayed call follows a user turn and the later round follows a tool_result, so both are skipped.
+        answer = {"role": "assistant", "content": "We're closed on Sunday."}
+        replayed = [{"role": "user", "content": "Hours on Sunday?"}, ANTHROPIC_CALL, ANTHROPIC_RESULT, answer]
+        wire = _anthropic_wire([*replayed, ANTHROPIC_CALL, ANTHROPIC_RESULT, ANTHROPIC_CALL, ANTHROPIC_RESULT])
+        self.assertEqual(wire[:5], [*replayed, {"role": "user", "content": PROMPT}])
+        self.assertEqual(len(wire), 9)
 
     def test_prompt_appends_without_a_tool_round(self) -> None:
         wire = _anthropic_wire([{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "prior reply"}])

@@ -69,14 +69,14 @@ class AnthropicProvider:
     def _create_messages(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
         # Preserve multi-turn history and put the prompt in front of the tool exchange it provoked.
         history = [dict(message) for message in config.messages]
-        history.insert(PromptPlacement.index(history, is_call_turn=lambda turn: self._has_block(turn, "assistant", "tool_use"), is_user_turn=lambda turn: turn.get("role") == "user" and not self._has_block(turn, "user", "tool_result")), {"role": "user", "content": prompt})
+        history.insert(PromptPlacement.index(history, is_call_turn=self._is_tool_use_turn), {"role": "user", "content": prompt})
         return history
 
     @staticmethod
-    def _has_block(turn: Mapping[str, Any], role: str, block_type: str) -> bool:
-        # A tool_result turn carries role "user" too, so a user's own turn is one without tool_result blocks.
+    def _is_tool_use_turn(turn: Mapping[str, Any]) -> bool:
+        # An assistant turn whose content carries a tool_use block is a tool call.
         content = turn.get("content")
-        return turn.get("role") == role and isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == block_type for block in content)
+        return turn.get("role") == "assistant" and isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_use" for block in content)
 
     def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
         # Anthropic uses a top-level system parameter rather than a system role.

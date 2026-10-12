@@ -189,7 +189,7 @@ class OpenAIProvider:
             # Put the prompt in front of the tool exchange it provoked, placed on the chat-shaped turns so an
             # assistant note and the function_call items it splits into stay together behind the prompt.
             history = [dict(message) for message in config.messages]
-            history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn, is_user_turn=PromptPlacement.is_chat_user_turn), {"role": "user", "content": prompt})
+            history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn), {"role": "user", "content": prompt})
             return [item for message in history for item in self._responses_items(message)]
         return prompt
 
