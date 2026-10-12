@@ -242,6 +242,8 @@ class AgentDescriptor:
             ) from exc
         try:
             ProviderModelRegistry.validate_model(self.model_name)
+            # An 'openrouter/<vendor>/<model>' slug only runs through OpenRouter, never through the declared vendor.
+            ProviderModelRegistry.require_openrouter_for_routed_model(self.provider, self.model_name)
         except ConfigurationError as exc:
             raise ConfigurationError(
                 f"Invalid model_name: {exc}",
