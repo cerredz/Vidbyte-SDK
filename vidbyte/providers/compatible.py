@@ -71,7 +71,7 @@ class OpenAICompatibleProvider:
             messages.append({"role": "system", "content": instructions})
         # Put the prompt in front of the tool exchange it provoked, so the newest turn is the work, not the task again.
         history = [dict(message) for message in config.messages]
-        history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn), {"role": "user", "content": prompt})
+        history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
         messages.extend(history)
         return messages
 

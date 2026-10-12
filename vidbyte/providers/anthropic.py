@@ -69,7 +69,7 @@ class AnthropicProvider:
     def _create_messages(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
         # Preserve multi-turn history and put the prompt in front of the tool exchange it provoked.
         history = [dict(message) for message in config.messages]
-        history.insert(PromptPlacement.index(history, is_call_turn=self._is_tool_use_turn), {"role": "user", "content": prompt})
+        history.insert(PromptPlacement.index(history, is_call_turn=self._is_tool_use_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
         return history
 
     @staticmethod

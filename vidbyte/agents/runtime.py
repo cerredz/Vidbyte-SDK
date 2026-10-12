@@ -315,6 +315,10 @@ class AgentRuntime:
         # @intent after-hooks-see-run-conversation
         # Keep the live conversation on the loop state so the end-of-run hooks can show it to observers like the continual trace.
         state.messages = messages
+        # @intent prompt-sits-at-the-run-boundary
+        # Remember the caller's own messages, because this run's exchange starts right after them and the provider puts
+        # the task there. Only the runtime knows this: a rejected draft and its feedback look just like a caller's greeting and question.
+        caller_messages = tuple(messages)
         rejections = 0
         compaction_count = 0
         last_assistant_output: str | None = None
@@ -393,6 +397,7 @@ class AgentRuntime:
                 # @intent internal-tools-never-spend-the-tool-budget
                 # The model-visible max_tool_calls usage reports the same non-internal count the budget enforces.
                 tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)),
+                caller_messages=caller_messages,
             )
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
@@ -1032,6 +1037,12 @@ class AgentRuntime:
             transformed["system"] = transform.system
         if transform.provider_messages is not None:
             transformed["messages"] = tuple(dict(message) for message in transform.provider_messages)
+            # @intent prompt-sits-at-the-run-boundary
+            # A rewritten list keeps the run boundary only while everything in front of it is unchanged; otherwise the
+            # provider places the prompt by the shape of the turns.
+            boundary = transformed.get("prompt_index")
+            if boundary is not None and transformed["messages"][:boundary] != tuple(call_options.get("messages", ()))[:boundary]:
+                transformed.pop("prompt_index")
         return transformed
 
     def _provider_messages_from_options(self, call_options: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
@@ -1486,8 +1497,8 @@ class AgentRuntime:
             return str(model_name)
         return None
 
-    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, iteration_count: int = 0, tokens_used: int | None = None, tool_call_count: int = 0) -> dict[str, Any]:
-        """Assemble per-iteration call options with system prompt, loop settings, primitives zone, tools, messages, and response format."""
+    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, iteration_count: int = 0, tokens_used: int | None = None, tool_call_count: int = 0, caller_messages: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
+        """Assemble per-iteration call options with system prompt, loop settings, primitives zone, tools, messages, prompt index, and response format."""
         call_options = dict(run_options)
         loop_settings_block = self._render_loop_settings_block(
             iteration_count=iteration_count,
@@ -1501,6 +1512,11 @@ class AgentRuntime:
         conversation_messages = self._build_conversation_messages(messages)
         if conversation_messages:
             call_options.setdefault("messages", conversation_messages)
+        # @intent prompt-sits-at-the-run-boundary
+        # Tell the provider where this run's own exchange begins, so the task goes in front of it and never after it.
+        boundary = self._run_boundary(conversation_messages, messages, caller_messages)
+        if boundary is not None:
+            call_options.setdefault("prompt_index", boundary)
         if self.output_schema is not None:
             call_options.setdefault("response_format", self._wire_schema())
         return call_options
@@ -1518,6 +1534,18 @@ class AgentRuntime:
             if isinstance(contract, SchemaConformance) and contract.schema is self.output_schema:
                 return contract.evaluate({contract.key: output})
         return self._schema_formatter.validate(output, self.output_schema)
+
+    @staticmethod
+    def _run_boundary(conversation: Sequence[Mapping[str, Any]], messages: Sequence[Mapping[str, Any]], caller_messages: Sequence[Mapping[str, Any]]) -> int | None:
+        """Return where this run's first own message sits in the sent conversation, or None when it cannot be told."""
+        # The caller's messages must still open the run's list as the same objects; a context-window algorithm or a
+        # fallback reset that rewrote them leaves the provider to its shape rule. So does a run with no turn of its own
+        # yet, which keeps the task after any end-of-conversation notes, as before.
+        caller_count = len(caller_messages)
+        if len(messages) <= caller_count or any(messages[index] is not caller for index, caller in enumerate(caller_messages)):
+            return None
+        first_own = messages[caller_count]
+        return next((index for index, message in enumerate(conversation) if message is first_own), None)
 
     def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """Assemble placed context-window conversation messages around runtime messages."""
