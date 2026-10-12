@@ -84,9 +84,12 @@ class CalculatorTool(BaseTool):
             if word not in _CALCULATOR_FUNCTIONS:
                 return ToolResult.error(self.name, f"Unsafe expression: name '{word}' is not permitted.")
 
+        # @intent calculator-whitespace-separates-tokens
+        # Evaluate with whitespace collapsed, not removed, so "1 000" is a syntax error rather than 1000.
+        spaced_expr = " ".join(expr.split())
         # Walk the expression instead of eval-ing it, so oversized powers fail before any work is done.
         try:
-            result = CalculatorExpression.evaluate(clean_expr)
+            result = CalculatorExpression.evaluate(spaced_expr)
             return ToolResult.success(self.name, str(result))
         except Exception as exc:
             return ToolResult.error(self.name, f"Evaluation failed: {exc}")
