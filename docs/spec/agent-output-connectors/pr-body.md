@@ -161,10 +161,10 @@ Code last changed at `563efc51`; every later commit changes only `docs/spec/agen
 | Full local gate | `python scripts/run_ci.py` (PYTHONPATH unset; source and package stages) | `3824 passed, 13 skipped in 32.78s` · `No broken requirements found.` · `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` |
 | Public API contract | `python scripts/generate-sdk-public-api.py --check` | `contracts/sdk-public-api.json is current at 839e8e33… (vidbyte-sdk 0.2.1, 623 exports).` |
 | Semgrep 1.170.1 | `semgrep --test …typed-mapping-boundary-policy…` · `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `1/1: ✓ All tests passed` · `Ran 1 rule on 911 files: 0 findings.` |
-| Remote `ci.yml` | dispatch pending on this commit | pending |
-| Remote `static-policy.yml` | dispatch pending on this commit | pending |
+| Remote `ci.yml` | dispatched on `4e5a6a73`, run 38221673990 | success. Source / Python 3.11: `3819 passed, 18 skipped` · `CI passed.` Source / Python 3.12: `3819 passed, 18 skipped` · `CI passed.` Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` |
+| Remote `static-policy.yml` | dispatched on `4e5a6a73`, run 38221677030 | success. `1/1: ✓ All tests passed` · `Ran 1 rule on 911 files: 0 findings.` |
 
-Remote CI on this repo runs only when it is dispatched, so `gh pr checks` lists nothing; the run IDs above are the checks. They cover the last code-bearing commit `563efc51` plus every docs commit up to the one dispatched. The next commit only writes these run IDs into this file, so it was not dispatched again.
+Remote CI on this repo runs only when it is dispatched, so `gh pr checks` lists nothing; the run IDs above are the checks. They cover the last code-bearing commit `563efc51` plus every docs commit up to `4e5a6a73`. The commit after it only writes these run IDs into this file and adds one row to `review.md`, so it was not dispatched again.
 
 The branch is 5 commits behind `main` (#856, #891, #892, #893, #894). `git merge-tree` shows a clean merge. Catch up at merge time. #891 edits `vidbyte/agents/base.py` (it wraps `generate_reply`, not `_generate_reply`), so re-measure lint S008 on `_generate_reply` after the merge: it sits exactly at its limit (10 / 9 / 50).
 
@@ -187,7 +187,7 @@ Review history after that first round:
 | Repair 2 | Merged `main` (`d4100704`, 8 commits, no conflicts). S6-1 fixed with `OutputArguments.non_empty`, so the error reads "to must list at least one value."; its test case `[email-empty-to]` was added first (`4b063c28`). S6-2 fixed: the hint gives the working zip recipe. | S6-1 `5b437f24`, S6-2 `2334385b` |
 | Re-review 2 (conformance) | SOUND. 0 Blocker, 0 Major, 2 Minor: RR2-C1 and RR2-C2. | the next two rows |
 | Repair 3 | RR2-C1 fixed. The resend caution named only `network`; it now also names `invalid_response`, `smtp_error`, `smtp_recipients_refused`, and codes starting with `http_5`, because each can follow a post the destination already stored. | `563efc51` |
-| S6 refresh | RR2-C2 fixed. This PR body still called S6-1 and S6-2 open, and its Telegram rationale no longer matched spec §17. | this refresh |
+| S6 refresh | RR2-C2 fixed. This PR body still called S6-1 and S6-2 open, and its Telegram rationale no longer matched spec §17. | `4e5a6a73` |
 
 ## Deviations from the spec
 - **Delivery sits in a helper, not inline (S3-1).** Spec r3 put the delivery `try` block inline in `BaseAgent._generate_reply`. That function was already at the lint S008 limit (complexity 10, 50 statements), so the code calls a private `_deliver_outputs` and moves three existing last-trace lines into `_record_last_trace`. The function still measures 10 / 9 / 50. Spec r5 adopted this, so the current spec (r8) matches the code.
