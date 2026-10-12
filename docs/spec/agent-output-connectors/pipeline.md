@@ -15,8 +15,8 @@ started: 2026-10-11 17:36
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-11 17:36 | 2026-10-11 17:52 | reports/S0-scout.md | base_commit db3988ff; code-map.md (4 sections, 477 lines) |
 | S1 spec + review | done | 2026-10-11 17:55 | 2026-10-11 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @1335db49 approved; r1 NEEDS REWORK (1B/5M/5m) → r2 SOUND WITH FIXES (0B/2M/5m), all 18 accepted |
-| S2 tests | pending | | | | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-11 | 2026-10-11 | reports/S2-test-author.md | 86 tests / 313 cases in tests/features/agent_output_connectors/ (9 modules); red `21 failed, 292 errors`; test commit d90400d2; S2_HEAD 72fc2002; 7 spec defects → spec r4 @f3229734; status tests-written @5e79413f |
+| S3 implement | running | 2026-10-11 | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -34,6 +34,11 @@ started: 2026-10-11 17:36
 
 - 2026-10-11 — Q-1..Q-10 take their stated defaults (all "No"/"Not built"): no CodexHarnessAgent outputs; as_tool/sub-agents (forks) do not deliver; no HMAC webhook; no Session.resume outputs=; render cannot return None; receipts not persisted; no YAML; Q-8/Q-9/Q-10 scope-adding not built — S1 summary printed, no user reply.
 - 2026-10-11 — Pointed the author at the reviewer report by path rather than pasting the findings block, to keep orchestrator context lean; one-line summaries of every finding were included in the message.
+
+- 2026-10-11 — S2 spot-check passed: tree clean, vidbyte/ untouched, all 26 AC in test-plan, re-ran acceptance (2F/4E) and dispatch (42E) red for missing modules; spec diff = Proof cells only.
+- 2026-10-11 — Sent S2's 7 spec defects (AC-18 vacuous, AC-19 wall clock, §13 seam reach, AC-4 re-prompt, AC-12 named agent, AC-23 split, AC-20 single-connector) to the S1 author (resumed, revision mode) → r4 @f3229734; not counted as a review round. Checks (a)–(h) of test-bound details: none conflicted; (e)(f)(h) added to spec. Verified r4 left tests/, test-plan.md and Proof cells unchanged.
+- 2026-10-11 — S2_HEAD = 72fc2002 (test tree baseline for S3/S5/S6 diffs; tests last changed in d90400d2).
+- 2026-10-11 — S2 built a throwaway prototype in its scratchpad (outside repo, never committed) to mutation-test the suite (71/72 caught); accepted, since nothing under vidbyte/ changed.
 
 ## User replies (verbatim)
 - (none yet)
@@ -60,4 +65,12 @@ started: 2026-10-11 17:36
 - A002 matches tokens in function bodies (names/attributes), not just def names: `_link` and `_deliver_one` need `# @intent` — *source:* S1 review r1/r2
 - Skip rule: deliver only when stop_reason absent, `final_response`, or `is_done`; budget stops come from runtime.py `_stopped_result` (~1882/1911) — *source:* S1 review r1
 - `_deliver_one` wraps `connector.send` in `asyncio.wait_for(..., OUTPUT_DELIVERY_DEADLINE_SECONDS)` (35 s); tests can shorten it by setting the attribute on the dispatcher module — *source:* S1 author r3
+- HTTP tests fake `HttpTransport._send_once` (header names must be lowercase); redirect + size-ceiling tests replace `transport_module.httpx.AsyncClient` with `httpx.MockTransport`, so keep `follow_redirects=False` and `max_response_bytes=OUTPUT_MAX_RESPONSE_BYTES` — *source:* S2
+- `delivery.py` must `import smtplib` (module import) and use the client as a context manager; fakes replace `delivery.smtplib.SMTP`/`SMTP_SSL` — *source:* S2 / spec r4 row 7
+- Dispatcher reads `OUTPUT_DELIVERY_DEADLINE_SECONDS` as a module global at call time (tests monkeypatch `dispatcher_module.OUTPUT_DELIVERY_DEADLINE_SECONDS`), never a default arg — *source:* S2 / spec r4 row 22
+- Inline `except BaseException` must `self._queued_prompts.clear()` on every exception (inside a run `_queued_prompts` returns the claimed list via a context var) — *source:* S2 / spec r4 INV-7
+- Exact strings asserted: `Missing credential for {dest} output. Pass {param} or set {ENV}.`; `{n} of {m} outputs failed: dest (code), ...`; `ClassName(credential='***')` — *source:* S2
+- Slack escapes after truncation; Jira paragraphs = non-blank lines of the truncated body — *source:* S2
+- Layering test parses real imports: agents/output may import stdlib, vidbyte.lib, vidbyte.agents.output only; lib/outputs must not import httpx/requests/aiohttp/http.client/urllib.request — *source:* S2 / spec r4 §12.2
+- Run new tests: `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors` (no global `pip install -e`; deps present in global Python 3.11) — *source:* S2
 - Prior-art tests: tests/test_web_operation_client_retry.py (patch HttpTransport._send_once + transport_module.asyncio.sleep), tests/test_restore_output_schema.py, tests/agent_test_support.py (build_test_agent, bind_test_runner, OfflineTestAgent); test header exemplar tests/features/coding_agent/conftest.py — *source:* spec §13
