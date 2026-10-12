@@ -10,7 +10,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, Strict
 from pydantic.alias_generators import to_camel
 
 from vidbyte import tool, vidbyte_tool
@@ -90,6 +90,13 @@ class CamelOrder(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel)
     order_id: str
     total_cents: int
+
+
+class StrictFilter(BaseModel):
+    model_config = ConfigDict(strict=True)
+    priority: Priority
+    due: date
+    window: tuple[int, int]
 
 
 def _logged(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -320,6 +327,41 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         defaulted = await book_stay.execute(ToolCall("book_stay", {"city": "Oslo"}))
         self.assertEqual(defaulted.output, "Oslo:1")
         self.assertEqual(calls, [("Rome", 3), ("Oslo", 1)])
+
+    async def test_strict_arguments_accept_the_models_json_spellings(self) -> None:
+        # @intent tool-arguments-validate-in-json-mode
+        received: list[tuple[StrictFilter, date]] = []
+
+        @tool
+        def find(criteria: StrictFilter, day: Annotated[date, Strict()]) -> str:
+            """Find tickets."""
+            received.append((criteria, day))
+            return "ok"
+
+        arguments = {"criteria": {"priority": "high", "due": "2026-10-11", "window": [9, 17]}, "day": "2026-10-12"}
+        call = ToolCall("find", json.loads(json.dumps(arguments)))
+
+        self.assertIsNone(find.validate_call(call))
+        result = await find.execute(call)
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(received, [(StrictFilter(priority=Priority.HIGH, due=date(2026, 10, 11), window=(9, 17)), date(2026, 10, 12))])
+
+    async def test_strict_arguments_keep_strictness_and_python_objects(self) -> None:
+        # JSON mode is still strict, and a call built in code with Python objects still validates in Python mode.
+        @tool
+        def find(criteria: StrictFilter, day: Annotated[date, Strict()]) -> str:
+            """Find tickets."""
+            return f"{criteria.priority.value}:{day.isoformat()}"
+
+        loose = ToolCall("find", {"criteria": {"priority": "high", "due": "2026-10-11", "window": "9-17"}, "day": "2026-10-12"})
+        rejected = await find.execute(loose)
+        self.assertEqual(rejected.status, ToolStatus.ERROR)
+        self.assertEqual(rejected.metadata["error_type"], "validation")
+        self.assertIn("criteria.window", find.validate_call(loose) or "")
+
+        built = StrictFilter(priority=Priority.LOW, due=date(2026, 1, 2), window=(1, 2))
+        accepted = await find.execute(ToolCall("find", {"criteria": built, "day": date(2026, 1, 3)}))
+        self.assertEqual(accepted.output, "low:2026-01-03")
 
 
 class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
