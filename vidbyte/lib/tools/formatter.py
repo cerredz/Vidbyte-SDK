@@ -341,8 +341,19 @@ class ToolsFormatter:
             return None
         message = choices[0].get("message") if isinstance(choices[0], Mapping) else None
         if isinstance(message, Mapping) and isinstance(message.get("tool_calls"), list):
-            return dict(message)
+            # @intent id-less-tool-call-pairs-by-name
+            # An echoed call and its result must carry the same id, so an id-less call falls back
+            # to the id format_tool_result uses: the parsed call id, else the tool name.
+            return {**message, "tool_calls": [ToolsFormatter._echoed_chat_tool_call(call) for call in message["tool_calls"]]}
         return None
+
+    @staticmethod
+    def _echoed_chat_tool_call(raw_call: Any) -> Any:
+        if not isinstance(raw_call, Mapping) or raw_call.get("id"):
+            return raw_call
+        function = raw_call.get("function", raw_call)
+        name = function.get("name", "") if isinstance(function, Mapping) else ""
+        return {**raw_call, "id": str(raw_call.get("call_id") or name)}
 
     @staticmethod
     def _assistant_turn_openai_responses(output: list[Any]) -> Mapping[str, Any] | None:
