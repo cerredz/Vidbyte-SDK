@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+from vidbyte.lib.tools.filesystem.newlines import LineEndings
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -47,7 +48,7 @@ class WriteTextTool(FileSystemTool):
                 return ToolResult.error(self.name, refusal)
             # Describe the change while the old file is still on disk. A
             # new file gets its line count, not a diff that repeats it.
-            change = self._edit_diff(target, content) if self.backend.stat(target).is_file else f"created, {len(content.splitlines())} lines"
+            change = self._edit_diff(target, content) if self.backend.stat(target).is_file else f"created, {len(LineEndings.split_lines(content))} lines"
             self.backend.write_text(target, content, encoding=self._config.encoding, create_parents=create_parents)
             # Show the model the path, then what its write changed.
             return ToolResult.success(self.name, f"{target}\n{change}", metadata={"path": str(target), "encoding": self._config.encoding})
