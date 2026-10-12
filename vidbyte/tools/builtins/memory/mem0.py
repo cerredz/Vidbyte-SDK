@@ -234,7 +234,7 @@ class Mem0DeleteMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_delete(
-                url=f"{self._base_url}/v1/memories/{memory_id}/",
+                url=f"{self._base_url}/v1/memories/{self._path_id(memory_id)}/",
                 headers=self._auth_headers("Token"),
             )
         except Exception as exc:

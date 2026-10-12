@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentLoopSettings, AgentMessage, BaseAgent, MinToolCalls, ToolErrorPolicy, ToolSettings
 from vidbyte.context.manager import ContextManager
+from vidbyte.lib.constants.jev import VIDBYTE_API_KEY_PREFIX
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import ModelProvider
@@ -451,6 +452,21 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(child.runner_config.provider, "openai")
                 self.assertEqual(ProviderModelRegistry.resolve_api_key(child.runner_config.provider, child.runner_config.api_key), "sk-openai-ENV")
         self.assertEqual(parent.runner_config.api_key, "sk-deepseek-SECRET")
+
+    def test_cross_provider_fork_keeps_a_vidbyte_key_only_for_a_managed_provider(self) -> None:
+        # @intent vidbyte-key-may-cross-to-a-managed-provider: the gateway serves Kimi with the same Vidbyte key, but not GLM.
+        vidbyte_key = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_key=vidbyte_key)
+        vendor_parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_key="sk-deepseek-SECRET")
+
+        with patch.dict(os.environ, {"GLM_API_KEY": "glm-ENV"}, clear=True):
+            managed = parent.fork(AgentForkSettings(provider="kimi", model_name="kimi-k2.7-code"))
+            unmanaged = parent.fork(AgentForkSettings(provider="glm", model_name="glm-5.2"))
+            vendor = vendor_parent.fork(AgentForkSettings(provider="kimi", model_name="kimi-k2.7-code"))
+
+        self.assertEqual((managed.runner_config.provider, managed.runner_config.api_key), ("kimi", vidbyte_key))
+        self.assertIsNone(unmanaged.runner_config.api_key)
+        self.assertIsNone(vendor.runner_config.api_key)
 
     def test_same_provider_fork_keeps_parent_api_key(self) -> None:
         # Staying on the parent's provider, including model-only overrides, keeps the parent's explicit key.

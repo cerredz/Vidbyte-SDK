@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import unittest
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Literal, Optional, Union
+from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -70,6 +70,24 @@ class _VocabularyModel(BaseModel):
 
     status: GoalSuccessVerdict | None = Field(None, description="Goal status.")
     priority: Literal["low", "urgent"] | None = Field(None, description="Priority.")
+
+
+class _OuterAnnotatedModel(BaseModel):
+    """Trace whose pydantic metadata wraps the whole Optional, so pydantic strips it."""
+
+    retries: Annotated[int | None, Field(ge=0, description="Retries.")] = None
+    owner: Annotated[_Owner | None, Field(description="Owner.")] = None
+    stage: Annotated[Literal["build", "ship"] | None, Field(description="Stage.")] = None
+    reviewers: Annotated[list[_Owner] | None, Field(description="Reviewers.")] = None
+
+
+class _InnerAnnotatedModel(BaseModel):
+    """The same trace with the pydantic metadata inside the Optional, which pydantic leaves on the annotation."""
+
+    retries: Annotated[int, Field(ge=0)] | None = Field(None, description="Retries.")
+    owner: Annotated[_Owner, Field(title="Owner")] | None = Field(None, description="Owner.")
+    stage: Annotated[Literal["build", "ship"], Field(title="Stage")] | None = Field(None, description="Stage.")
+    reviewers: list[Annotated[_Owner, Field(title="Reviewer")]] | None = Field(None, description="Reviewers.")
 
 
 def _progress_schema() -> TraceSchema:
@@ -149,6 +167,15 @@ class TraceOptionTests(unittest.TestCase):
         self.assertEqual(priority.enum, ("low", "urgent"))
         self.assertEqual(TraceField.model_validate(priority.model_dump(mode="json", exclude_none=True)), priority)
         self.assertIn("- priority (string, one of: low, urgent): Priority.", schema.describe_fields())
+
+    def test_from_model_inner_annotated_matches_outer(self) -> None:  # [Silent Failure]
+        inner = TraceSchema.from_model(_InnerAnnotatedModel).fields
+        outer = TraceSchema.from_model(_OuterAnnotatedModel).fields
+        self.assertEqual(inner, outer)
+        self.assertEqual(inner["retries"].type, TraceFieldType.INTEGER)
+        self.assertEqual(inner["owner"].fields["name"].type, TraceFieldType.STRING)
+        self.assertEqual(inner["stage"].enum, ("build", "ship"))
+        self.assertEqual(inner["reviewers"].items.fields["name"].type, TraceFieldType.STRING)
 
     def test_initial_artifact_keys_all_none(self) -> None:  # [Edge Case]
         artifact = _progress_schema().initial_artifact()

@@ -16,7 +16,7 @@ Two rules from the map apply to every change. **Do not grep, glob, or read files
 
 ## General Coding Style Guidelines
 
-These four principles describe how code in this repository should be shaped. They apply to new code and to code you change. Do not rewrite untouched code just to make it conform; that belongs in its own pull request.
+These five principles describe how code in this repository should be shaped. They apply to new code and to code you change. Do not rewrite untouched code just to make it conform; that belongs in its own pull request.
 
 ### 1. Keep Call Chains One Level Deep
 
@@ -33,6 +33,12 @@ Organize each feature as layers, and inside each layer split a large feature int
 ### 4. Use Validated Dataclasses for Core Inputs and Outputs
 
 Functions that carry core business logic take a dataclass as input and return a dataclass as output, rather than loose dicts, tuples, or long lists of primitive arguments. Each dataclass validates itself strictly when it is created, in `__post_init__`: it checks types, ranges, required fields, and allowed values, and raises a clear error that names the field and the bad value. Invalid data then fails at the boundary where it enters, not deep inside the logic that uses it, and the function body can trust every field it reads. Prefer `@dataclass(frozen=True, slots=True)` so a validated record cannot later be changed into an invalid one, and type any field whose value comes from a small, closed set as an enum. Small private helpers do not need dataclasses of their own; the rule is for the functions that hold a feature's real logic and for the data passed between layers. Define each new dataclass in `vidbyte/lib/dataclasses/<domain>.py` and each new enum in `vidbyte/lib/enums/<domain>.py`, as the [Placement Rules](#placement-rules) below require.
+
+### 5. Write Shared Logic Once, as a Canonical Helper in `lib/`
+
+When there is more than one way to do a job, and the same job is likely to come up again in other features, write the logic once as a canonical helper, a class or function in `vidbyte/lib/`, and have every caller use that helper instead of re-implementing the job inline. An API request is the standard example. Requests need a timeout and often a retry policy, and you should not hand-code the timeout, the backoff, and the choice of which failures are safe to repeat at every call site. That logic belongs in one helper that exposes the timeout and the retry policy as options, so each caller picks its settings while the logic itself exists in one place. `HttpTransport` in `vidbyte/lib/http/transport.py` already follows this pattern: its `request()` method takes `timeout_seconds`, `retry_count`, and backoff options, and refuses to retry an unsafe method without an idempotency key, so no caller has to build that loop itself. The same reasoning covers every other job of that kind, such as pagination, rate limiting, or parsing a provider's response.
+
+Before you write logic like this, look in `vidbyte/lib/` for a helper that already does it, and if one is close, add the option you need to it rather than copying it into a variant beside your feature. If none exists, create the helper in `vidbyte/lib/` rather than inside the feature that first needs it, nested in the subfolder for its domain when one fits, such as `vidbyte/lib/http/`; its dataclasses and enums still go where the [Placement Rules](#placement-rules) say. Because `vidbyte/lib/` is the bottom layer in principle 3, a canonical helper never imports from a layer above it; it takes what it needs as arguments or options. Logic that only one feature will ever need can stay with that feature, but whenever a canonical helper in `vidbyte/lib/` would save writing the same logic a second time, build it that way.
 
 ## Placement Rules
 

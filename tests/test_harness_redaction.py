@@ -34,8 +34,15 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import dataclass
 
 from vidbyte.harnesses.serialization import HarnessRedactor, HarnessSecretPolicy
+
+
+@dataclass
+class _DeployReport:
+    service: str
+    api_key: str
 
 
 class HarnessRedactorFreeTextTests(unittest.TestCase):
@@ -98,6 +105,14 @@ class HarnessSecretPolicyCamelCaseTests(unittest.TestCase):
         safe = HarnessRedactor().redact({"accessToken": "tok_camel123", "maxTokens": 5})
 
         self.assertEqual(safe, {"maxTokens": 5})
+
+    def test_dataclass_credential_field_is_scrubbed_like_mapping_key(self) -> None:
+        redactor = HarnessRedactor()
+
+        safe = redactor.redact(_DeployReport(service="billing", api_key="sk_live_DEPLOY_KEY_123"))
+
+        self.assertEqual(safe, {"service": "billing"})
+        self.assertEqual(safe, redactor.redact({"service": "billing", "api_key": "sk_live_DEPLOY_KEY_123"}))
 
 
 class HarnessSecretPolicyAcronymTests(unittest.TestCase):

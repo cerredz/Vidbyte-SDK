@@ -4,7 +4,7 @@ PURPOSE: Prove OutputSchemaBuilder keeps each value slot in the shape of its lat
 ROLE IN CODEBASE: Drives DeclareOutputSchemaTool, AppendOutputTool and ExtendOutputSchemaTool on one shared OutputSchemaBuilder.
 ARCHITECTURE NOTE: Pure in-memory tests; no agent, runner or network.
 COMMON MODIFICATION PATTERNS: Add a case when a new declaration attribute changes how values are stored.
-KNOWN EDGE CASES: Scalar to repeated wraps a set value; repeated to scalar keeps the latest entry; empty slots reseed; a null name or description counts as omitted; a non-boolean repeated refuses the whole call; a set false or 0 scalar makes the builder non-empty.
+KNOWN EDGE CASES: Scalar to repeated wraps a set value; repeated to scalar keeps the latest entry; empty slots reseed; a null name or description counts as omitted; a non-boolean repeated refuses the whole call; a set false or 0 scalar makes the builder non-empty; an all-nameless list errors like an empty one; a JSON-encoded name or scalar declares one field.
 RELATED DOCS: docs/design/builtin-tool-transport-and-builder-fixes.md
 TESTS: This module; full source gate via scripts/run_ci.py.
 """
@@ -125,3 +125,23 @@ async def test_falsy_scalar_values_make_the_builder_non_empty() -> None:
 
     assert builder.snapshot()["values"] == {"approved": False, "open_issues": 0, "notes": []}
     assert builder.is_empty() is False
+
+
+@pytest.mark.asyncio
+async def test_nameless_fields_report_no_valid_fields_and_json_encoded_name_declares() -> None:
+    builder = OutputSchemaBuilder()
+    declare, _, extend = _tools(builder)
+
+    nameless = await declare.execute(ToolCall("declare_output_schema", {"fields": [{"name": ""}, {"description": "x"}, "  "]}))
+    assert nameless.status.value == "error"
+    assert "No valid fields were provided to declare." in nameless.output
+    assert builder.snapshot()["fields"] == []
+
+    for encoded in ('"summary"', "2024"):
+        result = await declare.execute(ToolCall("declare_output_schema", {"fields": encoded}))
+        assert result.status.value == "success", result.output
+
+    extended = await extend.execute(ToolCall("extend_output_schema", {"fields": [{"name": " "}]}))
+    assert extended.status.value == "error"
+    assert "No valid fields were provided to extend." in extended.output
+    assert [field["name"] for field in builder.snapshot()["fields"]] == ["summary", "2024"]

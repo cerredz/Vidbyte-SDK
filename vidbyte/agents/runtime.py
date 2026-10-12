@@ -104,6 +104,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentIterationSnapshot,
     AgentRuntimeConfig,
     AgentStopReason,
+    FinishReviewAction,
 )
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.middleware import (
@@ -530,6 +531,19 @@ class AgentRuntime:
                             abort_result = self._middleware_abort_result(decision, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
                             return await self._finish_result(abort_result, state)
                         continue
+                # @intent review-finish-after-contracts
+                # A middleware, such as CodingAgent's verification
+                # command, may refuse the finish: the model then
+                # reads its own answer and the feedback, or the run
+                # ends unverified with that answer. It runs after
+                # the contracts, so an answer they reject never
+                # costs a review.
+                review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state))
+                if review.action is FinishReviewAction.STOP:
+                    return await self._finish_result(self._unverified_finish_result(last_assistant_output or "", state), state)
+                if review.action is FinishReviewAction.CONTINUE:
+                    messages.extend((self._assistant_message(last_assistant_output or ""), {"role": "user", "content": review.feedback}))
+                    continue
                 final = self._final_result(
                     output=last_assistant_output,
                     runner_metadata=runner_metadata,
@@ -607,12 +621,31 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
-                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages; harmless when the run finishes.
+                    # @intent accepted-finish-hides-provisional-refusal
+                    # The end-of-run hooks of an accepted finish must not read the provisional refusal below as the outcome,
+                    # so they get the conversation as it stood before it.
+                    finished_messages = list(messages)
+                    # Answer isDone and the turn's unprocessed calls before a continuation appends its own messages.
                     self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, "finish attempt not accepted yet; continue with the next message", metadata={"error": "finish_not_accepted"}), state.provider, MiddlewareDecision.continue_())
                     self._answer_skipped_tool_calls(messages, tool_calls[call_index + 1 :], state.provider)
+                    # The same middleware review as a plain final
+                    # answer. Its feedback follows the isDone answer
+                    # as a user message, as a continuation's does,
+                    # because the formatter cuts tool-error text to
+                    # 1,000 characters and the end of a test run's
+                    # output is usually the part that matters.
+                    review = await self.middleware.review_finish(self._middleware_context(MiddlewareHook.REVIEW_FINISH, state, tool_call=call, tool_result=result))
+                    if review.action is FinishReviewAction.STOP:
+                        return await self._finish_result(self._unverified_finish_result(result.output or "", state), state)
+                    if review.action is FinishReviewAction.CONTINUE:
+                        messages.append({"role": "user", "content": review.feedback})
+                        finish_attempt_continued = True
+                        break
                     if await self._continue_finish_attempt(final, state, messages):
                         finish_attempt_continued = True
                         break
+                    # The run ends here with the finish accepted, so the end-of-run hooks read the conversation without the refusal.
+                    state.messages = finished_messages
                     return await self._finish_result(final, state)
 
             if finish_attempt_continued or contract_rejected:
@@ -818,6 +851,12 @@ class AgentRuntime:
         published = run_state.get(AgentRuntimeStateKey.RESULT_METADATA.value)
         base = dict(published) if isinstance(published, Mapping) else {}
         run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
+
+    def _unverified_finish_result(self, output: str, state: BaseAgentRuntimeLoopState) -> AgentResult:
+        """Build the result of a finish a middleware review refused for good: the model's answer, stopped as CONTRACT_UNSATISFIED."""
+        # Same shape as output-contract exhaustion, so callers and
+        # the session failure router read one stop reason for both.
+        return self._final_result(output=output, runner_metadata={}, contexts=state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used, stop_reason=AgentStopReason.CONTRACT_UNSATISFIED)
 
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
         """Let a specialized linear runtime send a normal finish attempt back to work with feedback."""
@@ -1710,7 +1749,11 @@ class AgentRuntime:
         reason, meta = denial
         if settings is not None and settings.aborts_on_deny:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        denied_started_at = self.speed_tracker.now()
         context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta, iteration_count=iteration_count)
+        # @intent every-refused-call-reaches-speed-stats
+        # Speed stats count a refused call as one failed call whichever guardrail refused it, matching a middleware denial and the run's own counts.
+        self.speed_tracker.record_tool_call(RecordToolCallInput(tool_name=call.tool_name, started_at=denied_started_at, succeeded=False, error_type="ToolSettingsDenied", iteration_index=iteration_count))
         call_contexts.append(context_record)
         self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
         return context_record, result

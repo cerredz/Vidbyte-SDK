@@ -23,7 +23,7 @@ without network access or a checkout of the producing repository.
 
 | File | Source repository and path | Copied from | Blob | Contract `source.commit` |
 |---|---|---|---|---|
-| `vidbyte-platform-contract.json` | cerredz/Vidbyte `contracts/vidbyte-platform-contract.json` | `main` at `bbeef425a3af7e554d55a3016d73f0fa85976c76` (#648) | `0be92ffe2fa7a79ff3780be36b95962a0b56fac3` | `3b501a638cbea33b89ce4a6d9ae9527df7699b24` |
+| `vidbyte-platform-contract.json` | cerredz/Vidbyte `contracts/vidbyte-platform-contract.json` | branch `feat/generative-model-gateway` at `ceabda93ea8f782d0d91f897c05b0ee974f2c5a3` (adds the `models.generate` route; re-vendor from `main` if that branch is squash-merged) | `56d4d0b373994f5de6affd675ed4c209e64d589d` | `74b6b015e7938e2c6084272a42fae70277ff77e0` |
 
 ## Refreshing
 
@@ -45,3 +45,4 @@ Fix the SDK code; do not raise a baseline to absorb a contract change. A copy wi
 ## Change Log
 
 - 2026-10-09: Created with `vidbyte-platform-contract.json` (schema_version 1) for the cross-repo lint contracts.
+- 2026-10-10: Refreshed `vidbyte-platform-contract.json` from cerredz/Vidbyte branch `feat/generative-model-gateway` (`ceabda93`) for the `models.generate` route (`POST /api/v1/models/generate`) that Vidbyte-managed text calls use.

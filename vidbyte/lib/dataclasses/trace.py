@@ -217,11 +217,15 @@ class TraceSchema:
 
     @staticmethod
     def _unwrap_optional(annotation: Any) -> Any:
-        # Returns X for Optional[X] / X | None; any other annotation, including a multi-type union, passes through unchanged.
-        if typing.get_origin(annotation) not in (typing.Union, types.UnionType):
-            return annotation
-        members = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
-        return members[0] if len(members) == 1 else annotation
+        # Returns X for Optional[X] / X | None / Annotated[X, ...]; any other annotation, including a multi-type union, passes through unchanged.
+        # @intent inner-annotated-trace-field-keeps-its-type
+        # Pydantic strips only the outer Annotated, so Annotated[X, Field(...)] left inside an Optional or a list argument is peeled to X and maps like the outer spelling.
+        if typing.get_origin(annotation) is typing.Annotated:
+            annotation = typing.get_args(annotation)[0]
+        if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+            members = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+            annotation = members[0] if len(members) == 1 else annotation
+        return typing.get_args(annotation)[0] if typing.get_origin(annotation) is typing.Annotated else annotation
 
     @staticmethod
     def _annotation_to_type(annotation: Any) -> TraceFieldType:

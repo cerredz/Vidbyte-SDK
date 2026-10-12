@@ -176,7 +176,7 @@ class SupermemoryDeleteMemoryTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_delete(
-                url=f"{self._base_url}/v3/documents/{document_id}",
+                url=f"{self._base_url}/v3/documents/{self._path_id(document_id)}",
                 headers=self._auth_headers("Bearer"),
             )
         except Exception as exc:

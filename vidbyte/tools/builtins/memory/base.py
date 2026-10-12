@@ -14,8 +14,9 @@ Relations:
 from __future__ import annotations
 
 import json
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.http.transport import HttpTransport
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolResult
@@ -40,6 +41,15 @@ class BaseMemoryTool(BaseTool):
     def _ok(self, status: int) -> bool:
         # Returns True when the HTTP status code indicates success (2xx).
         return 200 <= status < 300
+
+    @staticmethod
+    def _path_id(value: object) -> str:
+        # @intent ids-stay-inside-their-path-segment
+        # An id the model chose is encoded as one path segment, so slashes or dots cannot send the request elsewhere.
+        text = str(value)
+        if text in ("", ".", ".."):
+            raise ToolExecutionError(f"id {text!r} cannot be used as a URL path segment")
+        return quote(text, safe="")
 
     async def _json_post(self, url: str, headers: dict[str, str], body: dict) -> tuple[int, dict]:
         # POSTs JSON body to url, decodes response JSON, and returns (status, parsed_dict).

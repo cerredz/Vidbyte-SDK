@@ -204,7 +204,7 @@ class CogneeDeleteTool(BaseMemoryTool):
 
         try:
             status, data = await self._json_delete(
-                url=f"{self._base_url}/api/v1/datasets/{dataset_id}/",
+                url=f"{self._base_url}/api/v1/datasets/{self._path_id(dataset_id)}/",
                 headers=self._auth_headers("Bearer"),
             )
         except Exception as exc:

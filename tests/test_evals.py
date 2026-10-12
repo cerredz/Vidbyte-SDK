@@ -316,6 +316,17 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             WeightedGrader([(ContainsGrader(), 0.0)])
 
+    async def test_weighted_grader_full_marks_pass_at_threshold_one(self) -> None:
+        # Tests that every child passing scores exactly 1.0, so threshold=1.0 passes despite float rounding of weights.
+        # @intent weighted-full-marks-scores-exactly-one
+        case = EvalCase(prompt="t", expected="Paris")
+        children = [ContainsGrader(), ContainsAllGrader(["A-1042"]), LengthGrader(max_chars=200)]
+        for weights in ((2, 3, 1), (1, 4, 1), (3, 2, 2)):
+            weighted = WeightedGrader(list(zip(children, weights)), threshold=1.0)
+            res = await weighted.agrade(case, "Paris, ticket A-1042.")
+            self.assertEqual(res.score, 1.0, weights)
+            self.assertTrue(res.passed, weights)
+
     async def test_composite_graders_forward_probe_to_predicate_children(self) -> None:
         # Tests that all-of, any-of, weighted, and nested composites hand the run probe to behavior children.
         # @intent composite-graders-forward-run-probe
