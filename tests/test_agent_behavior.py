@@ -519,6 +519,22 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(behavior_from_probe(RunProbe(output="```python\nx")).output.contains_code_block())
         self.assertTrue(behavior_from_probe(RunProbe(output="plain")).output.code_block_count(at_least=0, at_most=0))
 
+    def test_output_code_blocks_indented_list_item_fences(self) -> None:
+        # [Hidden Failure / Silent Failure] fences indented under list items count, each with its own language.
+        output = "1. Install:\n   ```bash\n   pip install x\n   ```\n2. Run:\n   ```python\n   print('x')\n   ```\n"
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertEqual(b.output.code_block_count(), 2)
+        self.assertTrue(b.output.contains_code_block("bash"))
+        self.assertTrue(b.output.contains_code_block("python"))
+
+    def test_output_code_blocks_empty_block_does_not_swallow_next(self) -> None:
+        # [Hidden Failure / Silent Failure] an empty block ends at its own fence instead of eating the next block's opener.
+        output = "```bash\n```\n\n```python\nprint('x')\n```\n"
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertEqual(b.output.code_block_count(), 2)
+        self.assertEqual(b.output.code_block_count("bash"), 1)
+        self.assertEqual(b.output.code_block_count("python"), 1)
+
     def test_output_urls(self) -> None:
         # [Edge Case / Silent Failure] URL detection handles http, https, and www forms.
         self.assertFalse(behavior_from_probe(RunProbe(output="no link")).output.contains_url())
