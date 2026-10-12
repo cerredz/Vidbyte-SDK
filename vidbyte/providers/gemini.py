@@ -250,7 +250,10 @@ class GeminiProvider:
         parts = content.get("parts") if isinstance(content, dict) else None
         if not isinstance(parts, list):
             raise ProviderResponseError("Gemini response did not include text parts.", provider=self.provider.value, response_excerpt=str(parsed))
-        chunks = [part["text"] for part in parts if isinstance(part, dict) and isinstance(part.get("text"), str)]
+        # @intent thought-parts-are-not-the-answer
+        # With thinkingConfig.includeThoughts, Gemini sends thought summaries as parts marked "thought": true
+        # ahead of the answer; the answer is the other text parts, never the thinking.
+        chunks = [part["text"] for part in parts if isinstance(part, dict) and isinstance(part.get("text"), str) and part.get("thought") is not True]
         if not chunks:
             if any(isinstance(part, dict) and ("functionCall" in part or "function_call" in part) for part in parts):
                 return ""
