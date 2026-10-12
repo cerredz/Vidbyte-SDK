@@ -134,14 +134,13 @@ class ZepGetMemoryTool(BaseMemoryTool):
         # @intent zep-get-memory-shows-facts-and-recent-messages
         # Show the facts and the recent messages that lastn asks for; a new session has a null context,
         # which must not reach the model as the text 'None'. Fall back to the raw response if both are empty.
-        output = self._render_memory(data) or self._success_output(data)
+        rendered = self._render_memory(data) if isinstance(data, dict) else ""
+        output = rendered or self._success_output(data)
         return ToolResult.success(self.name, output, metadata={"provider": "zep", "session_id": session_id})
 
     @staticmethod
-    def _render_memory(data: object) -> str:
+    def _render_memory(data: dict) -> str:
         # Joins the non-empty context string and a "Recent messages:" block, or returns "" when neither exists.
-        if not isinstance(data, dict):
-            return ""
         context = data.get("context")
         parts = [context] if isinstance(context, str) and context.strip() else []
         messages = data.get("messages")
