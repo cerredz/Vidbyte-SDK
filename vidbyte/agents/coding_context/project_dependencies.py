@@ -52,7 +52,7 @@ class ProjectDependencies:
         # @intent blank-manifest-key-gives-no-name
         # A table key such as "" or " " is malformed, not a name, and
         # EnvironmentContextItem rejects a blank one.
-        names =[name.strip() for name in names if isinstance(name, str) and name.strip()]
+        names = [name.strip() for name in names if isinstance(name, str) and name.strip()]
 
         # Keep each name once, in the order it first appeared, and cap
         # the list so a huge manifest cannot fill the context.
