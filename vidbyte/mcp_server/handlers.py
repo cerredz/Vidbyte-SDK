@@ -110,8 +110,10 @@ class StudioAgentsListTool(BaseTool):
             if filter_name and filter_name.lower() not in agent_name.lower():
                 continue
             card: AgentCard = agent.card()
+            # @intent studio-agents-list-reports-runnable-name
+            # Report the registry key: it is the name filter_name matches and studio.agents.run accepts.
             cards.append({
-                "name": card.name,
+                "name": agent_name,
                 "description": card.description,
                 "capabilities": list(card.capabilities),
                 "tool_names": list(card.tool_names),

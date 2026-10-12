@@ -218,6 +218,21 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["name"], "agent-alpha")
 
+    async def test_listed_agent_name_runs_and_filters_when_key_differs_from_agent_name(self) -> None:
+        server = McpStudioServer(agents={"analyst": self._make_agent("Research Bot")})
+        listed = await self._dispatch(server, "tools/call", {"name": "studio.agents.list", "arguments": {}})
+        name = json.loads(listed["result"]["content"][0]["text"])[0]["name"]
+        ran = await self._dispatch(server, "tools/call", {
+            "name": "studio.agents.run",
+            "arguments": {"agent_name": name, "prompt": "echo hello"},
+        })
+        self.assertNotIn("isError", ran["result"], ran)
+        filtered = await self._dispatch(server, "tools/call", {
+            "name": "studio.agents.list",
+            "arguments": {"filter_name": name[:4]},
+        })
+        self.assertEqual([card["name"] for card in json.loads(filtered["result"]["content"][0]["text"])], [name])
+
     async def test_server_close_sets_shutdown_flag(self) -> None:
         server = McpStudioServer()
         self.assertFalse(server._shutdown)
