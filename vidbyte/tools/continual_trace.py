@@ -119,6 +119,8 @@ class UpdateTraceTool(BaseTool):
     def _json_schema_for_field(self, spec: TraceField) -> dict[str, Any]:
         # Renders one TraceField as JSON Schema, recursing into its declared fields/items when present.
         schema: dict[str, Any] = {"type": spec.type.value, "description": spec.description}
+        if spec.enum:
+            schema["enum"] = list(spec.enum)
         if spec.type is TraceFieldType.OBJECT and spec.fields:
             schema["properties"] = {name: self._json_schema_for_field(sub) for name, sub in spec.fields.items()}
             schema["additionalProperties"] = False
@@ -140,6 +142,8 @@ class UpdateTraceTool(BaseTool):
         # Recursively checks one value against a TraceField's leaf type and, when declared, its nested fields/items.
         if not self._value_matches_type(value, spec.type):
             return f"{path} expected {spec.type.value}"
+        if spec.enum and value not in spec.enum:
+            return f"{path} expected one of {', '.join(str(allowed) for allowed in spec.enum)}"
         if spec.type is TraceFieldType.OBJECT and spec.fields:
             for sub_name, sub_spec in spec.fields.items():
                 if sub_name not in value or value[sub_name] is None:

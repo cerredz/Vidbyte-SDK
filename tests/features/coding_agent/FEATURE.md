@@ -150,7 +150,6 @@ None yet. This is a new feature, specified in `docs/spec/coding-agent/spec.md` r
 - `test_coding_agent_agents_md.py` checks `AGENTS.md` loading and the shared coding context window: the position in the request, the byte-identical request without a file, the switch, case variants, the root-only lookup, the cap and the cut character, blank and undecodable files, a broken file, strict bool validation, the caller's manager, fork, read-once, and `CodingContextWindow` and `CodingContextSectionText` on their own.
 - `test_coding_agent_setup_commands.py` checks setup commands: two passing lines placed after `AGENTS.md` and before the user message, stop at the first failure (a marker file proves the next command never ran), the time limit, `root_dir` as the working directory, no bash, the empty default, input validation, and the capped tail of a huge output.
 - `test_coding_agent_progress_notes.py` checks progress notes: a fresh root, existing notes and `.gitignore` kept, git status clean, a sibling tool's `.vidbyte/` files still visible to git, the cross-run edit with `replace_text`, a root that cannot be written, the switch, strict bool validation, and the cap.
-- `test_coding_agent_cli.py` checks `vidbyte-sdk coding run`: one task through the real loop under the default policy, the reply as the only output, a fetch key read only from the environment variable a flag names, and exit status 1 for an unset variable or a bad folder.
 - `test_bash_tool_contract.py` covers the following:
   - The spec and constants.
   - Validation.

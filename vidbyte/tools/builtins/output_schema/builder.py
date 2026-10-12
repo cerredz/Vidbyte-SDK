@@ -86,7 +86,12 @@ class OutputSchemaBuilder:
 
     def is_empty(self) -> bool:
         # Reports whether no values have been accumulated.
-        return not any(self._values.values())
+        # @intent falsy-output-value-is-a-value
+        # false or 0 set through append_output is an answer, so only an unset scalar or an empty list counts as empty.
+        return all(
+            value == [] if self._fields[name].repeated else value is None
+            for name, value in self._values.items()
+        )
 
     def _register(self, field: OutputSchemaField) -> None:
         # Stores a field declaration and keeps its value slot in the declared shape.

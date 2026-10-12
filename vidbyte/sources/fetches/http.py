@@ -13,6 +13,7 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 from vidbyte.lib.dataclasses.sources import FetchResponse
 from vidbyte.lib.errors import ProviderRequestError, SourceFetchError
@@ -39,6 +40,12 @@ class HttpFetcher:
         # Performs a blocking GET and normalizes provider failures to SourceFetchError.
         from vidbyte.lib.http.transport import SyncHttpTransport
 
+        # @intent http-fetcher-refuses-non-http-schemes
+        # Refuse anything but http/https before any request, because the transport would
+        # otherwise open file:// paths or fail on a missing scheme with a non-fetch error.
+        scheme = urlparse(url).scheme.lower()
+        if scheme not in ("http", "https"):
+            raise SourceFetchError("Only http and https URLs can be fetched.", details={"url": url, "scheme": scheme})
         transport = SyncHttpTransport()
         try:
             response = transport.request_bytes(

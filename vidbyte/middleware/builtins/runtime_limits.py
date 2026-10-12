@@ -51,4 +51,26 @@ class RuntimeLimitMiddleware(AgentMiddleware):
             )
         return MiddlewareDecision.continue_()
 
+    async def before_model_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        """Abort before a model call that would exceed the model-call limit."""
+        # @intent runtime-model-call-limit-caps-every-call
+        # Retries inside one iteration are model calls too, so the cap is checked per call, not only between iterations.
+        if self.max_model_calls is not None and ctx.model_call_count >= self.max_model_calls:
+            return MiddlewareDecision.abort(
+                "runtime_model_call_limit",
+                metadata={"max_model_calls": self.max_model_calls},
+            )
+        return MiddlewareDecision.continue_()
+
+    async def before_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        """Abort before a developer tool call that would exceed the tool-call limit."""
+        # @intent runtime-tool-limit-caps-every-call
+        # One model response can hold several calls, so the cap is checked per call, never on the loop's own isDone.
+        if self.max_tool_calls is not None and not ctx.tool_is_internal and ctx.tool_call_count >= self.max_tool_calls:
+            return MiddlewareDecision.abort(
+                "runtime_tool_call_limit",
+                metadata={"max_tool_calls": self.max_tool_calls},
+            )
+        return MiddlewareDecision.continue_()
+
 __all__ = ["RuntimeLimitMiddleware"]
