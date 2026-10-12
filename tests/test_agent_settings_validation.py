@@ -202,6 +202,18 @@ class ProviderModelValidationTests(unittest.TestCase):
             build(provider="deepseek", model_name="anthropic/claude-sonnet-5")
         self.assertIn("registered under provider 'anthropic'", str(ctx.exception))
 
+    def test_accepts_an_openrouter_prefixed_vendor_slug_only_under_openrouter(self) -> None:
+        # @intent openrouter-slug-validates-as-its-vendor-model
+        # The Runner runs 'openrouter/<vendor>/<model>' as that vendor slug, so the config must load;
+        # under any other provider it would reach that vendor with the prefix, so it stays rejected.
+        slug = "openrouter/anthropic/claude-sonnet-5"
+        self.assertEqual(build(provider="openrouter", model_name=slug).model_name, slug)
+        self.assertEqual(build(model_name=slug).model_name, slug)
+        for provider in ("anthropic", "openai"):
+            with self.subTest(provider=provider), self.assertRaises(ConfigurationError) as ctx:
+                build(provider=provider, model_name=slug)
+            self.assertIn("registered under provider 'openrouter'", str(ctx.exception))
+
     def test_rejects_a_non_text_model_for_a_conversational_agent(self) -> None:
         with self.assertRaises(ConfigurationError) as ctx:
             build(provider="openai", model_name="dall-e-3")

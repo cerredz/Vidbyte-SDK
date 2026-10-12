@@ -150,6 +150,7 @@ class IndependentCriticAlgorithm:
             return
         ProviderModelRegistry.validate_provider(self.reviewer_provider)
         ProviderModelRegistry.validate_model(self.reviewer_model or "")
+        ProviderModelRegistry.require_openrouter_for_routed_model(self.reviewer_provider, self.reviewer_model or "")
 
     def _validate_limits(self) -> None:
         # Reject non-positive or unreasonably large budgets before constructing a reviewer runtime.
