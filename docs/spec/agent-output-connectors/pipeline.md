@@ -21,7 +21,7 @@ started: 2026-10-11 17:36
 | S5 repair loop | done (converged at iteration 1) | 2026-10-11 | 2026-10-12 | reports/S5-repair-1.md, verify-log.md | merge ba83c953 (origin/main, no conflicts); 12 findings fixed one commit each; HEAD ed1dd67b; 340/340; SDK-LINT PASS; run_ci source 3743 passed; full run_ci CI passed (re-run by orchestrator at ed1dd67b); Semgrep 0; remote ci 38211917706 + static-policy 38211919803 success @1348b728; review.md 0 open |
 | S5 re-review | done (round 1/2) | 2026-10-12 | 2026-10-12 | reports/S5-rereview.md | SOUND: 0 Blocker / 0 Major / 2 Minor (R-C1 Telegram ctor raise not recorded as deviation; R-C2 E302 blank line email.py:32); all 12 fixes hold; merge clean; §4 snippet byte-equal |
 | S5 re-review | done (round 2/2) | 2026-10-12 | 2026-10-12 | reports/S5-rereview-2.md | SOUND: 0 Blocker / 0 Major / 2 Minor (R-C1 resend hint warns only about `network`, but EC-5 http_5xx-after-create and EC-24 smtp_recipients_refused can also already be delivered → following it duplicated a GitHub issue in a probe; R-C2 pr-body.md still calls S6-1/S6-2 "not fixed" + stale Telegram rationale); S6-1/S6-2 hold; merge clean; S008 10/9/50; AC-1/AC-15/contract hold; full pytest 3824 passed |
-| S6 PR | body written; reopened S5 for 2 Minors | 2026-10-12 | | reports/S6-pr-author.md | PR #882 retitled (no [WIP]), draft, 1 mermaid, spec pr-open @ae6115f4; ci 38215600229 + static 38215602359 success @ae6115f4; AC-18/AC-24 proofs exist on branch |
+| S6 PR | done | 2026-10-12 | 2026-10-12 | reports/S6-pr-author.md | PR #882 draft, base main, no [WIP], 1 mermaid, body refreshed @4e5a6a73 (+ run IDs @1b110a49); ci 38221673990 + static 38221677030 success @4e5a6a73 (code 563efc51); spec r8 pr-open; review.md 0 open; 5 behind main, merge-tree clean, MERGEABLE |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 3/8 (iteration 2 = S6 follow-ups; iteration 3 = re-review-2 R-C1 wording) · S5 re-review rounds: 2/2
@@ -74,6 +74,8 @@ started: 2026-10-11 17:36
 
 - 2026-10-12 — Repair-3 spot-check passed @9dadba0a: code commit 563efc51 touches only errors/base.py (1 line) + 2 READMEs; lint/ unchanged; pack diff vs d87fcbaf and tests/ diff vs d4100704 both 0 lines; 341 passed (re-run by me); ci 38220771957 + static 38220773950 success on 9dadba0a (checked via gh run view). Caution now names network, invalid_response, smtp_error, smtp_recipients_refused, and codes starting http_5 — wider than the reviewer's list, each derived from the code that builds it (invalid_response only after a 2xx; smtp_error covers a reply timeout after DATA). Accepted: all five can follow a stored post.
 - 2026-10-12 — Spec r8 next: align §9.2, AC-24, EC-42, row 25 with the final literal, and correct EC-46 (`port=2465` yields `smtp_error`, not `network` — code is right, the spec mis-predicted; no test pins it). Then S6 refresh (RR2-C2 + final verification table).
+
+- 2026-10-12 — Spec r8 @1f5338da verified (spec.md + S1 report only). S6 refresh verified: files since 563efc51 are docs/spec only; runs on 4e5a6a73 success (gh run view); remote body ends with the attribution line, 1 mermaid, draft, base main, MERGEABLE; tree clean, 0 unpushed. Accepted S6's title/body split (`tail -n +2`) — line 1 of pr-body.md is the title. Run finished; tearing down the worktree (branch kept).
 
 ## User replies (verbatim)
 - (none yet)
