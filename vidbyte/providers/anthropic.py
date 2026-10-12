@@ -129,6 +129,9 @@ class AnthropicProvider:
             event = json.loads(raw_line)
         except (json.JSONDecodeError, ValueError):
             return None
+        # @intent non-object-sse-payload-is-skipped
+        if not isinstance(event, dict):
+            return None
         if event.get("type") == "content_block_delta":
             delta = event.get("delta", {})
             if isinstance(delta, dict) and delta.get("type") == "text_delta":

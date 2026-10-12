@@ -147,6 +147,9 @@ class OpenAIProvider:
             event = json.loads(raw_line)
         except (json.JSONDecodeError, ValueError):
             return None
+        # @intent non-object-sse-payload-is-skipped
+        if not isinstance(event, dict):
+            return None
         event_type = event.get("type", "")
         if event_type == "response.text.delta":
             delta = event.get("delta")
