@@ -13,6 +13,8 @@ COMMON MODIFICATION PATTERNS:
 KNOWN EDGE CASES:
     An actor class missing from the actor registry cannot be named in a
     checkpoint, so it is left out of the exported list.
+RELATED DOCS:
+    vidbyte/lib/registries/actors.py (the role-name registry used for the round trip)
 TESTS:
     python -m pytest -q tests/test_restore_actor_include_actors.py
 """
