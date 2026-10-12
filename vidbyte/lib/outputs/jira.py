@@ -16,7 +16,9 @@ from collections.abc import Callable
 
 from vidbyte.lib.constants.outputs import (
     JIRA_ADF_VERSION,
+    JIRA_BROWSE_PATH,
     JIRA_DEFAULT_ISSUE_TYPE,
+    JIRA_ISSUE_PATH,
     JIRA_SITE_PATTERN,
     JIRA_TEXT_MAX_CHARS,
     OUTPUT_TITLE_MAX_CHARS,
@@ -72,7 +74,7 @@ class JiraIssueOutput(BaseOutput):
         # @intent jira-issue-link-is-built-from-the-key
         # Jira returns only the new issue's key, so the link is built
         # from the checked site; a 2xx with no key is FAILED.
-        request = OutputRequest(f"https://{self._site}/rest/api/3/issue", {"authorization": f"Basic {basic}"}, {"fields": fields}, link_path=("key",), link_prefix=f"https://{self._site}/browse/")
+        request = OutputRequest(f"https://{self._site}{JIRA_ISSUE_PATH}", {"authorization": f"Basic {basic}"}, {"fields": fields}, link_path=("key",), link_prefix=f"https://{self._site}{JIRA_BROWSE_PATH}")
         return await OutputHttp.post(self.destination, request)
 
 

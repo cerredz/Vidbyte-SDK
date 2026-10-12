@@ -98,6 +98,8 @@ LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 LINEAR_ISSUE_CREATE_MUTATION = "mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { url } } }"
 JIRA_SITE_PATTERN = r"[A-Za-z0-9-]+\.atlassian\.net"
 JIRA_DEFAULT_ISSUE_TYPE = "Task"
+JIRA_ISSUE_PATH = "/rest/api/3/issue"
+JIRA_BROWSE_PATH = "/browse/"
 JIRA_ADF_VERSION = 1
 NOTION_PAGES_URL = "https://api.notion.com/v1/pages"
 NOTION_API_VERSION = "2026-03-11"
@@ -112,7 +114,9 @@ __all__ = [
     "GOOGLE_CHAT_MENTION_REPLACEMENT",
     "GOOGLE_CHAT_TEXT_MAX_CHARS",
     "JIRA_ADF_VERSION",
+    "JIRA_BROWSE_PATH",
     "JIRA_DEFAULT_ISSUE_TYPE",
+    "JIRA_ISSUE_PATH",
     "JIRA_SITE_PATTERN",
     "JIRA_TEXT_MAX_CHARS",
     "LINEAR_GRAPHQL_URL",
