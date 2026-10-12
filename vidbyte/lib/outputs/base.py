@@ -71,6 +71,13 @@ class OutputArguments:
         raise ConfigurationError(f"{parameter} must be a list or tuple of strings, got {value!r}.", details={"parameter": parameter})
 
     @staticmethod
+    def non_empty(values: tuple[str, ...], *, parameter: str) -> tuple[str, ...]:
+        """Require at least one item, so an empty list names the parameter rather than a record field."""
+        if values:
+            return values
+        raise ConfigurationError(f"{parameter} must list at least one value.", details={"parameter": parameter})
+
+    @staticmethod
     def identifier(value: object, *, parameter: str) -> str:
         """Require a UUID, dashed or 32 hex digits, and return it dashed."""
         try:

@@ -47,7 +47,7 @@ class EmailOutput(BaseOutput):
         render: Callable[[AgentMessage], OutputContent] | None = None,
     ) -> None:
         super().__init__(render=render)
-        recipients = OutputArguments.texts((to,) if isinstance(to, str) else to, parameter="to")
+        recipients = OutputArguments.non_empty(OutputArguments.texts((to,) if isinstance(to, str) else to, parameter="to"), parameter="to")
         login = OutputArguments.text(username, parameter="username")
         self._settings = SmtpSettings(
             host=OutputArguments.text(host, parameter="host"),
