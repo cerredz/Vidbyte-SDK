@@ -191,3 +191,18 @@ The r6 fixes were applied to a throwaway copy of the tree in the scratchpad. Tha
 ### Spec items found (none blocking)
 - **R-1, R-3, and R-12 have no AC row.** Their proof is INV-4/EC-41, NFR-2/EC-47/INV-19, and EC-48, so no Proof cell names them. AC-3's surface list does not include logs.
 - **AC-20's `"pagerduty"` case cannot use a built-in connector.** Every built-in connector has an enum `destination`, so the case uses the pack's caller-written `ScriptedConnector("pagerduty")`. This is not a spec defect.
+
+## Addendum: late-review AC-20 case (2026-10-12)
+
+A late reader found that `EmailOutput(to=[], host="smtp.gmail.com", username="bot@acme.com")` raises a `ConfigurationError` that names `recipients`, the internal `SmtpSettings` field, instead of `to`. The cause is in `vidbyte/lib/outputs/email.py:50`: `OutputArguments.texts` accepts an empty sequence, so the empty tuple reaches `vidbyte/lib/dataclasses/outputs.py:112-113`.
+
+The change is one new row in the existing AC-20 table: `test_output_connectors_configuration.py::test_invalid_connector_argument_is_rejected_at_construction_naming_the_parameter_and_no_secret[email-empty-to]`. It uses the table's existing checks: `to` must appear as a whole word, and the message and `details` must hold no secret. `to=()` raises the same message, so it has no row of its own.
+
+Red run at `5b484d8f` plus this row:
+```
+test_output_connectors_configuration.py:95: AssertionError: recipients must be a non-empty tuple of email addresses, got ().
+$ PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors
+1 failed, 340 passed
+```
+
+`python lint/run.py` ends `SDK-LINT: PASS`. The spec was not changed: AC-20's Proof cell already names this test function.
