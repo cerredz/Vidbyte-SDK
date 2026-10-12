@@ -190,3 +190,60 @@ The full suite grew from 3743 to 3824 passing because of main's 8 commits. The r
 - `git diff d4100704..HEAD -- tests/` is empty.
 
 **Still open:** none of S6-1 or S6-2. The spec §8.5, §12.3 row 13, and §17 line for `OutputArguments.non_empty` is a docs follow-up for the orchestrator.
+
+## Iteration 3 — 2026-10-12 — agent report: reports/S5-repair-3.md
+
+**Defects in:**
+- RR2-C1 (Minor, conformance, from reports/S5-rereview-2.md R-C1): the `OutputDeliveryError` resend caution at `vidbyte/lib/errors/base.py:215` named only network failures. EC-5 (`http_502` after GitHub created the issue) and EC-24 (`smtp_recipients_refused` after one of two recipients got the email) may already be delivered, so following the hint can post twice.
+- Failing gates: none. Every gate was green at 81f9cba0, and cc79a564 differs only in docs.
+- Not this iteration's: RR2-C2 (pr-body.md) belongs to S6.
+
+**Hypotheses and attempts (in order):**
+- Checked for pinned wording first. `grep -rn "may already\|check its destination\|repair_approaches" tests/` finds only `test_output_connectors_dispatch.py:265` and `:273`, which assert that the field exists and is non-empty. No test pins the hint text or the README sentence, so no test blocks the fix.
+- Hypothesis: the caution should name every receipt code that can follow a request the destination already stored. I derived the list from INV-11's code forms, the EC table, D-21, and the code that builds each code (`delivery.py:78-93`, `:156-167`; `dispatcher.py:96`), then checked each one with a probe.
+  - Probe: `scratchpad/s5r3/probe_rr2_c1.py` (session scratchpad, not in the repo). It runs the real `OutputHttp.post` and `_send_once` through `httpx.MockTransport`, and the real `OutputSmtp.send` through a real smtplib client on an in-process `socket.socketpair()`. It makes no network call. Each case stores the content at the fake destination first, then fails.
+  - Before the fix, it printed this: `http_502` stored 1, caution names it False; `invalid_response` stored 1, False; `network` stored 1, True; `smtp_error` stored 1, False; `smtp_recipients_refused` stored 1, False.
+  - Two codes go beyond the reviewer's proposal:
+    - `invalid_response` is returned only after a 2xx (`delivery.py:84-92`, D-21). For GitHub, Jira and Notion, a 2xx means the object was created even when the link cannot be read (probe: GitHub 201 with a truncated JSON body).
+    - `smtp_error` covers an SMTP reply timeout. smtplib's `getreply` turns a read `OSError` into `SMTPServerDisconnected`. That class is an `SMTPException`, and `OutputSmtp.send` catches `SMTPException` before `OSError`, so a server that stores the body and then stalls past `OUTPUT_TIMEOUT_SECONDS` gives `smtp_error`, not `network`.
+  - Left out, with the reason for each:
+    - `http_4xx` and `smtp_<code>`: the destination refused the request (EC-1, EC-3, EC-23, EC-25, EC-31 to EC-33). EC-48 keeps the QUIT reply from changing the receipt.
+    - `unexpected:<Type>`: from a built-in connector it is raised before any request is made (EC-16, EC-40, EC-49). From a caller-written connector, the caller owns the code.
+    - `http_3xx`: EC-35 treats it as a refused redirect.
+    - Flip condition: if a destination is found that answers 3xx or 4xx after storing a post, add that code.
+- Wording: the reviewer's sentence used `http_5xx`, but no receipt carries that spelling. `_error_code` builds `http_<status>` or `http_<status>:<token>` (`delivery.py:99-103`), so the caution says "starts with http_5". A caller can test that with `str.startswith`.
+  - The inverse wording, which names what is safe to resend, came out longer. It would also have had to rule on `http_3xx` and `unexpected:`.
+  - Worked first time.
+- The hint stays one literal on one line (S062). The zip recipe is byte-identical to S6-2's; only the clause after the last `;` changed.
+- After the fix, the probe printed True for all five codes, and the feature pack gave `341 passed in 3.76s`.
+
+**Changes:**
+- 563efc51 fix(outputs): widen the resend caution to every failure that may already have landed [RR2-C1]
+  - `vidbyte/lib/errors/base.py:215`: the caution is now "if a failed receipt's error_code is network, invalid_response, smtp_error, or smtp_recipients_refused, or starts with http_5, that output may already have been delivered, so check its destination first."
+  - `vidbyte/agents/output/README.md:98-101`: the same list, with "(which includes a send that passed the deadline)" after `network`, because nothing near that paragraph says the deadline gives `network`.
+  - `vidbyte/lib/outputs/README.md:144-148` (the Deadline bullet): the same list. The bullet's first sentence already says the deadline gives `network`.
+
+Nothing under `tests/`, `lint/`, `.github/`, `.semgrep/`, `contracts/`, spec.md, pr-body.md, or `vidbyte/agents/base.py` changed.
+
+**Gate matrix out** (code at 563efc51):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| feature pack | `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/agent_output_connectors` | PASS | `341 passed in 3.76s` |
+| lint | `python lint/run.py` | PASS | `S009 RATCHETED: 350 known finding(s).` · `S051 IMPROVED 259 -> 258` · `S064 RATCHETED: 4 known finding(s).` · `SDK-LINT: PASS` |
+| run_ci source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `SDK-LINT: PASS` · `3824 passed, 13 skipped in 32.31s` · `CI passed.` (exit 0) |
+| run_ci full | `python scripts/run_ci.py` (PYTHONPATH unset) | PASS | `SDK-LINT: PASS` · `3824 passed, 13 skipped in 32.78s` · `No broken requirements found.` · `Installed vidbyte-sdk 0.2.1 passed smoke checks.` · `CI passed.` (exit 0) |
+| contract | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at 839e8e33… (vidbyte-sdk 0.2.1, 623 exports).` |
+| Semgrep | `semgrep --test …` · `semgrep scan --error …` (1.170.1, own venv) | PASS | `1/1: ✓ All tests passed` · `Ran 1 rule on 911 files: 0 findings.` (both exit 0) |
+| remote ci.yml | dispatched on the docs commit that records this entry | see the S5 STATUS block | — |
+| remote static-policy.yml | dispatched on the docs commit that records this entry | see the S5 STATUS block | — |
+
+Remote runs are dispatched once, after the docs push, so they cover the final SHA. The code they test is 563efc51's, because the docs commit changes only `docs/spec/`.
+
+**Test tree check:**
+- `git diff d87fcbaf..HEAD -- tests/features/agent_output_connectors docs/spec/agent-output-connectors/test-plan.md` is empty (0 lines).
+- `git diff d4100704..HEAD -- tests/` is empty (0 lines).
+
+**Still open:**
+- RR2-C1 is fixed in code. The spec author aligns spec §9.2, AC-24 and EC-42 with the literal above (r8). That list now also has `invalid_response` and `smtp_error`.
+- Spec text only, for the spec author: EC-46 says `EmailOutput(port=2465)` fails "giving FAILED `network`". The greeting wait goes through the same smtplib `getreply`. A probe gives `SMTPServerDisconnected | Connection unexpectedly closed: timed out | SMTPException: True | OSError: True`, and `OutputSmtp.send` catches `SMTPException` first, so the receipt is `smtp_error`. No code or README states the code for that case, so nothing else needs to change.
