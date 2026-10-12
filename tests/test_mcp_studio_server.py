@@ -28,6 +28,7 @@ from vidbyte.agents import BaseAgent
 from vidbyte.mcp_server import McpStudioServer
 from vidbyte.mcp_server.server import (
     JSONRPC_METHOD_NOT_FOUND,
+    JSONRPC_PARSE_ERROR,
 )
 from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.mcp_server.server import core as server_core
@@ -272,6 +273,22 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
         self.assertEqual([response["id"] for response in responses], [1, 2])
         self.assertNotIn("error", responses[1])
+
+    async def test_run_answers_undecodable_line_with_parse_error_and_keeps_serving(self) -> None:
+        lines = [
+            b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n',
+            b'{"jsonrpc":"2.0","id":2,"method":"ping","params":{"x":"\xff\xfe"}}\n',
+            b'{"jsonrpc":"2.0","id":3,"method":"ping"}\n',
+        ]
+        stdin = io.BytesIO(b"".join(lines))
+        stdout = io.BytesIO()
+        fake_sys = SimpleNamespace(platform="win32", stdin=SimpleNamespace(buffer=stdin), stdout=SimpleNamespace(buffer=stdout))
+        with mock.patch.object(server_core, "sys", fake_sys):
+            await McpStudioServer().run()
+        responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
+        self.assertEqual([response["id"] for response in responses], [1, None, 3])
+        self.assertEqual(responses[1]["error"]["code"], JSONRPC_PARSE_ERROR)
+        self.assertEqual(responses[2]["result"], {})
 
     async def test_ping_returns_empty_result(self) -> None:
         response = await self._dispatch(McpStudioServer(), "ping", request_id=9)
