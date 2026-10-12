@@ -6,6 +6,7 @@ ARCHITECTURE NOTE: Data and validation only. No record reads a file, an environm
 FUNCTION INVENTORY:
     SkillDocument.__post_init__() -> None: validates required text and optional source while leaving every accepted string unchanged.
     SkillText.require / require_optional / require_segment: shared non-blank, optional, and one-path-segment text checks that name the failing Class.field.
+    SkillText.require_version / require_folder: the vendor version check (text, with a hint for an integer) and the folder check that returns the folder pinned to an absolute Path; each has one owner here, shared by the two vendor entries and the two folder entries.
     SkillEntry.__post_init__() -> None: checks `name`, then calls `_validate_source()`; the base hook raises because only the six subclasses are usable entries.
     InlineSkill, LocalSkill, SkillsShSkill, GitHubSkill, AnthropicSkill, OpenAISkill._validate_source() -> None: per-source field checks (section 9.1 of the spec).
     SkillResolution.__post_init__() -> None: exactly one of a document, or a reason with a non-blank detail; `transient` is derived from the reason.
@@ -86,6 +87,22 @@ class SkillText:
         if value in SKILL_PATH_SPECIAL_SEGMENTS or any(character in value for character in SKILL_NAME_FORBIDDEN_CHARACTERS):
             raise ConfigurationError(f"{field_name} must be one folder name: no '/', '\\', ':', or NUL, and not '.' or '..'.")
 
+    @staticmethod
+    def require_version(value: object, field_name: str) -> None:
+        # Versions are text in the vendor's URL; an integer, a common
+        # slip, gets a hint to pass it as text.
+        if type(value) is int:
+            raise ConfigurationError(f'{field_name} must be text; pass "{value}".')
+        SkillText.require(value, field_name)
+
+    @staticmethod
+    def require_folder(value: object, field_name: str) -> Path:
+        # Pins a relative folder to the working folder now, so a later
+        # chdir does not move the skill; nothing on disk is read here.
+        if not isinstance(value, (str, Path)) or value == "":
+            raise ConfigurationError(f"{field_name} must be a non-empty str or Path naming a folder.")
+        return Path(value).absolute()
+
 
 @dataclass(frozen=True, slots=True)
 class SkillEntry:
@@ -129,13 +146,12 @@ class LocalSkill(SkillEntry):
     type: SkillSourceType = field(default=SkillSourceType.LOCAL, init=False)
 
     def _validate_source(self) -> None:
-        # Pin a relative folder to the working folder now, so a later
-        # chdir does not move the skill; nothing on disk is read here.
-        if not isinstance(self.path, (str, Path)) or self.path == "":
-            raise ConfigurationError("LocalSkill.path must be a non-empty str or Path naming the skill folder.")
-        if Path(self.path).name.lower() == SKILL_MARKDOWN_FILE_NAME.lower():
+        # The folder is pinned to an absolute path, and it must be the
+        # folder that holds SKILL.md, never the file itself.
+        folder = SkillText.require_folder(self.path, "LocalSkill.path")
+        if folder.name.lower() == SKILL_MARKDOWN_FILE_NAME.lower():
             raise ConfigurationError(f"LocalSkill.path must name the folder that holds {SKILL_MARKDOWN_FILE_NAME}, not the file itself.")
-        object.__setattr__(self, "path", Path(self.path).absolute())
+        object.__setattr__(self, "path", folder)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,9 +167,7 @@ class SkillsShSkill(SkillEntry):
         # segment; the directory is pinned like LocalSkill.path.
         SkillText.require_segment(self.name, "SkillsShSkill.name")
         SkillText.require(self.source, "SkillsShSkill.source")
-        if not isinstance(self.directory, (str, Path)) or self.directory == "":
-            raise ConfigurationError("SkillsShSkill.directory must be a non-empty str or Path.")
-        object.__setattr__(self, "directory", Path(self.directory).absolute())
+        object.__setattr__(self, "directory", SkillText.require_folder(self.directory, "SkillsShSkill.directory"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,9 +209,7 @@ class AnthropicSkill(SkillEntry):
     def _validate_source(self) -> None:
         # Versions are text in the vendor's URL; an integer gets a hint.
         SkillText.require(self.skill_id, "AnthropicSkill.skill_id")
-        if type(self.version) is int:
-            raise ConfigurationError(f'AnthropicSkill.version must be text; pass "{self.version}".')
-        SkillText.require(self.version, "AnthropicSkill.version")
+        SkillText.require_version(self.version, "AnthropicSkill.version")
         SkillText.require_optional(self.api_key, "AnthropicSkill.api_key")
 
 
@@ -213,9 +225,7 @@ class OpenAISkill(SkillEntry):
     def _validate_source(self) -> None:
         # Versions are text in the vendor's URL; an integer gets a hint.
         SkillText.require(self.skill_id, "OpenAISkill.skill_id")
-        if type(self.version) is int:
-            raise ConfigurationError(f'OpenAISkill.version must be text; pass "{self.version}".')
-        SkillText.require(self.version, "OpenAISkill.version")
+        SkillText.require_version(self.version, "OpenAISkill.version")
         SkillText.require_optional(self.api_key, "OpenAISkill.api_key")
 
 
