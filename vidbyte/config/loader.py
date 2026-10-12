@@ -89,7 +89,7 @@ class YamlLoader:
         document_path = self._path(path)
         document = self._read(document_path)
         if self._is_harness(document):
-            return self.load_harness(document_path)
+            return self._parse_harness_spec(document_path)
         return self._parse_agent_settings(document_path, document)
 
     def load_agent(self, path: str | Path) -> AgentSettings:
@@ -100,10 +100,17 @@ class YamlLoader:
     def load_harness(self, path: str | Path) -> HarnessSpec:
         # Loads one harness document into a validated, content-addressed HarnessSpec.
         document_path = self._path(path)
+        # @intent explicit-harness-load-rejects-duplicates
+        # The harness parser is last-key-wins, so run load()'s duplicate-rejecting read first or a hidden later key would win here.
+        self._read(document_path)
+        return self._parse_harness_spec(document_path)
+
+    def _parse_harness_spec(self, path: Path) -> HarnessSpec:
+        # Delegates an already-read harness document to the harness parser, naming the file on failure.
         try:
-            return HarnessConfigLoader().load(document_path)
+            return HarnessConfigLoader().load(path)
         except ConfigurationError as error:
-            error.details.setdefault("path", str(document_path))
+            error.details.setdefault("path", str(path))
             raise
 
     def harness_agent_names(self, spec: HarnessSpec) -> tuple[str, ...]:
