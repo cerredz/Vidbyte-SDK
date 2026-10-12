@@ -273,6 +273,21 @@ class SourcesBaseTests(unittest.TestCase):
                     self.assertEqual(caught.exception.details, {"url": url, "scheme": scheme})
             request_bytes.assert_not_called()
 
+    def test_httpfetcher_wraps_read_timeout_so_chained_fetcher_falls_back(self) -> None:
+        # @intent sync-request-bytes-normalizes-socket-errors
+        # [Error Path] urllib leaves a body read timeout unwrapped; HttpFetcher must still raise SourceFetchError.
+        response = mock.MagicMock(status=200)
+        response.__enter__.return_value = response
+        response.read.side_effect = TimeoutError("The read operation timed out")
+        url = "https://ex.com/x.md"
+        with mock.patch("vidbyte.lib.http.transport.urlopen", return_value=response):
+            with self.assertRaises(SourceFetchError) as caught:
+                HttpFetcher().fetch(url)
+            self.assertEqual(caught.exception.details, {"url": url, "status_code": None, "excerpt": "TimeoutError: The read operation timed out"})
+            fetcher = ChainedFetcher([HttpFetcher(), InMemoryFetcher({url: _DATA})])
+            result = DocumentSource(fetcher=fetcher).load(ArtifactRef(url=url))
+        self.assertEqual(result.items[0].title, "Title")
+
     def test_direct_http_fetch_tool_reports_fetch_failed_for_file_url(self) -> None:
         # [Edge Case] A model-supplied file:// URL is a clean fetch_failed result, not an execution error.
         with tempfile.TemporaryDirectory() as tmp:
