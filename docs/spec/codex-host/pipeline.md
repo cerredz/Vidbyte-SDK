@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:27 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md | spec r1 a1ee792a (18 sections, §12.3 28 rows); review round 1 launched 06:00 UTC |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -46,6 +46,16 @@ started: 2026-10-13 00:45 UTC
   - This run's Python venv for tests and gates is `C:/Users/422mi/vidbyte-repos/.venvs/sdk-codex-host`, created at S2.
   *Why:* never pip-install into the global Python. Its editable `vidbyte` install points at the canonical checkout, and two parallel runs would clobber each other. Semgrep breaks next to the SDK's mcp 2.x.
 
+- 2026-10-13 05:32 UTC — **An API session limit (HTTP 429) killed the S1 author** after it had written spec.md but before it committed. Once the limit reset, the orchestrator resumed the same agent with SendMessage. The resume message carried three corrections:
+  - export lists take sorted inserts;
+  - S045 forbids a `timeout` parameter on async methods;
+  - every raw `request` call must stay S012-compliant without suppressing the rule.
+- 2026-10-13 05:55 UTC — **S1 r1 spot-check passed.** The frontmatter `base_commit` and `worktree` match, there are 18 `## §` sections, §12.3 (lines 1190–1222) has 28 numbered rows, and the last commit is `docs(spec): add codex-host spec r1` (a1ee792a).
+- 2026-10-13 05:55 UTC — **Two revisions to request.md §C, the shared-file contract,** with the same change made to the ClaudeHost request.md:
+  1. The export-list bullet now says "insert only your own entries, in the file's own sorted order; never reorder or remove existing ones", replacing "append-only".
+  2. A new bullet fixes byte-identical text for the `REPO_MAP.md` native section and the `vidbyte/harnesses/README.md` bullet. The bullet block is byte-identical in both request.md files (SHA-256 `6da4fa77…51277b0`).
+  *Why:* spec r1 §12.5 proposed its own REPO_MAP text and asked the orchestrator to give PR B identical text, but ClaudeHost spec r1 had different text at the same two insertion points, which would conflict at the second merge. Spec r1's REPO_MAP text also broke the field guide's `agents-md-map.md` rule, which forbids backtick-quoted names and child-folder paths in a folder description. The fixed text is host-neutral and follows that rule. The spec author must adopt it in revision.
+
 ## User replies (verbatim)
 - none yet
 
@@ -71,4 +81,34 @@ started: 2026-10-13 00:45 UTC
   - The MCP tool registry runs tools without a `PermissionPolicy` check (mcp_server/handlers.py:88).
   - `BaseAgent` gives each agent its own tool copy only for classes in explicit lists (agents/base.py:421-482). `agents/base.py` is shared with the ClaudeHost PR, so any edit there must be minimal and append-only.
   *source:* S0.
+- **Design (spec r1, approach B).**
+  - `CodexHost`, in `vidbyte.harnesses.native.codex`, is an async context manager that owns one Codex app-server.
+  - It calls openai-codex's public sync `CodexClient` through `asyncio.wait_for(asyncio.to_thread(...), CODEX_HOST_REQUEST_TIMEOUT_SECONDS=300)`.
+  - Typed client methods carry the full params.
+  - Five raw calls go through `request_with_retry_on_overload`. The two that spend money (`review/start`, the goal budget set) get a single attempt (`CODEX_HOST_SINGLE_ATTEMPT`).
+  - Runner-up A (AsyncCodex plus the private `_client`) was rejected: it uses a private attribute, and its raw `request` fails S012.
+  - Budget: 17 new files, 30 classes, 15 records, 13 enums, 0 dependencies, 0 root exports.
+  *source:* S1 author.
+- **Contract names:**
+  - `CodexHost`, `CodexToolScope`, `CodexHostTools`;
+  - `CodexTurnSnapshot` (not `CodexTurnOutcome`, which already exists);
+  - `CodexTurnStatus.RUNNING = "inProgress"`;
+  - new failure codes directly after `CODEX_RUN_OPTION_UNSUPPORTED`.
+  *source:* S1 author.
+- **Test seam.** Patch the module attribute `vidbyte.harnesses.native.codex.connection.CodexClient` before entering the host; it is imported lazily in `__aenter__`. Also patch `shutil.which` and `sys.platform`. The fake needs no `request` or `model_list`, and the five raw calls go through `request_with_retry_on_overload`, keyed by method name. *source:* S1 author.
+- **S012 matches any call to a name `request`, bare or as a method.** Passing `client.request` uncalled to `to_thread` is forbidden too. A002 `# @intent` comes next: it applies to identifiers containing request, retry, attempt, fallback, provider and similar words. *source:* S1 author.
+- **The S1 author's least-sure assumptions:**
+  - A-1: the Windows npm `.cmd` launcher works and stops at close.
+  - A-2: a goal can start before the first turn.
+  - A-3: usage totals are cumulative.
+  - A-6: setting only the budget leaves the goal alone.
+  - A-7: approvals arrive only when the reviewer is `user`.
+  - A-12: the version reported at `initialize` can be parsed.
+  Q-1 to Q-9 all have defaults:
+  - Q-1: no split of the 1,205-line dataclass module.
+  - Q-2: minimum CLI version 0.151.0.
+  - Q-3: accept approvals.
+  - Q-4: no root exports.
+  - Q-5: refusal cap, default `None`.
+  *source:* S1 author.
 - **openai_codex must load lazily.** Nothing reachable from `import vidbyte`, or from `vidbyte.tools.builtins` (which the YAML component registry scans), may import openai_codex at module level. The precedent is `CodexTransport._load_sdk` (transport.py:215-259). CI installs only `.[dev]`, so SDK-dependent tests skip there (`skipUnless`). The global Python 3.11 has openai-codex 0.162.1. *source:* S0.
