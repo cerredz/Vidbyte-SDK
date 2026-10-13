@@ -32,6 +32,14 @@ Each line is input + state → wrong output. The test that catches it is in the 
 - `repr()` of a record, a config, or a settings object → shows a key (AC-20, INV-4).
 - `api_keys=['xai-a…', 'sk-ant-b…']` in free text → the harness redactor removes only the first key (AC-22, EC-49).
 - Old `api_key=` keyword → silently ignored or accepted → a key used for the wrong provider (AC-24).
+- A hand-built `ProviderKeys` that files a Vidbyte key under a provider → `vb_live_…` sent to that vendor in `DIRECT` (INV-13, review R-2).
+- An aggregate with no `aggregator` (the default is its own provider and model) and a list without that provider's key → every synthesis call silently goes Vidbyte-paid (INV-24, D-27, review R-3).
+- `VIDBYTE_MANAGED` with no list and `OPENAI_API_KEY=vb_live_…` → the provider variable is read, and M-14 fails a mode that never uses it (INV-5, EC-13, review R-4).
+- An image or audio model with `api_keys=[K_x, K_o]` → the runner takes the first key, and xAI's key goes to OpenAI's endpoint (INV-3, AC-23, review R-5).
+- A gateway-mode config for an unserved provider or with an endpoint, plus another provider's key → M-18 ("add your mistral key") instead of M-12 or M-13 naming `DIRECT`, a remedy that cannot work (INV-8, D-15, review R-6).
+- A `VIDBYTE_MANAGED` call answered 402 → the message says to add a key to `api_keys`, which that mode ignores (INV-5, D-15, review R-17).
+- `AgentRoleSettings(vidbyte_api_key=" vb_live_… ")` → refused as malformed although `Agent` accepts and strips the same value (INV-26, review R-14).
+- A dump of a relay request's headers → `X-Vidbyte-Provider-Key` is not a credential name, so the provider key survives redaction while the bearer is scrubbed (NFR-1, INV-22, review R-15).
 
 ## Contract
 
