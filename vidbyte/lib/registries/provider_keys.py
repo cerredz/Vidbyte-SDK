@@ -15,7 +15,11 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, ClassVar
 
-from vidbyte.lib.constants.jev import VIDBYTE_API_KEY_PREFIX, VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND, VIDBYTE_PROVIDER_KEY_PATTERN
+from vidbyte.lib.constants.jev import (
+    VIDBYTE_API_KEY_PREFIX,
+    VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
+    VIDBYTE_PROVIDER_KEY_PATTERN,
+)
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
@@ -327,8 +331,7 @@ class ProviderKeyMatcher:
                 continue
             names = [name.value for name in configured]
             raise ConfigurationError(
-                f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and none of the providers configured here "
-                f"({', '.join(names) or 'none'}) can take such a key. Add the model that uses it, or set that provider's own API key environment variable instead.",
+                f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and none of the providers configured here ({', '.join(names) or 'none'}) can take such a key. Add the model that uses it, or set that provider's own API key environment variable instead.",
                 details={"field": field_name, "index": index, "length": len(key), "providers": names},
             )
 
@@ -364,8 +367,7 @@ class ProviderKeyMatcher:
                 names = [name.value for name in candidates[key]]
                 variables = [env_vars[name] for name in candidates[key]]
                 raise ConfigurationError(
-                    f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and it could belong to any of {', '.join(names)}. "
-                    f"Set it as one of {', '.join(variables)} instead, so the SDK does not have to guess.",
+                    f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and it could belong to any of {', '.join(names)}. Set it as one of {', '.join(variables)} instead, so the SDK does not have to guess.",
                     details={"field": field_name, "index": index, "length": len(key), "providers": names},
                 )
             bound[candidates[forced][0]] = (waiting.pop(forced), forced)
@@ -383,8 +385,7 @@ class ProviderKeyMatcher:
             return
         names = [provider.value for provider, _bound in sorted(held.items(), key=lambda item: item[1][0])]
         raise ConfigurationError(
-            f"{field_name} holds keys for {', '.join(names)} but none for {missing.value}, the provider of a configured model. "
-            f"Add your {missing.value} key to {field_name}, or pass no provider keys to use {env_vars[missing]} or Vidbyte's own {missing.value} account.",
+            f"{field_name} holds keys for {', '.join(names)} but none for {missing.value}, the provider of a configured model. Add your {missing.value} key to {field_name}, or pass no provider keys to use {env_vars[missing]} or Vidbyte's own {missing.value} account.",
             details={"field": field_name, "provider": missing.value, "providers": names},
         )
 

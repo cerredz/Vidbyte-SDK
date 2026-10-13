@@ -24,7 +24,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.lib.dataclasses.agents import FallbackModel, FallbackTransform, ProviderKeys
+from vidbyte.lib.dataclasses.agents import (
+    FallbackModel,
+    FallbackTransform,
+    ProviderKeys,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.errors import (
@@ -111,7 +115,9 @@ class AgentFallback:
     @staticmethod
     def providers_in(spec: Sequence[str | FallbackModel] | AgentFallbackSettings | None) -> tuple[str, ...]:
         """Return the providers a fallback spec names, in order, or () when there is no spec."""
-        from vidbyte.agents.settings import AgentFallbackSettings as _AgentFallbackSettings
+        from vidbyte.agents.settings import (
+            AgentFallbackSettings as _AgentFallbackSettings,
+        )
 
         if spec is None:
             return ()

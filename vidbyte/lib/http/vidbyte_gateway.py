@@ -94,10 +94,7 @@ class _GatewayAnswer:
         # caller's own key or account, so the remedy is theirs to fix,
         # never a Vidbyte wallet, quota, or cap.
         if relays and status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.PAYMENT_REQUIRED, HTTPStatus.FORBIDDEN):
-            return (
-                f"{provider.value} refused the call made with your own {provider.value} key (HTTP {status}): the key is wrong or revoked, "
-                f"lacks access to this model, or its {provider.value} account cannot pay; the provider's message is withheld, and Vidbyte did not bill the call"
-            )
+            return f"{provider.value} refused the call made with your own {provider.value} key (HTTP {status}): the key is wrong or revoked, lacks access to this model, or its {provider.value} account cannot pay; the provider's message is withheld, and Vidbyte did not bill the call"
         relayed = f"{provider.value} returned HTTP {status} through the Vidbyte gateway; the provider's message is withheld, and the call was not billed"
         return f"{relayed}; {retried}" if status in (HTTPStatus.CONFLICT, HTTPStatus.BAD_GATEWAY) else relayed
 
@@ -111,16 +108,10 @@ class _GatewayAnswer:
         # remedies are worded differently there.
         reasons = {
             VIDBYTE_STATUS_UNAUTHORIZED: f"Vidbyte rejected the Vidbyte API key (HTTP {status}); check {VIDBYTE_API_KEY_ENV_VAR} or vidbyte_api_key",
-            VIDBYTE_STATUS_PAYMENT_REQUIRED: (
-                f"your own Vidbyte wallet balance is too low for this call (HTTP {status}, which never means a provider's billing); "
-                f"top up the wallet, or add your own provider key for {provider.value} to api_keys so the wallet pays only Vidbyte's fee"
-            ),
+            VIDBYTE_STATUS_PAYMENT_REQUIRED: f"your own Vidbyte wallet balance is too low for this call (HTTP {status}, which never means a provider's billing); top up the wallet, or add your own provider key for {provider.value} to api_keys so the wallet pays only Vidbyte's fee",
             VIDBYTE_STATUS_FORBIDDEN: f"the Vidbyte API key lacks the models:invoke scope (HTTP {status}); grant that scope to the key",
             HTTPStatus.CONFLICT: f"an earlier attempt of this call is still running at Vidbyte (HTTP {status}) and may still complete and be billed; {retried}, so wait before sending the request again, because a new request may pay twice",
-            HTTPStatus.REQUEST_ENTITY_TOO_LARGE: (
-                f"the request exceeds the gateway's 2,000,000-byte limit, measured as JSON with non-ASCII characters escaped (HTTP {status}); "
-                "shorten the context, or use TextModelMode.DIRECT to send it straight to the provider"
-            ),
+            HTTPStatus.REQUEST_ENTITY_TOO_LARGE: f"the request exceeds the gateway's 2,000,000-byte limit, measured as JSON with non-ASCII characters escaped (HTTP {status}); shorten the context, or use TextModelMode.DIRECT to send it straight to the provider",
             JEV_STATUS_UNPROCESSABLE: f"the gateway cannot manage this request (HTTP {status}); the causes are an unmanaged or unpriced provider or model, a malformed model name, streaming, a missing or invalid output-token limit, a body model that differs from the model (or any body model for Gemini), a hosted (non-function) tool, a service tier, a previous-response or conversation reference, or a body field outside the gateway's allowed list, including Gemini snake_case keys; to send a request the gateway cannot bill, use TextModelMode.DIRECT, which sends it straight to the provider with your own key",
             VIDBYTE_STATUS_RATE_LIMITED: f"the Vidbyte API key reached its request quota or its daily managed spend cap (HTTP {status}); wait for the limit to reset, or raise the cap",
         }

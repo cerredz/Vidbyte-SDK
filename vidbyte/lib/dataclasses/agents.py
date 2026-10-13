@@ -26,7 +26,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from vidbyte.lib.constants.jev import VIDBYTE_API_KEY_PATTERN, VIDBYTE_API_KEY_PREFIX, VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND
+from vidbyte.lib.constants.jev import (
+    VIDBYTE_API_KEY_PATTERN,
+    VIDBYTE_API_KEY_PREFIX,
+    VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
+)
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.text_model import TextModelMode
 from vidbyte.lib.errors import AgentForkConfigurationError, ConfigurationError

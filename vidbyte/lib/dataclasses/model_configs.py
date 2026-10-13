@@ -48,10 +48,7 @@ from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 
 # The way out a text call names when no Vidbyte key is found.
-TEXT_REMEDY: str = (
-    f"Pass vidbyte_api_key or set {VIDBYTE_API_KEY_ENV_VAR}, or use mode=TextModelMode.DIRECT "
-    "to call the provider with your own key and no Vidbyte fee."
-)
+TEXT_REMEDY: str = f"Pass vidbyte_api_key or set {VIDBYTE_API_KEY_ENV_VAR}, or use mode=TextModelMode.DIRECT to call the provider with your own key and no Vidbyte fee."
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,8 +208,7 @@ class TextModelConfig:
             return
         source = "api_keys" if self.api_keys.key_for(provider) is not None else ProviderModelRegistry.get_api_key_env_var(provider)
         raise ConfigurationError(
-            f"The {provider.value} key from {source} has {len(provider_key)} characters, and the Vidbyte gateway relays keys of at most "
-            f"{VIDBYTE_PROVIDER_KEY_MAX_LENGTH} characters. Use mode=TextModelMode.DIRECT to send it straight to {provider.value}.",
+            f"The {provider.value} key from {source} has {len(provider_key)} characters, and the Vidbyte gateway relays keys of at most {VIDBYTE_PROVIDER_KEY_MAX_LENGTH} characters. Use mode=TextModelMode.DIRECT to send it straight to {provider.value}.",
             details={"provider": provider.value, "source": source, "length": len(provider_key)},
         )
 
@@ -264,8 +260,7 @@ class TextCredentials:
             fits = has_vidbyte_key and (self.provider_api_key is None or has_provider_key)
         if not fits:
             raise ConfigurationError(
-                f"TextCredentials in {self.mode.value} mode cannot hold these keys: DIRECT holds only a provider key, "
-                "VIDBYTE_MANAGED only a Vidbyte key, and AUTO a Vidbyte key with an optional provider key."
+                f"TextCredentials in {self.mode.value} mode cannot hold these keys: DIRECT holds only a provider key, VIDBYTE_MANAGED only a Vidbyte key, and AUTO a Vidbyte key with an optional provider key."
             )
 
     @property

@@ -134,32 +134,12 @@ class ModalityDetector:
     ) -> object:
         """Create the internal concrete runner for a resolved modality."""
         from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
-        from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 
         resolved = ModalityDetector.coerce(modality)
         if resolved is ModelModality.AUTO:
             detected = ModalityDetector.detect_modality(model)
             resolved = detected if detected is not ModelModality.AUTO else ModelModality.TEXT
-
-        # @intent text-runners-take-the-key-list
-        # A text config takes the key list and matches it itself; an old
-        # api_key option would be filtered out silently, so it is
-        # refused. Other configs keep api_key and get their provider's
-        # matched key only, so their variable resolves as before.
-        if resolved is ModelModality.TEXT and "api_key" in options:
-            provider_name = provider.value if isinstance(provider, ModelProvider) else str(provider)
-            raise ConfigurationError(
-                "create_runner takes api_keys, a list of provider keys, for a text model; api_key is not accepted.",
-                details={"provider": provider_name, "model": model},
-            )
-        common_options = dict(options)
-        if resolved is ModelModality.TEXT:
-            if api_keys is not None:
-                common_options["api_keys"] = api_keys
-        elif (provider_key := ProviderKeyMatcher.match(api_keys, primary=provider).key_for(provider)) is not None:
-            common_options["api_key"] = provider_key
-        if resolved is ModelModality.TEXT and temperature is not None:
-            common_options["temperature"] = temperature
+        common_options = ModalityDetector._config_options(resolved, provider=provider, model=model, api_keys=api_keys, temperature=temperature, options=options)
 
         if resolved is ModelModality.TEXT:
             from vidbyte.lib.runners.text import TextModelRunner
@@ -222,6 +202,42 @@ class ModalityDetector:
                 transport=transport,
             )
         raise ConfigurationError(f"Unsupported model modality: {resolved.value!r}")
+
+    @staticmethod
+    def _config_options(
+        resolved: ModelModality,
+        *,
+        provider: ModelProvider | str,
+        model: str,
+        api_keys: ProviderKeys | Iterable[str | None] | None,
+        temperature: float | None,
+        options: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        # Builds the options for the resolved modality's config.
+        from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+
+        # @intent text-runners-take-the-key-list
+        # A text config takes the key list and matches it itself; an old
+        # api_key option would be filtered out silently, so it is
+        # refused. Other configs keep api_key and get their provider's
+        # matched key only, so their variable resolves as before.
+        common_options = dict(options)
+        if resolved is not ModelModality.TEXT:
+            provider_key = ProviderKeyMatcher.match(api_keys, primary=provider).key_for(provider)
+            if provider_key is not None:
+                common_options["api_key"] = provider_key
+            return common_options
+        if "api_key" in options:
+            provider_name = provider.value if isinstance(provider, ModelProvider) else str(provider)
+            raise ConfigurationError(
+                "create_runner takes api_keys, a list of provider keys, for a text model; api_key is not accepted.",
+                details={"provider": provider_name, "model": model},
+            )
+        if api_keys is not None:
+            common_options["api_keys"] = api_keys
+        if temperature is not None:
+            common_options["temperature"] = temperature
+        return common_options
 
     @staticmethod
     def build_config(
