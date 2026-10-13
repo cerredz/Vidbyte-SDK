@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:27 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 a1ee792a → review r1 SOUND WITH FIXES (2B/7M/4m) → spec r2 b38d573a (all 13 applied); scoped review round 2 launched 07:40 UTC |
+| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 a1ee792a → review r1 SOUND WITH FIXES (2B/7M/4m) → spec r2 b38d573a → review r2 (scoped) SOUND WITH FIXES (0B/3M/2m) → author writing final r3 with status: approved |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -72,6 +72,12 @@ started: 2026-10-13 00:45 UTC
   - INV-25/EC-74: a failed goal-budget request cancels the goal;
   - Q-3 resolved instead of left open;
   - the §11 hash command form.
+- 2026-10-13 ~10:30 UTC — **An API session limit (HTTP 429) stopped the round-2 reviewer** before it wrote its report. Once the limit reset, the orchestrator resumed the same agent with SendMessage.
+- 2026-10-13 10:50 UTC — **Review round 2: SOUND WITH FIXES, 5 findings** (0 Blockers, 3 Majors, 2 Minors). All five went to the author for the final revision r3, forwarded by path (lines 1–152 of reports/S1-spec-review-r2.md), with an instruction to set `status: approved`. The S1 review cap (2/2) is reached.
+- 2026-10-13 10:50 UTC — **R-1 is accepted as not scope-adding.** It applies the orchestrator's earlier R-5 rule (a `user` reviewer fails closed) to the reviewer Codex *reports* in the start and resume responses, not only the one the caller writes.
+  - Constraint added by the orchestrator: the check must not break the §4 default spawn, where no approval fields are set.
+  - The author must establish from openai-codex what a default thread reports, and choose a default-path behavior that never silently approves and keeps §4 working, using only existing fields and settings.
+  - It records that choice as a D-n with evidence, plus an A-n where it cannot be verified offline.
 
 ## User replies (verbatim)
 - none yet
@@ -160,4 +166,23 @@ started: 2026-10-13 00:45 UTC
   *source:* S1 author r2.
 - **Close order (INV-7):** finalize the turns, send each a single bounded interrupt, close the client on a daemon thread, then shut the executor down. *source:* S1 author r2.
 - **A PowerShell trap.** Windows PowerShell 5.1 changes bytes piped between programs, so the `git cat-file | python` form prints a wrong hash there. The §11 hash command uses a Python `subprocess` form, which gives the same hash in both shells. *source:* S1 author r2 (verified).
+- **Reviewer fields.**
+  - Every `thread/start`, `thread/resume` and `thread/fork` response carries required `approvalsReviewer` and `approvalPolicy` fields (`v2_all.py:12458`, `:12363`, `:12288`).
+  - Resume and `turn/start` accept a reviewer override (`:5987`, `:12544`).
+  - When none is sent, the thread takes Codex's configured default (`:10782`).
+  - The SDK never sends a policy that routes approvals to the client (`_approval_mode.py:28-35`).
+  *source:* S1 reviewer r2.
+- **Close and goal-watcher facts.**
+  - The sibling `CodexTransport` cancels pending tool calls before closing (`transport.py:198-213`, `CodexToolCallHandler.close()`).
+  - A goal state's `next_notification()` is a bare `Queue.get()`, woken only by a routed notification or by `fail_all` on a still-registered state.
+  - The SDK cleans up a cancelled goal as cancel, then `finish()`, then `unregister_goal_operation` (`client.py:643-648`).
+  - Executor workers are non-daemon and joined at exit. `shutdown(cancel_futures=True)` cancels only queued calls, and `submit` after shutdown raises `RuntimeError`.
+  *source:* S1 reviewer r2.
+- **`TransportClosedError` embeds the stderr tail** (`client.py:907-910`), so a mapped error is always raised `from None` (see also S017). *source:* S1 reviewer r2.
+- **Error type.** `FailureCode.CONFIGURATION_UNSUPPORTED_COMBINATION` exists but nothing uses it, and `ConfigurationError` has no code field. The R-5 rejection must therefore carry the code through the spec's own error type. *source:* S1 reviewer r2, R-5.
+- **Measured facts.**
+  - The vidbyte MCP server applies no tool timeout, so the 240 s wait clamp is the only server-side bound.
+  - The §11 hash command works in Git Bash and in PowerShell 5.1.
+  - The `agents-md-placement.yml` workflow runs only by hand, and running it could move the `codex_host.py` records into `codex.py`.
+  *source:* S1 reviewer r2.
 - **openai_codex must load lazily.** Nothing reachable from `import vidbyte`, or from `vidbyte.tools.builtins` (which the YAML component registry scans), may import openai_codex at module level. The precedent is `CodexTransport._load_sdk` (transport.py:215-259). CI installs only `.[dev]`, so SDK-dependent tests skip there (`skipUnless`). The global Python 3.11 has openai-codex 0.162.1. *source:* S0.
