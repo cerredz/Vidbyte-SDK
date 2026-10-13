@@ -269,6 +269,19 @@ class TextCallAcceptanceTests(unittest.TestCase):
         self.assertNotIn(K_OPENAI, flat(sent))
         self.assertNotIn("OPENAI_API_KEY", environment.reads)
 
+    def test_vidbyte_managed_with_no_list_never_reads_the_provider_variable_even_when_it_holds_a_vidbyte_key(self) -> None:
+        # AC-13, INV-5, EC-13 (review R-4): with no list, a provider-key lookup would read OPENAI_API_KEY and raise M-14 on the old habit of a Vidbyte key there.
+        from vidbyte.lib.config import TextModelMode
+
+        gateway = ScriptedGateway(provider_answer(ModelProvider.OPENAI))
+        environment = RecordingEnviron({"OPENAI_API_KEY": OTHER_VIDBYTE_KEY, "VIDBYTE_API_KEY": VIDBYTE_KEY})
+        with patch.object(os, "environ", environment), patch(RUNNER_TRANSPORT_TARGET, new=gateway):
+            TextModelRunner(TextModelConfig(provider="openai", model="gpt-5.5", mode=TextModelMode.VIDBYTE_MANAGED)).run(PROMPT)
+        self.assertEqual(len(gateway.requests), 1)
+        [sent] = gateway.requests
+        self.assertIsNone(provider_key_header(sent))
+        self.assertNotIn("OPENAI_API_KEY", environment.reads)
+
 
 class ReadmeAcceptanceTests(unittest.TestCase):
     """AC-27: the root README documents the two keys."""
