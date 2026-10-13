@@ -13,6 +13,7 @@ TESTS: tests/features/native_backends/test_native_backends_profiles.py, tests/fe
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Mapping
@@ -120,6 +121,8 @@ class HarnessBackends:
                 currencies = errors.listing(entry.currency for entry in balance.balances)
                 raise errors.build(FailureCode.BACKEND_BILLING_ERROR, "DeepSeek reports that the account cannot serve calls.", operation=operation, context={"vendor_error": f"is_available=false; currencies={currencies}"})
             return BackendReadiness(backend=profile.name, remote_verified=True, balance=balance)
+        except asyncio.CancelledError:
+            raise
         except NativeHostError:
             raise
         except ConfigurationError as exc:
@@ -165,6 +168,8 @@ class HarnessBackends:
 
             # Read the balance; is_available=false is data here, not an error.
             return await HarnessBackends._read_balance(str(profile.balance_url), key, errors, operation=operation)
+        except asyncio.CancelledError:
+            raise
         except NativeHostError:
             raise
         except ConfigurationError as exc:
