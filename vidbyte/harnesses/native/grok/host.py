@@ -90,13 +90,23 @@ class GrokHost:
         # EC-3: a host serves exactly one async with block. D-19: the
         # launcher is found here, once, so every call starts the same
         # program; with nothing found the block never starts (EC-11).
-        if self._entered:
-            raise self._errors.invalid_argument("host", "This GrokHost was already entered; a host serves one async with block.", operation=_ENTER, next_step=_REENTER_NEXT_STEP)
-        self._entered = True
-        if not self._cli.resolve_launcher():
+        try:
+            # A host serves one block only, open or already closed.
+            if self._entered:
+                raise self._errors.invalid_argument("host", "This GrokHost was already entered; a host serves one async with block.", operation=_ENTER, next_step=_REENTER_NEXT_STEP)
+            self._entered = True
+            # Find grok: the explicit command, then PATH, then the installer's folder.
+            if not self._cli.resolve_launcher():
+                self._closed = True
+                raise self._errors.from_launch_failure(ProcessLaunchFailure.NOT_FOUND, operation=_ENTER)
+            return self
+        except asyncio.CancelledError:
+            raise
+        except NativeHostError:
+            raise
+        except Exception as exc:
             self._closed = True
-            raise self._errors.from_launch_failure(ProcessLaunchFailure.NOT_FOUND, operation=_ENTER)
-        return self
+            raise self._errors.from_unexpected(exc, operation=_ENTER) from exc
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None) -> None:
         # @intent grok-host-exit-stops-every-turn
