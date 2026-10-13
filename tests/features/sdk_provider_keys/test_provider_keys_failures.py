@@ -27,6 +27,7 @@ from tests.features.sdk_managed_text.managed_text_fixtures import (
     VIDBYTE_KEY,
     BackoffRecorder,
     ScriptedGateway,
+    answer,
     gateway_error,
     relayed_provider_error,
 )
@@ -135,6 +136,28 @@ class GatewayErrorWordingTests(FailureAssertions):
         self.assertRegex(message, re.compile("wallet", re.IGNORECASE))
         if "api_keys" in message:
             self.assertIn("TextModelMode.AUTO", message)
+
+    def test_a_relayed_provider_400_points_at_the_callers_own_key_in_api_keys_and_a_paid_400_does_not(self) -> None:
+        # LE-1 (live E2E): xAI answers an incorrect API key with HTTP 400 "invalid-argument", not 401, so a relay call's 400 must name the caller's own key in api_keys as a cause.
+        # The body is the provider's (its "error" is a string, not the gateway's true) and echoes the key and the canary, so copying any of it is caught.
+        incorrect_key = answer(400, {"code": "invalid-argument", "error": f"Incorrect API key provided: {K_XAI} ({BODY_CANARY})."})
+        relayed = GatewayCall(incorrect_key, relay=True, provider=ModelProvider.XAI)
+        message = self.assert_credential_safe(relayed.run(), status=400, provider=ModelProvider.XAI)
+        self.assertEqual(provider_key_header(relayed.transport.requests[0]), K_XAI)
+        self.assertIn("api_keys", message)
+        self.assertGreaterEqual(message.count("xai"), 2, "names xai beyond the prefix")
+        self.assertIn("400", message)
+        self.assertRegex(message, re.compile("withheld", re.IGNORECASE))
+        self.assertRegex(message, re.compile(r"(not|n't)\b[^.;]{0,20}bill", re.IGNORECASE))
+        self.assertNotRegex(message, re.compile("quota|daily|wallet", re.IGNORECASE))
+        self.assertEqual(len(relayed.transport.requests), 1)
+        self.assertEqual(relayed.backoff.delays, [])
+        # Control: on a Vidbyte-paid call the same 400 answered Vidbyte's own account, so api_keys is not the cause there.
+        paid = GatewayCall(incorrect_key, relay=False, provider=ModelProvider.XAI)
+        paid_message = self.assert_credential_safe(paid.run(), status=400, provider=ModelProvider.XAI)
+        self.assertIsNone(provider_key_header(paid.transport.requests[0]))
+        self.assertNotIn("api_keys", paid_message)
+        self.assertRegex(paid_message, re.compile("withheld", re.IGNORECASE))
 
 
 class RelayedProviderRefusalTests(FailureAssertions):
