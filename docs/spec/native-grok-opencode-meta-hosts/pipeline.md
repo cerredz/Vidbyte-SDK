@@ -196,6 +196,11 @@ started: 2026-10-13 01:30 UTC
   - (1) I accept the verifier's reading of the spec, with no spec change: an interrupt that sent its cancel returns `was_running=True` even if completion won the race, and the recorded terminal state stands; `was_running=False` only when nothing was sent (EC-52). This refutes my earlier suggested `False` reading. Why: EC-52 and EC-53 already settle it, and the blind-written existing test asserts True.
   - (2) Iteration 6 takes R-18 through R-21 together, plus the three wording-only header claims from iteration 5. Why: they share one fix pattern (check that the turn really ended, keyed on a completion or answer and not on `running`, so that EC-51 and EC-96 stay intact), and R-19 is a second flake risk.
   - (3) An S2 addendum comes first: deterministic regression tests, with fake knobs where needed. The verifier's scratch prototypes are in `scratchpad/s5-race-verifier/`.
+- 2026-10-14 04:20 — **Granted test change (S2 addendum 3):** `tests/features/muse_host/test_muse_host_turns.py:240` `test_interrupt_answered_interrupted_or_cancelled_counts_as_success` may add `"order": "answer_first"` to its scenario.
+  - Only the scenario changes; the assertions do not.
+  - Why: today the test passes or fails depending on which frame wins the race, which caused CI run 38437336454's flake. Pinning the order makes it test the -32013/-32014 mapping every run, and the new `completed_first` test covers the other order.
+  - Also permitted: green-today *guard* tests (the R-20 Muse twin, the R-18 -32030-on-a-running-turn guard if none exists). They must be labeled as guards in the coverage map.
+- 2026-10-14 04:20 — **S2 addendum 3 launched** at HEAD 9531edcb, scoped to the review.md RACE-1 "Tests to add" table (R-18 a/b/c and guards, R-19, R-20 with the Muse twin, R-21).
 
 ## User replies (verbatim)
 (none during the run)
