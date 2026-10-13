@@ -56,6 +56,7 @@ class CredentialKeyPolicy:
         "api_key",
         "api_keys",
         "apikey",
+        "provider_key",
         "access_token",
         "refresh_token",
         "token",
@@ -74,7 +75,8 @@ class CredentialKeyPolicy:
         "auth",
     })
     # "_provider_key" covers the relay header X-Vidbyte-Provider-Key,
-    # which carries the caller's own provider key.
+    # which carries the caller's own provider key; "provider_key" in
+    # _SECRET_KEYS covers the bare name, as the free-text redactor does.
     _SECRET_SUFFIXES = ("_api_key", "_api_keys", "_provider_key", "_private_key", "_secret_key", "_access_key", "_access_key_id", "_token", "_secret", "_password")
 
     @classmethod
