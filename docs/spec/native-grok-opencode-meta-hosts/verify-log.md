@@ -402,3 +402,84 @@ Each commit was checked before it was made, using the packs and the lint, with t
 - **The Muse interrupt race above.** It is intermittent and seen once, on Linux 3.11. It is a host defect, not a flaky test. A fix belongs in the host: when `turn/interrupt` fails because the driver itself closed the peer after `turn/completed`, the turn has stopped, so the interrupt should succeed. A deterministic regression test should order `turn/completed` before the interrupt answer. Nothing was built here.
 - **The three header claims above.** They are wording only, with no behaviour change.
 - **Follow-ups:** R-M4, R-M5, R-M7, R-M8 and R-M10 are unchanged.
+
+## Iteration 6 — 2026-10-13 19:01 UTC — agent report: none (see below)
+
+**Report file:** none, as in iterations 4 and 5. Subagent report files are refused, so this entry and the agent's STATUS block are the full record.
+
+**Defects in:** R-18 [Major], R-19, R-20 and R-21 [Minor] from review.md's RACE-1 section, plus the three GrokWire header claims recorded in iteration 5. The blind RACE-1 tests (ba70578e) were red at 68cc1a9e. The orchestrator's `-k "loses_to or answered_after_turn_completed or rejected_with_32030 or still_closing or interrupt_answered_interrupted_or_cancelled"` command gave `8 failed, 4 passed`, reproduced here. origin/main 8387d666 was already an ancestor, so no merge was needed.
+
+**Hypotheses and attempts:**
+- **R-18 (Muse interrupt).**
+  - **Cause, as the review found.** `MuseTurnDriver.run` closes the peer in its `finally` once the ack's own `turn/completed` is read. `McpStdioTransport.close` then fails the pending `turn/interrupt` with reason `closed`, and `NativePeer.call` maps that to `muse.process_exited`.
+  - **Fix.** In `MuseTurnDriver.interrupt`:
+    - a new `except NativeHostError` re-raises only when `self._completed is None`;
+    - the `McpProtocolError` branch raises `vendor_failure` only when `self._completed is None` and the code is not -32013 or -32014.
+
+    The host still returns `was_running=True`.
+  - **Why `_completed`, and not `running` or the answer code.** Keyed this way, EC-96 (`turn/interrupt` `mode: exit`, no `turn/completed`), EC-97 (`on_interrupt: ignore`, silent) and the EC-102 guard (-32030 on a running turn) keep raising.
+  - **A moot interrupt falls through and sets `_stop_source` and the grace deadline. This is harmless:** `run` builds its result before its `finally` closes the peer. Between `_on_completed` and `_outcome()` there is no await, except the turn-ceiling stop branch.
+  - **Why the -32030-after-`turn/completed` case cannot slip past the guard.** The reader dispatches `turn/completed` before the answer. So the driver's inbox wake-up is queued before the interrupt task's, and the driver sets `_completed` in one step, without awaiting. Then the interrupt task sees it.
+- **R-19 (Grok cancel write).**
+  - **`GrokTurnDriver.ended`, a read-only property.** It is True when the `session/prompt` future is done, is not cancelled, and has either no exception or a `McpProtocolError` with `"error"` in its details, that is a JSON-RPC error answer. It is False while the future is pending or when it failed for a transport reason (closed, process_exited, reader_failed).
+  - **Why not a plain `_answer.done()`.** It would also be True after a transport failure, and would hide EC-51 once the peer had fully exited.
+  - **The cancel write.** `interrupt` wraps the `session/cancel` notify in `except NativeHostError: if not self.ended: raise`. The send still goes through `NativePeer.notify`, and its drain through `asyncio.wait_for`, in the caller's task, so the test seam engages; the `seam:` assertions hold.
+  - **CI-1.** The post-drain `is_closing()` check in `tools/mcp/transport.py` is untouched.
+  - **Edge of the predicate.** A non-mapping `session/prompt` result fails the future with a `McpProtocolError` that has neither `error` nor `reason`, so `ended` is False for it. This matches the review's predicate. A cancel written in that window raises process_exited, as before.
+- **R-20 (Grok answered, driver still closing).** `interrupt_grok_turn` now checks `turn.done() or driver is None or driver.ended`, so it sends nothing and returns `was_running=False`.
+- **R-21 (Muse steer).**
+  - **Spec read.** EC-115 gives `muse.turn_not_found` when "the turn is no longer RUNNING". EC-96 gives `process_exited` when "the peer exits … before the awaited answer". The spec does not contradict the orchestrator's recommended key.
+  - **Fix.** A new read-only `MuseTurnDriver.ended` (`self._completed is not None`) records the same fact R-18 keys on. `_steer` gains `except NativeHostError: if not driver.ended: raise`. Otherwise it raises `muse.turn_not_found`, built like the -32030 branch beside it: operation `steer_muse_turn` and `_TURN_NOT_FOUND_NEXT_STEP` (token `continue_muse_session`). The message is "The turn finished before Muse answered the steer.", because the host cannot know whether Muse applied the text.
+  - **Rejected: the verifier's `not driver.running`.** `running` also drops when the driver leaves its loop because the peer died (`peer.closed and inbox.empty()` on its own poll). If that poll and the reader's EOF land in the same loop pass, the driver can drop `running` before the steer task handles its failure. A crash would then be reported as `turn_not_found`. `ended` cannot be True without this turn's own `turn/completed`.
+  - **First passing run.** R-21's test had never passed under any fix before this iteration. It passed here 10 of 10 in the loop, and the EC-96, EC-97, EC-98, EC-101 and EC-102 steer rows stay green.
+- **Wording ([iter5-wording]), text only.** The AST with docstrings blanked is unchanged.
+  1. The `GrokWire` class docstring now names the cursor case (`configuration.invalid_argument`).
+  2. WHAT NOT TO DO 1 now names the one exception: `require_model` puts Grok's `currentModelId` in its message. It also says the factory scrubs and caps both messages and context values (`build` → `scrub`, capped at `NATIVE_VENDOR_MESSAGE_MAX_CHARS`).
+  3. COMMON MODIFICATION PATTERNS now says a marker in `GROK_NOT_SIGNED_IN_MARKERS` is for a sign-in failure only, because every marker raises `grok.not_signed_in`. Any other new CLI failure is a branch in `check_cli`.
+- **Not tried, on purpose:**
+  - removing or relaxing CI-1's `is_closing()` check (it fixed a real 3.12 EPIPE);
+  - keying R-18 on `running` or on the answer code (it breaks EC-96 or EC-102);
+  - moving the cancel send to the driver task (it breaks the R-19 seam);
+  - re-checking after opencode's probe (out of scope).
+
+**Observations, not findings (no change, out of scope):**
+- **Grok, transport failure while the driver closes.**
+  - *Input:* `interrupt_grok_turn` just after the Grok peer exited without answering `session/prompt`.
+  - *State:* the answer future has failed with a transport error, and the driver is still in its `finally` close.
+  - *Output:* `ended` is False, so `driver.interrupt` returns early on `_answer.done()` and sends nothing, but the host returns `was_running=True` without raising. The turn then records FAILED (`process_exited`).
+  - Before R-20, the same window also covered an answered turn; R-20 narrowed it to this case. The window lasts one close of an already-exited process, so it is short.
+- **Muse, steer or interrupt pending when the grace period closes the peer.** An earlier stop's grace period can close the peer with no `turn/completed`. A steer or a second interrupt still pending then raises `process_exited`, not `turn_not_found` or success. This follows from keying on the turn's own completion. EC-96 and EC-115 both plausibly apply to that window, and no test covers it.
+
+**Changes:**
+- R-18: 0284ffe1 (`muse/turn.py`)
+- R-19: 0e900159 (`grok/turn.py`)
+- R-20: 85788217 (`grok/host.py`)
+- R-21: 241f1966 (`muse/turn.py`, `muse/host.py`)
+- Wording: e4210fc3 (`grok/wire.py`, docstrings only)
+- review.md statuses and this entry: in the verify-log commit
+
+The A001 headers of all five files were updated where they described behaviour that has changed: FUNCTION INVENTORY lists both `ended` properties, and KNOWN EDGE CASES covers the moot interrupt, the moot cancel, the R-20 report and the R-21 steer. The scratch call-depth checker reports 0 chains before and after, and every added `#` comment is ≤ 72 columns.
+
+**Determinism:**
+- The new-test command, 10 runs in a loop: `12 passed, 61 deselected` every time (120/120).
+- Both `*_turns.py` files plus `test_muse_host_errors.py`, 3 full runs: `331 passed, 3 skipped` each time (53.62s, 96.43s, 69.99s).
+
+**Gate matrix out (code HEAD e4210fc3).** One sequential script, with nothing alongside and no flakes. Gates 2 and 3 were not run on their own; the source stage runs the full suite.
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests | the orchestrator's `-k` command | PASS 10/10 | `12 passed, 61 deselected in 3.15s` (run 10) |
+| packs | gate 1 | PASS | `1659 passed, 19 skipped in 215.15s (0:03:35)` (1649 + 10 new) |
+| lint | gate 4 | PASS (A001 643/643, A002 577/703, A007 255/255, S024 25/25, S062 889/889; no count rose) | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| source stage | gate 5 | PASS | `5674 passed, 32 skipped in 208.57s (0:03:28)` / `CI passed.` |
+| package stage | gate 6 | PASS | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| semgrep | gate 7 | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| public API | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| remote CI #1 | `gh run watch 38450551272 --exit-status` (head e4210fc3) | PASS (3.11, 3.12 and Package all success) | 3.11: `5667 passed, 39 skipped in 151.24s` / `CI passed.`; 3.12: `5667 passed, 39 skipped, 19 warnings in 157.21s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote CI #2 | `gh run watch 38450554202 --exit-status` (head e4210fc3) | PASS (3.11, 3.12 and Package all success) | 3.11: `5667 passed, 39 skipped in 187.43s` / `CI passed.`; 3.12: `5667 passed, 39 skipped, 19 warnings in 175.17s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| EC-51 (POSIX) | `test_interrupt_raises_process_exited_when_the_cancel_write_fails` (`@posix_only`) | PASS on 3.11 and 3.12 in both runs | 0 failures; 39 skips, the same count as in iterations 4 and 5, so it ran |
+| remote static policy | `gh run watch 38450557318 --exit-status` (head e4210fc3) | PASS | `Ran 1 rule on 949 files: 0 findings.` (conclusion success) |
+| PR | `gh pr view 1036 --json isDraft` | n/a | `true`; dispatch-only workflows, so `gh pr checks` lists none |
+| invariants | INV-19 / INV-22 / frozen files | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py`, `tests/`, `lint/`, `.semgrep/`, `pyproject.toml` and spec.md unchanged since 68cc1a9e; `git status` clean |
+
+**Still open:** nothing from this packet. R-18, R-19, R-20 and R-21 are fixed. The two observations above are recorded for the orchestrator and were not fixed. Follow-ups R-M4, R-M5, R-M7, R-M8 and R-M10 are unchanged.
