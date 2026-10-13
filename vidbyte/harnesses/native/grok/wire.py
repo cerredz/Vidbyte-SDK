@@ -46,7 +46,6 @@ from vidbyte.lib.errors import ConfigurationError, McpProtocolError, NativeHostE
 
 _AUTH_REQUIRED = -32000
 _RESOURCE_NOT_FOUND = -32002
-_METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _REQUEST_CANCELLED = -32800
 _MALFORMED_CODES = frozenset({-32700, -32600})
@@ -131,7 +130,7 @@ class GrokWire:
     @staticmethod
     def method_not_found() -> dict[str, Any]:
         # INV-10: the JSON-RPC answer to any server request the host does not serve.
-        return {"code": _METHOD_NOT_FOUND, "message": "Method not found"}
+        return {"code": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_CODE, "message": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_TEXT}
 
     # ---- ACP answers ----------------------------------------------------------
 
@@ -234,7 +233,7 @@ class GrokWire:
             return self._errors.build(self._errors.code("not_signed_in"), "Grok Build is not signed in.", operation=operation, context=session)
         if code == _RESOURCE_NOT_FOUND or (isinstance(data, Mapping) and data.get("code") == _FS_NOT_FOUND):
             return self._errors.build(self._errors.code("session_not_found"), "Grok Build has no such session in this workspace.", operation=operation, context=session)
-        if code == _METHOD_NOT_FOUND:
+        if code == native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_CODE:
             return self._errors.build(self._errors.code("capability_missing"), f"This Grok Build release does not serve ACP {method}.", operation=operation, context={"method": method})
         if code == _INVALID_PARAMS and cursor is not None:
             return self._errors.invalid_argument("cursor", "Grok Build refused the cursor; it is stale or was not issued by list_grok_sessions.", operation=operation, next_step=native_host_constants.NATIVE_STALE_CURSOR_NEXT_STEP.format(tool="list_grok_sessions"))

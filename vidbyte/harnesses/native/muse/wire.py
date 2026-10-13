@@ -61,7 +61,6 @@ _COMPACT_SEPARATORS = (",", ":")
 _PROMPT_TOO_LARGE_NEXT_STEP = "Shorten the prompt; Muse rejected its size."
 _PROMPT_TOO_LARGE_CODE = -32002
 _FORK_BOUNDARY_CODE = -32023
-_METHOD_NOT_FOUND_CODE = -32601
 _STALE_CURSOR_CODES = frozenset({-32602})
 _NOT_LOADED_CODES = frozenset({-32024})
 _ALREADY_STOPPING_CODES = frozenset({-32013, -32014})
@@ -175,7 +174,7 @@ class MuseWire:
     @staticmethod
     def method_not_found_error() -> dict[str, Any]:
         # The answer to any server request the host does not handle (D-11).
-        return {"code": _METHOD_NOT_FOUND_CODE, "message": "Method not found"}
+        return {"code": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_CODE, "message": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_TEXT}
 
     @staticmethod
     async def exchange(peer: NativePeer, method: str, params: Mapping[str, Any], *, operation: str, timeout_seconds: float | None = None) -> Mapping[str, Any]:
