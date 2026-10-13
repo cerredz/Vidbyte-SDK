@@ -25,7 +25,9 @@ class ContainsAllGrader(BaseGrader):
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Checks all required terms against the evaluated output.
         required = self.required or self._expected_terms(case)
-        haystack = actual if self.case_sensitive else actual.lower()
+        # @intent caseless-graders-casefold
+        # Case-insensitive grading uses casefold, the caseless-matching form (ß matches SS), as OutputBehavior does.
+        haystack = actual if self.case_sensitive else actual.casefold()
         missing = [term for term in required if self._normalize(term) not in haystack]
         passed = not missing
         score = 1.0 if passed else 0.0
@@ -42,5 +44,6 @@ class ContainsAllGrader(BaseGrader):
 
     def _normalize(self, term: str) -> str:
         # Applies the configured case sensitivity to a required term.
-        return term if self.case_sensitive else term.lower()
+        # @intent caseless-graders-casefold
+        return term if self.case_sensitive else term.casefold()
 

@@ -448,6 +448,27 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         template = T.concise_grounded_answer(required_terms="30 days", forbidden_terms="password")
         self.assertFalse((await template.build_grader().agrade(case, wrong)).passed)
         self.assertTrue((await template.build_grader().agrade(case, "Refunds within 30 days.")).passed)
+
+    async def test_caseless_graders_casefold(self) -> None:
+        # @intent caseless-graders-casefold
+        # [Silent Failure] lower() kept "ß" while "Hauptstraße 5".upper() is "HAUPTSTRASSE 5", so a correct German
+        # answer in capitals failed, though OutputBehavior's case_sensitive=False (casefold) matched the same pair.
+        expected = "Hauptstraße 5"
+        case = EvalCase(prompt="t", expected=expected)
+        checks = [
+            (ExactMatchGrader(), case, "HAUPTSTRASSE 5", True),
+            (ContainsGrader(), case, "Wohnt in der HAUPTSTRASSE 5.", True),
+            (ContainsAllGrader(["Straße"]), EvalCase(prompt="t"), "STRASSE", True),
+            (ForbiddenContentGrader(["Straße"]), EvalCase(prompt="t"), "STRASSE", False),
+            (ExactMatchGrader(), case, expected.upper(), True),
+            (ContainsGrader(), case, expected.upper(), True),
+            (ContainsAllGrader([expected]), EvalCase(prompt="t"), expected.upper(), True),
+            (ForbiddenContentGrader([expected]), EvalCase(prompt="t"), expected.upper(), False),
+        ]
+        for grader, grader_case, output, should_pass in checks:
+            with self.subTest(grader=type(grader).__name__, output=output):
+                result = await grader.agrade(grader_case, output)
+                self.assertEqual(result.passed, should_pass, result.reason)
         support = T.safe_customer_support(forbidden_terms="password")
         self.assertTrue((await support.build_grader().agrade(EvalCase(prompt="t", expected="30 days"), "Refunds within 30 days.")).passed)
 
