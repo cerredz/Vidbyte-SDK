@@ -5,7 +5,8 @@ Description:
 Purpose:
     Exposes stable data structures like AgentCard and AgentMessage for registry and execution systems.
 Architecture:
-    - AgentRunnerConfig: Primitive backend configuration.
+    - ProviderKeys: The matched provider keys and Vidbyte key that an agent's children carry.
+    - AgentRunnerConfig: Primitive backend configuration, with the matched keys and the text-model mode.
     - PauseDuration: Validated whole-number delay for BaseAgent.pause().
     - AllowedToolNames: Validated, stripped tool names for the AgentLoopSettings.allowed_tools gate.
     - FallbackModel: One entry in an ordered agent fallback chain.
@@ -20,10 +21,14 @@ Relations:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
+from vidbyte.lib.constants.jev import VIDBYTE_API_KEY_PATTERN, VIDBYTE_API_KEY_PREFIX, VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND
+from vidbyte.lib.enums.model_provider import ModelProvider
+from vidbyte.lib.enums.text_model import TextModelMode
 from vidbyte.lib.errors import AgentForkConfigurationError, ConfigurationError
 
 if TYPE_CHECKING:
@@ -42,7 +47,7 @@ if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.codex import CodexMessageData
     from vidbyte.lib.dataclasses.runner import RunnerHandle
     from vidbyte.lib.dataclasses.trace import TraceOption
-    from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
+    from vidbyte.lib.enums import AgentRuntimeType
     from vidbyte.middleware import AgentMiddleware
     from vidbyte.tools.catalog import Tools
     from vidbyte.tools.types import ToolCallContext
@@ -198,15 +203,111 @@ class AgentIterationSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderKeys:
+    """The matched form of a developer's api_keys list, which an agent's children carry.
+
+    Developers pass api_keys as a plain list of key strings, and
+    ProviderKeyMatcher.match builds this record from it: one key per
+    provider, plus the Vidbyte key. A record passed in as api_keys is
+    checked key by key and never re-bound. The repr shows provider
+    names only, never a key.
+    """
+
+    providers: tuple[ModelProvider, ...] = ()
+    keys: tuple[str, ...] = field(default=(), repr=False)
+    vidbyte_api_key: str | None = field(default=None, repr=False)
+    matched_primary: tuple[ModelProvider, ...] = ()
+    matched_others: tuple[ModelProvider, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Coerce provider names to members, and check that the keys line up with them."""
+        # Turn every provider name into its enum member, so a lookup by
+        # name and a lookup by member find the same key.
+        for name in ("providers", "matched_primary", "matched_others"):
+            object.__setattr__(self, name, self._members(name, getattr(self, name)))
+        # One key per provider: a repeated provider would make key_for
+        # ambiguous.
+        if len(set(self.providers)) != len(self.providers):
+            raise ConfigurationError("ProviderKeys.providers must not name a provider twice.", details={"field": "providers"})
+        # Each provider needs exactly one usable key beside it.
+        object.__setattr__(self, "keys", self._checked_keys(self.keys, len(self.providers)))
+        # The Vidbyte key only ever goes to the gateway, so its format
+        # is checked here, where it enters, without reading the
+        # environment.
+        self._check_vidbyte_api_key(self.vidbyte_api_key)
+
+    @staticmethod
+    def _members(name: str, values: object) -> tuple[ModelProvider, ...]:
+        """Return values as ModelProvider members, refusing a bare string or an unknown name."""
+        # @intent provider-names-become-members
+        # A bare string would be read letter by letter, so it is refused
+        # rather than split into one-letter provider names.
+        message = f"ProviderKeys.{name} must be a tuple of ModelProvider members or their names."
+        if isinstance(values, (str, bytes)):
+            raise ConfigurationError(message, details={"field": name})
+        try:
+            return tuple(ModelProvider(value) for value in values)  # type: ignore[attr-defined]
+        except (TypeError, ValueError):
+            raise ConfigurationError(message, details={"field": name}) from None
+
+    @staticmethod
+    def _checked_keys(keys: object, count: int) -> tuple[str, ...]:
+        """Return keys as a tuple of non-blank, stripped strings, one for each provider."""
+        if not isinstance(keys, (tuple, list)) or len(keys) != count:
+            raise ConfigurationError("ProviderKeys.keys must hold exactly one key for each provider.", details={"field": "keys"})
+        for index, key in enumerate(keys):
+            if not isinstance(key, str) or not key.strip() or key != key.strip():
+                raise ConfigurationError(f"ProviderKeys.keys[{index}] must be a non-blank string without surrounding spaces.", details={"field": "keys", "index": index})
+        return tuple(keys)
+
+    @staticmethod
+    def _check_vidbyte_api_key(key: object) -> None:
+        """Refuse a Vidbyte key that is not a string or not a live key."""
+        # @intent vidbyte-key-format-checked-where-it-enters
+        # A malformed Vidbyte key fails here, at construction, with
+        # the managed-credential error kind, so it never reaches the
+        # gateway.
+        details = {"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND}
+        if key is None:
+            return
+        if not isinstance(key, str):
+            raise ConfigurationError("vidbyte_api_key must be a string or None.", details=details)
+        if re.fullmatch(VIDBYTE_API_KEY_PATTERN, key) is None:
+            raise ConfigurationError(f"The managed Vidbyte API key must be a live key in the {VIDBYTE_API_KEY_PREFIX} format.", details=details)
+
+    def key_for(self, provider: ModelProvider | str) -> str | None:
+        """Return the key matched to provider, given as a member or its name, or None."""
+        # @intent key-lookup-never-guesses
+        # Only an exact provider match returns a key, so a key is never
+        # sent to a provider it was not matched to.
+        for held, key in zip(self.providers, self.keys, strict=True):
+            if held == provider:
+                return key
+        return None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentRunnerConfig:
     """Primitive runner settings captured by an SDK agent."""
 
-    api_key: str | None = None
+    api_keys: ProviderKeys = field(default_factory=ProviderKeys, repr=False)
     provider: str | None = None
     model_name: str | None = None
     temperature: float | None = None
     run_id: str | None = None
     timeout_seconds: float | None = None
+    model_mode: TextModelMode = TextModelMode.AUTO
+
+    def __post_init__(self) -> None:
+        """Refuse a raw key list or a mode that is not the enum."""
+        # @intent runner-config-carries-a-matched-record
+        # BaseAgent matches the developer's list before it builds this
+        # config, so a raw list here means matching was skipped; the
+        # message names no key.
+        if not isinstance(self.api_keys, ProviderKeys):
+            raise ConfigurationError("AgentRunnerConfig.api_keys must be a ProviderKeys record; BaseAgent matches the developer's list first.")
+        if not isinstance(self.model_mode, TextModelMode):
+            raise ConfigurationError("AgentRunnerConfig.model_mode must be a TextModelMode value.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +316,6 @@ class FallbackModel:
 
     provider: str
     model: str
-    api_key: str | None = None
     temperature: float | None = None
 
     def __post_init__(self) -> None:
@@ -234,10 +334,9 @@ class FallbackModel:
         return f"{self.provider}/{self.model}"
 
     def __repr__(self) -> str:
-        """Return a developer-readable string that never exposes the API key."""
-        key = ", api_key='***'" if self.api_key else ""
+        """Return a developer-readable string naming the model and its temperature."""
         temperature = f", temperature={self.temperature!r}" if self.temperature is not None else ""
-        return f"FallbackModel({self.identity()!r}{key}{temperature})"
+        return f"FallbackModel({self.identity()!r}{temperature})"
 
 
 @dataclass(frozen=True, slots=True)
