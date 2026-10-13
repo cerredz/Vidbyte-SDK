@@ -33,6 +33,7 @@ from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
 from vidbyte.lib.runners import TextModelResponse
+from vidbyte.tools import FunctionTool, ToolCall
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -41,6 +42,11 @@ def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: d
     if result_output is not None:
         result = ToolResult(tool_name=name, status=ToolStatus.SUCCESS, output=result_output)
     return ToolCallContext(tool_name=name, arguments=dict(args or {}), state=state, result=result)
+
+
+def zurich_weather() -> dict[str, Any]:
+    # A function tool that returns non-ASCII text inside a dict.
+    return {"city": "Zürich", "temp_c": 4}
 
 
 def make_reply(content: str = "reply", metadata: dict[str, Any] | None = None) -> AgentMessage:
@@ -338,6 +344,13 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         b = behavior_from_probe(RunProbe(tool_calls=(make_call("search", result_output="id: 123-45"),)))
         self.assertTrue(b.tool.tool_returned_matching("search", r"\d{3}-\d{2}"))
         self.assertFalse(b.tool.tool_returned_matching("search", r"\d{5}"))
+
+    async def test_tool_returned_containing_sees_non_ascii_in_a_dict_return(self) -> None:
+        # [Hidden Assumption] a function tool's dict return keeps "Zürich" as characters, not a \u escape.
+        result = await FunctionTool(zurich_weather).execute(ToolCall("zurich_weather", {}))
+        call = ToolCallContext(tool_name="zurich_weather", arguments={}, state=ToolCallState.SUCCEEDED, result=result)
+        b = behavior_from_probe(RunProbe(tool_calls=(call,)))
+        self.assertTrue(b.tool.tool_returned_containing("zurich_weather", "Zürich"))
 
     # --- ToolArgumentBehavior Category C ---
 
