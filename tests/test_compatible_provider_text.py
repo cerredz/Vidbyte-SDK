@@ -18,9 +18,9 @@ import json
 import unittest
 from collections.abc import Mapping
 
-from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponse, HttpResponseParser
-from vidbyte.providers.compatible import MiniMaxProvider, MistralProvider
+from vidbyte.providers.compatible import GLMProvider, MiniMaxProvider, MistralProvider
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.xai import XAIProvider
 
@@ -72,6 +72,20 @@ class CompatibleToolCallTextTests(unittest.TestCase):
         self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": "Paris"}), "Paris")
         self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": mid_answer}), mid_answer)
         self.assertEqual(self._text(MiniMaxProvider, call_turn), "")
+
+    def test_glm_network_error_reply_raises_and_keeps_usage(self) -> None:
+        """A GLM reply cut off by network_error raises with its billed usage; "stop" and "model_context_window_exceeded" return the text."""
+        usage = {"prompt_tokens": 1200, "completion_tokens": 6}
+        message = {"role": "assistant", "content": "The refund window is "}
+        provider = GLMProvider(model="glm-5", api_key="test-key")
+        with self.assertRaises(ProviderResponseError) as caught:
+            asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=_ScriptedTransport({"choices": [{"message": message, "finish_reason": "network_error"}], "usage": usage})))
+        self.assertIn("network_error", caught.exception.message)
+        self.assertEqual(caught.exception.details["usage"], usage)
+        for finish_reason in ("stop", "model_context_window_exceeded"):
+            with self.subTest(finish_reason=finish_reason):
+                transport = _ScriptedTransport({"choices": [{"message": message, "finish_reason": finish_reason}], "usage": usage})
+                self.assertEqual(asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=transport)).text, "The refund window is ")
 
 
 class CompatibleErrorMessageTests(unittest.TestCase):
