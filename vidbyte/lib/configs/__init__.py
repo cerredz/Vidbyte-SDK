@@ -2,6 +2,7 @@
 
 from vidbyte.lib.configs.structured_output import (
     MODEL_SUPPORT,
+    NATIVE_SCHEMA_WITHOUT_TOOLS,
     PROVIDER_SUPPORT,
     STRUCTURED_OUTPUT_AS_OF,
     STRUCTURED_OUTPUT_DESCRIPTIONS,
@@ -10,6 +11,7 @@ from vidbyte.lib.configs.structured_output import (
 
 __all__ = [
     "MODEL_SUPPORT",
+    "NATIVE_SCHEMA_WITHOUT_TOOLS",
     "PROVIDER_SUPPORT",
     "STRUCTURED_OUTPUT_AS_OF",
     "STRUCTURED_OUTPUT_DESCRIPTIONS",
