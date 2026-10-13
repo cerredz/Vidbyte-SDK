@@ -1260,6 +1260,19 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
         result = asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
         self.assertEqual(result.content, "ANSWER FROM root")
 
+    def test_actor_run_reports_its_actor_count(self) -> None:
+        # @intent actor-count-is-read-before-cleanup
+        # [Regression] The count was read after the cleanup cleared the actor table, so every run reported active_actors=0.
+        from vidbyte.agents.runtimes.actor.actor import CriticActor, PlannerActor
+
+        agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(include_actors=[PlannerActor, CriticActor]), runner=AnswerRunner())
+        runtime = agent._runtime()
+        with patch.object(agent, "_runtime", return_value=runtime):
+            result = asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+        self.assertEqual(result.content, "ANSWER")
+        self.assertEqual(result.metadata["active_actors"], 3)
+        self.assertEqual(runtime._actors, {})
+
     def test_actor_quiescence_waits_for_an_actor_that_is_still_working(self) -> None:
         # [Regression] Quiescence ended the run while the root actor was still awaiting its model call.
         agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(termination_mode="quiescence", include_actors=[]), runner=SlowAnswerRunner())
