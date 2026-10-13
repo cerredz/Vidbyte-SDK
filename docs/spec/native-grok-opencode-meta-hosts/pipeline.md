@@ -23,7 +23,7 @@ started: 2026-10-13 01:30 UTC
 | S5 repair loop | done | 2026-10-13 16:45 UTC | 2026-10-13 23:05 UTC | reports/S5-repair-{1,2,3}.md, verify-log.md | converged in 3/8; all 13 confirmed Blocker/Major + CI-1 + R-M1/R-M6 fixed; code HEAD af3e05e8; remote ci 38418651864 + static-policy 38418656187 green |
 | S5 re-review | done | 2026-10-13 23:10 UTC | 2026-10-14 02:40 UTC | reports/S5-rereview.md, S5-rereview-verifier.md, S5-rereview-2.md | round 1: 21/21 fixes held; R-16/R-17 confirmed, fixed in iteration 4; round 2: SOUND, 3/3 fixes held, 0 Blocker/Major, 1 trivial Minor (R-RR2-1) |
 | S5 RACE-1 (post-SOUND) | done | 2026-10-14 03:40 UTC | 2026-10-14 06:10 UTC | review.md RACE-1 section, test-plan Addendum 3, verify-log iteration 6 | R-18..R-21 fixed (0284ffe1, 0e900159, 85788217, 241f1966) + wording e4210fc3; code HEAD e4210fc3; ci 38450551272 + 38450554202 green, static-policy 38450557318 green |
-| S6 PR | running | 2026-10-14 06:25 UTC | | reports/S6-pr-author.md | |
+| S6 PR | body done; reopened for 2 Minors | (see clock note) | | inline (report file refused) | 16078049: title final, draft, pr-open; ci 38454805967 + static-policy 38454808626 green |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
@@ -225,6 +225,33 @@ started: 2026-10-13 01:30 UTC
   - **Decision: how it reads the diff.** It reads every changed `vidbyte/` file in full (67 files, +11,656). Tests (49 files, +13,735) it reads by test name, FEATURE.md and the coverage maps, not line by line. Why: the code is what the PR body describes, and the test plan already maps every test to what it proves.
   - **Decision: AC-1 is run through its test, never by hand.** The §4 snippet is run only through its AC-1 test, which uses the fakes. Running it by hand would launch the real `grok.exe` on PATH and make a live vendor call, which the request forbids.
   - **Decision: what the PR body must say about RACE-1.** The RACE-1 fixes came after re-review round 2 (cap 2/2). They were checked by blind regression tests and by my own verification, not by a third re-review.
+- 2026-10-13 19:35 UTC (from `date -u`) — **Clock correction.** Several orchestrator timestamps in this file are estimates, not clock readings. Some of them, including every "2026-10-14 …" entry and the stage-table times from S5 on, are ahead of the real clock. The S6 PR author caught it. Treat commit dates (`git log --format=%cI`) as authoritative. From here on, entries carry `date -u` readings.
+- 2026-10-13 19:35 UTC — **S6 PR author done** (16078049, docs only).
+  - **Body.** Title `feat(native-hosts): GrokHost, OpencodeHost and MuseHost plus GLM and DeepSeek backend profiles, each failing with one typed error`. 13 deviations, 14 follow-ups and 11 limitation bullets. §5 diagram drift was fixed in the spec, with a §17 row.
+  - **My spot-check:**
+    - `gh pr view`: OPEN, draft, base `main`, head 16078049, no `[WIP]`;
+    - the body has 2 mermaid blocks and ends with the attribution line;
+    - the spec on `origin/feat/...` reads `status: pr-open`, `pr:` set, `revision: 8`;
+    - ci 38454805967 (3.11, 3.12 and Package) and static-policy 38454808626 both succeeded on 16078049;
+    - the tree is clean and 0 commits are unpushed;
+    - no non-docs file changed after e4210fc3;
+    - AC proofs checked: AC-1 `test_snippet_prints_completed_text_when_grok_is_the_fake` and AC-14 `test_compat_refuses_unsupported_features_then_disallowed_harness_without_network` exist and pass (2 passed).
+- 2026-10-13 19:35 UTC — **Decision: send S6's two code-defect OPEN ITEMS back to S5, not to follow-ups.**
+  - The items:
+    - (R-22?) `muse/host.py:675-678`: `_forget_driver` never retrieves `task.exception()`, while Grok (`grok/host.py:565-570`) and opencode (`opencode/host.py:768-773`) do, so a failed, never-waited Muse turn may log "Task exception was never retrieved".
+    - (R-23?) `backends/profiles.py:286` hard-codes `DEEPSEEK_API_KEY` instead of the profile's own variable. This is latent.
+  - Why: the skill sends code defects found at S6 back to S5. The user asked for "extensive" error handling on every function. Iterations remain (6/8).
+  - Order: as with RACE-1, a scoped findings verifier first, because neither item has been reproduced and S6 hedged both ("can log", "harmless today"). Then an S2 addendum for the confirmed items that have a deterministic test, then S5 iteration 7, then the S6 author updates the body by SendMessage.
+  - Not routed: the T-6 scrub conflict (already a spec-level follow-up), and the speculative BOM in `muse/launcher.py:153`, which has no evidence.
+- 2026-10-13 19:35 UTC — **The S6 field-guide candidates go in the final user report only.** One line each:
+  - win32 vendor CLI: launch only a real .exe (R-2);
+  - after a deadline drain, check `stdin.is_closing()` (CI-1);
+  - lower-case UUID ids in one key function, opaque ids exact (R-8, R-16);
+  - scrub then cap vendor strings, titles included (R-17);
+  - count lint against a real main checkout (R-13);
+  - keep spec ids out of SDK comments, 72 columns (R-14, R-15, R-M11);
+  - enum parameter descriptions name every value (R-4);
+  - key moot interrupts on the turn's recorded completion (R-18..R-21).
 
 ## User replies (verbatim)
 (none during the run)
