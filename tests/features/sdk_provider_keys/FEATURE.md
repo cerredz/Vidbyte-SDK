@@ -42,6 +42,7 @@ Each line is input + state → wrong output. The test that catches it is in the 
 - A dump of a relay request's headers → `X-Vidbyte-Provider-Key` is not a credential name, so the provider key survives redaction while the bearer is scrubbed (NFR-1, INV-22, review R-15).
 - A `DIRECT` config or agent on an unserved provider (mistral) with only another provider's key → M-18 tells the developer to fall back to "Vidbyte's own mistral account", which the gateway cannot serve (M-18, review R-13, re-review R-C2).
 - A relay call whose provider answers a wrong key with HTTP 400 (xAI's `invalid-argument`, not 401) → the message never mentions the caller's own key in `api_keys`, so the developer cannot tell their key is the cause (table G, live test LE-1).
+- A captured mapping `{"provider_key": <key>}` → the name policy knows only the `_provider_key` suffix, so the key survives in harness output while the same name in free text is scrubbed (INV-22, NFR-1, re-review R-C3).
 
 ## Contract
 

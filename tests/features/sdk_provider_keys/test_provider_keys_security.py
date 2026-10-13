@@ -255,6 +255,21 @@ class CredentialGuardTests(unittest.TestCase):
                     for key in (K_XAI, VIDBYTE_KEY):
                         self.assertNotIn(key, output)
 
+    def test_the_bare_name_provider_key_is_a_secret_name_as_the_free_text_redactor_already_treats_it(self) -> None:
+        # INV-22, NFR-1 (re-review R-C3): the free-text pass scrubs provider_key=..., so the name policy must agree, or a mapping {"provider_key": key} keeps the key.
+        from vidbyte.harnesses.serialization import HarnessRedactor
+        from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
+
+        for name in ("provider_key", "providerKey", "Provider-Key"):
+            with self.subTest(name=name):
+                self.assertTrue(CredentialKeyPolicy.is_secret_key(name), f"{name} must be a credential name")
+        self.assertFalse(CredentialKeyPolicy.is_secret_key("provider"))
+        redactor = HarnessRedactor()
+        structured = redactor.redact({"provider_key": K_XAI, "provider": "xai"})
+        self.assertNotIn(K_XAI, repr(structured))
+        self.assertIn("xai", repr(structured))
+        self.assertNotIn(K_XAI, redactor.redact(f"provider_key={K_XAI}"))
+
 
 if __name__ == "__main__":
     unittest.main()
