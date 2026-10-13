@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencod
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
 s3_head: de5b7c4c
-s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8])
+s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests])
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1036
 until: none
 started: 2026-10-13 01:30 UTC
@@ -157,6 +157,10 @@ started: 2026-10-13 01:30 UTC
 
   S6 must list it under Follow-ups with the proposed wording.
 - 2026-10-14 00:30 — **Next:** an S2 addendum with regression tests for R-16 and R-17, proven red. Then S5 iteration 4 (R-16, R-17, R-M11), then re-review round 2, the last.
+- 2026-10-14 01:10 — **S2 addendum 2 done** (tests 5ce6e85d, report 1c74c450). It adds 11 regression tests, all red for the stated reasons: R-16 ×8 (Grok and Muse; continue and fork; the handle's id and its lower-case form) and R-17 ×3.
+  - My run of the new files: `11 failed, 34 passed`.
+  - The test diff only adds; the few removed lines are A001 header fields, rewritten.
+  - **Open note from the author:** no test pins opencode's exact id comparison. Iteration 4 is briefed that opencode must stay exact (INV-14), and re-review round 2 checks it.
 
 ## User replies (verbatim)
 (none during the run)
