@@ -125,6 +125,11 @@ class MuseModelCatalog:
     models: tuple[MuseModel, ...]
 
     def __post_init__(self) -> None:
+        # @intent muse-model-catalog-is-type-checked
+        # The catalog comes from Muse's model/list answer and
+        # decides the model check before a turn spends money, so
+        # each field's type is checked and the wire turns a refusal
+        # into protocol_mismatch.
         RecordFieldConverter.require_instance(self.provider_id, "MuseModelCatalog.provider_id", str)
         RecordFieldConverter.require_instance(self.profile_id, "MuseModelCatalog.profile_id", str, optional=True)
         RecordFieldConverter.require_instance(self.source, "MuseModelCatalog.source", str)
@@ -147,6 +152,10 @@ class MuseSession:
     updated_at: str
 
     def __post_init__(self) -> None:
+        # @intent muse-session-record-is-type-checked
+        # A session read from Muse reaches the caller and feeds the fork
+        # and busy checks, so each field's type is checked here and the
+        # wire turns a refusal into protocol_mismatch.
         RecordFieldConverter.require_instance(self.session_id, "MuseSession.session_id", str)
         RecordFieldConverter.require_instance(self.workspace_root, "MuseSession.workspace_root", str)
         RecordFieldConverter.require_instance(self.status, "MuseSession.status", str)

@@ -87,6 +87,11 @@ class NativeApprovalDecision:
     outcome: ApprovalOutcome
 
     def __post_init__(self) -> None:
+        # @intent approval-decision-record-is-bounded
+        # Every decision a turn records reaches the caller and the
+        # model, so the kind and the title are capped and the outcome is
+        # a closed ApprovalOutcome. The title may be empty, because a
+        # vendor need not send one.
         RecordFieldValidator.require_text(self.request_kind, "NativeApprovalDecision.request_kind", max_chars=NATIVE_ID_MAX_CHARS)
         RecordFieldValidator.require_text(self.title, "NativeApprovalDecision.title", max_chars=NATIVE_APPROVAL_TITLE_MAX_CHARS, allow_blank=True)
         RecordFieldValidator.require_enum(self.outcome, ApprovalOutcome, "NativeApprovalDecision.outcome")

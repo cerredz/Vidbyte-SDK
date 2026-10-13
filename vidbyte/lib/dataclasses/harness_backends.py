@@ -53,6 +53,11 @@ class HarnessBackend:
     balance_url: str | None = None
 
     def __post_init__(self) -> None:
+        # @intent backend-profile-holds-no-secret
+        # A profile is public, declared data: https endpoints, variable
+        # names and fixed pairs. claude_env may not hold a
+        # credential-named key, because those pairs are shown and copied
+        # freely; the key itself is read on each call and kept apart.
         RecordFieldValidator.require_enum(self.name, HarnessBackendName, "HarnessBackend.name")
         RecordFieldConverter.require_url(self.anthropic_base_url, "HarnessBackend.anthropic_base_url", max_chars=NATIVE_URL_MAX_CHARS)
         RecordFieldValidator.require_text(self.auth_env_var, "HarnessBackend.auth_env_var", max_chars=BACKEND_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
@@ -108,6 +113,11 @@ class OpencodeBackendProvider:
     model_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        # @intent opencode-backend-provider-names-variables-only
+        # The wiring names which variable to copy into which and never
+        # holds a key value. Both names must be plain environment
+        # variable names, because the opencode host copies the key
+        # between them in the child's environment.
         RecordFieldValidator.require_enum(self.backend, HarnessBackendName, "OpencodeBackendProvider.backend")
         RecordFieldValidator.require_text(self.provider_id, "OpencodeBackendProvider.provider_id", max_chars=NATIVE_ID_MAX_CHARS)
         RecordFieldValidator.require_text(self.source_env_var, "OpencodeBackendProvider.source_env_var", max_chars=BACKEND_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)

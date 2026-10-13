@@ -72,6 +72,12 @@ class OpencodePermissionRule:
     action: OpencodePermissionAction
 
     def __post_init__(self) -> None:
+        # @intent opencode-rule-never-allows-everything
+        # A session's permission rules reach opencode as they are,
+        # so the one rule that would allow every permission on
+        # every pattern (*, *, allow) is refused here. The host
+        # must never approve everything on the model's behalf,
+        # whoever builds the rule.
         RecordFieldValidator.require_text(self.permission, "OpencodePermissionRule.permission", max_chars=OPENCODE_RULE_MAX_CHARS)
         RecordFieldValidator.require_text(self.pattern, "OpencodePermissionRule.pattern", max_chars=OPENCODE_RULE_MAX_CHARS)
         RecordFieldValidator.require_enum(self.action, OpencodePermissionAction, "OpencodePermissionRule.action")
@@ -90,6 +96,11 @@ class OpencodePromptRequest:
     max_turn_seconds: float = NATIVE_TURN_DEFAULT_SECONDS
 
     def __post_init__(self) -> None:
+        # @intent opencode-prompt-checked-before-it-spends
+        # A turn starts spending once its prompt is sent, so every value
+        # is checked here first: the model must be one provider/model
+        # pair, which the prompt body splits at its first slash, and the
+        # ceiling must be a finite time within the host's limit.
         RecordFieldValidator.require_text(self.prompt, "OpencodePromptRequest.prompt", max_chars=NATIVE_PROMPT_MAX_CHARS)
         RecordFieldValidator.require_optional_text(self.model, "OpencodePromptRequest.model", max_chars=OPENCODE_PROVIDER_MODEL_MAX_CHARS, pattern=_PROVIDER_MODEL_PATTERN)
         RecordFieldValidator.require_optional_text(self.agent, "OpencodePromptRequest.agent", max_chars=NATIVE_ID_MAX_CHARS, pattern=NATIVE_VENDOR_ID_PATTERN)
@@ -106,6 +117,11 @@ class OpencodeSpawnRequest:
     permission_rules: tuple[OpencodePermissionRule, ...] = ()
 
     def __post_init__(self) -> None:
+        # @intent opencode-spawn-carries-only-checked-rules
+        # A new session starts with exactly these permission rules and
+        # nothing more, so each one must be a checked
+        # OpencodePermissionRule and their number is capped before the
+        # session is created.
         RecordFieldConverter.require_instance(self.turn, "OpencodeSpawnRequest.turn", OpencodePromptRequest)
         RecordFieldValidator.require_optional_text(self.title, "OpencodeSpawnRequest.title", max_chars=NATIVE_ID_MAX_CHARS)
         rules = RecordFieldConverter.to_tuple(self.permission_rules, "OpencodeSpawnRequest.permission_rules", item_type=OpencodePermissionRule, max_items=OPENCODE_MAX_PERMISSION_RULES)
@@ -125,6 +141,12 @@ class OpencodeMcpServerConfig:
     timeout_ms: int | None = None
 
     def __post_init__(self) -> None:
+        # @intent opencode-mcp-config-shape-is-fixed
+        # A registered MCP server runs a command or reaches a URL with
+        # secrets in its environment or headers, so its shape is fixed
+        # here: a local server has a command and no URL, a remote one
+        # has an https URL (plain http only on loopback) and no command.
+        # The environment and header maps are copied read-only.
         RecordFieldValidator.require_text(self.name, "OpencodeMcpServerConfig.name", max_chars=OPENCODE_MCP_NAME_MAX_CHARS, pattern=OPENCODE_MCP_NAME_PATTERN)
         RecordFieldValidator.require_enum(self.kind, OpencodeMcpKind, "OpencodeMcpServerConfig.kind")
         if self.kind is OpencodeMcpKind.LOCAL:
@@ -159,6 +181,11 @@ class OpencodeHostSettings:
     max_live_turns: int = NATIVE_MAX_LIVE_TURNS_DEFAULT
 
     def __post_init__(self) -> None:
+        # @intent opencode-host-owns-or-attaches-never-both
+        # A host either starts its own server or attaches to one at
+        # server_url, never both. Attached credentials come as a pair
+        # and only with a URL, and every timeout and the MCP map are
+        # bounded before any process starts or any request is sent.
         RecordFieldValidator.require_directory(self.workspace, "OpencodeHostSettings.workspace")
         if self.opencode_command is not None:
             RecordFieldValidator.require_argv(self.opencode_command, "OpencodeHostSettings.opencode_command")
@@ -214,6 +241,11 @@ class OpencodeModel:
     output_limit: int | None = None
 
     def __post_init__(self) -> None:
+        # @intent opencode-model-read-is-type-checked
+        # Models are read from the server's answer, so each field's type
+        # is checked here and the wire turns a refusal into
+        # protocol_mismatch. The ids stay verbatim, because the prompt
+        # body sends them back unchanged.
         RecordFieldConverter.require_instance(self.provider_id, "OpencodeModel.provider_id", str)
         RecordFieldConverter.require_instance(self.model_id, "OpencodeModel.model_id", str)
         RecordFieldConverter.require_instance(self.name, "OpencodeModel.name", str, optional=True)
@@ -235,6 +267,12 @@ class OpencodeProvider:
     default_model_id: str | None = None
 
     def __post_init__(self) -> None:
+        # @intent opencode-provider-record-holds-no-key
+        # A provider record carries ids, names and variable names
+        # only, never the key or options the server's provider
+        # object holds. Each field's type is checked, so a malformed
+        # answer fails at the wire as protocol_mismatch instead of
+        # reaching a tool result.
         RecordFieldConverter.require_instance(self.provider_id, "OpencodeProvider.provider_id", str)
         RecordFieldConverter.require_instance(self.name, "OpencodeProvider.name", str)
         RecordFieldConverter.require_instance(self.source, "OpencodeProvider.source", str)
@@ -264,6 +302,11 @@ class OpencodeProviderAuth:
     methods: tuple[OpencodeAuthMethod, ...]
 
     def __post_init__(self) -> None:
+        # @intent opencode-provider-auth-is-read-only
+        # The auth methods are a read of what the server offers, copied
+        # verbatim and never acted on. Their types are checked, so a
+        # malformed answer fails at the wire as protocol_mismatch
+        # instead of reaching a tool result.
         RecordFieldConverter.require_instance(self.provider_id, "OpencodeProviderAuth.provider_id", str)
         object.__setattr__(self, "methods", RecordFieldConverter.to_tuple(self.methods, "OpencodeProviderAuth.methods", item_type=OpencodeAuthMethod))
 
@@ -330,6 +373,11 @@ class OpencodeMessage:
     usage: NativeTokenUsage | None = None
 
     def __post_init__(self) -> None:
+        # @intent opencode-message-text-is-capped
+        # A message read from the server reaches the model, so its text
+        # must already be cut to NATIVE_RESULT_TEXT_MAX_CHARS, with
+        # text_truncated saying whether it was cut. Every other field is
+        # type-checked, so a malformed answer fails at the wire.
         RecordFieldConverter.require_instance(self.message_id, "OpencodeMessage.message_id", str)
         RecordFieldConverter.require_instance(self.session_id, "OpencodeMessage.session_id", str)
         RecordFieldConverter.require_instance(self.role, "OpencodeMessage.role", str)
@@ -403,6 +451,11 @@ class OpencodePermissionRequest:
     patterns: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        # @intent opencode-permission-request-id-is-checked
+        # The watcher answers this request by its id, so the id must
+        # carry opencode's per prefix and the session id must be a
+        # session id. A malformed entry fails the poll instead of being
+        # answered on a guess.
         RecordFieldValidator.require_text(self.request_id, "OpencodePermissionRequest.request_id", max_chars=NATIVE_ID_MAX_CHARS)
         if not self.request_id.startswith(_PERMISSION_REQUEST_PREFIX):
             raise ConfigurationError("OpencodePermissionRequest.request_id must start with per.", details={"field": "OpencodePermissionRequest.request_id"})
@@ -419,6 +472,11 @@ class OpencodeQuestionRequest:
     session_id: str
 
     def __post_init__(self) -> None:
+        # @intent opencode-question-request-id-is-checked
+        # The watcher rejects this question by its id, so the id must
+        # carry opencode's que prefix and the session id must be a
+        # session id. A malformed entry fails the poll instead of being
+        # skipped unanswered.
         RecordFieldValidator.require_text(self.request_id, "OpencodeQuestionRequest.request_id", max_chars=NATIVE_ID_MAX_CHARS)
         if not self.request_id.startswith(_QUESTION_REQUEST_PREFIX):
             raise ConfigurationError("OpencodeQuestionRequest.request_id must start with que.", details={"field": "OpencodeQuestionRequest.request_id"})
@@ -436,6 +494,11 @@ class OpencodeSessionStatus:
     retry_reason: str | None = None
 
     def __post_init__(self) -> None:
+        # @intent opencode-retry-status-carries-its-attempt
+        # The watcher fails a turn whose retry attempt reaches its
+        # limit, so a retry status must carry its attempt number and no
+        # other status may. A status that breaks this fails the poll
+        # instead of hiding a retry loop that keeps spending.
         RecordFieldConverter.require_instance(self.session_id, "OpencodeSessionStatus.session_id", str)
         RecordFieldConverter.require_instance(self.state, "OpencodeSessionStatus.state", str)
         RecordFieldValidator.require_optional_count(self.retry_attempt, "OpencodeSessionStatus.retry_attempt")

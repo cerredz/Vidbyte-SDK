@@ -207,8 +207,10 @@ class CliRunner:
         return process, None
 
     async def _feed_stdin(self, process: asyncio.subprocess.Process, stdin_text: str | None) -> None:
-        # Writes the text and closes the pipe so the child reads to EOF;
-        # a child that exits early is not an error.
+        # @intent cli-stdin-closes-after-the-text
+        # Writes the text and closes the pipe, so the child reads to EOF
+        # instead of waiting for more input. A child that exits early is
+        # not an error here, because the outcome reports its exit.
         if process.stdin is None:
             return
         with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
@@ -237,8 +239,10 @@ class CliRunner:
             await asyncio.wait(pending)
 
     def _outcome(self, process: asyncio.subprocess.Process, stdout: bytearray, stderr: bytearray, limit_bytes: int, timed_out: bool) -> CliOutcome:
-        # Decodes each stream within the byte cap, trimming a
-        # partly kept character.
+        # @intent cli-outcome-text-stays-within-the-cap
+        # Decodes each stream within the byte cap, trimming a partly
+        # kept character, so the text is valid and never longer than the
+        # cap; the truncated flags say whether more was read.
         out_text = bytes(stdout[:limit_bytes]).decode("utf-8", errors="replace").encode("utf-8")[:limit_bytes].decode("utf-8", errors="ignore")
         err_text = bytes(stderr[:limit_bytes]).decode("utf-8", errors="replace").encode("utf-8")[:limit_bytes].decode("utf-8", errors="ignore")
         return CliOutcome(

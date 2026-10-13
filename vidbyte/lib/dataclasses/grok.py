@@ -95,6 +95,12 @@ class GrokOneShotRequest:
     max_turn_seconds: float = NATIVE_TURN_DEFAULT_SECONDS
 
     def __post_init__(self) -> None:
+        # @intent grok-one-shot-values-are-argv-safe
+        # Every value here goes onto the grok command line, so each is
+        # checked before the run: the prompt within the argv cap, the
+        # ids to the plain vendor-id pattern, and the allow and deny
+        # rules to the rule pattern and one shared count. The permission
+        # mode is an enum with no approve-everything member.
         RecordFieldValidator.require_text(self.prompt, "GrokOneShotRequest.prompt", max_chars=GROK_ARGV_PROMPT_MAX_CHARS)
         RecordFieldValidator.require_optional_text(self.model, "GrokOneShotRequest.model", max_chars=NATIVE_ID_MAX_CHARS, pattern=NATIVE_VENDOR_ID_PATTERN)
         RecordFieldValidator.require_optional_text(self.reasoning_effort, "GrokOneShotRequest.reasoning_effort", max_chars=NATIVE_ID_MAX_CHARS, pattern=NATIVE_VENDOR_ID_PATTERN)
@@ -125,6 +131,10 @@ class GrokOneShotResult:
     request_id: str | None = None
 
     def __post_init__(self) -> None:
+        # @intent grok-one-shot-result-is-type-checked
+        # The result is read from the CLI's JSON output, so each field's
+        # type is checked here and a malformed answer fails at the wire
+        # instead of reaching the caller half-read.
         RecordFieldConverter.require_instance(self.text, "GrokOneShotResult.text", str)
         RecordFieldValidator.require_bool(self.text_truncated, "GrokOneShotResult.text_truncated")
         RecordFieldConverter.require_instance(self.stop_reason, "GrokOneShotResult.stop_reason", str)
@@ -243,6 +253,11 @@ class GrokPermissionRequest:
     options: tuple[GrokPermissionOption, ...]
 
     def __post_init__(self) -> None:
+        # @intent grok-permission-request-checked-before-a-decision
+        # The driver decides on this request and must echo its JSON-RPC
+        # id, so the id must be an int or a string and the tool kind an
+        # AcpToolKind. A malformed request fails the turn instead of
+        # being answered on a guess.
         RecordFieldConverter.require_instance(self.request_id, "GrokPermissionRequest.request_id", (int, str))
         RecordFieldConverter.require_instance(self.session_id, "GrokPermissionRequest.session_id", str)
         RecordFieldValidator.require_enum(self.tool_kind, AcpToolKind, "GrokPermissionRequest.tool_kind")
