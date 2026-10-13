@@ -20,8 +20,8 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | S3 implement | done | 2026-10-13 | 2026-10-13 | reports/S3-implementer.md | S3_HEAD 23dff561 (code at 3481ed66); draft PR #1027; 41 rows; full 4101P/13S/0F; pack 117/117; SDK-LINT PASS (A001 643→641); run_ci source+package PASS; semgrep 0; remote CI + Static policy success @3481ed66; budget 1 file/3 classes/0 deps, base.py +26/30 |
 | S4 adversarial review | done | 2026-10-13 | 2026-10-13 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker / 9 Major / 8 Minor; refuted 0 (3 sub-claims corrected) |
 | S5 repair loop | converged | 2026-10-13 | 2026-10-13 | reports/S5-test-author-1.md, reports/S5-repair-1.md, verify-log.md | test pass 1 57596097; repair 1 HEAD 36897094 (code at 6ac82305); full 4107P/13S; 0 open findings (R-18 deferred) |
-| S5 live E2E (both repos) | pending | | | | |
-| S5 re-review | running | 2026-10-13 | | reports/S5-rereview-conformance-1.md | |
+| S5 live E2E (both repos) | done | 2026-10-13 | 2026-10-13 | scratchpad live-e2e/ (launcher, sdk_live, cleanup) | PASS: junk-key probe relayed xAI's own 400 invalid-argument; real runner + agent 200 via relay; 1 FEE_ONLY session, cost 1,723,700 nUSD, 200 bps, billed 1 cent = expected; open 0; second cleanup idempotent |
+| S5 re-review | round 1 done; round 2 pending | 2026-10-13 | | reports/S5-rereview-conformance-1.md | round 1: 13/13 fixes confirmed; new 0 Blocker / 1 Major (R-C1) / 2 Minor |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -136,4 +136,19 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
   - A002 is 580 (base 584). `fallback._validate_error_types` passes only because the new `named_providers` @intent is within 20 lines.
   - `s014_mut.py` ends with `git checkout -- .`, so run it only on a git-archive copy that has its own `git init`.
   - Source: S5 repair 1.
+- 2026-10-13 — Re-review round 1 (conformance) returned MERGEABLE AFTER FIXES. It confirmed 13/13 fixes and found no regression. New findings, ruled as follows:
+  - **R-C1 (Major): confirmed by me, no fresh verifier.** `provider_keys.py` is 300 lines, and spec.md:519 NFR-4 says "under 300 lines". The evidence is one deterministic command I ran myself (`wc -l` → 300). Fix in code; the 300 lines must not be met by amending NFR-4.
+  - **R-C2 (Minor):** §17 and table M's M-18 text still show the unconditional clause, and no test pins R-13. The spec gets fixed, and a test is added.
+  - **R-C3 (Minor):** `CredentialKeyPolicy` misses the bare name `provider_key`. Fix, and add a test.
+- 2026-10-13 — Live E2E. The user's reply (verbatim, AskUserQuestion): "Read it from Render (Recommended)".
+  - **The first attempt** got Vidbyte's own 401. The main checkout's backend `.env` `INTEGRATIONS_HASH_KEY` differs from production's: the key's record is in the production DB, active, but 0 hash matches. The cleanup was clean and nothing was billed.
+  - **Render CLI v2.22 has no `env-vars` command.** The launcher instead reads only `INTEGRATIONS_HASH_KEY` via `GET /v1/services/srv-cvi99evnoe9s739rvrd0/env-vars`, using the CLI's stored login, in memory only.
+  - **Results, on SDK code 6ac82305 and backend 2dfd148ed:**
+    - Construction-only checks: the Grok key on an openai model is refused with M-18; a Vidbyte key inside `api_keys` is recognised; VIDBYTE_MANAGED drops the provider key; DIRECT skips the gateway.
+    - Junk-key probe: xAI's `invalid-argument` "Incorrect API key provided" came back relayed, as HTTP 400 and not a Vidbyte body.
+    - Real calls: the runner returned "pong" (max_output_tokens 64) and the single-iteration Grok agent returned "Hi". Both were 200 via relay with the header sent.
+    - Cleanup: 1 FEE_ONLY session, `provider_cost_nanousd` 1,723,700 at 200 bps, a fee of 34,474 nUSD, `billed_cents` 1 = expected; open 0, no settle failures. A second cleanup gave the identical result (idempotent).
+- 2026-10-13 — **LE-1 (Major, found live), added to the defect list.** xAI answers an incorrect API key with HTTP 400 `invalid-argument`, not 401. The SDK's relay wording ("relayed-refusal-blames-the-callers-own-key") covers only 401/402/403. So a developer with a wrong xAI key sees "xai returned HTTP 400 through the Vidbyte gateway; the provider's message is withheld, and the call was not billed", which never points at their own key. Fix (wording only, relay calls only): a relayed 400 names the caller's own `{provider}` key in `api_keys` as one possible cause, keeps withholding the body, and keeps "not billed". In scope: Prompt 5 "dont want developers to have to worry about this".
+- 2026-10-13 — Observation for the final report, not a defect: settlement rounds each session's fee UP to whole cents. A tiny session's 2% fee ($0.0000345 here) bills 1 cent. Sessions aggregate per day, Vidbyte key, provider and basis, so over-rounding is at most 1 cent per session.
+- 2026-10-13 — Plan: S5 test pass 2 adds T-11 (pin R-13; green at HEAD; kills a revert of 940ff97c), T-12 (LE-1; red) and T-13 (R-C3; red). Then repair iteration 2 fixes R-C1, R-C2 (spec), R-C3 and LE-1. Then re-review round 2, the last allowed.
 
