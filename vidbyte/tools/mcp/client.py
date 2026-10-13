@@ -46,6 +46,13 @@ class McpClient:
                 "clientInfo": {"name": "vidbyte-sdk", "version": "0.2.1"},
             },
         )
+        # @intent mcp-client-sends-initialized-notification
+        # MCP's lifecycle requires notifications/initialized after initialize; servers that enforce it (the
+        # official Python SDK server before mcp 1.18) refuse every request until it arrives. Request-only
+        # custom transports have no notify, so they skip it.
+        notify = getattr(self.transport, "notify", None)
+        if notify is not None:
+            await notify("notifications/initialized")
         self.initialized = True
 
     async def list_tools(self) -> tuple[McpToolDefinition, ...]:
