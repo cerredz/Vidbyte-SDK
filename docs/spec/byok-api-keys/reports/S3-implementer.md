@@ -59,14 +59,15 @@ Worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys`, bra
 | 39 | d301e2f6 | `scripts/test-new-runners.py`, `scripts/test-async-http-transport.py`, `scripts/test-openai-compatible-chat-trace-inputs.py` | every `TextModelConfig(` takes `api_keys=[FAKE_<PROVIDER>_KEY], mode=TextModelMode.DIRECT` (fakes built from parts, one per provider used); the Anthropic header check compares against the fake. `test-new-runners.py`: 43/43 passed. The other two fail exactly as they do at the base `140b17ed` (`BaseAgent(... runner=...)` TypeError at line 299; `test_existing_payload_fields_still_pass_through` 9/10), both pre-existing and not on this feature's path. Contract scripts test passes; ruff on the three files: 131 at base, 130 now |
 | S009 | 4b23e3d9 | `vidbyte/agents/aggregation.py` (row 21 follow-up) | the full lint after row 39 showed S009 351/350: the one-line aggregator conditional left `provider` typed `str \| None`. Two branches let mypy narrow it; `--rule S009`: `S009 RATCHETED: 350 known finding(s)` / `SDK-LINT: PASS`; aggregate tests 41 passed |
 | 40 | d83024ec | `lint/baseline.json` | full lint showed `A001 IMPROVED 643 -> 641`; `--rule A001 --update-baseline` changed only `"A001": 643` to `641` |
+| S014 | 1b302cee | `lint/rules/s014_provider_model_registry_parity.py` (outside §12.3, authorized by the pipeline.md ruling at 0d0b484b) | option E: when `ProviderModelRegistry.API_KEY_ENV_VARS` holds no literal, the rule reads `PROVIDER_API_KEY_ENV_VARS` from `vidbyte/lib/constants/jev.py`, points those findings at jev.py, and requires jev.py like its other three files. Header (ARCHITECTURE NOTE, FUNCTION INVENTORY, KNOWN EDGE CASES) and the diagnostic examples say so. `--rule S014`: `S014 provider-model-registry-parity 0 0 CLEAN`; mutation proof in section 6 |
 
-## 2. Budget (§8.4), final at d1eef1aa
+## 2. Budget (§8.4), final at 1b302cee
 
 - New files: 1 (`vidbyte/lib/registries/provider_keys.py`, 296 lines; NFR-4 limit 300).
 - New classes: 3 (`ProviderKeys`, `ProviderKeyMatcher`, `TextCredentials`).
 - New dependencies: 0.
 - `vidbyte/agents/base.py`: `git diff --numstat 140b17ed -- vidbyte/agents/base.py` gives `34 8`, so +26 net (limit +30).
-- Files touched outside §12.3: none. Every changed path is a §12.3 row; `provider_keys.py` (row 4) also took two source-comment fixes in the row 35 commits. No test file changed (`git log 140b17ed..HEAD -- tests/` is empty).
+- Files touched outside §12.3: `lint/rules/s014_provider_model_registry_parity.py` (1b302cee), authorized by the orchestrator ruling in pipeline.md at 0d0b484b (option E). Every other changed path is a §12.3 row; `provider_keys.py` (row 4) also took two source-comment fixes in the row 35 commits. I changed no test file; the only test change on the branch since 140b17ed is the S2 author's c0ab2b0a.
 
 ## 3. Deviations
 
@@ -90,28 +91,25 @@ Worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys`, bra
 18. Row 37 shows `api_keys: Sequence[str] | None = None` as the row says (list form only, NG-19); the real annotation is `ProviderKeys | Iterable[str | None] | None`.
 19. Row 39: `test-async-http-transport.py` (TypeError at line 299, `BaseAgent(... runner=...)`) and `test-openai-compatible-chat-trace-inputs.py` (9/10) fail identically at base `140b17ed`; not fixed (outside the row; CI only compiles scripts).
 20. Semgrep ran from a scratch venv (semgrep 1.170.1 + mcp 1.23.3): the global semgrep 1.170.1 cannot start, because the global `mcp` is now 2.3.0, which removed `mcp.server.fastmcp`.
+21. Option E (1b302cee) goes beyond the trial patch in three small ways: findings for the aliased table point at `vidbyte/lib/constants/jev.py`, not models.py; jev.py joins the rule's required files, so a missing file fails closed; and the alias choice uses conditional expressions instead of an `if` block, which keeps `analyze` at C901's limit of 10 (the patch made it 11).
 
-## 4. Gates at HEAD d1eef1aa
+## 4. Gates at HEAD 1b302cee (Phase 5, in order)
 
-Full lint, `env -u DEEPSEEK_API_KEY PYTHONIOENCODING=utf-8 PYTHONPATH=$(pwd) python lint/run.py` (also the first step of `run_ci.py --stage source`):
+1. Lint, `env -u DEEPSEEK_API_KEY PYTHONIOENCODING=utf-8 PYTHONPATH=$(pwd) python lint/run.py`:
 
 ```
 A006   directed-dependency-graph                  34     34 RATCHETED
 C017   platform-route-contract                     0      0 CLEAN
 S009   staged-mypy-contracts                     350    350 RATCHETED
-S014   provider-model-registry-parity             14      0 REGRESSED
-S014 REGRESSED: 14 finding(s), allowance 0.
-SDK-LINT: FAIL
-CI failed: Command failed with exit code 1: ...python.exe ...lint/run.py
+S014   provider-model-registry-parity              0      0 CLEAN
+SDK-LINT: PASS
 ```
 
-S014 is the only regression; see section 6. Every other rule is RATCHETED, CLEAN, or IMPROVED.
+2. Source stage, `env -u DEEPSEEK_API_KEY PYTHONIOENCODING=utf-8 PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`: `SDK-LINT: PASS`, `context write-path integrity: ok`, `context primitive introductions: ok`, `reasoning trace contracts: ok (182 tools, 55 shapes)`, `====================== 4101 passed, 13 skipped in 34.47s ======================`, `CI passed.`
+3. Package stage, `env -u DEEPSEEK_API_KEY python scripts/run_ci.py --stage package`: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.`
+4. Semgrep 1.170.1 from the scratch venv (static-policy.yml commands): `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py`: `1/1: All tests passed`; `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte`: `Ran 1 rule on 894 files: 0 findings.` (exit 0); the same rule on `vidbyte/lib/registries/provider_keys.py`: `Ran 1 rule on 1 file: 0 findings.` (exit 0).
 
-- Source stage (`env -u DEEPSEEK_API_KEY PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`): FAIL at its first step, lint (S014). Its later steps, run one by one: `python -m compileall -q vidbyte` exit 0; `context write-path integrity: ok`; `context primitive introductions: ok`; `reasoning trace contracts: ok (182 tools, 55 shapes)`.
-- Full pytest (`env -u DEEPSEEK_API_KEY PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/`): `1 failed, 4100 passed, 13 skipped in 34.43s`. The one failure is the straggler in section 7.
-- Package stage (`env -u DEEPSEEK_API_KEY python scripts/run_ci.py --stage package`): `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.`
-- Semgrep 1.170.1 (static-policy.yml commands): `semgrep --test ...`: `1/1: All tests passed`; `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte`: `Ran 1 rule on 894 files: 0 findings.`; the same rule on `vidbyte/lib/registries/provider_keys.py`: `Ran 1 rule on 1 file: 0 findings.`
-- Feature packs (`tests/features/sdk_provider_keys/ tests/features/sdk_managed_text/`): `156 passed`.
+Earlier, at d1eef1aa before the rulings, the same gates showed `S014 REGRESSED: 14 finding(s), allowance 0` and the jev_compute straggler; sections 6 and 7 record how both were resolved.
 
 ## 5. Resolved: import cycle that D-21 did not resolve (§14 "Ask first"; ruling: option B)
 
@@ -143,22 +141,18 @@ The options:
 
 Ruling: option B, applied in d079e32b. A006 is back to 34.
 
-## 6. Open: S014 regression from option B (blocks the push)
+## 6. Resolved: S014 regression from option B (ruling: option E, pipeline.md at 0d0b484b)
 
-`lint/rules/s014_provider_model_registry_parity.py` reads `API_KEY_ENV_VARS` statically, as a dict literal inside `class ProviderModelRegistry` in `vidbyte/lib/registries/models.py` (`_class_dict`, `PARITY_MAPS`). Option B (d079e32b) made that attribute `= PROVIDER_API_KEY_ENV_VARS`, a name, so the rule finds no entries and reports all 14 providers missing: `S014 REGRESSED: 14 finding(s), allowance 0`. The option B proof ran only A006 and tests, so it missed this. The ruling (one dict object, literal in `constants/jev.py`) and S014 (literal in `models.py`) cannot both hold, and my rules forbid editing a lint rule or raising a baseline without a ruling.
+`lint/rules/s014_provider_model_registry_parity.py` read `API_KEY_ENV_VARS` only as a dict literal inside `class ProviderModelRegistry` in `vidbyte/lib/registries/models.py`. Option B (d079e32b) made that attribute `= PROVIDER_API_KEY_ENV_VARS`, so the rule saw no entries and reported all 14 providers missing (`S014 REGRESSED: 14 finding(s), allowance 0`). The option B proof had run only A006 and tests. The options were E (the rule follows the alias), F (two literals), and G (revert B). The ruling chose E, applied in 1b302cee.
 
-Options:
+Mutation proof (each mutation reverted with `git checkout -- vidbyte/lib/constants/jev.py`):
 
-- **E. S014 follows the alias.** When the class attribute holds no literal, the rule reads `PROVIDER_API_KEY_ENV_VARS` from `vidbyte/lib/constants/jev.py` with the same ModelProvider-key extraction. Parity stays exactly as strict (14 entries checked against the enum). Trial patch, applied and reverted, saved at `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/5bfc4a32-d2a9-4a4d-a6e5-3f472a0fe403/scratchpad/option-E-s014.patch` (about 15 lines): `S014 provider-model-registry-parity 0 0 CLEAN` / `SDK-LINT: PASS`. Cost: a change under `lint/`, outside §12.3.
-- **F. Two literals.** Restore the 14-entry literal in `models.py` and keep the one in `jev.py`. S014 and A006 both pass, but the ruling's "same dict object" breaks, the table is duplicated, and nothing guards drift (I may not add a test).
-- **G. Revert option B and break the cycle elsewhere.** Every other route needs a §8.5 signature change (the matcher takes the variable names as an argument) or a façade import that only hides the cycle from A006, which A006's own guidance rejects.
+- Removed `ModelProvider.MISTRAL: "MISTRAL_API_KEY",` from `PROVIDER_API_KEY_ENV_VARS`. `python lint/run.py --rule S014` gave `S014 provider-model-registry-parity 1 0 REGRESSED`, `S014 REGRESSED: 1 finding(s), allowance 0.`, and one finding: `vidbyte/lib/constants/jev.py:102 registry item MISTRAL is inconsistent: API_KEY_ENV_VARS is missing ModelProvider.MISTRAL.`
+- Removed the whole `PROVIDER_API_KEY_ENV_VARS` literal: `S014 provider-model-registry-parity 14 0 REGRESSED`, with one finding for each of ANTHROPIC, DEEPSEEK, ELEVENLABS, GEMINI, GLM, KIMI, META, MINIMAX, MISTRAL, OPENAI, OPENROUTER, PLAYAI, TYPESAFE, and XAI, all at `vidbyte/lib/constants/jev.py:1`.
+- After the revert: `S014 provider-model-registry-parity 0 0 CLEAN`.
 
-Recommendation: **E**. It keeps the ruling, one table, and the rule's full strength.
+Lint tests: there is no `lint/tests/`, and no test names S014 or its analyzer. The tests that import `lint` (`tests/test_readme_size_limit.py`, `tests/features/coding_agent/test_coding_agent_agents_md.py`) pass: `44 passed, 1 skipped`. The rule file's one mypy finding (line 56, `values.get("__line__", 1)` typed `str | int`) is also present at base, as line 45, and was left alone.
 
-## 7. Stragglers (pre-existing tests that fail only because of the new key rules; not edited)
+## 7. Resolved: straggler
 
-- `tests/test_jev_compute.py::JevComputeCheckpointTests::test_a_chosen_specialist_runs_without_a_checkpoint`: `ConfigurationError: Missing Vidbyte API key. Pass vidbyte_api_key or set VIDBYTE_API_KEY, or use mode=TextModelMode.DIRECT ...`, wrapped as `AgentExecutionError` at `vidbyte/agents/base.py:936`. `_settings()` builds `JevAgentSettings(..., api_keys=["sk-main-key"])` in the default `AUTO` with no Vidbyte key, and the agent builds its runner in `generate_reply` (pre-existing), so INV-7 (table R, M-9) makes it raise. S2 moved this file to `api_keys` in 938fb795 without adding `model_mode=TextModelMode.DIRECT` or a `VIDBYTE_API_KEY`. Test vs spec: INV-7. Likely fix (S2's): add `"model_mode": TextModelMode.DIRECT` to `_settings`.
-
-## 8. Not done because of section 6 and 7 (BLOCKED)
-
-Push, draft PR, the spec frontmatter `pr:`/`status:` commit, CI and Static policy dispatch, and Phase 7 (§6.2 Proof cells, §17 r5 row). Everything is committed locally on `feat/byok-api-keys` at d1eef1aa plus this report's commit; nothing is pushed.
+`tests/test_jev_compute.py::JevComputeCheckpointTests::test_a_chosen_specialist_runs_without_a_checkpoint` ran `AUTO` with no Vidbyte key, so INV-7 made it raise "Missing Vidbyte API key". The S2 test author fixed it at c0ab2b0a: that one test now builds its agent with `model_mode=TextModelMode.DIRECT`. The full suite is `4101 passed, 13 skipped`. I edited no test.
