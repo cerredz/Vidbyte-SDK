@@ -16,8 +16,8 @@ started: 2026-10-13 00:45 UTC
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:35 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
 | S1 spec + review | done | 2026-10-13 01:45 UTC | 2026-10-13 08:15 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 ba522bba, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
 | S2 tests | done | 2026-10-13 08:20 UTC | 2026-10-13 15:40 UTC | reports/S2-test-author.md | S2_HEAD 9a8ecc3c (tests 8e116bc7, proof 9a8ecc3c); 165 tests in tests/features/claude_host/, all red on `ModuleNotFoundError: vidbyte.harnesses.native`; spec r4 55c233bf pins the S2 open items; spec status: tests-written |
-| S3 implement | in progress | 2026-10-13 15:45 UTC | | reports/S3-implementer.md | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-13 15:45 UTC | 2026-10-13 21:05 UTC | reports/S3-implementer.md | S3_HEAD d9c5fea2; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1044 ([WIP] title); 36 commits; 31/31 §12.3 rows; budget 22/22 files, 69/69 classes, 1/1 optional dependency, 0 root exports; pack 165/165 with and without claude_agent_sdk (orchestrator re-run); source gate 4100 passed / 27 skipped; package stage PASS; SDK-LINT PASS; semgrep 0; public API unchanged; spec status: implemented |
+| S4 adversarial review | in progress | 2026-10-13 21:15 UTC | | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -107,6 +107,27 @@ started: 2026-10-13 00:45 UTC
   - CodexHost changes `CodexAgentError.__init__` (:129–156).
   The hunks are about 80 lines apart, so no merge conflict is expected. The sorted export inserts (`enums/__init__`, `tools/builtins/__init__`, `toolsets/__init__`) may conflict trivially at the second merge because the Claude* and Codex* names sit next to each other. That is resolved at the catch-up merge.
 - 2026-10-13 15:40 UTC — **Three HTTP 429 session-limit interruptions so far** (~05:30, ~10:30 and ~15:00 UTC). Each time I checked the worktree state and resumed the same agent through SendMessage with what was on disk. No work was lost.
+
+- 2026-10-13 ~18:20 UTC — **Fourth HTTP 429 session-limit interruption.** It hit the S3 implementer at 8a08732e (22 commits, clean tree). After the 20:30 UTC reset I checked the tree (clean), the test diff since S2_HEAD (empty) and the native/__init__.py blob hash (0374a2c8…, correct). I resumed the same agent through SendMessage at 20:32 UTC. No work was lost.
+- 2026-10-13 21:05 UTC — **S3 spot-check passed.**
+  - `git status --porcelain` is empty.
+  - There are 36 commits since b0d6c4c3. Every code commit cites W-/FR-/AC- ids. The two `docs(spec)` commits need none, and the style commit 5edf1a4d cites §12.4 and W- ids.
+  - `git diff 9a8ecc3c..HEAD --stat -- tests/` is empty.
+  - My re-run of the pack gave `165 passed in 6.07s`. With `sys.modules['claude_agent_sdk']=None` (the CI view) it gave `165 passed in 6.14s`.
+  - `gh pr view` shows draft PR #1044, title "[WIP] feat(harnesses): add ClaudeHost with one agent tool per Claude Code function", head d9c5fea2.
+  - The spec reads `status: implemented` with `pr:` set. The native blob hash is 0374a2c8…, correct.
+  *Why:* the S3 spot-check rule.
+- 2026-10-13 21:07 UTC — **Dispatched remote CI on d9c5fea2,** because SDK CI is dispatch-only: `ci.yml` run 38468157942 and `static-policy.yml` run 38468160731. I read the results through the check-runs API.
+- 2026-10-13 21:15 UTC — **Chose the S4 focus for each lens.**
+  - Conformance: the request.md §D weighted words, AC-1, and the 11 implementation deviations (spec §17).
+  - Conventions: the spec §11 field-guide entries, the §12.4 obligations and the lint vocabulary.
+  - Engineering:
+    - S2-7/D-29 (a success turn with a refusing window ends FAILED usage_limited);
+    - INV-7, INV-8 and INV-18 (exactly once);
+    - the steer/grace prompt numbering the implementer calls the most timing-sensitive code;
+    - the riskiest test `test_claude_host_stops.py::CloseTests::test_the_turn_ends_only_after_its_one_disconnect_finishes`.
+  Reviewers must not start a live `claude` process: the AC-1 snippet runs only through the fake-SDK seam.
+  *Why:* the user's account must not be spent, and the tests prove behaviour through the fake SDK.
 
 ## User replies (verbatim)
 - none yet
@@ -267,3 +288,25 @@ started: 2026-10-13 00:45 UTC
   - Sandbox `network` is sent only with non-empty domain lists.
   - EC-61: there is no re-entry guard; calls after `aclose` stay refused.
   *source:* spec r4.
+- **The lint policy vocabulary.**
+  - A002 flags any `_request` attribute or `permission` name that has no `# @intent` block.
+  - A007 flags a numeric literal near a `request` name. That is why `several = len(prompts) > 1` is a separate statement.
+  - The options helpers take `spawn`, not `request`.
+  *source:* S3 implementer.
+- **Comment width.** Every added `#` line must be at most 72 columns, indent included (§12.4; the field-guide comment-format entry). This prints nothing for added lines: `awk 'length($0) > 72'` piped to `grep '^\s*#'`. *source:* S3 implementer.
+- **Reading tool arguments.** Use `BaseTool._optional_argument(call, name, default=None)`. `call.arguments.get` fails mypy for typed host parameters. *source:* S3 implementer.
+- **Semgrep needs its venv first on PATH.** Put `.venvs/semgrep-1.170.1/Scripts` first on PATH; calling `semgrep.exe` alone is not enough, because the global semgrep is broken by mcp 2.x. *source:* S3 implementer.
+- **Do not reorder `vidbyte/lib/errors/__init__.py`.** It has a ruff I001 finding (out-of-order imports) that predates this branch and sits within the S051 baseline. Reordering breaks the shared-file contract. *source:* S3 implementer.
+- **CRLF shared files.**
+  - `vidbyte/tools/builtins/__init__.py` has a `# Memory providers` comment inside `__all__`.
+  - The shared files are CRLF in the checkout.
+  - Edit them only with scripts that keep CRLF and comments.
+  *source:* S3 implementer.
+- **Not yet checked against a live CLI** (no live run, by rule):
+  - `--permission-prompts none` on CLI 2.1.296 or later;
+  - the initialize-answer keys `account`, `apiKeySource` and `apiProvider` (value firstParty);
+  - real interrupt latency against the grace;
+  - the shape of a real rate_limit_event;
+  - the claude.exe lookup on Windows.
+  *source:* S3 implementer, open items.
+- **Drift from main.** The branch is 41 commits behind origin/main, and `git merge-tree` shows a clean merge. Among the touched paths, main changed only `vidbyte/harnesses/stores/file.py`. Catch up by merge (never rebase) when the repair loop or S6 pushes. *source:* S3 implementer.
