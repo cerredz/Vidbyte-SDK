@@ -119,7 +119,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         choice = {"index": 0, "message": {"role": "assistant", "content": "The refund window is "}, "finish_reason": "error", "error": {"code": 502, "message": "Provider returned error"}}
         transport = FakeTransport(json.dumps({"choices": [choice], "usage": usage}), status_code=200)
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_keys=["sk-or-v1-test-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
         with self.assertRaises(ProviderResponseError) as caught:
@@ -128,7 +128,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         self.assertEqual(caught.exception.details["usage"], usage)
         stopped = FakeTransport(json.dumps({"choices": [{**choice, "finish_reason": "stop"}], "usage": usage}), status_code=200)
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_keys=["sk-or-v1-test-key"], mode=TextModelMode.DIRECT),
             transport=stopped,
         )
         self.assertEqual(runner.run("Hello").text, "The refund window is ")

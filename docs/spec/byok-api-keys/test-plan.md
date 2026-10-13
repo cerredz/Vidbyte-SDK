@@ -1,8 +1,8 @@
 # byok-api-keys: test plan (S2)
 
-Spec: `docs/spec/byok-api-keys/spec.md` r4 (approved). Branch `feat/byok-api-keys`, base `52aab816`.
+Spec: `docs/spec/byok-api-keys/spec.md` r4 (approved), now r5 with the S2 wording rulings. Branch `feat/byok-api-keys`, written on base `52aab816` and rebased onto origin/main `b53c8811` on 2026-10-13.
 New pack: `tests/features/sdk_provider_keys/` (117 tests, 11 files plus fixtures, FEATURE.md, README.md).
-Superseded updates: `tests/features/sdk_managed_text/` and 30 module test files (spec §13).
+Superseded updates: `tests/features/sdk_managed_text/` and 30 module test files (spec §13), plus post-rebase stragglers in seven module test files, one of them added on main (§5).
 
 Every test that builds a runner or an agent clears the environment (`patch.dict(os.environ, …, clear=True)` or `RecordingEnviron`) and scripts the inner HTTP transport. Only the transport, the retry wait, and the environment are faked. `ProviderKeyMatcher`, `ProviderKeys`, `credentials()`, `ProviderModelRegistry`, the adapters, and `VidbyteGatewayTransport` run for real. Every feature symbol is imported inside the test, so the pack collects while it is red.
 
@@ -102,18 +102,21 @@ Files are abbreviated: `acc` = `test_provider_keys_acceptance.py`, `match` = `�
 
 ## 3. Red run
 
-Command: `env -u DEEPSEEK_API_KEY PYTHONPATH=C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys python -m pytest -q -p no:cacheprovider`, at HEAD `661fe8bf` plus these test changes (no production code changed).
+Command: `env -u DEEPSEEK_API_KEY PYTHONPATH=C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys python -m pytest -q -p no:cacheprovider`, on the branch rebased onto origin/main `b53c8811`, with the post-rebase straggler updates (no production code changed).
 
-- Baseline before S2 (same command, base tests): **3912 passed, 13 skipped**.
-- Red run: **295 failed, 3727 passed, 13 skipped, 7 errors in 39.47s** (4,042 tests = 3,925 + 117 new).
+- Baseline: origin/main `b53c8811` in a scratch worktree, same command with `PYTHONPATH` set to that worktree: **3981 passed, 13 skipped, 0 failed**. So no failure below is pre-existing.
+- Red run: **307 failed, 3784 passed, 13 skipped, 7 errors in 40.58s** (4,111 tests = 3,994 + 117 new).
 - New pack: **117 failed, 0 passed**.
-- Superseded tests: **178 failed + 7 setup errors**, all in the files listed in §5. No failure is in an untouched file, so none is pre-existing (the base run had none).
+- Superseded tests: **190 failed + 7 setup errors**, all in the files listed in §5. That is the first run's 178 + 7, plus 12 tests main added: the 11 updated as post-rebase stragglers, and `test_chunked_content_answers_with_its_text_chunks`, which already runs through the `DIRECT` `_text` helper of `test_compatible_provider_text.py`. No failure is in an untouched file.
+- First run, before the rebase (base `52aab816`, HEAD `661fe8bf`): baseline 3912 passed, 13 skipped; red 295 failed, 3727 passed, 13 skipped, 7 errors. Every test that failed there still fails, for the same reason.
+
+Rebase: three conflicts, all in import blocks where main added imports for its new tests and §13 added `TextModelMode` (`test_compatible_provider_text.py`, `test_deepseek_provider.py`, `test_output_schema_provider_dialect.py`). Each keeps main's imports and the §13 one. The other five edited files main touched merged on their own.
 
 Failure reasons, grouped (every one is the feature being absent, never a bad import or a typo):
 
 | Count | Reason |
 |---|---|
-| 113 | `AttributeError: DIRECT` (106 in a test, 7 in `setUp`): `TextModelMode.DIRECT` does not exist yet |
+| 125 | `AttributeError: DIRECT` (118 in a test, 7 in `setUp`): `TextModelMode.DIRECT` does not exist yet |
 | 38 + 2 | `JevAgentSettings` / `JevRunBriefSettings` reject `api_keys` |
 | 30 + 6 + 3 | `BaseAgent` rejects `api_keys`, `vidbyte_api_key`, `model_mode` |
 | 28 | `TextModelConfig` rejects `api_keys` / `vidbyte_api_key` |
@@ -135,10 +138,11 @@ The managed pack's `test_managed_text_failures.py:126-146` (the §13 "must stay 
 - **Order of checks in `AUTO`** with `OPENAI_API_KEY=vb_live_…` and no `VIDBYTE_API_KEY`: the tests assert only `error_kind`, so either M-9 or M-14 may win.
 - **Fakes.** Every fake is built by concatenation; anything with `vb_live_` reuses `VIDBYTE_KEY` or `VIDBYTE_API_KEY_PREFIX`. Do not "simplify" them into literals (C020, push protection).
 - **Run the pack** with `DEEPSEEK_API_KEY` unset; this machine exports a real one.
+- **Row 16 moved on main.** `HarnessRedactor._ERROR_ASSIGNMENT` no longer starts with `\b`: main (#993) replaced it with a lookbehind that also matches a credential word after `_`/`-` or at a camelCase hump (`OPENAI_API_KEY=`, `githubToken=`). Apply row 16's `keys?` and list/tuple alternatives to that regex and keep the new lookbehind.
 
 ## 5. Superseded tests updated
 
-All rows are from spec §13. Protective intent is kept in every case; no assertion was loosened beyond what the cited spec ID requires. "Rename" = `api_key=` → `api_keys=[<fake that matches the provider per table F/A>]`, plus `mode`/`model_mode=TextModelMode.DIRECT` where the test expects vendor-direct traffic.
+All rows are from spec §13, except those marked "(post-rebase straggler)": tests main added after `52aab816`, and one base test the first hunt missed, found by the static search after the rebase. Protective intent is kept in every case; no assertion was loosened beyond what the cited spec ID requires. "Rename" = `api_key=` → `api_keys=[<fake that matches the provider per table F/A>]`, plus `mode`/`model_mode=TextModelMode.DIRECT` where the test expects vendor-direct traffic.
 
 | File | Test | Spec ID | What changed |
 |---|---|---|---|
@@ -164,12 +168,12 @@ All rows are from spec §13. Protective intent is kept in every case; no asserti
 | same | `test_validate_refuses_an_explicit_vidbyte_key_for_a_provider_the_gateway_does_not_serve` | D-25, D-23, M-12 | `vidbyte_api_key=`; refused at construction; names `DIRECT` |
 | `tests/features/sdk_managed_text/FEATURE.md`, `README.md` | contract text | G-1, INV-1, INV-2 | "BYOK must see no change at all" replaced by the relay/`DIRECT` contract; key selection, headers, pinning, invariants, failure modes, README log |
 | `tests/test_text_model_runner.py` | all six tests | INV-6 | Rename, `DIRECT` |
-| `tests/test_streaming_text_runner.py` | all 17 tests | INV-11 | Rename, `DIRECT` (gemini with an `AIza` fake built at runtime) |
+| `tests/test_streaming_text_runner.py` | all 17 tests | INV-11 | Rename, `DIRECT` (gemini with an `AQ.` fake built at runtime) |
 | `tests/test_sync_runner_default_transport.py` | `test_default_streaming_runner_yields_chunks` | INV-11 | Rename, `DIRECT`; non-text tests unchanged |
 | `tests/test_config_validation.py` | `test_text_config_resolves_explicit_api_key`, `…_env_api_key`, `…_rejects_bad_temperature` | FR-2 | Rename, `DIRECT` (`resolved_api_key()` returns the key only in `DIRECT`) |
 | `tests/test_openrouter_provider.py` | six tests | EC-15 | Rename with an `sk-or-` fake, `DIRECT`; `:78` becomes M-4 |
 | `tests/test_deepseek_provider.py` | `test_zero_argument_tool_call_returns_empty_text`, `_text`, `_agent` (8 tests) | Rename | Rename, `DIRECT` |
-| `tests/test_gemini_tool_wire_format.py` | `fake_gemini`, `strict_gemini`, `_runner` (10 tests) | Rename | Rename with a runtime `AIza` fake, `DIRECT` |
+| `tests/test_gemini_tool_wire_format.py` | `fake_gemini`, `strict_gemini`, `_runner` (10 tests) | Rename | Rename with a runtime `AQ.` fake, `DIRECT` |
 | `tests/test_output_schema_provider_dialect.py` | three tests | D-2, D-28 | Rename, `DIRECT`; mistral keeps `["k"]` |
 | `tests/test_prompt_opens_tool_exchange.py` | `_chat_wire`, `_anthropic_wire`, `_responses_wire`, streaming, `call` (11 tests) | INV-11 | Rename, `DIRECT` |
 | `tests/test_compatible_provider_text.py` | `_text` | Rename | Rename with per-provider fakes, `DIRECT` |
@@ -190,3 +194,12 @@ All rows are from spec §13. Protective intent is kept in every case; no asserti
 | `tests/test_jev_run_brief.py` | `_settings`, `test_defaults_and_provider_validation`, `test_uses_main_provider_by_default_and_allows_an_independent_provider` | EC-34, D-13, D-27 | Rename; the writer's own list is its own root |
 | `tests/test_jev_compute.py`, `…_clone.py`, `…_situations.py`, `…_swarm.py` | `_settings` / `_agent` | Rename | `api_keys=["sk-main-key"]` (an `sk-` key the openai primary takes) |
 | `tests/test_codex_failure_recovery.py` | module header | wording | Prose now names `api_keys` |
+| `tests/test_compatible_provider_text.py` | `_PROVIDER_TEST_KEYS`, for main's `test_minimax_inline_thinking_is_not_the_answer` (post-rebase straggler) | D-23, M-12 | MiniMax gets a fake in the per-provider table the `DIRECT` `_text` helper reads |
+| same | `test_glm_network_error_reply_raises_and_keeps_usage` (post-rebase straggler) | D-23, M-12 | Rename, `DIRECT` |
+| `tests/test_deepseek_provider.py` | `test_insufficient_system_resource_reply_raises_and_keeps_usage` (post-rebase straggler) | INV-6 | Rename, `DIRECT` |
+| `tests/test_output_schema_provider_dialect.py` | `test_anthropic_output_config_payload_closes_every_object` (post-rebase straggler) | INV-6 | Rename with an `sk-ant-` fake, `DIRECT` |
+| same | `test_compatible_native_schema_payload_closes_every_object` (post-rebase straggler; a base test the first hunt missed) | D-23, M-12 | The mistral `TextModelConfig` also gets `mode=TextModelMode.DIRECT`; the adapter already had it |
+| `tests/test_openrouter_provider.py` | `test_error_finish_reason_raises_with_usage` (post-rebase straggler) | EC-15, D-23 | Rename with an `sk-or-` fake, `DIRECT`, in both configs |
+| `tests/test_streaming_text_runner.py` | `test_anthropic_error_event_mid_stream_…`, `test_openai_error_event_mid_stream_…`, `test_openai_response_failed_mid_stream_…` (post-rebase straggler) | INV-11 | Rename, `DIRECT` |
+| `tests/test_text_model_runner.py` | `test_openai_responses_reasoning_item_text_is_not_the_answer`, `test_anthropic_joins_adjacent_text_blocks_as_written` (post-rebase straggler) | INV-6 | Rename, `DIRECT` |
+| `tests/test_gemini_provider_text.py` (added on main) | `_text`, used by `test_thought_parts_are_not_the_answer` (post-rebase straggler) | INV-6 | Rename with a runtime `AQ.` fake (gemini takes only a proven key), `DIRECT` |

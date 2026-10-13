@@ -135,3 +135,16 @@ Result: no stragglers beyond the §13 rows.
 - `docs(spec): add byok-api-keys S2 test author report`: this file.
 
 Not pushed.
+
+## 8. Rebase onto origin/main (2026-10-13)
+
+- **Rebase.** The branch was rebased from `52aab816` onto origin/main `b53c8811` (48 commits). There were three conflicts, all in import blocks: `test_compatible_provider_text.py`, `test_deepseek_provider.py`, and `test_output_schema_provider_dialect.py`. Each keeps main's new imports and the §13 `TextModelMode` import. The other five edited files that main touched merged on their own.
+- **Straggler search.** A static search covered every test file main added or changed since `52aab816`: `api_key` on a renamed surface, a real runner or agent in `AUTO` with only a provider key, lists without the primary's key, and an unserved provider or endpoint in `AUTO` (an AST scan of the whole `tests/` tree).
+- **Tests updated.** It found 11 of main's new tests across seven files, one of them the new `test_gemini_provider_text.py`. It also found one base test the first hunt missed: the mistral `TextModelConfig` in `test_compatible_native_schema_payload_closes_every_object`, which D-23 would refuse in `AUTO`.
+- **Recording and commit.** Each one is in test-plan.md §5 as "(post-rebase straggler)". They were committed as `test(sdk): update post-rebase stragglers for byok-api-keys`.
+- **Red run.**
+  - origin/main baseline: 3981 passed, 13 skipped.
+  - Rebased red run: 307 failed, 3784 passed, 13 skipped, 7 errors. That breaks down as 117 in the pack plus 190 failures and 7 errors in §13 or straggler files, with none pre-existing.
+  - `test_managed_text_failures.py` passes 10 of 10.
+  - `python lint/run.py` reports SDK-LINT: PASS.
+- **Spec §12.3.** Of the §12.3 files, main changed only `vidbyte/harnesses/serialization.py` (row 16). The leading `\b` of `_ERROR_ASSIGNMENT` became a lookbehind that also redacts prefixed and camelCase credential names (#993). Row 16's changes now apply on top of that.

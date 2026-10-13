@@ -258,7 +258,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         error_event = json.dumps({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}})
         transport = FakeStreamingTransport([_anthropic_delta("The refund window is "), error_event])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -271,7 +271,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         error_event = json.dumps({"type": "error", "code": "server_error", "message": "boom", "param": None, "sequence_number": 3})
         transport = FakeStreamingTransport([_openai_delta("The refund window is "), error_event])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -284,7 +284,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         failed_event = json.dumps({"type": "response.failed", "response": {"status": "failed", "error": {"code": "server_error", "message": "failed"}}})
         transport = FakeStreamingTransport([_openai_delta("The refund window is "), failed_event])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 

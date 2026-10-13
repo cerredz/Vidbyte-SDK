@@ -18,9 +18,12 @@ import json
 import unittest
 from collections.abc import Mapping
 
+from vidbyte.lib.config import TextModelMode
 from vidbyte.lib.http import HttpResponse
 from vidbyte.providers.gemini import GeminiProvider
 
+# byok-api-keys: gemini takes only a proven key (table A), so the fake carries the AQ. prefix, built at runtime.
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 _THOUGHT = {"text": "**Recalling the capital**\nThe user wants the capital of France.", "thought": True}
 
 
@@ -37,7 +40,7 @@ class GeminiThoughtPartTextTests(unittest.TestCase):
 
     def _text(self, parts: list[Mapping[str, object]]) -> str:
         transport = _ScriptedTransport({"candidates": [{"content": {"role": "model", "parts": parts}, "finishReason": "STOP"}]})
-        provider = GeminiProvider(model="test-model", api_key="test-key")
+        provider = GeminiProvider(model="test-model", api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT)
         return asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=transport)).text
 
     def test_thought_parts_are_not_the_answer(self) -> None:

@@ -27,7 +27,7 @@ from vidbyte.providers.xai import XAIProvider
 
 _PROVIDERS = (XAIProvider, OpenRouterProvider, MistralProvider)
 # Each fake key carries the prefix its provider's keys use, so the key matcher binds it to that provider.
-_PROVIDER_TEST_KEYS = {XAIProvider: "xai-test-key", OpenRouterProvider: "sk-or-v1-test-key", MistralProvider: "test-key"}
+_PROVIDER_TEST_KEYS = {XAIProvider: "xai-test-key", OpenRouterProvider: "sk-or-v1-test-key", MistralProvider: "test-key", MiniMaxProvider: "test-key"}
 
 
 class _ScriptedTransport:
@@ -80,7 +80,7 @@ class CompatibleToolCallTextTests(unittest.TestCase):
         """A GLM reply cut off by network_error raises with its billed usage; "stop" and "model_context_window_exceeded" return the text."""
         usage = {"prompt_tokens": 1200, "completion_tokens": 6}
         message = {"role": "assistant", "content": "The refund window is "}
-        provider = GLMProvider(model="glm-5", api_key="test-key")
+        provider = GLMProvider(model="glm-5", api_keys=["test-key"], mode=TextModelMode.DIRECT)
         with self.assertRaises(ProviderResponseError) as caught:
             asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=_ScriptedTransport({"choices": [{"message": message, "finish_reason": "network_error"}], "usage": usage})))
         self.assertIn("network_error", caught.exception.message)

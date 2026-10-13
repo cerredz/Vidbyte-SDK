@@ -64,7 +64,7 @@ class TextModelRunnerTests(unittest.TestCase):
         }
         for output in ([reasoning, message], [message]):
             transport = FakeTransport({"output": output, "usage": {"output_tokens": 9}})
-            runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+            runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
 
             response = runner.run("Hello")
 
@@ -165,7 +165,7 @@ class TextModelRunnerTests(unittest.TestCase):
         for content, expected in cases:
             with self.subTest(expected=expected):
                 transport = FakeTransport({"content": content})
-                runner = TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"), transport=transport)
+                runner = TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT), transport=transport)
 
                 self.assertEqual(runner.run("Hello").text, expected)
 

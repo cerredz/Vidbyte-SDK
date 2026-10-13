@@ -58,7 +58,7 @@ class DeepSeekToolCallTextTests(unittest.TestCase):
         message = {"role": "assistant", "content": "The refund window is "}
         interrupted = _ScriptedTransport({"choices": [{"message": message, "finish_reason": "insufficient_system_resource"}], "usage": usage})
         truncated = _ScriptedTransport({"choices": [{"message": message, "finish_reason": "length"}], "usage": usage})
-        provider = DeepSeekProvider(model="deepseek-v4-pro", api_key="test-key")
+        provider = DeepSeekProvider(model="deepseek-v4-pro", api_keys=["test-key"], mode=TextModelMode.DIRECT)
 
         with self.assertRaises(ProviderResponseError) as caught:
             asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=interrupted))

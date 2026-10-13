@@ -126,7 +126,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
 
     def test_compatible_native_schema_payload_closes_every_object(self) -> None:
         """The compatible adapter's NATIVE_SCHEMA tier sends the same strict dialect."""
-        config = TextModelConfig(provider=ModelProvider.MISTRAL, model="mistral-large-latest", response_format=_wire_schema(Ticket))
+        config = TextModelConfig(provider=ModelProvider.MISTRAL, model="mistral-large-latest", response_format=_wire_schema(Ticket), mode=TextModelMode.DIRECT)
         payload = MistralProvider(model="mistral-large-latest", api_keys=["k"], mode=TextModelMode.DIRECT)._create_payload(config, "triage", None, None)
         json_schema = payload["response_format"]["json_schema"]
 
@@ -140,7 +140,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         schema = _wire_schema(Ticket)
         before = json.dumps(schema, sort_keys=True)
         config = TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-sonnet-4-5", response_format=schema)
-        payload = AnthropicProvider(model="claude-sonnet-4-5", api_key="k")._create_payload(config, "triage", None, None)
+        payload = AnthropicProvider(model="claude-sonnet-4-5", api_keys=["sk-ant-" + "k"], mode=TextModelMode.DIRECT)._create_payload(config, "triage", None, None)
         sent = payload["output_config"]["format"]["schema"]
 
         self.assertEqual(payload["output_config"]["format"]["type"], "json_schema")
