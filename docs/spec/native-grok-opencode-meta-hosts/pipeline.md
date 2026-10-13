@@ -82,6 +82,15 @@ started: 2026-10-13 01:30 UTC
   - Order: spec r8, then an S2 test addendum (R-1, R-2, R-5, R-6, R-7, R-8 regression tests, proven red), then S5 iteration 1. Why: test-first, and repair agents may not write tests.
 - 2026-10-13 15:15 — I chose not to use the `Ubuntu` WSL2 distro on this machine as a Linux 3.12 reproducer. Why: it is the user's environment and would need packages installed. Remote CI (`ci.yml`, matrix 3.11 and 3.12) is the Linux reproducer for CI-1.
 - 2026-10-13 15:15 — Spec `status: reviewed`, set by an orchestrator docs commit as S4 prescribes.
+- 2026-10-13 15:55 — **Spec r8**, written in revision mode by a fresh spec author: e377b7c2 for R-2, R-M2 and R-M3, then fadd6b81 for EC-39. The status stays `reviewed`.
+  - **R-2:** D-19 plus a new EC-157. On win32, Grok never starts a `.cmd` or `.bat` launcher, whether found on PATH or set explicitly. A shim found on PATH falls back to `~/.grok/bin/grok.exe`; otherwise `__aenter__` raises `grok.not_installed` with the EC-157 next step. AC-1's win32 branch moves to the §13 seam.
+  - **Audit:** opencode and Muse put no caller value on argv, so their launchers are unchanged (§10 T-2).
+  - **Counts unchanged:** 53 codes; §8.4 counts the same.
+- 2026-10-13 15:55 — **EC-39 target clause, my decision; the spec author's open note asked for one.** I recorded the implementer's `!= target` fork check in EC-39 and listed it as §17 deviation 10, rather than dropping it. Why: dropping it would accept a paid fork that names the wrong session.
+  - The r8 INV-14 change goes with it: Grok and Muse session ids are compared ignoring letter case (the busy check, EC-32, EC-35, EC-36, EC-39); opencode `ses…` ids are compared exactly.
+- 2026-10-13 15:55 — **Next step: an S2 test addendum before S5 iteration 1.**
+  - New regression tests for R-1, R-2/EC-157, R-5, R-6, R-7 and R-8 (case-insensitive ids, the EC-39 target clause), proven red against HEAD.
+  - I granted one test change: AC-1's win32 branch moves to the `grok_command` seam, as spec r8 §14 says. Any other existing test whose assertion now contradicts r8 (EC-157, D-19, AC-1, EC-39, INV-14) may change only with its before and after recorded.
 
 ## User replies (verbatim)
 (none during the run)
