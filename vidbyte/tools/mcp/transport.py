@@ -14,7 +14,9 @@ Architecture:
     - Opt-in peer extension (the defaults keep MCP behaviour): on_message for
       frames that carry "method", send_request, notify, respond, per-call
       timeouts, exit_grace_seconds, and stop_process_tree, plus a read-only
-      returncode that outlives close.
+      returncode that outlives close. Only a call with its own
+      timeout_seconds bounds its write; without one the write is MCP's plain
+      drain.
 Relations:
     Related to vidbyte.tools.mcp.client, vidbyte.tools.mcp.bridge, and
     vidbyte.tools.mcp.attach.
@@ -254,13 +256,16 @@ class McpStdioTransport:
         """Send a JSON-RPC request and return its result object."""
         # @intent mcp-stdio-request-is-send-then-bounded-wait
         # One deadline per call, request_timeout or this call's
-        # timeout_seconds, bounds both the write and the wait for the answer.
+        # timeout_seconds, bounds the wait for the answer. Only an explicit
+        # timeout_seconds also bounds the write; without one the write is
+        # the plain drain MCP callers had before the peer extension.
         timeout = self._call_timeout(timeout_seconds)
-        request_id, future = await self._send(method, params, timeout)
+        write_seconds = None if timeout_seconds is None else timeout
+        request_id, future = await self._send(method, params, write_seconds)
         return await self._answer(method, request_id, future, timeout)
 
-    async def _send(self, method: str, params: Mapping[str, Any] | None, seconds: float) -> tuple[int, asyncio.Future[Mapping[str, Any]]]:
-        """Register a pending future under a fresh id, then write the request frame within timeout."""
+    async def _send(self, method: str, params: Mapping[str, Any] | None, seconds: float | None) -> tuple[int, asyncio.Future[Mapping[str, Any]]]:
+        """Register a pending future under a fresh id, then write the request frame, bounded by seconds when given."""
         # @intent mcp-stdio-pending-before-write
         # The future is registered before the frame is written, so an answer
         # that arrives at once still finds it; a failed write removes it.
@@ -300,7 +305,13 @@ class McpStdioTransport:
             }
             try:
                 self._process.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
-                await asyncio.wait_for(self._process.stdin.drain(), seconds)
+                # @intent mcp-stdio-bounded-write-has-a-deadline
+                # Without a deadline this is MCP's plain drain; with one the
+                # drain is bounded by it.
+                if seconds is None:
+                    await self._process.stdin.drain()
+                else:
+                    await asyncio.wait_for(self._process.stdin.drain(), seconds)
             except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 self._pending.pop(request_id, None)
                 if not future.done():
@@ -354,31 +365,32 @@ class McpStdioTransport:
         # @intent mcp-stdio-send-returns-after-drain
         # A host returns a turn handle while a long request (an ACP
         # session/prompt) is still pending, so this returns once the frame is
-        # written and drained, within timeout_seconds.
-        _request_id, future = await self._send(method, params, self._call_timeout(timeout_seconds))
+        # written and drained, within timeout_seconds when given.
+        write_seconds = None if timeout_seconds is None else self._call_timeout(timeout_seconds)
+        _request_id, future = await self._send(method, params, write_seconds)
         return future
 
     async def notify(self, method: str, params: Mapping[str, Any] | None = None, *, timeout_seconds: float | None = None) -> None:
         """Write one JSON-RPC notification, which has no id and gets no answer; params is left out when None."""
-        timeout = self._call_timeout(timeout_seconds)
+        write_seconds = None if timeout_seconds is None else self._call_timeout(timeout_seconds)
         frame: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             frame["params"] = dict(params)
-        await self._write_frame(frame, method, timeout)
+        await self._write_frame(frame, method, write_seconds)
 
     async def respond(self, request_id: int | str, *, result: Mapping[str, Any] | None = None, error: Mapping[str, Any] | None = None, timeout_seconds: float | None = None) -> None:
         """Answer one server request with exactly one of a result or an error."""
         # @intent mcp-stdio-respond-is-checked-before-writing
         # A response with both or neither of result and error is refused as
         # invalid_call before anything is written, so the peer never sees it.
-        timeout = self._call_timeout(timeout_seconds)
+        write_seconds = None if timeout_seconds is None else self._call_timeout(timeout_seconds)
         if (result is None) == (error is None):
             raise McpProtocolError("An MCP response needs exactly one of result and error.", details={"reason": "invalid_call", "request_id": request_id})
         answer = {"result": dict(result)} if result is not None else {"error": dict(error or {})}
-        await self._write_frame({"jsonrpc": "2.0", "id": request_id, **answer}, None, timeout)
+        await self._write_frame({"jsonrpc": "2.0", "id": request_id, **answer}, None, write_seconds)
 
-    async def _write_frame(self, frame: Mapping[str, Any], method: str | None, seconds: float) -> None:
-        """Write one frame that expects no answer, within timeout."""
+    async def _write_frame(self, frame: Mapping[str, Any], method: str | None, seconds: float | None) -> None:
+        """Write one frame that expects no answer, bounded by seconds when given."""
         if self._closed:
             raise McpProtocolError("MCP transport is closed", details={"reason": "closed", "method": method})
         await self.start()
@@ -388,7 +400,13 @@ class McpStdioTransport:
                 raise McpProtocolError("MCP transport is closed", details={"reason": "closed", "method": method})
             try:
                 process.stdin.write((json.dumps(frame) + "\n").encode("utf-8"))
-                await asyncio.wait_for(process.stdin.drain(), seconds)
+                # @intent mcp-stdio-bounded-write-has-a-deadline
+                # The same write as _send: plain without a deadline, bounded
+                # with one.
+                if seconds is None:
+                    await process.stdin.drain()
+                else:
+                    await asyncio.wait_for(process.stdin.drain(), seconds)
             except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 reason = "timeout" if isinstance(exc, TimeoutError) else "stdin_write_failed"
                 raise McpProtocolError("MCP process stdin is not writable", details={"method": method, "stderr_tail": self.stderr_snapshot(), "reason": reason}) from exc
