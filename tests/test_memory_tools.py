@@ -579,6 +579,15 @@ class LettaSearchTests(unittest.IsolatedAsyncioTestCase):
         await tool.execute(ToolCall("letta_search_archival_memory", {"agent_id": "a1", "query": "test", "limit": 3}))
         self.assertIn("limit=3", transport.last_call["url"])
 
+    async def test_search_query_sent_as_list_endpoint_search_filter(self) -> None:
+        """[Silent Failure] the query goes in Letta's documented `search` filter, not an ignored `query` key."""
+        transport = MockTransport(200, [])
+        tool = _inject_transport(LettaSearchArchivalMemoryTool("lettakey"), transport)
+        await tool.execute(ToolCall("letta_search_archival_memory", {"agent_id": "a1", "query": "Alice", "limit": 3}))
+        url = transport.last_call["url"]
+        self.assertIn("search=Alice", url)
+        self.assertNotIn("query=", url)
+
 
 class LettaDeleteTests(unittest.IsolatedAsyncioTestCase):
 
