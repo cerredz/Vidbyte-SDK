@@ -408,6 +408,34 @@ class SourcesBaseTests(unittest.TestCase):
         self.assertEqual(result.metadata["error"], "fetch_failed")
         self.assertNotIn("# Title", result.output)
 
+    def test_direct_http_fetch_tool_decodes_pages_with_their_declared_charset(self) -> None:
+        # [Hidden Assumption] Pages declare their encoding in the Content-Type charset or a <meta charset>; reading
+        # every page as UTF-8 turns windows-1252, Shift_JIS and GBK pages into U+FFFD for the model.
+        german = "<html><body>Öffnungszeiten: Müllabfuhr am Dienstag – 5 €</body></html>"
+        japanese = "<html><body>東京駅から品川駅まで</body></html>"
+        meta_only = '<html><head><meta charset="Shift_JIS"></head><body>東京駅から品川駅まで</body></html>'
+        cases = (
+            (german.encode("cp1252"), "text/html; charset=windows-1252", german),
+            (japanese.encode("shift_jis"), 'text/html; Charset="Shift_JIS"', japanese),
+            (meta_only.encode("shift_jis"), "text/html", meta_only),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=x-bogus", "<p>ünïcode ✓</p>"),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), None, "<p>ünïcode ✓</p>"),
+            # Codecs that codecs.lookup knows but that cannot decode text under errors="replace" must fall back too:
+            # bytes-to-bytes codecs raise LookupError, and idna and punycode raise UnicodeError.
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=base64", "<p>ünïcode ✓</p>"),
+            ('<meta charset="hex"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="hex"><p>ünïcode ✓</p>'),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=idna", "<p>ünïcode ✓</p>"),
+            ('<meta charset="punycode"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="punycode"><p>ünïcode ✓</p>'),
+        )
+        for body, content_type, expected in cases:
+            with self.subTest(content_type=content_type, expected=expected[:40]):
+                response = FetchResponse(status_code=200, body_bytes=body, content_type=content_type, url="https://example.com/")
+                with mock.patch.object(HttpFetcher, "fetch", return_value=response):
+                    result = asyncio.run(DirectHttpFetchTool().execute(ToolCall("direct_http_fetch", {"url": "https://example.com/"})))
+                self.assertEqual(result.status.value, "success")
+                self.assertEqual(result.output, expected)
+                self.assertNotIn("�", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()
