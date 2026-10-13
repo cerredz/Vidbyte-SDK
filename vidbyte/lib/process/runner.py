@@ -183,12 +183,12 @@ class CliRunner:
             process.stdin.close()
 
     async def _drain(self, stream: asyncio.StreamReader | None, buffer: bytearray, limit_bytes: int) -> None:
-        # Keeps the first limit_bytes and reads past them until EOF, so the child never blocks on a full pipe.
+        # Keeps the first limit_bytes plus a one-byte truncation probe and reads past them until EOF, so the child never blocks on a full pipe.
         if stream is None:
             return
         with contextlib.suppress(OSError, ValueError):
             while chunk := await stream.read(_READ_CHUNK_BYTES):
-                buffer.extend(chunk[: max(0, limit_bytes + 1 - len(buffer))])
+                buffer.extend(chunk[: limit_bytes + native_host_constants.NATIVE_PROCESS_TRUNCATION_PROBE_BYTES - len(buffer)])
 
     async def _finish_readers(self, readers: tuple[asyncio.Task[None], ...]) -> None:
         # Gives the readers one kill-wait to reach EOF, then cancels any that a surviving grandchild keeps open.

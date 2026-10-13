@@ -23,6 +23,7 @@ from vidbyte.lib.constants.native_hosts import (
     NATIVE_ID_MAX_CHARS,
     NATIVE_MAX_LIVE_TURNS_DEFAULT,
     NATIVE_MAX_LIVE_TURNS_LIMIT,
+    NATIVE_MIN_LIVE_TURNS,
     NATIVE_PROMPT_MAX_CHARS,
     NATIVE_TURN_DEFAULT_SECONDS,
     NATIVE_TURN_MAX_SECONDS,
@@ -63,7 +64,7 @@ class MuseHostSettings:
         if self.wsl_distro is not None and self.muse_command is not None:
             raise ConfigurationError("MuseHostSettings.wsl_distro and MuseHostSettings.muse_command cannot both be set; pick one launcher.")
         RecordFieldValidator.require_number(self.control_timeout_seconds, "MuseHostSettings.control_timeout_seconds", maximum=NATIVE_CONTROL_TIMEOUT_MAX_SECONDS)
-        RecordFieldValidator.require_int(self.max_live_turns, "MuseHostSettings.max_live_turns", minimum=1, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
+        RecordFieldValidator.require_int(self.max_live_turns, "MuseHostSettings.max_live_turns", minimum=NATIVE_MIN_LIVE_TURNS, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
 
 
 @dataclass(frozen=True, slots=True)

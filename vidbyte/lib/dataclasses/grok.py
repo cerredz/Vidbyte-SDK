@@ -22,12 +22,14 @@ from vidbyte.lib.constants.native_hosts import (
     GROK_ARGV_PROMPT_MAX_CHARS,
     GROK_MAX_RULES,
     GROK_MAX_TURNS_LIMIT,
+    GROK_MIN_TURNS,
     GROK_RULE_MAX_CHARS,
     NATIVE_CONTROL_TIMEOUT_MAX_SECONDS,
     NATIVE_CONTROL_TIMEOUT_SECONDS,
     NATIVE_ID_MAX_CHARS,
     NATIVE_MAX_LIVE_TURNS_DEFAULT,
     NATIVE_MAX_LIVE_TURNS_LIMIT,
+    NATIVE_MIN_LIVE_TURNS,
     NATIVE_PROMPT_MAX_CHARS,
     NATIVE_TURN_DEFAULT_SECONDS,
     NATIVE_TURN_MAX_SECONDS,
@@ -58,7 +60,7 @@ class GrokHostSettings:
         if self.grok_command is not None:
             RecordFieldValidator.require_argv(self.grok_command, "GrokHostSettings.grok_command")
         RecordFieldValidator.require_number(self.control_timeout_seconds, "GrokHostSettings.control_timeout_seconds", maximum=NATIVE_CONTROL_TIMEOUT_MAX_SECONDS)
-        RecordFieldValidator.require_int(self.max_live_turns, "GrokHostSettings.max_live_turns", minimum=1, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
+        RecordFieldValidator.require_int(self.max_live_turns, "GrokHostSettings.max_live_turns", minimum=NATIVE_MIN_LIVE_TURNS, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +110,7 @@ class GrokOneShotRequest:
         object.__setattr__(self, "allow_rules", allow_rules)
         object.__setattr__(self, "deny_rules", deny_rules)
         if self.max_turns is not None:
-            RecordFieldValidator.require_int(self.max_turns, "GrokOneShotRequest.max_turns", minimum=1, maximum=GROK_MAX_TURNS_LIMIT)
+            RecordFieldValidator.require_int(self.max_turns, "GrokOneShotRequest.max_turns", minimum=GROK_MIN_TURNS, maximum=GROK_MAX_TURNS_LIMIT)
         RecordFieldValidator.require_number(self.max_turn_seconds, "GrokOneShotRequest.max_turn_seconds", maximum=NATIVE_TURN_MAX_SECONDS)
 
 

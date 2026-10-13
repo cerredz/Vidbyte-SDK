@@ -140,7 +140,7 @@ class ManagedProcess:
         with contextlib.suppress(OSError, ValueError):
             while chunk := await process.stderr.read(_READ_CHUNK_BYTES):
                 self._stderr_tail.extend(chunk)
-                del self._stderr_tail[: max(0, len(self._stderr_tail) - self._invocation.max_output_bytes)]
+                del self._stderr_tail[: -self._invocation.max_output_bytes]
 
     async def _settle(self) -> tuple[str | None, bool]:
         # Returns (ready line, timed out); an early exit returns (None, False) once stderr has been read.

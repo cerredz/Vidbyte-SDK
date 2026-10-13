@@ -24,6 +24,7 @@ from vidbyte.lib.constants.native_hosts import (
     NATIVE_ID_MAX_CHARS,
     NATIVE_MAX_LIVE_TURNS_DEFAULT,
     NATIVE_MAX_LIVE_TURNS_LIMIT,
+    NATIVE_MIN_LIVE_TURNS,
     NATIVE_PROMPT_MAX_CHARS,
     NATIVE_RESULT_TEXT_MAX_CHARS,
     NATIVE_TURN_DEFAULT_SECONDS,
@@ -34,6 +35,7 @@ from vidbyte.lib.constants.native_hosts import (
     OPENCODE_MAX_PERMISSION_RULES,
     OPENCODE_MCP_NAME_PATTERN,
     OPENCODE_MCP_TIMEOUT_MAX_MS,
+    OPENCODE_MCP_TIMEOUT_MIN_MS,
     OPENCODE_REQUEST_TIMEOUT_SECONDS,
     OPENCODE_RULE_MAX_CHARS,
     OPENCODE_SESSION_ID_PATTERN,
@@ -155,7 +157,7 @@ class OpencodeMcpServerConfig:
         object.__setattr__(self, "environment", MappingProxyType(dict(environment)))
         object.__setattr__(self, "headers", MappingProxyType(dict(headers)))
         if self.timeout_ms is not None:
-            RecordFieldValidator.require_int(self.timeout_ms, "OpencodeMcpServerConfig.timeout_ms", minimum=1, maximum=OPENCODE_MCP_TIMEOUT_MAX_MS)
+            RecordFieldValidator.require_int(self.timeout_ms, "OpencodeMcpServerConfig.timeout_ms", minimum=OPENCODE_MCP_TIMEOUT_MIN_MS, maximum=OPENCODE_MCP_TIMEOUT_MAX_MS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +201,7 @@ class OpencodeHostSettings:
         if not all(isinstance(config, OpencodeMcpServerConfig) and key == config.name for key, config in self.mcp_servers.items()):
             raise ConfigurationError("OpencodeHostSettings.mcp_servers must map each name to an OpencodeMcpServerConfig with that same name.")
         object.__setattr__(self, "mcp_servers", MappingProxyType(dict(self.mcp_servers)))
-        RecordFieldValidator.require_int(self.max_live_turns, "OpencodeHostSettings.max_live_turns", minimum=1, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
+        RecordFieldValidator.require_int(self.max_live_turns, "OpencodeHostSettings.max_live_turns", minimum=NATIVE_MIN_LIVE_TURNS, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
 
 
 @dataclass(frozen=True, slots=True)
