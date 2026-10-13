@@ -189,6 +189,10 @@ class ClaudeThinking:
     display: ClaudeThinkingDisplay = ClaudeThinkingDisplay.PROVIDER_DEFAULT
 
     def __post_init__(self) -> None:
+        # @intent thinking-settings-apply-only-to-their-mode
+        # A budget belongs to enabled mode only and a display choice cannot
+        # apply when thinking is disabled. Claude Code would ignore either one
+        # without an error, so a caller's mistaken setting fails here instead.
         mode = _ClaudeFieldRules.choice(self.mode, ClaudeThinkingMode, "mode")
         object.__setattr__(self, "mode", mode)
         object.__setattr__(self, "display", _ClaudeFieldRules.choice(self.display, ClaudeThinkingDisplay, "display"))

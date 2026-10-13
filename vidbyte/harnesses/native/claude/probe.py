@@ -153,6 +153,10 @@ class ClaudeProbe:
     @staticmethod
     def signed_in(account: Mapping[str, Any]) -> bool:
         """Return whether the account can call a model: any provider but Anthropic's own API, or a credential source in use."""
+        # @intent other-providers-count-as-signed-in
+        # An account on another provider keeps its credentials outside Claude
+        # Code, so it counts as signed in; reading it as signed out would refuse
+        # a turn that the provider's own credentials can run.
         if (account.get(CLAUDE_PROVIDER_FIELD) or CLAUDE_FIRST_PARTY_PROVIDER) != CLAUDE_FIRST_PARTY_PROVIDER:
             return True
         return any(account.get(name) not in (None, CLAUDE_ABSENT_SOURCE) for name in CLAUDE_CREDENTIAL_SOURCE_FIELDS)
