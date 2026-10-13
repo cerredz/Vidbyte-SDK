@@ -16,7 +16,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-12 16:20 | 2026-10-12 16:50 | reports/S0-scout.md | base 52aab816; code-map 4 sections |
 | S1 spec + review | done | 2026-10-12 16:52 | 2026-10-12 | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); r3 74f0b83d approved; r4 91e69211 approved |
-| S2 tests | running | 2026-10-12 | | reports/S2-test-author.md | |
+| S2 tests | running | 2026-10-12 | | reports/S2-test-author.md | pre-rebase S2 at 5671f7a2: 117 new tests red, 36 superseded files; full 295F/3727P/13S/7E; rebase onto origin/main in progress |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -32,6 +32,10 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - 2026-10-12 16:20 — Header name fixed as `X-Vidbyte-Provider-Key` — `X-Api-Key` is already a Vidbyte-key auth header in the backend; Sentry's default filter drops neither name, so the backend scrubs it explicitly.
 - 2026-10-12 16:20 — Treat the /talk Needs-you defaults (AUTO requires a Vidbyte key with DIRECT explicit; 200 bps unchanged; streaming gap accepted) as accepted — Prompt 5 opened "great, just to be clear" and contested none.
 - 2026-10-12 16:20 — Add a "live E2E" step after both repair loops converge — Prompt 5 asks for live grok testing with the real keys; Prompt 6 chose the local-backend path.
+
+- 2026-10-13 — Every running agent was stopped by an API session limit (HTTP 429): backend S4 reviewers C/V/E, SDK S2 author and its helper. After the reset, ListAgents showed no live pipeline agent. Backend worktree clean, no S4 reports written. SDK S2 left 24 modified tests plus the new pack, uncommitted. Each agent resumed via SendMessage; the SDK S2 author is told to verify its dead helper's edits and not to spawn helpers again.
+- 2026-10-13 — S2 ambiguities 1–6 + two notes ruled to match the tests' bindings; spec r5 e349ee46 (wording only, Proof column unchanged). Items 7 (M-9 vs M-14 order) and 8 (DIRECT runner pinning) left unspecified: tests assert only `error_kind` / do not depend on them.
+- 2026-10-13 — origin/main is 48 commits past base 52aab816, touching 78 files, including 8 test files S2 edited and §12.3's `vidbyte/harnesses/serialization.py`. Rebase the unpushed branch (docs and tests only) onto origin/main NOW, before S3, via the S2 author, who owns test conflicts, plus a static straggler hunt over main's new or changed tests. This is cheaper than an S6 rebase with implementation code. S2_HEAD is re-recorded after the rebase.
 
 ## User replies (verbatim)
 - 2026-10-12 16:15 — Clarifying answers recorded verbatim in request.md §A Prompt 6.
@@ -92,3 +96,5 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - 2026-10-12 — Spec approved at r4 after 2 review rounds (cap) and two orchestrator-ruling revisions. Q-3 (streaming in default mode) defaults to no: refuse, naming DIRECT. Q-4 (per-model mode) defaults to no. Q-5 (fail at build without a Vidbyte key) defaults to no. Q-6 (refuse `T3BlbkFJ` for non-openai) defaults to no.
 - 2026-10-12 — S2 straggler plan: stragglers (tests that only fail once INV-7 or INV-24 is enforced) cannot be found by a pre-implementation red run. The S2 author hunts them statically. Any found later by S3/S5 go back to a test-author pass (the implementer may not edit tests), each logged here.
 - 2026-10-12 — Environment hazard: this machine's shell exports `DEEPSEEK_API_KEY` (possibly a real key). `VIDBYTE_API_KEY` and `GROK_API_KEY` are user-scope registry variables, not inherited by Bash. Every test run uses `env -u DEEPSEEK_API_KEY`, and every test clears the environment with `patch.dict(os.environ, {...}, clear=True)`.
+- S2 tests read private seams `TextModelRunner._config` (via `AgentFallback.build_runner(i)._config.credentials()`) and `BaseAgent._runner_for_model()`; keep both. `AgentFallbackSettings.resolved_models(primary=…)` is still called, with a keyless `FallbackModel`. `test_fallback_runner_inherits_the_agent_timeout` runs in DIRECT (a gateway runner floors 300 s to 630 s). `ProposerSpec(" DeepSeek ", …)` must normalize to deepseek. Fake keys are concatenated on purpose (C020, push protection). — *source:* S2
+- AC-28 (`run_ci.py` green and C017 `CLEAN`) is owed by the implementer. — *source:* S2
