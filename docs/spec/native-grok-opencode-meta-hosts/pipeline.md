@@ -26,7 +26,7 @@ started: 2026-10-13 01:30 UTC
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
-- S5 repair iterations: 1/8
+- S5 repair iterations: 2/8
 - S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
@@ -118,6 +118,17 @@ started: 2026-10-13 01:30 UTC
     - my own `run_ci --stage source` gave `5653 passed, 32 skipped in 184.27s` / `CI passed.`;
     - INV-19's hash is intact.
   - **CI-1's root cause was confirmed in the CPython source** as I had predicted: a bare `drain()` returns normally after EPIPE on 3.12. The fix: a write that names a deadline raises if stdin is closing after drain. The default transport path stays as main's (INV-18).
+- 2026-10-13 21:00 — **S5 iteration 2 is DONE and verified by me.** HEAD is 1717bb3b; the last code commit is 04be59fa. Commits: R-11 7f61f927 and 3c896557, R-9 616e8a0f, R-10 0f93301a, R-12 5a7e09de, R-M6 04be59fa.
+  - **My checks:**
+    - the tree is clean and in sync with origin;
+    - the packs are byte-identical to S2_HEAD, and the other tests match origin/main;
+    - the five rows read `fixed @sha`;
+    - `ci.yml` 38409525140 and `static-policy.yml` 38409529932 passed on 04be59fa;
+    - my own `run_ci --stage source` gave `5653 passed, 32 skipped in 180.96s` / `CI passed.`;
+    - INV-19 holds, and origin/main has not moved since the iteration 1 merge.
+  - **Behaviour changes, intended:** Muse and opencode approval titles are now cut at 200, the record's cap, instead of 128. Muse next steps lost their backticks.
+  - **A deviation to state in S6:** `require_url` sits on `RecordFieldConverter`, not `RecordFieldValidator`, because a test pins the validator at 13 public methods.
+  - The repair agent says 11 call chains remain and all are accepted: `build→scrub`, `_read_balance`, and the transport and FailureCode chains that predate this PR. The final re-review must check that judgement.
 
 ## User replies (verbatim)
 (none during the run)
