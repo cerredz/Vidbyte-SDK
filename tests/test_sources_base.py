@@ -372,6 +372,27 @@ class SourcesBaseTests(unittest.TestCase):
             result = DocumentSource(fetcher=fetcher).load(ArtifactRef(url=url))
         self.assertEqual(result.items[0].title, "Title")
 
+    def test_httpfetcher_sends_iris_as_percent_encoded_uris(self) -> None:
+        # @intent http-fetcher-sends-iris-as-uris
+        # [Edge Case] http.client writes the request line as ASCII, so a non-ASCII path or query must be sent as UTF-8 percent escapes.
+        cases = {
+            "https://de.example.test/wiki/Müller": "https://de.example.test/wiki/M%C3%BCller",
+            "https://ja.example.test/wiki/東京駅": "https://ja.example.test/wiki/%E6%9D%B1%E4%BA%AC%E9%A7%85",
+            "https://shop.example.test/suche?q=größe&x=1": "https://shop.example.test/suche?q=gr%C3%B6%C3%9Fe&x=1",
+            "https://de.example.test/wiki/M%C3%BCller?a=1&b=%2F": "https://de.example.test/wiki/M%C3%BCller?a=1&b=%2F",
+        }
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                requested: list[str] = []
+                response = mock.MagicMock(status=200, url=expected)
+                response.__enter__.return_value = response
+                response.read.return_value = _DATA
+                response.headers.items.return_value = [("Content-Type", "text/markdown")]
+                with mock.patch("vidbyte.lib.http.transport.urlopen", side_effect=lambda request, timeout: requested.append(request.full_url) or response):
+                    result = HttpFetcher().fetch(url)
+                self.assertEqual(requested, [expected])
+                self.assertEqual(result.body_bytes, _DATA)
+
     def test_redirect_off_the_allowlist_is_refused(self) -> None:
         # @intent redirect-target-is-allowlisted
         # [Hidden Assumption] An allowlisted URL that redirects to an unlisted host must not load that host's bytes.
