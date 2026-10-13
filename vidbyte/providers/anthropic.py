@@ -6,7 +6,11 @@ from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
+from vidbyte.lib.errors import (
+    ProviderConfigurationError,
+    ProviderRequestError,
+    ProviderResponseError,
+)
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.util import PromptPlacement
@@ -132,6 +136,15 @@ class AnthropicProvider:
         # @intent non-object-sse-payload-is-skipped
         if not isinstance(event, dict):
             return None
+        # @intent stream-error-event-raises
+        # An error event ends a started stream (the streaming form of an HTTP 529/5xx), so raise instead of returning the text so far as the whole answer.
+        if event.get("type") == "error":
+            error = event.get("error")
+            error_type = error.get("type") if isinstance(error, dict) else None
+            error_message = error.get("message") if isinstance(error, dict) else None
+            detail = ": ".join(part for part in (error_type, error_message) if isinstance(part, str))
+            message = f"Anthropic stream ended with an error event: {detail}" if detail else "Anthropic stream ended with an error event."
+            raise ProviderRequestError(message, provider=self.provider.value, response_excerpt=raw_line)
         if event.get("type") == "content_block_delta":
             delta = event.get("delta", {})
             if isinstance(delta, dict) and delta.get("type") == "text_delta":
