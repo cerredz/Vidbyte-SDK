@@ -26,6 +26,7 @@ from typing import Any
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.agents.base import BaseAgent
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.evals import (
     AllOfGrader,
     AnyOfGrader,
@@ -686,6 +687,29 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         expected = [("Capital of France?", "Paris", ("geo", "easy")), ("2 + 2?", "4", ("math",))]
         self.assertEqual(loaded["utf-8-sig"], expected)
         self.assertEqual(loaded["utf-8"], expected)
+
+    def test_eval_suite_csv_without_prompt_column_raises(self) -> None:
+        # @intent missing-prompt-column-fails-loudly
+        # [Silent] A ";" Excel export or a "Question" header loaded every prompt as "" and ran the suite on empty prompts.
+        files = {
+            "semicolon.csv": 'prompt;expected;tags\n"Capital of France?";Paris;geo\n"2 + 2?";4;math\n',
+            "question.csv": 'Question,expected\n"Capital of France?",Paris\n"2 + 2?",4\n',
+            "empty.csv": "",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = {}
+            for name, text in files.items():
+                paths[name] = os.path.join(temp_dir, name)
+                with open(paths[name], "w", encoding="utf-8", newline="") as f:
+                    f.write(text)
+            for name in ("semicolon.csv", "question.csv"):
+                with self.assertRaisesRegex(ConfigurationError, "prompt"):
+                    EvalSuite.from_csv(paths[name])
+            renamed = EvalSuite.from_csv(paths["question.csv"], prompt_col="Question")
+            empty = EvalSuite.from_csv(paths["empty.csv"])
+
+        self.assertEqual([case.prompt for case in renamed.cases], ["Capital of France?", "2 + 2?"])
+        self.assertEqual(len(empty), 0)
 
     def test_eval_suite_json_with_powershell_bom_loads_like_plain_utf8(self) -> None:
         # @intent json-suite-bom-is-not-content

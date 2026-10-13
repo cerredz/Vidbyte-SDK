@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 from vidbyte.evals.types import EvalCase
 from vidbyte.evals.templates import default_template_registry
+from vidbyte.lib.errors import ConfigurationError
 
 
 class EvalSuite:
@@ -76,6 +77,13 @@ class EvalSuite:
         # Excel's "CSV UTF-8" starts with a byte-order mark; read as part of the first header it hides the prompt column and every prompt becomes "".
         with open(path, "r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
+            # @intent missing-prompt-column-fails-loudly
+            # A header without the prompt column would turn every prompt into "" and run the whole suite on empty prompts, so it raises, as from_json does for a case without "prompt".
+            if reader.fieldnames is not None and prompt_col not in reader.fieldnames:
+                raise ConfigurationError(
+                    f"Eval CSV {path} has no {prompt_col!r} column; its header is {list(reader.fieldnames)}. A file that uses a separator other than ',' (such as ';' from a non-English Excel export) reads as one column.",
+                    details={"path": str(path), "prompt_col": prompt_col, "found_columns": list(reader.fieldnames)},
+                )
             cases_list = []
             for row in reader:
                 prompt = row.get(prompt_col, "")
