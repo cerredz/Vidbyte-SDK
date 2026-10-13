@@ -1,7 +1,7 @@
 ---
 spec: native-grok-opencode-meta-hosts
 title: Native Grok, opencode and Muse hosts, plus GLM and DeepSeek backend profiles
-status: verified      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open       # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 8
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
@@ -146,16 +146,16 @@ The developer no longer has to:
 
 ```mermaid
 flowchart TD
-  A[caller or tool: host.spawn_*_session] -->|*TurnRequest validated at construction| B[host: resolve launcher, check live-turn cap]
-  B -->|argv prefix + allowlisted env| C{transport}
-  C -->|Grok / Muse| D[McpStdioTransport peer per turn: initialize]
-  C -->|opencode| E[HttpTransport to owned opencode serve]
+  A[caller or tool: host.spawn_*_session] -->|*TurnRequest validated at construction| B[host: check open, reserve a live-turn slot before any await]
+  B -->|launcher resolved once when the host was entered, caller env plus host overlay| C{transport}
+  C -->|Grok / Muse| D[NativePeer over McpStdioTransport, one per turn: initialize]
+  C -->|opencode| E[HTTP client to the owned or attached opencode serve]
   D -->|model id| F[validate model and effort against live list]
   E -->|GET /config/providers| F
   F -->|session/new, session/start or POST /session| G[vendor session id]
-  G -->|session/prompt, turn/start or prompt_async| H[turn driver task stored in turn table]
+  G -->|session/prompt written, turn/start acked or prompt_async sent| H[driver or polling watcher task stored in turn table]
   H -->|NativeTurnHandle| I[caller gets handle at once]
-  H -->|notifications and server requests| J[answer approvals: allow by policy else reject, record]
+  H -->|server requests, or polled permissions and questions for opencode| J[answer approvals: allow by policy else reject, record]
   H -->|result, error, ceiling or interrupt| K[NativeTurnResult or failure in turn table]
   K -->|wait_*_turn| L[result, raised NativeHostError, or turn_timed_out]
   H -->|finally| M[peer closed: protocol stop, stdin EOF, grace, tree stop, reap]
@@ -166,14 +166,18 @@ sequenceDiagram
   participant C as Caller
   participant H as GrokHost
   participant P as grok agent stdio (per turn)
+  C->>H: async with GrokHost(settings)
+  H->>H: resolve the grok launcher once, never a .cmd or .bat on win32
   C->>H: spawn_grok_session(request)
+  H->>H: check open, reserve a live-turn slot
   H->>P: start argv [grok, agent, --no-leader, --model=MODEL, stdio]
   H->>P: initialize (control timeout)
   P-->>H: result (protocolVersion, _meta.modelState)
   H->>H: currentModelId == model else grok.model_unknown (peer closed)
   H->>P: session/new {cwd: workspace, mcpServers: []}
   P-->>H: {sessionId}
-  H->>P: session/prompt (background driver, ceiling = max_turn_seconds)
+  H->>P: session/prompt, written by the host before the driver starts
+  H->>H: start the driver task, which awaits the answer, ceiling = max_turn_seconds
   H-->>C: NativeTurnHandle
   P->>H: session/request_permission (kind edit)
   H->>P: reject_once unless kind in allowed_tool_kinds
@@ -2203,6 +2207,7 @@ The table has 56 CREATE and 12 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 | r6 | 2026-10-13 | S3 implementer finding | S3-2: read-only `McpStdioTransport.returncode` and `NativePeer.exit_code` so EC-95 can tell exit code 127 apart; INV-18, FR-15, D-3 (size trigger about 200 lines) and rows 22 and 28 updated. Status unchanged |
 | r7 | 2026-10-13 | S3 implement | All 68 §12.3 rows implemented (56 created, 12 modified) at `f7476015`. The 1635 S2 tests (1616 passed, 19 platform skips) and the full suite (5572 passed) are green. `SDK-LINT: PASS`; `run_ci.py` source and package pass; Semgrep is clean. Draft PR #1036. Status implemented. No §6.2 Proof cell was blank, so no commit SHA was added there |
 | r8 | 2026-10-13 | S4 review findings | Applied S4-1 to S4-3. S4-1 (R-2): on win32, Grok never starts a batch launcher (new EC-157, `grok.not_installed` with its own next step). The rule is recorded in D-19, §10 T-2 (with the opencode and Muse audit and the shell-wrapper residual), §4, the §6.3.1 meaning, EC-11, §8.2, §8.5, §9.1, §12.3 rows 30 and 33, §13 and §14. AC-1's win32 outcome now runs through the §13 seam. S4-2 and S4-3: deviations 9 and 7. S4-4 and S4-5 record CI-1 and R-3 as code fixes with no spec change. Added within r8 by orchestrator decision (S4-6, R-8 / R-C5): EC-39 records the `new_session_id` target clause. Grok and Muse session-id comparisons ignore letter case (INV-14, EC-32, EC-35, EC-36, EC-39, §8.5 `reserve`, §12.3 rows 30, 32 and 41), and opencode ids compare exactly. This is deviation 10. Also added within r8 by orchestrator decision (S4-7, R-6, a gap the test author found): new EC-158 makes an opencode turn that the host fails on its own send one best-effort abort first. INV-13, EC-87, §8.5 watcher step 7 and §12.3 row 38 are updated to match. Status stays `reviewed` |
+| r8 | 2026-10-13 | S6 PR | Finalized for review. Status set to `pr-open`; `revision` stays 8. §5 corrected to match the shipped code, diagrams only: the launcher is resolved once in `__aenter__`, not at spawn; a child gets the caller's environment plus a host overlay (D-18), not an allowlisted environment; the live-turn slot is reserved before any await; opencode runs against an owned or attached server and its turns are polled by a watcher; Grok's `session/prompt` is written by the host before the driver task starts, and the driver awaits its answer. No behaviour row changed |
 
 **Implementation deviations (S3).** Each one resolves a point the spec leaves open; the S3 report gives the reasons.
 
