@@ -441,6 +441,17 @@ class NonTextModelKeyTests(unittest.TestCase):
         self.assertIsNone(keyless_runner._config.api_key)
         self.assertEqual(factory_runner._config.api_key, K_OPENAI)
 
+    def test_a_non_text_runner_takes_its_own_providers_key_when_another_providers_key_comes_first(self) -> None:
+        # AC-23, INV-3, NFR-10 (review R-5): with single-key lists, "first key" and key_for(provider) look the same; here the xAI key comes first.
+        from vidbyte.lib.agents.modality_detector import ModalityDetector
+
+        with patch.dict(os.environ, {}, clear=True):
+            image_runner, image_type = Agent(name="artist", system_prompt="Draw.", provider="openai", model_name="gpt-image-1", api_keys=[K_XAI, K_OPENAI])._runner_for_model()
+            factory_runner = ModalityDetector.create_runner("image", provider="openai", model="gpt-image-1", api_keys=[K_XAI, K_OPENAI])
+        self.assertEqual(image_type, "image")
+        self.assertEqual(image_runner._config.api_key, K_OPENAI)
+        self.assertEqual(factory_runner._config.api_key, K_OPENAI)
+
 
 if __name__ == "__main__":
     unittest.main()
