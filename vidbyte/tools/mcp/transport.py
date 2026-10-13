@@ -15,8 +15,8 @@ Architecture:
       frames that carry "method", send_request, notify, respond, per-call
       timeouts, exit_grace_seconds, and stop_process_tree, plus a read-only
       returncode that outlives close. Only a call with its own
-      timeout_seconds bounds its write; without one the write is MCP's plain
-      drain.
+      timeout_seconds bounds its write and refuses a pipe that closed under
+      it; without one the write is MCP's plain drain.
 Relations:
     Related to vidbyte.tools.mcp.client, vidbyte.tools.mcp.bridge, and
     vidbyte.tools.mcp.attach.
@@ -265,7 +265,7 @@ class McpStdioTransport:
         return await self._answer(method, request_id, future, timeout)
 
     async def _send(self, method: str, params: Mapping[str, Any] | None, seconds: float | None) -> tuple[int, asyncio.Future[Mapping[str, Any]]]:
-        """Register a pending future under a fresh id, then write the request frame, bounded by seconds when given."""
+        """Register a pending future under a fresh id, then write the request frame, checked within seconds when given."""
         # @intent mcp-stdio-pending-before-write
         # The future is registered before the frame is written, so an answer
         # that arrives at once still finds it; a failed write removes it.
@@ -305,13 +305,18 @@ class McpStdioTransport:
             }
             try:
                 self._process.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
-                # @intent mcp-stdio-bounded-write-has-a-deadline
-                # Without a deadline this is MCP's plain drain; with one the
-                # drain is bounded by it.
+                # @intent mcp-stdio-checked-write-has-a-deadline
+                # Without a deadline this is MCP's plain drain. With one the
+                # drain is bounded, and a pipe already closing afterwards
+                # raises: on a broken pipe asyncio marks the pipe closing at
+                # once but tells drain only a loop turn later, so drain alone
+                # can return as if the frame had been written.
                 if seconds is None:
                     await self._process.stdin.drain()
                 else:
                     await asyncio.wait_for(self._process.stdin.drain(), seconds)
+                if seconds is not None and self._process.stdin.is_closing():
+                    raise BrokenPipeError("The MCP process stdin closed under the write.")
             except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 self._pending.pop(request_id, None)
                 if not future.done():
@@ -390,7 +395,7 @@ class McpStdioTransport:
         await self._write_frame({"jsonrpc": "2.0", "id": request_id, **answer}, None, write_seconds)
 
     async def _write_frame(self, frame: Mapping[str, Any], method: str | None, seconds: float | None) -> None:
-        """Write one frame that expects no answer, bounded by seconds when given."""
+        """Write one frame that expects no answer, checked within seconds when given."""
         if self._closed:
             raise McpProtocolError("MCP transport is closed", details={"reason": "closed", "method": method})
         await self.start()
@@ -400,13 +405,15 @@ class McpStdioTransport:
                 raise McpProtocolError("MCP transport is closed", details={"reason": "closed", "method": method})
             try:
                 process.stdin.write((json.dumps(frame) + "\n").encode("utf-8"))
-                # @intent mcp-stdio-bounded-write-has-a-deadline
+                # @intent mcp-stdio-checked-write-has-a-deadline
                 # The same write as _send: plain without a deadline, bounded
-                # with one.
+                # and refused on a closing pipe with one.
                 if seconds is None:
                     await process.stdin.drain()
                 else:
                     await asyncio.wait_for(process.stdin.drain(), seconds)
+                if seconds is not None and process.stdin.is_closing():
+                    raise BrokenPipeError("The MCP process stdin closed under the write.")
             except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 reason = "timeout" if isinstance(exc, TimeoutError) else "stdin_write_failed"
                 raise McpProtocolError("MCP process stdin is not writable", details={"method": method, "stderr_tail": self.stderr_snapshot(), "reason": reason}) from exc

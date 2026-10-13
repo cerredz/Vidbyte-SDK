@@ -2,7 +2,7 @@
 
 PURPOSE: Defines NativePeer, one JSON-RPC stdio peer process (`grok agent stdio` or `muse serve`) with an inbox of the frames it sends unasked, and NativeChildEnvironment, which builds a vendor child's environment as the caller's environment plus the host's overlay.
 ROLE IN CODEBASE: GrokHost and MuseHost start one NativePeer per live turn and one short-lived peer per read; their turn drivers read peer.inbox and answer server requests through peer.answer. NativeChildEnvironment is also used for opencode's owned server and the Muse in-distro reap.
-ARCHITECTURE NOTE: NativePeer reuses McpStdioTransport (D-3) with exit_grace_seconds=NATIVE_STOP_GRACE_SECONDS, shutdown_timeout=NATIVE_KILL_WAIT_SECONDS and stop_process_tree=True (D-23), so close is stdin EOF, a grace period, then a whole-tree stop, all bounded. Every write passes the control timeout as its deadline, so it is bounded. The timing constants are read when a peer is built, so tests can shrink them through the constants module.
+ARCHITECTURE NOTE: NativePeer reuses McpStdioTransport (D-3) with exit_grace_seconds=NATIVE_STOP_GRACE_SECONDS, shutdown_timeout=NATIVE_KILL_WAIT_SECONDS and stop_process_tree=True (D-23), so close is stdin EOF, a grace period, then a whole-tree stop, all bounded. Every write passes the control timeout as its deadline, so it is bounded and a pipe that closed under it fails at once. The timing constants are read when a peer is built, so tests can shrink them through the constants module.
 FUNCTION INVENTORY: NativePeer.start launches the process; call sends a request and waits for its answer; send writes a request and returns its future; notify writes a notification; answer replies to a server request; close stops the peer and never raises; stderr_tail returns scrubbed stderr; closed reports whether the pipe has ended; exit_code is the child's exit code once it has exited. NativeChildEnvironment.build merges the overlay over os.environ.
 COMMON MODIFICATION PATTERNS: A new peer protocol reuses NativePeer unchanged and maps its own JSON-RPC error codes in its host's wire.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not map JSON-RPC error answers here; they stay McpProtocolError for the host's wire codec (spec §8.5). 2. Do not let close raise; it runs in finally blocks and __aexit__. 3. Do not put a secret on argv; secrets travel in the environment overlay.
@@ -83,8 +83,9 @@ class NativePeer:
         # becomes NativeHostError here.
         # @intent native-peer-writes-name-their-deadline
         # Every write names a deadline, the control timeout unless the
-        # caller gave one, because the transport bounds a write only for a
-        # call that names one; a peer write must never wait without a bound.
+        # caller gave one, because the transport bounds a write and refuses
+        # a pipe that closed under it only for a call that names one; a
+        # peer that stopped reading must surface as process_exited (EC-51).
         seconds = self._control_timeout_seconds if timeout_seconds is None else timeout_seconds
         try:
             return await self._transport.request(method, params, timeout_seconds=seconds)
@@ -102,7 +103,7 @@ class NativePeer:
             raise self._errors.from_protocol_error(exc, operation=operation) from exc
 
     async def notify(self, method: str, params: Mapping[str, Any], *, operation: str) -> None:
-        # Writes a notification within the control timeout; a dead pipe becomes process_exited.
+        # Writes a notification within the control timeout; a dead or closed pipe becomes process_exited.
         try:
             await self._transport.notify(method, params, timeout_seconds=self._control_timeout_seconds)
         except McpProtocolError as exc:
