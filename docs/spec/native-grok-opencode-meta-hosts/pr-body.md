@@ -190,10 +190,12 @@ S6 re-ran all 73 proof test ids below at `319d714f`, on Windows with CPython 3.1
 
 ## Verification (gate table)
 
-The last commit to product code is `3917b49a`. The last commit outside `docs/` is `7e1f770b`, a test-fake fix. The gates below come from verify-log iteration 8 at `3917b49a`, plus the S6 runs at `319d714f`. CI here is dispatch-only (`workflow_dispatch`), so `gh pr checks` lists no checks.
+The last commit to product code is `3917b49a`. The last commit outside `docs/` is `7e1f770b`, a test-fake fix. The gates below come from verify-log iteration 8 at `3917b49a`, plus the S6 runs at `319d714f`. The final remote runs are on `6d68effa`, the last head that contains code or tests: it holds every code and test commit. Every later commit touches only `docs/spec/native-grok-opencode-meta-hosts/`, so it was not dispatched again. CI here is dispatch-only (`workflow_dispatch`), so `gh pr checks` lists no checks.
 
 | Gate | Head | Result |
 |---|---|---|
+| Final remote `ci.yml` run 38479268619 | `6d68effa` | Succeeded on attempt 1 (3.11, 3.12 and package smoke). 3.11: `5676 passed, 39 skipped in 164.28s` / `CI passed.`; 3.12: `5676 passed, 39 skipped, 19 warnings in 195.98s` / `CI passed.`; package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` |
+| Final remote `static-policy.yml` run 38479272007 | `6d68effa` | success, `Ran 1 rule on 949 files: 0 findings.` |
 | R-25 regression tests, 10 runs | `3917b49a` | `7 passed, 15 deselected`, 10 of 10 runs (`in 4.41s` on run 10) |
 | AC-4 cancel test, 30 runs | `3917b49a` | `4 passed`, 30 of 30 runs |
 | RACE-1 and R-19 regression tests | `3917b49a` | `12 passed, 63 deselected in 4.00s` |
