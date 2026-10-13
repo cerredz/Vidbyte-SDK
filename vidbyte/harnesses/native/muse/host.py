@@ -132,19 +132,25 @@ class MuseHost:
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None) -> None:
         # @intent muse-host-exit-stops-every-turn
-        # EC-8: refuse every later call, ask each live turn to stop as
-        # HOST_CLOSED, then wait for the drivers, which close (and reap)
-        # their peers within the grace period. It raises nothing of its own
-        # and never suppresses the body's error.
+        # EC-8, NFR-2: refuse every later call, ask each live turn to stop
+        # as HOST_CLOSED, give the turns NATIVE_STOP_GRACE_SECONDS to end,
+        # then close the remaining peers all at once, which also fails a
+        # call still waiting on a silent peer, and wait for the drivers to
+        # record the ending and reap. It raises nothing of its own and never
+        # suppresses the body's error.
         self._open = False
         drivers = list(self._drivers.values())
         tasks = self._turns.live_tasks()
-        if not tasks:
+        if not drivers or not tasks:
             return None
         # Interrupt every live turn at once, so many turns cost no more than one.
         with contextlib.suppress(Exception):
             await asyncio.gather(*(driver.shut_down() for driver in drivers))
-        # Each driver ends within the grace period and closes its own peer on the way out.
+        # Give the turns the grace period to end by themselves.
+        await asyncio.wait(tasks, timeout=native_host_constants.NATIVE_STOP_GRACE_SECONDS)
+        # Close every peer at once, so a peer silent on approval/decide cannot hold exit, then let the drivers finish.
+        closers = [asyncio.create_task(driver.peer.close()) for driver in drivers]
+        await asyncio.wait(closers)
         await asyncio.wait(tasks)
         return None
 
