@@ -13,12 +13,14 @@ TESTS: tests/features/muse_host/test_muse_host_tools.py, tests/features/muse_hos
 
 from __future__ import annotations
 
+import dataclasses
 from typing import ClassVar
 
 from vidbyte.harnesses.native.muse import MuseHost
 from vidbyte.lib.constants import native_hosts as native_host_constants
 from vidbyte.lib.dataclasses.muse import MuseTurnRequest
 from vidbyte.lib.enums.native_hosts import MuseReasoningEffort, MuseViewDirection
+from vidbyte.lib.tools.formatter import ToolsFormatter
 from vidbyte.tools.builtins.muse.descriptions import (
     CHECK_MUSE_READY_DESCRIPTION,
     CONTINUE_MUSE_SESSION_DESCRIPTION,
@@ -48,7 +50,7 @@ from vidbyte.tools.builtins.muse.descriptions import (
     WAIT_MUSE_TURN_DESCRIPTION,
 )
 from vidbyte.tools.builtins.native_host_tool import NativeHostTool, NativeToolArguments
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolSpec
 
 _PROMPT = "prompt"
 _MODEL = "model"
@@ -79,6 +81,20 @@ class MuseHostTool(NativeHostTool[MuseHost]):
     """A tool over one MuseHost method; it reports its harness as muse."""
 
     _HARNESS: ClassVar[str] = "muse"
+
+    def spec(self) -> ToolSpec:
+        # @intent muse-effort-schema-lists-its-values
+        # reasoning_effort takes only MuseReasoningEffort's values, so the
+        # input schema lists them as an enum, as the repo's other categorical
+        # tool parameters do; a tool without it keeps the schema its
+        # parameters build.
+        spec = super().spec()
+        schema = ToolsFormatter.input_schema(spec)
+        effort = schema["properties"].get(_REASONING_EFFORT)
+        if effort is None:
+            return spec
+        effort["enum"] = [member.value for member in MuseReasoningEffort]
+        return dataclasses.replace(spec, input_schema=schema)
 
 
 class CheckMuseReadyTool(MuseHostTool):

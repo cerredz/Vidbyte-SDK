@@ -2,7 +2,7 @@
 
 PURPOSE: Holds the model-facing description text of the twelve Muse host tools (check_muse_ready through track_muse_session_usage) and of their parameters.
 ROLE IN CODEBASE: Read by the tool classes in vidbyte/tools/builtins/muse/tools.py when they declare their ToolSpec and ToolParameter values.
-ARCHITECTURE NOTE: Plain string constants, each at least four general sentences with no concrete example values, so lint rule S025 can resolve and count them statically. Parameters whose meaning differs between tools (the cursor and the limit of a session list and of a view page) get one constant each.
+ARCHITECTURE NOTE: Plain string constants, each at least four general sentences with no concrete example values, so lint rule S025 can resolve and count them statically. The reasoning effort description names every MuseReasoningEffort value, read from the enum so the list cannot drift. Parameters whose meaning differs between tools (the cursor and the limit of a session list and of a view page) get one constant each.
 FUNCTION INVENTORY: No functions. One description per tool and one per parameter meaning.
 COMMON MODIFICATION PATTERNS: When a tool's behaviour changes, update its description here in the same change, keeping at least four sentences.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put a concrete example value, a path or a credential in a description. 2. Do not join adjacent string literals implicitly (S062); write each constant as one parenthesised expression with explicit spaces.
@@ -12,6 +12,8 @@ TESTS: tests/features/muse_host/test_muse_host_tools.py
 """
 
 from __future__ import annotations
+
+from vidbyte.lib.enums.native_hosts import MuseReasoningEffort
 
 CHECK_MUSE_READY_DESCRIPTION = (
     "Checks that Muse Code on this machine, or inside the configured WSL distro, can be used by this host. "
@@ -97,9 +99,10 @@ MODEL_PARAMETER_DESCRIPTION = (
     + "An id that is not in a non-empty model list is refused before any session is created. "
     + "When Muse lists no models, the id is passed through unchecked."
 )
+_REASONING_EFFORT_VALUES = ", ".join(member.value for member in MuseReasoningEffort)
 REASONING_EFFORT_PARAMETER_DESCRIPTION = (
     "How much reasoning Muse should spend on this turn. "
-    + "It must be one of the reasoning effort values the Muse session protocol defines, written in lower case. "
+    + f"It must be one of {_REASONING_EFFORT_VALUES}, which run from the least reasoning to the most, written in lower case. "
     + "Leave it out to use Muse's own default for the model. "
     + "Any other value is refused before the turn starts."
 )
