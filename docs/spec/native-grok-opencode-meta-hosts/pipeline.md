@@ -145,6 +145,18 @@ started: 2026-10-13 01:30 UTC
   - **R-RR4 (Minor):** 86 header lines outside RELATED DOCS, plus one docstring, still cite spec ids.
 
   Per the skill, the new Majors go to a fresh findings verifier scoped to R-RR1 to R-RR4, then back into repair, which counts toward the 8 iterations. Re-review rounds: 1 of 2 used.
+- 2026-10-14 00:30 — **The scoped verifier for re-review round 1 confirmed 2 Majors, both reproduced, neither needing a spec change.**
+  - **R-16 (R-RR1):** Grok and Muse bind a vendor-returned session id verbatim, which breaks INV-14. The fix site is NativeTurnTable, lower-casing keys for GROK and MUSE only, per §8.5.
+  - **R-17 (R-RR3):** Grok and Muse approval titles are unscrubbed, which breaks §9.1 and INV-6. The fix is to scrub before the cap, as opencode does.
+  - **Downgraded to Minor:** R-RR2 became R-M10, follow-up and a spec gap. R-RR4 became R-M11, trivial.
+- 2026-10-14 00:30 — **R-M10 stays a stated follow-up, not built.** A child session's 404 during the tree walk fails the turn as `session_not_found` and sends no EC-158 abort. Why:
+  - it needs a narrow race;
+  - the turn still fails with a structured error;
+  - the fix needs a spec design choice about how a child's 404 is classified, and the verifier proposed EC-154/EC-158 wording;
+  - opening a spec revision on the last allowed re-review round adds risk.
+
+  S6 must list it under Follow-ups with the proposed wording.
+- 2026-10-14 00:30 — **Next:** an S2 addendum with regression tests for R-16 and R-17, proven red. Then S5 iteration 4 (R-16, R-17, R-M11), then re-review round 2, the last.
 
 ## User replies (verbatim)
 (none during the run)
