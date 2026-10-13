@@ -87,7 +87,15 @@ These are the orchestrator's gate numbers on `d3066f84`. I re-ran lint on this d
 
 ## 5. PR, push, and checks
 
-This section is filled in after the push, in the follow-up docs commit.
+- **The first docs commit.** `99a08d99` (`docs(spec): finalize byok-api-keys for PR`) was pushed from `d3066f84` with a fast-forward, with no merge, rebase, or force. Before the push, `origin/main` was still `8387d666`.
+- **Remote runs on `99a08d99`.** I dispatched both runs and confirmed that `headSha` = `99a08d992efdce9207e9e62ba39fe8b846b50025`. I watched both with `--exit-status`, and both exited 0.
+  - CI run 38479305539: `Source / Python 3.12: success`, `Source / Python 3.11: success`, `Package: success`.
+  - Static policy run 38479308567: `Static policy: success`.
+- **PR edit.** I ran `gh pr edit 1027 --title "<line 1>" --body-file <lines 2 on>`. `gh pr view 1027 --json title,isDraft,baseRefName,headRefOid,url` then gave:
+  `{"baseRefName":"main","headRefOid":"99a08d992efdce9207e9e62ba39fe8b846b50025","isDraft":true,"title":"feat(lib,agents): agents take vidbyte_api_key and a list of api_keys, and text calls relay your provider key through the Vidbyte gateway","url":"https://github.com/cerredz/Vidbyte-SDK/pull/1027"}`
+- **`gh pr checks 1027`.** It printed `no checks reported on the 'feat/byok-api-keys' branch`, which is expected: dispatched runs do not attach to the PR. The run ids above are the proof.
+- **Mergeability.** `gh pr view 1027 --json mergeable,mergeStateStatus,isDraft` gave `{"isDraft":true,"mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE"}`. There is no conflict. BLOCKED reflects the draft state and the required checks, which never attach.
+- **This commit.** The commit that adds this section is a second docs-only commit. Its own dispatched runs are quoted in the stage's final STATUS, not here.
 
 ## 6. Candidate field-guide lessons (conventions lens)
 

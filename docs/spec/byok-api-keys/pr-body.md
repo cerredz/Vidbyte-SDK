@@ -224,6 +224,7 @@ Python commands ran from the worktree root, with `DEEPSEEK_API_KEY` unset and `P
 | §4 snippet, offline | the scripted-transport run shown above | `Hi`; 1 POST to the gateway; relay header = the xAI key; no Anthropic key in the request |
 | Remote CI, code head | `gh workflow run CI` → run 38477180582, on `d3066f84` | `Source / Python 3.11: success` · `Source / Python 3.12: success` · `Package: success` |
 | Remote Static policy, code head | `gh workflow run "Static policy"` → run 38477183555, on `d3066f84` | `Static policy: success` |
+| Remote CI + Static policy, docs commit | runs 38479305539 and 38479308567, on `99a08d99` (spec finalized, this body added) | `Source / Python 3.11`, `Source / Python 3.12`, `Package`, `Static policy`: all `success` |
 | Live, local backend: setup | SDK code `6ac82305` against backend `2dfd148ed` (the #695 branch), with the backend run locally with `--lifespan off` against the production DB and the user's real keys | none of the user's keys is quoted here |
 | Live, local backend: construction | Four checks before any call | The Grok key on an openai model is refused with M-18. A Vidbyte key inside `api_keys` is recognised. VIDBYTE_MANAGED drops the provider key. DIRECT skips the gateway |
 | Live, local backend: junk-key probe | A junk `xai-` key, relayed | xAI's own HTTP 400 `invalid-argument` came back, relayed rather than wrapped in a Vidbyte body |
