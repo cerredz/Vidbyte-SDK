@@ -186,6 +186,16 @@ started: 2026-10-13 01:30 UTC
 - 2026-10-14 03:30 — **My decision: fix RACE-1 rather than list it as a limitation.** The user asked for exhaustive error handling, and a flaky required check is a real cost.
   - **Order:** a scoped findings verifier covers the interrupt-vs-completion race across all three hosts. Grok may hit it too, via the CI-1 closed-pipe check after a normal completion closes the peer. Next, the S2 author adds deterministic regression tests that drive the fake's ordering. Then iteration 6 fixes it, together with the three wording-only header claims iteration 5 reported in `grok/wire.py`.
   - **Re-review:** the cap (2/2) is reached, so this fix gets no third re-review round. Its independent check is the S2 author's blind red-to-green regression test, plus my own verification. The final report tells the user this plainly.
+- 2026-10-14 04:10 — **The RACE-1 verifier (scoped) confirmed the defects.** Its notes came back inline, because the harness refuses subagent report files.
+  - **R-18 (Major, Muse):** an interrupt raises `process_exited` when `turn/completed` beats the `turn/interrupt` answer. Reproduced deterministically: 10/10 runs with `{"turn":{"mode":"hold"},"msp":{"turn/interrupt":{"mode":"silent"}}}`.
+  - **R-19 (Minor, Grok):** the cancel's drain yields on Python 3.11, a completion closes the peer, and the CI-1 check raises `process_exited`. This is a CI-flake risk on 3.11.
+  - **R-20 (Minor, Grok):** an answered turn whose driver is still closing gets `was_running=True` with nothing sent.
+  - **R-21 (Minor, Muse):** a steer that races completion raises `process_exited` instead of EC-115's `turn_not_found`.
+  - **opencode:** not affected.
+- 2026-10-14 04:10 — **Decisions:**
+  - (1) I accept the verifier's reading of the spec, with no spec change: an interrupt that sent its cancel returns `was_running=True` even if completion won the race, and the recorded terminal state stands; `was_running=False` only when nothing was sent (EC-52). This refutes my earlier suggested `False` reading. Why: EC-52 and EC-53 already settle it, and the blind-written existing test asserts True.
+  - (2) Iteration 6 takes R-18 through R-21 together, plus the three wording-only header claims from iteration 5. Why: they share one fix pattern (check that the turn really ended, keyed on a completion or answer and not on `running`, so that EC-51 and EC-96 stay intact), and R-19 is a second flake risk.
+  - (3) An S2 addendum comes first: deterministic regression tests, with fake knobs where needed. The verifier's scratch prototypes are in `scratchpad/s5-race-verifier/`.
 
 ## User replies (verbatim)
 (none during the run)
