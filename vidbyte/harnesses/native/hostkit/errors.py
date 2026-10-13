@@ -3,7 +3,7 @@
 PURPOSE: Defines NativeErrorFactory, which builds every NativeHostError a native host raises: it scrubs vendor text (the shared HarnessRedactor plus every value the host injected), caps it, and maps launch failures, transport failures and unexpected exceptions to the spec's failure codes.
 ROLE IN CODEBASE: One factory per host (GrokHost, OpencodeHost, MuseHost), shared with that host's NativeTurnTable and NativePeer. Hosts and their wire codecs call build for every row of spec §6.3.
 ARCHITECTURE NOTE: Lives in hostkit, not vidbyte.lib, because scrubbing reuses HarnessRedactor from vidbyte.harnesses.serialization and lib may not import upward (D-22). Codes are looked up as "<harness>.<problem>" so one factory serves all three hosts.
-FUNCTION INVENTORY: register_secret remembers an injected value; scrub redacts and caps text; listing joins ids for a context value; build makes a NativeHostError with scrubbed message and context; invalid_argument makes configuration.invalid_argument naming the argument; from_configuration_error maps a validator or record refusal to it; from_unexpected maps a defect to runtime.error; from_launch_failure maps a process launch failure; from_protocol_error maps a McpProtocolError reason.
+FUNCTION INVENTORY: register_secret remembers an injected value; scrub redacts and caps text; listing joins ids for a context value; build makes a NativeHostError with scrubbed message and context; invalid_argument makes configuration.invalid_argument naming the argument; from_configuration_error maps a validator or record refusal to the same code; from_unexpected maps a defect to runtime.error; from_launch_failure maps a process launch failure; from_protocol_error maps a McpProtocolError reason.
 COMMON MODIFICATION PATTERNS: A new transport reason gets one entry in _EXITED_REASONS or its own branch in from_protocol_error; a new harness needs its codes in FailureCode and a label in _LABELS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put raw exception text into a message or context; only class names and scrubbed vendor text. 2. Do not add context keys outside the spec §13 list. 3. Do not raise from build; a builder that fails would hide the original error.
 KNOWN EDGE CASES: A registered value is replaced before the redactor runs and before the cap, so a cap cannot cut a secret in half and leave its prefix. Empty text stays empty instead of becoming the redactor's "raised without a message" fallback.
@@ -98,7 +98,8 @@ class NativeErrorFactory:
         # ("GrokTurnRequest.model" names the argument "model"); the message is
         # the SDK's own text, which quotes only short non-secret values.
         field = str(exc.details.get("field", "argument")).rsplit(".", 1)[-1]
-        return self.invalid_argument(field, exc.message, operation=operation)
+        next_step = native_host_constants.NATIVE_INVALID_ARGUMENT_NEXT_STEP.format(field=field)
+        return self.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, exc.message, operation=operation, next_step=next_step, context={"field": field})
 
     def from_unexpected(self, exc: Exception, *, operation: str) -> NativeHostError:
         # @intent native-errors-defects-name-only-the-class

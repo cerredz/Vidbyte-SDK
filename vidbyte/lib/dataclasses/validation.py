@@ -3,7 +3,7 @@
 PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records: text, optional text, positive finite numbers, bounded ints, optional counts, strict bools, enum members, enum sets, argv tuples, text mappings, UUIDs, absolute directories and non-negative decimals.
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_hosts.py, grok.py, opencode.py, muse.py, harness_backends.py and process.py, by McpStdioTransport in vidbyte/tools/mcp/transport.py for its new options, and by the native tool argument parser in vidbyte/tools/builtins/native_host_tool.py.
 ARCHITECTURE NOTE: A class of static methods, each taking the checked value first and the field name second, returning the checked (and for sets, converted) value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a tool can name the bad parameter without reading the message text.
-FUNCTION INVENTORY: require_text, require_optional_text, require_number, require_int, require_optional_count, require_bool, require_enum, require_enum_set, require_argv, require_text_mapping, require_uuid, require_directory, require_decimal; _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_decimal (a decimal string), require_instance, require_url (an https URL, or plain http only to a named host, never quoted).
+FUNCTION INVENTORY: require_text, require_optional_text, require_number, require_int, require_optional_count, require_bool, require_enum, require_enum_set, require_argv, require_text_mapping, require_uuid, require_directory, require_decimal; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_decimal (a decimal string), require_instance, require_url (an https URL, or plain http only to a named host, never quoted).
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently, except a set to a frozenset in require_enum_set. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
 KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples.
@@ -39,18 +39,18 @@ class RecordFieldValidator:
     def require_text(value: Any, field_name: str, *, max_chars: int, pattern: str | None = None, allow_blank: bool = False) -> str:
         # A str of at most max_chars, fully matching pattern when one
         # is given; it may be empty or blank only with allow_blank.
-        if not isinstance(value, str) or (not allow_blank and not value.strip()) or len(value) > max_chars:
-            raise ConfigurationError(f"{field_name} must be {'text' if allow_blank else 'non-empty text'} of at most {max_chars} characters; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
-        if pattern is not None and re.fullmatch(pattern, value) is None:
-            raise ConfigurationError(f"{field_name} must match {pattern}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        problem = RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=allow_blank)
+        if problem is not None:
+            raise ConfigurationError(f"{field_name} must {problem}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return value
 
     @staticmethod
     def require_optional_text(value: Any, field_name: str, *, max_chars: int, pattern: str | None = None) -> str | None:
         # None, or what require_text accepts.
-        if value is None:
-            return None
-        return RecordFieldValidator.require_text(value, field_name, max_chars=max_chars, pattern=pattern)
+        problem = None if value is None else RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=False)
+        if problem is not None:
+            raise ConfigurationError(f"{field_name} must {problem}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        return value
 
     @staticmethod
     def require_number(value: Any, field_name: str, *, maximum: float) -> float:
@@ -134,6 +134,15 @@ class RecordFieldValidator:
         if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
             raise ConfigurationError(f"{field_name} must be a finite Decimal of at least 0; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return value
+
+    @staticmethod
+    def _text_problem(value: Any, *, max_chars: int, pattern: str | None, allow_blank: bool) -> str | None:
+        # What a text value fails, worded to follow "must", or None.
+        if not isinstance(value, str) or (not allow_blank and not value.strip()) or len(value) > max_chars:
+            return f"be {'text' if allow_blank else 'non-empty text'} of at most {max_chars} characters"
+        if pattern is not None and re.fullmatch(pattern, value) is None:
+            return f"match {pattern}"
+        return None
 
     @staticmethod
     def _received(value: Any, field_name: str) -> str:

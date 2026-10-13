@@ -259,7 +259,9 @@ class McpStdioTransport:
         # timeout_seconds, bounds the wait for the answer. Only an explicit
         # timeout_seconds also bounds the write; without one the write is
         # the plain drain MCP callers had before the peer extension.
-        timeout = self._call_timeout(timeout_seconds)
+        # None keeps request_timeout; any other value must pass the
+        # shared check.
+        timeout = self.request_timeout if timeout_seconds is None else self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
         write_seconds = None if timeout_seconds is None else timeout
         request_id, future = await self._send(method, params, write_seconds)
         return await self._answer(method, request_id, future, timeout)
@@ -371,13 +373,13 @@ class McpStdioTransport:
         # A host returns a turn handle while a long request (an ACP
         # session/prompt) is still pending, so this returns once the frame is
         # written and drained, within timeout_seconds when given.
-        write_seconds = None if timeout_seconds is None else self._call_timeout(timeout_seconds)
+        write_seconds = None if timeout_seconds is None else self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
         _request_id, future = await self._send(method, params, write_seconds)
         return future
 
     async def notify(self, method: str, params: Mapping[str, Any] | None = None, *, timeout_seconds: float | None = None) -> None:
         """Write one JSON-RPC notification, which has no id and gets no answer; params is left out when None."""
-        write_seconds = None if timeout_seconds is None else self._call_timeout(timeout_seconds)
+        write_seconds = None if timeout_seconds is None else self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
         frame: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             frame["params"] = dict(params)
@@ -388,7 +390,7 @@ class McpStdioTransport:
         # @intent mcp-stdio-respond-is-checked-before-writing
         # A response with both or neither of result and error is refused as
         # invalid_call before anything is written, so the peer never sees it.
-        write_seconds = None if timeout_seconds is None else self._call_timeout(timeout_seconds)
+        write_seconds = None if timeout_seconds is None else self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
         if (result is None) == (error is None):
             raise McpProtocolError("An MCP response needs exactly one of result and error.", details={"reason": "invalid_call", "request_id": request_id})
         answer = {"result": dict(result)} if result is not None else {"error": dict(error or {})}
@@ -417,14 +419,6 @@ class McpStdioTransport:
             except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 reason = "timeout" if isinstance(exc, TimeoutError) else "stdin_write_failed"
                 raise McpProtocolError("MCP process stdin is not writable", details={"method": method, "stderr_tail": self.stderr_snapshot(), "reason": reason}) from exc
-
-    def _call_timeout(self, timeout_seconds: float | None) -> float:
-        """Return this call's deadline: the transport default, or a checked per-call value."""
-        # @intent mcp-stdio-per-call-timeout
-        # None keeps request_timeout; any other value must pass the shared check.
-        if timeout_seconds is None:
-            return self.request_timeout
-        return self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
 
     @staticmethod
     def _seconds_or_invalid_call(value: object, name: str) -> float:

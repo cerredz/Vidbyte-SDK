@@ -3,7 +3,7 @@
 PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input, and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
 ROLE IN CODEBASE: CliRunner runs grok --version, grok models, the Grok one-shot and fork runs, and the Muse in-distro reap and WSL distro listing (vidbyte/harnesses/native/). ProcessStopper is also used by ManagedProcess (vidbyte/lib/process/managed.py) and by McpStdioTransport when stop_process_tree is set (vidbyte/tools/mcp/transport.py).
 ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. Timing constants are read through the native_hosts constants module at call time so tests can shrink them.
-FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.launch is the shared static launch that run and ManagedProcess.start use, returning the child or the launch failure; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
+FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.launch is the shared static launch that run and ManagedProcess.start use, returning the child or the launch failure; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever.
 KNOWN EDGE CASES: On Windows, taskkill /T cannot reach a grandchild of a leader that already exited (Q-19). A program name is looked up through PATH and PATHEXT on Windows so .cmd shims start. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
@@ -38,10 +38,14 @@ class ProcessStopper:
         # whatever returncode says. A cancellation part-way still sends the
         # KILL and closes the pipes in the finally block.
         finished = False
+        killer: asyncio.subprocess.Process | None = None
         try:
             if sys.platform == "win32":
-                # Windows follows parent ids from the live leader to stop the tree.
-                await ProcessStopper._taskkill(process.pid, grace_seconds)
+                # Windows follows parent ids from the live leader to
+                # stop the tree; a taskkill that cannot start or hangs
+                # is skipped.
+                killer = await ProcessStopper._start_taskkill(process.pid)
+                await ProcessStopper._wait_taskkill(killer, grace_seconds)
             else:
                 # Ask the whole group to stop, give it the grace period, then kill it.
                 ProcessStopper._signal_group(process.pid, signal.SIGTERM)
@@ -58,6 +62,7 @@ class ProcessStopper:
                 ProcessStopper._kill_leader(process)
             # Release our end of the pipes even if a grandchild still holds the other end.
             ProcessStopper._close_pipes(process)
+            ProcessStopper._close_pipes(killer)
         return process.returncode
 
     @staticmethod
@@ -69,19 +74,27 @@ class ProcessStopper:
             os.killpg(pid, signal_number)
 
     @staticmethod
-    async def _taskkill(pid: int, grace_seconds: float) -> None:
-        # Runs taskkill /T /F with its own deadline; a taskkill that cannot start or hangs is skipped.
+    async def _start_taskkill(pid: int) -> asyncio.subprocess.Process | None:
+        # @intent stop-tree-taskkill-may-fail-to-start
+        # Starts taskkill /T /F on the tree with no inherited streams;
+        # None when it cannot start, so the leader kill still runs.
         try:
-            killer = await asyncio.create_subprocess_exec(*_TASKKILL_ARGUMENTS, str(pid), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            return await asyncio.create_subprocess_exec(*_TASKKILL_ARGUMENTS, str(pid), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         except OSError:
+            return None
+
+    @staticmethod
+    async def _wait_taskkill(killer: asyncio.subprocess.Process | None, grace_seconds: float) -> None:
+        # @intent stop-tree-taskkill-has-its-own-deadline
+        # Waits for taskkill at most grace_seconds and kills one that
+        # hangs, so a stuck taskkill never holds up the stop.
+        if killer is None:
             return
         try:
             await asyncio.wait_for(killer.wait(), grace_seconds)
         except TimeoutError:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 killer.kill()
-        finally:
-            ProcessStopper._close_pipes(killer)
 
     @staticmethod
     def _kill_leader(process: asyncio.subprocess.Process) -> None:
@@ -97,8 +110,10 @@ class ProcessStopper:
             await asyncio.wait_for(process.wait(), seconds)
 
     @staticmethod
-    def _close_pipes(process: asyncio.subprocess.Process) -> None:
-        # Closes the subprocess transport; getattr degrades to a pipe leak on a Python without it.
+    def _close_pipes(process: asyncio.subprocess.Process | None) -> None:
+        # Closes the subprocess transport. None, when no taskkill
+        # started, has none; getattr degrades to a pipe leak on a
+        # Python without it.
         transport = getattr(process, "_transport", None)
         if transport is not None:
             with contextlib.suppress(PermissionError, ProcessLookupError, OSError, RuntimeError):

@@ -230,9 +230,12 @@ class HarnessBackends:
 
     @staticmethod
     async def _read_balance(url: str, key: str, errors: NativeErrorFactory, *, operation: str) -> DeepseekBalance:
-        # One GET, then the status rows, then the body's relied-on members.
+        # One GET, then the status rows, then the body's relied-on
+        # members. The vendor's own error text is read here so a refused
+        # call can carry it.
         response = await HarnessBackends._send_balance_request(url, key, errors, operation=operation)
-        HarnessBackends._check_balance_status(response, errors, operation=operation)
+        vendor_text = HarnessBackends._vendor_text(response.body)
+        HarnessBackends._check_balance_status(response, vendor_text, errors, operation=operation)
         return HarnessBackends._parse_balance(response.body, errors, operation=operation)
 
     @staticmethod
@@ -252,7 +255,7 @@ class HarnessBackends:
             raise errors.build(FailureCode.BACKEND_PROTOCOL_MISMATCH, "The DeepSeek balance answer is larger than this SDK reads.", operation=operation, context={"reason": "response_too_large"}) from exc
 
     @staticmethod
-    def _check_balance_status(response: HttpResponse, errors: NativeErrorFactory, *, operation: str) -> None:
+    def _check_balance_status(response: HttpResponse, vendor_text: str, errors: NativeErrorFactory, *, operation: str) -> None:
         # @intent backend-balance-status-rows
         # 401 and 403 mean the key was rejected, 402 an empty balance and 429
         # a rate limit; any other non-2xx status, a redirect included, is an
@@ -266,7 +269,6 @@ class HarnessBackends:
             raise errors.build(FailureCode.BACKEND_USAGE_LIMITED, "DeepSeek rate-limited the call.", operation=operation, context={"status_code": str(status)})
         if not native_host_constants.NATIVE_HTTP_SUCCESS_FIRST_STATUS <= status < native_host_constants.NATIVE_HTTP_SUCCESS_END_STATUS:
             context = {"status_code": str(status)}
-            vendor_text = HarnessBackends._vendor_text(response.body)
             if vendor_text.strip():
                 context["vendor_error"] = vendor_text
             raise errors.build(FailureCode.BACKEND_API_ERROR, f"DeepSeek answered the balance call with HTTP {status}.", operation=operation, context=context)
