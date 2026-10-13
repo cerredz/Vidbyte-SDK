@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
-s2_head: a716c858 (was cfad74f8; moved after the S3-adjudicated test fixes at 66d5c3bb)
+s2_head: 762b68e7 (cfad74f8 → a716c858 after the D-1..D-3 fixes → 762b68e7 after the r5 catalog-row alignment)
 pr:
 until: none
 started: 2026-10-13 01:30 UTC
@@ -59,6 +59,7 @@ started: 2026-10-13 01:30 UTC
 
   The S2 test author fixed them at 66d5c3bb (3 files, 4+/4−). I checked the diff `git diff cfad74f8..HEAD -- tests/`: exactly those 3 files. S2_HEAD moves to a716c858; later test-tree diffs use this base. I ran the fix and S3's resume one after the other, not in parallel, because both agents commit in the same worktree.
 - 2026-10-13 08:55 — The S2 author reports `lint/run.py` SDK-LINT: FAIL. Rule A007 has 263 findings against an allowance of 255, caused by P1 code: `lib/dataclasses/grok.py` 4, `lib/process/runner.py` 4, `lib/process/managed.py` 2. S3 had reported PASS. This was handed to S3 to fix at the source.
+- 2026-10-13 09:40 — S3 reported BLOCKED a second time, at the start of P3: in spec §6.3.1, `muse.budget_exhausted`'s exact next-step text did not contain its own required token `continue_muse_session`. I took the implementer's option 1 and put the token into the text, which matches every other row, where the token names the function to call. The fix went in three steps: spec r5 (254ebc53), a one-line change to the test CATALOG row (762b68e7, verified 1 file, 1+/1−), then resuming S3 to update `NATIVE_HOST_NEXT_STEPS`. S2_HEAD moves to 762b68e7.
 
 ## User replies (verbatim)
 (none during the run)
@@ -130,4 +131,7 @@ started: 2026-10-13 01:30 UTC
 - opencode's `abort` returns `200 true` and `diff` returns `200 []` even for a missing session, so the host calls `GET /session/{id}` first. Take the message baseline before `prompt_async`. — *source:* S2
 - AC-18 needs `import vidbyte` to load `vidbyte.tools.toolsets.{grok,opencode,muse,harness_backends}`. `test_method_frames_are_dropped_without_a_callback` is the regression proof for the transport dispatch fix. — *source:* S2
 - The suite runs fast: all four packs red in about 16 s on Windows. The 19 skips are platform guards that should run on Linux CI. — *source:* S2
+- Lint rules A002 and A007 skip untracked files, so `git add` new files before running `python lint/run.py`. S3's first "PASS" was false for this reason. — *source:* S3
+- A007 matches whole split tokens (`byte` yes, `bytes` no) and flags literals near read/send/request/sleep calls. A002 wants `# @intent` near any `def` whose identifiers contain request/send/transport/subprocess/provider/permission; its slack is 625/703. S024 allows nesting depth 3 at most. — *source:* S3
+- `NativePeer.call` re-raises JSON-RPC error answers as `McpProtocolError` with `details["error"]`, for each host's wire code to map; transport failures become `NativeHostError`. The transport change came out at +156/−8 lines. — *source:* S3
 
