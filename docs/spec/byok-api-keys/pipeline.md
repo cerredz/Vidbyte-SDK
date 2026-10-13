@@ -25,7 +25,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2 (running)
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 running)
 
 ## Decisions the orchestrator made
 - 2026-10-12 16:20 — Run backend and SDK as two parallel pipelines, joined by a wire contract fixed in request.md §C — the user asked for both repos; the contract is small and fixing it lets both proceed at once.
@@ -151,4 +151,13 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - 2026-10-13 — **LE-1 (Major, found live), added to the defect list.** xAI answers an incorrect API key with HTTP 400 `invalid-argument`, not 401. The SDK's relay wording ("relayed-refusal-blames-the-callers-own-key") covers only 401/402/403. So a developer with a wrong xAI key sees "xai returned HTTP 400 through the Vidbyte gateway; the provider's message is withheld, and the call was not billed", which never points at their own key. Fix (wording only, relay calls only): a relayed 400 names the caller's own `{provider}` key in `api_keys` as one possible cause, keeps withholding the body, and keeps "not billed". In scope: Prompt 5 "dont want developers to have to worry about this".
 - 2026-10-13 — Observation for the final report, not a defect: settlement rounds each session's fee UP to whole cents. A tiny session's 2% fee ($0.0000345 here) bills 1 cent. Sessions aggregate per day, Vidbyte key, provider and basis, so over-rounding is at most 1 cent per session.
 - 2026-10-13 — Plan: S5 test pass 2 adds T-11 (pin R-13; green at HEAD; kills a revert of 940ff97c), T-12 (LE-1; red) and T-13 (R-C3; red). Then repair iteration 2 fixes R-C1, R-C2 (spec), R-C3 and LE-1. Then re-review round 2, the last allowed.
+- 2026-10-13 — S5 test pass 2 done at d9ef911c: T-11 2d4486ac, T-12 705862f9, T-13 a576b25e. Orchestrator spot-check:
+  - only `tests/` and docs changed;
+  - the pack had 2 red tests (T-12, T-13);
+  - re-ran T-11 inside `scratchpad/s5-mut2/tree_r13_revert`, where it fails (1 failed).
+- 2026-10-13 — Repair iteration 2 converged at b1c76a2b. Fixes: R-C1 a1cea1bd (`provider_keys.py` 299 lines), R-C3 ac5099fb, LE-1 76657bba (code) and 17121734 (spec, with R-C2). Orchestrator spot-check:
+  - `tests/` unchanged;
+  - re-ran `run_ci.py --stage source`: `4110 passed, 13 skipped`, `CI passed.`;
+  - remote CI and Static policy succeeded on b1c76a2b.
+- 2026-10-13 — Accepted the LE-1 wording, which adds "or {ENV}". AUTO with no list relays the provider's env-var key, and the transport cannot tell which source the key came from, so naming both is accurate.
 
