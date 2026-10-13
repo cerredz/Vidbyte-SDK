@@ -14,6 +14,7 @@ from vidbyte.lib.errors import (
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.util import PromptPlacement
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
 class AnthropicProvider:
@@ -63,8 +64,10 @@ class AnthropicProvider:
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
         # Anthropic carries the schema under output_config.format rather than a response_format field.
+        # @intent anthropic-structured-output-closes-every-object: Anthropic requires additionalProperties:false on every
+        # object and does not transform raw schemas; strict() is the same rewrite the other native-schema providers send.
         if config.response_format is not None:
-            payload["output_config"] = {"format": {"type": "json_schema", "schema": dict(config.response_format)}}
+            payload["output_config"] = {"format": {"type": "json_schema", "schema": OutputSchemaFormatter().strict(config.response_format)}}
 
     def _create_headers(self, config: TextModelConfig) -> dict[str, str]:
         # Include the required Anthropic version and API key headers.
