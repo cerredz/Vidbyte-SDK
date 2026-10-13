@@ -51,6 +51,11 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         shutil.move(str(source), str(destination))
 
     def copy(self, source: Path, destination: Path) -> None:
+        # @intent copy-never-copies-into-itself
+        # A destination inside the source directory would be copied into itself until the path is too
+        # deep, so it is refused before anything is written, the way `cp -r` and `shutil.move` refuse it.
+        if source.is_dir() and destination.resolve().is_relative_to(source.resolve()):
+            raise ToolExecutionError("Cannot copy a directory into itself.", details={"source": str(source), "destination": str(destination)})
         destination.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
             shutil.copytree(source, destination, dirs_exist_ok=True)

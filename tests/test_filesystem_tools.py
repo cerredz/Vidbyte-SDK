@@ -440,6 +440,25 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(exists.output, "true")
 
 
+def test_copy_refuses_to_copy_a_directory_into_itself(tmp_path: Path) -> None:
+    (tmp_path / "handbook" / "sub").mkdir(parents=True)
+    (tmp_path / "handbook" / "a.md").write_text("a")
+    (tmp_path / "handbook" / "sub" / "b.md").write_text("b")
+    tool = CopyTool(FileSystemToolConfig(root=str(tmp_path), allow_write=True))
+    into_subfolder = run(tool.execute(ToolCall("copy", {"source": "handbook", "destination": "handbook/archive/today"})))
+    assert into_subfolder.status == ToolStatus.ERROR
+    assert "Cannot copy a directory into itself" in into_subfolder.output
+    assert not (tmp_path / "handbook" / "archive").exists()
+    root_into_subfolder = run(tool.execute(ToolCall("copy", {"source": ".", "destination": "backups/x"})))
+    assert root_into_subfolder.status == ToolStatus.ERROR
+    assert "Cannot copy a directory into itself" in root_into_subfolder.output
+    assert not (tmp_path / "backups").exists()
+    sibling = run(tool.execute(ToolCall("copy", {"source": "handbook", "destination": "handbook_copy"})))
+    assert sibling.status == ToolStatus.SUCCESS, sibling.output
+    assert (tmp_path / "handbook_copy" / "a.md").read_text() == "a"
+    assert (tmp_path / "handbook_copy" / "sub" / "b.md").read_text() == "b"
+
+
 class FileSystemToolErrorPathTests(unittest.TestCase):
     def test_path_traversal_returns_error_not_raises(self) -> None:
         with TemporaryDirectory() as tmp:
