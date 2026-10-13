@@ -359,9 +359,12 @@ class McpStdioTransport:
         return future
 
     async def notify(self, method: str, params: Mapping[str, Any] | None = None, *, timeout_seconds: float | None = None) -> None:
-        """Write one JSON-RPC notification, which has no id and gets no answer."""
+        """Write one JSON-RPC notification, which has no id and gets no answer; params is left out when None."""
         timeout = self._call_timeout(timeout_seconds)
-        await self._write_frame({"jsonrpc": "2.0", "method": method, "params": dict(params or {})}, method, timeout)
+        frame: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            frame["params"] = dict(params)
+        await self._write_frame(frame, method, timeout)
 
     async def respond(self, request_id: int | str, *, result: Mapping[str, Any] | None = None, error: Mapping[str, Any] | None = None, timeout_seconds: float | None = None) -> None:
         """Answer one server request with exactly one of a result or an error."""

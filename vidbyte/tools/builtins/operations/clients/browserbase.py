@@ -44,7 +44,9 @@ class BrowserbaseClient(WebOperationClient):
 
     async def fetch(self, url: str, *, proxies: bool = False) -> FetchPayload:
         """Fetch one page through Browserbase and return it with billing counts."""
-        payload, attempts = await self.request_json("fetch", "POST", path="fetch", headers=self._headers(), json_body={"url": url, "proxies": proxies})
+        # @intent browserbase-fetch-follows-redirects
+        # Browserbase follows redirects only when asked (allowRedirects defaults to false); every other fetch backend returns the page a URL resolves to.
+        payload, attempts = await self.request_json("fetch", "POST", path="fetch", headers=self._headers(), json_body={"url": url, "allowRedirects": True, "proxies": proxies})
         return FetchPayload(provider=self.provider, pages=(self._page_from_payload(url, payload),), attempts=attempts, billable_units=1)
 
     def _headers(self) -> dict[str, str]:

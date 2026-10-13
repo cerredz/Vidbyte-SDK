@@ -194,6 +194,50 @@ class SyncTransportSocketErrorTests(unittest.TestCase):
                         if label == "stream_request" and stage == "reading the body":
                             self.assertEqual(received, ["first"])
 
+    def test_unencodable_url_surfaces_as_provider_request_error(self) -> None:
+        # @intent sync-request-bytes-normalizes-socket-errors
+        # [Error Path] http.client raises UnicodeEncodeError for a URL it cannot write (an IDN host in the Host header); callers catch only ProviderRequestError.
+        failure = UnicodeEncodeError("latin-1", "例え.example", 0, 1, "ordinal not in range(256)")
+        transport = SyncHttpTransport()
+        received: list[str] = []
+        calls = {label: call for label, call in self._calls(transport, received).items() if label != "upload_multipart"}
+        calls["request_bytes"] = lambda: transport.request_bytes(method="GET", url=_URL, headers={})
+        for label, call in calls.items():
+            with self.subTest(path=label):
+                with patch("vidbyte.lib.http.transport.urlopen", side_effect=failure), self.assertRaises(ProviderRequestError) as caught:
+                    call()
+                self.assertIs(caught.exception.__cause__, failure)
+                self.assertEqual(caught.exception.response_excerpt, f"UnicodeEncodeError: {failure}")
+
+
+class _LinesResponse:
+    """Stands in for an open urllib SSE response that yields fixed raw lines."""
+
+    status = 200
+
+    def __init__(self, lines: list[bytes]) -> None:
+        self.headers = Message()
+        self._lines = lines
+
+    def __enter__(self) -> _LinesResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield from self._lines
+
+
+class SyncTransportSseFieldTests(unittest.TestCase):
+    def test_data_lines_without_a_space_after_the_colon_are_streamed(self) -> None:
+        # @intent sse-space-after-colon-is-optional
+        # [Hidden Failure] Compatible servers such as Kimi for Coding send "data:{...}"; requiring "data: " streamed nothing.
+        lines = [b'data:{"a":1}\n', b"\n", b'data: {"b":2}\n', b": keep-alive\n", b"event:ping\n", b"data:[DONE]\n", b'data:{"c":3}\n']
+        with patch("vidbyte.lib.http.transport.urlopen", return_value=_LinesResponse(lines)):
+            received = list(SyncHttpTransport().stream_request(method="POST", url=_URL, headers={}, json_body={"q": 1}))
+        self.assertEqual(received, ['{"a":1}', '{"b":2}'])
+
 
 class ExaClientStrictServerTests(unittest.TestCase):
     def test_exa_search_succeeds_against_a_strict_server(self) -> None:

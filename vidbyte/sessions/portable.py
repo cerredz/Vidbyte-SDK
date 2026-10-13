@@ -67,7 +67,9 @@ class SessionBundleExporter:
     @staticmethod
     def _write_json(bundle: zipfile.ZipFile, name: str, payload: Mapping[str, Any]) -> None:
         # Serialize a payload as formatted UTF-8 JSON inside the bundle.
-        bundle.writestr(name, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+        # @intent trajectory-file-keeps-undecodable-file-names
+        # A tag may hold a POSIX non-UTF-8 file name (a lone surrogate); write it as a JSON \udcff escape, not fail.
+        bundle.writestr(name, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8", errors="backslashreplace"))
 
     @staticmethod
     def _checkpoint_name(checkpoint: Checkpoint) -> str:

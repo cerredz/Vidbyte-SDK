@@ -68,7 +68,7 @@ class TaskNodeEvent(BaseModel):
             "The current judgment on whether this specific node's own objective has been met, scoped "
             "only to this node's work and not to the task as a whole. Judge it independently of how "
             "this node's own steps were carried out and independently of whether its claims have been "
-            "verified ΓÇö those are separate judgments recorded elsewhere on this same event."
+            "verified — those are separate judgments recorded elsewhere on this same event."
         )
     )
     path_quality_verdict: PathQualityVerdict = Field(
@@ -117,15 +117,15 @@ class ReworkEvent(BaseModel):
     reason: str = Field(
         description=(
             "Why a node that was already considered finished had to be reopened. State the actual cause "
-            "discovered ΓÇö new information, a missed constraint, a downstream failure that traced back to "
-            "this node ΓÇö rather than simply restating that a mistake occurred, since the cause is what "
+            "discovered — new information, a missed constraint, a downstream failure that traced back to "
+            "this node — rather than simply restating that a mistake occurred, since the cause is what "
             "makes this event useful to a later reader."
         )
     )
     axis_reopened: CalibratedAxis = Field(
         description=(
             "Which of the three performance axes actually turned out to be wrong and drove the need for "
-            "rework ΓÇö the node's goal-success verdict, its path-quality verdict, or its correctness "
+            "rework — the node's goal-success verdict, its path-quality verdict, or its correctness "
             "verdict. A single rework event should name the one axis whose prior verdict was mistaken, "
             "not the node as a whole, since a node's other two axes may have been judged correctly all "
             "along."
@@ -149,7 +149,7 @@ class ReworkEvent(BaseModel):
     )
     discovered_by: str = Field(
         description=(
-            "What actually surfaced the need for rework ΓÇö a self-check the agent ran on its own work, a "
+            "What actually surfaced the need for rework — a self-check the agent ran on its own work, a "
             "downstream node failing in a way that traced back here, a sibling comparison that exposed "
             "an inconsistency, or an explicit external correction. This is a distinct signal from reason: "
             "reason explains the underlying mistake, this explains how it was caught."
@@ -199,7 +199,7 @@ class GoalCompletionPrediction(BaseModel):
         description=(
             "The agent's own estimate, at the time this prediction was made, of how much of the stated "
             "goal is complete, expressed on a scale from fully unmet to fully met. This is a genuine "
-            "forecast made under uncertainty, not a restatement of a verdict recorded elsewhere ΓÇö it "
+            "forecast made under uncertainty, not a restatement of a verdict recorded elsewhere — it "
             "should reflect what the agent actually believed before the outcome was confirmed."
         )
     )
@@ -213,7 +213,7 @@ class GoalCompletionPrediction(BaseModel):
     )
     confidence_in_estimate: float = Field(
         description=(
-            "A separate, meta-level confidence in predicted_pct itself ΓÇö how sure the agent is that its "
+            "A separate, meta-level confidence in predicted_pct itself — how sure the agent is that its "
             "own percentage estimate is close to correct, as distinct from the percentage estimate. Two "
             "predictions can share the same predicted_pct while one is a near-certain read and the other "
             "is a rough guess; only this field distinguishes them."
@@ -229,8 +229,8 @@ class GoalCompletionPrediction(BaseModel):
     evidence_considered: list[str] = Field(
         default_factory=list,
         description=(
-            "Concrete signals the agent actually weighed when forming this estimate ΓÇö specific completed "
-            "subtasks, tool results, or stated requirements ΓÇö rather than a restatement of stated_reasoning "
+            "Concrete signals the agent actually weighed when forming this estimate — specific completed "
+            "subtasks, tool results, or stated requirements — rather than a restatement of stated_reasoning "
             "in list form. An empty list is itself informative: it means the estimate was made with little "
             "or no concrete grounding."
         ),
@@ -296,7 +296,7 @@ class GoalCompletionResolution(BaseModel):
     )
     resolution_evidence: str = Field(
         description=(
-            "What concretely established actual_outcome ΓÇö the specific check, verification, or terminal "
+            "What concretely established actual_outcome — the specific check, verification, or terminal "
             "state that made the true outcome knowable. This lets a later reader judge how trustworthy "
             "the ground truth itself is, since a weakly evidenced resolution should be trusted less than "
             "one grounded in a direct, verifiable check."
@@ -312,7 +312,7 @@ class GoalCompletionResolution(BaseModel):
     )
     contributing_factor: str = Field(
         description=(
-            "The single largest driver of the gap between what was predicted and what actually happened ΓÇö "
+            "The single largest driver of the gap between what was predicted and what actually happened — "
             "new information that emerged after the prediction, a misjudgment at prediction time, or an "
             "external event outside the agent's control. Naming one dominant factor, rather than listing "
             "every possible contributor, keeps this field actionable for a later reader."
@@ -321,7 +321,7 @@ class GoalCompletionResolution(BaseModel):
     lessons_applied: bool = Field(
         description=(
             "Whether this resolution's lesson is already visibly reflected in later goal-completion "
-            "predictions ΓÇö for example, a later prediction citing this same key_uncertainty or adjusting "
+            "predictions — for example, a later prediction citing this same key_uncertainty or adjusting "
             "its confidence_in_estimate in the direction this resolution suggests. False does not "
             "necessarily mean the lesson was ignored; it may simply be too early to tell."
         )
@@ -384,7 +384,7 @@ class PathEfficiencyPrediction(BaseModel):
     )
     baseline_reference: str = Field(
         description=(
-            "What this efficiency estimate is actually being measured against ΓÇö an ideal minimal path for "
+            "What this efficiency estimate is actually being measured against — an ideal minimal path for "
             "this kind of task, a prior similar approach earlier in the same run, or a general expectation "
             "for tasks of this shape. Without stating the baseline, a bare efficiency number has no fixed "
             "meaning across different predictions."
@@ -430,8 +430,8 @@ class PathEfficiencyResolution(BaseModel):
     )
     resolution_evidence: str = Field(
         description=(
-            "What concretely established actual_efficiency ΓÇö a direct step count, a comparison against "
-            "baseline_reference, or an explicit efficiency check ΓÇö so a later reader can judge how solid "
+            "What concretely established actual_efficiency — a direct step count, a comparison against "
+            "baseline_reference, or an explicit efficiency check — so a later reader can judge how solid "
             "the measurement itself is, not just trust the number at face value."
         )
     )
@@ -439,7 +439,7 @@ class PathEfficiencyResolution(BaseModel):
         default_factory=list,
         description=(
             "Obstacles that actually slowed the approach but were not named among the original "
-            "prediction's risk_factors_considered ΓÇö genuine blind spots rather than known risks that "
+            "prediction's risk_factors_considered — genuine blind spots rather than known risks that "
             "simply materialized. A pattern of the same kind of unexpected obstacle recurring across "
             "resolutions is more actionable than any single instance."
         ),
@@ -454,7 +454,7 @@ class PathEfficiencyResolution(BaseModel):
     lessons_applied: bool = Field(
         description=(
             "Whether this resolution's lesson is already visibly reflected in later path-efficiency "
-            "predictions ΓÇö for example, a later prediction citing an obstacle from unexpected_obstacles "
+            "predictions — for example, a later prediction citing an obstacle from unexpected_obstacles "
             "among its own risk_factors_considered. False does not necessarily mean the lesson was "
             "ignored; it may simply be too early to tell."
         )
@@ -502,7 +502,7 @@ class ClaimConfidencePrediction(BaseModel):
     )
     stakes: str = Field(
         description=(
-            "What actually depends on this specific claim being true ΓÇö a downstream decision, another "
+            "What actually depends on this specific claim being true — a downstream decision, another "
             "claim built on top of it, or the goal itself. This is what tells a later reader whether a "
             "given claim's confidence calibration matters a great deal or barely at all to the run's "
             "outcome."
@@ -510,7 +510,7 @@ class ClaimConfidencePrediction(BaseModel):
     )
     source_type: str = Field(
         description=(
-            "Where the claim's basis actually came from ΓÇö direct tool output, prior background knowledge, "
+            "Where the claim's basis actually came from — direct tool output, prior background knowledge, "
             "or an inference drawn from other claims already made. Claims inferred from other claims "
             "inherit and can compound the uncertainty of what they were built on, which this field makes "
             "explicit rather than leaving implicit in stated confidence alone."
@@ -542,14 +542,14 @@ class ClaimConfidenceResolution(BaseModel):
     )
     calibration_gap: float = Field(
         description=(
-            "How far the original stated confidence was from what verification actually found ΓÇö high "
+            "How far the original stated confidence was from what verification actually found — high "
             "confidence in a claim that turned out false, or low confidence in one that turned out true, "
             "both produce a large gap here even though they represent opposite kinds of miscalibration."
         )
     )
     verification_method: str = Field(
         description=(
-            "How the claim was actually checked ΓÇö a specific tool call, a cross-reference against another "
+            "How the claim was actually checked — a specific tool call, a cross-reference against another "
             "source, or direct observation of the outcome it predicted. A verification method that is "
             "itself weak deserves the same skepticism applied to the claim it is meant to settle."
         )
@@ -573,7 +573,7 @@ class ClaimConfidenceResolution(BaseModel):
     lessons_applied: bool = Field(
         description=(
             "Whether this resolution's lesson is already visibly reflected in later claim-confidence "
-            "predictions ΓÇö for example, a later prediction on a similarly sourced claim stating a "
+            "predictions — for example, a later prediction on a similarly sourced claim stating a "
             "confidence level shifted in the direction this resolution suggests. False does not "
             "necessarily mean the lesson was ignored; it may simply be too early to tell."
         )
@@ -617,7 +617,7 @@ class GoalSuccessErrorEvent(BaseModel):
     )
     detected_by: str = Field(
         description=(
-            "How this mistake was actually caught ΓÇö the agent's own self-check, a downstream failure that "
+            "How this mistake was actually caught — the agent's own self-check, a downstream failure that "
             "traced back to it, or an explicit external correction. This measures the agent's own "
             "self-monitoring on this specific instance, complementing the schema-level "
             "correctness_self_caught_error_count aggregate."
@@ -641,8 +641,8 @@ class GoalSuccessErrorEvent(BaseModel):
     )
     recurrence_count: int = Field(
         description=(
-            "How many times this specific instance-level mistake ΓÇö not the broader error_type category, "
-            "but this particular manifestation of it ΓÇö has now been observed. This is a finer-grained "
+            "How many times this specific instance-level mistake — not the broader error_type category, "
+            "but this particular manifestation of it — has now been observed. This is a finer-grained "
             "signal than goal_success_recurring_pattern, which only tracks recurrence at the category "
             "level."
         )
@@ -672,7 +672,7 @@ class PathQualityErrorEvent(BaseModel):
     )
     detected_by: str = Field(
         description=(
-            "How this mistake was actually caught ΓÇö the agent's own self-check, a later step that "
+            "How this mistake was actually caught — the agent's own self-check, a later step that "
             "exposed it, or an explicit external correction. Complements path_quality_recovery_success_rate "
             "on the parent schema by explaining how each individual mistake entered the record in the "
             "first place."
@@ -682,7 +682,7 @@ class PathQualityErrorEvent(BaseModel):
         default=None,
         description=(
             "What the agent actually did to recover from this specific mistake, if anything. Leave this "
-            "unset when no recovery attempt has been made yet ΓÇö this is one of the raw signals "
+            "unset when no recovery attempt has been made yet — this is one of the raw signals "
             "path_quality_recovery_success_rate is aggregated from."
         ),
     )
@@ -696,8 +696,8 @@ class PathQualityErrorEvent(BaseModel):
     )
     recurrence_count: int = Field(
         description=(
-            "How many times this specific instance-level mistake ΓÇö not the broader error_type category, "
-            "but this particular manifestation of it ΓÇö has now been observed. This is a finer-grained "
+            "How many times this specific instance-level mistake — not the broader error_type category, "
+            "but this particular manifestation of it — has now been observed. This is a finer-grained "
             "signal than path_quality_most_common_error_type, which only tracks the plurality at the "
             "category level."
         )
@@ -729,7 +729,7 @@ class AnswerCorrectnessErrorEvent(BaseModel):
     )
     detected_by: str = Field(
         description=(
-            "How this mistake was actually caught ΓÇö the agent's own self-check, cross-referencing against "
+            "How this mistake was actually caught — the agent's own self-check, cross-referencing against "
             "another claim or source, or an explicit external correction. This is the per-instance signal "
             "correctness_self_caught_error_count on the parent schema is aggregated from."
         )
@@ -737,7 +737,7 @@ class AnswerCorrectnessErrorEvent(BaseModel):
     correction_applied: str | None = Field(
         default=None,
         description=(
-            "What the agent actually did once this factual mistake was identified ΓÇö retracting the claim, "
+            "What the agent actually did once this factual mistake was identified — retracting the claim, "
             "issuing a corrected version, or flagging it as unresolved. Leave this unset when no correction "
             "has been applied yet."
         ),
@@ -753,8 +753,8 @@ class AnswerCorrectnessErrorEvent(BaseModel):
     )
     recurrence_count: int = Field(
         description=(
-            "How many times this specific instance-level mistake ΓÇö not the broader error_type category, "
-            "but this particular manifestation of it ΓÇö has now been observed. This is a finer-grained "
+            "How many times this specific instance-level mistake — not the broader error_type category, "
+            "but this particular manifestation of it — has now been observed. This is a finer-grained "
             "signal than correctness_error_clustering_note, which describes clustering qualitatively "
             "rather than counting a single recurring instance."
         )
@@ -795,7 +795,7 @@ class GoalSuccessJudgment(BaseModel):
     )
     judge_pass_number: int = Field(
         description=(
-            "Which numbered independent pass over this axis this judgment represents ΓÇö the first, second, "
+            "Which numbered independent pass over this axis this judgment represents — the first, second, "
             "third, and so on. This is distinct from iteration, which records when the pass happened; "
             "judge_pass_number records how many independent looks at this axis have now accumulated."
         )
@@ -810,7 +810,7 @@ class GoalSuccessJudgment(BaseModel):
     dissent_reason: str | None = Field(
         default=None,
         description=(
-            "If this judgment broke from the prior majority, why ΓÇö what evidence or reasoning led it to a "
+            "If this judgment broke from the prior majority, why — what evidence or reasoning led it to a "
             "different conclusion. Leave this unset when agreed_with_prior_majority is true, since a "
             "judgment that agrees with the majority has nothing to dissent about."
         ),
@@ -867,8 +867,8 @@ class AnswerCorrectnessJudgment(BaseModel):
     confidence: float = Field(description="How confident this specific judgment is in its own verdict.")
     reasoning: str = Field(
         description=(
-            "The reasoning chain this specific judgment used to reach its verdict ΓÇö how it moved from the "
-            "evidence in evidence_reviewed to a conclusion ΓÇö kept separate from the raw list of sources so "
+            "The reasoning chain this specific judgment used to reach its verdict — how it moved from the "
+            "evidence in evidence_reviewed to a conclusion — kept separate from the raw list of sources so "
             "a reader can evaluate the logic and the evidence base independently of each other."
         )
     )
@@ -876,7 +876,7 @@ class AnswerCorrectnessJudgment(BaseModel):
         default_factory=list,
         description=(
             "Which specific sources or evidence this judgment actually consulted, so a later reader can "
-            "assess how independent it really was from the other judgments in the ensemble ΓÇö two "
+            "assess how independent it really was from the other judgments in the ensemble — two "
             "judgments that consulted disjoint sources and still agree are stronger evidence of "
             "correctness than two that consulted the same source."
         ),
@@ -898,7 +898,7 @@ class AnswerCorrectnessJudgment(BaseModel):
     dissent_reason: str | None = Field(
         default=None,
         description=(
-            "If this judgment broke from the prior majority, why ΓÇö grounds this specific pass gives for "
+            "If this judgment broke from the prior majority, why — grounds this specific pass gives for "
             "reaching a different correctness conclusion. Leave this unset when agreed_with_prior_majority "
             "is true."
         ),
@@ -933,7 +933,7 @@ class GoalInterpretationAlternative(BaseModel):
     )
     ambiguity_source: str = Field(
         description=(
-            "What specifically in the original request created the ambiguity in the first place ΓÇö vague "
+            "What specifically in the original request created the ambiguity in the first place — vague "
             "wording, an unstated assumption, or a genuine conflict between two stated goals. Naming the "
             "source is what makes this record useful beyond this one instance, since the same source of "
             "ambiguity can recur across other interpretation points in the same run."
@@ -962,12 +962,12 @@ class GoalInterpretationSwitchEvent(BaseModel):
     from_interpretation: str = Field(description="The reading of the goal the agent was working from immediately before this switch.")
     to_interpretation: str = Field(description="The reading of the goal the agent adopted from this point forward.")
     trigger: str = Field(
-        description="What specifically caused the switch ΓÇö new information, a contradiction discovered in the prior reading, or explicit clarification ΓÇö rather than simply noting that a switch occurred."
+        description="What specifically caused the switch — new information, a contradiction discovered in the prior reading, or explicit clarification — rather than simply noting that a switch occurred."
     )
     work_invalidated: list[str] = Field(
         default_factory=list,
         description=(
-            "Prior work ΓÇö task-tree nodes, claims, or completed steps ΓÇö that had to be redone or discarded "
+            "Prior work — task-tree nodes, claims, or completed steps — that had to be redone or discarded "
             "specifically because it was built on from_interpretation and does not carry over to "
             "to_interpretation. An empty list means the switch was caught early enough to cost nothing."
         ),
@@ -975,14 +975,14 @@ class GoalInterpretationSwitchEvent(BaseModel):
     cost_of_switch: str = Field(
         description=(
             "A qualitative account of how expensive and disruptive this switch actually was, beyond the "
-            "literal list in work_invalidated ΓÇö whether it meant restarting a small piece of analysis or "
+            "literal list in work_invalidated — whether it meant restarting a small piece of analysis or "
             "unwinding a substantial portion of the run's progress."
         )
     )
     could_have_been_avoided: bool = Field(
         description=(
-            "A retrospective judgment on whether better upfront disambiguation ΓÇö asking a clarifying "
-            "question, or reading the original request more carefully ΓÇö would plausibly have avoided this "
+            "A retrospective judgment on whether better upfront disambiguation — asking a clarifying "
+            "question, or reading the original request more carefully — would plausibly have avoided this "
             "switch entirely. This distinguishes an avoidable process failure from a switch that only made "
             "sense once genuinely new information arrived."
         )
@@ -1029,7 +1029,7 @@ class PathDecisionPoint(BaseModel):
     )
     reversibility: str = Field(
         description=(
-            "Whether this decision could realistically be undone later if it turned out to be wrong ΓÇö a "
+            "Whether this decision could realistically be undone later if it turned out to be wrong — a "
             "cheaply reversible choice versus a one-way door. A poor decision that was still reversible "
             "carries much less risk than an equally poor one that locked in irreversible consequences, "
             "even though both might receive the same regret_assessment."
@@ -1067,8 +1067,8 @@ class PathRegretEvent(BaseModel):
     )
     cost_of_mistake: str = Field(
         description=(
-            "The concrete cost this decision actually incurred once it was recognized as wrong ΓÇö wasted "
-            "steps, discarded work, or a materially worse final result ΓÇö stated specifically enough to "
+            "The concrete cost this decision actually incurred once it was recognized as wrong — wasted "
+            "steps, discarded work, or a materially worse final result — stated specifically enough to "
             "judge whether this regret matters a great deal or only marginally."
         )
     )
@@ -1083,7 +1083,7 @@ class PathRegretEvent(BaseModel):
     trigger_for_realization: str = Field(
         description=(
             "What specifically caused the agent to realize, at regretted_at_iteration, that the earlier "
-            "decision was wrong ΓÇö a downstream failure, new information, or an explicit external "
+            "decision was wrong — a downstream failure, new information, or an explicit external "
             "correction. This is distinct from what_should_have_happened, which describes the fix rather "
             "than what exposed the need for one."
         )
@@ -1092,7 +1092,7 @@ class PathRegretEvent(BaseModel):
         default=None,
         description=(
             "What the agent actually did in response once this regret was recognized, if anything. Leave "
-            "this unset when the mistake was identified but no corrective action has been taken yet ΓÇö "
+            "this unset when the mistake was identified but no corrective action has been taken yet — "
             "for example, because the decision was irreversible per the original decision point's "
             "reversibility field."
         ),
@@ -1118,7 +1118,7 @@ class CorrectnessSourceAlternative(BaseModel):
     source_selection_reasoning: str = Field(
         description=(
             "Why source_used was chosen over the other entries in sources_considered, even when it is not "
-            "the top-ranked one by source_reliability_rank ΓÇö for example, because a more reliable source "
+            "the top-ranked one by source_reliability_rank — for example, because a more reliable source "
             "was unavailable or too costly to consult. This is what distinguishes a deliberate tradeoff "
             "from an oversight."
         )
@@ -1154,7 +1154,7 @@ class CorrectnessSourceConflictEvent(BaseModel):
     source_b: str = Field(description="The other source that disagreed.")
     resolution: str = Field(
         description=(
-            "How the conflict was actually resolved ΓÇö which source was trusted and why, or that the "
+            "How the conflict was actually resolved — which source was trusted and why, or that the "
             "conflict remains unresolved and the claim should be treated as unsettled rather than as "
             "confidently verified."
         )
@@ -1204,7 +1204,7 @@ class GoalSuccessCheckEntry(BaseModel):
     criterion: str = Field(
         description=(
             "The specific, checkable requirement the goal implies, phrased narrowly enough to be "
-            "judged as met or not met on its own ΓÇö 'matches explicit user intent' or 'satisfies the "
+            "judged as met or not met on its own — 'matches explicit user intent' or 'satisfies the "
             "stated length constraint' rather than a vague restatement of the whole goal. This is the "
             "human-readable identity of the criterion; every other field on this entry is a judgment "
             "about it."
@@ -1214,14 +1214,14 @@ class GoalSuccessCheckEntry(BaseModel):
         description=(
             "Whether this specific criterion is currently satisfied, as a plain binary reader-facing "
             "signal independent of the richer verdict field below. Set it purely on this one "
-            "criterion's own evidence ΓÇö never let a path_quality or answer_correctness finding change "
+            "criterion's own evidence — never let a path_quality or answer_correctness finding change "
             "it, since those are separate axes evaluated on their own entries elsewhere in this schema."
         )
     )
     verdict: GoalSuccessVerdict = Field(
         description=(
             "The finer-grained read on this one criterion drawn from the shared GoalSuccessVerdict "
-            "vocabulary, distinguishing states `met` alone cannot ΓÇö a criterion can be genuinely "
+            "vocabulary, distinguishing states `met` alone cannot — a criterion can be genuinely "
             "unattemptable yet, actively regressing after once being met, or blocked by something "
             "external to the agent's own work. Judge it against this criterion alone, not the goal as "
             "a whole."
@@ -1230,7 +1230,7 @@ class GoalSuccessCheckEntry(BaseModel):
     evidence: str = Field(
         description=(
             "The specific, concrete fact from the current context that justifies this entry's met and "
-            "verdict values ΓÇö a quoted requirement, a specific output excerpt, or a specific constraint "
+            "verdict values — a quoted requirement, a specific output excerpt, or a specific constraint "
             "check. State the fact itself rather than a restatement of the criterion, since the "
             "criterion is already captured above and this field exists to let a reader audit the "
             "judgment independently."
@@ -1247,7 +1247,7 @@ class GoalSuccessCheckEntry(BaseModel):
     blocking: bool = Field(
         description=(
             "Whether this criterion being unmet is, on its own, enough to prevent overall goal "
-            "success ΓÇö as opposed to a minor or optional criterion whose failure is survivable. This "
+            "success — as opposed to a minor or optional criterion whose failure is survivable. This "
             "lets a reader triage a long checklist by scanning for blocking=True entries first rather "
             "than weighing every criterion as equally important."
         )
@@ -1255,8 +1255,8 @@ class GoalSuccessCheckEntry(BaseModel):
     iteration: int = Field(
         description=(
             "The run iteration at which this entry was recorded. Because entries are never edited in "
-            "place ΓÇö a criterion whose answer changes gets a brand-new entry with the current "
-            "iteration and the same criterion_id ΓÇö a reader takes the entry with the highest iteration "
+            "place — a criterion whose answer changes gets a brand-new entry with the current "
+            "iteration and the same criterion_id — a reader takes the entry with the highest iteration "
             "for a given criterion_id as that criterion's current state."
         )
     )
@@ -1276,7 +1276,7 @@ class PathQualityCheckEntry(BaseModel):
     )
     criterion: str = Field(
         description=(
-            "The specific, checkable process requirement being evaluated ΓÇö 'no redundant tool calls' "
+            "The specific, checkable process requirement being evaluated — 'no redundant tool calls' "
             "or 'no unsafe action taken without a stated reason' rather than a vague sense of overall "
             "process quality. This is the human-readable identity of the criterion that every other "
             "field on this entry judges."
@@ -1285,7 +1285,7 @@ class PathQualityCheckEntry(BaseModel):
     met: bool = Field(
         description=(
             "Whether this specific process criterion is currently satisfied. Scored purely on the "
-            "path taken so far ΓÇö a path criterion should never fail just because the goal ultimately "
+            "path taken so far — a path criterion should never fail just because the goal ultimately "
             "wasn't reached, and should never pass just because the final output happened to be "
             "correct despite a messy process."
         )
@@ -1293,7 +1293,7 @@ class PathQualityCheckEntry(BaseModel):
     verdict: PathQualityVerdict = Field(
         description=(
             "The finer-grained read on this one criterion drawn from the shared PathQualityVerdict "
-            "vocabulary, distinguishing states `met` alone cannot ΓÇö a criterion can be actively "
+            "vocabulary, distinguishing states `met` alone cannot — a criterion can be actively "
             "recovering from an earlier violation, currently blocked, or redundant without yet being "
             "outright unsafe. Judge it against this one criterion, not the path as a whole."
         )
@@ -1317,16 +1317,16 @@ class PathQualityCheckEntry(BaseModel):
     blocking: bool = Field(
         description=(
             "Whether this criterion being unmet is, on its own, severe enough to call the whole path "
-            "unsafe or unusable ΓÇö as opposed to a minor inefficiency that does not threaten the run. "
+            "unsafe or unusable — as opposed to a minor inefficiency that does not threaten the run. "
             "This lets a reader triage a long checklist for the process failures that actually matter "
             "without weighing every entry equally."
         )
     )
     iteration: int = Field(
         description=(
-            "The run iteration at which this entry was recorded. Entries are never edited in place ΓÇö "
+            "The run iteration at which this entry was recorded. Entries are never edited in place — "
             "a criterion whose answer changes gets a new entry with the current iteration and the same "
-            "criterion_id ΓÇö so a reader takes the highest-iteration entry per criterion_id as current."
+            "criterion_id — so a reader takes the highest-iteration entry per criterion_id as current."
         )
     )
 
@@ -1344,7 +1344,7 @@ class AnswerCorrectnessCheckEntry(BaseModel):
     )
     criterion: str = Field(
         description=(
-            "The specific, checkable factual requirement being evaluated ΓÇö 'every numeric claim is "
+            "The specific, checkable factual requirement being evaluated — 'every numeric claim is "
             "traceable to a source' or 'no two claims contradict each other' rather than a vague sense "
             "of overall trustworthiness. This is the human-readable identity of the criterion every "
             "other field on this entry judges."
@@ -1353,7 +1353,7 @@ class AnswerCorrectnessCheckEntry(BaseModel):
     met: bool = Field(
         description=(
             "Whether this specific correctness criterion is currently satisfied. Scored purely on the "
-            "claims and evidence available so far ΓÇö a criterion here should never be marked met just "
+            "claims and evidence available so far — a criterion here should never be marked met just "
             "because the goal was reached through a clean path, since correctness is judged "
             "independently of both the outcome and the process."
         )
@@ -1361,7 +1361,7 @@ class AnswerCorrectnessCheckEntry(BaseModel):
     verdict: AnswerCorrectnessVerdict = Field(
         description=(
             "The finer-grained read on this one criterion drawn from the shared AnswerCorrectnessVerdict "
-            "vocabulary, distinguishing states `met` alone cannot ΓÇö a criterion can be pending "
+            "vocabulary, distinguishing states `met` alone cannot — a criterion can be pending "
             "verification, stale relative to newer information, or self-contradictory without yet "
             "being outright disproven. Judge it against this one criterion, not the answer as a whole."
         )
@@ -1385,16 +1385,16 @@ class AnswerCorrectnessCheckEntry(BaseModel):
     blocking: bool = Field(
         description=(
             "Whether this criterion being unmet is, on its own, severe enough to call the whole "
-            "answer untrustworthy ΓÇö as opposed to a minor phrasing nitpick that does not threaten "
+            "answer untrustworthy — as opposed to a minor phrasing nitpick that does not threaten "
             "correctness. This lets a reader triage a long checklist for the correctness failures that "
             "actually matter."
         )
     )
     iteration: int = Field(
         description=(
-            "The run iteration at which this entry was recorded. Entries are never edited in place ΓÇö "
+            "The run iteration at which this entry was recorded. Entries are never edited in place — "
             "a criterion whose answer changes gets a new entry with the current iteration and the same "
-            "criterion_id ΓÇö so a reader takes the highest-iteration entry per criterion_id as current."
+            "criterion_id — so a reader takes the highest-iteration entry per criterion_id as current."
         )
     )
 
@@ -1426,7 +1426,7 @@ class GoalSuccessEvent(BaseModel):
             "The current read on this specific subgoal drawn from the shared GoalSuccessVerdict "
             "vocabulary, scoped only to this subgoal and not to the overall goal. Judge it "
             "independently of how this subgoal's own steps were carried out and independently of "
-            "whether its claims have been verified ΓÇö those are separate axes recorded on their own "
+            "whether its claims have been verified — those are separate axes recorded on their own "
             "event ledgers."
         )
     )
@@ -1441,7 +1441,7 @@ class GoalSuccessEvent(BaseModel):
     )
     description: str = Field(
         description=(
-            "What actually happened to cause this status change ΓÇö the specific action, discovery, or "
+            "What actually happened to cause this status change — the specific action, discovery, or "
             "piece of new information involved. Phrase it as a concrete event rather than a restatement "
             "of the status value, since the status field already captures the verdict and this field "
             "exists to explain why it changed."
@@ -1457,7 +1457,7 @@ class GoalSuccessEvent(BaseModel):
     )
     triggered_by: str = Field(
         description=(
-            "What in the agent's own work caused this event to be recorded ΓÇö a specific tool result, a "
+            "What in the agent's own work caused this event to be recorded — a specific tool result, a "
             "specific piece of reasoning, or a specific piece of user-provided context. This is what "
             "turns the ledger from a bare state log into an explainable trail a later reader can follow "
             "back to the actual cause of each transition."
@@ -1492,7 +1492,7 @@ class PathQualityEvent(BaseModel):
     )
     action: str = Field(
         description=(
-            "What the agent actually did ΓÇö the specific tool call, decision, or step taken, phrased "
+            "What the agent actually did — the specific tool call, decision, or step taken, phrased "
             "concretely enough that a reader unfamiliar with this run can picture the action without "
             "opening the main agent's own transcript."
         )
@@ -1507,7 +1507,7 @@ class PathQualityEvent(BaseModel):
     )
     risk_flag: ErrorSeverity = Field(
         description=(
-            "How much risk this specific action carried, drawn from the shared ErrorSeverity scale ΓÇö "
+            "How much risk this specific action carried, drawn from the shared ErrorSeverity scale — "
             "the same axis-independent severity vocabulary used for classified mistakes elsewhere in "
             "this SDK's continual-trace schemas, reused here to describe risk rather than an already-"
             "realized error. A trivial risk_flag on an otherwise ordinary action needs no further "
@@ -1527,7 +1527,7 @@ class PathQualityEvent(BaseModel):
     recoverable: bool = Field(
         description=(
             "Whether this action's effects, if they turn out to have been wrong, can still be undone "
-            "or corrected later in the run ΓÇö as opposed to an action with a permanent, irreversible "
+            "or corrected later in the run — as opposed to an action with a permanent, irreversible "
             "consequence. This is often more decision-relevant than risk_flag alone, since a "
             "recoverable risky action is a very different situation from an irreversible one."
         )
@@ -1571,7 +1571,7 @@ class AnswerCorrectnessEvent(BaseModel):
     verdict: AnswerCorrectnessVerdict = Field(
         description=(
             "The current read on this specific claim drawn from the shared AnswerCorrectnessVerdict "
-            "vocabulary, distinguishing states the plain verified boolean cannot ΓÇö a claim can be "
+            "vocabulary, distinguishing states the plain verified boolean cannot — a claim can be "
             "pending verification, stale relative to newer information, or self-contradictory with "
             "another claim without yet being outright disproven."
         )
@@ -1626,8 +1626,8 @@ class GoalSuccessSnapshot(BaseModel):
     status: GoalSuccessVerdict = Field(
         description=(
             "The current overall goal-success read at this point in the run, drawn from the shared "
-            "GoalSuccessVerdict vocabulary. A reversal ΓÇö status moving backward from a later iteration "
-            "to an earlier one, such as achieved regressing to in_progress ΓÇö should be visible directly "
+            "GoalSuccessVerdict vocabulary. A reversal — status moving backward from a later iteration "
+            "to an earlier one, such as achieved regressing to in_progress — should be visible directly "
             "in the sequence of snapshots, not smoothed away by only keeping the latest value."
         )
     )
@@ -1698,7 +1698,7 @@ class PathQualitySnapshot(BaseModel):
     risky_action_count: int = Field(
         description=(
             "The cumulative count of actions flagged as carrying meaningful risk, counted from the "
-            "start of the run up to and including this snapshot's iteration ΓÇö not a per-pass delta. A "
+            "start of the run up to and including this snapshot's iteration — not a per-pass delta. A "
             "single entry is therefore always enough to read the running total at that point in the run "
             "without summing across prior snapshots."
         )
@@ -1707,7 +1707,7 @@ class PathQualitySnapshot(BaseModel):
         description=(
             "The current overall path-quality read at this point in the run, drawn from the shared "
             "PathQualityVerdict vocabulary. This can move independently of efficiency and "
-            "risky_action_count in either direction ΓÇö a still-efficient path can turn risky through a "
+            "risky_action_count in either direction — a still-efficient path can turn risky through a "
             "single consequential action, and a recovering path can regain a healthy status while "
             "efficiency stays temporarily depressed."
         )
@@ -1758,7 +1758,7 @@ class AnswerCorrectnessSnapshot(BaseModel):
     verified_claim_count: int = Field(
         description=(
             "The cumulative count of claims verified against evidence as of this snapshot's iteration, "
-            "counted from the start of the run ΓÇö not a per-pass delta. A single entry is therefore "
+            "counted from the start of the run — not a per-pass delta. A single entry is therefore "
             "enough to read the running total without summing across prior snapshots."
         )
     )
@@ -1774,7 +1774,7 @@ class AnswerCorrectnessSnapshot(BaseModel):
         description=(
             "The current overall answer-correctness read at this point in the run, drawn from the "
             "shared AnswerCorrectnessVerdict vocabulary. This can move independently of the two raw "
-            "counts above in either direction ΓÇö a high verified_claim_count does not guarantee a "
+            "counts above in either direction — a high verified_claim_count does not guarantee a "
             "'verified' status if even one significant contradiction remains unresolved."
         )
     )

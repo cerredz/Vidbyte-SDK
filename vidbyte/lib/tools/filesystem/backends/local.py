@@ -20,6 +20,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         return path.read_bytes()
 
     def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # Opening for writing empties the file at once, so text the encoding
+        # cannot hold must fail here, before the file is opened.
+        content.encode(encoding)
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding=encoding, newline=newline) as handle:
@@ -94,10 +98,14 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         destination.mkdir(parents=True, exist_ok=True)
         extracted: list[str] = []
         with zipfile.ZipFile(source) as archive:
+            # @intent refused-archive-extracts-nothing
+            # An archive with a member outside the extraction root is refused as a whole, so check
+            # every member before writing any; otherwise earlier members would already be extracted.
             for member in archive.infolist():
                 target = (destination / member.filename).resolve()
                 if target != destination and destination not in target.parents:
                     raise ToolExecutionError("Zip archive contains a path outside the extraction root.", details={"member": member.filename})
+            for member in archive.infolist():
                 archive.extract(member, destination)
                 extracted.append(member.filename)
         return tuple(extracted)

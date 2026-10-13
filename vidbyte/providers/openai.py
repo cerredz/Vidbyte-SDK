@@ -302,7 +302,9 @@ class OpenAIProvider:
         if config.size:
             payload["size"] = config.size
         if config.seconds:
-            payload["seconds"] = config.seconds
+            # @intent openai-video-seconds-is-a-string
+            # The Videos API types seconds as the string enum "4" | "8" | "12" and rejects an integer; the config keeps an int for validation.
+            payload["seconds"] = str(config.seconds)
         if config.extra_body:
             payload.update(dict(config.extra_body))
         return payload
@@ -326,6 +328,10 @@ class OpenAIProvider:
     def _collect_output_text(self, chunks: list[str], item: object) -> None:
         # Collect text leaves from one Responses API output item.
         if not isinstance(item, dict):
+            return
+        # @intent reasoning-items-are-not-the-answer
+        # A "reasoning" item's content is the model's chain of thought (reasoning_text), never the answer; streaming yields only output_text.
+        if item.get("type") == "reasoning":
             return
         content = item.get("content")
         if not isinstance(content, list):

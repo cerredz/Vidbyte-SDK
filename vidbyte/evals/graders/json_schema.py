@@ -49,6 +49,23 @@ class JSONSchemaGrader(BaseGrader):
         if not schema_type:
             return True, ""
 
+        # @intent json-schema-type-may-be-an-array
+        # JSON Schema's type is one name or an array of names ("null" included); a value passes when it matches any.
+        if isinstance(schema_type, list):
+            errors = [self._validate_node(data, {**schema, "type": single}) for single in schema_type]
+            if any(res for res, _ in errors):
+                return True, ""
+            nested = [err for _, err in errors if not err.startswith("Expected ")]
+            if nested:
+                return False, nested[0]
+            names = ", ".join(str(single) for single in schema_type)
+            return False, f"Expected one of {names}, got {type(data).__name__}"
+
+        if schema_type == "null":
+            if data is not None:
+                return False, f"Expected null, got {type(data).__name__}"
+            return True, ""
+
         if schema_type == "object":
             if not isinstance(data, dict):
                 return False, f"Expected object, got {type(data).__name__}"

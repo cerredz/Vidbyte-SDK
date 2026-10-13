@@ -113,10 +113,13 @@ class LettaSearchArchivalMemoryTool(BaseMemoryTool):
         limit: int = int(call.arguments.get("limit") or 10)
 
         try:
+            # @intent letta-archival-list-filters-by-search
+            # The archival-memory list endpoint filters by text with `search` and has no `query` parameter;
+            # it ignores unknown parameters, so `query=` would return the oldest passages unfiltered.
             status, data = await self._json_get(
                 url=f"{self._base_url}/v1/agents/{self._path_id(agent_id)}/archival-memory",
                 headers=self._auth_headers("Bearer"),
-                params={"query": query, "limit": limit},
+                params={"search": query, "limit": limit},
             )
         except Exception as exc:
             return ToolResult.error(self.name, f"Request failed: {exc}", metadata={"provider": "letta"})

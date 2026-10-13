@@ -27,6 +27,7 @@ import unittest
 from unittest import mock
 
 from vidbyte.lib.errors import McpProtocolError
+from vidbyte.tools.mcp.client import McpClient
 from vidbyte.tools.mcp.transport import McpStdioTransport, build_child_env
 
 
@@ -433,6 +434,40 @@ class McpStdioTransportHardeningTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(McpProtocolError) as ctx:
                 await transport.request("missing")
             self.assertIn("error", ctx.exception.details)
+        finally:
+            await transport.close()
+
+    async def test_client_sends_initialized_notification_to_lifecycle_strict_server(self) -> None:
+        """A server that refuses requests until notifications/initialized (mcp < 1.18) still lists tools."""
+        command = _python_child(
+            """
+            import json, sys
+            notified = None
+            for line in sys.stdin:
+                msg = json.loads(line)
+                if msg.get("method") == "notifications/initialized" and "id" not in msg:
+                    notified = msg
+                    continue
+                if "id" not in msg:
+                    continue
+                if msg["method"] == "initialize":
+                    reply = {"result": {"protocolVersion": "2024-11-05", "capabilities": {}}}
+                elif notified is None:
+                    reply = {"error": {"code": -32602, "message": "Invalid request parameters"}}
+                else:
+                    reply = {"result": {"tools": [{"name": "lookup", "inputSchema": {"type": "object"}}],
+                                        "received": notified}}
+                sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], **reply}) + "\\n")
+                sys.stdout.flush()
+            """
+        )
+        transport = McpStdioTransport(command, request_timeout=5.0)
+        try:
+            tools = await McpClient(transport).list_tools()
+            self.assertEqual([tool.name for tool in tools], ["lookup"])
+            received = (await transport.request("tools/list"))["received"]
+            self.assertEqual(received["method"], "notifications/initialized")
+            self.assertNotIn("id", received)
         finally:
             await transport.close()
 

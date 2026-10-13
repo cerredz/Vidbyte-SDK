@@ -14,6 +14,7 @@ from vidbyte.lib.errors import (
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.util import PromptPlacement
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
 class AnthropicProvider:
@@ -63,8 +64,10 @@ class AnthropicProvider:
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
         # Anthropic carries the schema under output_config.format rather than a response_format field.
+        # @intent anthropic-structured-output-closes-every-object: Anthropic requires additionalProperties:false on every
+        # object and does not transform raw schemas; strict() is the same rewrite the other native-schema providers send.
         if config.response_format is not None:
-            payload["output_config"] = {"format": {"type": "json_schema", "schema": dict(config.response_format)}}
+            payload["output_config"] = {"format": {"type": "json_schema", "schema": OutputSchemaFormatter().strict(config.response_format)}}
 
     def _create_headers(self, config: TextModelConfig) -> dict[str, str]:
         # Include the required Anthropic version and API key headers.
@@ -157,7 +160,17 @@ class AnthropicProvider:
         content = parsed.get("content")
         if not isinstance(content, list):
             raise ProviderResponseError("Anthropic response did not include content.", provider=self.provider.value, response_excerpt=str(parsed))
-        chunks = [item["text"] for item in content if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str)]
+        # @intent adjacent-text-blocks-are-one-text: with citations Claude splits one sentence into adjacent text blocks at each cited span (the spaces are inside the fragments),
+        # so adjacent blocks are concatenated as written, as streaming and the compatible providers do; only text that another block separates starts a new line.
+        chunks: list[str] = []
+        previous_was_text = False
+        for item in content:
+            is_text = isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str)
+            if is_text and previous_was_text:
+                chunks[-1] += item["text"]
+            elif is_text:
+                chunks.append(item["text"])
+            previous_was_text = is_text
         if not chunks:
             if any(isinstance(item, dict) and item.get("type") == "tool_use" for item in content):
                 return ""

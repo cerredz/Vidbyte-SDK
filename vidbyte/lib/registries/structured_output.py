@@ -9,6 +9,7 @@ Purpose:
 Architecture:
     - StructuredOutputRegistry.resolve: Resolves a provider/model to its declared enforcement tier.
     - StructuredOutputRegistry.describe: Returns the developer-facing description for that tier.
+    - StructuredOutputRegistry.native_schema_with_tools: Says whether native schema may ride beside functions.
     - StructuredOutputRegistry.descriptions: Returns the complete documented tier catalog.
 Key Functions:
     - resolve: Never raises for an unknown provider; it returns PROMPT_ONLY.
@@ -25,6 +26,7 @@ from typing import ClassVar
 
 from vidbyte.lib.configs.structured_output import (
     MODEL_SUPPORT,
+    NATIVE_SCHEMA_WITHOUT_TOOLS,
     PROVIDER_SUPPORT,
     STRUCTURED_OUTPUT_AS_OF,
     STRUCTURED_OUTPUT_DESCRIPTIONS,
@@ -38,6 +40,7 @@ class StructuredOutputRegistry:
 
     _PROVIDER_SUPPORT: ClassVar[dict[ModelProvider, StructuredOutputSupport]] = PROVIDER_SUPPORT
     _MODEL_SUPPORT: ClassVar[dict[ModelProvider, dict[str, StructuredOutputSupport]]] = MODEL_SUPPORT
+    _NATIVE_SCHEMA_WITHOUT_TOOLS: ClassVar[dict[ModelProvider, tuple[str, ...]]] = NATIVE_SCHEMA_WITHOUT_TOOLS
 
     @classmethod
     def resolve(cls, provider: ModelProvider | str | None, model: str | None = None) -> StructuredOutputSupport:
@@ -54,6 +57,14 @@ class StructuredOutputRegistry:
     def describe(cls, provider: ModelProvider | str | None, model: str | None = None) -> StructuredOutputDescription:
         # Return the complete developer-facing explanation for an endpoint's resolved support tier.
         return STRUCTURED_OUTPUT_DESCRIPTIONS[cls.resolve(provider, model)]
+
+    @classmethod
+    def native_schema_with_tools(cls, provider: ModelProvider | str | None, model: str | None = None) -> bool:
+        # Reports whether this endpoint's native schema may travel in the same request as function declarations.
+        resolved = cls._provider(provider)
+        prefixes = cls._NATIVE_SCHEMA_WITHOUT_TOOLS.get(resolved, ()) if resolved is not None else ()
+        normalized = str(model or "").lower()
+        return not any(normalized.startswith(prefix) for prefix in prefixes)
 
     @classmethod
     def descriptions(cls) -> tuple[StructuredOutputDescription, ...]:
@@ -90,6 +101,7 @@ __all__ = [
     "StructuredOutputDescription",
     "PROVIDER_SUPPORT",
     "MODEL_SUPPORT",
+    "NATIVE_SCHEMA_WITHOUT_TOOLS",
     "STRUCTURED_OUTPUT_AS_OF",
     "STRUCTURED_OUTPUT_DESCRIPTIONS",
 ]

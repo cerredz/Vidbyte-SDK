@@ -22,7 +22,9 @@ class ForbiddenContentGrader(BaseGrader):
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Checks that none of the forbidden terms are present.
-        haystack = actual if self.case_sensitive else actual.lower()
+        # @intent caseless-graders-casefold
+        # Case-insensitive grading uses casefold, the caseless-matching form (ß matches SS), as OutputBehavior does.
+        haystack = actual if self.case_sensitive else actual.casefold()
         found = [term for term in self.forbidden if self._normalize(term) in haystack]
         passed = not found
         score = 1.0 if passed else 0.0
@@ -31,5 +33,6 @@ class ForbiddenContentGrader(BaseGrader):
 
     def _normalize(self, term: str) -> str:
         # Applies the configured case sensitivity to a forbidden term.
-        return term if self.case_sensitive else term.lower()
+        # @intent caseless-graders-casefold
+        return term if self.case_sensitive else term.casefold()
 

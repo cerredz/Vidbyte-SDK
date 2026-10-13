@@ -5,8 +5,9 @@ ROLE IN CODEBASE: Keeps strict OpenAI requests and Gemini responseSchema payload
 ARCHITECTURE NOTE: Builds each provider's request payload directly from a TextModelConfig carrying the
     annotated Pydantic schema the agent runtime would send, then inspects the payload dict.
 FUNCTION INVENTORY: OpenAIStrictDialectTests checks both strict-mode rules at every object node for the
-    OpenAI Responses adapter and the compatible NATIVE_SCHEMA tier; GeminiResponseSchemaTests checks refs
-    are expanded; StrictFormatterTests checks explicit additionalProperties choices are kept.
+    OpenAI Responses adapter, the compatible NATIVE_SCHEMA tier and Anthropic's output_config; GeminiResponseSchemaTests checks refs
+    are expanded; StrictFormatterTests checks explicit additionalProperties choices are kept. Strict payloads
+    must also carry no "$ref" with sibling keywords (defaulted enums, described nested models).
 COMMON MODIFICATION PATTERNS: Add a model per schema shape a provider dialect must accept.
 WHAT NOT TO DO: Do not call real provider endpoints or require API keys from the environment.
 KNOWN EDGE CASES: Pydantic emits Optional[X] as anyOf [X, null] and puts nested models and Enums in $defs.
@@ -21,9 +22,10 @@ import unittest
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.providers.compatible import MistralProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
@@ -45,6 +47,16 @@ class Ticket(BaseModel):
     assignee: Optional[str] = None
     estimate_hours: int = 1
     tags: list[Tag]
+
+
+class Customer(BaseModel):
+    name: str
+
+
+class AnnotatedTicket(BaseModel):
+    title: str
+    priority: Priority = Priority.LOW
+    customer: Customer = Field(description="Who filed the ticket")
 
 
 class Closed(BaseModel):
@@ -70,6 +82,20 @@ def _object_nodes(node: Any) -> list[dict[str, Any]]:
     elif isinstance(node, list):
         for value in node:
             found.extend(_object_nodes(value))
+    return found
+
+
+def _refs_with_siblings(node: Any) -> list[dict[str, Any]]:
+    # Collects every node that carries "$ref" next to another keyword, which OpenAI strict mode rejects.
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        if "$ref" in node and len(node) > 1:
+            found.append(node)
+        for value in node.values():
+            found.extend(_refs_with_siblings(value))
+    elif isinstance(node, list):
+        for value in node:
+            found.extend(_refs_with_siblings(value))
     return found
 
 
@@ -105,6 +131,56 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         self.assertIs(json_schema["strict"], True)
         self.assert_strict(json_schema["schema"])
 
+    def test_anthropic_output_config_payload_closes_every_object(self) -> None:
+        """Anthropic's output_config json_schema gets the same strict dialect, without mutating the runtime schema."""
+        # @intent anthropic-structured-output-closes-every-object
+        # Anthropic 400s on any object whose additionalProperties is not false and does not rewrite raw schemas.
+        schema = _wire_schema(Ticket)
+        before = json.dumps(schema, sort_keys=True)
+        config = TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-sonnet-4-5", response_format=schema)
+        payload = AnthropicProvider(model="claude-sonnet-4-5", api_key="k")._create_payload(config, "triage", None, None)
+        sent = payload["output_config"]["format"]["schema"]
+
+        self.assertEqual(payload["output_config"]["format"]["type"], "json_schema")
+        self.assert_strict(sent)
+        self.assertIs(sent["$defs"]["Tag"]["additionalProperties"], False)
+        self.assertEqual(json.dumps(schema, sort_keys=True), before)
+
+    def assert_annotated_refs_unravelled(self, strict: dict[str, Any]) -> None:
+        self.assertEqual(_refs_with_siblings(strict), [])
+        customer = strict["properties"]["customer"]
+        self.assertEqual(customer["description"], "Who filed the ticket")
+        self.assertIs(customer["additionalProperties"], False)
+        self.assertEqual(customer["required"], ["name"])
+        priority = strict["properties"]["priority"]
+        self.assertEqual(priority["enum"], ["low", "high"])
+        self.assertEqual(priority["default"], "low")
+
+    def test_strict_unravels_refs_that_carry_sibling_keywords(self) -> None:
+        """A defaulted enum and a described nested model are inlined instead of sent as "$ref" plus siblings."""
+        # @intent strict-mode-unravels-annotated-refs
+        # OpenAI strict 400s with "$ref cannot have keywords {'description'}" on Pydantic's annotated refs.
+        schema = _wire_schema(AnnotatedTicket)
+        before = json.dumps(schema, sort_keys=True)
+        self.assertEqual(len(_refs_with_siblings(schema)), 2)
+
+        strict = OutputSchemaFormatter().strict(schema)
+
+        self.assert_annotated_refs_unravelled(strict)
+        self.assertEqual(json.dumps(schema, sort_keys=True), before)
+
+    def test_openai_responses_payload_unravels_annotated_refs(self) -> None:
+        """The OpenAI Responses text.format schema carries no "$ref" with sibling keywords."""
+        schema = _wire_schema(AnnotatedTicket)
+        before = json.dumps(schema, sort_keys=True)
+        config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", response_format=schema)
+        payload = OpenAIProvider(model="gpt-5.4-mini", api_key="k")._create_text_payload(config, "triage", None, None)
+        sent = payload["text"]["format"]["schema"]
+
+        self.assert_strict(sent)
+        self.assert_annotated_refs_unravelled(sent)
+        self.assertEqual(json.dumps(schema, sort_keys=True), before)
+
     def test_strict_does_not_mutate_the_runtime_schema(self) -> None:
         """The runtime's schema is reused for validation and prompts, so strict() works on a copy."""
         schema = _wire_schema(Ticket)
@@ -127,6 +203,19 @@ class StrictFormatterTests(unittest.TestCase):
         self.assertIs(strict["additionalProperties"], False)
         self.assertEqual(strict["required"], ["name", "note"])
 
+    def test_self_referencing_annotated_ref_is_inlined_once(self) -> None:
+        """A definition whose body refers to itself through an annotated "$ref" does not expand forever."""
+        schema = {
+            "type": "object",
+            "properties": {"root": {"$ref": "#/$defs/Node", "description": "top"}},
+            "$defs": {"Node": {"type": "object", "properties": {"child": {"$ref": "#/$defs/Node", "description": "self"}}}},
+        }
+        strict = OutputSchemaFormatter().strict(schema)
+
+        self.assertEqual(_refs_with_siblings(strict), [])
+        self.assertEqual(strict["properties"]["root"]["properties"]["child"], {"$ref": "#/$defs/Node"})
+        self.assertIs(strict["properties"]["root"]["additionalProperties"], False)
+
 
 class GeminiResponseSchemaTests(unittest.TestCase):
     """Verify Gemini's responseSchema is reduced to its OpenAPI subset."""
@@ -143,6 +232,56 @@ class GeminiResponseSchemaTests(unittest.TestCase):
         self.assertNotIn("$ref", wire)
         self.assertEqual(schema["properties"]["tags"]["items"]["properties"]["label"]["type"], "string")
         self.assertEqual(schema["properties"]["priority"]["enum"], ["low", "high"])
+
+
+_GEMINI_FUNCTION_TOOL = {"function_declarations": [{"name": "isDone", "description": "Signal completion.", "parameters": {"type": "object", "properties": {"final_answer": {"type": "string"}}}}]}
+
+
+def _gemini_payload(model: str, *, tools: tuple[dict[str, Any], ...] = (), system: str | None = "Be brief.") -> dict[str, Any]:
+    # Builds the Gemini request body an output_schema agent would send, optionally with functions declared.
+    config = TextModelConfig(provider=ModelProvider.GEMINI, model=model, response_format=_wire_schema(Ticket), tools=tools)
+    return GeminiProvider(model=model, api_key="k")._create_payload(config, "triage", system, None)
+
+
+class GeminiSchemaWithFunctionsTests(unittest.TestCase):
+    """Verify Gemini 2.x never receives a JSON response MIME type next to function declarations."""
+
+    def test_gemini_2_with_functions_sends_schema_as_instructions(self) -> None:
+        """Gemini 2.x rejects responseMimeType beside functionDeclarations, so the schema rides as text."""
+        # @intent gemini-2-schema-cannot-ride-with-function-calls
+        payload = _gemini_payload("gemini-2.5-flash", tools=(_GEMINI_FUNCTION_TOOL,))
+        generation_config = payload.get("generationConfig", {})
+        instructions = payload["systemInstruction"]["parts"][0]["text"]
+
+        self.assertNotIn("responseMimeType", generation_config)
+        self.assertNotIn("responseSchema", generation_config)
+        self.assertTrue(instructions.startswith("Be brief."))
+        for field in ("title", "priority", "assignee", "estimate_hours", "tags"):
+            self.assertIn(f'"{field}"', instructions)
+
+    def test_gemini_2_with_functions_and_no_system_creates_the_instruction(self) -> None:
+        """Without system text the schema instruction alone becomes the systemInstruction."""
+        payload = _gemini_payload("gemini-2.0-flash", tools=(_GEMINI_FUNCTION_TOOL,), system=None)
+        instructions = payload["systemInstruction"]["parts"][0]["text"]
+
+        self.assertNotIn("responseSchema", payload.get("generationConfig", {}))
+        self.assertTrue(instructions.startswith("You MUST respond"))
+
+    def test_gemini_3_with_functions_keeps_native_schema(self) -> None:
+        """Gemini 3 accepts the schema beside function declarations, so it stays native."""
+        payload = _gemini_payload("gemini-3.5-flash", tools=(_GEMINI_FUNCTION_TOOL,))
+
+        self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
+        self.assertIn("responseSchema", payload["generationConfig"])
+        self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "Be brief."}]})
+
+    def test_gemini_2_without_functions_keeps_native_schema(self) -> None:
+        """A tool-free Gemini 2.x request still gets native responseSchema enforcement."""
+        payload = _gemini_payload("gemini-2.5-flash")
+
+        self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
+        self.assertIn("responseSchema", payload["generationConfig"])
+        self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "Be brief."}]})
 
 
 if __name__ == "__main__":
