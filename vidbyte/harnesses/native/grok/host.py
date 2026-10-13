@@ -329,7 +329,7 @@ class GrokHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
-    async def list_grok_sessions(self, *, cursor: str | None = None) -> GrokSessionPage:
+    async def list_grok_sessions(self, cursor: str | None = None) -> GrokSessionPage:
         """List one page of this workspace's Grok sessions."""
         operation = "list_grok_sessions"
         try:
@@ -354,7 +354,7 @@ class GrokHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
-    async def search_grok_sessions(self, query: str, *, limit: int = native_host_constants.GROK_SEARCH_DEFAULT_LIMIT) -> GrokSessionSearch:
+    async def search_grok_sessions(self, query: str, limit: int = native_host_constants.GROK_SEARCH_DEFAULT_LIMIT) -> GrokSessionSearch:
         """Find this workspace's sessions whose title contains the query, ignoring case."""
         operation = "search_grok_sessions"
         try:
@@ -383,7 +383,7 @@ class GrokHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
-    async def wait_grok_turn(self, handle: NativeTurnHandle, *, timeout_seconds: float = native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS) -> NativeTurnResult:
+    async def wait_grok_turn(self, handle: NativeTurnHandle, timeout_seconds: float = native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS) -> NativeTurnResult:
         """Wait up to timeout_seconds for a turn's result; a timed-out or cancelled wait leaves the turn running."""
         # @intent grok-wait-never-touches-the-turn
         # D-9 / INV-12: the wait is shielded, so its timeout or cancellation

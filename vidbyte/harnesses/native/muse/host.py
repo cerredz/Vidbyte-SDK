@@ -278,7 +278,7 @@ class MuseHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
-    async def fork_muse_session(self, session_id: str, *, last_turn_id: str | None = None) -> MuseSession:
+    async def fork_muse_session(self, session_id: str, last_turn_id: str | None = None) -> MuseSession:
         """Copy a Muse session, whole or up to last_turn_id, into a new session and return the copy."""
         operation = "fork_muse_session"
         try:
@@ -308,7 +308,7 @@ class MuseHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
-    async def list_muse_sessions(self, *, cursor: str | None = None, limit: int = native_host_constants.NATIVE_LIST_DEFAULT_LIMIT) -> MuseSessionPage:
+    async def list_muse_sessions(self, cursor: str | None = None, limit: int = native_host_constants.NATIVE_LIST_DEFAULT_LIMIT) -> MuseSessionPage:
         """List one page of this workspace's Muse sessions, with Muse's cursor for the next page."""
         operation = "list_muse_sessions"
         try:
@@ -360,7 +360,6 @@ class MuseHost:
     async def page_muse_session(
         self,
         session_id: str,
-        *,
         cursor: str | None = None,
         limit: int = native_host_constants.NATIVE_LIST_DEFAULT_LIMIT,
         direction: MuseViewDirection = MuseViewDirection.FORWARD,
@@ -441,7 +440,7 @@ class MuseHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
-    async def wait_muse_turn(self, handle: NativeTurnHandle, *, timeout_seconds: float = native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS) -> NativeTurnResult:
+    async def wait_muse_turn(self, handle: NativeTurnHandle, timeout_seconds: float = native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS) -> NativeTurnResult:
         """Wait up to timeout_seconds for a Muse turn's result; a timed-out wait leaves the turn running."""
         operation = "wait_muse_turn"
         try:
