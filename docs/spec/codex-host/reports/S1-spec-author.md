@@ -204,3 +204,20 @@ No gate was run and nothing was installed. That follows S1's read-only rule.
 - **A-1**, **A-6** and **A-14** stand as in r2.
 
 This addendum is not committed; I staged only the spec.
+
+## Addendum r4: S2 spec defects (2026-10-13)
+
+**Inputs.** The S2 test author found three spec defects, and the orchestrator forwarded them as S2-1 to S2-3. This was not a review round, and the frozen tests are now the interface. I opened the named test and its helper, `_assert_owned_and_interrupted_once` in `test_codex_host_failures.py`, and grepped the pack for `limit_reached`. My rate-limit grep was broader than asked: it also matched `rateLimits`, which showed the assertions of `test_codex_host_threads.py::test_rate_limits_and_models_are_translated_across_pages`. That test does not assert `limit_reached`. I read no other test. The spec is at revision 4 and stays `status: approved`. §16 has rows S2-1 to S2-3, and §17 has the r4 row.
+
+**Dispositions:**
+- **S2-1, accepted (new D-33).** Handles are owned by value. A handle is accepted when its `(thread_id, turn_id)` names a turn this host registered, late-accepted turns included. A frozen `CodexTurnHandle` already compares by value, so the registry lookup is the whole check. INV-23, INV-11, EC-36, EC-67, §9.1 and the §9.2 wait, interrupt and `session_not_found` cells follow. The `session_not_found` next step is unchanged, because it is a `CODEX_NEXT_STEPS` value and names a remedy, not the rule. INV-33, the tool scope's rule, is unchanged.
+- **S2-2, accepted (new D-34).** `limit_reached` is the wire value of `rateLimits.rateLimitReachedType` in the `account/rateLimits/read` response, or `""` when that field is absent or null. In openai-codex 0.162.1 that is `GetAccountRateLimitsResponse.rate_limits.rate_limit_reached_type`, an optional `RateLimitReachedType` with five values. The name and the `str` type stay.
+- **S2-3, accepted (new D-35): no problem code.** The late-acceptance interrupt records no stop reason, as `interrupt_codex_turn` does. So a turn that Codex reports `interrupted` ends INTERRUPTED with no problem. A goal follows the goal table with no Vidbyte stop reason, and the caller's error is never copied onto the snapshot. The §9.1 INTERRUPTED line and the goal table's `paused` row now say that only D-7's timeout and output-cap labels set a problem.
+
+**Checked against the tests.**
+- The helper rebuilds `CodexTurnHandle(thread_id=…, turn_id=…)` from ids. It asserts exactly one `turn/interrupt`, an `interrupted` status, and a get equal to the waited snapshot. It asserts nothing about the problem, so D-33 and D-35 agree with it.
+- The `limit_reached` hits (records test lines 151 and 244, tools test line 428) check only that the field is text and that `""` is valid. D-34 keeps both.
+
+**Scope.** No pin adds a guard, flag, field or code path, so there is no new stated limitation. INV-11's "exactly one interrupt" already ruled out a second interrupt. No AC row, Proof cell, name, §9 signature or §12.3 row changed. The orchestrator's FYI, that late acceptance on goal start, continue and launch has no test of its own, goes to S4; I left the spec alone for it.
+
+**Vendor read.** I read `generated/v2_all.py` in the CLI venv as text only, at `RateLimitReachedType` 3639, `RateLimitSnapshot` 9038 and `GetAccountRateLimitsResponse` 10965. §11 now cites the first two as well. Nothing was imported or run from there.
