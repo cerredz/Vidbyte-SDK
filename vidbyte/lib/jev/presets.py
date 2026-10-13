@@ -16,9 +16,9 @@ from types import MappingProxyType
 
 from vidbyte.lib.constants.jev import (
     JEV_BULK_WORK_THRESHOLD,
-    JEV_READ_ONLY_THRESHOLD,
     JEV_CLARITY_THRESHOLD,
     JEV_CLARITY_VETO_THRESHOLD,
+    JEV_READ_ONLY_THRESHOLD,
     JEV_RUN_STATE_RELATION_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevPresetDefinition
