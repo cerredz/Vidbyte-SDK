@@ -282,6 +282,12 @@ class AgentRootRefusalTests(unittest.TestCase):
             self.assertIn("anthropic", message)
             self.assertEqual(caught.exception.details.get("provider"), "openai")
 
+            # Review R-3: with no aggregator given, the default one is the agent's own provider and model, so it is a primary too.
+            with self.assertRaises(ConfigurationError) as default_caught:
+                AggregateAgent(name="panel", system_prompt="Answer.", proposers=[("openai", "gpt-5.5")], provider="anthropic", model_name="claude-sonnet-5", api_keys=[K_OPENAI])
+            assert_no_key_text(self, default_caught.exception, K_OPENAI)
+            self.assertEqual(default_caught.exception.details.get("provider"), "anthropic")
+
             judge = Agent(name="judge", system_prompt="Judge.", provider="anthropic", model_name="claude-sonnet-5")
             prebuilt = AggregateAgent(name="panel", system_prompt="Answer.", proposers=proposers, aggregator=judge, api_keys=[K_OPENAI, K_UNPROVEN])
         record = prebuilt.runner_config.api_keys
