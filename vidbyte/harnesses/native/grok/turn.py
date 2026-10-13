@@ -3,10 +3,10 @@
 PURPOSE: Defines GrokTurnDriver, which plays one live Grok turn on its own ACP peer: it answers permission and other server requests by policy, collects the agent's message text and cost, applies the turn ceiling and the stop grace, and ends with a NativeTurnResult or the error that failed the turn.
 ROLE IN CODEBASE: GrokHost (vidbyte/harnesses/native/grok/host.py) builds one driver per spawn or continue after session/prompt is written, runs driver.run as the turn's task in its NativeTurnTable, and calls interrupt and close from interrupt_grok_turn and __aexit__. wait_grok_turn awaits the task.
 ARCHITECTURE NOTE: The driver owns its peer from the moment it is built and closes it whatever way the turn ends. Every frame becomes a validated record through GrokWire before the driver reads it. An interrupt sends ACP session/cancel once and returns; the driver closes the peer NATIVE_STOP_GRACE_SECONDS later if the turn has not ended.
-FUNCTION INVENTORY: run is the narrated main function; interrupt sends the cancel and arms the stop timer; close stops the peer at once. Helpers: _next_frame waits for one frame or timer, _answer_permission and _refuse answer server requests, _take_update collects text and cost, _record keeps a decision within the cap, _outcome reads the prompt answer.
+FUNCTION INVENTORY: run is the narrated main function; interrupt sends the cancel and arms the stop timer; close stops the peer at once; ended reports whether Grok answered session/prompt. Helpers: _next_frame waits for one frame or timer, _answer_permission and _refuse answer server requests, _take_update collects text and cost, _record keeps a decision within the cap, _outcome reads the prompt answer.
 COMMON MODIFICATION PATTERNS: A new server request the host serves is one more branch in run plus its answering helper; a new update kind is one more branch in _take_update.
 WHAT NOT TO DO IN THIS FILE: 1. Do not select an allow_always or reject_always option, and never allow a tool kind the request did not allow. 2. Do not leave a server request unanswered while the turn runs. 3. Do not report missing usage as zero.
-KNOWN EDGE CASES: Grok writes a turn's updates before its prompt answer, so updates still queued when the answer lands are taken before the result is built. A "cancelled" stop reason or a -32800 answer ends the turn INTERRUPTED, attributed to CALLER when this host did not send the cancel. A peer that stops after an interrupt ends the turn INTERRUPTED; one that stops without an interrupt fails it with process_exited.
+KNOWN EDGE CASES: Grok writes a turn's updates before its prompt answer, so updates still queued when the answer lands are taken before the result is built. A "cancelled" stop reason or a -32800 answer ends the turn INTERRUPTED, attributed to CALLER when this host did not send the cancel. A peer that stops after an interrupt ends the turn INTERRUPTED; one that stops without an interrupt fails it with process_exited. A cancel whose write fails after Grok answered the prompt raises nothing, because the driver closed the peer after the answer; a transport failure of the prompt request is not an answer, so a cancel to a peer that has gone still raises.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (Grok host), D-9, D-10, D-11, D-14, EC-48 to EC-53, INV-10, INV-15, INV-16
 TESTS: tests/features/grok_host/test_grok_host_turns.py, tests/features/grok_host/test_grok_host_process_bounds.py
 """
@@ -61,6 +61,17 @@ class GrokTurnDriver:
         self._source: InterruptSource | None = None
         self._stop_at: float | None = None
         self._reader: asyncio.Task[Mapping[str, Any]] | None = None
+
+    @property
+    def ended(self) -> bool:
+        # @intent grok-turn-ended-means-grok-answered
+        # True once Grok answered session/prompt, with a result or a
+        # JSON-RPC error. A transport failure is not an answer: the
+        # peer stopped before Grok reported the turn's end.
+        if not self._answer.done() or self._answer.cancelled():
+            return False
+        failure = self._answer.exception()
+        return failure is None or (isinstance(failure, McpProtocolError) and "error" in failure.details)
 
     async def run(self) -> NativeTurnResult:
         # @intent grok-turn-driver-owns-its-peer
@@ -127,14 +138,20 @@ class GrokTurnDriver:
         # once; Grok then ends the turn itself, and if it has not
         # NATIVE_STOP_GRACE_SECONDS later the driver closes the peer.
         # The first source wins, and a cancel that cannot be written
-        # raises process_exited while the stop timer still runs.
+        # raises process_exited while the stop timer still runs,
+        # unless Grok answered the prompt during the write: the
+        # driver then closed the peer itself, and the turn is over.
         if self._source is not None or self._answer.done():
             return
         self._source = source
         self._stop_at = asyncio.get_running_loop().time() + native_host_constants.NATIVE_STOP_GRACE_SECONDS
         if self._reader is not None:
             self._reader.cancel()
-        await self._peer.notify(GrokWire.CANCEL, self._wire.cancel_params(self._handle.session_id), operation=operation)
+        try:
+            await self._peer.notify(GrokWire.CANCEL, self._wire.cancel_params(self._handle.session_id), operation=operation)
+        except NativeHostError:
+            if not self.ended:
+                raise
 
     async def close(self) -> None:
         # Stops the peer now; the pending answer fails
