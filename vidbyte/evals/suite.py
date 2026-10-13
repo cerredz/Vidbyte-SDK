@@ -36,7 +36,9 @@ class EvalSuite:
     @classmethod
     def from_json(cls, path: str | Path) -> EvalSuite:
         # Asynchronously or synchronously loads an evaluation suite from a JSON file.
-        with open(path, "r", encoding="utf-8") as f:
+        # @intent json-suite-bom-is-not-content
+        # PowerShell 5.1's -Encoding utf8 writes a byte-order mark that json.load rejects; a valid suite loads like from_csv.
+        with open(path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         
         name = str(data.get("name", "Loaded JSON Suite"))
