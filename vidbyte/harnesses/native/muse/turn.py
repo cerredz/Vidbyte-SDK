@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: run is the narrated main loop. It reads peer.inbox in arrival
 FUNCTION INVENTORY: run drives the turn and closes the peer; interrupt sends turn/interrupt and starts the grace period; close_after_grace starts it without sending; shut_down is __aexit__'s stop; peer, session_id, turn_id and running describe the turn; _next_frame waits for one frame; _on_item, _on_gap, _on_approval, _on_user_input, _on_completed and _on_other handle one method each; _grace_over checks the stop deadline; _outcome builds the result or raises the failure row.
 COMMON MODIFICATION PATTERNS: A new MSP notification the turn must read is one more handler in _handlers, parsing its frame through a MuseWire parser first; a new failure kind is one more entry in _FAILURE_PROBLEMS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pick an approving choice or a session or persistent scope; with no denied choice scoped once, record CANCELLED and stop the turn. 2. Do not match items or completions by commandId; the ack's turnId is the turn's id. 3. Do not wait on the inbox without a bound; a dead peer sends nothing more.
-KNOWN EDGE CASES: A turn/completed for another turn id, such as a foreign or queued turn, is ignored. A cancelled turn the host did not stop has source CALLER, because another client of the session stopped it. A decide answered -32051 or -32053 lost a benign race and the turn goes on; any other failed decide or cancel stops the turn by policy. Decisions past NATIVE_MAX_RECORDED_DECISIONS are counted in decisions_dropped.
+KNOWN EDGE CASES: A turn/completed for another turn id, such as a foreign or queued turn, is ignored. A cancelled turn the host did not stop has source CALLER, because another client of the session stopped it. A decide answered -32051 or -32053 lost a benign race and the turn goes on; any other failed decide or cancel stops the turn by policy. An interrupt that fails after the turn's own turn/completed was read raises nothing, because the turn has ended and the driver closes the peer under the pending call. Decisions past NATIVE_MAX_RECORDED_DECISIONS are counted in decisions_dropped.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §6.3.5 (EC-109, EC-115 to EC-121, EC-156), §8.1 D-9, D-10, D-11, D-14, D-23, §8.5 (How MuseTurnDriver builds the result)
 TESTS: tests/features/muse_host/test_muse_host_turns.py, tests/features/muse_host/test_muse_host_acceptance.py, tests/features/muse_host/test_muse_host_process_bounds.py
 """
@@ -143,12 +143,21 @@ class MuseTurnDriver:
         # counts as success. Once Muse has the interrupt, the
         # turn gets NATIVE_STOP_GRACE_SECONDS to finish before
         # the driver closes the peer.
+        # @intent muse-interrupt-moot-after-turn-completed
+        # Once this turn's own turn/completed was read, a failed
+        # interrupt is moot: the turn has ended, and the driver
+        # may have closed the peer under the pending call. A
+        # peer that stops, or a refusal that comes before
+        # turn/completed, still raises.
         params = MuseWire.turn_interrupt_params(self._handle.session_id, self._ack.turn_id)
         try:
             await self._peer.call("turn/interrupt", params, operation=operation, timeout_seconds=timeout_seconds)
         except McpProtocolError as exc:
-            if not MuseWire.is_already_stopping(exc):
+            if self._completed is None and not MuseWire.is_already_stopping(exc):
                 raise MuseWire.vendor_failure(exc, operation=operation) from exc
+        except NativeHostError:
+            if self._completed is None:
+                raise
         self._stop_source = self._stop_source or source
         if self._stop_deadline is None:
             self._stop_deadline = asyncio.get_running_loop().time() + native_host_constants.NATIVE_STOP_GRACE_SECONDS
