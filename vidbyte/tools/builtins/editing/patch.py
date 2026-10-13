@@ -77,9 +77,13 @@ class PatchTool(BaseTool):
 
         after = before.replace(search_block, replace_block, 1)
         try:
+            # @intent failed-edit-leaves-file-untouched
+            # Opening for writing empties the file at once, so text the encoding
+            # cannot hold must fail here, before the file is opened.
+            after.encode(self.encoding)
             with path.open("w", encoding=self.encoding, newline=newline) as handle:
                 handle.write(after)
-        except OSError as exc:
+        except (OSError, UnicodeEncodeError) as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "write_error"})
         # Split at "\n" only and mark a missing final newline, so each diff line stays on its own line.
         diff = LineEndings.unified_diff(before, after, fromfile=f"a/{file_path}", tofile=f"b/{file_path}")

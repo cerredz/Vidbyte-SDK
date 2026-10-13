@@ -32,8 +32,10 @@ class ContainsGrader(BaseGrader):
 
         actual_text = str(actual)
         expected_text = str(expected)
-        a = actual_text if self.case_sensitive else actual_text.lower()
-        e = expected_text if self.case_sensitive else expected_text.lower()
+        # @intent caseless-graders-casefold
+        # Case-insensitive grading uses casefold, the caseless-matching form (ß matches SS), as OutputBehavior does.
+        a = actual_text if self.case_sensitive else actual_text.casefold()
+        e = expected_text if self.case_sensitive else expected_text.casefold()
 
         passed = (e in a)
         score = 1.0 if passed else 0.0

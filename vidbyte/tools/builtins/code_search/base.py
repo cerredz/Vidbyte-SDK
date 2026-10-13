@@ -82,6 +82,7 @@ class BaseCodeSearchTool(BaseTool):
             return
         extension_set = tuple(ext if ext.startswith(".") else f".{ext}" for ext in extensions)
         candidates = (start,) if start.is_file() else start.rglob("*")
+        seen: set[Path] = set()
         for path in candidates:
             if not path.is_file() or self.should_ignore(path):
                 continue
@@ -90,6 +91,12 @@ class BaseCodeSearchTool(BaseTool):
                 resolved.relative_to(self.root_dir)
             except ValueError:
                 continue
+            # @intent code-search-reports-each-file-once
+            # Hits are reported by resolved path, so a file reached through an in-root link
+            # (file symlink, directory alias, Windows junction) is yielded once, not once per spelling.
+            if resolved in seen:
+                continue
+            seen.add(resolved)
             if extension_set and resolved.suffix not in extension_set:
                 continue
             if not self.is_text_file(resolved):

@@ -206,8 +206,12 @@ def _validation_message(exc: ValidationError) -> str:
 def _stringify_output(value: object) -> str:
     if isinstance(value, str):
         return value
+    # @intent tool-output-keeps-non-ascii-readable
+    # The model and the tool-output predicates read this text, so non-ASCII stays as characters, like a str return
+    # and like the SDK's other JSON (isDone answer, session/harness stores); the HTTP transport still escapes the
+    # wire body itself.
     try:
-        return json.dumps(value, default=_json_default, sort_keys=True)
+        return json.dumps(value, default=_json_default, sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError):
         pass
     # @intent tool-model-output-is-json
@@ -216,7 +220,7 @@ def _stringify_output(value: object) -> str:
     # unknown leaves into str(), and fall back to a repr only if that still fails. Nested models dump by alias here
     # too (see _json_default).
     try:
-        return json.dumps(to_jsonable_python(value, by_alias=True, fallback=_json_default), sort_keys=True)
+        return json.dumps(to_jsonable_python(value, by_alias=True, fallback=_json_default), sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError):
         return str(value)
 

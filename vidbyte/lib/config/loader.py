@@ -130,7 +130,15 @@ class YamlLoader:
                 f"YAML file exceeds maximum size of {_MAX_FILE_BYTES} bytes.",
                 details={"path": str(file_path), "max_bytes": _MAX_FILE_BYTES},
             )
-        text = file_path.read_text(encoding="utf-8")
+        # @intent unreadable-yaml-is-a-configuration-error
+        # A file that is not UTF-8 text, or cannot be read, is reported like every other loader failure, as vidbyte.config.YamlLoader and the harness config loader already do.
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ConfigurationError(
+                f"Unable to read YAML file as UTF-8 text ({type(exc).__name__}): {exc}",
+                details={"path": str(file_path)},
+            ) from exc
         try:
             raw = yaml.load(text, Loader=_DuplicateKeySafeLoader)
         except yaml.YAMLError as exc:

@@ -434,6 +434,12 @@ class FileStoreTests(unittest.TestCase):
         leftovers = list(Path(self._dir).glob("se/checkpoints/*"))
         self.assertEqual(leftovers, [])
 
+    def test_tag_holding_an_undecodable_file_name_is_written_and_read_back(self) -> None:  # [Hidden Failure]
+        # POSIX hands a non-UTF-8 file name such as b"report-\xff.txt" to Python as "report-\udcff.txt".
+        session = Session(FakeAgent(), store=self.store, tags=("report-\udcff.txt", "Grüße"))
+        self.assertEqual(FileSessionStore(self._dir).get_meta(session.id).tags, ("report-\udcff.txt", "Grüße"))
+        self.assertIn("Grüße", (Path(self._dir) / session.id / "meta.json").read_text(encoding="utf-8"))
+
     def test_get_meta_missing_raises(self) -> None:  # [Edge Case]
         with self.assertRaises(SessionNotFoundError):
             self.store.get_meta("ghost")
@@ -627,6 +633,18 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.export(target, imported_id), b"exported-bundle")
         exporter_type.assert_called_once_with(target)
         exporter_type.return_value.export.assert_called_once_with(imported_id)
+
+    async def test_export_and_import_keep_a_tag_holding_an_undecodable_file_name(self) -> None:  # [Hidden Failure]
+        # POSIX hands a non-UTF-8 file name to Python as a lone surrogate; the bundle must carry it, not raise.
+        source = InMemorySessionStore()
+        client = SessionClient()
+        session = Session(FakeAgent(), store=source, tags=("report-\udcff.txt",))
+        await session.arun("one")
+        target = InMemorySessionStore()
+
+        imported_id = client.import_(target, client.export(source, session.id))
+
+        self.assertEqual(target.get_meta(imported_id).tags, ("report-\udcff.txt",))
 
     def test_import_without_new_id_rejects_existing_session(self) -> None:  # [Hidden Assumption]
         # Verify same-id imports fail loudly rather than clobbering existing metadata.

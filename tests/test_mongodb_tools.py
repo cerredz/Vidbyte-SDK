@@ -1,7 +1,7 @@
 """FILE: tests/test_mongodb_tools.py
 
 PURPOSE: Tests the MongoDB provider operation tools against a recording fake store.
-ROLE IN CODEBASE: Regression coverage proving declared boolean arguments are read strictly, so a stringly "false" is refused before the store is called, and that a null find limit means the default.
+ROLE IN CODEBASE: Regression coverage proving declared boolean arguments are read strictly, so a stringly "false" is refused before the store is called, that a null find limit means the default, and that non-ASCII document text stays readable in the tool output.
 ARCHITECTURE NOTE: RecordingStore is a fake store that records every provider call; MongoBooleanArgumentTests drives the tools through execute().
 COMMON MODIFICATION PATTERNS: Add a fake store method when a new MongoDB tool gains a boolean argument, then assert the store sees no call on refusal.
 KNOWN EDGE CASES: A JSON null means the documented default; only a real bool is passed through; any other value is a tool error.
@@ -11,6 +11,7 @@ TESTS: python -m pytest tests/test_mongodb_tools.py
 
 from __future__ import annotations
 
+import json
 import unittest
 from typing import Any
 
@@ -44,6 +45,14 @@ class RecordingStore:
     def find_documents(self, collection: str, query: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
         self.calls.append(("find_documents", {"collection": collection, "query": query, "limit": limit}))
         return []
+
+
+class CityStore(RecordingStore):
+    """Returns documents holding non-ASCII text, as a real collection may."""
+
+    def find_documents(self, collection: str, query: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
+        super().find_documents(collection, query, limit=limit)
+        return [{"city": "Zürich", "station": "品川"}]
 
 
 class MongoBooleanArgumentTests(unittest.IsolatedAsyncioTestCase):
@@ -92,6 +101,17 @@ class MongoNullLimitTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
         self.assertEqual(store.calls, [("find_documents", {"collection": "users", "query": {}, "limit": 50})])
+
+
+class MongoNonAsciiOutputTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies provider output keeps non-ASCII text readable for the model."""
+
+    async def test_find_documents_output_keeps_non_ascii_characters(self) -> None:
+        result = await MongoFindDocumentsTool(CityStore()).execute(ToolCall("mongodb_find_documents", {"collection": "cities"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        self.assertIn("Zürich", result.output)
+        self.assertIn("品川", result.output)
+        self.assertEqual(json.loads(result.output), [{"city": "Zürich", "station": "品川"}])
 
 
 if __name__ == "__main__":
