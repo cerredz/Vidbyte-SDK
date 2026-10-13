@@ -15,7 +15,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-12 16:20 | 2026-10-12 16:50 | reports/S0-scout.md | base 52aab816; code-map 4 sections |
-| S1 spec + review | running | 2026-10-12 16:52 | | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); author applying, then approved (cap reached) |
+| S1 spec + review | running | 2026-10-12 16:52 | | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); r3 74f0b83d approved; r4 (AQ. ruling) in progress |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -83,3 +83,8 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
   - R-15 accept the order fix, and add `vidbyte/lib/dataclasses/__init__.py` as a §12.3 row.
   - Prefix sources: a rule that ROUTES a key needs a first-party citation; drop `AQ.` unless Google's own docs show it (env var still works). Evidence for refuse-only claims may be secondary.
 - 2026-10-12 — Corrected niche fact: the spec budget for `base.py` is +30 net lines (r2), not 25.
+- 2026-10-12 — r3 open items ruled:
+  - `AQ.` routes to gemini. A vendor's official GitHub org counts as first-party for both OpenAI (`sk-proj-`) and Google (google-gemini cookbook). Google staff replies on discuss.ai.google.dev (Google-run) say AI Studio now issues only `AQ.` keys, so refusing them would block most new Gemini users.
+  - `RESERVED_PREFIXES` is accepted as a refuse-only guard, now holding only `sk-svcacct-`.
+  - Applied as r4, no review (the cap is reached; the change is narrow).
+- Spec r3 new names: `ProviderKeyMatcher.RESERVED_PREFIXES`; `match(..., require_primary_key=True)` with `primary` as a str or tuple; `ProviderKeys.matched_primary` / `matched_others`; `VIDBYTE_PROVIDER_KEY_PATTERN = r"[!-~]+"`; `VIDBYTE_PROVIDER_KEY_MAX_LENGTH = 512`; `runtime_config["key_providers"]` (names only; the session serializer strips only names containing API_KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL or AUTH). xAI `xai-client-secret.` tokens contain a dot and are refused. — *source:* S1 author r3
