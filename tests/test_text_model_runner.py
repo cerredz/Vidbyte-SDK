@@ -112,6 +112,43 @@ class TextModelRunnerTests(unittest.TestCase):
         self.assertEqual(transport.requests[0]["url"], "https://api.anthropic.com/v1/messages")
         self.assertEqual(transport.requests[0]["json_body"]["max_tokens"], 1024)
 
+    def test_anthropic_joins_adjacent_text_blocks_as_written(self) -> None:
+        # @intent adjacent-text-blocks-are-one-text
+        # With citations Claude splits one sentence into adjacent text blocks at each cited span; only another block between text starts a new line.
+        citation = [{"type": "char_location", "cited_text": "x", "document_index": 0, "start_char_index": 0, "end_char_index": 1}]
+        cases = [
+            (
+                [
+                    {"type": "text", "text": "According to the document, "},
+                    {"type": "text", "text": "the grass is green", "citations": citation},
+                    {"type": "text", "text": " and "},
+                    {"type": "text", "text": "the sky is blue", "citations": citation},
+                    {"type": "text", "text": "."},
+                ],
+                "According to the document, the grass is green and the sky is blue.",
+            ),
+            (
+                [
+                    {"type": "text", "text": "I'll search."},
+                    {"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": {"query": "answer"}},
+                    {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_1", "content": []},
+                    {"type": "text", "text": "Based on the results, "},
+                    {"type": "text", "text": "it is 42", "citations": citation},
+                ],
+                "I'll search.\nBased on the results, it is 42",
+            ),
+            (
+                [{"type": "text", "text": "Checking."}, {"type": "tool_use", "id": "toolu_1", "name": "lookup", "input": {}}],
+                "Checking.",
+            ),
+        ]
+        for content, expected in cases:
+            with self.subTest(expected=expected):
+                transport = FakeTransport({"content": content})
+                runner = TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"), transport=transport)
+
+                self.assertEqual(runner.run("Hello").text, expected)
+
     def test_gemini_generate_content_request_and_text_normalization(self) -> None:
         transport = FakeTransport(
             {"candidates": [{"content": {"parts": [{"text": "ok"}]}}], "usageMetadata": {"x": 1}}
