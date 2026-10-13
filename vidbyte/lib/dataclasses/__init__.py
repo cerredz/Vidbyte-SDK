@@ -46,6 +46,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentStopReason,
     FinishReview,
     FinishReviewAction,
+    ProviderKeys,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.codex import (
@@ -406,6 +407,7 @@ __all__ = [
     "ProsecutorAllegationPayload",
     "ProsecutorDefenderJudgeReport",
     "ProsecutorReportPayload",
+    "ProviderKeys",
     "RecordModelCallFailureInput",
     "RecordModelCallInput",
     "RecordRetryWaitInput",
