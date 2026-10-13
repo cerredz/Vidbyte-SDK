@@ -98,10 +98,14 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         destination.mkdir(parents=True, exist_ok=True)
         extracted: list[str] = []
         with zipfile.ZipFile(source) as archive:
+            # @intent refused-archive-extracts-nothing
+            # An archive with a member outside the extraction root is refused as a whole, so check
+            # every member before writing any; otherwise earlier members would already be extracted.
             for member in archive.infolist():
                 target = (destination / member.filename).resolve()
                 if target != destination and destination not in target.parents:
                     raise ToolExecutionError("Zip archive contains a path outside the extraction root.", details={"member": member.filename})
+            for member in archive.infolist():
                 archive.extract(member, destination)
                 extracted.append(member.filename)
         return tuple(extracted)

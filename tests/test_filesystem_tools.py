@@ -283,6 +283,25 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(unzip_result.status, ToolStatus.SUCCESS)
             self.assertIn("src/file.txt", unzip_result.output)
 
+    def test_unzip_refusing_a_zip_slip_member_extracts_nothing(self) -> None:
+        # @intent refused-archive-extracts-nothing
+        # The escaping member comes last, so the members before it must not already be
+        # extracted, overwriting README.md, when the refusal is reported.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            readme = Path(tmp, "pkg", "notes", "README.md")
+            readme.parent.mkdir(parents=True)
+            readme.write_text("original", encoding="utf-8")
+            with zipfile.ZipFile(Path(tmp, "bad.zip"), "w") as archive:
+                archive.writestr("notes/README.md", "from archive")
+                archive.writestr("new.txt", "new")
+                archive.writestr("../escape.txt", "escaped")
+            result = run(UnzipTool(config).execute(ToolCall("unzip", {"source": "bad.zip", "destination": "pkg"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("outside the extraction root", result.output)
+            self.assertEqual(readme.read_text(encoding="utf-8"), "original")
+            self.assertFalse(Path(tmp, "pkg", "new.txt").exists())
+
     def test_read_lines_returns_selected_lines_newline_joined(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
