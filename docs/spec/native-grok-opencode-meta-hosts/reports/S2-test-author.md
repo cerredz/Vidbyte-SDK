@@ -252,3 +252,42 @@ I ran the four packs twice:
 - **Run 2:** `1 failed, 1615 passed, 19 skipped in 148.39s`.
 
 In both runs the only failure was `test_muse_host_wsl.py::test_missing_in_distro_muse_is_not_installed[spawn-exit-127]`, the EC-95 exit-127 case. It is waiting for S3's r6 exit-code accessors.
+
+## Addendum r8 — S4 regression tests (commit `061580cd`)
+
+The S4 review (`review.md`) confirmed six failure paths with no regression test and adopted the r8 spec changes (EC-157, INV-14 case-insensitivity, EC-39's target clause). I added one test per finding, bound to the r8 names, all through the §13 fakes. No `vidbyte/` source was read; no live `grok`, `muse` or `wsl.exe` ran.
+
+### What was added (per finding)
+
+- **R-1 (EC-16 / EC-41).** Two `test_grok_error_row` rows (`spawn_grok_session` and `list_grok_sessions`, variant `minus-32602-no-cursor`, host + tool) and one focused test in `test_grok_host_errors.py`: a `-32602` with no cursor is `grok.api_error` keeping `vendor_error`, while the EC-41 cursor row stays `configuration.invalid_argument`. Red: the code returns `grok.protocol_mismatch` and drops `vendor_error`.
+- **R-2 (EC-157, win32-only).** New file `test_grok_host_windows_launcher.py`: a `grok.cmd` on PATH with `grok_command` unset and no `~/.grok/bin/grok.exe`, and an explicit `.cmd`/`.bat` `grok_command` (plus mixed-case and trailing dot/space), are refused at `__aenter__` with `grok.not_installed` and EC-157's exact next step. The shim only drops a marker, and the prompt and model carry `"&%^`; the test asserts the marker is absent. Red: the host launches the batch file (`grok.process_exited`).
+- **R-5 (NFR-2 / EC-8).** `test_aexit_returns_within_the_bound_when_a_peer_is_silent_on_decide` in `test_muse_host_process_bounds.py`: with a peer silent on `approval/decide` and `control_timeout_seconds=6.0`, `__aexit__` must return within `grace + (grace + 2·kill_wait) + slack = 3.6 s`. Red: it waited 6.02 s.
+- **R-6 (INV-10 / INV-13 / EC-87).** `test_a_single_non_counted_poll_failure_aborts_before_failing_the_turn` in `test_opencode_host_watcher.py`, over `session_status` and `permission_list`: one 500 (EC-59, not counted) must send exactly one `POST …/abort` before the turn fails with `opencode.api_error`. Red: no abort is sent.
+- **R-7 (§9.3 / D-18).** `test_read_peer_forwards_meta_api_key_through_wslenv` in `test_muse_host_wsl.py` (win32-only): with `META_API_KEY` set, a short-lived WSL read peer forwards `META_API_KEY/u` in `WSLENV`, after the caller's entries. Red: the read peer's `WSLENV` holds only the caller's entries.
+- **R-8 (INV-14).** New file `test_grok_host_session_id_case.py` for Grok, plus `test_continue_on_the_upper_cased_id_of_a_live_session_is_busy` in `test_muse_host_turns.py`:
+  - continue busy on the upper-cased id (Grok `grok.session_busy`; Muse `muse.session_busy`) — red;
+  - fork on an upper-cased source id is accepted (EC-35) — red;
+  - upper-cased `new_session_id` colliding with an existing id is refused (EC-36) — red;
+  - EC-39 success when the returned id equals the request ignoring case — **lock** (already green: the EC-39 target comparison is already case-insensitive);
+  - EC-39 target-mismatch raises `grok.protocol_mismatch` — **lock** (the one the brief names).
+
+### Granted change
+
+Only grant (a): `test_grok_host_acceptance.py::test_snippet_prints_completed_text_when_grok_is_the_fake` now reaches the fake on win32 through `GrokHostSettings.grok_command` (the §13 seam), because EC-157 refuses the `grok.cmd` shim. Its three assertions are unchanged; the POSIX shim path is unchanged. `run_snippet` gained an optional `grok_command`. Before/after is recorded in the test-plan addendum. CI-1's test is untouched. No other existing assertion changed.
+
+### Red run
+
+`PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q tests/features/grok_host tests/features/opencode_host tests/features/muse_host tests/features/native_backends` →
+
+```
+20 failed, 1618 passed, 19 skipped in 158.00s (0:02:37)
+```
+
+The 20 failures are exactly the new non-lock tests, each red for its stated reason; the two EC-39 locks and all pre-existing tests pass; 19 platform skips (POSIX-only on win32; the win32-only R-2/R-7 skip on Linux CI). `python lint/run.py` → `SDK-LINT: PASS`.
+
+### Not written, and spec gaps
+
+- **R-2 case (iii) — the fallback that selects `~/.grok/bin/grok.exe` over a shadowing PATH `grok.cmd`** — is not written: `__aenter__` starts no process, so proving which program it resolved needs a real runnable `grok.exe` ACP peer at that path, which the §13 seam does not provide (it seams fakes through `grok_command` only). Cases (i)/(ii) cover the refusal. The fallback-selects-`grok.exe` branch is therefore untested — an OPEN ITEM for the repair agent.
+- **R-8 EC-32 case-insensitive equality** is not written: it is a near-duplicate of (iii)'s EC-36 coverage under the same INV-14 rule, and may already be green (a lock).
+- **R-6 rests on an implicit spec rule.** The spec does not state an abort-before-local-failure rule for opencode; R-6 binds to INV-10/INV-13 intent and the review's fix (`turn.py`), as `FEATURE.md` records. Flagged as a spec gap.
+- **R-8 (iv)** turned out green rather than the brief's expected red: the current code already compares the EC-39 target ignoring case. It is kept as a lock, not a regression test.
