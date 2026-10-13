@@ -85,7 +85,7 @@ NATIVE_HOST_NEXT_STEPS: MappingProxyType[str, str] = MappingProxyType(
         "muse.capability_missing": "This Muse Code release lacks the method; upgrade Muse Code.",
         "muse.session_not_found": "Use list_muse_sessions to find a session id in this workspace.",
         "muse.session_busy": "Wait for or interrupt the running turn with wait_muse_turn or interrupt_muse_turn, then retry.",
-        "muse.budget_exhausted": "The turn hit Muse's step limit; continue the session with a narrower prompt.",
+        "muse.budget_exhausted": "The turn hit Muse's step limit; continue the session with continue_muse_session and a narrower prompt.",
         "muse.sandbox_not_ready": "Run muse sandbox inside the distro to check the OS sandbox, then retry.",
         "muse.api_error": "Retry later; if it repeats, inspect error.context['vendor_error'].",
         "muse.process_exited": "Run check_muse_ready; if the host was closed, open a new MuseHost.",
