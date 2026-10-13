@@ -39,6 +39,7 @@ ROOT_NAMES = (
     "DeliveryStatus",
     "OutputDestination",
     "OutputDeliveryError",
+    "OutputDispatcher",
     "SlackOutput",
     "DiscordOutput",
     "TeamsOutput",
@@ -51,8 +52,8 @@ ROOT_NAMES = (
     "NotionPageOutput",
     "WebhookOutput",
 )
-CONNECTOR_NAMES = ROOT_NAMES[6:]
-NOT_ROOT_NAMES = ("OutputDispatcher", "OutputShaping", "BaseOutput", "OutputArguments", "OutputText", "OutputHttp", "OutputSmtp", "OutputRequest", "SmtpSettings")
+CONNECTOR_NAMES = ROOT_NAMES[7:]
+NOT_ROOT_NAMES = ("OutputShaping", "BaseOutput", "OutputArguments", "OutputText", "OutputHttp", "OutputSmtp", "OutputRequest", "SmtpSettings")
 LIB_OUTPUT_MODULES = ("__init__", "base", "text", "delivery", "slack", "discord", "teams", "google_chat", "telegram", "email", "github", "linear", "jira", "notion", "webhook")
 AGENT_OUTPUT_MODULES = ("__init__", "connector", "dispatcher")
 
@@ -62,8 +63,8 @@ def _names(pattern: str, message: str) -> bool:
 
 
 def test_public_names_are_exported_from_the_agent_output_package_and_the_root(output_api) -> None:
-    # FR-18 / D-16 / §9.2: 17 root names, the same objects in vidbyte.agents.output plus OutputDispatcher.
-    assert sorted(output_api.__all__) == sorted((*ROOT_NAMES, "OutputDispatcher"))
+    # FR-18 / D-16 / §9.2: 18 root names, OutputDispatcher included, the same objects in vidbyte.agents.output.
+    assert sorted(output_api.__all__) == sorted(ROOT_NAMES)
     assert len(output_api.__all__) == 18
     assert "OutputShaping" not in output_api.__all__
     for name in ROOT_NAMES:

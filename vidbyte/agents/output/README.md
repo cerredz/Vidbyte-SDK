@@ -31,9 +31,10 @@ credentials, and limits.
   `destination`, an optional `render`, and an async `send`), and
   `OutputShaping`, the skip rule and the default title and body.
 - `dispatcher.py`: `OutputDispatcher`, which validates an `outputs` argument
-  and delivers one reply to every connector.
-- `__init__.py`: the public names, re-exported from the `vidbyte` root except
-  `OutputDispatcher`.
+  and delivers one reply to every connector. Code that runs its own agent can
+  build an `AgentMessage` and call `OutputDispatcher.deliver` directly.
+- `__init__.py`: the public names, all re-exported from the `vidbyte` root,
+  `OutputDispatcher` included.
 
 ## When Delivery Runs
 
@@ -84,6 +85,8 @@ is retried. Running the agent again sends to every output again, so resend
 only the failed ones:
 
 ```python
+from vidbyte import DeliveryStatus, OutputDeliveryError, OutputDispatcher
+
 try:
     reply = await agent.arun("Scan checkout")
 except OutputDeliveryError as err:

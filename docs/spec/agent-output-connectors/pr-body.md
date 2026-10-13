@@ -210,5 +210,6 @@ The spec was also corrected after review, so none of these is an open deviation:
 - **Known limitations, documented in the READMEs.** A 429 retry ignores `Retry-After`. A FAILED receipt whose code is `network` (including a send past the deadline), `invalid_response`, `smtp_error`, `smtp_recipients_refused`, or `http_5…` may already have been delivered, so check the destination before resending. Receipts are not saved in session checkpoints (Q-6). GitHub `@user` and Telegram `@username` in model text notify that person.
 - **Catch up with `main` at merge time.** The branch is 5 behind (#891, #856, #892–#894) and `git merge-tree` is clean. After the merge, re-measure lint S008 on `_generate_reply`.
 - **Next destinations.** GitLab Issues has the same shape as `GitHubIssueOutput`; spec §9.2 (b) lists the other "qualifies, below the cut" rows.
+- **Root export added 2026-10-13.** `OutputDispatcher` is now also exported from the root package (`from vidbyte import OutputDispatcher`, 18 root exports), so vidbyte-cli can deliver an `AgentMessage` it builds itself.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
