@@ -227,3 +227,41 @@
 - §12.3: 68 rows.
 - Constants: unchanged.
 - Proof and Priority cells: byte-identical to `cfad74f8`.
+
+## Addendum r8
+
+**Scope.** I changed only R-2, R-M2 and R-M3 (§16 S4-1 to S4-3). S4-4 (CI-1) and S4-5 (R-3) record the orchestrator's "no spec change; code fix" rulings. Status stays `reviewed`, and the spec and this addendum are in one commit.
+
+**R-2: the rule chosen (D-19, new EC-157).**
+- On win32, Grok never starts through a batch file. At `__aenter__`, Grok's program, whether explicit or found, is looked up through `PATH` and `PATHEXT` the way a launch looks it up, and the host keeps the path it found.
+- A name ending in `.cmd` or `.bat` (any letter case, with trailing dots and spaces dropped) is refused.
+- If the batch file was found on PATH, the host falls back to `~/.grok/bin/grok.exe`. Otherwise `__aenter__` raises `grok.not_installed` with EC-157's own next step, which names `grok.exe` and keeps the token `GrokHostSettings.grok_command`.
+- An explicit batch `grok_command` is refused at `__aenter__`, not in the record, because `("grok",)` becomes `grok.cmd` only through the lookup. EC-11 already maps an explicit launcher that cannot run to `grok.not_installed`.
+- The §6.3.1 default next step is unchanged, so §4, AC-1 and the verbatim test still hold.
+
+**Alternatives rejected.**
+- Escaping values for `cmd.exe`: a second quoting language whose failure mode is code execution.
+- A guard in `CliRunner`: it misses the peers, which start through `McpStdioTransport`, and it would refuse opencode and Muse launchers that carry no caller value.
+- Refusing only the argv lists that carry caller values: every turn peer can carry `--model=`, so this gives a host that passes `check_grok_ready` and then fails on its first turn.
+
+**Audit (§10 T-2).**
+- opencode: its only process is `serve --hostname 127.0.0.1 --port 0` through `ManagedProcess` (`opencode/server.py:30`), and everything else is HTTP.
+- Muse: argv carries only `serve` or `--version` (`muse/host.py:158,516`), plus in WSL mode the developer's distro and path and the host's hex mark (`muse/launcher.py:96-100,140,176`). Its win32 default is `wsl.exe` itself.
+- Neither host puts a caller value on argv, so neither launcher changes.
+- Residual: a launcher routed through a shell on purpose (`cmd.exe /c …`).
+
+**Verified facts.** These come from a harmless batch file in the scratchpad; no vendor binary was run.
+- `shutil.which` returns `.CMD` in upper case.
+- `probe.cmd.`, `probe.cmd ` and `probe.cmd. .` all still run the batch file, and `x&echo>MARK.txt` created the marker each time.
+- On the user's machine, `shutil.which("grok")` returns `~/.grok/bin/grok.EXE`, so the header claim at `cli.py:9` is false there. §12.3 row 33 asks for that line to be corrected.
+
+**AC-1.** The `completed T` outcome on win32 now uses the §13 seam (`sys.executable`, `-u`, the fake and its arguments). §14 assigns the change to the `write_grok_shim` branch to the test author, not the repair agent.
+
+**Observation for the orchestrator (not acted on).** R-8's fix text asks to "record the `!= target` clause under EC-39". That would be a spec change outside this run's three findings, so EC-39 is unchanged.
+
+**Self-check.**
+- Every EC, D and T reference resolves (EC-157, D-19, T-2, EC-2, EC-11 and EC-146 are defined).
+- 0 table rows have a wrong cell count.
+- The `grok.not_installed` default and EC-157's next step both contain `GrokHostSettings.grok_command`.
+- AC-1 is one criterion with two observable outcomes, and both can be met on every platform.
+- §8.4 counts are unchanged, with no new code, field, constant, file or dependency.
