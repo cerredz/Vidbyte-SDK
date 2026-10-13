@@ -52,7 +52,7 @@ _RESOURCE_NOT_FOUND = -32002
 _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _REQUEST_CANCELLED = -32800
-_MALFORMED_CODES = frozenset({-32700, -32600, _INVALID_PARAMS})
+_MALFORMED_CODES = frozenset({-32700, -32600})
 _FS_NOT_FOUND = "FS_NOT_FOUND"
 _AGENT_VERSION_PATTERN = r"^(\d+)\.(\d+)\.(\d+)"
 _SESSION_ID_PATTERN = r"^\S+$"
@@ -224,9 +224,10 @@ class GrokWire:
         # @intent grok-json-rpc-codes-to-rows
         # §6.3.3: ACP -32000 is authentication, -32002 or an FS_NOT_FOUND
         # payload is a missing session, -32601 a missing method, -32602 on a
-        # cursor a stale cursor (EC-41), the malformed-request codes a
-        # protocol mismatch, and every other code an api_error carrying the
-        # vendor code. A failure without a JSON-RPC error is a transport one.
+        # cursor a stale cursor (EC-41), -32700 and -32600 a protocol
+        # mismatch, and every other code, -32602 without a cursor included,
+        # an api_error carrying the vendor code and message (EC-16). A
+        # failure without a JSON-RPC error is a transport one.
         vendor = exc.details.get("error")
         if not isinstance(vendor, Mapping):
             return self._errors.from_protocol_error(exc, operation=operation)
