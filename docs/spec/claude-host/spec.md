@@ -1,0 +1,1366 @@
+---
+spec: claude-host
+title: "ClaudeHost: small atomic Claude Code functions with one agent tool per function"
+status: draft
+revision: 1
+repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
+worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host
+branch: feat/claude-host
+base_commit: 678136bd4358bcf9f120504cecd818d36a3d46fe
+created: 2026-10-12
+updated: 2026-10-12
+pr:
+---
+
+# Spec: ClaudeHost: small atomic Claude Code functions with one agent tool per function
+
+> **TL;DR** — This PR adds `ClaudeHost`, an async context manager in the SDK that drives the user's installed Claude Code through the official `claude-agent-sdk`. It exposes R3's 15 ★ functions as small methods (readiness, models, rate limits, spawn, continue, fork, three history reads, wait and result, steer, interrupt, usage, and subagent fan-out), one agent tool per function, and a `ClaudeTools` toolset. Every failure comes back as a `claude.<problem>` code with a next step. The design decision that matters most: **each turn owns exactly one `claude` process, from connect to its result, inside the host**. Spawn returns a handle immediately, and history and fork read session files without starting a process.
+
+## §0 User prompts
+
+### 0.1 Invoking request (verbatim)
+great, using the spec-pipeline skill file do you think that you can implement the Codexhost and ClaudeHost functionality in the vidbyte-sdk/ in parallel in 2 seperate prs. Coordinate 2 sets of subagents that use the skill file to develope the 2 features in parallel
+
+### 0.2 User replies during the run
+_None yet. The orchestrator appends any reply the user sends during the run here verbatim, labeled with the revision it produced._
+
+---
+
+## Part A — Framing
+
+## §1 Goal
+
+Today, an agent or a developer who wants Claude Code to do work from Python has two options. They can shell out to `claude -p` and parse text, or they can learn `claude-agent-sdk`'s client lifecycle, message types and failure shapes themselves. Nothing in vidbyte-sdk wraps Claude Code at all: request.md §C and code-map §2.1 record that no Claude record, enum, failure code, extra or adapter exists. The user wants a vocabulary of small functions ("launch a claude session", "fork", "launch with x tools"), each also usable as an agent tool, so that composing harnesses ("3 codex subagents, 4 claude subagents, and then using a grok thread to merge the results") is "only a few functions" (request.md §A Prompt 1, Prompt 2, Prompt 3).
+
+| ID | Goal (outcome) | How we will know | Source |
+|---|---|---|---|
+| G-1 | A developer can check, start, continue, fork, steer, interrupt, wait on and measure Claude Code sessions from Python through the 15 ★ functions, without touching `claude-agent-sdk` types. | The §4 snippet runs. Every ★ row of R3 "ClaudeHost: full list" has one method on `ClaudeHost` with R3's name. | request.md §C "The ★ functions"; Prompt 2, Prompt 3 |
+| G-2 | An agent gets each capability as a tool, so it does not have to improvise shell commands during its run. | One `BaseTool` per ★ function, bundled as `ClaudeTools`, usable by `BaseAgent` and servable by the existing MCP server. | Prompt 2 ("connect each individual function to the vidbyte/tools folder"); Prompt 1 ("agent terminal toolset mcp") |
+| G-3 | Every failure is semantic and actionable: a `claude.<problem>` code, a reason and a next step. Tools return error results instead of raising. | Each R3 "Claude detects it via" condition produces its code, and no tool raises into the agent loop. | Prompt 2 ("return semantic error messages ... each funciton shoulllld make sure to handle errors"); R3 "One error vocabulary" |
+| G-4 | Cross-harness code can call ClaudeHost and CodexHost with the same verbs and problem names. | Names match R3 "Shared vocabulary". Problem names match R3's error table. | Prompt 2 ("apply this same principle/philosophy"); R3 |
+
+## §2 Objective
+
+When this PR merges, the repository will contain the following, and none of it exists today:
+
+- A new package `vidbyte.harnesses.native.claude` exporting `ClaudeHost`. It implements the 15 ★ functions of R3, owns one `claude` process per running turn, and uses the user's installed `claude` by default, after a minimum-version check.
+- The shared parent marker `vidbyte.harnesses.native`, byte-identical with the CodexHost PR.
+- Validated records in `vidbyte.lib.dataclasses.claude` and `vidbyte.lib.dataclasses.claude_host`. `ClaudeSpawnRequest` carries 58 fields: R3's list, with `prompt` split into text and images, and `prompt_suggestions` dropped.
+- Seventeen enums in `vidbyte.lib.enums.claude`, exported from `vidbyte.lib.enums`.
+- Constants in `vidbyte.lib.constants.claude`.
+- Sixteen `claude.*` members of `FailureCode`.
+- `ClaudeOperationError` in `vidbyte.lib.errors`.
+- Fifteen model-facing tools in `vidbyte.tools.builtins.claude`, exported from `vidbyte.tools.builtins`.
+- The `ClaudeTools` toolset, exported from `vidbyte.tools.toolsets`.
+- The optional extra `vidbyte-sdk[claude]`.
+- A REPO_MAP entry and a harnesses README bullet.
+
+This PR is slice B of two parallel PRs, alongside CodexHost. It builds only R3's ★ rows. The unstarred rows and the shared-base extraction are later PRs (NG-1, NG-3).
+
+## §3 Non-goals
+
+- **NG-1** — R3's unstarred ClaudeHost functions, such as `prewarm_claude_session`, `run_claude_once`, background sessions, `rename/tag/delete_claude_session`, `stream_claude_session`, `set_claude_model`, context usage, MCP management, plugins, cloud and ultrareview, and `plan_claude_fan_out`. — *Why not:* R3's legend makes ★ the first PR, and Prompt 4 asks for one PR per host (request.md §C "Key decisions").
+- **NG-2** — ⚑ functions and any use of the private `_send_control_request`, including R3's second source for rate limits, "⚑ `get_usage`". — *Why not:* the Q1 default was accepted in Prompt 4 (request.md §C "Answers to R3").
+- **NG-3** — A shared base class or module with CodexHost (error envelope, tool base, handle registry). — *Why not:* both PRs are built in parallel, so each would contain one implementation (request.md §C "Rejected alternatives").
+- **NG-4** — Root `vidbyte` exports and regenerating the public-API contract. — *Why not:* no repo rule requires a root export. Each one changes the generated contract (C016) and costs a merge conflict with the CodexHost PR. Users import from the subpackages shown in §4. Optional Q-10.
+- **NG-5** — Edits to the agent base class or to the MCP server package. — *Why not:* tools hold their host directly, so the agent's hard-coded binding lists need no change (code-map §4.1 #14). The MCP server already serves any `Sequence[BaseTool]` (code-map §2.4).
+- **NG-6** — Controls that the conversation never asked for:
+  - a permission gate on the MCP server;
+  - history scoped to one project;
+  - clipping of long tool outputs;
+  - a per-toolset handle scope;
+  - a memory governor, or a default concurrency cap;
+  - a process reaper beyond the SDK's own;
+  - stopping new spawns on an `allowed_warning` rate-limit status;
+  - letting the model choose spawn knobs per call;
+  - forgetting finished handles before close.
+
+  *Why not:* hard rule 9. Each is an optional `Q-n` with default **no** (§15).
+- **NG-7** — The R3 spawn field `prompt_suggestions`. — *Why not:* the CLI emits suggestion messages after the turn's result, and claude-agent-sdk 0.2.165's parser drops message types it does not know. No ★ function could ever surface one, so the field would be a false contract. Optional Q-6.
+- **NG-8** — A README for the native package, C008's canonical shared validation module, edits to the tools README, and rewording the stale REPO_MAP toolsets sentence. — *Why not:* the shared-file contract forbids the README (request.md §C). Creating C008's shared module is its own change. The other two edit existing text that the CodexHost PR may also touch, and the contract allows inserts only.
+- **NG-9** — Measuring memory per `claude` process, or choosing a default concurrency cap. — *Why not:* request.md says "do not invent a threshold". The cap is developer-set (D-22).
+- **NG-10** — Live tests against a real `claude`, or any network call in CI. — *Why not:* CI has no Anthropic credentials, and spawned sessions draw from the user's plan window (request.md §C "Shared plan window"). Live checks are manual QA after S6.
+- **NG-11** — Re-exporting Claude records or constants from the `vidbyte.lib.dataclasses` or `vidbyte.lib.constants` packages. — *Why not:* AGENTS.md says to import a record from its domain module, and those package `__init__`s are shared hot spots with the CodexHost PR.
+
+## §4 Developer usage
+
+```python
+import asyncio
+
+from vidbyte.harnesses.native.claude import ClaudeHost
+from vidbyte.lib.dataclasses.claude import ClaudeSpawnRequest
+from vidbyte.lib.enums.claude import ClaudePermissionMode
+
+async def main() -> None:
+    async with ClaudeHost() as host:
+        readiness = await host.check_claude_ready()
+        if readiness.failure is not None:
+            print(readiness.failure.code.value, readiness.failure.next_step)
+            return
+        request = ClaudeSpawnRequest(
+            prompt="List the TODO comments in this repository.",
+            cwd="C:/work/repo",
+            permission_mode=ClaudePermissionMode.PLAN,
+            max_budget_usd=0.50,
+        )
+        handle = await host.spawn_claude_session(request)
+        result = await host.wait_claude_turn(handle, timeout_seconds=600)
+        print(result.status.value, result.result_text)
+        usage = await host.track_claude_session_usage(handle)
+        print(usage.total_cost_usd)
+
+asyncio.run(main())
+```
+
+The developer sees one of two outputs:
+
+- **Ready:** `completed` followed by Claude's answer, then the dollars the turn cost. A failed turn prints `failed` instead, and `result.failure` carries the code and next step.
+- **Not ready:** one line such as `claude.not_installed Install Claude Code, or pass cli_path to ClaudeHost.`
+
+The developer no longer has to find the CLI, check its version, build `ClaudeAgentOptions`, drain message iterators, close processes, or parse failure shapes.
+
+The same host as tools, for an agent run under `arun` inside the host's `async with`:
+
+```python
+from vidbyte import BaseAgent, ToolPermission
+from vidbyte.harnesses.native.claude import ClaudeHost
+from vidbyte.lib.dataclasses.claude import ClaudeSpawnRequest
+from vidbyte.lib.dataclasses.security import PermissionPolicy
+from vidbyte.tools.toolsets.claude import ClaudeTools
+
+async def compare_reviews() -> str:
+    async with ClaudeHost(max_live_sessions=4) as host:
+        agent = BaseAgent(
+            name="orchestrator",
+            system_prompt="Run Claude Code sessions with your tools and compare what they find.",
+            tools=ClaudeTools(host, ClaudeSpawnRequest(cwd="C:/work/repo", max_budget_usd=1.0)),
+            permission_policy=PermissionPolicy(allowed=frozenset({ToolPermission.SAFE, ToolPermission.READ, ToolPermission.WRITE})),
+            provider="openai",
+            model_name="gpt-4.1",
+        )
+        reply = await agent.arun("Launch two Claude sessions that each review src/, then compare their findings.")
+        return reply.content
+```
+
+## §5 Flow diagram
+
+```mermaid
+flowchart TD
+  A[caller or tool: ClaudeHost.spawn_claude_session] -->|ClaudeSpawnRequest| B[host preconditions: loop, closed, extra, cli_path, cap, busy, rate window]
+  B -->|ClaudeOperationError| X[raised to caller / error ToolResult]
+  B -->|register handle, no await| C[ClaudeLiveSession created, status QUEUED]
+  C -->|ClaudeSessionHandle| R[returned immediately]
+  C --> D[pump task: ClaudeOptionsTranslator.to_options]
+  D -->|options, cli_path| E[client.connect]
+  E -->|initialize dict| F[process preconditions: version, auth mode, hooks_applied]
+  F -->|fail| G[ClaudeFailureMapper.classify_turn]
+  F -->|ok, status RUNNING| H[client.query prompt]
+  H --> I[receive_messages loop]
+  I -->|RateLimitEvent| W[host rate windows]
+  I -->|assistant error, task usage, injected-turn result| I
+  I -->|own result, steer pending| H
+  I -->|own result, nothing pending| G
+  G -->|ClaudeTurnResult| J[done event set]
+  J --> K[client.disconnect, process ends]
+  L[wait_claude_turn / get_claude_turn_result] -->|snapshot| J
+  M[steer_claude_session] -->|pending message + interrupt| I
+  N[interrupt_claude_turn] -->|interrupt| I
+  O[history and fork] -->|asyncio.to_thread| P[session files, no process]
+```
+
+```mermaid
+sequenceDiagram
+  participant T as caller or tool
+  participant H as ClaudeHost
+  participant S as ClaudeLiveSession pump
+  participant C as claude process
+  T->>H: spawn_claude_session(request)
+  H-->>T: ClaudeSessionHandle (QUEUED)
+  S->>C: connect + initialize
+  S->>C: query(prompt)
+  T->>H: steer_claude_session(handle, message)
+  H->>S: store pending message
+  H->>C: interrupt()
+  C-->>S: ResultMessage (aborted turn)
+  S->>C: query(pending message)
+  C-->>S: ResultMessage (steered turn)
+  S->>S: classify, set done
+  S->>C: disconnect
+  T->>H: wait_claude_turn(handle, timeout_seconds)
+  H-->>T: ClaudeTurnResult (final)
+```
+
+How the flow works:
+
+- **Validation** happens in two places. The request record checks itself on construction. The host's preconditions then run synchronously, with no await between the check and the registry insert, so the cap and the busy guard cannot race.
+- **State changes** happen only inside the host's registry and the `ClaudeLiveSession` that owns each turn. Status moves from QUEUED to RUNNING and then to exactly one terminal state.
+- **Failures** are caught at two points. Host preconditions raise `ClaudeOperationError` before any process starts. Everything after the process starts lands in the turn result through `ClaudeFailureMapper`, so a dead process or a refused precondition is a result, never a hang. The `disconnect` in the pump's `finally` guarantees the process ends.
+
+---
+
+## Part B — Behavior (this is the spec; everything else is framing)
+
+## §6 Behavior
+
+### 6.1 Invariants
+
+- **INV-1** — Importing `vidbyte`, `vidbyte.tools.builtins`, `vidbyte.tools.toolsets`, `vidbyte.tools.toolsets.claude`, `vidbyte.harnesses.native` or `vidbyte.harnesses.native.claude` never imports `claude_agent_sdk`.
+  - The vendor SDK is imported in exactly one function, `ClaudeSdkLoader.load`, and only when a ★ function first needs it.
+  - The tools package imports `ClaudeHost` only under `TYPE_CHECKING`.
+- **INV-2** — Every ★ function handles its own errors. It either returns its documented record or raises `ClaudeOperationError`.
+  - `failure_code` is a `FailureCode` value, and `reason` and `next_step` are non-empty.
+  - The single exception is `check_claude_ready`, which reports Claude-side problems (missing extra, CLI, version, login, probe failure) in `ClaudeReadiness.failure` and never raises for them.
+  - No ★ function lets a vendor or builtin exception escape, except `asyncio.CancelledError` and other `BaseException`s, which always propagate.
+- **INV-3** — `spawn_claude_session`, `continue_claude_session` and `launch_claude_subagents` return their handles before any turn they start can finish. The returned statuses are QUEUED or RUNNING, never terminal, except for a QUEUED handle the caller interrupts afterwards.
+- **INV-4** — Within one host, at most one live handle exists per session id at any time. A live handle has status QUEUED or RUNNING. A second spawn, continue or launch that targets a live session id raises `claude.session_busy` and starts no process.
+- **INV-5** — When `max_live_sessions` is set, the number of live handles in the host never exceeds it.
+- **INV-6** — `launch_claude_subagents` registers all N handles or none: a refused launch leaves the registry unchanged.
+- **INV-7** — Every turn reaches exactly one terminal status (COMPLETED, FAILED or INTERRUPTED), exactly once. Its done signal fires exactly once, and a terminal status never changes afterwards. Only the prompt's own result can end a turn (D-28); the result of a turn the CLI injected never does.
+- **INV-8** — Every `claude` client the host constructs is disconnected: when its turn reaches a terminal status, or at `aclose`, whichever comes first. The host never awaits `disconnect()` twice for one client. No client stays connected after its turn is terminal, so no idle `claude` process exists.
+- **INV-9** — `wait_claude_turn` never cancels, interrupts or alters the turn. It returns within `timeout_seconds` plus scheduling delay. On timeout it returns the current QUEUED or RUNNING snapshot instead of raising.
+- **INV-10** — The host never lets the SDK fall back to its bundled CLI. Every client and probe receives an explicit `cli_path`: the request's, else the host's, else the installed `claude` resolved on PATH when the host was entered. If none resolves, the operation fails with `claude.not_installed`.
+- **INV-11** — When a precondition fails, no prompt is sent, so nothing is spent. This covers:
+  - every host-side precondition, which also starts no process;
+  - the version and auth-mode checks after connect;
+  - an interrupt requested before the first query, and a host closing before the first query.
+- **INV-12** — No `reason`, `next_step`, tool output or tool metadata contains raw exception text (`str(exc)`, `repr(exc)` or an f-string of a caught exception), or any value from the request's `env` or MCP `headers`. Reasons name the operation, the SDK exception class or result fields such as `subtype` and `terminal_reason`.
+- **INV-13** — The 15 Claude tools never raise for a `ClaudeOperationError`. Each returns `ToolResult.error` with output `"<code>: <reason> Next step: <next_step>"` and `metadata={"error": <code>, "error_type": "ClaudeOperationError"}`.
+- **INV-14** — Tool permissions follow R3's R/W column:
+  - READ: `check_claude_ready`, `list_claude_models`, `get_claude_rate_limits`, `list_claude_sessions`, `get_claude_session_info`, `get_claude_session_messages`, `wait_claude_turn`, `get_claude_turn_result`, `track_claude_session_usage`.
+  - WRITE: `spawn_claude_session`, `continue_claude_session`, `fork_claude_session`, `steer_claude_session`, `interrupt_claude_turn`, `launch_claude_subagents`.
+  - Under the default `PermissionPolicy` (SAFE and READ allowed), every WRITE tool is refused until the developer opts in.
+- **INV-15** — A host serves only the event loop that entered it. Any ★ function or `get_handle` call fails with `action.precondition_failed` if it comes:
+  - before `__aenter__`;
+  - after `aclose`;
+  - from a different running loop.
+
+  A host is entered once and is never reopened.
+- **INV-16** — History reads and fork never start a `claude` process. They run the SDK's synchronous file functions in a worker thread (`asyncio.to_thread`), so a slow `git worktree list` never blocks the event loop.
+- **INV-17** — A request whose `system_prompt` is left at its default sends Claude Code's `claude_code` preset, never an empty system prompt.
+- **INV-18** — A steer is delivered exactly once, as the next turn after the interrupted one.
+  - A handle holds at most one pending steer.
+  - The host refuses a steer while another is pending, while the turn is QUEUED or stopping, and after the turn is terminal.
+  - An explicit interrupt or an expired time budget discards a pending steer before it is sent.
+- **INV-19** — A failed turn carries exactly one failure code, chosen by the precedence in §9.2 "Turn classification".
+- **INV-20** — `track_claude_session_usage` takes dollars and per-model totals from the latest `ResultMessage` of the handle. Those values are cumulative across the session's turns (A-11), so they are never summed across results.
+- **INV-21** — The `vidbyte.harnesses.native` marker module is byte-identical to the request.md §C contract block. Its SHA-256 is `0374a2c899318e4fdb31c065d951266feaffff5aa736ecde616c4a66942f497a`, with LF line endings and a final newline.
+- **INV-22** — The 16 `claude.*` failure codes form one contiguous block placed directly before the first `CODEX_*` member, and never adjacent to the end of the `CODEX_*` block. Every `claude.*` code has a non-empty next step in `CLAUDE_FAILURE_NEXT_STEPS`, and every key of that mapping is a real `claude.*` code.
+
+**Must not regress:**
+- **INV-23** — Every existing `FailureCode` member keeps its name and value, and every code still has a category prefix. Implemented today by `vidbyte/lib/enums/failure.py:FailureCode` and checked by `tests/test_session_failures.py:test_every_code_has_category_prefix`.
+- **INV-24** — The default `PermissionPolicy` still allows exactly SAFE and READ, and existing builtins, toolsets, enums and errors keep every export they have today. Implemented today by `vidbyte/lib/dataclasses/security.py:PermissionPolicy` and the export lists in `vidbyte/tools/builtins/__init__.py`, `vidbyte/tools/toolsets/__init__.py`, `vidbyte/lib/enums/__init__.py` and `vidbyte/lib/errors/__init__.py`.
+- **INV-25** — The package smoke still passes from a wheel installed without extras: `import vidbyte` and `from vidbyte import Prompts, VidbyteSDK`. Implemented today by the package stage of `scripts/run_ci.py` (:180-218).
+- **INV-26** — `CodexHarnessAgent`, the `codex` extra and every `CODEX_*` member are untouched. Implemented today by `vidbyte/agents/codex/`, the `codex` list in `pyproject.toml` (:42-44) and `vidbyte/lib/enums/failure.py` (:35-46).
+
+### 6.2 Acceptance criteria
+
+"Fake SDK" below means the test seam in §13: `ClaudeSdkLoader.load` patched to return a `ClaudeSdkTypes` built from fakes. No criterion requires a real `claude`.
+
+| ID | Given | When | Then | Priority | Proof |
+|---|---|---|---|---|---|
+| AC-1 | a clean checkout of this branch, the fake SDK reporting CLI 2.1.296, a signed-in account and one successful result, and an explicit or resolvable `cli_path` | the §4 snippet runs | it prints the status `completed`, the fake result text, and the fake `total_cost_usd`, in that order; no real process starts | P0 | |
+| AC-2 | `claude_agent_sdk` is not importable | each ★ function is called inside an entered host | each raises `ClaudeOperationError` with `failure_code == FailureCode.CLAUDE_SDK_UNAVAILABLE.value`, except `check_claude_ready`, which returns `failure.code == FailureCode.CLAUDE_SDK_UNAVAILABLE`. Importing every module named in INV-1 still succeeds. | P0 | |
+| AC-3 | the fake client's turn has not produced a result yet | `spawn_claude_session(request)` returns | the handle exists, `get_claude_turn_result` shows QUEUED or RUNNING, and the client was constructed with `cli_path` equal to the host's resolved path, never `None` | P0 | |
+| AC-4 | a running turn | `wait_claude_turn(handle, timeout_seconds=small)` times out, and the fake later emits the result | the first call returns a RUNNING snapshot without raising and the turn continues. A second wait returns COMPLETED with the result text. | P0 | |
+| AC-5 | the fake result has `is_error=True` with subtype `error_max_budget_usd`, or subtype `error_max_turns` | the turn finishes | status FAILED, `failure.code` `claude.budget_exhausted`, and `next_step` equals the constant for that code | P0 | |
+| AC-6 | each detection condition in §9.2 "Turn classification" and "Exception mapping", one at a time | the turn finishes or the call raises | the code is the one that table names: `claude.not_signed_in`, `claude.billing_error`, `claude.usage_limited`, `claude.model_unknown`, `claude.api_error`, `claude.schema_violation`, `claude.process_exited`, `claude.protocol_mismatch`, `claude.not_installed`, `configuration.invalid_argument` (for an SDK `ValueError`), and `claude.permission_denied` (the last one on a COMPLETED turn) | P0 | |
+| AC-7 | session S has a live handle in the host | `continue_claude_session(S, "next")` | raises `claude.session_busy` and constructs no client. For an unknown S it raises `claude.session_not_found`. For S recorded with cwd A and a request cwd B (different after normalization) it raises `configuration.unsupported_combination`. | P0 | |
+| AC-8 | session S exists in the fake history | `fork_claude_session(S, up_to_message_id, title)` | returns the fake fork's new session id, constructs no client, and calls the fake fork function off the loop thread. A `FileNotFoundError` from the fake maps to `claude.session_not_found`, and a `ValueError` to `configuration.invalid_argument`. | P0 | |
+| AC-9 | a RUNNING turn | `steer_claude_session(handle, "focus on tests")` | the fake records `interrupt()`, then after the interrupted result exactly one `query` carrying the message. The handle's final result is the steered turn's result. A second steer before the message is sent raises `action.precondition_failed`, and so does a steer on a terminal turn. | P0 | |
+| AC-10 | a RUNNING turn, and separately a QUEUED launch handle | `interrupt_claude_turn(handle)` | RUNNING: the fake records `interrupt()` and the final status is INTERRUPTED. QUEUED: the final status is INTERRUPTED and the fake records no `query`. On a terminal turn the call returns the same terminal snapshot unchanged. | P0 | |
+| AC-11 | three prompts and `limit=2` | `launch_claude_subagents(prompts, request, 2)` | returns exactly three handles with distinct session ids. At no instant are more than two fake clients connected for the launch, and all three turns reach a terminal status. | P0 | |
+| AC-12 | each of the 15 tools | its `spec()` is read and `execute` runs with the host raising `ClaudeOperationError` | `spec().name` equals the ★ function name. Permission matches INV-14. `input_schema` has `additionalProperties: false`. The result is an error `ToolResult` per INV-13 and nothing is raised. | P0 | |
+| AC-13 | `ClaudeTools(host, request)` | listed and run through `ToolExecutor` with the default `PermissionPolicy` | it holds the 15 tools in the §9.2 order. READ tools run, and WRITE tools return the executor's permission-denied result. | P0 | |
+| AC-14 | the fake history functions record their calling thread | `list_claude_sessions`, `get_claude_session_info` and `get_claude_session_messages` run | each SDK call ran off the event loop thread. Results convert to `ClaudeSessionSummary` and `ClaudeSessionMessage` with the §9.1 text rendering. `None` info maps to `claude.session_not_found`. Empty messages for an unknown id map to `claude.session_not_found`, and for a known id return `()`. | P0 | |
+| AC-15 | a session with two results whose `model_usage` and `total_cost_usd` are cumulative | `track_claude_session_usage(handle)` | totals equal the second result's figures, not the sum. Before any result, `total_cost_usd is None` and `models == ()`. Task usage reflects the latest progress or notification message per task id. | P0 | |
+| AC-16 | no rate-limit event seen | `get_claude_rate_limits()` | returns `()`. After the fake emits two windows, it returns the latest window per type. After a `rejected` window with a future `resets_at` and no allowed overage, `spawn_claude_session` raises `claude.usage_limited` and constructs no client. | P0 | |
+| AC-17 | requests exercising each row of §9.2 "Field mapping" | `ClaudeOptionsTranslator` builds options | each field lands on the SDK option, `extra_args` key or env variable that row names, and unset fields are omitted. Examples: the default system prompt becomes the preset form; `fallback_model=("a","b")` becomes `"a,b"`; `files` becomes `extra_args["file"]`; `max_output_tokens` becomes env `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. | P0 | |
+| AC-18 | an invalid value in any validated field (bool for a count, NaN or infinity for an amount, a non-UUID `session_id`, `session_id` with `resume` but no `fork_session`, an out-of-range `autocompact`, two `files`, an unknown enum value) | the record is constructed | it raises `ClaudeOperationError` with `failure_code` `configuration.invalid_argument` (or `configuration.unsupported_combination` for a forbidden combination) and `operation` `validate_request`, whose reason names the field, and nothing else happens | P0 | |
+| AC-19 | the built branch | the bytes of the `vidbyte.harnesses.native` marker are hashed | SHA-256 equals INV-21's value | P0 | |
+| AC-20 | a request with two `BaseTool`s, one READ and one WRITE | the turn starts | the options carry one SDK MCP server named `vidbyte` with both tools, and `allowed_tools` gains only the READ tool's `mcp__vidbyte__<name>`. When a tool's `execute` raises or returns an error result, the handler returns `is_error: True` and does not raise. | P0 | |
+| AC-21 | an entered host with one RUNNING and one QUEUED handle | `aclose()` | every connected fake client is disconnected exactly once and both handles end INTERRUPTED. Any later ★ call, a call before entry, and a call from another event loop each raise `action.precondition_failed`. | P0 | |
+| AC-22 | the fake initialize reports version 2.1.200, or reports no version, or reports a signed-in account with no API key source while the request sets `betas` or `bare` | spawn and readiness run | for the first two cases, readiness reports `claude.version_unsupported` and the spawned turn ends FAILED with `claude.version_unsupported`. For the third, readiness reports no failure and the spawned turn ends FAILED with `claude.auth_mode_unsupported`. In every case the fake records no `query`. Separately, an account with neither a token source nor an API key source (and no third-party provider) makes readiness report `claude.not_signed_in` with `signed_in` false. | P0 | |
+| AC-23 | the `FailureCode` enum | inspected | it has the 16 `claude.*` members of §9.2 as one contiguous block, immediately after `CONFIGURATION_INVALID_ARGUMENT` and before `CODEX_SDK_UNAVAILABLE`, and `CLAUDE_FAILURE_NEXT_STEPS` covers exactly those 16 | P0 | |
+| AC-24 | the fake raises an SDK error whose text contains a marker string, and the request env holds a marker value | the failure surfaces through a host call, a turn result and a tool result | neither marker appears in any `reason`, `next_step`, tool output or tool metadata | P0 | |
+| AC-25 | a turn that completes | the done signal fires | the fake client has been disconnected, and no client remains connected for that handle | P0 | |
+| AC-26 | a model-written argument of the wrong JSON type (`"limit": "2"`, `"limit": true`, a non-string `handle_id`) or JSON `null` for an optional argument | the tool executes | a wrong type returns an error `ToolResult` with `configuration.invalid_argument` and no client is constructed. `null` is treated as the argument being omitted. | P0 | |
+| AC-27 | the package | `from vidbyte.lib.enums import ClaudePermissionMode` (and each of the 17 enums) | it imports, and the names sit in `vidbyte.lib.enums.__all__` | P1 | |
+| AC-28 | the fake initialize reports `hooks_applied: true` for a request with hooks, and omits it for one without | the turn finishes | `ClaudeTurnResult.hooks_applied` is `True` in the first case and `None` in the second | P1 | |
+| AC-29 | `McpStudioServer(tools=ClaudeTools(host, request))` | the server lists its tools | the 15 Claude tool names are listed, with no change to the MCP server package | P1 | |
+| AC-30 | `ClaudeHost(max_live_sessions=1)` with one live handle | a second spawn, or a launch of one prompt | raises `claude.session_busy` whose next step is `CLAUDE_LIVE_CAP_NEXT_STEP`, and no client is constructed | P0 | |
+| AC-31 | `timeout_seconds=small` on the request and a fake turn that never finishes on its own | the time budget expires | the fake records `interrupt()`, and the turn ends FAILED with `claude.budget_exhausted`. If the fake's `interrupt()` raises, the client is disconnected and the code is the same. | P0 | |
+| AC-32 | the branch | the repository map and the harnesses README are read | the map has an entry for the native harness package between the harnesses entry and the stores entry, and the README's Key modules list ends with a bullet for the native package | P2 | |
+| AC-33 | the package metadata | parsed | its optional dependencies have `claude = ["claude-agent-sdk>=0.2.165,<0.3.0"]` before `codex`, and `dev` is unchanged | P1 | |
+| AC-34 | the fake initialize lists two models with effort levels, one of them unknown to `ClaudeEffort` | `list_claude_models()` | returns two `ClaudeModelInfo` records with known effort levels kept and the unknown one skipped. The probe client is disconnected and no `query` is recorded. | P0 | |
+| AC-35 | `ClaudeHost` | its public methods are listed | the 15 ★ names of R3 are present with the §8.5 signatures, and no unstarred R3 function exists | P0 | |
+| AC-36 | a fake stream that emits a result whose `origin` kind is `task-notification` before the prompt's own result (which has no `origin`) | the turn finishes | the handle's status and result text come from the prompt's own result, and the injected result only updates the usage snapshot | P1 | |
+
+### 6.3 Edge cases and failure modes
+
+| ID | Trigger (input + state) | System behavior | User sees | Guarded by (INV-/D-) |
+|---|---|---|---|---|
+| EC-1 | `claude_agent_sdk` not installed; any ★ call | `ClaudeSdkLoader.load` raises `claude.sdk_unavailable`. Without the guard, an `ImportError` would surface at `import vidbyte` for every user. | `claude.sdk_unavailable`, next step `pip install "vidbyte-sdk[claude]"` | INV-1, INV-2 |
+| EC-2 | `claude` is not on PATH and no `cli_path` was given | `__aenter__` resolves `""`. Spawn and readiness report `claude.not_installed`. Without the guard, the SDK would silently run its bundled 2.1.294 CLI with no login. | `claude.not_installed` | INV-10, D-5 |
+| EC-3 | The installed CLI is older than `CLAUDE_MIN_CLI_VERSION`, or initialize has no `claude_code_version` | Readiness reports `version_unsupported`. A spawned turn fails after connect, before any query. | `claude.version_unsupported`, "Run claude update." | INV-11, D-6 |
+| EC-4 | The CLI is older and the request uses an `extra_args` flag that version does not know | The process exits at start, which maps to `claude.process_exited`, not `version_unsupported` (A-14). This is an accepted limitation, because the version is known only after start. | `claude.process_exited`; `check_claude_ready` names the real cause | D-9 (limitation) |
+| EC-5 | Not signed in (no token or API key source) | Readiness reports `claude.not_signed_in`. A spawned turn gets the assistant error `authentication_failed`, which maps to `not_signed_in`. | `claude.not_signed_in`, "Run claude auth login." | INV-2, D-5 |
+| EC-6 | `betas` or `bare` set while the account shows no API key | The turn fails after connect, before any query (A-13). | `claude.auth_mode_unsupported` | INV-11, D-6 |
+| EC-7 | The host has seen a `rejected` window whose `resets_at` is in the future, with overage not allowed; a new spawn arrives | It is refused before registration, so no process starts. Once the reset time passes (A-16), spawns are allowed again. | `claude.usage_limited`, "Wait until the reset time, or use an API key." | INV-11, D-8 |
+| EC-8 | A window goes `rejected` mid-turn, or an assistant message carries the error `rate_limit` | The turn fails with `usage_limited`. | FAILED `claude.usage_limited` | INV-19 |
+| EC-9 | Assistant error `billing_error` | The turn fails. | `claude.billing_error`, "Add credits." | INV-19 |
+| EC-10 | The request names a model the account cannot use | The CLI reports the assistant error `model_not_found`, which maps to `model_unknown`. Without D-7, a pre-check against initialize's model list would refuse valid full model ids the list omits. | `claude.model_unknown`, "Pick a model from list_claude_models." | D-7 |
+| EC-11 | A continue, a plain resume spawn, or a spawn with a chosen `session_id` targets a session id already live in this host | Refused before registration. Without the guard, two processes would append to one transcript. | `claude.session_busy`, "Steer it, or fork it." | INV-4 |
+| EC-12 | The host cap is reached, or a launch needs more slots than remain | Refused, with nothing registered. Without the guard, a model calling spawn in a loop would start unbounded processes (R2 runaway guard). | `claude.session_busy`, `CLAUDE_LIVE_CAP_NEXT_STEP` | INV-5, INV-6, D-22 |
+| EC-13 | `max_budget_usd` or `max_turns` reached | The CLI ends the turn with an error result. | FAILED `claude.budget_exhausted` | INV-19 |
+| EC-14 | `timeout_seconds` elapses | The watchdog interrupts the turn. If the interrupt raises, the watchdog disconnects the client. The turn never becomes a cancelled SDK call, which the vendor warns can orphan the child. | FAILED `claude.budget_exhausted` | D-4, INV-8 |
+| EC-15 | The process dies mid-turn, or the stream ends without a result | The pump maps the end to `process_exited` and finishes. Without the guard, waiters would hang forever (R2 "never hang"). | FAILED `claude.process_exited`, "Respawn, then resume by id." | INV-7, INV-9 |
+| EC-16 | The CLI emits malformed JSON, or a parse error occurs | `ClaudeSDKError` subclasses other than the named ones map to `protocol_mismatch`. | `claude.protocol_mismatch` | INV-19 |
+| EC-17 | `output_schema` set; the result has no `structured_output`, or the subtype is `error_max_structured_output_retries` | FAILED, with `result_text` kept for a repair turn. | `claude.schema_violation` | INV-19 |
+| EC-18 | The turn succeeds but `permission_denials` is non-empty | COMPLETED with `failure` `permission_denied`, and the denials listed by tool name and id. | the denied tools, "Allow the tool, or change the permission mode." | INV-19 |
+| EC-19 | A steer arrives just after the CLI emitted the result, before the pump read it | `interrupt()` is a no-op. The pump reads the result, sees the pending message and sends it as a new turn. Without D-3, the message would be lost, or the handle would finish before its own result. | final result = the steered turn | INV-18, D-3 |
+| EC-20 | Two steers in quick succession | The second is refused while the first is pending. Without the guard, two queued messages could coalesce into one CLI turn, and the pump would wait forever for a second result. | `action.precondition_failed`, "Wait for the steer to start, then steer again." | INV-18 |
+| EC-21 | A steer on a QUEUED, stopping or terminal handle | Refused. | `action.precondition_failed`, naming wait, interrupt or continue | INV-18 |
+| EC-22 | An interrupt on a QUEUED handle (for example, waiting on a launch slot) | The handle finishes INTERRUPTED without sending a prompt. A connect already in flight completes and is then disconnected. | INTERRUPTED, zero spend | INV-11 |
+| EC-23 | An interrupt on a terminal handle | No-op. | the same terminal snapshot | INV-7 |
+| EC-24 | The runtime's `tool_timeout_seconds` cancels a wait tool mid-wait | Only the wait is cancelled. The turn continues. | the agent sees a tool timeout; the handle stays valid | INV-9 |
+| EC-25 | `agent.run()` (sync) with `ClaudeTools` | Each sync run uses a fresh loop, so the host refuses it. Without INV-15, the client would be driven from a foreign loop and could hang. | error `ToolResult` `action.precondition_failed`, "Use await agent.arun() inside async with ClaudeHost()." | INV-15 |
+| EC-26 | A ★ call before entry or after `aclose` | Refused. | `action.precondition_failed` | INV-15 |
+| EC-27 | `aclose` while launch handles wait for slots | Each waiting handle finishes INTERRUPTED as it acquires a slot, without connecting. | INTERRUPTED | INV-7, INV-11 |
+| EC-28 | The event loop ends without `aclose` (no `async with`) | Children still running are reaped by the SDK's own atexit reaper. Accepted limitation; `async with` is the documented use. | none; the processes end at interpreter exit | limitation |
+| EC-29 | `get_session_info` returns `None` for an invalid UUID, a sidechain, or a session with no summary | All map to `session_not_found`. The SDK does not distinguish them, so this is an accepted limitation. | `claude.session_not_found` | D-19 |
+| EC-30 | `get_session_messages` returns `[]` | Info is checked: unknown means `session_not_found`, known means `()`. | either | D-19 |
+| EC-31 | `list_claude_sessions` where `git worktree list` takes up to 5 s | It runs in a worker thread, and the loop keeps serving other turns. | a slower list, no stall | INV-16 |
+| EC-32 | A continue whose `request.cwd` differs from the session's recorded cwd | Refused. Resuming from another project directory would not find the transcript (A-10). | `configuration.unsupported_combination` | D-27 |
+| EC-33 | A launch with N>1, where the template sets `session_id`, or sets `resume` or `continue_conversation` without `fork_session` | `session_id` raises `configuration.unsupported_combination`. Resume without fork raises `session_busy` (N writers on one transcript). | the code | INV-4 |
+| EC-34 | `continue_conversation=True` without `fork_session` | The session id is unknown until the result, so the handle's `session_id` is `""` and no busy guard applies. Accepted limitation; `continue_claude_session` with an explicit id is the guarded path. | `session_id` filled in on the result | limitation |
+| EC-35 | An image with an unsupported media type, empty data or invalid base64 | Record validation fails. | `configuration.invalid_argument` naming the field | INV-2 |
+| EC-36 | More than one `files` spec, or more than one plugin URL | Validation fails: an `extra_args` key carries one value (D-9). | `configuration.invalid_argument` | D-9 |
+| EC-37 | A `fallback_model` entry contains a comma | Validation fails, because the entries are comma-joined. | `configuration.invalid_argument` | D-11 |
+| EC-38 | `env` already holds `CLAUDE_CODE_MAX_OUTPUT_TOKENS` and `max_output_tokens` is set | Validation fails (conflicting sources). | `configuration.unsupported_combination` | D-9 |
+| EC-39 | An MCP server named `vidbyte` alongside `tools` | Refused: the name is reserved for the in-process tool server. | `configuration.invalid_argument` | D-12 |
+| EC-40 | Two `BaseTool`s with the same name in `tools` | Validation fails. | `configuration.invalid_argument` | D-12 |
+| EC-41 | A custom tool raises inside Claude's turn | The handler returns `is_error` text and the turn continues. The executor's own message is passed through. | Claude sees a tool error | INV-13, D-12 |
+| EC-42 | A WRITE custom tool, headless (`permission_prompts=NONE`), not in `allowed_tools` | Claude Code denies the call, which appears in `permission_denials` (A-2). | COMPLETED with `permission_denied` | D-12 |
+| EC-43 | `sandbox` enabled on Windows | Passed through unchanged. The SDK docstring says "macOS/Linux only" while the TS settings describe Windows behaviour (code-map §4.1 #9). Accepted limitation. | the CLI's behaviour | limitation |
+| EC-44 | `user` set on Windows | The OS layer rejects it during process start, which maps to `configuration.invalid_argument` (A-15). | `configuration.invalid_argument` | INV-2 |
+| EC-45 | A native background subagent (`ClaudeAgentDefinition.background=True`) is still running when the main result arrives | The host disconnects at the result, which stops it. Accepted limitation of one process per turn. | the result without the background work | D-2 (limitation) |
+| EC-46 | A host shared by two agents, or by an agent and its forks | Handles are visible across them. Accepted limitation: the documented pattern is one host per agent. | another agent can wait or steer the same handle if it learns the id | D-14, Q-5 |
+| EC-47 | Two hosts, or an interactive `claude`, on one session id | Undetectable across processes. Accepted limitation. | interleaved transcript | limitation |
+| EC-48 | A handle id from another host, or one that was never issued | `get_handle` raises `session_not_found`. | `claude.session_not_found`, "Find the session with list_claude_sessions." | INV-2, D-14 |
+| EC-49 | An empty prompt (spawn, continue, steer or a launch item), or an empty `prompts` tuple | Refused before registration. | `input.empty` | INV-11 |
+| EC-50 | `limit` < 1, a bool, or not an int; `timeout_seconds` ≤ 0, NaN or a bool | Refused. | `configuration.invalid_argument` | INV-2 |
+| EC-51 | A long transcript or session list | Returned whole. Accepted limitation; a tool may flood the calling agent's context. | large tool output | Q-4 |
+| EC-52 | A rate-limit event without `rate_limit_type`, or with a type outside the enum | Skipped (cannot be keyed). | absent from `get_claude_rate_limits` | D-8 |
+| EC-53 | The CLI acknowledges an interrupt but never emits a result | The turn stays RUNNING until `aclose` disconnects it. Accepted limitation. | RUNNING snapshots | limitation |
+| EC-54 | A YAML component config names a Claude tool | The component registry discovers the class but cannot build it without a host. Accepted limitation, the same as other bound builtins. | registry build error | limitation |
+| EC-55 | A handle's result is requested after many turns in a long-lived host | Finished handles stay in the registry until `aclose` (one small entry per turn). Accepted limitation, with an optional purge (Q-9). | memory grows by one entry per turn | D-23 |
+| EC-56 | A background task, scheduled trigger or channel message makes the CLI inject a turn, and that turn's result arrives on the stream before the prompt's own result | The pump records the injected result's cumulative cost and keeps reading. Without the guard, the handle would finish with another turn's text and status, and the prompt's real result would be lost. | the prompt's own result | D-28, INV-7 |
+
+**Rollback of the user action:**
+- A spawned or continued turn can be stopped with `interrupt_claude_turn` or by closing the host, which ends all spend.
+- Money already spent and transcripts already written under the user's Claude config directory cannot be rolled back by this PR. The ✗ function `delete_claude_session` is unstarred, so the user deletes sessions in Claude Code or on disk.
+- A fork is a new transcript file, so deleting that file undoes it.
+- The code change is additive: reverting the PR and uninstalling the extra restores the previous state, because no existing behaviour changes.
+
+## §7 Requirements
+
+**Functional**
+| ID | Requirement | Priority | Source (request.md / G-) |
+|---|---|---|---|
+| FR-1 | `ClaudeHost(*, cli_path="", max_live_sessions=None)` is an async context manager. Entry resolves the installed `claude`. `aclose` stops every live turn and disconnects every client. `get_handle(handle_id)` looks up a handle. | P0 | §C "One host class"; R3 Q3 default; G-1 |
+| FR-2 | `check_claude_ready()` reports the CLI path, the version against the minimum, and the login, through one initialize probe that sends no prompt. | P0 | §C ★ list; G-1 |
+| FR-3 | `list_claude_models()` returns per-model effort levels, adaptive-thinking support and fast or auto mode support from initialize. | P0 | §C ★ list |
+| FR-4 | `get_claude_rate_limits()` returns the latest window per type seen on any of this host's streams, or `()` before any event. | P0 | §C ★ list ("⚑ excluded") |
+| FR-5 | `spawn_claude_session(request)` returns a handle at once and runs the turn in the host. | P0 | §C ★ list; "Spawn returns a handle immediately" |
+| FR-6 | `continue_claude_session(session_id, prompt, *, request=None)` resumes an existing session as a new turn. | P0 | §C ★ list |
+| FR-7 | `fork_claude_session(session_id, up_to_message_id="", title="")` copies a session offline and returns the new session id. | P0 | §C ★ list; "One host class, with Claude's process model" (history and fork are offline) |
+| FR-8 | `list_claude_sessions(directory="", limit=None, offset=0, include_worktrees=True)` returns session summaries. | P0 | §C ★ list |
+| FR-9 | `get_claude_session_info(session_id)` returns one session summary. | P0 | §C ★ list |
+| FR-10 | `get_claude_session_messages(session_id, limit=None, offset=0)` returns transcript messages as text. | P0 | §C ★ list |
+| FR-11 | `wait_claude_turn(handle, *, timeout_seconds)` and `get_claude_turn_result(handle)` return the turn's snapshot. | P0 | §C ★ list |
+| FR-12 | `steer_claude_session(handle, message)` redirects a running turn with a new message (D-3). | P0 | §C ★ list; §C open question "Steering" |
+| FR-13 | `interrupt_claude_turn(handle)` stops a QUEUED or RUNNING turn. | P0 | §C ★ list |
+| FR-14 | `track_claude_session_usage(handle)` returns dollars, per-model tokens (input, output, cache read, cache write), web searches, and per-task usage. | P0 | §C ★ list |
+| FR-15 | `launch_claude_subagents(prompts, request, limit)` runs exactly N sessions or forks, at most `limit` at once. | P0 | §C ★ list; Prompt 1 |
+| FR-16 | `ClaudeSpawnRequest` carries the R3 fields (58, per §9.2), validates them, and maps each to the SDK as §9.2 states. | P0 | §C "ClaudeSpawnRequest fields"; Prompt 2 "all the params needed" |
+| FR-17 | Errors use 16 new `claude.*` codes plus existing generic codes. Each has a next step, mapped as §9.2 states. | P0 | §C "Errors"; R3 error table |
+| FR-18 | `request.tools` (Vidbyte `BaseTool`s) reach the session through an in-process SDK MCP server. | P0 | §C "Custom tools stay in our process" |
+| FR-19 | One tool per ★ function (15) returns error results, with READ or WRITE per R3. | P0 | §C "One tool per function"; "Tool permissions" |
+| FR-20 | The `ClaudeTools(host, request)` toolset bundles the 15 tools. | P0 | §C "One tool per function" (the toolset bundle) |
+| FR-21 | The optional extra is `claude = ["claude-agent-sdk>=0.2.165,<0.3.0"]`. | P0 | §C "Official SDK"; open question "Version pin" |
+| FR-22 | The shared `vidbyte.harnesses.native` marker is byte-exact. | P0 | §C shared-file contract |
+| FR-23 | The 17 Claude enums are exported from `vidbyte.lib.enums`. | P1 | AGENTS.md "Enums go in vidbyte/lib/enums/" |
+| FR-24 | A REPO_MAP entry and a harnesses README bullet are added for the native package. | P2 | AGENTS.md:9 (REPO_MAP covers each subpackage); §C contract list |
+| FR-25 | `ClaudeTurnResult.hooks_applied` reports whether the CLI registered the request's hooks. | P1 | R3 "Config that fails to load gives no error" |
+
+**Non-functional**
+| ID | Requirement | Priority | Target |
+|---|---|---|---|
+| NFR-1 | Optional dependency. | P0 | INV-1 holds with only `.[dev]` installed. Every module named in INV-1 imports in the package smoke. |
+| NFR-2 | Readiness, models, history and fork cost nothing. | P0 | 0 prompts sent: readiness and models open one probe process each and close it before returning; history and fork open none. |
+| NFR-3 | Mirrored vocabulary (Prompt 2: "apply this same principle/philosophy of functions to other open source harnesses"). | P0 | Function names equal R3 "Shared vocabulary" and ★ names, and problem names equal R3's error table. |
+| NFR-4 | Small, atomic, reusable functions (Prompt 2: "small, atomic, rueusable, and helper functions"). | P0 | Each ★ function wraps one SDK surface. No function only forwards one option. Every new file stays under 1,000 lines. Call chains stay one level deep (AGENTS.md principle 1). |
+| NFR-5 | Repo gates. | P0 | The full local gate (§11) passes in both its source and package stages, lint ends `SDK-LINT: PASS`, the semgrep policy scan exits 0, and the lint baseline is unchanged. |
+| NFR-6 | Deterministic tests. | P0 | No test needs `claude`, credentials or the network. Real-SDK contract tests skip when the extra is absent. |
+| NFR-7 | Process hygiene. | P0 | Live `claude` processes started by a host never exceed its live (QUEUED or RUNNING) turns plus in-flight probes. |
+| NFR-8 | No event-loop blocking. | P0 | No synchronous SDK file function runs on the loop thread. |
+| NFR-9 | Secret hygiene. | P0 | INV-12 holds, and validation messages never echo `env` or `headers` values. |
+| NFR-10 | Parallel-PR independence (Prompt 4: "in parallel in 2 seperate prs"). | P0 | No import of, or reference to, CodexHost code. The shared files follow request.md §C exactly. |
+| NFR-11 | Simple agents (Prompt 1: "very simple agents to be built inside of the vidbyte-cli/ like this"). | P1 | A readiness, spawn, wait and usage program needs only three `vidbyte` imports and fits in 25 lines, as the first §4 snippet shows. |
+
+**Weighted words (request.md §D) and where each is made testable**
+
+- "the function should have all the params needed to launch a codex thread according to their sdk and also return semantic error  messages if something goes wrong, each funciton shoulllld make sure to handle errors." (Prompt 2; ClaudeHost inherits it through Prompt 3's "the same"): the params are FR-16 and AC-17, and the errors are INV-2, AC-6, AC-18 and AC-24.
+- "then apply this same principle/philosophy of functions to other open source harnesses  (claude code, grok build, opencode, etc)." (Prompt 2): NFR-3.
+- "connect each individual function to the vidbyte/tools folder as well to give agents the functionalties in tools and not have to rely on them actually trying to do these things during their agent run." (Prompt 2): INV-13, INV-14, AC-12 and AC-13.
+- "I want to create all types of small, atomic, rueusable, and helper functions for interacting with codex in this class" (Prompt 2): NFR-4.
+- "can you recommend the same "full implementation subspace of functions" for a similiar ClaudeHost class that implements everything that we can do with claude code." (Prompt 3): AC-35, with Prompt 4 scoping this PR to ★ (NG-1).
+- "Then,  return to me all of the functions for the ClaudeHost and CodexHost, expecting a big list in this request." (Prompt 3): AC-35 (the ★ slice of R3's list).
+- "And coming up with very simple agents to be built inside of the vidbyte-cli/ like this." (Prompt 1): NFR-11 and AC-1.
+- "All of a sudden, "launching a codex thread with 3 codex subagents, 4 claude subagents, and then using a grok thread to merge the results is very easy,  it is only a few functions that we create" (Prompt 1): AC-11 and NFR-3.
+- "we could even package all of these into tools that other agents can use. we can even create like an "agent terminal toolset mcp" that packages all of these types of tools/functions" (Prompt 1): AC-13 and AC-29.
+- "implement the Codexhost and ClaudeHost functionality in the vidbyte-sdk/ in parallel in 2 seperate prs." (Prompt 4): NFR-10 and INV-21.
+
+---
+
+## Part C — Design
+
+## §8 Architecture and decisions
+
+The feature has five layers. Each one imports only the layers below it.
+
+- **Records** (`vidbyte.lib`): enums, constants, dataclasses, the error class and the failure codes.
+- **Host** (`vidbyte.harnesses.native.claude`): `ClaudeHost` coordinates eight single-purpose helpers.
+  - `ClaudeSdkLoader`: the only vendor import.
+  - `ClaudeOptionsTranslator`: request to SDK options.
+  - `ClaudeFailureMapper`: exceptions and results to codes.
+  - `ClaudeLiveSession`: one turn's state and its pump.
+  - `ClaudeHistory`: offline session files.
+  - `ClaudeProbe`: initialize-only process.
+  - `ClaudeToolServer` and `ClaudeToolHandler`: `BaseTool`s exposed as an SDK MCP server.
+- **Tools** (`vidbyte.tools.builtins.claude`): one thin `BaseTool` per ★ function over a shared `_ClaudeBuiltinTool`.
+- **Toolset** (`vidbyte.tools.toolsets.claude`): `ClaudeTools`.
+- **Consumers**: agents, `McpStudioServer` and user code, all unchanged.
+
+### 8.1 Decisions
+| ID | Decision | Deciding reason | Runner-up | Flips if |
+|---|---|---|---|---|
+| D-1 | `ClaudeHost` is an async context manager bound to the loop that entered it. Its lifecycle is one-shot: enter, use, close. | A `ClaudeSDKClient` keeps a task group from connect to disconnect and cannot cross async contexts (code-map §2.5.2). Binding the loop turns a cross-loop misuse into a clear error instead of a hang. | Lazy auto-start on the first call, with no context manager. | The SDK client becomes loop-agnostic. |
+| D-2 | **One process per turn.** Each spawn, continue or launch item connects its own client, sends the prompt, reads to the result, and disconnects. A later turn on the same session is a `continue` (resume). | It has the fewest moving parts that satisfy every ★ live function, because all of them act on a running turn. No idle processes exist, so there is nothing for a reaper or memory governor to manage. Steering keeps the process because it is within the turn. | Keep each session's process connected after its result until close or an idle timeout, so the next prompt skips process start. | A ★ function needs to send a second prompt to a finished turn's live process, or start-up latency is measured as a user-visible problem. |
+| D-3 | **Steer means interrupt, then resend.** `steer_claude_session` stores one pending message and calls `interrupt()`. When the pump reads the interrupted turn's result, it sends the message with `query()`, and that next result is the handle's. One pending steer is allowed at a time. | A plain mid-turn `query()` is queued by the CLI and either folded into the running turn between tool rounds or run later as its own turn, and several queued sends may coalesce (DTS `user_message_uuids`, `queued_turn_count`). Python's parser drops both fields (code-map §2.5.3), so the host could not tell how many results remain: the handle would finish early or wait forever. Sending only after a result means exactly one prompt is ever outstanding (A-8; A-9 covers calling `interrupt()` from the caller's task while the pump reads). | Send `query(message)` mid-turn and let the CLI queue or fold it. That is the closest match to Codex `turn/steer`. | claude-agent-sdk exposes `queued_turn_count` or `user_message_uuids` on `ResultMessage`, or a priority on `query()`. |
+| D-4 | **The Vidbyte time budget is a watchdog that interrupts.** `timeout_seconds` on the request starts a watchdog when the turn becomes RUNNING. When it fires, the watchdog clears any pending steer and calls `interrupt()`. If the interrupt raises, it disconnects. The turn ends FAILED with `budget_exhausted`. | The vendor warns that `asyncio.wait_for`, `asyncio.timeout` or a bare cancel around SDK calls can skip close-escalation and orphan the child (code-map §2.5.4). | `asyncio.timeout` around the read loop. | The SDK documents cancellation-safe reads. |
+| D-5 | **Readiness and models use one initialize probe.** The probe connects a client with no prompt, reads `get_server_info()`, and disconnects. `cli_path` is resolved at entry with `shutil.which("claude")`, never by the SDK. | Initialize already carries `account`, `models` and `claude_code_version` (code-map §2.5.5), and sends no prompt (A-6). One mechanism serves both functions with no CLI subprocess code in Vidbyte. | `claude --version` plus `claude auth status --json` subprocesses, which would mean a new runner and the S052/S055 surface. | Initialize stops carrying `account` or the version. |
+| D-6 | **The minimum CLI version is 2.1.296.** It is compared numerically on dotted parts. An absent or unparsable version fails the check. The version and auth-mode checks run after connect and before the first query. | Every `extra_args` flag and the env variable this PR relies on were verified in the 2.1.296 binary (§11), and it is the user's installed version. A CLI that omits `claude_code_version` predates the field ("Absent on CLIs that predate the field"). | 2.1.294, the SDK's bundled CLI. | The flags are verified in an older binary. |
+| D-7 | **`model_unknown` comes from the assistant error `model_not_found`.** There is no pre-check against initialize's model list. | The TS SDK's `SDKAssistantMessageError` union lists `model_not_found`, and the Python 0.2.165 parser passes the CLI's `error` string through unchanged even though its own `AssistantMessageError` literal omits that value. The model list holds aliases and display entries. A pre-check would refuse valid full model ids that the list omits, which is a false refusal. The next step still points at `list_claude_models`. | Pre-check `request.model` against `models[].value`. | The CLI's model list is shown to contain every id it accepts. |
+| D-8 | **Rate limits are read from the host's own streams.** The pump records each `RateLimitEvent` window, and the latest one per type wins. Spawn refuses only when a window is `rejected` with a future `resets_at` and overage not allowed. `allowed_warning` does not stop spawns. | ⚑ `get_usage` is excluded, so streams are the only source. R3 attaches the `allowed_warning` stop to `plan_claude_fan_out`, which is unstarred. Windows update only on live streams, so a warning would block every spawn until the host closed. | Also stop on `allowed_warning`. | The user answers Q-1 yes. |
+| D-9 | **Request fields with no typed SDK option map to `extra_args` only where the 2.1.296 flag was verified, and to env only for the verified variable.** The fields: `files`, `restricted`, `autocompact`, `name`, `main_agent`, `bare`, `safe_mode`, `persist_session=False`, `worktree` and a plugin URL use flags; `max_output_tokens` uses env `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. Every other field maps to a typed option. `prompt_suggestions` is excluded (NG-7). Fields an `extra_args` key cannot carry more than once (`files`, plugin URLs) are capped at one value. | The briefing's rule: no workaround layer, flags only where verified. `extra_args` is a public `ClaudeAgentOptions` field. | Exclude every flag-only field as a limitation. | A typed SDK option appears for a field. Then use the option, and lift the one-value caps if the SDK accepts lists. |
+| D-10 | **The system prompt defaults to the `claude_code` preset.** `ClaudeSystemPrompt.mode` is PRESET (optional `text` is appended), REPLACE (the custom prompt) or FILE (a path). | `system_prompt=None` makes the SDK send `--system-prompt ""`, an empty prompt (code-map §4.1 #24), which is not "Claude Code as the user knows it". | Mirror the SDK's `None` default. | Never. |
+| D-11 | **`fallback_model` is a tuple that is comma-joined into the SDK's single string.** | The 2.1.296 help says `--fallback-model` "Accepts a comma-separated list to try each in order". This satisfies R3's "ordered list" through the SDK's `str` field. | Allow one model only. | The CLI drops list support. |
+| D-12 | **Custom tools travel through one in-process SDK MCP server named `vidbyte`.** Each `BaseTool` becomes an SDK `tool()` whose input schema comes from `ToolsFormatter.to_anthropic_tool(spec)` and whose handler runs the tool through `ToolExecutor` with `PermissionPolicy.allow_all()`. The host adds `mcp__vidbyte__<name>` to `allowed_tools` for SAFE and READ tools only. WRITE and EXECUTE tools stay under Claude Code's own permission rules (permission mode, `can_use_tool`, the caller's `allowed_tools`). | The developer granted the tools by listing them. Mirroring Vidbyte's default policy (SAFE and READ allowed) onto Claude's permission layer makes read tools usable headless while keeping writes opt-in. | Auto-allow nothing, and document the `mcp__vidbyte__` naming. | Users report that read tools need prompts, or that write tools should be auto-allowed. |
+| D-13 | **Model-facing tools take only the inputs R3's signatures name.** Spawn takes the prompt; launch takes prompts and limit; continue takes session id and prompt. Every other spawn field comes from the developer's base request bound to `ClaudeTools`. | A model that can set `permission_mode`, `sandbox`, budgets or `cli_path` can escalate (R3 "Permission escalation"). Fixed fields keep spend and permissions with the developer. | Expose safe knobs such as `model` and `effort` as optional tool parameters. | The user answers Q-7 yes. |
+| D-14 | **Tools hold one host per agent.** `ClaudeTools(host, request)` gives every tool the same host and base request. The agent base class's binding lists are not extended, and no tool defines `bind_session`. | request.md §C: "Tools hold one ClaudeHost per agent". The agent's `_bind_session_tool` would call any `bind_session` attribute with a Vidbyte `Session` (code-map §4.1 #14). | A per-toolset handle scope like `SessionScope.own_runs()` (R2's guard for a shared host). | A host must be shared across agents (Q-5). |
+| D-15 | **Errors are one class, `ClaudeOperationError(VidbyteSdkError)`, in `vidbyte.lib.errors`, with the A003 packet.** Its attributes are `failure_code`, `operation`, `reason` and `next_step`. Claude problems use new `claude.*` codes. Argument and lifecycle misuse use existing codes: `configuration.invalid_argument`, `configuration.unsupported_combination`, `input.empty` and `action.precondition_failed`. Record validation (§9.1) raises the same class with the configuration codes and operation `validate_request`. | Mirrors `CodexAgentError`'s placement and the `failure_code` attribute that `FailureCode.from_exception` reads. The host is not an agent, so the class does not subclass `AgentExecutionError`. One class for record validation too means a developer, a ★ function and a tool all handle one error type, and a record a tool builds from model input can never leak a different exception into the agent loop (INV-2, INV-13). | A feature-local error module, which A003 would not cover. | Never. |
+| D-16 | **Records are split across two lib modules:** `claude` (the request and its sub-records) and `claude_host` (host outputs and the SDK type record). | AGENTS.md keeps files well below 1,000 lines. The Codex record module is already 1,205 lines (code-map §4.1 #23). | One `claude` module. | The combined size stays under 700 lines. |
+| D-17 | **No root exports.** | NG-4. | Root-export `ClaudeHost`. | The user answers Q-10 yes. |
+| D-18 | **The extra pin is `claude-agent-sdk>=0.2.165,<0.3.0`.** | This PR uses only public SDK API (no ⚑). The runtime-primitives skill asks for "a reviewed compatibility range" for pre-1.0 SDKs, and Codex's narrow pin exists only because of private-attribute access. | An exact pin `==0.2.165`. | A 0.2.x release breaks a public surface used here. The real-SDK contract tests catch this. |
+| D-19 | **History, info, messages and fork run the SDK's synchronous file functions in `asyncio.to_thread`.** Fork uses the offline file copy, never a resume with `fork_session`. | They may run `git worktree list` with a 5 s timeout (code-map §4.1 #31). R3 makes fork offline and instant. | Call them directly on the loop. | The SDK ships async variants for local files. |
+| D-20 | **Turn classification follows the fixed precedence in §9.2.** The first match wins, and denials only annotate a success. | One deterministic code per turn (INV-19). An R3 row can co-occur with another, such as a budget stop after a rate-limit warning. | Report every matching code. | Never. |
+| D-21 | **`hooks_applied` comes from initialize and is reported on the turn result. `plugins_applied` is not surfaced.** | R3: "Put `hooks_applied` and `plugins_applied` from the initialize result on every handle". The handle is returned before initialize, so the value lives on the result. Python's initialize request never lists plugins, which the CLI reports as absent (DTS: "Absent when the request listed no plugins"). | A field that is always `None`. | The SDK sends plugins in initialize. |
+| D-22 | **The live-session cap is developer-set on the host (`max_live_sessions`, default `None`), and a refusal uses `claude.session_busy`.** | R2's runaway guard: "the tool takes a cap on live turns ... `thread_busy` and `usage_limited` come back as error results". request.md: "do not invent a threshold". | A default cap. | Memory per process is measured (Q-8). |
+| D-23 | **Finished handles stay readable until `aclose`.** | `wait`, `get` and `track usage` must work after the turn ends. A host is scoped to one `async with`. | Evict on read. | Long-lived hosts need a purge (Q-9). |
+| D-24 | **`can_use_tool` and hook callbacks pass through in the SDK's own callback shape.** | They are R3 spawn fields. The Vidbyte-typed wrappers (`set_claude_permission_handler`, `register_claude_hooks`) are unstarred ✗ functions, and a translation layer would add surface that no ★ function needs. | Vidbyte permission and hook records. | Those unstarred functions are built. |
+| D-25 | **Every ★ function is a coroutine method, including `get_claude_turn_result`.** | One calling convention for callers and tools, and room to await later without an API change. | A sync getter. | Never. |
+| D-26 | **`interrupt_claude_turn` returns the `ClaudeTurnResult` snapshot taken right after the request.** | It is the same shape as wait and get, so a caller can see QUEUED→INTERRUPTED at once and RUNNING otherwise. | Return `ClaudeTurnStatus`. | Never. |
+| D-27 | **`continue_claude_session` takes its cwd from the session's recorded cwd unless the request sets one. Two different cwds are refused.** | Resume locates the transcript under the project directory derived from cwd (A-10). | Always use the request's cwd. | The CLI resolves sessions across projects. |
+| D-28 | **Only the prompt's own result ends a turn.** A `ResultMessage` ends the handle's turn only when its `origin` is absent or has kind `human`. A result with any other origin kind belongs to a turn the CLI injected (a task notification, a channel or peer message, an auto-continuation), so the pump records its cumulative cost and keeps reading. | The 0.2.165 `ResultMessage.origin` docstring says it "lets a streaming-input consumer distinguish the result of its own prompt ... from results of injected turns such as background-task notifications", and `MessageOriginKind` says to treat any unrecognized kind as not human. Ending at the first result would hand the caller another turn's text and status (EC-56). | End the turn at the first `ResultMessage`. | Never. |
+
+### 8.2 Patterns inherited
+- **One lazy vendor import seam:** a static loader with literal imports inside `try`, raising a vocabulary error on `ImportError`. It keeps the extra optional (C003, NFR-1). From `vidbyte/agents/codex/transport.py:CodexTransport._load_sdk`.
+- **SDK classes carried in a frozen record:** `CodexSdkTypes` in `vidbyte/lib/dataclasses/codex.py`. Tests swap the whole SDK by patching one function.
+- **Protocols for vendor objects:** `_CodexClient` in `vidbyte/agents/codex/transport.py`. This avoids `object`/`Any` parameters named `client` (A005).
+- **Bridge from BaseTool to vendor tool:** `CodexToolBridge` and `CodexToolCallHandler` in `vidbyte/agents/codex/tools.py`, running tools through `ToolExecutor`. The schema comes from the canonical `ToolsFormatter` (AGENTS.md principle 5).
+- **Semaphore instead of `asyncio.Lock`** for bounded concurrency, which S039 requires: `vidbyte/agents/codex/agent.py` (`asyncio.Semaphore(CODEX_MAX_CONCURRENT_TURNS)`).
+- **Builtin tool family:** a `_base.py` with shared state, one module per group, and a `descriptions.py`. From `vidbyte/tools/builtins/sessions/`. Only the structure is copied, not its A001-less headers, adjacent literals (S062), or `_caught` raw-text errors (S017).
+- **JSON null means the default:** `vidbyte/tools/builtins/sessions/_base.py:_SessionBuiltinTool._optional_text` (`# @intent null-optional-arg-means-default`).
+- **Developer-set bound on a model-facing tool:** `vidbyte/tools/builtins/pause.py:PauseAgentTool(max_seconds=…)`, the shape of `max_live_sessions`.
+- **Toolset with a static interface:** `vidbyte/tools/toolsets/coding.py:CodingAgentTools` (`__init__` narrated, plus `@staticmethod get_tools`).
+- **Error with the full A003 packet:** `vidbyte/lib/errors/base.py:CodexAgentError`.
+- **`str, Enum` with a `PROVIDER_DEFAULT = ""` sentinel that is omitted before SDK calls:** `vidbyte/lib/enums/codex.py`.
+
+### 8.3 Smaller design rejected
+
+**Rejected 1: module-level functions with no host class.** Each function would build a fresh `ClaudeSDKClient`, run `receive_response()`, and return. That design fails:
+- FR-5 and INV-3: a spawn would block until the result;
+- FR-11, FR-12 and FR-13: no live object would exist for wait, steer or interrupt to reach;
+- INV-4 and INV-5: no registry would exist for the busy guard or the cap.
+
+**Rejected 2: one long-lived process per session, kept until close.** It looks smaller because there is no reconnect on continue. It fails:
+- NFR-7: idle processes accumulate, each a 260 MB binary;
+- D-2's requirement that nothing outlives its turn.
+
+It would also add an idle-eviction policy that no conversation asked for (hard rule 9).
+
+### 8.4 Complexity budget
+| Item | Count | Justification for each |
+|---|---|---|
+| New files | 22 | See the breakdown below the table. Test files are created by S2 under §13 and are not counted here. |
+| New classes/modules | 69 classes | See the breakdown below the table. |
+| New dependencies | 1 (optional) | `claude-agent-sdk>=0.2.165,<0.3.0` in the new `claude` extra, pre-authorized by request.md §C. It pulls `anyio`, `sniffio`, `mcp` and `jsonschema` only when installed. |
+| New config keys | 1 extra, 2 host arguments, 58 request fields | No environment variable is read by Vidbyte. The host arguments are `cli_path` and `max_live_sessions`. The request fields are R3's list (§9.2). |
+| New collections/tables | 0 | Only in-memory registries inside a host. |
+| New public endpoints/commands | 0 commands; 15 host functions, 15 tools, 1 toolset | No CLI commands are added (field-guide prebuilt-agents entry: no CLI in the SDK). |
+
+The 22 new files:
+- 10 host files: the shared `native` marker, the package `__init__`, and the 8 single-purpose modules of §8.
+- 4 lib files: two record modules (D-16), enums and constants.
+- 7 tools files: `__init__`, `_base`, `descriptions` and 4 group modules (R3's tables).
+- 1 toolset file.
+
+The 69 classes:
+- 10 in the host (§8; one of them a Protocol);
+- 23 records: 8 on the request side, and 15 on the host side (14 outputs plus `ClaudeTurnOutcome`, the pump's collected facts that `ClaudeFailureMapper.classify_turn` reads);
+- 1 private field-rule helper;
+- 17 enums;
+- 1 error;
+- 16 tool classes (a base plus 15 tools);
+- 1 toolset.
+
+Each is forced by AGENTS.md principles 3 and 4 (a dataclass per record, an enum per closed set) or by "one tool per function".
+
+_The implementer may not exceed this budget without stopping and reporting BLOCKED._
+
+### 8.5 Key interfaces
+
+```python
+# vidbyte.harnesses.native.claude  (exports ClaudeHost)
+class ClaudeHost:
+    def __init__(self, *, cli_path: str = "", max_live_sessions: int | None = None) -> None: ...
+    async def __aenter__(self) -> ClaudeHost: ...
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None) -> None: ...
+    async def aclose(self) -> None: ...
+    def get_handle(self, handle_id: str) -> ClaudeSessionHandle: ...
+    async def check_claude_ready(self) -> ClaudeReadiness: ...
+    async def list_claude_models(self) -> tuple[ClaudeModelInfo, ...]: ...
+    async def get_claude_rate_limits(self) -> tuple[ClaudeRateLimitWindow, ...]: ...
+    async def spawn_claude_session(self, request: ClaudeSpawnRequest) -> ClaudeSessionHandle: ...
+    async def continue_claude_session(self, session_id: str, prompt: str, *, request: ClaudeSpawnRequest | None = None) -> ClaudeSessionHandle: ...
+    async def fork_claude_session(self, session_id: str, up_to_message_id: str = "", title: str = "") -> str: ...
+    async def list_claude_sessions(self, directory: str = "", limit: int | None = None, offset: int = 0, include_worktrees: bool = True) -> tuple[ClaudeSessionSummary, ...]: ...
+    async def get_claude_session_info(self, session_id: str) -> ClaudeSessionSummary: ...
+    async def get_claude_session_messages(self, session_id: str, limit: int | None = None, offset: int = 0) -> tuple[ClaudeSessionMessage, ...]: ...
+    async def wait_claude_turn(self, handle: ClaudeSessionHandle, *, timeout_seconds: float) -> ClaudeTurnResult: ...
+    async def get_claude_turn_result(self, handle: ClaudeSessionHandle) -> ClaudeTurnResult: ...
+    async def steer_claude_session(self, handle: ClaudeSessionHandle, message: str) -> None: ...
+    async def interrupt_claude_turn(self, handle: ClaudeSessionHandle) -> ClaudeTurnResult: ...
+    async def track_claude_session_usage(self, handle: ClaudeSessionHandle) -> ClaudeUsageSnapshot: ...
+    async def launch_claude_subagents(self, prompts: tuple[str, ...], request: ClaudeSpawnRequest, limit: int) -> tuple[ClaudeSessionHandle, ...]: ...
+
+# vidbyte.harnesses.native.claude.sdk  (the test seam)
+class ClaudeSdkLoader:
+    @staticmethod
+    def load() -> ClaudeSdkTypes: ...   # the only claude_agent_sdk import; ImportError -> claude.sdk_unavailable
+
+# vidbyte.harnesses.native.claude.{options,failures,session,history,probe,tool_server}
+class ClaudeOptionsTranslator: ...      # static: to_options(...), to_prompt(...), one function per surface
+class ClaudeFailureMapper: ...          # static: from_exception(...), classify_turn(outcome: ClaudeTurnOutcome), failure(code, reason)
+class ClaudeLiveSession: ...            # one turn: state, pump, watchdog, steer, interrupt, snapshot, usage, wait, close
+class ClaudeHistory: ...                # static: list/info/messages/fork via asyncio.to_thread
+class ClaudeProbe: ...                  # static: initialize-only probe -> readiness, models
+class ClaudeToolServer: ...             # static: build(tools, sdk), auto_allowed(tools)
+class ClaudeToolHandler:                # one per BaseTool; never raises
+    def __init__(self, executor: ToolExecutor, tool_name: str) -> None: ...
+    async def __call__(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
+
+# vidbyte.lib.dataclasses.claude  (all @dataclass(frozen=True, slots=True), validated in __post_init__)
+class ClaudeSpawnRequest: ...           # 58 fields, §9.2 "Field mapping", in that order
+class ClaudeImage:            media_type: ClaudeImageMediaType; data: str
+class ClaudeThinking:         mode: ClaudeThinkingMode; budget_tokens: int | None = None; display: ClaudeThinkingDisplay = ClaudeThinkingDisplay.PROVIDER_DEFAULT
+class ClaudeSystemPrompt:     mode: ClaudeSystemPromptMode = ClaudeSystemPromptMode.PRESET; text: str = ""
+class ClaudeSandbox:          enabled: bool = True; auto_allow_bash: bool | None = None; excluded_commands: tuple[str, ...] = (); allowed_domains: tuple[str, ...] = (); denied_domains: tuple[str, ...] = ()
+class ClaudeHookMatcher:      event: ClaudeHookEvent; callbacks: tuple[Callable[..., Awaitable[object]], ...]; matcher: str = ""; timeout_seconds: float | None = None
+class ClaudeMcpServer:        name: str; transport: ClaudeMcpTransport; command: str = ""; args: tuple[str, ...] = (); env: Mapping[str, str] = field(default_factory=dict); url: str = ""; headers: Mapping[str, str] = field(default_factory=dict)
+class ClaudeAgentDefinition:  name: str; description: str; prompt: str; tools: tuple[str, ...] | None = None; disallowed_tools: tuple[str, ...] = (); model: str = ""; skills: tuple[str, ...] | None = None; memory: ClaudeMemoryScope | None = None; mcp_servers: tuple[str, ...] = (); initial_prompt: str = ""; max_turns: int | None = None; background: bool | None = None; effort: ClaudeEffort = ClaudeEffort.PROVIDER_DEFAULT; permission_mode: ClaudePermissionMode = ClaudePermissionMode.PROVIDER_DEFAULT
+
+# vidbyte.lib.dataclasses.claude_host
+class ClaudeHostSettings:     cli_path: str = ""; max_live_sessions: int | None = None
+class ClaudeSessionHandle:    handle_id: str; session_id: str
+class ClaudeFailure:          code: FailureCode; reason: str; next_step: str
+class ClaudePermissionDenial: tool_name: str; tool_use_id: str
+class ClaudeTurnResult:       handle_id: str; session_id: str; status: ClaudeTurnStatus; result_text: str = ""; structured_output: object = None; failure: ClaudeFailure | None = None; num_turns: int | None = None; duration_ms: int | None = None; total_cost_usd: float | None = None; stop_reason: str = ""; terminal_reason: str = ""; permission_denials: tuple[ClaudePermissionDenial, ...] = (); hooks_applied: bool | None = None
+class ClaudeModelUsage:       model: str; input_tokens: int; output_tokens: int; cache_read_input_tokens: int; cache_creation_input_tokens: int; web_search_requests: int; cost_usd: float
+class ClaudeTaskUsage:        task_id: str; description: str; total_tokens: int; tool_uses: int; duration_ms: int
+class ClaudeUsageSnapshot:    handle_id: str; session_id: str; total_cost_usd: float | None; models: tuple[ClaudeModelUsage, ...]; tasks: tuple[ClaudeTaskUsage, ...]
+class ClaudeRateLimitWindow:  rate_limit_type: ClaudeRateLimitType; status: ClaudeRateLimitStatus; resets_at: int | None; utilization: float | None; overage_status: ClaudeRateLimitStatus | None; overage_resets_at: int | None; overage_disabled_reason: str
+class ClaudeReadiness:        cli_path: str; cli_version: str; signed_in: bool; failure: ClaudeFailure | None
+class ClaudeModelInfo:        value: str; display_name: str; description: str; resolved_model: str; supports_effort: bool | None; supported_effort_levels: tuple[ClaudeEffort, ...]; supports_adaptive_thinking: bool | None; supports_fast_mode: bool | None; supports_auto_mode: bool | None
+class ClaudeSessionSummary:   session_id: str; summary: str; last_modified: int; file_size: int | None; custom_title: str; first_prompt: str; git_branch: str; cwd: str; tag: str; created_at: int | None
+class ClaudeSessionMessage:   uuid: str; session_id: str; kind: ClaudeMessageKind; text: str
+class ClaudeSdkTypes: ...               # loaded SDK classes and functions, fields typed `type` / Callable[..., Any] (§9.1)
+class ClaudeTurnOutcome:      result_seen: bool; is_error: bool; subtype: str; terminal_reason: str; api_error_status: int | None; structured_output_missing: bool; permission_denials: tuple[ClaudePermissionDenial, ...]; assistant_errors: tuple[str, ...]; rate_limit_rejected: bool; interrupted: bool; budget_expired: bool; precondition_failure: ClaudeFailure | None; stream_failure: ClaudeFailure | None   # the pump's facts; classify_turn's only input
+
+# vidbyte.lib.errors
+class ClaudeOperationError(VidbyteSdkError):
+    DIAGNOSTIC_FIELDS = ("error_kind", "expected", "actual", "safe_runtime_details", "likely_causes", "repair_approaches", "related_docs", "relevant_tests")
+    def __init__(self, reason: str, *, failure_code: str, operation: str, next_step: str) -> None: ...
+    # attributes: failure_code (a FailureCode value), operation, reason, next_step, plus the 8 diagnostic fields
+
+# vidbyte.tools.toolsets.claude
+class ClaudeTools(Tools):
+    def __init__(self, host: ClaudeHost, request: ClaudeSpawnRequest | None = None) -> None: ...
+    @staticmethod
+    def get_tools(host: ClaudeHost, request: ClaudeSpawnRequest) -> tuple[BaseTool, ...]: ...
+
+# vidbyte.tools.builtins.claude  (each: __init__(self, host: ClaudeHost, request: ClaudeSpawnRequest); spec(); async execute(call))
+CheckClaudeReadyTool, ListClaudeModelsTool, GetClaudeRateLimitsTool,
+SpawnClaudeSessionTool, ContinueClaudeSessionTool, ForkClaudeSessionTool, LaunchClaudeSubagentsTool,
+ListClaudeSessionsTool, GetClaudeSessionInfoTool, GetClaudeSessionMessagesTool,
+WaitClaudeTurnTool, GetClaudeTurnResultTool, SteerClaudeSessionTool, InterruptClaudeTurnTool, TrackClaudeSessionUsageTool
+```
+
+Enum names and members are defined in `vidbyte.lib.enums.claude`; the values below are the wire values.
+- `ClaudePermissionMode`: PROVIDER_DEFAULT `""`, DEFAULT `default`, ACCEPT_EDITS `acceptEdits`, PLAN `plan`, BYPASS_PERMISSIONS `bypassPermissions`, DONT_ASK `dontAsk`, AUTO `auto`.
+- `ClaudeEffort`: PROVIDER_DEFAULT `""`, LOW, MEDIUM, HIGH, XHIGH `xhigh`, MAX `max`.
+- `ClaudeThinkingMode`: ADAPTIVE `adaptive`, ENABLED `enabled`, DISABLED `disabled`.
+- `ClaudeThinkingDisplay`: PROVIDER_DEFAULT `""`, SUMMARIZED `summarized`, OMITTED `omitted`.
+- `ClaudeSystemPromptMode`: PRESET `preset`, REPLACE `replace`, FILE `file`.
+- `ClaudeSettingSource`: USER `user`, PROJECT `project`, LOCAL `local`.
+- `ClaudePermissionPrompts`: HOST `host`, NONE `none`.
+- `ClaudeBeta`: CONTEXT_1M `context-1m-2025-08-07`.
+- `ClaudeHookEvent`: PRE_TOOL_USE `PreToolUse`, POST_TOOL_USE `PostToolUse`, POST_TOOL_USE_FAILURE `PostToolUseFailure`, USER_PROMPT_SUBMIT `UserPromptSubmit`, STOP `Stop`, SUBAGENT_STOP `SubagentStop`, PRE_COMPACT `PreCompact`, NOTIFICATION `Notification`, SUBAGENT_START `SubagentStart`, PERMISSION_REQUEST `PermissionRequest`.
+- `ClaudeMemoryScope`: USER, PROJECT, LOCAL.
+- `ClaudeMcpTransport`: STDIO `stdio`, SSE `sse`, HTTP `http`.
+- `ClaudeImageMediaType`: JPEG `image/jpeg`, PNG `image/png`, GIF `image/gif`, WEBP `image/webp`.
+- `ClaudeTurnStatus`: QUEUED, RUNNING, COMPLETED, FAILED, INTERRUPTED (lowercase values).
+- `ClaudeRateLimitStatus`: ALLOWED `allowed`, ALLOWED_WARNING `allowed_warning`, REJECTED `rejected`.
+- `ClaudeRateLimitType`: FIVE_HOUR `five_hour`, SEVEN_DAY `seven_day`, SEVEN_DAY_OPUS `seven_day_opus`, SEVEN_DAY_SONNET `seven_day_sonnet`, SEVEN_DAY_OVERAGE_INCLUDED `seven_day_overage_included`, OVERAGE `overage`.
+- `ClaudeMessageKind`: USER `user`, ASSISTANT `assistant`.
+- `ClaudeCliFlag`: FILE `file`, RESTRICTED `restricted`, AUTOCOMPACT `autocompact`, NAME `name`, AGENT `agent`, BARE `bare`, SAFE_MODE `safe-mode`, NO_SESSION_PERSISTENCE `no-session-persistence`, WORKTREE `worktree`, PLUGIN_URL `plugin-url`.
+
+## §9 Data, API, configuration, migration
+
+### 9.1 Data model
+
+No persistent store is added. The only state is in memory, inside an entered host.
+
+- **Registry (inside `ClaudeHost`):**
+  - `handle_id → ClaudeLiveSession`: one entry per spawned turn, kept until `aclose` (D-23).
+  - `session_id → handle_id` for live handles only: the busy guard, INV-4.
+  - `ClaudeRateLimitType → ClaudeRateLimitWindow`: the latest window per type, at most 6 entries.
+- **Natural keys:**
+  - `handle_id` is a fresh `uuid4` string.
+  - `session_id` is chosen by the host as a fresh `uuid4` for every new or forked session, the caller's `session_id` when given, or the resumed id for a plain resume. It is `""` only for `continue_conversation` without `fork_session` (EC-34).
+- **Volume:** one entry per turn started in the host's lifetime. A typical agent run starts tens.
+- **Turn lifecycle:**
+
+  ```
+  QUEUED --connect+preconditions ok, prompt sent--> RUNNING
+  QUEUED --interrupt / close / start failure--> INTERRUPTED | FAILED
+  RUNNING --result, nothing pending--> COMPLETED | FAILED   (classification, §9.2)
+  RUNNING --interrupt or close--> INTERRUPTED
+  RUNNING --time budget--> FAILED(budget_exhausted)
+  RUNNING --result with steer pending--> RUNNING (steered prompt sent)
+  ```
+
+  Terminal states are final (INV-7).
+- **Session messages:** `ClaudeSessionMessage.text` renders the raw API message content.
+  - String content is returned verbatim.
+  - In list content, text blocks are verbatim, a `tool_use` block becomes `[tool call: <name>]`, a `tool_result` block becomes `[tool result]`, and any other block becomes `[<type>]`.
+  - The parts are joined with newlines.
+- **Task usage:** one `ClaudeTaskUsage` per task id seen on the handle's stream. `description` comes from the task's progress messages, and stays empty when only a notification was seen, because a notification carries a summary instead. The token, tool-use and duration figures come from whichever progress or notification message arrived last; a notification without `usage` leaves the last progress figures in place.
+- **Turn outcome:** `ClaudeTurnOutcome` is the pump's record of what it saw: the fields of the prompt's own latest result (D-28), the assistant error kinds, the rate-limit, interrupt and time-budget flags, a process-precondition failure, and the failure mapped from an exception that ended the stream. `ClaudeFailureMapper.classify_turn` reads only this record.
+- **`ClaudeSdkTypes` fields:**
+  - classes: `client_class`, `options_class`, `agent_definition_class`, `hook_matcher_class`;
+  - functions: `create_sdk_mcp_server`, `tool`, `list_sessions`, `get_session_info`, `get_session_messages`, `fork_session`;
+  - message classes: `assistant_message`, `result_message`, `rate_limit_event`, `task_progress_message`, `task_notification_message`;
+  - error classes: `sdk_error`, `cli_not_found_error`, `cli_connection_error`, `process_error`, `result_error`, `cli_json_decode_error`.
+
+  Each is typed `type` or `Callable[..., Any]`, following `CodexSdkTypes`.
+
+**Validation summary.** Every record validates in `__post_init__` (AGENTS.md principle 4) and raises `ClaudeOperationError` with operation `validate_request` and `failure_code` `configuration.invalid_argument`, or `configuration.unsupported_combination` for a forbidden combination (D-15). The reason names the field, and the bad value too for non-secret scalar fields. It never echoes a prompt, image, system-prompt text, settings, `env` or `headers` value (T-3).
+
+- **Text** fields are `str`. Tuples hold non-empty `str`, and `Mapping[str, str]` holds string keys and values. Error messages name the bad key, never an `env` or `headers` value.
+- **Counts** (`max_turns`, `task_budget`, `max_output_tokens`, `load_timeout_ms`, `budget_tokens`, agent `max_turns`): an `int` that is not a `bool` and is at least `CLAUDE_MIN_COUNT`.
+- **Amounts** (`max_budget_usd`, `timeout_seconds`, hook `timeout_seconds`): a finite real, not a `bool`, above `CLAUDE_MIN_EXCLUSIVE_AMOUNT` (C006).
+- **`autocompact`:** a count within `CLAUDE_MIN_AUTOCOMPACT_TOKENS`–`CLAUDE_MAX_AUTOCOMPACT_TOKENS`.
+- **Enums:** coerced with the enum constructor; unknown values are rejected.
+- **`session_id`, `resume`, `resume_session_at`, `resume_drops_turn`:** each must parse as a UUID when set.
+- **Session field combinations:**
+  - `session_id` with `resume` or `continue_conversation` requires `fork_session` (the SDK rule).
+  - `resume` and `continue_conversation` are exclusive.
+  - `fork_session` requires `resume` or `continue_conversation`.
+  - `resume_session_at` requires `resume`, and `resume_drops_turn` requires `resume_session_at`.
+- **System prompt:**
+  - REPLACE and FILE need non-empty `text`.
+  - `exclude_dynamic_system_prompt_sections=True` needs PRESET.
+  - `system_prompt_snapshot` is refused with FILE.
+- **Thinking:** ENABLED needs `budget_tokens`; ADAPTIVE and DISABLED refuse it; DISABLED refuses a `display`.
+- **Permission prompts:** HOST requires `can_use_tool`, and NONE refuses it.
+- **`images`:** need a non-empty `prompt`, and each image's `data` must be valid base64.
+- **`files`:** at most `CLAUDE_MAX_FILE_SPECS`, each `file_id:path`.
+- **`plugins`:** at most `CLAUDE_MAX_PLUGIN_URLS` entries containing `CLAUDE_PLUGIN_URL_MARKER`.
+- **`fallback_model`:** entries must not contain a comma.
+- **`env`:** must not hold `CLAUDE_CODE_MAX_OUTPUT_TOKENS` when `max_output_tokens` is set.
+- **`tools`:**
+  - each has a callable `spec`, and names are unique;
+  - no `mcp_servers` entry is named `CLAUDE_TOOL_SERVER_NAME` when `tools` is non-empty.
+- **MCP servers:** STDIO needs `command`, SSE and HTTP need `url`, and names are unique.
+- **Agents:** names are unique.
+- **`session_store`:** has callable `append` and `load`.
+- **Host settings:**
+  - `ClaudeHostSettings.max_live_sessions` is `None` or a count.
+  - `ClaudeHost` method arguments that come from model JSON (ids, prompts, `limit`, `offset`, `timeout_seconds`, flags) are type-checked at the host boundary and raise `ClaudeOperationError` with `configuration.invalid_argument` or `input.empty`.
+
+### 9.2 API and interface surface
+
+**Public functions** (signatures in §8.5). Each one first runs the host guard:
+- a closed, unentered or wrong-loop host raises `action.precondition_failed`;
+- every function except the history reads and fork then loads the SDK.
+
+| Function | Spawns a process | Behaviour and failures beyond INV-2 |
+|---|---|---|
+| `check_claude_ready` | one probe, no prompt | Missing extra, CLI, version or login is reported in `failure`. Probe errors are mapped per "Exception mapping". |
+| `list_claude_models` | one probe, no prompt | Raises the readiness codes. |
+| `get_claude_rate_limits` | no | `()` before any event. Ordered by `ClaudeRateLimitType` declaration order. |
+| `spawn_claude_session` | yes (async) | Host preconditions run in this order: `input.empty`, `not_installed`, `session_busy` (cap, then id), `usage_limited` (D-8). Process preconditions are listed in "Turn classification". |
+| `continue_claude_session` | yes (async) | After the `input.empty` check on `prompt`, info is read in a thread (`session_not_found`), then busy and cwd (D-27) are checked, and the remaining spawn preconditions follow with no await between the busy check and registration. The request is the given one, or a default `ClaudeSpawnRequest()`, with `prompt`, `cwd` and `resume=session_id` set, and `session_id`, `fork_session`, `continue_conversation`, `resume_session_at` and `resume_drops_turn` cleared. |
+| `fork_claude_session` | no | Offline `fork_session(session_id, None, up_to_message_id or None, title or None)` in a thread, returning the `session_id` of the SDK's `ForkSessionResult`. `FileNotFoundError` maps to `session_not_found`. `ValueError` maps to `configuration.invalid_argument`. Allowed while the source is live (R3: "steer it, or fork it"). |
+| `list_claude_sessions` | no | `directory=""` means all projects. `include_worktrees` applies only with a directory. Results are most recent first (the SDK sorts by `last_modified` descending). |
+| `get_claude_session_info` | no | `None` maps to `session_not_found` (EC-29). |
+| `get_claude_session_messages` | no | EC-30. |
+| `wait_claude_turn` | no | INV-9. `timeout_seconds` is a finite number above zero. |
+| `get_claude_turn_result` | no | The current snapshot. |
+| `steer_claude_session` | no (uses the turn's) | INV-18. If `interrupt()` raises, the pending message is withdrawn (if not yet sent) and the mapped error is raised; the turn continues. |
+| `interrupt_claude_turn` | no | QUEUED: finishes INTERRUPTED with no prompt. RUNNING: discards a pending steer, then `interrupt()`; if that raises, the client is disconnected, and either way the turn ends INTERRUPTED. Terminal: no-op. |
+| `track_claude_session_usage` | no | INV-20. |
+| `launch_claude_subagents` | yes, N (async) | `prompts` is a non-empty tuple of non-empty text. `limit` is a count. Every prompt becomes `replace(request, prompt=p)` with a fresh `uuid4` session id, unless the template is a plain resume (refused when N>1). EC-33 and INV-6 apply. A per-launch `asyncio.Semaphore(limit)` gates connects. |
+
+**Turn classification.** `ClaudeFailureMapper.classify_turn` checks the conditions in this order; the first match wins (D-20). "The result" below always means the prompt's own latest result: a `ResultMessage` whose `origin` is absent or `human` (D-28).
+
+**Process preconditions** run after connect and before any prompt:
+
+1. A version below `CLAUDE_MIN_CLI_VERSION`, or absent: `claude.version_unsupported`.
+2. `betas` or `bare` set while the account's `apiKeySource` is absent or `none`: `claude.auth_mode_unsupported`.
+
+**Stops the host caused:**
+
+3. The time budget fired: `claude.budget_exhausted`. The watchdog sets only its own flag, never the caller-interrupt flag, so its stop is never reported as INTERRUPTED.
+4. An interrupt requested by the caller or by close: status INTERRUPTED, no failure.
+
+**What the latest result and the stream reported:**
+
+5. A window went `rejected` during the turn, or an assistant error `rate_limit`: `claude.usage_limited`.
+6. Assistant error `billing_error`: `claude.billing_error`.
+7. Assistant error `authentication_failed`: `claude.not_signed_in`.
+8. Assistant error `model_not_found`: `claude.model_unknown`.
+9. Result subtype `error_max_budget_usd` or `error_max_turns`: `claude.budget_exhausted`.
+10. Result subtype `error_max_structured_output_retries`, or `output_schema` set and `structured_output` missing on a success: `claude.schema_violation`.
+11. Any other result with `is_error`: `claude.api_error`. The reason names `subtype`, `terminal_reason`, `api_error_status` and the assistant error kind when one was seen (for example `overloaded` or `account_on_hold`); all are CLI vocabulary values or numbers, never message text.
+12. The stream ended or the process exited without a result: the failure mapped from the exception that ended the stream (see "Exception mapping"), or `claude.process_exited` when the stream simply ended.
+13. Success with non-empty `permission_denials`: status COMPLETED with failure `claude.permission_denied`.
+14. Otherwise: COMPLETED with no failure.
+
+**Exception mapping.** `ClaudeFailureMapper.from_exception` has one guarded `try` and typed branches, and never catches `BaseException`.
+
+| SDK exception | Code |
+|---|---|
+| `CLINotFoundError` | `claude.not_installed` |
+| `ResultError` | by its subtype, per rows 9–11 |
+| `ProcessError` or `CLIConnectionError` | `claude.process_exited` |
+| `CLIJSONDecodeError`, and any other `ClaudeSDKError` (including the unexported `MessageParseError`) | `claude.protocol_mismatch` |
+| builtin `ValueError` or `TypeError` raised while building options or starting the process (the SDK's argument rejections) | `configuration.invalid_argument` |
+| any other `Exception`, including the SDK's bare control-protocol `Exception`s | `claude.protocol_mismatch` |
+
+The reason text names the operation and the exception class only.
+
+**Failure codes** (new `FailureCode` members, values `claude.<problem>`), with each code's next step as R3 gives it:
+
+| Member | Value | Next step (from R3, stored in `CLAUDE_FAILURE_NEXT_STEPS`) |
+|---|---|---|
+| CLAUDE_SDK_UNAVAILABLE | claude.sdk_unavailable | Install the extra: pip install "vidbyte-sdk[claude]". |
+| CLAUDE_NOT_INSTALLED | claude.not_installed | Install Claude Code, or pass cli_path to ClaudeHost. |
+| CLAUDE_VERSION_UNSUPPORTED | claude.version_unsupported | Run claude update. |
+| CLAUDE_NOT_SIGNED_IN | claude.not_signed_in | Run claude auth login. |
+| CLAUDE_AUTH_MODE_UNSUPPORTED | claude.auth_mode_unsupported | Switch login type: betas and bare need an API key login. |
+| CLAUDE_USAGE_LIMITED | claude.usage_limited | Wait until the reset time, or use an API key. |
+| CLAUDE_BILLING_ERROR | claude.billing_error | Add credits. |
+| CLAUDE_MODEL_UNKNOWN | claude.model_unknown | Pick a model from list_claude_models. |
+| CLAUDE_SESSION_NOT_FOUND | claude.session_not_found | Find the session with list_claude_sessions. |
+| CLAUDE_SESSION_BUSY | claude.session_busy | Steer it, or fork it. |
+| CLAUDE_BUDGET_EXHAUSTED | claude.budget_exhausted | Raise the budget, or split the work. |
+| CLAUDE_API_ERROR | claude.api_error | Retry with backoff. |
+| CLAUDE_PERMISSION_DENIED | claude.permission_denied | Allow the tool, or change the permission mode. |
+| CLAUDE_SCHEMA_VIOLATION | claude.schema_violation | Run a repair turn using the raw text. |
+| CLAUDE_PROCESS_EXITED | claude.process_exited | Respawn, then resume by id. |
+| CLAUDE_PROTOCOL_MISMATCH | claude.protocol_mismatch | Align the SDK and CLI versions. |
+
+The cap refusal reuses `claude.session_busy`, with `CLAUDE_LIVE_CAP_NEXT_STEP` ("Wait for a running session to finish, or interrupt one, then spawn again."). R3's `mcp_server_failed`, `checkpointing_disabled` and `sandbox_not_ready` are not added, because no ★ path can detect them.
+
+**Model-facing tools** (`ClaudeTools` order). Every input schema is `{"type": "object", "additionalProperties": false, ...}`, and each description and parameter description runs 4–5 general sentences with no examples. Handles cross the model boundary as `handle_id` (a string), which `ClaudeHost.get_handle` resolves.
+
+| # in set | Class | Tool name | Permission | Parameters (required in bold) |
+|---|---|---|---|---|
+| a | CheckClaudeReadyTool | check_claude_ready | READ | none |
+| b | ListClaudeModelsTool | list_claude_models | READ | none |
+| c | GetClaudeRateLimitsTool | get_claude_rate_limits | READ | none |
+| d | SpawnClaudeSessionTool | spawn_claude_session | WRITE | **prompt** |
+| e | ContinueClaudeSessionTool | continue_claude_session | WRITE | **session_id**, **prompt** |
+| f | ForkClaudeSessionTool | fork_claude_session | WRITE | **session_id**, up_to_message_id, title |
+| g | LaunchClaudeSubagentsTool | launch_claude_subagents | WRITE | **prompts** (array of strings), **limit** |
+| h | ListClaudeSessionsTool | list_claude_sessions | READ | directory, limit, offset, include_worktrees |
+| i | GetClaudeSessionInfoTool | get_claude_session_info | READ | **session_id** |
+| j | GetClaudeSessionMessagesTool | get_claude_session_messages | READ | **session_id**, limit, offset |
+| k | WaitClaudeTurnTool | wait_claude_turn | READ | **handle_id**, **timeout_seconds** |
+| l | GetClaudeTurnResultTool | get_claude_turn_result | READ | **handle_id** |
+| m | SteerClaudeSessionTool | steer_claude_session | WRITE | **handle_id**, **message** |
+| n | InterruptClaudeTurnTool | interrupt_claude_turn | WRITE | **handle_id** |
+| o | TrackClaudeSessionUsageTool | track_claude_session_usage | READ | **handle_id** |
+
+How the tools respond:
+- **Success:** output is the JSON rendering of the returned record, or a list of records, via `dataclasses.asdict`, with enums as their values. Handles render as `{"handle_id", "session_id"}`.
+- **Fork:** output is `{"session_id": <new id>}`.
+- **Steer:** output is `{"steered": true}`.
+- **Errors:** INV-13.
+
+**Field mapping** (`ClaudeSpawnRequest`, in declaration order). Each row gives the field's type and default, then the claude-agent-sdk 0.2.165 surface it maps to. "Omitted" means the SDK option is left at its default when the field is at its default.
+
+| Field | Type, default | SDK surface | Notes |
+|---|---|---|---|
+| prompt | `str`, `""` | `client.query(str)` | Spawn requires non-empty (`input.empty`). |
+| images | `tuple[ClaudeImage, ...]`, `()` | `client.query(AsyncIterable[dict])` with content blocks `[{"type":"text"}, {"type":"image","source":{"type":"base64","media_type","data"}}]` | R3's "content blocks with images" (A-1). |
+| files | `tuple[str, ...]`, `()` | `extra_args["file"]` (`--file`, verified) | At most 1 (D-9). |
+| cwd | `str`, `""` | `cwd` | |
+| add_dirs | `tuple[str, ...]`, `()` | `add_dirs` | |
+| model | `str`, `""` | `model` | |
+| fallback_model | `tuple[str, ...]`, `()` | `fallback_model` = comma-joined | D-11. |
+| effort | `ClaudeEffort`, PROVIDER_DEFAULT | `effort` | |
+| thinking | `ClaudeThinking \| None`, `None` | `thinking` = `{"type": mode, "budget_tokens"?, "display"?}` | The deprecated `max_thinking_tokens` is never used. |
+| betas | `tuple[ClaudeBeta, ...]`, `()` | `betas` | API-key logins only (EC-6). |
+| system_prompt | `ClaudeSystemPrompt`, PRESET with no text | PRESET is `{"type":"preset","preset":"claude_code","append"?}`. REPLACE is `{"type":"custom","prompt"}`. FILE is `{"type":"file","path"}`. | D-10, INV-17. |
+| exclude_dynamic_system_prompt_sections | `bool`, `False` | preset `exclude_dynamic_sections` | PRESET only. |
+| system_prompt_snapshot | `bool \| None`, `None` | preset or custom `snapshot` | Not with FILE. |
+| builtin_tools | `tuple[str, ...] \| None`, `None` | `tools` (list) | `()` means no built-in tools. |
+| allowed_tools | `tuple[str, ...]`, `()` | `allowed_tools`, plus D-12's auto-allowed names | |
+| disallowed_tools | `tuple[str, ...]`, `()` | `disallowed_tools` | |
+| permission_mode | `ClaudePermissionMode`, PROVIDER_DEFAULT | `permission_mode` | |
+| permission_prompts | `ClaudePermissionPrompts`, NONE | HOST gives `can_use_tool` (the SDK then routes prompts over stdio). NONE gives no prompt tool. | Consistency is validated (§9.1). |
+| restricted | `bool`, `False` | `extra_args["restricted"]=None` | Verified flag. |
+| sandbox | `ClaudeSandbox \| None`, `None` | `sandbox` = `{"enabled","autoAllowBashIfSandboxed"?,"excludedCommands"?,"network":{"allowedDomains"?,"deniedDomains"?}}` | EC-43. |
+| can_use_tool | `Callable[..., Awaitable[object]] \| None`, `None` | `can_use_tool` (pass-through) | D-24. |
+| hooks | `tuple[ClaudeHookMatcher, ...]`, `()` | `hooks` = `{event: [HookMatcher(matcher or None, list(callbacks), timeout_seconds)]}` | D-24. |
+| tools | `tuple[BaseTool, ...]`, `()` | one `mcp_servers["vidbyte"]` SDK server | D-12. |
+| mcp_servers | `tuple[ClaudeMcpServer, ...]`, `()` | `mcp_servers` dict: `{"type":"stdio","command","args","env"}` or `{"type":"sse"\|"http","url","headers"}` | |
+| strict_mcp_config | `bool`, `False` | `strict_mcp_config` | |
+| skills | `tuple[str, ...] \| None`, `None` | `skills` (list) | The SDK's `"all"` is not offered; `None` is the SDK default. |
+| plugins | `tuple[str, ...]`, `()` | a path (folder or `.zip`) becomes `plugins=[{"type":"local","path"}]`; a URL becomes `extra_args["plugin-url"]` | At most 1 URL (D-9). |
+| agents | `tuple[ClaudeAgentDefinition, ...]`, `()` | `agents` = `{name: AgentDefinition(...)}` with camelCase SDK fields | `mcp_servers` takes names only, and `effort` takes enum values only. |
+| main_agent | `str`, `""` | `extra_args["agent"]` | Verified flag. |
+| setting_sources | `tuple[ClaudeSettingSource, ...] \| None`, `None` | `setting_sources` | `None` loads all and `()` loads none; `project` is needed for CLAUDE.md. |
+| settings | `str`, `""` | `settings` | A path or JSON. The SDK merges `sandbox` into it. |
+| bare | `bool`, `False` | `extra_args["bare"]=None` | EC-6. |
+| safe_mode | `bool`, `False` | `extra_args["safe-mode"]=None` | Verified flag. |
+| max_turns | `int \| None`, `None` | `max_turns` | |
+| max_budget_usd | `float \| None`, `None` | `max_budget_usd` | Counts spend since this query (DTS). |
+| task_budget | `int \| None`, `None` | `task_budget={"total": n}` | |
+| autocompact | `int \| None`, `None` | `extra_args["autocompact"]=str(n)` | 100,000–1,000,000 (A-4). |
+| max_output_tokens | `int \| None`, `None` | env `CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(n)` | Verified name (A-5). |
+| session_id | `str`, `""` | `session_id` | A UUID; otherwise a fresh `uuid4` from the host (§9.1). |
+| name | `str`, `""` | `extra_args["name"]` | Verified flag. |
+| resume | `str`, `""` | `resume` | |
+| continue_conversation | `bool`, `False` | `continue_conversation` | EC-34. |
+| fork_session | `bool`, `False` | `fork_session` | |
+| resume_session_at | `str`, `""` | `resume_session_at` | |
+| resume_drops_turn | `str`, `""` | `resume_drops_turn` | A prompt UUID. |
+| persist_session | `bool`, `True` | `False` becomes `extra_args["no-session-persistence"]=None` | A-3. |
+| enable_file_checkpointing | `bool`, `False` | `enable_file_checkpointing` | |
+| session_store | `object \| None`, `None` | `session_store` (pass-through) | Shape check (§9.1). |
+| worktree | `str \| None`, `None` | `None` passes nothing. `""` becomes `extra_args["worktree"]=None` (auto-named). Text becomes `extra_args["worktree"]=text`. | A-12. |
+| output_schema | `Mapping[str, Any] \| None`, `None` | `output_format={"type":"json_schema","schema":...}` | |
+| include_partial_messages | `bool`, `False` | `include_partial_messages` | Passed through; no ★ function surfaces those messages. |
+| include_hook_events | `bool`, `False` | `include_hook_events` | Same as above. |
+| forward_subagent_text | `bool`, `False` | `forward_subagent_text` | Same as above. |
+| cli_path | `str`, `""` | `cli_path` = this, else the host's resolved path | INV-10. |
+| env | `Mapping[str, str]`, `{}` | `env` (plus `max_output_tokens`) | EC-38. |
+| user | `str`, `""` | `user` | POSIX only (EC-44). |
+| load_timeout_ms | `int \| None`, `None` | `load_timeout_ms` | The session_store load timeout, not process start (code-map §4.1 #6). |
+| timeout_seconds | `float \| None`, `None` | none (Vidbyte watchdog) | D-4. |
+
+### 9.3 Configuration and flags
+| Variable / key | Required | Default | Purpose | Lives in |
+|---|---|---|---|---|
+| extra `claude` | only for ClaudeHost users | not installed | Installs `claude-agent-sdk>=0.2.165,<0.3.0`. | package metadata, optional-dependencies table |
+| `ClaudeHost(cli_path=)` | no | `""`, then the installed `claude` on PATH | Choose the CLI binary. | `ClaudeHostSettings` |
+| `ClaudeHost(max_live_sessions=)` | no | `None` (no cap) | Runaway guard (D-22). | `ClaudeHostSettings` |
+| `CLAUDE_MIN_CLI_VERSION` | n/a | `"2.1.296"` | Minimum CLI (D-6). | `vidbyte.lib.constants.claude` |
+| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` (env, set on the child only) | no | unset | Carries `max_output_tokens`. Vidbyte never reads it from its own environment. | child process env |
+
+### 9.4 Migrations and compatibility
+
+N/A for data: nothing is persisted by Vidbyte, and the SDK writes only Claude's own transcript files.
+
+The public contract only grows: new subpackages, new enum exports, a new error export, new builtins and toolset exports, and new `FailureCode` members. The generated public-API contract is unchanged because no root export is added (NG-4). Existing callers see no change (INV-23 to INV-26).
+
+The second of the two parallel PRs to merge catches up by merging `origin/main`. Expected conflicts are limited to the insert-only shared files (request.md §C).
+
+## §10 Security and tenancy
+| ID | Attacker | Shortest path to harm | Control | Where the control sits |
+|---|---|---|---|---|
+| T-1 | Careless user | An agent loops `spawn_claude_session` or launches a large N, draining the user's shared plan window and starting many 260 MB processes. | WRITE tools are refused under the default `PermissionPolicy` (INV-14). `max_live_sessions` caps live turns (INV-5). A launch is all-or-none (INV-6). Spawns are refused while a window is rejected (D-8). | Inside `ClaudeHost`'s registry, before any process starts, and in `ToolExecutor`'s policy check |
+| T-2 | Hostile user (prompt injection steering the calling model) | It makes the model spawn a session with `bypassPermissions`, a looser sandbox, a new `cli_path` or a larger budget, or read other projects' transcripts. | Spawn, continue and launch tools accept only prompts, ids and limits. Every permission, sandbox, budget and path field is fixed by the developer's base request (D-13). `restricted` is available, and refuses `bypassPermissions` in the CLI itself. The history tools can still read any project (accepted limitation; Q-3). | In the tool schemas (`additionalProperties: false`) and `ClaudeTools`' bound request; the CLI enforces `--restricted` |
+| T-3 | Compromised teammate / leaked credential | Secrets passed in `env` or MCP `headers` leak through error messages, tool outputs or logs that an agent or MCP client can read. | INV-12: reasons never carry raw exception text or `env`/`headers` values. Validation names keys, never values. Tool outputs render only result records, never the request. | In `ClaudeFailureMapper`, the records' `__post_init__` messages, and `_ClaudeBuiltinTool`'s rendering |
+| T-4 | Another tenant | Another agent sharing a host waits on, steers or interrupts a turn it did not start. Or an MCP client of `McpStudioServer` calls WRITE tools, which that server runs without a `PermissionPolicy` (code-map §4.1 #13). | One host per agent (D-14), so handle ids from another host are unknown (`session_not_found`). Handle ids are random `uuid4`s. The ungated MCP path is an accepted limitation (Q-2). | In the `ClaudeHost` registry lookup (`get_handle`) |
+
+- **Auth:** no new endpoint or command is added. Claude authentication stays with the user's CLI login or API key, and readiness reports it.
+- **Tenant isolation:** each host's registry is per instance; there is no shared module-level state.
+- **Secrets:** the request record holds `env` and `headers` only to pass them to the child process, following the repo convention that public details exclude secrets (the `vidbyte.lib.errors.base` module header, KNOWN EDGE CASES).
+
+## §11 Codebase grounding
+
+- **Rules read:**
+  - `AGENTS.md`, in full. The sections that bind:
+    - Repository Map (REPO_MAP is binding for placement; `docs/` is opaque; the full gate before calling work complete);
+    - the five coding principles;
+    - Placement Rules (dataclasses in `vidbyte/lib/dataclasses/<domain>.py`; enums in `vidbyte/lib/enums/<domain>.py`, exported).
+  - `CLAUDE.md` is `@AGENTS.md`. There are no nested rule files.
+  - Folder READMEs: `vidbyte/harnesses/README.md` ("Key modules" list, :167-178). None of the touched folders has a "Notes for agents" section (code-map §1.1).
+- **Field-guide entries applied** (`C:/Users/422mi/vidbyte-repos/field-guide/vidbyte-sdk/`):
+  - `model-facing-tool-contracts.md`: give the tool and every parameter a 4–5 sentence general description with no examples, and make categorical vocabularies `str, Enum`. Its "6–9 fields per event" applies to event-recording tools, not these operation tools, whose parameters are R3's signatures (hard rule 9).
+  - `strict-config-dataclasses.md`: a thin adapter over one validated frozen record; bounds in `lib/constants` with a feature prefix; harness bridge functions take lib records; generous vendor-derived caps.
+  - `class-bound-helpers.md`: static helper classes; one function per translated surface; keep Vidbyte translation apart from SDK serialization; a callback that must not raise uses one `try`.
+  - `provider-api-contracts.md`: mirror the vendor's own reference shapes; one guarded `try` with typed branches; never catch `BaseException`.
+  - `blocking-lint-invariants.md`: the full A003 packet; S060 and S039 in lib records; S012 (a call named `request` needs an explicit timeout keyword, so name no method `request`); TYPE_CHECKING plus a shape check for higher-layer objects in lib records; A007 constants.
+  - `comment-format.md`: wrap comments at 72 columns or fewer, directly above the code; `# @intent <slug>` on its own first line within 20 lines of the `def`.
+  - `prebuilt-agents.md`: a `<Thing>Tools(Tools)` toolset with a static interface; never add SDK CLI commands.
+  - `agents-md-map.md`: REPO_MAP folder descriptions are 4–5 general sentences with no file, subfolder or command names.
+  - `cli-backed-source-integrations.md`: model inputs never contain command strings; tool wrappers stay thin.
+  - `local-ci-verification.md`: run the gate from a worktree with `PYTHONPATH`, then the package stage without it; check which `vidbyte` is imported.
+  - `review-scope.md`: keep the PR to its slice.
+  - `runtime-boundaries.md` and `diagnostic-context.md`: read; no new runtime type, and no lint metadata is touched.
+- **Stack (from manifests):**
+  - Python ≥3.11; CI runs 3.11 and 3.12 (`.github/workflows/ci.yml:21-23`).
+  - Runtime dependencies: `pydantic>=2,<3`, `httpx>=0.27`, `PyYAML>=6,<7` (`pyproject.toml:35-39`).
+  - Tests: pytest 8.3.5 with pytest-asyncio 1.3.0 (`pyproject.toml:45-52`).
+  - mypy 2.3.1 and ruff 0.16.4 (dev extra).
+  - New optional dependency: claude-agent-sdk 0.2.165 (bundles CLI 2.1.294; requires `anyio>=4`, `sniffio`, `mcp>=1.23,<3`, `jsonschema>=4.20`).
+  - User machine: `claude` 2.1.296 at `C:/Users/422mi/.local/bin/claude.exe`.
+- **Commands (exact, from `context/code-map.md` §1.3 and §3.4, and AGENTS.md):**
+  - Install: `python -m pip install -e ".[dev]"` (code-map §1.3). This run's venv `C:/Users/422mi/vidbyte-repos/.venvs/sdk-claude-host` gets the same install with the `claude` extra added once row 29 exists (pipeline.md "Environments"), so the optional real-SDK tests can run locally.
+  - Lint: `python lint/run.py`, whose last line must be `SDK-LINT: PASS`. One rule: `python lint/run.py --rule A001`. Import order across the tree: `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache`.
+  - Typecheck: mypy runs inside lint as S009 (`lint/mypy.ini`). There is no separate command.
+  - Test (focused): `PYTHONPATH=$(pwd) python -m pytest tests/test_claude_<name>.py` (code-map §3.4; substitute the file, or the pack directory `tests/features/claude_host`). Area with neighbours: `PYTHONPATH=$(pwd) python -m pytest tests/test_claude_*.py tests/test_session_failures.py tests/test_mcp_studio_server.py tests/test_codex_tools.py`.
+  - Test (full): `PYTHONPATH=$(pwd) python -m pytest`.
+  - Full local gate:
+    - AGENTS.md: `python scripts/run_ci.py`.
+    - From this worktree: `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`, then `python scripts/run_ci.py --stage package` with no PYTHONPATH.
+    - Check the import path first: `PYTHONPATH=$(pwd) python -c "import vidbyte,inspect;print(inspect.getfile(vidbyte))"`.
+  - Semgrep (separate workflow, not in run_ci): `git add -A`, then `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte`. Use semgrep==1.170.1 from `C:/Users/422mi/vidbyte-repos/.venvs/semgrep-1.170.1`.
+  - Before trusting lint during a merge: `git ls-files -u | wc -l` must print 0.
+  - Remote-only checks: none run automatically. `ci.yml` and `static-policy.yml` are `workflow_dispatch` only (code-map §1.4), so semgrep must be run locally.
+- **Baseline on clean `origin/main`:** not run at S1, because the briefing forbids running gates. code-map §4.3 records that per-rule lint slack is unverified. A001 has no headroom (baseline 643), so every new tracked `.py` file needs the full header. The first gate run at S2 or S3 must record any pre-existing failures before changes.
+- **Directory layout relevant to this change (new in bold):**
+  ```
+  vidbyte/
+    harnesses/  README.md  __init__.py  execution.py  stores/
+      **native/__init__.py**                       (shared, byte-exact)
+      **native/claude/** __init__ host sdk options failures session history probe tool_server
+    lib/
+      constants/ **claude.py**   codex.py
+      dataclasses/ **claude.py  claude_host.py**   codex.py  security.py  tools.py
+      enums/ __init__.py  **claude.py**  codex.py  failure.py
+      errors/ __init__.py  base.py
+    tools/
+      builtins/ __init__.py  **claude/** __init__ _base descriptions readiness sessions history turns   sessions/  pause.py
+      toolsets/ __init__.py  **claude.py**  coding.py
+  pyproject.toml  REPO_MAP.md
+  tests/features/claude_host/   (S2)
+  ```
+- **Nearest sibling feature (the template to copy):** `vidbyte/agents/codex/`, read as a pattern only (request.md §C). Copy:
+  - the lazy import seam `transport.py:CodexTransport._load_sdk` (:215-259);
+  - the Protocols `_CodexClient` and `_CodexThread` (:39-48);
+  - the tool bridge `tools.py:CodexToolBridge` and `CodexToolCallHandler` (:76-125);
+  - the Semaphore comment at `agent.py:82-86`;
+  - the records in `vidbyte/lib/dataclasses/codex.py`: `CodexSdkTypes` (:1186-1203) and the `TYPE_CHECKING` block (:43-52);
+  - the enum header and sentinel style in `vidbyte/lib/enums/codex.py`;
+  - the constants style in `vidbyte/lib/constants/codex.py` (`CODEX_SDK_EXTRA` :50).
+
+  For tools, the structural sibling is `vidbyte/tools/builtins/sessions/`. For the toolset, it is `vidbyte/tools/toolsets/coding.py`.
+- **Reusable pieces:**
+  - `vidbyte/lib/tools/formatter.py:ToolsFormatter.to_anthropic_tool` (:111-118): the JSON schema for each custom tool.
+  - `vidbyte/tools/executor.py:ToolExecutor.execute_call` (:43-76): runs a custom tool with validation and exception wrapping.
+  - `vidbyte/tools/catalog.py:Tools` (:27-42): the toolset base, which raises `ToolRegistrationError` on duplicate names.
+  - `vidbyte/lib/dataclasses/security.py:PermissionPolicy` (:30-55; `allow_all()` :52): `allow_all()` for the inner executor, and the default for INV-14.
+  - `vidbyte/lib/dataclasses/tools.py:ToolResult.success` and `ToolResult.error` (:296-325): the tool results.
+  - `vidbyte/lib/enums/failure.py:FailureCode.from_exception` (:159-174): reads `failure_code` from `ClaudeOperationError`.
+  - `vidbyte/lib/errors/base.py:VidbyteSdkError` (:59): the base of `ClaudeOperationError`.
+  - `vidbyte/lib/errors/base.py:ConfigurationError` (:235): `ClaudeOperationError` is inserted directly before it (row 25).
+  - `vidbyte/lib/errors/base.py:CodexAgentError` (:129-154): the A003 packet shape `ClaudeOperationError` copies, with vendor documentation URLs in `related_docs`.
+  - `vidbyte/mcp_server/server/core.py:McpStudioServer(tools=...)` (:68,81): serves `ClaudeTools` unchanged.
+- **Code-style exemplar** (`vidbyte/tools/toolsets/coding.py:47-57`):
+  ```python
+  class CodingAgentTools(Tools):
+      """Catalog of the seven tools a CodingAgent starts with, all over one root folder."""
+
+      def __init__(self, settings: CodingAgentSettings) -> None:
+          # Give the one supplied key to its fetch provider, or use the
+          # keyless direct HTTP fetch when the caller supplied no key.
+          fetch_tool = self.authenticate_tools(settings)
+
+          # Put bash and the five file and search tools over the root
+          # folder first, and the fetch tool last.
+          super().__init__(self.get_tools(Path(settings.root_dir), fetch_tool, settings.max_rewrite_lines))
+  ```
+- **Domain glossary:**
+  - **host:** `ClaudeHost`, the owner of processes and handles.
+  - **handle:** `ClaudeSessionHandle`, returned at once by a spawn.
+  - **turn:** one prompt through to its `ResultMessage`.
+  - **session:** one transcript.
+  - **live:** a handle in status QUEUED or RUNNING.
+  - **probe:** a connect with no prompt, used to read initialize.
+  - **pump:** the task that drives one turn.
+  - **★ / ⚑ / R / W:** the R3 legend (request.md §C "Terminology").
+  - **native:** the vendor's coding-agent executable.
+- **Prior specs / design docs / ADRs that constrain this:** request.md and code-map.md only. The briefing names no other document, and `docs/` is opaque.
+- **Conflicts between house style and AGENTS.md** (the repository wins):
+  1. `vidbyte-gates.md` says the lint line reads `AGENT-LINT: PASS` and that semgrep is part of `run_ci.py`. The repo prints `SDK-LINT: PASS` (`lint/core/report.py:58`), and semgrep runs only in `static-policy.yml`.
+  2. The house style's agentic practice of a README per folder conflicts with the repo, which has no README rule (A009 only caps size), and with the request.md §C contract, which forbids `native/README.md`.
+  3. The house style's "~40–50 lines per function" is compatible with AGENTS.md, which states no number.
+  4. The field guide's "6–9 fields per event" is not applied to operation tools (rule 9).
+
+**Evidence for the CLI flags and environment variable used in D-9.** These were found by byte-searching the user's `claude.exe` 2.1.296 help strings, read-only; the binary was never executed.
+- `--file <specs...>` "File resources to download at startup. Format: file_id:relative_path".
+- `--restricted`.
+- `--autocompact <auto|tokens>` "(auto, or 100k–1M tokens)".
+- `-n, --name <name>`.
+- `--agent <agent>`.
+- `--betas <betas...>` "API key users only".
+- `--fallback-model` "Accepts a comma-separated list to try each in order".
+- `--plugin-url <url>` "repeatable".
+- `--plugin-dir` (a folder or .zip).
+- `--safe-mode`.
+- `--bare` ("Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via --settings").
+- `--no-session-persistence` "(only works with --print)".
+- `-w, --worktree [name]`.
+- `CLAUDE_CODE_MAX_OUTPUT_TOKENS` (8 occurrences, including "CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable").
+- The initialize schema field `claude_code_version` ("Claude Code version of the process that runs this session's turns").
+
+SDK `_build_command` emits each `extra_args` entry as `--flag` (value `None`), as `--flag=value` (value starting with `-`), or as `--flag value`.
+
+## §12 Work breakdown — everything this PR has to do
+
+### 12.1 Feature list
+| ID | Feature (capability this PR adds) | Serves | Visible to |
+|---|---|---|---|
+| W-1 | Host lifecycle: construct, enter (resolve CLI, bind loop), `get_handle`, `aclose` | FR-1, AC-1, AC-21, AC-35 | developer |
+| W-2 | Readiness and models through the initialize probe | FR-2, FR-3, AC-22, AC-34 | developer, agent |
+| W-3 | Rate-limit windows recorded from streams, with the spawn precheck | FR-4, AC-16 | developer, agent |
+| W-4 | Spawn and the per-turn pump: preconditions, query, read, classify, disconnect, time budget, `hooks_applied` | FR-5, FR-25, AC-3, AC-22, AC-25, AC-28, AC-30, AC-31, AC-36 | developer, agent |
+| W-5 | Continue by resume, with the busy and cwd guards | FR-6, AC-7 | developer, agent |
+| W-6 | Offline fork | FR-7, AC-8 | developer, agent |
+| W-7 | History reads off the loop | FR-8, FR-9, FR-10, AC-14 | developer, agent |
+| W-8 | Wait and result snapshots | FR-11, AC-4 | developer, agent |
+| W-9 | Steer (D-3) | FR-12, AC-9 | developer, agent |
+| W-10 | Interrupt | FR-13, AC-10 | developer, agent |
+| W-11 | Usage snapshot | FR-14, AC-15 | developer, agent |
+| W-12 | Launch N with a limit | FR-15, AC-11 | developer, agent |
+| W-13 | `ClaudeSpawnRequest` with validation and translation | FR-16, AC-17, AC-18 | developer |
+| W-14 | Error vocabulary: codes, class, mapper, next steps | FR-17, AC-2, AC-5, AC-6, AC-23, AC-24 | developer, agent |
+| W-15 | Custom-tool MCP server | FR-18, AC-20 | developer |
+| W-16 | Fifteen model-facing tools | FR-19, AC-12, AC-26 | agent |
+| W-17 | `ClaudeTools` toolset (also servable over MCP) | FR-20, AC-13, AC-29 | developer, agent |
+| W-18 | `claude` extra | FR-21, AC-33 | developer |
+| W-19 | Shared `native` marker | FR-22, AC-19 | maintainers |
+| W-20 | Enum exports | FR-23, AC-27 | developer |
+| W-21 | REPO_MAP and README entries | FR-24, AC-32 | maintainers, agents |
+
+### 12.2 Folder and module map
+| Folder | Kind of code (per repo rules) | New? | README / header obligation | May import from |
+|---|---|---|---|---|
+| `vidbyte/harnesses/native/` | parent package of native hosts | yes | A001 header (contract bytes). No README (contract). | nothing |
+| `vidbyte/harnesses/native/claude/` | orchestration-layer host service | yes | A001 header in every module. No README (no repo rule; NG-8). | `vidbyte.lib.*`, `vidbyte.tools.executor`, `vidbyte.tools.catalog`, `vidbyte.tools.base` (type only), and `claude_agent_sdk` only inside `ClaudeSdkLoader.load` |
+| `vidbyte/lib/dataclasses/` | records (Placement Rules) | no | A001 header in the new modules | `vidbyte.lib.*` only. Higher layers only under `TYPE_CHECKING`. |
+| `vidbyte/lib/enums/` | enums (Placement Rules) | no | A001 header; export from `__init__` | `enum` only |
+| `vidbyte/lib/constants/` | constants (the Codex precedent; AGENTS.md:69 convention) | no | A001 header | `vidbyte.lib.*` |
+| `vidbyte/lib/errors/` | typed errors (A003 scope) | no | existing header | stdlib, `vidbyte.lib.*` |
+| `vidbyte/tools/builtins/claude/` | model-facing builtin tools | yes | A001 header in every module, including `descriptions.py` | `vidbyte.lib.*`, `vidbyte.tools.base`, `vidbyte.tools.types`. `vidbyte.harnesses.native.claude` only under `TYPE_CHECKING` (code-map §4.1 #15). |
+| `vidbyte/tools/toolsets/` | prebuilt tool catalogs | no | A001 header in the new module | `vidbyte.lib.*`, `vidbyte.tools.*`. The host only under `TYPE_CHECKING`. |
+| repo root | `pyproject.toml`, `REPO_MAP.md` | no | REPO_MAP entry rules (agents-md-map) | n/a |
+
+### 12.3 File-by-file actions
+
+Test files are created by the S2 test author under the §13 layout and are not rows here. Every new `.py` file opens with the seven A001 fields (PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MODIFICATION PATTERNS, KNOWN EDGE CASES, RELATED DOCS, TESTS) in the form of `vidbyte/tools/toolsets/coding.py:1-12`. In the table, "TESTS: pack" means the line `TESTS: tests/features/claude_host/`.
+
+| # | Action | Path | Kind of code | What exactly changes (symbols, signatures, exports, registrations) | Governing standard (AGENTS.md § / placement rule / field-guide file / lint rule ID) | Serves | Phase |
+|---|---|---|---|---|---|---|---|
+| 1 | CREATE | `vidbyte/harnesses/native/__init__.py` | package marker | Exactly the request.md:175-184 bytes (LF, final newline; SHA-256 `0374a2c8…942f497a`). No imports, no `__all__`. If a gate rejects these bytes, report BLOCKED with the rule ID instead of editing them. | request.md §C shared-file contract; A001 (the bytes carry all seven fields) | FR-22, AC-19, W-19 | P2 |
+| 2 | CREATE | `vidbyte/harnesses/native/claude/__init__.py` | package init | A001 header ("TESTS: pack"). `from vidbyte.harnesses.native.claude.host import ClaudeHost`; `__all__ = ["ClaudeHost"]`. Imports nothing from `claude_agent_sdk`. | A001; S015; S051 (I001); S040; INV-1 | FR-1, AC-1, W-1 | P2 |
+| 3 | CREATE | `vidbyte/harnesses/native/claude/host.py` | service (main class) | `class ClaudeHost` with every §8.5 method. **Constructor:** builds `ClaudeHostSettings`. **`__aenter__`:** records `asyncio.get_running_loop()` and resolves the CLI path with `shutil.which(CLAUDE_CLI_NAME) or ""`. **Private registry state:** handles, live session ids, rate windows. **Helpers:** `_guard()` (loop, entered, closed → `action.precondition_failed`), `_admit(requests)` (cap, busy and rate checks plus synchronous registration, with no await inside; all-or-none for launch), `_session(handle)`. **Each ★ method:** guard → load SDK (except history and fork) → validate primitives (`configuration.invalid_argument` / `input.empty`) → delegate to `ClaudeLiveSession`, `ClaudeHistory` or `ClaudeProbe`. **`aclose`:** marks closing, disconnects connected clients with `asyncio.gather(..., return_exceptions=True)` (classifying each result against `BaseException`), awaits the pumps, and marks unfinished turns INTERRUPTED. Each ★ method body is narrated. | AGENTS.md principles 1–3 (one-level chains, narrated main functions, small classes); class-bound-helpers; A002 `# @intent` (request, permission, mcp, fallback, persist, subprocess, send tokens); A005 (no `object`/`Any` client params); A007 (no numeric literals near limit/timeout/budget/status, so use constants); S006 (keep task references); S019 (never swallow `CancelledError`); S039 (no `asyncio.Lock`; a Semaphore per launch); S045 (`timeout_seconds`, never `timeout`); S063 (classify gather results); S024 (nesting ≤ 3); comment-format | FR-1–FR-15, INV-3–INV-11, INV-15, AC-1, AC-3, AC-7, AC-11, AC-16, AC-21, AC-30, AC-35, W-1–W-12 | P2 |
+| 4 | CREATE | `vidbyte/harnesses/native/claude/sdk.py` | vendor import seam | `class ClaudeSdkLoader` with `@staticmethod load() -> ClaudeSdkTypes`. One literal `from claude_agent_sdk import (...)` inside `try`. `except ImportError as exc` raises `ClaudeOperationError(..., failure_code=FailureCode.CLAUDE_SDK_UNAVAILABLE.value, operation="load_sdk", next_step=CLAUDE_FAILURE_NEXT_STEPS[...]) from exc`. Only public SDK names are imported (no `_internal`, no `MessageParseError`). `class _ClaudeClient(Protocol)`: `connect`, `query`, `receive_messages`, `interrupt`, `get_server_info`, `disconnect`. | C003 (literal import); A005; A002 (`# @intent` for the transport and subprocess tokens if named); Codex `_load_sdk` pattern; header "WHAT NOT TO DO: import claude_agent_sdk anywhere else" | FR-17, NFR-1, INV-1, AC-2, W-14 | P2 |
+| 5 | CREATE | `vidbyte/harnesses/native/claude/options.py` | translator | `class ClaudeOptionsTranslator`, all `@staticmethod`. **Main:** `to_options(request: ClaudeSpawnRequest, *, cli_path: str, session_id: str, tool_server: object \| None, auto_allowed: tuple[str, ...], sdk: ClaudeSdkTypes) -> object` returns `sdk.options_class(**kwargs)`. **One helper per surface** (each returns its fragment): `model_options`, `instruction_options`, `permission_options`, `extension_options`, `config_options`, `budget_options`, `session_options`, `output_options`, `process_options`, `extra_args`, `child_env`. **Prompt:** `to_prompt(request) -> str \| AsyncIterable[dict[str, Any]]`, where images use a module-level async generator yielding one user message. Enum `PROVIDER_DEFAULT` values and empty fields are omitted. Behaviour exactly as §9.2 "Field mapping". | class-bound-helpers (one function per translated surface); strict-config-dataclasses (the bridge takes the lib record); runtime-primitives SKILL.md:38 ("Reject unsupported public options"); S008; S024; A002 (request, permission, mcp, fallback, persist, checkpoint); A007 | FR-16, D-9, D-10, D-11, AC-17, W-13 | P2 |
+| 6 | CREATE | `vidbyte/harnesses/native/claude/failures.py` | error mapper | `class ClaudeFailureMapper`, all static. `from_exception(exc: Exception, *, operation: str, sdk: ClaudeSdkTypes \| None) -> ClaudeOperationError` per §9.2 "Exception mapping" (dict dispatch, ordered from subclass to base). `classify_turn(outcome: ClaudeTurnOutcome) -> tuple[ClaudeTurnStatus, ClaudeFailure \| None]` per "Turn classification", where `ClaudeTurnOutcome` is the lib record of row 12. `failure(code: FailureCode, reason: str) -> ClaudeFailure` takes its next step from `CLAUDE_FAILURE_NEXT_STEPS`. Never catches `BaseException`; never formats the exception's text. | provider-api-contracts (one guarded `try`, typed branches); AGENTS.md Placement Rules (the outcome record is a dataclass, so it is defined in row 12, not here); S008; S042; INV-12 | FR-17, INV-12, INV-19, AC-5, AC-6, AC-24, W-14 | P2 |
+| 7 | CREATE | `vidbyte/harnesses/native/claude/session.py` | per-turn runtime | `class ClaudeLiveSession`. It holds the handle, request, options, status, done `asyncio.Event`, latest result facts, assistant error kinds, task usage, pending steer slot, interrupt and budget flags, the client, the pump and watchdog tasks, an optional launch semaphore, and the `disconnected` flag. **Main `run()`** (the pump, narrated): acquire the slot → if stopping, finish INTERRUPTED → construct the client → `connect()` → read `get_server_info()` (version, auth mode, `hooks_applied`) → mark RUNNING, start the watchdog → `query(prompt)` → read `receive_messages()`, dispatching per message class through small `_on_<kind>` helpers (rate-limit windows go to the host callback) → a `ResultMessage` from an injected turn (D-28) only updates usage → on the prompt's own `ResultMessage` with a pending steer, `query(message)` and continue, else stop → build a `ClaudeTurnOutcome` and classify → set done → `finally`: cancel the watchdog, disconnect once, release the slot. **Other methods:** `steer(message)`, `interrupt()`, `snapshot() -> ClaudeTurnResult`, `usage() -> ClaudeUsageSnapshot`, `wait(timeout_seconds) -> ClaudeTurnResult` (`asyncio.wait_for` on `event.wait()` only), `close()`. No method named `arun`. | AGENTS.md principle 2 (narrate `run`); principle 1; S006; S019; S024 (per-kind dispatch helpers); C011 (an `arun` on a `*Session` class needs a synchronous `run` twin, so the pump is the async `run` and no `arun` exists); D-2, D-3, D-4, D-28; A007; A002 | FR-5, FR-11–FR-14, FR-25, INV-7–INV-9, INV-11, INV-18, INV-20, AC-3, AC-4, AC-9, AC-10, AC-15, AC-25, AC-28, AC-31, AC-36, W-4, W-8–W-11 | P2 |
+| 8 | CREATE | `vidbyte/harnesses/native/claude/history.py` | offline session files | `class ClaudeHistory`, all static async: `list_sessions(sdk, directory, limit, offset, include_worktrees)`, `session_info(sdk, session_id)`, `session_messages(sdk, session_id, limit, offset)`, `fork(sdk, session_id, up_to_message_id, title) -> str` (the `session_id` of the SDK's `ForkSessionResult`). Each calls the SDK function through `asyncio.to_thread`. Converters: `summary(info) -> ClaudeSessionSummary` and `message(raw) -> ClaudeSessionMessage` (the §9.1 text rendering). | D-19; INV-16; class-bound-helpers; S052 intent (no blocking in async) | FR-7–FR-10, AC-8, AC-14, W-6, W-7 | P2 |
+| 9 | CREATE | `vidbyte/harnesses/native/claude/probe.py` | initialize probe | `class ClaudeProbe`, static. `initialize(sdk, cli_path) -> Mapping[str, Any]` connects with only `cli_path` and disconnects in `finally`. `readiness(sdk, cli_path) -> ClaudeReadiness`. `models(info) -> tuple[ClaudeModelInfo, ...]` skips unknown effort levels. `version_ok(text) -> bool` compares dotted numerics. `signed_in(account) -> bool` (A-7). | D-5, D-6; class-bound-helpers; C008 (do not name helpers verb + primitive, such as `is_int`); A002 | FR-2, FR-3, AC-22, AC-34, W-2 | P2 |
+| 10 | CREATE | `vidbyte/harnesses/native/claude/tool_server.py` | BaseTool → SDK MCP bridge | `class ClaudeToolServer`, static. `build(tools: tuple[BaseTool, ...], sdk: ClaudeSdkTypes) -> object` calls `sdk.create_sdk_mcp_server(CLAUDE_TOOL_SERVER_NAME, tools=[sdk.tool(spec.name, spec.description, ToolsFormatter.to_anthropic_tool(spec)["input_schema"])(ClaudeToolHandler(executor, spec.name)) ...])` over one `ToolExecutor(Tools(tools), permission_policy=PermissionPolicy.allow_all())`. `auto_allowed(tools) -> tuple[str, ...]` gives `CLAUDE_MCP_TOOL_PREFIX + CLAUDE_TOOL_SERVER_NAME + "__" + name` for SAFE and READ specs. `class ClaudeToolHandler` holds the executor and tool name; `async __call__(arguments)` returns `{"content": [{"type": "text", "text": result.output}], "is_error": result.status is not ToolStatus.SUCCESS}` inside one `try` that returns an `is_error` text and never raises. | D-12; S053/B023 (a callable class, not a loop closure); class-bound-helpers ("a callback that must not raise uses one try"); AGENTS.md principle 5 (reuse `ToolsFormatter`, `ToolExecutor`); A002 (mcp, permission) | FR-18, AC-20, W-15 | P2 |
+| 11 | CREATE | `vidbyte/lib/dataclasses/claude.py` | records (request side) | `ClaudeSpawnRequest` (58 fields in §9.2 order), plus `ClaudeImage`, `ClaudeThinking`, `ClaudeSystemPrompt`, `ClaudeSandbox`, `ClaudeHookMatcher`, `ClaudeMcpServer` and `ClaudeAgentDefinition`. All are `@dataclass(frozen=True, slots=True)` and validate in `__post_init__` per §9.1, raising `ClaudeOperationError` with a configuration code (D-15). A private static helper class `_ClaudeFieldRules` holds the checks, with names that avoid C008's verb + primitive grammar (for example `count`, `amount`, `texts`); each bool guard is written once there, against a generic parameter name. Mapping fields default through `field(default_factory=dict)`. `BaseTool` is imported only under `TYPE_CHECKING`, with a shape check at runtime. Literal `__all__` of the 8 public names. Header "TESTS: pack". | Placement Rules (dataclasses); AGENTS.md principle 4; strict-config-dataclasses; C006 (reject bool, NaN and inf before comparing); C008; C002 (one owner per bool-guard identity); S027 (no mutable dataclass defaults); A006; S060 (no `dict[str, Any]` encoders); S039 (no TypedDict); A007 (bounds are `CLAUDE_*` constants); S009 (full generics); semgrep `no-untyped-mapping-fallback` (raise, never return a fallback) | FR-16, AC-18, W-13 | P1 |
+| 12 | CREATE | `vidbyte/lib/dataclasses/claude_host.py` | records (host outputs) | `ClaudeHostSettings`, `ClaudeSessionHandle`, `ClaudeFailure`, `ClaudePermissionDenial`, `ClaudeTurnResult`, `ClaudeModelUsage`, `ClaudeTaskUsage`, `ClaudeUsageSnapshot`, `ClaudeRateLimitWindow`, `ClaudeReadiness`, `ClaudeModelInfo`, `ClaudeSessionSummary`, `ClaudeSessionMessage` and `ClaudeSdkTypes` per §8.5 and §9.1. Also `ClaudeTurnOutcome` (§8.5, §9.1), the pump's collected facts for `ClaudeFailureMapper.classify_turn`: these are the 15 host-side records of §8.4. Records are frozen and slotted, with type validation that raises `ClaudeOperationError` like row 11. Each output field accepts every value shape the SDK documents for its source (an absent value becomes `None` or empty text), so converting a well-formed SDK message never fails validation; the converters in rows 7–9 map any failure to build these records from SDK data to `claude.protocol_mismatch`. Literal `__all__` of all 15 names. | Placement Rules; principle 4; D-16; S060; A007; C006 | FR-1–FR-15, FR-25, AC-4, AC-15, AC-28, W-1–W-12 | P1 |
+| 13 | CREATE | `vidbyte/lib/enums/claude.py` | enums | The 17 enums of §8.5, each `class X(str, Enum)` with the listed members and literal `__all__`. Header: "Enum values must match claude-agent-sdk 0.2.165 / Claude Code 2.1.296 wire values exactly; empty PROVIDER_DEFAULT sentinels are omitted before SDK calls." | Placement Rules (enums); model-facing-tool-contracts (`str, Enum`); the `vidbyte/lib/enums/codex.py` header pattern; S015 | FR-23, FR-16, AC-27, W-20 | P1 |
+| 14 | CREATE | `vidbyte/lib/constants/claude.py` | constants | `CLAUDE_SDK_EXTRA = "vidbyte-sdk[claude]"`, `CLAUDE_CLI_NAME = "claude"`, `CLAUDE_MIN_CLI_VERSION = "2.1.296"`, `CLAUDE_TOOL_SERVER_NAME = "vidbyte"`, `CLAUDE_MCP_TOOL_PREFIX = "mcp__"`, `CLAUDE_SYSTEM_PROMPT_PRESET = "claude_code"`, `CLAUDE_PLUGIN_URL_MARKER = "://"`, `CLAUDE_MAX_FILE_SPECS = 1`, `CLAUDE_MAX_PLUGIN_URLS = 1`, `CLAUDE_MIN_AUTOCOMPACT_TOKENS = 100_000`, `CLAUDE_MAX_AUTOCOMPACT_TOKENS = 1_000_000`, `CLAUDE_MAX_OUTPUT_TOKENS_ENV = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"`, `CLAUDE_MIN_COUNT = 1`, `CLAUDE_MIN_EXCLUSIVE_AMOUNT = 0.0`, `CLAUDE_LIVE_CAP_NEXT_STEP`, and `CLAUDE_FAILURE_NEXT_STEPS: Mapping[str, str]` keyed by the 16 `FailureCode.CLAUDE_*.value`s with the §9.2 texts. Each value gets a one-line reason comment. | A007 (numeric policy values as UPPERCASE constants); strict-config-dataclasses (bounds in `lib/constants` with a feature prefix); the `vidbyte/lib/constants/codex.py` pattern; INV-22 | FR-16, FR-17, AC-23, W-13, W-14 | P1 |
+| 15 | CREATE | `vidbyte/tools/builtins/claude/__init__.py` | package init | A001 header. Imports and a literal `__all__` of the 15 tool classes, in sorted order. No import of `vidbyte.harnesses` or `claude_agent_sdk`. | A001; S015; S051; INV-1; code-map §4.1 #15 | FR-19, W-16 | P3 |
+| 16 | CREATE | `vidbyte/tools/builtins/claude/_base.py` | shared tool base | `class _ClaudeBuiltinTool(BaseTool)` with `__init__(self, host: ClaudeHost, request: ClaudeSpawnRequest)`; the host is typed under `TYPE_CHECKING` only. Helpers: `_argument(call, name)` (JSON null means omitted, `# @intent null-optional-arg-means-default`), `_handle(call)` (via `host.get_handle`), `_failed(tool_name, error: ClaudeOperationError) -> ToolResult` (INV-13: built from `failure_code`, `reason` and `next_step` attributes, never `str(exc)`), `_rendered(tool_name, value) -> ToolResult` (`json.dumps` of `dataclasses.asdict`). No `bind_session` and no `bind_agent`. | D-13, D-14; S016 (no builtin exceptions raised here); S017 (no raw exception text in `.error(...)`); A005; A002; INV-12, INV-13 | FR-19, AC-12, AC-24, AC-26, W-16 | P3 |
+| 17 | CREATE | `vidbyte/tools/builtins/claude/descriptions.py` | model-facing text | A001 header. One constant per tool description and per parameter description, each a single string literal of 4–5 general sentences with no examples, naming what the tool does, when to use it, what it returns and how it fails. | S025 (≥4 sentences); S062 (no adjacent literals); model-facing-tool-contracts; A001 (the sessions sibling lacks it) | FR-19, AC-12, W-16 | P3 |
+| 18 | CREATE | `vidbyte/tools/builtins/claude/readiness.py` | tools | `CheckClaudeReadyTool`, `ListClaudeModelsTool`, `GetClaudeRateLimitsTool`, each READ: `spec()` and `async execute(call)` calling the matching host function, rendering the result or catching `ClaudeOperationError`. | §9.2 tool table; S016; S017; S025; A002 | FR-19, INV-14, AC-12, W-16 | P3 |
+| 19 | CREATE | `vidbyte/tools/builtins/claude/sessions.py` | tools | `SpawnClaudeSessionTool` (`replace(request, prompt=...)`), `ContinueClaudeSessionTool` (passes its bound request as `request=`), `ForkClaudeSessionTool` and `LaunchClaudeSubagentsTool` (`prompts` → `tuple[str, ...]`), each WRITE. | §9.2 tool table; D-13; S016; S017; S025; A002 (request) | FR-19, INV-14, AC-12, AC-26, W-16 | P3 |
+| 20 | CREATE | `vidbyte/tools/builtins/claude/history.py` | tools | `ListClaudeSessionsTool`, `GetClaudeSessionInfoTool` and `GetClaudeSessionMessagesTool`, each READ. | §9.2 tool table; S016; S017; S025 | FR-19, INV-14, AC-12, W-16 | P3 |
+| 21 | CREATE | `vidbyte/tools/builtins/claude/turns.py` | tools | `WaitClaudeTurnTool`, `GetClaudeTurnResultTool` and `TrackClaudeSessionUsageTool` (READ); `SteerClaudeSessionTool` and `InterruptClaudeTurnTool` (WRITE). | §9.2 tool table; S016; S017; S025; S045 (no `timeout` parameter names) | FR-19, INV-14, AC-12, W-16 | P3 |
+| 22 | CREATE | `vidbyte/tools/toolsets/claude.py` | toolset | `class ClaudeTools(Tools)`: `__init__(self, host, request=None)`, narrated: default the request to `ClaudeSpawnRequest()`, then `super().__init__(self.get_tools(host, request))`. No runtime type checks: the host is a `TYPE_CHECKING` import, and the request is an already validated record. `@staticmethod get_tools(host, request) -> tuple[BaseTool, ...]` returns the 15 tools in §9.2 order. `ClaudeHost` is imported under `TYPE_CHECKING` only. `__all__ = ["ClaudeTools"]`. | prebuilt-agents (`<Thing>Tools(Tools)`, static interface); the `vidbyte/tools/toolsets/coding.py` pattern; principle 2; A001 | FR-20, AC-13, AC-29, W-17 | P3 |
+| 23 | MODIFY | `vidbyte/lib/enums/failure.py` | enum (shared) | Insert the 16 `CLAUDE_*` members of §9.2 as one block between `CONFIGURATION_INVALID_ARGUMENT` (:34) and `CODEX_SDK_UNAVAILABLE` (:35). No other line changes. | request.md §C shared-file contract (not adjacent to the end of the CODEX block); the failure.py header ("Add a category-prefixed code with docs, mapping coverage, and a focused test"); INV-22, INV-23 | FR-17, AC-23, W-14 | P1 |
+| 24 | MODIFY | `vidbyte/lib/enums/__init__.py` | export list (shared) | Insert `from vidbyte.lib.enums.claude import (...17 names...)` between the `agent_runtime` import (:40) and the `codex` import (:41). Insert the 17 names into `__all__` at their sorted positions, between `"CircularityVerdict"` and `"CodexApprovalMode"`. | AGENTS.md:61 (export every public enum); S051 (I001); S015; contract "inserts in sorted position only" | FR-23, AC-27, W-20 | P1 |
+| 25 | MODIFY | `vidbyte/lib/errors/base.py` | typed error | Add `class ClaudeOperationError(VidbyteSdkError)` directly before `class ConfigurationError` (:235), after `AggregateExecutionError`. It has the literal 8-field `DIAGNOSTIC_FIELDS`. `__init__(self, reason, *, failure_code, operation, next_step)` sets `failure_code`, `operation`, `reason`, `next_step`, `error_kind=failure_code`, `expected`, `actual=reason`, `safe_runtime_details={"operation": operation}`, `likely_causes`, `repair_approaches=(next_step,)`, `related_docs=("https://platform.claude.com/docs/en/agent-sdk/python", "https://docs.claude.com/en/docs/claude-code/rate-limits")` (both URLs appear in the claude-agent-sdk 0.2.165 package, as `CodexAgentError` cites its vendor docs) and `relevant_tests=("python scripts/run_ci.py",)`, and passes `details` to `super()`. The header's Architecture list is not extended, following `CodexAgentError`'s precedent (the list is not exhaustive). | A003 (full packet); blocking-lint-invariants; the header's "Add one type for a distinct remediation category, export it from errors.__init__"; D-15 | FR-17, AC-2, W-14 | P1 |
+| 26 | MODIFY | `vidbyte/lib/errors/__init__.py` | export list | Add `ClaudeOperationError` to the `from vidbyte.lib.errors.base import (...)` block and to `__all__`, each between `AggregateExecutionError` and `ConfigurationError`. | the errors header ("export it from errors.__init__"); S015; contract sorted inserts | FR-17, W-14 | P1 |
+| 27 | MODIFY | `vidbyte/tools/builtins/__init__.py` | export list (shared) | Insert `from vidbyte.tools.builtins.claude import (...15 classes...)` between the `bash` import (:28) and the `code_execution` import (:29). Insert the 15 names into `__all__` at their sorted positions. Add one Architecture bullet, "Claude Code host tools from builtins.claude.", after the bash bullet. | request.md §C (insert-only, sorted); S051; S015; INV-1 (the import chain loads during `import vidbyte.agents`, code-map §4.1 #15) | FR-19, W-16 | P3 |
+| 28 | MODIFY | `vidbyte/tools/toolsets/__init__.py` | export list (shared) | Insert `from vidbyte.tools.toolsets.claude import ClaudeTools` before the `coding` import. Put `"ClaudeTools"` first in `__all__`. Append the Architecture bullet "ClaudeTools: The fifteen Claude Code host tools over one ClaudeHost." | request.md §C; S051; S015 | FR-20, W-17 | P3 |
+| 29 | MODIFY | `pyproject.toml` | config | In `[project.optional-dependencies]`, insert `claude = ["claude-agent-sdk>=0.2.165,<0.3.0",]` (multi-line, like `codex`) directly before `codex = [`. `dev` and every other table are unchanged. | request.md §C ("only this PR changes it"); D-18; runtime-primitives SKILL.md:41; S036/RUF200 (valid pyproject) | FR-21, AC-33, W-18 | P1 |
+| 30 | MODIFY | `REPO_MAP.md` | doc index | Insert a `##### \`vidbyte/harnesses/native/\`` entry between `#### \`vidbyte/harnesses/\`` (:147) and `##### \`vidbyte/harnesses/stores/\`` (:151): 4–5 general sentences on the folder's intent (hosts that wrap native coding-harness SDKs as small functions, one subpackage per harness, optional vendor extras). No file, subfolder or command names. | AGENTS.md:9 (the File Index covers each subpackage of `vidbyte/`); agents-md-map; contract (insert only) | FR-24, AC-32, W-21 | P4 |
+| 31 | MODIFY | `vidbyte/harnesses/README.md` | folder README | Append to "## Key modules", after the `serialization.py` bullet: "- `native/`: native coding-harness hosts, one subpackage per harness (`native/claude/` holds `ClaudeHost`); each imports its vendor SDK only through its optional extra." | request.md §C (append mention of `native/`); AGENTS.md:11; A009 (README ≤ 40,000 characters; it is 8,805 today) | FR-24, AC-32, W-21 | P4 |
+
+Note on rows 6 and 12: the pump's collected-facts record is a dataclass, so it lives in `vidbyte/lib/dataclasses/claude_host.py` as `ClaudeTurnOutcome` (AGENTS.md: "whether it is public or underscore-prefixed"). It is the 15th record in that module and is counted in §8.4's 69 classes; row 6's mapper only reads it.
+
+### 12.4 Standards checklist for this change
+
+**Headers and comments**
+- [ ] Every new `.py` file (22, plus every S2 test file) opens with a docstring carrying all seven A001 fields: PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MODIFICATION PATTERNS, KNOWN EDGE CASES, RELATED DOCS, TESTS. — *source:* A001 (`lint/rules/a001_agent_readable_file_headers.py:24-32,69`); baseline 643 with no headroom.
+- [ ] The `vidbyte.harnesses.native` marker is the contract bytes, unchanged. — *source:* request.md §C.
+- [ ] Every function whose name, local names or attributes contain a policy token carries `# @intent <slug>` on its own line between def −3 and +20. The tokens are retry, backoff, attempt, permission, authorize, pricing, price, billing, redact, secret, persist, persistence, checkpoint, fallback, transition, transport, request, fetch, send, urlopen, provider, subprocess and mcp. — *source:* A002; comment-format.
+- [ ] Main functions are narrated in plain English: every ★ method of `ClaudeHost`, `ClaudeLiveSession.run`, `ClaudeTools.__init__` and `ClaudeOptionsTranslator.to_options`. Comments are wrapped at 72 columns or fewer, directly above the code. — *source:* AGENTS.md principle 2; comment-format.
+
+**Placement and layering**
+- [ ] Every dataclass is defined in `vidbyte/lib/dataclasses/claude.py` or `claude_host.py`, never in `harnesses/` or `tools/`. — *source:* AGENTS.md Placement Rules.
+- [ ] Every enum is defined in `vidbyte/lib/enums/claude.py` and exported from `vidbyte/lib/enums/__init__.py`. — *source:* AGENTS.md:61.
+- [ ] Every closed set is typed with an enum: modes, efforts, sources, transports, statuses, kinds and flags. — *source:* AGENTS.md:63.
+- [ ] Numeric bounds and policy strings are `CLAUDE_*` constants in `vidbyte/lib/constants/claude.py`. No numeric literal sits near limit, timeout, budget, token, status or interval names, including defaults and comparisons. — *source:* A007; strict-config-dataclasses.
+- [ ] `vidbyte/lib/` never imports `vidbyte.harnesses` or `vidbyte.tools` except under `TYPE_CHECKING`, and records holding a `BaseTool` check its shape at runtime. — *source:* AGENTS.md principle 3; A006; blocking-lint-invariants.
+- [ ] `vidbyte.tools.builtins.claude` and `vidbyte.tools.toolsets.claude` import `ClaudeHost` only under `TYPE_CHECKING`. — *source:* code-map §4.1 #15; A006.
+- [ ] `claude_agent_sdk` is imported in exactly one function (`ClaudeSdkLoader.load`), with literal import statements. — *source:* C003; INV-1.
+
+**Function shape**
+- [ ] Call chains are one level deep: a main function calls its helpers, and helpers call only other classes or the stdlib. There are no nested function definitions except the SDK-required async generator, which is module-level. — *source:* AGENTS.md principle 1.
+- [ ] Every file stays under 1,000 lines. If one heads toward it, split it along the §8 subsystems before adding more. — *source:* AGENTS.md principle 3.
+- [ ] Complexity and nesting stay within S008 and S024 (nesting ≤ 3): dispatch by dict or small per-kind helpers, not if-ladders. — *source:* S008; S024; house style.
+- [ ] Every public function is fully annotated with complete generics (`dict[str, Any]`, `tuple[str, ...]`, `Callable[..., Awaitable[object]]`). — *source:* S007; S009 (`disallow_any_generics`).
+- [ ] All imports are absolute and isort-ordered in every new and edited module. — *source:* S040; S051.
+- [ ] No module calls `print`; every function returns a record instead. — *source:* A008.
+- [ ] Every `zip` passes `strict=True`, for example when pairing launch prompts with their handles. — *source:* S003.
+
+**Records and validation**
+- [ ] Every record is `@dataclass(frozen=True, slots=True)` and validates types, ranges, combinations and enums in `__post_init__`, raising `ClaudeOperationError` with a configuration code whose reason names the field (§9.1). — *source:* AGENTS.md principle 4; D-15.
+- [ ] Each meaningful `isinstance(x, bool)` guard is written once, in `_ClaudeFieldRules` or one host helper, against a generic parameter name; it is never copied across functions for the same field name. — *source:* C002.
+- [ ] Mapping fields default through `field(default_factory=dict)`, and no class attribute or dataclass field has a mutable default. — *source:* S005; S027.
+- [ ] Bools, NaN and infinity are rejected before every ordered comparison. — *source:* C006.
+- [ ] No helper is named verb + primitive (`require_positive_int`, `validate_timeout`, `is_int`, …) outside the non-existent `validation.py`. — *source:* C008 (`lint/rules/c008_shared_validator_owner.py`).
+- [ ] Lib records have no `dict[str, Any]` encoder methods and no TypedDict. JSON rendering happens in the tools layer. — *source:* S060; S039.
+- [ ] No parameter typed `object`/`Any` is followed by an `isinstance(x, Mapping)` fallback `return`; such checks raise instead. — *source:* semgrep `no-untyped-mapping-fallback`.
+
+**Errors and exceptions**
+- [ ] `ClaudeOperationError` carries the full eight-field `DIAGNOSTIC_FIELDS` literal and attributes. — *source:* A003; blocking-lint-invariants.
+- [ ] No `str(exc)`, `repr(exc)` or f-string of a caught exception goes into an error, result, reason or message, in either `harnesses/` or `tools/`. — *source:* S017 (tools scope); the Codex transport header ("never publish raw exception text"); INV-12.
+- [ ] No builtin exception (`ValueError`, `TypeError`, `RuntimeError`, `Exception`) is raised in `vidbyte/tools/builtins/claude/`. — *source:* S016.
+- [ ] No plain `Exception` is raised anywhere. — *source:* S042.
+- [ ] An error raised inside an `except` block chains its cause with `raise ... from exc`. — *source:* S002.
+- [ ] `CancelledError` is never swallowed, and no handler catches `BaseException` without re-raising. — *source:* S019; provider-api-contracts.
+
+**Async and concurrency**
+- [ ] No `asyncio.Lock`. Admission is synchronous and launches use `asyncio.Semaphore`. — *source:* S039 (TID251); Codex `agent.py:82-86`.
+- [ ] Every task created is kept on its owner and awaited or cancelled at close. — *source:* S006 (RUF006).
+- [ ] `asyncio.gather(..., return_exceptions=True)` results are classified against `BaseException`. — *source:* S063.
+- [ ] No `async def` has a parameter named `timeout`; the name is `timeout_seconds`. — *source:* S045 (ASYNC109).
+- [ ] No synchronous SDK file function and no `subprocess` call runs on the event loop; the history functions use `asyncio.to_thread`. — *source:* S052; INV-16.
+- [ ] No `shell=True`, and no file reads of caller paths in ClaudeHost: the system-prompt file path is passed to the CLI, never opened. — *source:* S055; S061.
+- [ ] Tool handlers for the SDK MCP server are instances of a callable class, not closures built in a loop. — *source:* S053 (B023).
+- [ ] No method is named `request` or `urlopen`, because S012 flags every call to a function of those names that lacks a `timeout` or `timeout_seconds` keyword. — *source:* S012 (`REQUEST_METHODS`).
+
+**Tools**
+- [ ] Each tool and each parameter description is a single literal of 4–5 general sentences with no examples. — *source:* S025; S062; model-facing-tool-contracts.
+- [ ] Every input schema sets `additionalProperties: false`. Categorical parameters (none today) would use `EnumClass` values. — *source:* model-facing-tool-contracts; the `ForkTool` precedent.
+- [ ] No tool defines `bind_session`, and the agent base class is not edited. — *source:* code-map §4.1 #14; D-14.
+- [ ] Tools never accept a command string or a path to execute. — *source:* cli-backed-source-integrations.
+
+**Exports and shared files**
+- [ ] Every `__all__` is a literal, unique and bound. — *source:* S015.
+- [ ] Every insert into a shared export list or index lands in the file's own sorted or natural position; nothing is reordered or removed. — *source:* request.md §C.
+- [ ] `lint/baseline.json` is never edited, and no suppression is added. — *source:* request.md §C "Do not touch"; vidbyte-gates.md.
+- [ ] The CLAUDE failure block sits between :34 and :35 of `failure.py`, and `CLAUDE_FAILURE_NEXT_STEPS` covers exactly the 16 codes. — *source:* request.md §C; failure.py header ("mapping coverage").
+- [ ] No root `vidbyte` export, no contract regeneration, no `mcp_server/` edit, no edit to the agent base class, and no `native/README.md`. — *source:* NG-4, NG-5, NG-8; request.md §C.
+
+**Config and docs**
+- [ ] The `claude` list mirrors the multi-line form of the `codex` list, and the package metadata stays valid. — *source:* S036 (RUF200); request.md §C.
+- [ ] The REPO_MAP entry is 4–5 general sentences with no file, subfolder or command names. — *source:* agents-md-map; AGENTS.md "Repository Map".
+- [ ] The harnesses README stays at or under 40,000 characters after the new bullet, and no touched folder README has a `## File Index` section to keep in step (verified at `base_commit`). — *source:* A009; S020.
+
+**Gates**
+- [ ] The gate runs from this worktree with `PYTHONPATH`, then the package stage without it. The import-path check passes first. — *source:* local-ci-verification; AGENTS.md:13.
+- [ ] Semgrep passes locally, because no automatic workflow runs it. — *source:* code-map §1.4.
+
+### 12.5 Non-code actions
+
+**Exports**
+- Export the 17 enums. — `vidbyte/lib/enums/__init__.py` — *source:* AGENTS.md:61 (row 24).
+- Export `ClaudeOperationError`. — `vidbyte/lib/errors/__init__.py` — *source:* the errors header (row 26).
+- Export the 15 tool classes. — `vidbyte/tools/builtins/__init__.py` — *source:* request.md §C contract list (row 27).
+- Export `ClaudeTools`. — `vidbyte/tools/toolsets/__init__.py` — *source:* request.md §C (row 28).
+
+**Configuration**
+- Add the optional extra `claude`. — `pyproject.toml` — *source:* request.md §C (row 29).
+
+**Docs and indexes**
+- REPO_MAP entry for `vidbyte/harnesses/native/`. — `REPO_MAP.md` — *source:* AGENTS.md:9 (row 30).
+- Key-modules bullet. — `vidbyte/harnesses/README.md` — *source:* request.md §C (row 31).
+
+**Deliberately not done** (each verified as not required):
+- No `vidbyte/harnesses/native/README.md` (contract).
+- No `llms.txt` or `artifacts/file_index.md` regeneration. Neither is gated, and both describe the existing tree; AGENTS.md names them as optional deeper reading.
+- No changelog: the repo keeps none (code-map §1.8).
+- No `.env.example`: no environment variable is read.
+- No contract regeneration (NG-4).
+- No lint baseline ratchet: a ratchet happens only after a genuine IMPROVED, and this PR targets zero new findings.
+- No `skills/failure/vocabulary.md` entry. That file lists no Codex codes and is not exhaustive (code-map §2.2).
+- No design doc under `docs/design/`: the repo does not require one per feature, and this spec is the design record.
+
+**Tests and later stages**
+- S2 creates the test pack under `tests/features/claude_host/` (§13).
+- S6 writes the PR body, reprinting §4.
+
+### 12.6 Phases and dependency order
+
+**P1 — Vocabulary and records** (ships: importable, validated records, enums, constants, codes and the error class; nothing calls them yet, and the gate stays green): rows 13, 24, 23, 14, 25, 26, 11, 12, 29
+**P2 — Host** (ships: a working `ClaudeHost` with all 15 functions behind the lazy seam): rows 1, 4, 6, 5, 8, 9, 10, 7, 3, 2
+**P3 — Tools and toolset** (ships: agents and the MCP server can use every function as a tool): rows 16, 17, 18, 19, 20, 21, 15, 22, 27, 28
+**P4 — Docs and index** (ships: the map and the harnesses README describe the native package): rows 30, 31
+
+**Dependency order:**
+- 13 → 24; 23 → 14 (the next-step mapping is keyed by the new codes); 25 → 26; then 13, 14, 23 and 25 → 11 → 12 (the records need the enums, constants, codes and error class).
+- 1 → 4 → 6 → 5, 8, 9, 10 → 7 → 3 → 2: the package marker first, then the seam and the mapper, the single-purpose helpers, the turn runtime, the host, and its export.
+- 16, 17 → 18–21 → 15 → 22 → 27, 28.
+
+**Independent:**
+- Row 29 is independent of everything.
+- Rows 30 and 31 are independent of the code.
+- Rows 18–21 are independent of one another.
+- Rows 5, 8, 9 and 10 are independent of one another, once 4 and 6 exist.
+
+## §13 Test seams (facts for the test author — no tests here)
+
+- **Framework:**
+  - pytest 8.3.5 with pytest-asyncio 1.3.0, configured at `pyproject.toml:78-81` with `--strict-config --strict-markers` and no `asyncio_mode`.
+  - Existing async tests mostly use `unittest.IsolatedAsyncioTestCase` (90 files). 18 files use `asyncio.run` and 11 use `pytest.mark.asyncio` (code-map §3.1).
+- **Layout and naming:**
+  - Use the feature pack `tests/features/claude_host/`, with no `__init__.py` (repo convention for feature packs). Basenames must be unique across `tests/`, for example `test_claude_host_<area>.py`.
+  - Every test `.py` file, and any `conftest.py`, needs the seven-field A001 header (A001 scans tests). S062 (no adjacent string literals) also scans tests. Ruff rules do not.
+  - Only claude-named test files are allowed (request.md §C "No shared test files"), so the neighbouring suites are run, not edited.
+- **Prior art to copy:** `tests/test_codex_tools.py`:
+  - fakes `_FakeSyncClient` (:202) and `_FakeAsyncCodex` (:233);
+  - `_fake_sdk()` (:264-282) builds a `CodexSdkTypes`;
+  - `_run_transport` (:298-312) patches the seam with `mock.patch.object(CodexTransport, "_load_sdk", return_value=...)`;
+  - the missing-extra assertion `caught.exception.failure_code == FailureCode.CODEX_SDK_UNAVAILABLE.value` (:574);
+  - real-SDK tests behind `@unittest.skipUnless(importlib.util.find_spec("openai_codex"), ...)` (:640-641).
+
+  For coverage-table tests, see `tests/test_codex_failure_recovery.py:188-201` (every `codex.` code has a row). For tool execution, see `tests/test_durable_sessions.py:1380` (`await tool.execute(ToolCall(...))`, with `result.status.value == "error"`).
+- **The one seam:**
+  - `mock.patch.object(ClaudeSdkLoader, "load", return_value=fake_types)`, where `ClaudeSdkLoader` lives in `vidbyte.harnesses.native.claude.sdk`.
+  - `fake_types` is a real `ClaudeSdkTypes` whose fields are fakes:
+    - a client class implementing `connect`, `query`, `receive_messages`, `interrupt`, `get_server_info` and `disconnect`, and recording calls and its constructor options;
+    - an options class that records its kwargs;
+    - message and error classes, used by the pump's `isinstance` dispatch, so fakes must be the classes placed in the record. A fake result carries the 0.2.165 `ResultMessage` fields the classifier and usage read: `subtype`, `is_error`, `num_turns`, `duration_ms`, `session_id`, `stop_reason`, `total_cost_usd`, `result`, `structured_output`, `model_usage`, `permission_denials`, `api_error_status`, `terminal_reason` and `origin` (`None` for the prompt's own result). A fake assistant message carries `error`, a fake rate-limit event carries `rate_limit_info`, and fake task messages carry `task_id`, `description` or `summary`, and `usage`;
+    - functions for `list_sessions`, `get_session_info`, `get_session_messages`, `fork_session`, `create_sdk_mcp_server` and `tool`.
+  - For the missing extra, make `load` raise the `ClaudeOperationError` the real loader raises, or patch `builtins.__import__` for `claude_agent_sdk` only.
+  - Pass `cli_path="..."` to `ClaudeHost` to avoid depending on PATH, or patch `shutil.which` in the host module.
+- **Time:**
+  - The time budget uses a watchdog over `asyncio.sleep`, and `wait_claude_turn` uses `timeout_seconds`. Tests can use small values. No real clock is injected.
+  - Rate-limit `resets_at` is compared with `time.time()`; patch it in the host module, or use far-past and far-future timestamps.
+- **Fixtures / factories:**
+  - No shared fixtures exist for this area. The only conftest is `tests/features/coding_agent/conftest.py`, which is not reusable.
+  - Build requests with `ClaudeSpawnRequest(...)` directly.
+- **Real seams (do not mock):**
+  - `ClaudeHost`'s own registry, admission, loop guard and statuses;
+  - `ClaudeOptionsTranslator`, `ClaudeFailureMapper`, `ClaudeLiveSession` and the records' validation;
+  - `ToolExecutor`, `Tools`, `PermissionPolicy` and `ToolsFormatter`;
+  - `asyncio.to_thread`. The history thread check relies on the fake function recording `threading.get_ident()`.
+
+  Only the vendor SDK is faked. Never start `claude` or reach the network (NFR-6).
+- **Real-SDK contract tests** (optional for S2): guard with `@unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "requires the optional claude extra")`. They may import the real SDK to check that `ClaudeSdkLoader.load()` returns its classes, and that `ClaudeOptionsTranslator` output constructs a real `ClaudeAgentOptions`, without connecting. The venv `C:/Users/422mi/vidbyte-repos/.venvs/sdk-claude-host` gets `.[dev,claude]`. CI never installs the extra, so these tests skip there.
+- **MCP:** `McpStudioServer(tools=ClaudeTools(host, request))` from `vidbyte.mcp_server` lists tools without any client connection. Prior art is `tests/test_mcp_studio_server.py`.
+- **Per-area config:** none. Do not add pytest config to `pyproject.toml`.
+- **Run one file:** `PYTHONPATH=$(pwd) python -m pytest tests/features/claude_host/test_claude_host_<area>.py` · **Run all:** `PYTHONPATH=$(pwd) python -m pytest`
+
+## §14 Agent boundaries
+
+- **Always:**
+  - Keep edits inside this spec's worktree (frontmatter `worktree`); the main checkout is read-only.
+  - Build exactly §12.3, phase by phase, and run the claude test pack after each phase.
+  - Run the one-rule lint command (§11) for A001, A002, A003, A007, C002, C006, C008, S016, S017 and S025 while iterating.
+  - Run the full local gate (source stage with `PYTHONPATH`, then the package stage) plus the semgrep scan before pushing.
+  - Cite spec IDs (FR-, W-, row numbers) in commit messages, as `type(scope): summary`.
+  - Verify the marker file's SHA-256 after every commit that touches it.
+- **Ask first (stop and report BLOCKED):**
+  - modifying any test file;
+  - exceeding the §8.4 budget, or adding a file not in §12.3;
+  - touching any file outside §12.3, especially the agent base class, the MCP server package, the root `vidbyte` package or the public-API contract;
+  - any gate rejecting the marker's contract bytes;
+  - a lint rule that cannot be satisfied without a suppression or a baseline change;
+  - adding a dependency other than the `claude` extra;
+  - changing a §8.5 name or signature;
+  - needing a ⚑ private SDK call;
+  - discovering that a §15 assumption is false in a way that changes behaviour.
+- **Never:**
+  - commit secrets or a real API key;
+  - run `claude` against a real account in tests or CI;
+  - delete, skip, xfail or weaken a failing test;
+  - raise a number in the lint baseline or add a suppression;
+  - push to `main` or merge; the PR stays a draft;
+  - rebase after the first push (catch up by merging `origin/main`);
+  - read or write the CodexHost worktree;
+  - reorder or remove existing entries in shared files;
+  - implement anything not in §12, including any optional `Q-n`.
+
+## §15 Assumptions and open questions
+
+**Assumptions** (stand unless the user corrects them):
+- **A-1** — The CLI accepts a user message whose content is a list of text and base64 image blocks over `query(AsyncIterable[dict])`, as the Anthropic Messages content format describes. — *If wrong:* `images` is removed and becomes a stated limitation. The rest is unaffected.
+- **A-2** — In SDK stream-json mode with no prompt handler (`permission_prompts=NONE`), a tool call that needs permission is denied rather than left waiting, and appears in `permission_denials`. — *If wrong:* such turns would wait until the time budget or an interrupt, and the next step for `permission_denied` would need to say so.
+- **A-3** — The verified 2.1.296 flags behave in SDK (stream-json) mode as their help text describes, including `--no-session-persistence`, whose help says "only works with --print". — *If wrong:* `persist_session=False` becomes a limitation, and the field is rejected with `configuration.unsupported_combination`.
+- **A-4** — `--autocompact` accepts a plain integer token count, such as `200000`. — *If wrong:* the translator formats the value in the CLI's `k`/`M` form. Only the translator changes.
+- **A-5** — `CLAUDE_CODE_MAX_OUTPUT_TOKENS` caps output tokens per model request. — *If wrong:* the field's documentation changes; the mapping stays.
+- **A-6** — `connect()` with no prompt sends only `initialize`, makes no model request, and on 2.1.296 returns `account`, `models` and `claude_code_version`. The binary's initialize schema has the field. — *If wrong:* readiness falls back to the version on the `system/init` message, which requires a turn and so is not free, and NFR-2 is revised.
+- **A-7** — "Signed in" means one of these: `account.apiProvider` is present and not `firstParty` (third-party auth); or `tokenSource` or `apiKeySource` is present and not `none`. — *If wrong:* only `ClaudeProbe.signed_in` changes.
+- **A-8** — An interrupted running turn always ends with exactly one result for its prompt, and a `query()` sent after that result starts exactly one new turn whose result is the next prompt result on the stream. Turns the CLI injects in between, such as a background agent waking the session, carry a non-human `origin` and are skipped (D-28). — *If wrong:* steer (D-3) needs the CLI's `session_state_changed` idle signal, opted in with env `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS`.
+- **A-9** — One `ClaudeSDKClient` may be driven from several tasks on one loop: the pump task reads, while tool calls send `interrupt()`. The SDK's anyio task-compat layer runs its background tasks as plain loop tasks, which was read, not executed; the client docstring warns only against crossing async contexts. — *If wrong:* steer and interrupt are routed through the pump task with a small command queue. Only `ClaudeLiveSession` changes.
+- **A-10** — Resuming a session from a cwd other than the one it was recorded under does not find the transcript. — *If wrong:* D-27's refusal becomes unnecessary and can be dropped.
+- **A-11** — A `ResultMessage`'s `total_cost_usd` and `model_usage` are cumulative for the session across turns, including resumed and forked sessions, which continue from saved totals (TS SDK documentation). — *If wrong:* the usage snapshot must sum results per turn (INV-20 flips).
+- **A-12** — `--worktree` works headless in SDK mode, creating or reusing the worktree before the first turn. — *If wrong:* `worktree` becomes a limitation.
+- **A-13** — Under `--bare` with no API key, initialize's `account.apiKeySource` is absent or `none`. — *If wrong:* EC-6's precheck for `bare` misses, and the turn fails later as `not_signed_in` instead.
+- **A-14** — A process-start failure, such as an unknown flag on an old CLI, surfaces from `connect()` as `CLIConnectionError` or `ProcessError`. — *If wrong:* it maps through the generic branch to `protocol_mismatch`.
+- **A-15** — On Windows the OS layer rejects the `user` option during process start with a builtin `ValueError` or `TypeError`. — *If wrong:* another exception class maps to `protocol_mismatch`.
+- **A-16** — The rate-limit `resets_at` is a Unix timestamp in seconds. — *If wrong:* the comparison scales it.
+
+**Open questions** (max 5 blocking):
+| ID | Question | Blocking? | Default if unanswered |
+|---|---|---|---|
+| Q-1 | Should a seen `allowed_warning` window stop new spawns, as R3 describes for `plan_claude_fan_out`? | non-blocking | No (D-8). |
+| Q-2 | Add a permission gate so WRITE Claude tools served through `McpStudioServer` require an explicit opt-in? | non-blocking | No; stated limitation (T-4). |
+| Q-3 | Scope the history tools to the base request's `cwd`, so an agent cannot read other projects' transcripts? | non-blocking | No; stated limitation (T-2). |
+| Q-4 | Clip long session lists and transcripts in tool outputs? | non-blocking | No (EC-51). |
+| Q-5 | Add a per-toolset handle scope (R2's "a handle only works for the tool that created it") for hosts shared across agents? | non-blocking | No (D-14). |
+| Q-6 | Support `prompt_suggestions` through `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` plus a reader for the suggestion messages? | non-blocking | No (NG-7). |
+| Q-7 | Let the model choose `model` and `effort` per spawn tool call? | non-blocking | No (D-13). |
+| Q-8 | Set a default `max_live_sessions` and launch `limit` after measuring memory per `claude` process? | non-blocking | No (D-22). |
+| Q-9 | Add a way to forget finished handles before `aclose`? | non-blocking | No (D-23). |
+| Q-10 | Export `ClaudeHost` and `ClaudeTools` from the root `vidbyte` package (this regenerates the public-API contract)? | non-blocking | No (NG-4). |
+
+No question blocks this spec.
+
+## §16 Review log
+| Round | ID | Severity | Section | Finding (one line) | Disposition | Change made / reason |
+|---|---|---|---|---|---|---|
+
+## §17 Revision history
+| Revision | Date | Stage | Summary |
+|---|---|---|---|
+| r1 | 2026-10-12 | S1 spec | Initial spec |
