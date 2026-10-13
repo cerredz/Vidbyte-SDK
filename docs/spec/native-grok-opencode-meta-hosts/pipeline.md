@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencod
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
 s3_head: de5b7c4c
-s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests] → ba70578e [RACE-1 R-18..R-21 tests] → c1599d0b [post-S6 R-22, R-24 tests])
+s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests] → ba70578e [RACE-1 R-18..R-21 tests] → c1599d0b [post-S6 R-22, R-24 tests] → 5e4c3c34 + 15fd9332 [3.11 swallowed-cancel tests])
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1036
 until: none
 started: 2026-10-13 01:30 UTC
@@ -275,6 +275,18 @@ started: 2026-10-13 01:30 UTC
   - Why: it is engineering, not product intent. The spec already settles it (AC-4/INV-2 require a cancel to propagate). The fault is in the PR's own code, and it makes a gate flaky on a CI leg (3.11). The remedy was validated by probe in the iteration 7 verify-log.
   - **Order:** S2 addendum 5 (a deterministic test forcing the swallow window), then iteration 8, then the S6 body update.
   - **If iteration 8 does not converge,** I stop and report. I will not raise the cap.
+- 2026-10-13 21:40 UTC — **S2 addendum 5 done:** 7 cases in `test_grok_host_process_bounds.py`, committed in 5e4c3c34 and 15fd9332.
+  - **The cases:**
+    - the request drain for spawn, continue and list;
+    - the `session/cancel` drain;
+    - the answer wait for spawn, continue and list.
+  - **My spot-check:** no `vidbyte/` change; no other existing test file touched; `-k "answer_arrives or drain_finishes"` gives 7 failed.
+  - **The author's own runs:** four packs 7 failed, 1661 passed, 19 skipped; scratch remedy 5/5 green; R-19 still green.
+  - **The answer-wait test** was added on my request, after the author found that the planned fix left `transport.py:349` (the answer wait) able to hand a result to a cancelled caller.
+- 2026-10-13 21:40 UTC — **Decision: iteration 8 scope.**
+  - **In scope:** the bounded drain sites `:323` and `:423` (one helper that keeps `asyncio.wait_for`, a `cancelling()` check, and `_send` popping and cancelling the pending future) and the answer wait `:349` (the same `cancelling()` check inside `_answer`'s existing try).
+  - **Out of scope, a follow-up:** the close-path waits `:473`, `:499` and `:509`. Why: cleanup should finish, and re-raising mid-close could leave a child process unreaped.
+  - Also passed to iteration 8: my unexplained 1-in-62 timeout of the R-22/R-24 pair at 19582f13. It should loop those tests too.
 
 ## User replies (verbatim)
 (none during the run)
