@@ -171,6 +171,99 @@ CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {
         FailureSeverity.ERROR.value,
         FailureDisposition.RAISE.value,
     ),
+    # CodexHost codes. Setup problems are terminal until the developer fixes
+    # them; usage windows, overload and a dead process pass with time or a
+    # new host; Vidbyte's own stops are warnings that end the turn.
+    FailureCode.CODEX_NOT_INSTALLED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_VERSION_UNSUPPORTED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_NOT_SIGNED_IN.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_USAGE_LIMITED.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.STOP.value,
+    ),
+    FailureCode.CODEX_MODEL_UNKNOWN.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SESSION_NOT_FOUND.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SESSION_BUSY.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_BUDGET_EXHAUSTED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.STOP.value,
+    ),
+    FailureCode.CODEX_API_ERROR.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.MODEL.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_PERMISSION_DENIED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.ACTION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.STOP.value,
+    ),
+    FailureCode.CODEX_SANDBOX_NOT_READY.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SCHEMA_VIOLATION.value: (
+        CodexFailureClass.MODEL_RETRYABLE.value,
+        FailurePhase.OUTPUT.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_PROCESS_EXITED.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_PROTOCOL_MISMATCH.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_TURN_TIMED_OUT.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.STOP.value,
+    ),
 }
 # Published apart from one another so a caller can tell "no failures" from
 # "one recovered failure", and a first-attempt answer from a fallback answer.
@@ -224,6 +317,117 @@ CODEX_CONTRACTS_KEY = "output_contracts"
 # so simultaneous turns against it are not a performance opportunity the provider
 # offers — and the facade's thread_id, history, and usage ledger would race.
 CODEX_MAX_CONCURRENT_TURNS = 1
+# CodexHost bounds each app-server call by the tool bridge's bound, so a
+# host call never outlives the dynamic-tool call that made it (D-3).
+CODEX_HOST_REQUEST_TIMEOUT_SECONDS = CODEX_TOOL_CALL_TIMEOUT_SECONDS
+# The wait tool's default and clamp, kept below the bridge bound so a
+# wait made from inside a Codex dynamic tool still answers (D-31).
+CODEX_HOST_TOOL_MAX_WAIT_SECONDS = 240.0
+# Each host's own call executor size: the ceiling of the standard
+# library's default pool size. Workers start only when needed (D-1).
+CODEX_HOST_WORKER_THREADS = 32
+# The bound on each interrupt sent at close and on the goal cancel after
+# a failed goal start; a live app-server answers at once (INV-7).
+CODEX_HOST_CLOSE_INTERRUPT_SECONDS = 5.0
+# How long close waits for the close thread; CodexClient.close() bounds
+# itself to about 3 seconds (INV-7).
+CODEX_HOST_CLOSE_WAIT_SECONDS = 10.0
+# The host's dynamic-tools opt-in message (INV-29).
+CODEX_HOST_EXPERIMENTAL_API_TEXT = "Dynamic tools on CodexHost require CodexClientSettings(experimental_api=True)."
+# The next step of every configuration.unsupported_combination refusal:
+# a USER reviewer at construction (D-16) or reported by Codex (D-32).
+CODEX_HOST_USER_REVIEWER_TEXT = "Set approvals_reviewer=AUTO_REVIEW or GUARDIAN_SUBAGENT, and set it whenever approval_policy is set. To continue a thread whose reviewer is user, pass overrides=CodexSpawnRequest(approvals_reviewer=AUTO_REVIEW), or set it in the CodexHostTools spawn_defaults. Answering approval requests in code needs set_codex_approval_handler, which this release does not include."
+# The oldest codex runtime the host talks to, the SDK's own floor (D-5).
+CODEX_HOST_MINIMUM_VERSION = "0.151.0"
+# The executable name the host resolves on PATH (D-4).
+CODEX_HOST_BINARY_NAME = "codex"
+# max_attempts for raw calls that spend usage, so none is sent twice (D-2).
+CODEX_HOST_SINGLE_ATTEMPT = 1
+# Lower bounds for max_live_turns, token_budget and max_output_tokens.
+CODEX_HOST_MIN_LIVE_TURNS = 1
+CODEX_HOST_MIN_TOKEN_LIMIT = 1
+# Timeouts must be strictly greater than this.
+CODEX_HOST_MIN_EXCLUSIVE_SECONDS = 0.0
+# The approval_mode thread/start sends when nothing is set (D-16).
+CODEX_HOST_DEFAULT_APPROVAL_MODE = "auto_review"
+# App-server methods the host calls through the SDK's raw request path.
+CODEX_RATE_LIMITS_READ_METHOD = "account/rateLimits/read"
+CODEX_SANDBOX_READINESS_METHOD = "windowsSandbox/readiness"
+CODEX_REVIEW_START_METHOD = "review/start"
+CODEX_GOAL_SET_METHOD = "thread/goal/set"
+CODEX_MODEL_LIST_METHOD = "model/list"
+# Notification names the turn watchers read.
+CODEX_TURN_STARTED_NOTIFICATION = "turn/started"
+CODEX_TURN_COMPLETED_NOTIFICATION = "turn/completed"
+CODEX_ITEM_COMPLETED_NOTIFICATION = "item/completed"
+CODEX_USAGE_UPDATED_NOTIFICATION = "thread/tokenUsage/updated"
+CODEX_GOAL_UPDATED_NOTIFICATION = "thread/goal/updated"
+CODEX_GOAL_CLEARED_NOTIFICATION = "thread/goal/cleared"
+# Maps an approval_mode value to the wire approvalPolicy and
+# approvalsReviewer; an empty reviewer is left unsent.
+CODEX_APPROVAL_MODE_WIRE: Mapping[str, tuple[str, str]] = {
+    "auto_review": ("on-request", "auto_review"),
+    "deny_all": ("never", ""),
+}
+# Maps a CodexSandbox value to the thread sandbox mode and to the turn
+# sandboxPolicy type.
+CODEX_SANDBOX_THREAD_MODE: Mapping[str, str] = {
+    "read-only": "read-only",
+    "workspace-write": "workspace-write",
+    "full-access": "danger-full-access",
+}
+CODEX_SANDBOX_TURN_POLICY: Mapping[str, str] = {
+    "read-only": "readOnly",
+    "workspace-write": "workspaceWrite",
+    "full-access": "dangerFullAccess",
+}
+# Approval requests the host's router accepts, mirroring the SDK's own
+# default handler (D-16).
+CODEX_ACCEPTED_APPROVAL_METHODS = frozenset(
+    {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}
+)
+CODEX_APPROVAL_ACCEPT_DECISION = "accept"
+# Maps a turn error's codexErrorInfo key to a failure code; every other
+# key means codex.api_error.
+CODEX_ERROR_INFO_CODES: Mapping[str, str] = {
+    "usageLimitExceeded": FailureCode.CODEX_USAGE_LIMITED.value,
+    "rateLimitExceeded": FailureCode.CODEX_USAGE_LIMITED.value,
+    "sessionBudgetExceeded": FailureCode.CODEX_BUDGET_EXHAUSTED.value,
+    "contextWindowExceeded": FailureCode.CODEX_BUDGET_EXHAUSTED.value,
+    "unauthorized": FailureCode.CODEX_NOT_SIGNED_IN.value,
+    "sandboxError": FailureCode.CODEX_SANDBOX_NOT_READY.value,
+    "tooManyDenials": FailureCode.CODEX_PERMISSION_DENIED.value,
+    "cyberPolicy": FailureCode.CODEX_PERMISSION_DENIED.value,
+    "misalignmentPolicyViolation": FailureCode.CODEX_PERMISSION_DENIED.value,
+}
+# Goal statuses that end a goal run, as openai-codex's goal stream ends.
+CODEX_GOAL_TERMINAL_STATUSES = frozenset(
+    {"paused", "blocked", "usageLimited", "budgetLimited", "complete"}
+)
+# The next step each CodexHost failure tells its caller to take.
+CODEX_NEXT_STEPS: Mapping[str, str] = {
+    FailureCode.CODEX_NOT_INSTALLED.value: "Install the Codex CLI (npm install -g @openai/codex) or pass CodexClientSettings(codex_bin=...).",
+    FailureCode.CODEX_VERSION_UNSUPPORTED.value: "Run codex update, then open a new CodexHost.",
+    FailureCode.CODEX_NOT_SIGNED_IN.value: "Run codex login, then retry.",
+    FailureCode.CODEX_USAGE_LIMITED.value: "Wait until the usage window resets, or sign Codex in with an API key.",
+    FailureCode.CODEX_MODEL_UNKNOWN.value: "Pick a model from list_codex_models.",
+    FailureCode.CODEX_SESSION_NOT_FOUND.value: "Find the thread with list_codex_threads, or use a handle this host returned; continue a finished turn instead of steering it.",
+    FailureCode.CODEX_SESSION_BUSY.value: "Steer or wait on the running turn, or fork the thread.",
+    FailureCode.CODEX_BUDGET_EXHAUSTED.value: "Raise max_output_tokens or the goal token_budget, or split the work.",
+    FailureCode.CODEX_API_ERROR.value: "Retry with backoff, and check the service status if it persists.",
+    FailureCode.CODEX_PERMISSION_DENIED.value: "Allow the action (approval_policy, approvals_reviewer or sandbox), or ask for work that does not need it.",
+    FailureCode.CODEX_SANDBOX_NOT_READY.value: "Set up the Codex Windows sandbox, or run with sandbox=FULL_ACCESS.",
+    FailureCode.CODEX_SCHEMA_VIOLATION.value: "Continue the thread and ask for output that matches the schema; the raw text is in result.final_response.",
+    FailureCode.CODEX_PROCESS_EXITED.value: "Open a new CodexHost and continue the thread by id.",
+    FailureCode.CODEX_PROTOCOL_MISMATCH.value: "Match the Codex CLI and openai-codex versions (codex update), then open a new CodexHost.",
+    FailureCode.CODEX_TURN_TIMED_OUT.value: "Raise timeout_seconds, or continue the thread to finish the work.",
+    FailureCode.CODEX_FORK_FAILED.value: "Fork from a completed turn.",
+    FailureCode.CODEX_RESPONSE_INVALID.value: "Continue the thread and ask for a final answer.",
+    FailureCode.CONFIGURATION_INVALID_ARGUMENT.value: "Fix the argument or setup named in the message, then call again.",
+    FailureCode.CONFIGURATION_UNSUPPORTED_COMBINATION.value: CODEX_HOST_USER_REVIEWER_TEXT,
+}
+# The router's answer to a tool call on a thread with no Vidbyte tools.
+CODEX_UNREGISTERED_TOOL_TEXT = "No Vidbyte tool is registered for this thread on this host."
 
 
 __all__ = [
@@ -264,4 +468,38 @@ __all__ = [
     "CODEX_THREAD_START_METHOD",
     "CODEX_TOOL_CALL_METHOD",
     "CODEX_TOOL_CALL_TIMEOUT_SECONDS",
+    "CODEX_HOST_REQUEST_TIMEOUT_SECONDS",
+    "CODEX_HOST_TOOL_MAX_WAIT_SECONDS",
+    "CODEX_HOST_WORKER_THREADS",
+    "CODEX_HOST_CLOSE_INTERRUPT_SECONDS",
+    "CODEX_HOST_CLOSE_WAIT_SECONDS",
+    "CODEX_HOST_EXPERIMENTAL_API_TEXT",
+    "CODEX_HOST_USER_REVIEWER_TEXT",
+    "CODEX_HOST_MINIMUM_VERSION",
+    "CODEX_HOST_BINARY_NAME",
+    "CODEX_HOST_SINGLE_ATTEMPT",
+    "CODEX_HOST_MIN_LIVE_TURNS",
+    "CODEX_HOST_MIN_TOKEN_LIMIT",
+    "CODEX_HOST_MIN_EXCLUSIVE_SECONDS",
+    "CODEX_HOST_DEFAULT_APPROVAL_MODE",
+    "CODEX_RATE_LIMITS_READ_METHOD",
+    "CODEX_SANDBOX_READINESS_METHOD",
+    "CODEX_REVIEW_START_METHOD",
+    "CODEX_GOAL_SET_METHOD",
+    "CODEX_MODEL_LIST_METHOD",
+    "CODEX_TURN_STARTED_NOTIFICATION",
+    "CODEX_TURN_COMPLETED_NOTIFICATION",
+    "CODEX_ITEM_COMPLETED_NOTIFICATION",
+    "CODEX_USAGE_UPDATED_NOTIFICATION",
+    "CODEX_GOAL_UPDATED_NOTIFICATION",
+    "CODEX_GOAL_CLEARED_NOTIFICATION",
+    "CODEX_APPROVAL_MODE_WIRE",
+    "CODEX_SANDBOX_THREAD_MODE",
+    "CODEX_SANDBOX_TURN_POLICY",
+    "CODEX_ACCEPTED_APPROVAL_METHODS",
+    "CODEX_APPROVAL_ACCEPT_DECISION",
+    "CODEX_ERROR_INFO_CODES",
+    "CODEX_GOAL_TERMINAL_STATUSES",
+    "CODEX_NEXT_STEPS",
+    "CODEX_UNREGISTERED_TOOL_TEXT",
 ]
