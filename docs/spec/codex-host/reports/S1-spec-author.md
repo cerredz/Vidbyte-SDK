@@ -127,3 +127,40 @@ No gate was run and nothing was installed. That follows S1's read-only rule.
   - A001 headers, which have no headroom;
   - S045 for anything async that takes a timeout.
 - **The native `__init__`** must hash to `0374a2c8…942f497a` exactly. If a gate rejects those bytes, the run reports BLOCKED.
+
+## Addendum r2: review round 1 (2026-10-13)
+
+**Inputs.** I applied all 13 findings in `reports/S1-spec-review.md` (verdict SOUND WITH FIXES), plus the orchestrator's decisions for R-5 and R-9. The spec is now at revision 2, commit `b38d573a`. Each finding has a §16 row, and §17 has the r2 row. `status` stays `draft` for the scoped round-2 review.
+
+**Sections changed.** §8, §8.5, §9, §10 and §12 all changed. So did §2, §3 (NG-8, NG-12), §4 (one import), §5, §6, §7 (FR-30, NFR-9, NFR-10), §11, §13, §14 and §15.
+
+**Design changes:**
+- **Host executor.** Calls run on a `ThreadPoolExecutor` the host owns (`CODEX_HOST_WORKER_THREADS`), never on the loop's default executor.
+- **Close.** It finalizes the turns, then sends each one bounded interrupt, then closes on a daemon thread under `CODEX_HOST_CLOSE_WAIT_SECONDS`.
+- **Late acceptance.** It now also covers a start request that outlives its bound. A failed or timed-out goal budget request also cancels the goal (INV-25, EC-74). I added this one myself: it is the same unowned-turn gap as R-6.
+- **Death flag.** After it is set, every failure maps to `process_exited` with fixed text.
+- **Wait clamp.** 240 s.
+- **USER reviewer.** Rejected when the request is built (orchestrator decision).
+- **Records.** The records now live in a new `codex_host` module (repo-forced).
+- **Fixed texts.** §12.5 carries request.md §C's fixed texts, copied by a script and compared byte for byte.
+
+**New facts I checked this round:**
+- **The review's blob-hash pipe gives a wrong hash in Windows PowerShell 5.1.** That shell re-encodes bytes piped between two programs: `git show HEAD:vidbyte/harnesses/README.md` piped to Python printed `dbbbe043…` in PowerShell and `4075c323…` in Git Bash. §11 now reads the blob inside Python with `subprocess.run`. That form printed `4075c323…` in both shells, for the staged path and for the `HEAD:` path.
+- **ruff `F` is in the lint selectors** (`lint/core/ruff.py:26-34`). So the new records module must not import `CodexClientSettings`, which no record uses. Row 6 lists exactly the records the fields need.
+- **`ToolInput` comes from `vidbyte.tools.adapters`.** `codex.py` imports it under `TYPE_CHECKING`, and row 6 says the new module does the same.
+- **No lint rule is scoped by file name in a way the move would trip.** C012's exemptions name `codex.py` fields, but the new records are not configuration owners, so C012 does not select them. S058 applies only to pydantic models.
+- **`thread/read` with `includeTurns`** "include[s] turns and their items from rollout history", and `Turn.itemsView` defaults to `full` (`generated/v2_all.py`). These were read from the schema, not run, so the review completion read-back rests on A-14.
+- **openai-codex's `_TURN_START_EXECUTOR`** passes no `max_workers`, so it gets the standard library default of min(32, CPU count + 4).
+
+**Least sure:**
+- **A-1:** does the app-server exit on stdin end-of-file on Windows? If not, it lingers after close (EC-69).
+- **A-7:** do resumed threads keep their reviewer? If not, a thread started outside the host with a `user` reviewer could send approvals that hit the `accept` fallback.
+- **A-14:** does the read-back have the final item by the time `turn/completed` arrives?
+
+**For the round-2 reviewer:**
+- The three judgement calls of mine are:
+  - INV-25/EC-74;
+  - leaving Q-3 resolved rather than open for the callback, because the callback is R3's ✗ function;
+  - the §11 hash command form.
+- Everything else follows the review's smallest fixes or the orchestrator's notes.
+- This addendum is not committed; I staged only the spec.

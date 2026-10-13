@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:27 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1 a1ee792a (18 sections, §12.3 28 rows); review r1: SOUND WITH FIXES, 2 Blockers, 7 Majors, 4 Minors; author revising to r2 |
+| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 a1ee792a → review r1 SOUND WITH FIXES (2B/7M/4m) → spec r2 b38d573a (all 13 applied); scoped review round 2 launched 07:40 UTC |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-13 00:45 UTC
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Parallel run
 - **Sibling pipeline:** `claude-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host` on branch `feat/claude-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -65,6 +65,13 @@ started: 2026-10-13 00:45 UTC
   - The handler is not built (rule 11).
   *Why:* openai-codex 0.162.1 has no decline decision, and its default handler answers `accept`. In this PR, a `USER` reviewer with no handler would silently approve every escalation, the opposite of what that setting asks for. Rejecting the value narrows nothing the user can safely use today.
 - 2026-10-13 06:35 UTC — **R-9: new records go in a new domain module,** not into the 1,205-line `vidbyte/lib/dataclasses/codex.py`. *Why:* AGENTS.md:31 says to split before adding more once a file heads toward four digits. So this is repo-forced, and Q-1 is no longer a question.
+- 2026-10-13 07:40 UTC — **r2 spot-check passed.** `revision: 2`, §16 holds a disposition row for each of R-1 to R-13, there are 18 sections and 28 §12.3 rows (18 CREATE, 10 MODIFY), and the commit is `docs(spec): revise codex-host spec r2 (apply review round 1, R-1 to R-13)` (b38d573a).
+  - The spec contains the request.md §C REPO_MAP paragraph and README bullet byte for byte (checked with `grep -F`).
+  - The orchestrator committed the author's r2 report addendum.
+- 2026-10-13 07:40 UTC — **Launched review round 2 (the last allowed), scoped to what r2 changed and what depends on it.** That covers §8, §8.5, §9.1–9.4, §10 T-3/T-6, §12, and the new INV/EC items. It also covers three calls the author made beyond the review:
+  - INV-25/EC-74: a failed goal-budget request cancels the goal;
+  - Q-3 resolved instead of left open;
+  - the §11 hash command form.
 
 ## User replies (verbatim)
 - none yet
@@ -141,4 +148,16 @@ started: 2026-10-13 00:45 UTC
   - No test enumerates `ComponentRegistry`.
   - No lint rule caps file length.
   *source:* S1 reviewer.
+- **Contract import paths (spec r2).** New records come from `vidbyte.lib.dataclasses.codex_host`. Settings records and helpers still come from `vidbyte.lib.dataclasses.codex`, which is not edited.
+  - The new module's `__all__` is a list literal. Copying `codex.py`'s `Codex*` comprehension would re-export the imported records.
+  - ruff `F` (unused imports) is in the lint selectors, so `codex_host.py` must not import `CodexClientSettings`.
+  *source:* S1 author r2.
+- **Executor and close constants.**
+  - Host calls run on a host-owned executor, `CODEX_HOST_WORKER_THREADS=32`; there is no `to_thread`.
+  - `close()` runs on a daemon thread, with 5 s and 10 s bounds.
+  - The wait clamp is 240 s, below the 300 s tool-call cancel bound.
+  - The connection module reads the request-timeout and close constants at call time, and the worker count when it builds the executor.
+  *source:* S1 author r2.
+- **Close order (INV-7):** finalize the turns, send each a single bounded interrupt, close the client on a daemon thread, then shut the executor down. *source:* S1 author r2.
+- **A PowerShell trap.** Windows PowerShell 5.1 changes bytes piped between programs, so the `git cat-file | python` form prints a wrong hash there. The §11 hash command uses a Python `subprocess` form, which gives the same hash in both shells. *source:* S1 author r2 (verified).
 - **openai_codex must load lazily.** Nothing reachable from `import vidbyte`, or from `vidbyte.tools.builtins` (which the YAML component registry scans), may import openai_codex at module level. The precedent is `CodexTransport._load_sdk` (transport.py:215-259). CI installs only `.[dev]`, so SDK-dependent tests skip there (`skipUnless`). The global Python 3.11 has openai-codex 0.162.1. *source:* S0.
