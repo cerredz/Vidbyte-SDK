@@ -157,10 +157,10 @@ class OpencodeTurnWatcher:
 
     async def interrupt(self, source: InterruptSource, *, operation: str) -> None:
         # @intent opencode-watcher-records-abort-source
-        # The first recorded source wins and is set before POST …/abort,
-        # so a poll that sees the abort reply already knows who sent it;
-        # a failed abort leaves no source behind. A turn already
-        # recorded as failed has nothing left to abort.
+        # The first recorded source wins and is set before POST
+        # …/abort, so a poll that sees the abort reply already knows
+        # who sent it; a failed abort leaves no source behind. A turn
+        # already recorded as failed has nothing left to abort.
         if self._failure is not None:
             return
         first = self._source is None
