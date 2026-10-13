@@ -1,7 +1,7 @@
 """FILE: vidbyte/tools/builtins/muse/__init__.py
 
 PURPOSE: Exports the twelve Muse tool classes: CheckMuseReadyTool, ListMuseModelsTool, SpawnMuseSessionTool, ContinueMuseSessionTool, ForkMuseSessionTool, ListMuseSessionsTool, ReadMuseSessionTool, PageMuseSessionTool, SteerMuseTurnTool, InterruptMuseTurnTool, WaitMuseTurnTool and TrackMuseSessionUsageTool.
-ROLE IN CODEBASE: Imported by MuseTools in vidbyte/tools/toolsets/muse.py. Not re-exported from vidbyte/tools/builtins/__init__.py or the root package (D-15).
+ROLE IN CODEBASE: Imported by MuseTools in vidbyte/tools/toolsets/muse.py. Not re-exported from vidbyte/tools/builtins/__init__.py or the root package.
 ARCHITECTURE NOTE: A package initializer that only re-exports; the classes live in tools.py and their text in descriptions.py.
 FUNCTION INVENTORY: No functions. Re-exports the twelve tool classes.
 COMMON MODIFICATION PATTERNS: A new Muse tool class is added to the import and the literal __all__.

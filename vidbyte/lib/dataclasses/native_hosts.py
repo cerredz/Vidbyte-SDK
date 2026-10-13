@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the records every native host shares: the turn handle a spawn returns, token usage, one recorded approval decision, a finished turn's result, an interrupt result, a Muse steer result, and per-message and per-session usage.
 ROLE IN CODEBASE: Built by NativeTurnTable (vidbyte/harnesses/native/hostkit/turns.py) and the Grok, opencode and Muse turn drivers; returned by GrokHost, OpencodeHost and MuseHost; encoded to JSON by vidbyte/tools/builtins/native_host_tool.py.
-ARCHITECTURE NOTE: Data only. Every record is frozen and slotted and validates in __post_init__ through RecordFieldValidator and RecordFieldConverter. Unknown usage is None, never 0 (INV-15). A result never carries RUNNING or FAILED: a wait raises at its deadline while a turn runs, and raises the recorded error for a failed turn.
+ARCHITECTURE NOTE: Data only. Every record is frozen and slotted and validates in __post_init__ through RecordFieldValidator and RecordFieldConverter. Unknown usage is None, never 0. A result never carries RUNNING or FAILED: a wait raises at its deadline while a turn runs, and raises the recorded error for a failed turn.
 FUNCTION INVENTORY: NativeTurnHandle, NativeTokenUsage, NativeApprovalDecision, NativeTurnResult, NativeInterruptResult, NativeSteerResult, NativeMessageUsage, NativeSessionUsage; each has only __post_init__.
 COMMON MODIFICATION PATTERNS: Add a field with its default and its check in __post_init__ together; keep counts optional so unknown stays distinct from zero.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add host behaviour here. 2. Do not default a usage count to 0. 3. Do not accept a vendor status string where NativeTurnStatus is required.

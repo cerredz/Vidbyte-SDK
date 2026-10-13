@@ -1,7 +1,7 @@
 """FILE: vidbyte/tools/builtins/grok/__init__.py
 
 PURPOSE: Exports the ten Grok tool classes: CheckGrokReadyTool, ListGrokModelsTool, SpawnGrokSessionTool, RunGrokOnceTool, ContinueGrokSessionTool, ForkGrokSessionTool, ListGrokSessionsTool, SearchGrokSessionsTool, WaitGrokTurnTool and InterruptGrokTurnTool.
-ROLE IN CODEBASE: Imported by GrokTools in vidbyte/tools/toolsets/grok.py. Not re-exported from vidbyte/tools/builtins/__init__.py or the root package (D-15).
+ROLE IN CODEBASE: Imported by GrokTools in vidbyte/tools/toolsets/grok.py. Not re-exported from vidbyte/tools/builtins/__init__.py or the root package.
 ARCHITECTURE NOTE: A package initializer that only re-exports; the classes live in tools.py and their text in descriptions.py.
 FUNCTION INVENTORY: No functions. Re-exports the ten tool classes.
 COMMON MODIFICATION PATTERNS: A new Grok tool class is added to the import and the literal __all__.

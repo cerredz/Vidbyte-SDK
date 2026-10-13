@@ -2,11 +2,11 @@
 
 PURPOSE: Defines HarnessBackendTool, the base of the backend tools, and the three READ tools over the backend functions: ListHarnessBackendsTool, CheckBackendReadyTool and GetDeepseekBalanceTool.
 ROLE IN CODEBASE: Bundled by HarnessBackendTools in vidbyte/tools/toolsets/harness_backends.py; each tool calls one function of vidbyte.harnesses.native.backends. Exported by vidbyte/tools/builtins/harness_backends/__init__.py.
-ARCHITECTURE NOTE: HarnessBackendTool is a NativeHostTool with no host (the backend functions are module functions) and reports its harness as "backend". Each subclass sets its name, permission, description and parameters and implements _invoke as one argument parse and one function call; the base turns failures into error results (INV-7).
+ARCHITECTURE NOTE: HarnessBackendTool is a NativeHostTool with no host (the backend functions are module functions) and reports its harness as "backend". Each subclass sets its name, permission, description and parameters and implements _invoke as one argument parse and one function call; the base turns failures into error results.
 FUNCTION INVENTORY: HarnessBackendTool.__init__ takes no host; each tool's _invoke parses its arguments and calls its function.
 COMMON MODIFICATION PATTERNS: A new public backend function gets one more subclass here, its description in descriptions.py, and its entry in HarnessBackendTools.
-WHAT NOT TO DO IN THIS FILE: 1. Do not add a tool for build_claude_backend_env, check_backend_compat or build_opencode_backend_provider; they are internal (FR-5). 2. Do not accept a key, model or endpoint as a tool argument.
-KNOWN EDGE CASES: check_backend_ready accepts only the exact lower-case profile names; the backend function refuses any other text as configuration.invalid_argument naming backend (EC-147).
+WHAT NOT TO DO IN THIS FILE: 1. Do not add a tool for build_claude_backend_env, check_backend_compat or build_opencode_backend_provider; they are internal. 2. Do not accept a key, model or endpoint as a tool argument.
+KNOWN EDGE CASES: check_backend_ready accepts only the exact lower-case profile names; the backend function refuses any other text as configuration.invalid_argument naming backend.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (Tools), §9.2 rows 41-43, EC-147
 TESTS: tests/features/native_backends/test_native_backends_tools.py, tests/features/native_backends/test_native_backends_errors.py
 """

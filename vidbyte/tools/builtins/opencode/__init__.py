@@ -1,7 +1,7 @@
 """FILE: vidbyte/tools/builtins/opencode/__init__.py
 
 PURPOSE: Exports the 18 opencode tool classes: the ten READ tools of read_tools.py and the eight session tools of session_tools.py.
-ROLE IN CODEBASE: Imported by OpencodeTools in vidbyte/tools/toolsets/opencode.py. Not re-exported from vidbyte/tools/builtins/__init__.py or the root package (D-15).
+ROLE IN CODEBASE: Imported by OpencodeTools in vidbyte/tools/toolsets/opencode.py. Not re-exported from vidbyte/tools/builtins/__init__.py or the root package.
 ARCHITECTURE NOTE: A package initializer that only re-exports; the classes live in read_tools.py and session_tools.py and their text in descriptions.py.
 FUNCTION INVENTORY: No functions. Re-exports the 18 tool classes.
 COMMON MODIFICATION PATTERNS: A new opencode tool class is added to the import and the literal __all__.

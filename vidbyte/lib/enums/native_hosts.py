@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_host
 ARCHITECTURE NOTE: Every enum is a str Enum so a record field holds a member while JSON output carries its value. Vendor vocabularies the hosts only pass through (stop reasons, session states, approval decisions) stay plain strings in the records and are not modelled here.
 FUNCTION INVENTORY: No functions. NativeHarness, NativeTurnStatus, InterruptSource, ApprovalOutcome, AcpToolKind, GrokPermissionMode, OpencodePermissionAction, OpencodeMcpKind, MuseReasoningEffort and MuseViewDirection.
 COMMON MODIFICATION PATTERNS: Add a member only when the vendor protocol adds the value; update the records that check it and the host that sends it in the same change.
-WHAT NOT TO DO IN THIS FILE: 1. Do not add an auto or bypassPermissions member to GrokPermissionMode; the hosts never approve everything (INV-9). 2. Do not import anything from vidbyte; enums sit at the bottom layer.
+WHAT NOT TO DO IN THIS FILE: 1. Do not add an auto or bypassPermissions member to GrokPermissionMode; the hosts never approve everything. 2. Do not import anything from vidbyte; enums sit at the bottom layer.
 KNOWN EDGE CASES: A missing or unknown ACP tool kind is read as AcpToolKind.OTHER by the Grok wire parser. NativeHarness lists CLAUDE_CODE and CODEX so backend profiles can name them, although no native host here drives those two.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §9.1; vidbyte/harnesses/README.md
 TESTS: tests/features/grok_host/test_grok_host_records.py, tests/features/muse_host/test_muse_host_records.py, tests/features/opencode_host/test_opencode_host_records.py

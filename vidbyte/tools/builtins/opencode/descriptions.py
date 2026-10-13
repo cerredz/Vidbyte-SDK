@@ -1,11 +1,11 @@
 """FILE: vidbyte/tools/builtins/opencode/descriptions.py
 
-PURPOSE: Holds the model-facing description text of the 18 opencode tools (§9.2 rows 11-28) and of their parameters.
+PURPOSE: Holds the model-facing description text of the 18 opencode tools and of their parameters.
 ROLE IN CODEBASE: Read by the tool classes in vidbyte/tools/builtins/opencode/read_tools.py and session_tools.py when they declare their ToolSpec and ToolParameter values.
 ARCHITECTURE NOTE: Plain string constants, each at least four general sentences with no concrete example values, so lint rule S025 can resolve and count them statically. A parameter whose meaning differs between tools (a message id, a limit) has one constant per meaning.
 FUNCTION INVENTORY: No functions. One description per tool and one per parameter meaning.
 COMMON MODIFICATION PATTERNS: When a tool's behaviour changes, update its description here in the same change, keeping at least four sentences.
-WHAT NOT TO DO IN THIS FILE: 1. Do not put an id, a model name, a URL, a key or any other concrete example in a description. 2. Do not join adjacent string literals implicitly (S062); write each constant as one parenthesised expression with explicit spaces. 3. Do not promise a parameter the tool does not accept; rules, folders and MCP commands are the developer's to set (D-11, T-2).
+WHAT NOT TO DO IN THIS FILE: 1. Do not put an id, a model name, a URL, a key or any other concrete example in a description. 2. Do not join adjacent string literals implicitly (S062); write each constant as one parenthesised expression with explicit spaces. 3. Do not promise a parameter the tool does not accept; rules, folders and MCP commands are the developer's to set.
 KNOWN EDGE CASES: Descriptions name other tools by their exact names so a model can chain them; they never name a credential's value.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §9.2 (Tools, rows 11-28); field guide model-facing-tool-contracts.md
 TESTS: tests/features/opencode_host/test_opencode_host_tools.py

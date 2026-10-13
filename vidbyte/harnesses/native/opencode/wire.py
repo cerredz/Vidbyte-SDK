@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/opencode/wire.py
 
-PURPOSE: Defines OpencodeWire, the opencode HTTP codec: it builds the request bodies the host sends, turns every JSON body opencode answers into a §9.1 record, and maps an assistant message's error object to its failure row (EC-82 to EC-85).
+PURPOSE: Defines OpencodeWire, the opencode HTTP codec: it builds the request bodies the host sends, turns every JSON body opencode answers into a validated record, and maps an assistant message's error object to its failure code.
 ROLE IN CODEBASE: Used by OpencodeHost and OpencodeTurnWatcher in vidbyte/harnesses/native/opencode/; the bodies come from OpencodeClient already decoded from JSON. The records live in vidbyte/lib/dataclasses/opencode.py and native_hosts.py.
-ARCHITECTURE NOTE: Three small classes in one direction: _Members reads one typed member, _WireRecords builds one record from one decoded value, and OpencodeWire is the public codec that wraps each builder so a missing or wrongly typed relied-on member raises opencode.protocol_mismatch naming the member (D-13), never a raw parsing error. Vendor vocabularies (states, statuses, method types) are kept verbatim.
+ARCHITECTURE NOTE: Three small classes in one direction: _Members reads one typed member, _WireRecords builds one record from one decoded value, and OpencodeWire is the public codec that wraps each builder so a missing or wrongly typed relied-on member raises opencode.protocol_mismatch naming the member, never a raw parsing error. Vendor vocabularies (states, statuses, method types) are kept verbatim.
 FUNCTION INVENTORY: OpencodeWire.session_body, prompt_body and mcp_body build request bodies; parse_health, parse_readiness, parse_providers, parse_config_providers, parse_provider_auth, parse_session, parse_sessions, parse_message, parse_messages, parse_diffs, parse_mcp_status, parse_permission_requests, parse_question_requests, parse_session_statuses and parse_assistant_error read bodies; reply_failure maps a reply's error to its row; _mismatch builds the protocol error. _WireRecords has one builder per record; _Members has member, mapping and items.
 COMMON MODIFICATION PATTERNS: A newly relied-on member is one more _Members.member call in its builder; a new body is one more builder in _WireRecords plus one parse_* wrapper here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not fall back to a default when a relied-on member is missing or mistyped; raise protocol_mismatch. 2. Do not read a provider's key or options; they hold credentials. 3. Do not put raw exception text into an error; only the member name.
-KNOWN EDGE CASES: Costs arrive as Decimal because OpencodeClient decodes JSON floats as Decimal, so sums stay exact; an integer cost is converted. A session status absent from GET /session/status means idle. An MCP answer that lacks the server's name returns no status, which the host reports as EC-92.
+KNOWN EDGE CASES: Costs arrive as Decimal because OpencodeClient decodes JSON floats as Decimal, so sums stay exact; an integer cost is converted. A session status absent from GET /session/status means idle. An MCP answer that lacks the server's name returns no status, which the host reports as opencode.mcp_server_failed.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (OpencodeWire), §9.1 (vidbyte.lib.dataclasses.opencode), D-13, EC-58, EC-82 to EC-85
 TESTS: tests/features/opencode_host/test_opencode_host_watcher.py, tests/features/opencode_host/test_opencode_host_errors.py, tests/features/opencode_host/test_opencode_host_acceptance.py
 """
@@ -73,7 +73,7 @@ class _Members:
 
 
 class _WireRecords:
-    """Builds one §9.1 record from one decoded opencode value."""
+    """Builds one validated record from one decoded opencode value."""
 
     @staticmethod
     def usage(info: Mapping[str, Any]) -> NativeTokenUsage | None:
