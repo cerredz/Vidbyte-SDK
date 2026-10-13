@@ -49,6 +49,7 @@ from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.constants.jev import (
     PROVIDER_API_KEY_ENV_VARS,
     VIDBYTE_API_KEY_ENV_VAR,
+    VIDBYTE_API_KEY_FORMAT_MESSAGE,
     VIDBYTE_API_KEY_PATTERN,
     VIDBYTE_API_KEY_PREFIX,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
@@ -206,7 +207,7 @@ class ProviderModelRegistry:
             way_out = f"Pass api_key or set {VIDBYTE_API_KEY_ENV_VAR}." if remedy is None else remedy
             raise ConfigurationError(f"Missing Vidbyte API key. {way_out}", details=details)
         if re.fullmatch(VIDBYTE_API_KEY_PATTERN, key) is None:
-            raise ConfigurationError(f"The managed Vidbyte API key must be a live key in the {VIDBYTE_API_KEY_PREFIX} format.", details=details)
+            raise ConfigurationError(VIDBYTE_API_KEY_FORMAT_MESSAGE, details=details)
         return key
 
     @classmethod

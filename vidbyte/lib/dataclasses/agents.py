@@ -28,8 +28,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from vidbyte.lib.constants.jev import (
+    VIDBYTE_API_KEY_FORMAT_MESSAGE,
     VIDBYTE_API_KEY_PATTERN,
-    VIDBYTE_API_KEY_PREFIX,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
 )
 from vidbyte.lib.enums.model_provider import ModelProvider
@@ -278,7 +278,7 @@ class ProviderKeys:
         if not isinstance(key, str):
             raise ConfigurationError("vidbyte_api_key must be a string or None.", details=details)
         if re.fullmatch(VIDBYTE_API_KEY_PATTERN, key) is None:
-            raise ConfigurationError(f"The managed Vidbyte API key must be a live key in the {VIDBYTE_API_KEY_PREFIX} format.", details=details)
+            raise ConfigurationError(VIDBYTE_API_KEY_FORMAT_MESSAGE, details=details)
 
     def key_for(self, provider: ModelProvider | str) -> str | None:
         """Return the key matched to provider, given as a member or its name, or None."""

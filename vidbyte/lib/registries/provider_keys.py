@@ -64,6 +64,8 @@ class ProviderKeyMatcher:
     # https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml
     RESERVED_PREFIXES: ClassVar[tuple[tuple[str, ModelProvider], ...]] = (("sk-svcacct-", ModelProvider.OPENAI),)
 
+    DUPLICATE_KEY_MESSAGE: ClassVar[str] = "{field}[{first}] and {field}[{second}] are both {provider} keys; pass one key per provider."  # M-7
+
     @classmethod
     def provider_of(cls, key: str) -> ModelProvider | None:
         """Return the provider whose table F rule fully matches key, or None when no prefix proves one."""
@@ -237,7 +239,7 @@ class ProviderKeyMatcher:
                 held[provider] = (index, key)
             elif held[provider][1] != key:
                 first = held[provider][0]
-                raise ConfigurationError(f"{field_name}[{first}] and {field_name}[{index}] are both {provider.value} keys; pass one key per provider.", details={"field": field_name, "indexes": (first, index), "provider": provider.value})
+                raise ConfigurationError(ProviderKeyMatcher.DUPLICATE_KEY_MESSAGE.format(field=field_name, first=first, second=index, provider=provider.value), details={"field": field_name, "indexes": (first, index), "provider": provider.value})
         return held
 
     @staticmethod
@@ -273,7 +275,7 @@ class ProviderKeyMatcher:
             if stuck is not None:
                 owner = accepting[stuck][0]
                 first, second = sorted((bound[owner][0], waiting[stuck]))
-                raise ConfigurationError(f"{field_name}[{first}] and {field_name}[{second}] are both {owner.value} keys; pass one key per provider.", details={"field": field_name, "indexes": (first, second), "provider": owner.value})
+                raise ConfigurationError(ProviderKeyMatcher.DUPLICATE_KEY_MESSAGE.format(field=field_name, first=first, second=second, provider=owner.value), details={"field": field_name, "indexes": (first, second), "provider": owner.value})
             forced = next((key for key in waiting if len(candidates[key]) == 1), None)
             if forced is None:
                 key, index = next(iter(waiting.items()))

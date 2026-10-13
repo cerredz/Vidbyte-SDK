@@ -63,6 +63,8 @@ JEV_IDEMPOTENCY_KEY_HEADER: str = "Idempotency-Key"
 # shared by the managed Jev and the managed text configs.
 VIDBYTE_API_KEY_PREFIX: str = "vb_live_"
 VIDBYTE_API_KEY_PATTERN: str = rf"{re.escape(VIDBYTE_API_KEY_PREFIX)}[A-Za-z0-9_-]{{32,}}"
+# The one wording of the error for a key that fails the pattern (M-10).
+VIDBYTE_API_KEY_FORMAT_MESSAGE: str = f"The managed Vidbyte API key must be a live key in the {VIDBYTE_API_KEY_PREFIX} format."
 VIDBYTE_API_KEY_ENV_VAR: str = "VIDBYTE_API_KEY"
 # The one generative route, on the contract's live host (C018), which
 # every managed text call posts to whatever its provider.
