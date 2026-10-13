@@ -246,12 +246,15 @@ class TextCredentials:
             raise ConfigurationError("TextCredentials.mode must be a TextModelMode value.")
         has_provider_key = isinstance(self.provider_api_key, str) and bool(self.provider_api_key.strip())
         has_vidbyte_key = isinstance(self.vidbyte_api_key, str) and bool(self.vidbyte_api_key.strip())
-        if self.mode is TextModelMode.DIRECT:
-            fits = has_provider_key and self.vidbyte_api_key is None
-        elif self.mode is TextModelMode.VIDBYTE_MANAGED:
-            fits = has_vidbyte_key and self.provider_api_key is None
-        else:
-            fits = has_vidbyte_key and (self.provider_api_key is None or has_provider_key)
+        match self.mode:
+            case TextModelMode.DIRECT:
+                fits = has_provider_key and self.vidbyte_api_key is None
+            case TextModelMode.VIDBYTE_MANAGED:
+                fits = has_vidbyte_key and self.provider_api_key is None
+            case TextModelMode.AUTO:
+                fits = has_vidbyte_key and (self.provider_api_key is None or has_provider_key)
+            case _:
+                raise ConfigurationError("TextCredentials.mode must be a TextModelMode value.")
         if not fits:
             raise ConfigurationError(
                 f"TextCredentials in {self.mode.value} mode cannot hold these keys: DIRECT holds only a provider key, VIDBYTE_MANAGED only a Vidbyte key, and AUTO a Vidbyte key with an optional provider key."
