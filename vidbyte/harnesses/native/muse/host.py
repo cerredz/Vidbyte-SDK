@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: D-9: every live turn runs on its own `muse serve` peer owned 
 FUNCTION INVENTORY: __aenter__ resolves the launcher once; __aexit__ stops every live turn; the twelve public methods are narrated main functions. Helpers: _require_open, _reserve, _turn_task, _new_peer, _handshake, _check_model, _resume, _start_turn, _launch, _list_page, _steer, _latest_usage, _discard and the _forget_driver done-callback.
 COMMON MODIFICATION PATTERNS: A new MSP call is one public method here, its params and result reader in wire.py and one tool in vidbyte/tools/builtins/muse/tools.py. A row next step the catalog does not give is a module constant here or in wire.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read Muse credentials or send an approve-everything value; sessions start with approvalMode denyUnmatched and the driver denies every approval (INV-9, D-11). 2. Do not await between the busy check and the reservation of a turn (EC-9). 3. Do not leave a peer running after its method returns, on any path (INV-4).
-KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument (EC-3). On win32 a host needs muse_command or wsl_distro (EC-94). A WSL peer that exits before answering is classified from its stderr; an in-distro muse missing with exit code 127 and no text cannot be told apart from another early exit, because NativePeer does not expose the exit code. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED.
+KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument (EC-3). On win32 a host needs muse_command or wsl_distro (EC-94). A WSL peer that exits before answering is classified from its stderr and its exit code, read after close through NativePeer.exit_code: 127 or the ENOENT text is an in-distro muse missing (EC-95). A turn whose host closed ends INTERRUPTED with source HOST_CLOSED.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (MuseHost), §6.3.5 (EC-94 to EC-121, EC-156), D-9 to D-14, D-18, D-19, D-23, FR-19
 TESTS: tests/features/muse_host/test_muse_host_acceptance.py, tests/features/muse_host/test_muse_host_errors.py, tests/features/muse_host/test_muse_host_reads.py, tests/features/muse_host/test_muse_host_turns.py, tests/features/muse_host/test_muse_host_process_bounds.py, tests/features/muse_host/test_muse_host_wsl.py
 """
@@ -520,7 +520,8 @@ class MuseHost:
         # Start the peer, send initialize with clientInfo, check the schema
         # and server version (EC-98, EC-99), then send `initialized` before
         # any other request. A WSL peer that exits before answering may say
-        # why on stderr: a missing distro or a missing muse (EC-94, EC-95).
+        # why on stderr or by exit code 127: a missing distro or a missing
+        # muse (EC-94, EC-95). The exit code is known once close reaps it.
         try:
             await peer.start(operation=operation)
             result = await MuseWire.exchange(peer, "initialize", MuseWire.initialize_params(), operation=operation)
@@ -530,7 +531,7 @@ class MuseHost:
             if exc.failure_code is not FailureCode.MUSE_PROCESS_EXITED:
                 raise
             await peer.close()
-            failure = self._launcher.launch_failure(peer.stderr_tail(), None, errors=self._errors, operation=operation)
+            failure = self._launcher.launch_failure(peer.stderr_tail(), peer.exit_code, errors=self._errors, operation=operation)
             if failure is None:
                 raise
             raise failure from exc

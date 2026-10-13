@@ -13,7 +13,8 @@ Architecture:
       restricted child environment, and idempotent bounded close.
     - Opt-in peer extension (the defaults keep MCP behaviour): on_message for
       frames that carry "method", send_request, notify, respond, per-call
-      timeouts, exit_grace_seconds, and stop_process_tree.
+      timeouts, exit_grace_seconds, and stop_process_tree, plus a read-only
+      returncode that outlives close.
 Relations:
     Related to vidbyte.tools.mcp.client, vidbyte.tools.mcp.bridge, and
     vidbyte.tools.mcp.attach.
@@ -148,6 +149,7 @@ class McpStdioTransport:
         self.exit_grace_seconds = None if exit_grace_seconds is None else self._seconds_or_invalid_call(exit_grace_seconds, "exit_grace_seconds")
         self.stop_process_tree = self._switch_or_invalid_call(stop_process_tree, "stop_process_tree")
         self._process: asyncio.subprocess.Process | None = None
+        self._returncode: int | None = None
         self._next_id = 1
         self._closed = False
         self._pending: dict[int, asyncio.Future[Mapping[str, Any]]] = {}
@@ -163,6 +165,12 @@ class McpStdioTransport:
     def closed(self) -> bool:
         """True after close has begun or completed."""
         return self._closed
+
+    @property
+    def returncode(self) -> int | None:
+        """The child's exit code once it has exited, else None; kept after close detaches the child."""
+        process = self._process
+        return self._returncode if process is None else process.returncode
 
     def is_bound_to_running_loop(self) -> bool:
         """False when the pipes were opened on an event loop that is not the one running now."""
@@ -478,6 +486,8 @@ class McpStdioTransport:
 
     def _detach_process_state(self) -> None:
         """Idempotently clear process ownership after wait or known death."""
+        if self._process is not None:
+            self._returncode = self._process.returncode
         self._process = None
         self._stdout_task = None
         self._stderr_task = None

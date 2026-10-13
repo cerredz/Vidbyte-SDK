@@ -3,7 +3,7 @@
 PURPOSE: Defines NativePeer, one JSON-RPC stdio peer process (`grok agent stdio` or `muse serve`) with an inbox of the frames it sends unasked, and NativeChildEnvironment, which builds a vendor child's environment as the caller's environment plus the host's overlay.
 ROLE IN CODEBASE: GrokHost and MuseHost start one NativePeer per live turn and one short-lived peer per read; their turn drivers read peer.inbox and answer server requests through peer.answer. NativeChildEnvironment is also used for opencode's owned server and the Muse in-distro reap.
 ARCHITECTURE NOTE: NativePeer reuses McpStdioTransport (D-3) with exit_grace_seconds=NATIVE_STOP_GRACE_SECONDS, shutdown_timeout=NATIVE_KILL_WAIT_SECONDS and stop_process_tree=True (D-23), so close is stdin EOF, a grace period, then a whole-tree stop, all bounded. The timing constants are read when a peer is built, so tests can shrink them through the constants module.
-FUNCTION INVENTORY: NativePeer.start launches the process; call sends a request and waits for its answer; send writes a request and returns its future; notify writes a notification; answer replies to a server request; close stops the peer and never raises; stderr_tail returns scrubbed stderr; closed reports whether the pipe has ended. NativeChildEnvironment.build merges the overlay over os.environ.
+FUNCTION INVENTORY: NativePeer.start launches the process; call sends a request and waits for its answer; send writes a request and returns its future; notify writes a notification; answer replies to a server request; close stops the peer and never raises; stderr_tail returns scrubbed stderr; closed reports whether the pipe has ended; exit_code is the child's exit code once it has exited. NativeChildEnvironment.build merges the overlay over os.environ.
 COMMON MODIFICATION PATTERNS: A new peer protocol reuses NativePeer unchanged and maps its own JSON-RPC error codes in its host's wire.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not map JSON-RPC error answers here; they stay McpProtocolError for the host's wire codec (spec §8.5). 2. Do not let close raise; it runs in finally blocks and __aexit__. 3. Do not put a secret on argv; secrets travel in the environment overlay.
 KNOWN EDGE CASES: A peer that never started closes without doing anything. The inbox keeps every frame that arrived before a driver began reading, so nothing sent between a turn/start answer and the driver's first read is lost.
@@ -112,6 +112,12 @@ class NativePeer:
         # failure here must never replace the error or cancellation in flight.
         with contextlib.suppress(Exception):
             await self._transport.close()
+
+    @property
+    def exit_code(self) -> int | None:
+        # The transport's returncode: the child's exit code once it has
+        # exited, None while it runs. The Muse host reads it for EC-95.
+        return self._transport.returncode
 
     def stderr_tail(self) -> str:
         # @intent native-peer-stderr-is-scrubbed
