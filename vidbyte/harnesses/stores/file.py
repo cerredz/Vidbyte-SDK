@@ -61,10 +61,13 @@ class FileTrajectorySink:
             line = json.dumps(asdict(record), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise HarnessSinkError("Trajectory record could not be encoded as JSON.", details={"run_id": record.run_id, "error_type": type(exc).__name__}) from exc
+        # @intent trajectory-file-keeps-undecodable-file-names
+        # POSIX hands a non-UTF-8 file name to Python as a lone surrogate, which UTF-8 cannot write; the record must
+        # still reach the file. backslashreplace writes it as \udcff, a valid JSON escape since dumps puts non-ASCII only inside strings.
         try:
             with self._lock:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
-                with self._path.open("a", encoding="utf-8", newline="\n") as stream:
+                with self._path.open("a", encoding="utf-8", errors="backslashreplace", newline="\n") as stream:
                     stream.write(line + "\n")
         except OSError as exc:
             raise HarnessSinkError("Trajectory record could not be written to its destination.", details={"destination": self._path.name, "error_type": type(exc).__name__}) from exc

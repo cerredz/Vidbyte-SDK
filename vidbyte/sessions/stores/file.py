@@ -131,7 +131,9 @@ class FileSessionStore(BaseSessionStore):
         target.parent.mkdir(parents=True, exist_ok=True)
         handle, tmp_path = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
         try:
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            # @intent trajectory-file-keeps-undecodable-file-names
+            # A tag may hold a POSIX non-UTF-8 file name (a lone surrogate); write it as a JSON \udcff escape, not fail.
+            with os.fdopen(handle, "w", encoding="utf-8", errors="backslashreplace") as stream:
                 json.dump(payload, stream, ensure_ascii=False, indent=2)
             os.replace(tmp_path, target)
         except Exception as exc:
