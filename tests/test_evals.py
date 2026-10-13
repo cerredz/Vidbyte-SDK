@@ -671,6 +671,22 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         runner = EvalRunner(MockRunner("ok"), default_grader=ContainsGrader(), concurrency=1)
         self.assertEqual(len((await runner.arun(EvalSuite("nulls", suite.cases[:6]))).results), 6)
 
+    def test_eval_suite_csv_with_excel_bom_keeps_prompt_column(self) -> None:
+        # @intent csv-bom-is-not-part-of-the-header
+        # [Silent] Excel's "CSV UTF-8" BOM became part of the "prompt" header, so every prompt loaded as "".
+        rows = 'prompt,expected,tags\n"Capital of France?",Paris,"geo, easy"\n"2 + 2?",4,math\n'
+        loaded = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for encoding in ("utf-8-sig", "utf-8"):
+                path = os.path.join(temp_dir, f"suite_{encoding}.csv")
+                with open(path, "w", encoding=encoding, newline="") as f:
+                    f.write(rows)
+                loaded[encoding] = [(case.prompt, case.expected, case.tags) for case in EvalSuite.from_csv(path).cases]
+
+        expected = [("Capital of France?", "Paris", ("geo", "easy")), ("2 + 2?", "4", ("math",))]
+        self.assertEqual(loaded["utf-8-sig"], expected)
+        self.assertEqual(loaded["utf-8"], expected)
+
     async def test_eval_registry_structured_expected_roundtrip(self) -> None:
         # Tests SQLite registry persistence for structured expected payloads.
         temp_dir = tempfile.mkdtemp()

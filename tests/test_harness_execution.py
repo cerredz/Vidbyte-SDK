@@ -8,7 +8,8 @@ PURPOSE:
     written to a file sink with reward None. HarnessClient.load() uses a
     Harness subclass (passed directly or built by a registered factory) as is,
     so its self.session() works and lands in the client-supplied store/sink,
-    while a foreign run(request) object is still wrapped.
+    while a foreign run(request) object is still wrapped. A .json config file
+    saved with a UTF-8 byte-order mark loads to the same spec as without one.
 
 ROLE IN CODEBASE:
     Exercises vidbyte/harnesses/execution.py, the run lifecycle that assigns a
@@ -181,6 +182,22 @@ class HarnessClientLoadsHarnessSubclassTests(unittest.TestCase):
         self.assertIsNot(harness, foreign)
         self.assertEqual(result.output, {"echo": "A"})
         self.assertEqual([record.run_id for record in sink.records()], [result.run.run_id])
+
+
+class HarnessConfigFileByteOrderMarkTests(unittest.TestCase):
+    def test_json_config_with_bom_loads_like_plain_json(self) -> None:
+        # @intent config-bom-is-not-content
+        # [Crash] PowerShell 5.1's -Encoding utf8 BOM made a valid .json config fail as "malformed JSON or YAML".
+        specs = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            for encoding in ("utf-8", "utf-8-sig"):
+                path = Path(tmp) / f"triage_{encoding}.json"
+                path.write_text(json.dumps(CONFIG, indent=4), encoding=encoding)
+                specs[encoding] = _Triage().load(path).spec
+
+        self.assertEqual(specs["utf-8-sig"].spec_id, specs["utf-8"].spec_id)
+        self.assertEqual(specs["utf-8-sig"].requested_config, specs["utf-8"].requested_config)
+        self.assertEqual(specs["utf-8-sig"].agents, specs["utf-8"].agents)
 
 
 if __name__ == "__main__":

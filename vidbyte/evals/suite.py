@@ -70,7 +70,9 @@ class EvalSuite:
     @classmethod
     def from_csv(cls, path: str | Path, *, prompt_col: str = "prompt", expected_col: str = "expected") -> EvalSuite:
         # Asynchronously or synchronously loads an evaluation suite from a flat CSV file.
-        with open(path, "r", encoding="utf-8") as f:
+        # @intent csv-bom-is-not-part-of-the-header
+        # Excel's "CSV UTF-8" starts with a byte-order mark; read as part of the first header it hides the prompt column and every prompt becomes "".
+        with open(path, "r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             cases_list = []
             for row in reader:
