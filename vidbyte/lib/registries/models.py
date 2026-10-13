@@ -6,6 +6,7 @@ Purpose:
     Eliminates one-off provider-model dicts and environment resolution scattered across the SDK.
 Architecture:
     - ProviderModelRegistry: Centralized model definitions, endpoints, API keys, and lookup methods.
+    - API_KEY_ENV_VARS: The provider-to-variable table, the same dict as PROVIDER_API_KEY_ENV_VARS in vidbyte.lib.constants.jev.
 Key Functions:
     - default_model: Returns the default model string for a given provider enum.
     - get_api_key_env_var: Retrieves the API key environment variable name.
@@ -46,6 +47,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.constants.jev import (
+    PROVIDER_API_KEY_ENV_VARS,
     VIDBYTE_API_KEY_ENV_VAR,
     VIDBYTE_API_KEY_PATTERN,
     VIDBYTE_API_KEY_PREFIX,
@@ -84,22 +86,9 @@ class ProviderModelRegistry:
         ModelProvider.TYPESAFE: "jev-latest",
     }
 
-    API_KEY_ENV_VARS: ClassVar[dict[ModelProvider, str]] = {
-        ModelProvider.OPENAI: "OPENAI_API_KEY",
-        ModelProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
-        ModelProvider.GEMINI: "GEMINI_API_KEY",
-        ModelProvider.XAI: "XAI_API_KEY",
-        ModelProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
-        ModelProvider.GLM: "GLM_API_KEY",
-        ModelProvider.MINIMAX: "MINIMAX_API_KEY",
-        ModelProvider.KIMI: "MOONSHOT_API_KEY",
-        ModelProvider.META: "META_API_KEY",
-        ModelProvider.MISTRAL: "MISTRAL_API_KEY",
-        ModelProvider.OPENROUTER: "OPENROUTER_API_KEY",
-        ModelProvider.ELEVENLABS: "ELEVENLABS_API_KEY",
-        ModelProvider.PLAYAI: "PLAYAI_API_KEY",
-        ModelProvider.TYPESAFE: "TYPESAFE_API_KEY",
-    }
+    # The same dict object as the constant, so a patch of either is
+    # seen by every reader, the key matcher included.
+    API_KEY_ENV_VARS: ClassVar[dict[ModelProvider, str]] = PROVIDER_API_KEY_ENV_VARS
 
     DEFAULT_ENDPOINTS: ClassVar[dict[ModelProvider, str]] = {
         ModelProvider.OPENAI: "https://api.openai.com/v1",

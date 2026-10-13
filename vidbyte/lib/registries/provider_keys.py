@@ -2,7 +2,7 @@
 
 PURPOSE: Matches a developer's list of API keys to the providers an agent or text config uses: a key whose prefix proves its provider goes to that provider, a Vidbyte key becomes the Vidbyte key, and any other key is bound only when exactly one configured provider can take it.
 ROLE IN CODEBASE: The roots (TextModelConfig, BaseAgent and AggregateAgent, JevAgentSettings, BaseAgent.restore) call ProviderKeyMatcher.match once and hand the returned ProviderKeys record to every child unchanged; JevRunBriefSettings and AgentRoleSettings call normalize. ProviderModelRegistry.find_provider_api_key reads a provider's key from the record.
-ARCHITECTURE NOTE: A static lookup class in the lib layer. At module level it imports only re, collections.abc, typing, vidbyte.lib.constants.jev, vidbyte.lib.enums, and vidbyte.lib.errors; ProviderKeys and ProviderModelRegistry are imported inside match, because vidbyte.lib.dataclasses.agents is reached through this package's own __init__ (spec D-21). It reads no environment and makes no request.
+ARCHITECTURE NOTE: A static lookup class in the lib layer. At module level it imports only re, collections.abc, typing, vidbyte.lib.constants.jev, vidbyte.lib.enums, and vidbyte.lib.errors; ProviderKeys is imported inside match, because vidbyte.lib.dataclasses.agents is reached through this package's own __init__ (spec D-21). The provider variable names in its messages come from PROVIDER_API_KEY_ENV_VARS in vidbyte.lib.constants.jev, which ProviderModelRegistry.API_KEY_ENV_VARS also is, so the matcher never imports the models registry (lint A006). It reads no environment and makes no request.
 COMMON MODIFICATION PATTERNS: Add a KEY_FORMATS rule only for a prefix the vendor documents first-party, with its source in a comment here and in the registries README's "Provider Key Format Sources"; its literal prefixes become reserved automatically. A refuse-only prefix goes in RESERVED_PREFIXES and may rest on a secondary source.
 KNOWN EDGE CASES: A key that starts with a KEY_FORMATS prefix but does not fully match the rule (an xai- key with a dot) is unproven and reserved to that provider, which takes no unproven key, so nothing takes it. Entries are named by their index in the developer's list, counting skipped None and blank entries, and no message ever quotes a key.
 RELATED DOCS: docs/spec/byok-api-keys/spec.md (section 9.2 "Matching", tables F, A, and M; D-2, D-21, D-28, D-29, D-31) and vidbyte/lib/registries/README.md.
@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, ClassVar
 
 from vidbyte.lib.constants.jev import (
+    PROVIDER_API_KEY_ENV_VARS,
     VIDBYTE_API_KEY_PREFIX,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
     VIDBYTE_PROVIDER_KEY_PATTERN,
@@ -98,10 +99,9 @@ class ProviderKeyMatcher:
         """Match a developer's list of keys to the root's configured providers and return the matched record."""
         # @intent provider-keys-import-late
         # This package's __init__ reaches vidbyte.lib.dataclasses.agents
-        # through vidbyte.agents.types, so both imports wait until call
-        # time and no load order can form a cycle.
+        # through vidbyte.agents.types, so ProviderKeys is imported at
+        # call time and no load order can form a cycle.
         from vidbyte.lib.dataclasses.agents import ProviderKeys
-        from vidbyte.lib.registries.models import ProviderModelRegistry
 
         # A blank explicit Vidbyte key counts as none, as it always has.
         explicit = (vidbyte_api_key.strip() or None) if isinstance(vidbyte_api_key, str) else vidbyte_api_key
@@ -155,13 +155,12 @@ class ProviderKeyMatcher:
                 unproven = {}
         # Bind every other unproven key where it has exactly one
         # possible owner left, taking the keys in index order.
-        env_vars = ProviderModelRegistry.API_KEY_ENV_VARS
-        held = cls._bind_unproven(unproven, accepting, held, field_name, env_vars)
+        held = cls._bind_unproven(unproven, accepting, held, field_name, PROVIDER_API_KEY_ENV_VARS)
 
         # Step 6: a list that holds provider keys must hold one for
         # every primary, unless a restore turns this off (D-30).
         if require_primary_key and held:
-            cls._require_primary_keys(primaries, held, field_name, env_vars)
+            cls._require_primary_keys(primaries, held, field_name, PROVIDER_API_KEY_ENV_VARS)
 
         # Step 7: return the record, keys in order of first appearance.
         ordered = sorted(held.items(), key=lambda item: item[1][0])

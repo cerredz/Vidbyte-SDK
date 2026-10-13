@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/constants/jev.py
 
 PURPOSE: Declares TypeSafe Jev limits, defaults, wire literals, and preflight/done-check policy values shared by decision records, the provider adapter, and the JevAgent layer. Negative-coverage policy uses the shared threshold and state-field contract. Guaranteed-next-action policy requires a separate necessity and unfinished judgment for each candidate. Required actions adds only procedures the request explicitly names. Cumulative obligations preserve requirements across the supplied chronological user turns. Discovered-item coverage inventories bounded recorded outputs and checks requested per-item processing. The Vidbyte-managed generative gateway values (key prefix and format, provider set, default output cap, timeout floor, placeholder key) also live here, beside the managed Jev gateway constants.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values. `vidbyte/lib/registries/models.py`, `vidbyte/lib/registries/provider_keys.py`, `vidbyte/lib/dataclasses/model_configs.py`, `vidbyte/lib/http/vidbyte_gateway.py`, and `vidbyte/lib/runners/text.py` read the managed generative gateway values, including the provider-key relay header and its character and length limits.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values. `vidbyte/lib/registries/models.py`, `vidbyte/lib/registries/provider_keys.py`, `vidbyte/lib/dataclasses/model_configs.py`, `vidbyte/lib/http/vidbyte_gateway.py`, and `vidbyte/lib/runners/text.py` read the managed generative gateway values, including the provider-key relay header and its character and length limits. PROVIDER_API_KEY_ENV_VARS, the provider-to-environment-variable table, is `ProviderModelRegistry.API_KEY_ENV_VARS` (the same dict) and names each provider's variable in the key matcher's messages.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
-COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself. Change a managed generative gateway value (route, key prefix and format, provider set, output cap, timeout floor, provider-key header name, pattern, or length cap) only when the backend gateway contract changes, together with the README managed-mode section, tests/features/sdk_managed_text/, and tests/features/sdk_provider_keys/.
+COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself. Change a managed generative gateway value (route, key prefix and format, provider set, output cap, timeout floor, provider-key header name, pattern, or length cap) only when the backend gateway contract changes, together with the README managed-mode section, tests/features/sdk_managed_text/, and tests/features/sdk_provider_keys/. Add a provider's API key environment variable here, in PROVIDER_API_KEY_ENV_VARS, never in a second table.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only. VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS is the gateway's 600 s total upstream deadline plus 30 s, so lowering it lets the SDK give up on a call Vidbyte may still complete and bill. VIDBYTE_API_KEY_PREFIX must stay the only spelling of the live-key prefix (lint C020). VIDBYTE_MANAGED_KEY_PLACEHOLDER is not a secret; adapters send it to vendors in managed state.
 RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-discovered-item-coverage.md, docs/spec/managed-generative-models/spec.md (sections 8.5 and 9.3), docs/design/jev-gateway-live-host.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-agent-scaffold.py, tests/test_jev_done.py, and tests/features/sdk_managed_text/.
@@ -95,6 +95,26 @@ VIDBYTE_MANAGED_KEY_PLACEHOLDER: str = "vidbyte-managed"
 VIDBYTE_PROVIDER_KEY_HEADER: str = "X-Vidbyte-Provider-Key"
 VIDBYTE_PROVIDER_KEY_PATTERN: str = r"[!-~]+"
 VIDBYTE_PROVIDER_KEY_MAX_LENGTH: int = 512
+# Each provider's own API key environment variable. It is the one
+# table: ProviderModelRegistry.API_KEY_ENV_VARS is this same dict,
+# and the key matcher reads it here so the registries package
+# forms no import cycle (lint A006).
+PROVIDER_API_KEY_ENV_VARS: dict[ModelProvider, str] = {
+    ModelProvider.OPENAI: "OPENAI_API_KEY",
+    ModelProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
+    ModelProvider.GEMINI: "GEMINI_API_KEY",
+    ModelProvider.XAI: "XAI_API_KEY",
+    ModelProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
+    ModelProvider.GLM: "GLM_API_KEY",
+    ModelProvider.MINIMAX: "MINIMAX_API_KEY",
+    ModelProvider.KIMI: "MOONSHOT_API_KEY",
+    ModelProvider.META: "META_API_KEY",
+    ModelProvider.MISTRAL: "MISTRAL_API_KEY",
+    ModelProvider.OPENROUTER: "OPENROUTER_API_KEY",
+    ModelProvider.ELEVENLABS: "ELEVENLABS_API_KEY",
+    ModelProvider.PLAYAI: "PLAYAI_API_KEY",
+    ModelProvider.TYPESAFE: "TYPESAFE_API_KEY",
+}
 
 # HTTP statuses the API documents (https://docs.typesafe.ai/api.md#errors).
 JEV_STATUS_REQUEST_TIMEOUT: int = 408
