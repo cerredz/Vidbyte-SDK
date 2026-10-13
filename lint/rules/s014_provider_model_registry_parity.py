@@ -2,11 +2,11 @@
 
 PURPOSE: Keeps provider enums, configuration maps, and runner catalogs synchronized.
 ROLE IN CODEBASE: Prevents accepted providers/models from failing only during dispatch.
-ARCHITECTURE NOTE: Registry data is extracted statically; importing the SDK is forbidden. ProviderModelRegistry.API_KEY_ENV_VARS may alias PROVIDER_API_KEY_ENV_VARS in vidbyte/lib/constants/jev.py; the literal is then checked there, and its findings point at that file.
-FUNCTION INVENTORY: RegistryParityAnalyzer extracts named class/module dictionaries, including the aliased provider env-var table (_provider_dict).
+ARCHITECTURE NOTE: Registry data is extracted statically; importing the SDK is forbidden. Only when the ProviderModelRegistry body annotates API_KEY_ENV_VARS with the bare name PROVIDER_API_KEY_ENV_VARS is that literal in vidbyte/lib/constants/jev.py checked instead, with its findings pointing at that file.
+FUNCTION INVENTORY: RegistryParityAnalyzer extracts named class/module dictionaries, detects the env-var alias (_aliases), and reads the aliased table (_provider_dict).
 COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together; rerun the focused rule.
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
-KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed. An API_KEY_ENV_VARS that is neither a literal nor a resolvable alias reports every provider missing.
+KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed. An API_KEY_ENV_VARS that is {}, missing, or any value but the bare name PROVIDER_API_KEY_ENV_VARS is read from the registry itself and reports every provider missing there.
 RELATED DOCS: field-guide/vidbyte-sdk/declarative-config-resolution.md
 TESTS: Exercised by python lint/run.py --rule S014.
 """
@@ -26,6 +26,7 @@ RUNNER_FILE = "vidbyte/lib/constants/runners.py"
 # ProviderModelRegistry.API_KEY_ENV_VARS aliases this module's
 # PROVIDER_API_KEY_ENV_VARS, so the env-var literal is read here.
 KEY_ENV_FILE = "vidbyte/lib/constants/jev.py"
+KEY_ENV_TABLE = "PROVIDER_API_KEY_ENV_VARS"
 PARITY_MAPS = ("DEFAULT_PROVIDER_MODELS", "API_KEY_ENV_VARS", "DEFAULT_ENDPOINTS")
 
 
@@ -39,11 +40,12 @@ class RegistryParityAnalyzer:
         runner_source = files[RUNNER_FILE]
         enum = self._enum_members(enum_source.tree)
         maps = {name: self._class_dict(registry_source.tree, "ProviderModelRegistry", name) for name in PARITY_MAPS}
-        # When API_KEY_ENV_VARS holds no literal it aliases
-        # PROVIDER_API_KEY_ENV_VARS, so check that literal, in its file.
+        # Only a bare-name alias of PROVIDER_API_KEY_ENV_VARS moves the
+        # check to that literal, in its file. {}, a deleted attribute,
+        # or any other value stays a registry finding, as before.
         key_env_tree = files[KEY_ENV_FILE].tree
-        constants_map = self._provider_dict(key_env_tree.body if key_env_tree else (), "PROVIDER_API_KEY_ENV_VARS")
-        aliased = set(maps["API_KEY_ENV_VARS"]) == {"__line__"}
+        constants_map = self._provider_dict(key_env_tree.body if key_env_tree else (), KEY_ENV_TABLE)
+        aliased = self._aliases(registry_source.tree, "ProviderModelRegistry", "API_KEY_ENV_VARS", KEY_ENV_TABLE)
         maps["API_KEY_ENV_VARS"] = constants_map if aliased else maps["API_KEY_ENV_VARS"]
         sources = dict.fromkeys(PARITY_MAPS, REGISTRY_FILE) | {"API_KEY_ENV_VARS": KEY_ENV_FILE if aliased else REGISTRY_FILE}
         qualified = self._module_string_dict(runner_source.tree, "MODEL_PROVIDER_RUNNER_TYPE_MAP")
@@ -98,6 +100,15 @@ class RegistryParityAnalyzer:
                             result[member] = value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else ast.unparse(value)
                     return result
         return {"__line__": 1}
+
+    def _aliases(self, tree: ast.Module | None, class_name: str, variable: str, target: str) -> bool:
+        # True only when the class annotates variable with the bare name target.
+        for node in tree.body if tree else ():
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and item.target.id == variable:
+                        return isinstance(item.value, ast.Name) and item.value.id == target
+        return False
 
     def _provider_dict(self, body: Sequence[ast.stmt], variable: str) -> dict[str, str | int]:
         # Extracts ModelProvider member keys from one annotated
