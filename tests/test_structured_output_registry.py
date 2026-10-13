@@ -33,6 +33,17 @@ class StructuredOutputRegistryTests(unittest.TestCase):
             StructuredOutputSupport.NATIVE_SCHEMA,
         )
 
+    def test_native_schema_with_tools_is_declared_per_model(self) -> None:
+        """Gemini 2.x cannot send its native schema beside function declarations; Gemini 3 and others can."""
+        self.assertEqual(
+            (
+                StructuredOutputRegistry.native_schema_with_tools("gemini", "gemini-2.5-flash"),
+                StructuredOutputRegistry.native_schema_with_tools("gemini", "gemini-3.5-flash"),
+                StructuredOutputRegistry.native_schema_with_tools("openai", "gpt-2"),
+            ),
+            (False, True, True),
+        )
+
     def test_unknown_provider_remains_prompt_only(self) -> None:
         """Unknown providers do not inherit xAI's structured-output capability."""
         self.assertEqual(

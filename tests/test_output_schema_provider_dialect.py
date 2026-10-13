@@ -234,5 +234,55 @@ class GeminiResponseSchemaTests(unittest.TestCase):
         self.assertEqual(schema["properties"]["priority"]["enum"], ["low", "high"])
 
 
+_GEMINI_FUNCTION_TOOL = {"function_declarations": [{"name": "isDone", "description": "Signal completion.", "parameters": {"type": "object", "properties": {"final_answer": {"type": "string"}}}}]}
+
+
+def _gemini_payload(model: str, *, tools: tuple[dict[str, Any], ...] = (), system: str | None = "Be brief.") -> dict[str, Any]:
+    # Builds the Gemini request body an output_schema agent would send, optionally with functions declared.
+    config = TextModelConfig(provider=ModelProvider.GEMINI, model=model, response_format=_wire_schema(Ticket), tools=tools)
+    return GeminiProvider(model=model, api_key="k")._create_payload(config, "triage", system, None)
+
+
+class GeminiSchemaWithFunctionsTests(unittest.TestCase):
+    """Verify Gemini 2.x never receives a JSON response MIME type next to function declarations."""
+
+    def test_gemini_2_with_functions_sends_schema_as_instructions(self) -> None:
+        """Gemini 2.x rejects responseMimeType beside functionDeclarations, so the schema rides as text."""
+        # @intent gemini-2-schema-cannot-ride-with-function-calls
+        payload = _gemini_payload("gemini-2.5-flash", tools=(_GEMINI_FUNCTION_TOOL,))
+        generation_config = payload.get("generationConfig", {})
+        instructions = payload["systemInstruction"]["parts"][0]["text"]
+
+        self.assertNotIn("responseMimeType", generation_config)
+        self.assertNotIn("responseSchema", generation_config)
+        self.assertTrue(instructions.startswith("Be brief."))
+        for field in ("title", "priority", "assignee", "estimate_hours", "tags"):
+            self.assertIn(f'"{field}"', instructions)
+
+    def test_gemini_2_with_functions_and_no_system_creates_the_instruction(self) -> None:
+        """Without system text the schema instruction alone becomes the systemInstruction."""
+        payload = _gemini_payload("gemini-2.0-flash", tools=(_GEMINI_FUNCTION_TOOL,), system=None)
+        instructions = payload["systemInstruction"]["parts"][0]["text"]
+
+        self.assertNotIn("responseSchema", payload.get("generationConfig", {}))
+        self.assertTrue(instructions.startswith("You MUST respond"))
+
+    def test_gemini_3_with_functions_keeps_native_schema(self) -> None:
+        """Gemini 3 accepts the schema beside function declarations, so it stays native."""
+        payload = _gemini_payload("gemini-3.5-flash", tools=(_GEMINI_FUNCTION_TOOL,))
+
+        self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
+        self.assertIn("responseSchema", payload["generationConfig"])
+        self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "Be brief."}]})
+
+    def test_gemini_2_without_functions_keeps_native_schema(self) -> None:
+        """A tool-free Gemini 2.x request still gets native responseSchema enforcement."""
+        payload = _gemini_payload("gemini-2.5-flash")
+
+        self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
+        self.assertIn("responseSchema", payload["generationConfig"])
+        self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "Be brief."}]})
+
+
 if __name__ == "__main__":
     unittest.main()

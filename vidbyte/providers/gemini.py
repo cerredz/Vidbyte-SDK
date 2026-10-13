@@ -7,6 +7,7 @@ from vidbyte.lib.config import EmbeddingModelConfig, TextModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import EmbeddingResponse, TextModelResponse
 from vidbyte.lib.tools.formatter import ToolsFormatter
 
@@ -54,8 +55,10 @@ class GeminiProvider:
     def _create_payload(self, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None) -> dict[str, Any]:
         # Build the Gemini request body around its contents array contract.
         payload: dict[str, Any] = {"contents": self._create_contents(config, prompt)}
-        self._attach_instructions(payload, config, system)
-        self._attach_generation_config(payload, config)
+        # Decide once whether the output schema travels as instructions, so both steps below agree.
+        schema_as_text = self._schema_as_text(config)
+        self._attach_instructions(payload, config, system, schema_as_text)
+        self._attach_generation_config(payload, config, schema_as_text)
         self._attach_tools(payload, config)
         self._attach_safety(payload, config)
         self._attach_cache(payload, config)
@@ -152,13 +155,24 @@ class GeminiProvider:
             turn["parts"] = [{"text": content if isinstance(content, str) else str(content)}]
         return turn
 
-    def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
+    def _schema_as_text(self, config: TextModelConfig) -> bool:
+        # @intent gemini-2-schema-cannot-ride-with-function-calls
+        # The registry declares which models reject a JSON response type beside function declarations.
+        if config.response_format is None or not config.tools:
+            return False
+        return not StructuredOutputRegistry.native_schema_with_tools(self.provider, config.model)
+
+    def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None, schema_as_text: bool) -> None:
         # Gemini uses systemInstruction for developer-provided instructions.
-        instructions = system or config.system
+        instructions = system or config.system or ""
+        # @intent below-native-the-fields-only-reach-the-model-as-text
+        # When native schema cannot be sent, its fields reach the model through the instructions instead.
+        if schema_as_text and config.response_format is not None:
+            instructions = (instructions + StructuredOutputRegistry.describe(self.provider, config.model).schema_instruction(dict(config.response_format))).strip()
         if instructions:
             payload["systemInstruction"] = {"parts": [{"text": instructions}]}
 
-    def _attach_generation_config(self, payload: dict[str, Any], config: TextModelConfig) -> None:
+    def _attach_generation_config(self, payload: dict[str, Any], config: TextModelConfig, schema_as_text: bool) -> None:
         # Collect Gemini generation options under generationConfig.
         generation_config: dict[str, Any] = {}
         if config.temperature is not None:
@@ -167,7 +181,7 @@ class GeminiProvider:
             generation_config["topP"] = config.top_p
         if config.max_output_tokens is not None:
             generation_config["maxOutputTokens"] = config.max_output_tokens
-        if config.response_format is not None:
+        if config.response_format is not None and not schema_as_text:
             generation_config["responseMimeType"] = "application/json"
             # @intent response-schema-speaks-gemini-openapi-subset
             # responseSchema is Gemini's OpenAPI subset, so $defs/$ref from any nested model or Enum
