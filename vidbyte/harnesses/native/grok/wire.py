@@ -18,9 +18,9 @@ import re
 from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any, ClassVar
 
+import vidbyte
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory
 from vidbyte.lib.constants import native_hosts as native_host_constants
 from vidbyte.lib.dataclasses.grok import (
@@ -45,7 +45,8 @@ from vidbyte.lib.enums.native_hosts import AcpToolKind
 from vidbyte.lib.errors import ConfigurationError, McpProtocolError, NativeHostError
 
 _TURN_OPERATION = "wait_grok_turn"
-_CLIENT_INFO = MappingProxyType({"name": "vidbyte-sdk", "title": "Vidbyte SDK", "version": "0.2.1"})
+_CLIENT_NAME = "vidbyte-sdk"
+_CLIENT_TITLE = "Vidbyte SDK"
 _AUTH_REQUIRED = -32000
 _RESOURCE_NOT_FOUND = -32002
 _METHOD_NOT_FOUND = -32601
@@ -87,9 +88,11 @@ class GrokWire:
 
     @staticmethod
     def initialize_params() -> dict[str, Any]:
-        # §8.5: protocol 1, no file system or terminal for the agent, and who the client is.
+        # §8.5: protocol 1, no file system or terminal for the agent, and who
+        # the client is; the version is read on each call, as for Muse.
         capabilities = {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False}
-        return {"protocolVersion": native_host_constants.GROK_ACP_PROTOCOL_VERSION, "clientCapabilities": capabilities, "clientInfo": dict(_CLIENT_INFO)}
+        client = {"name": _CLIENT_NAME, "title": _CLIENT_TITLE, "version": vidbyte.__version__}
+        return {"protocolVersion": native_host_constants.GROK_ACP_PROTOCOL_VERSION, "clientCapabilities": capabilities, "clientInfo": client}
 
     @staticmethod
     def new_session_params(cwd: Path) -> dict[str, Any]:
