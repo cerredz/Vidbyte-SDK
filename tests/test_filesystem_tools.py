@@ -10,6 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
+
 from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
 from vidbyte.lib.errors import ConfigurationError
@@ -457,6 +459,58 @@ def test_copy_refuses_to_copy_a_directory_into_itself(tmp_path: Path) -> None:
     assert sibling.status == ToolStatus.SUCCESS, sibling.output
     assert (tmp_path / "handbook_copy" / "a.md").read_text() == "a"
     assert (tmp_path / "handbook_copy" / "sub" / "b.md").read_text() == "b"
+
+
+def make_link(link: Path, target: Path) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=target.is_dir())
+    except OSError as exc:
+        pytest.skip(f"symlinks are not available here: {exc}")
+
+
+def make_project_with_outside_secret(tmp_path: Path) -> Path:
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret.txt").write_text("outside secret")
+    (tmp_path / "root" / "project").mkdir(parents=True)
+    (tmp_path / "root" / "project" / "README.md").write_text("readme")
+    return tmp_path / "root"
+
+
+def test_copy_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    make_link(root / "project" / "shared", tmp_path / "outside")
+    tool = CopyTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project_copy").exists()
+    assert not any(path.name == "secret.txt" for path in root.rglob("*"))
+
+
+def test_zip_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    make_link(root / "project" / "key.txt", tmp_path / "outside" / "secret.txt")
+    tool = ZipTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("zip", {"source": "project", "destination": "project.zip"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project.zip").exists()
+    assert not any(path.suffix == ".zip" for path in root.rglob("*"))
+
+
+def test_copy_and_zip_keep_links_that_stay_inside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    (root / "project" / "docs").mkdir()
+    (root / "project" / "docs" / "guide.md").write_text("guide")
+    make_link(root / "project" / "current", root / "project" / "docs")
+    config = FileSystemToolConfig(root=str(root), allow_write=True)
+    copied = run(CopyTool(config).execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert copied.status == ToolStatus.SUCCESS, copied.output
+    assert (root / "project_copy" / "current" / "guide.md").read_text() == "guide"
+    zipped = run(ZipTool(config).execute(ToolCall("zip", {"source": "project", "destination": "project.zip"})))
+    assert zipped.status == ToolStatus.SUCCESS, zipped.output
+    with zipfile.ZipFile(root / "project.zip") as archive:
+        assert "project/docs/guide.md" in archive.namelist()
 
 
 class FileSystemToolErrorPathTests(unittest.TestCase):
