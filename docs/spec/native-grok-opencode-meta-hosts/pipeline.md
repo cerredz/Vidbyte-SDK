@@ -4,6 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
+s3_head: de5b7c4c
 s2_head: 91e874b2 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6])
 pr:
 until: none
@@ -17,7 +18,7 @@ started: 2026-10-13 01:30 UTC
 | S0 worktree + capture + recon | done | 2026-10-13 01:30 UTC | 2026-10-13 02:20 UTC | reports/S0-scout.md | base_commit aa8c380c; code-map.md, 4 sections, 21 notes |
 | S1 spec + review | done | 2026-10-13 02:22 UTC | 2026-10-13 05:40 UTC | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @f1b2fa31 approved; r1 review SOUND WITH FIXES (15/15 accepted), r2 review SOUND WITH FIXES (11/11 accepted) |
 | S2 tests | done | 2026-10-13 05:50 UTC | 2026-10-13 07:35 UTC | reports/S2-test-author.md | 1635 tests (grok 458, opencode 581, muse 458, backends 138), all red; S2_HEAD cfad74f8 |
-| S3 implement | running | 2026-10-13 08:20 UTC | | reports/S3-implementer.md | P1 done @c3bd8c6f; BLOCKED once on 3 test defects (fixed by S2 @66d5c3bb) |
+| S3 implement | done | 2026-10-13 08:20 UTC | 2026-10-13 13:40 UTC | reports/S3-implementer.md | S3_HEAD de5b7c4c; draft PR #1036; 51 commits; budget 56/56 create, 12/12 modify, 66/66 records, 13/13 enums, 53/53 codes; 1616 passed, 19 skipped (re-run by orchestrator); full gate + Semgrep green; ci.yml 38379243965 dispatched, static-policy 38379248609 success |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -142,4 +143,11 @@ started: 2026-10-13 01:30 UTC
 - Lint rules A002 and A007 skip untracked files, so `git add` new files before running `python lint/run.py`. S3's first "PASS" was false for this reason. — *source:* S3
 - A007 matches whole split tokens (`byte` yes, `bytes` no) and flags literals near read/send/request/sleep calls. A002 wants `# @intent` near any `def` whose identifiers contain request/send/transport/subprocess/provider/permission; its slack is 625/703. S024 allows nesting depth 3 at most. — *source:* S3
 - `NativePeer.call` re-raises JSON-RPC error answers as `McpProtocolError` with `details["error"]`, for each host's wire code to map; transport failures become `NativeHostError`. The transport change came out at +156/−8 lines. — *source:* S3
+- Semgrep on this machine needs `PATH="/c/Users/422mi/vidbyte-repos/.venvs/semgrep-1.170.1/Scripts:$PATH"`. The global pysemgrep breaks under mcp 2.x. — *source:* S3
+- `McpStdioTransport.returncode` is saved in `_detach_process_state`, so it survives `close()`. The transport diff is +166/−8. — *source:* S3
+- S3 deviations are listed under spec §17 "Implementation deviations". Two of them:
+  - (8) `list_harness_backends` has no §12.4 try, because it returns a constant.
+  - The opencode list tools return wrapped objects such as `{"models": ...}`, which S6 must state.
+  — *source:* S3
+- An untested race: when `turn/completed` and a -32030 answer arrive together, a Muse steer may raise `api_error` (vendor_code -32030) instead of `turn_not_found`. That follows EC-115/EC-102 as written. — *source:* S3
 
