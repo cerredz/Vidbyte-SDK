@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "839e8e33a369743d0643463137f05a6b5eb39282", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "4272c308aeb426e37e06c525e7e630361d7ea6f6", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.2.1",
   "exports": [
@@ -426,6 +426,7 @@
     "OutputContent",
     "OutputDeliveryError",
     "OutputDestination",
+    "OutputDispatcher",
     "OutputSchemaBuilder",
     "OutputSchemaField",
     "OutputSchemaFormatter",
