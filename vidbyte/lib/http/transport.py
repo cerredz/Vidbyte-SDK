@@ -228,8 +228,10 @@ class SyncHttpTransport:
             line = raw_line.decode("utf-8").rstrip("\r\n") if isinstance(raw_line, bytes) else raw_line.rstrip("\r\n")
             if not line or line.startswith(":") or line.startswith("event:"):
                 continue
-            if line.startswith("data: "):
-                payload = line[6:]
+            # @intent sse-space-after-colon-is-optional
+            # The SSE standard strips one optional space after the colon; compatible servers such as Kimi for Coding send "data:{...}".
+            if line.startswith("data:"):
+                payload = line[5:].removeprefix(" ")
                 if payload == "[DONE]":
                     return
                 yield payload
