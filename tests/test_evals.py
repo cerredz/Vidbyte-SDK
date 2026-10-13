@@ -687,6 +687,26 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded["utf-8-sig"], expected)
         self.assertEqual(loaded["utf-8"], expected)
 
+    def test_eval_suite_json_with_powershell_bom_loads_like_plain_utf8(self) -> None:
+        # @intent json-suite-bom-is-not-content
+        # [Crash] PowerShell 5.1's -Encoding utf8 BOM made json.load reject an otherwise valid suite file.
+        suite_json = json.dumps({"name": "bom-suite", "cases": [
+            {"prompt": "Capital of France?", "expected": "Paris", "tags": ["geo", "easy"]},
+            {"prompt": "2 + 2?", "expected": "4", "tags": "math"},
+        ]})
+        loaded = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for encoding in ("utf-8-sig", "utf-8"):
+                path = os.path.join(temp_dir, f"suite_{encoding}.json")
+                with open(path, "w", encoding=encoding) as f:
+                    f.write(suite_json)
+                suite = EvalSuite.from_json(path)
+                loaded[encoding] = (suite.name, [(case.prompt, case.expected, case.tags) for case in suite.cases])
+
+        expected = ("bom-suite", [("Capital of France?", "Paris", ("geo", "easy")), ("2 + 2?", "4", ("math",))])
+        self.assertEqual(loaded["utf-8-sig"], expected)
+        self.assertEqual(loaded["utf-8"], expected)
+
     async def test_eval_registry_structured_expected_roundtrip(self) -> None:
         # Tests SQLite registry persistence for structured expected payloads.
         temp_dir = tempfile.mkdtemp()
