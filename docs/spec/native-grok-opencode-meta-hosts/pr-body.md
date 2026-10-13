@@ -25,7 +25,7 @@ What now exists:
   - `read_only(host)` returns the READ subset, for exposure over MCP.
   - A tool never raises. A failure becomes `ToolResult.error`, and its metadata holds `error`, `next_step`, `hint`, `operation` and `harness`.
 - **Shared plumbing.**
-  - `McpStdioTransport` gets an opt-in extension: `on_message`, `notify`, `respond`, a per-call `timeout_seconds`, `exit_grace_seconds`, `stop_process_tree` and a read-only `returncode`. Left at its defaults, the transport behaves as it did before.
+  - `McpStdioTransport` gets an opt-in extension: `on_message`, `notify`, `respond`, a per-call `timeout_seconds`, `exit_grace_seconds`, `stop_process_tree` and a read-only `returncode`. Left at its defaults, the transport behaves as it did before for every call that is not cancelled (deviation 14).
   - A new canonical package, `vidbyte.lib.process`, holds `CliRunner`, `ManagedProcess` and `ProcessStopper`.
 - **No approve-everything setting exists anywhere.**
   - Grok answers `allow_once` only for a tool kind the request allows, and `reject_once` for any other.
@@ -41,11 +41,11 @@ Scope is the catalog's ★ functions plus `build_opencode_backend_provider`. Out
 - MCP-server permission changes;
 - live vendor smoke tests.
 
-Size against `main` (8387d666): 141 files, +33,759 / −38.
-- SDK code: 67 files, +11,656 / −38.
-- Tests: 49 files, +13,735.
-- Spec docs: 24 files, +8,360.
+Size against `main` (8387d666): 143 files.
+- SDK code: 67 files, +11,699 / −38.
+- Tests: 49 files, +14,023.
 - `REPO_MAP.md`: +8.
+- Spec docs: 26 files under `docs/spec/native-grok-opencode-meta-hosts/`.
 
 The spec is `docs/spec/native-grok-opencode-meta-hosts/spec.md`, revision r8.
 
@@ -141,13 +141,13 @@ flowchart LR
 | Area | Files | Lines | What it adds |
 |---|---|---|---|
 | `vidbyte/harnesses/native/__init__.py` | 1 | +10 | The shared package file, byte-exact. SHA-256 `0374a2c8…497a` (INV-19), shared with the parallel Codex and Claude PRs |
-| `vidbyte/harnesses/native/grok/` | 5 | +1,421 | `GrokHost`, `run_grok_once`, `GrokCli` (argv; launcher resolved at `__aenter__`, batch launchers refused on win32), `GrokWire` (ACP codec and error mapping), `GrokTurnDriver` |
+| `vidbyte/harnesses/native/grok/` | 5 | +1,424 | `GrokHost`, `run_grok_once`, `GrokCli` (argv; launcher resolved at `__aenter__`, batch launchers refused on win32), `GrokWire` (ACP codec and error mapping), `GrokTurnDriver`. A host closed during spawn or continue cancels the unread `session/prompt` answer (R-24) |
 | `vidbyte/harnesses/native/opencode/` | 6 | +2,015 | `OpencodeHost`, `OpencodeServer` (owned or attached), `OpencodeClient`, `OpencodeWire`, `OpencodeTurnWatcher` (polling, tree-scoped `reject`, ceiling and EC-158 abort) |
-| `vidbyte/harnesses/native/muse/` | 5 | +1,715 | `MuseHost`, `MuseLauncher` (WSL argv, peer mark, in-distro reap), `MusePathTranslator`, `MuseWire` (MSP 1.0.1), `MuseTurnDriver` |
+| `vidbyte/harnesses/native/muse/` | 5 | +1,717 | `MuseHost`, `MuseLauncher` (WSL argv, peer mark, in-distro reap), `MusePathTranslator`, `MuseWire` (MSP 1.0.1), `MuseTurnDriver`. `_forget_driver` marks a failed turn's error as seen, and `wait_muse_turn` still raises it (R-22) |
 | `vidbyte/harnesses/native/hostkit/` | 4 | +444 | `NativeErrorFactory` (scrub, cap, next steps), `NativeTurnTable` (synchronous reservation; Grok and Muse ids lower-cased, opencode exact), `NativePeer`, `NativeChildEnvironment` (the caller's environment plus a host overlay) |
 | `vidbyte/harnesses/native/backends/` | 2 | +371 | `HarnessBackends` and the six backend functions |
 | `vidbyte/lib/process/` | 3 | +424 | `CliRunner` (bounded, capped output, stdin piped or `DEVNULL`), `ManagedProcess`, `ProcessStopper` (POSIX `killpg` TERM then KILL; Windows `taskkill /T /F`) |
-| `vidbyte/tools/mcp/transport.py` | 1 | +192 / −36 | The opt-in transport extension. A frame that has `method` never resolves a pending request (INV-18's one exception). A write with an explicit deadline raises when stdin is closing (CI-1). The default path keeps the plain `drain()` (R-3) |
+| `vidbyte/tools/mcp/transport.py` | 1 | +230 / −36 | The opt-in transport extension. A frame that has `method` never resolves a pending request (INV-18's one exception). A write with an explicit deadline goes through `_drain_within`, which raises when stdin is closing (CI-1). The default path keeps the plain `drain()` (R-3). On CPython 3.11, the bounded drains and the answer wait compare the task's `cancelling()` count before and after `wait_for` and re-raise a cancel it dropped, and a cancelled request write pops and cancels its pending future (R-25) |
 | `vidbyte/lib/errors/` | 2 | +54 | `NativeHostError(AgentExecutionError)` with `failure_code`, `operation`, `next_step` and `context` |
 | `vidbyte/lib/enums/` | 5 | +274 | 53 `FailureCode` members (Grok 13, opencode 16, Muse 15, backend 9); `harness_backends.py`, `native_hosts.py` and `process.py` enums; append-only exports |
 | `vidbyte/lib/dataclasses/` | 7 | +1,920 | Validated frozen records for settings, requests, results and inbound wire data, plus `validation.py` (`RecordFieldValidator`, `RecordFieldConverter`) |
@@ -156,14 +156,14 @@ flowchart LR
 | `vidbyte/tools/builtins/{grok,opencode,muse,harness_backends}/` | 13 | +1,990 | 43 tools (Grok 10, opencode 18, Muse 12, backend 3 READ) with model-facing descriptions |
 | `vidbyte/tools/toolsets/` | 5 | +267 | `GrokTools`, `OpencodeTools`, `MuseTools` (each with `read_only(host)`), `HarnessBackendTools` |
 | READMEs and `REPO_MAP.md` | 5 | +32 / −2 | Append-only entries in `REPO_MAP.md` and in the READMEs of `vidbyte/harnesses/`, `vidbyte/lib/`, `vidbyte/tools/` and `vidbyte/tools/mcp/`. The MCP README entry covers the transport options; the harnesses entry carries the T-5 note |
-| `tests/features/{grok_host,opencode_host,muse_host,native_backends}/` | 49 | +13,735 | Four packs with fake ACP and MSP peers, a fake opencode server, a fake `wsl.exe` and fake backend HTTP. Grok 4,715 lines, opencode 3,677, Muse 3,864, backends 1,479 |
-| `docs/spec/native-grok-opencode-meta-hosts/` | 24 | +8,360 | Spec r8, request, test plan, review, verify log, pipeline log, stage reports, this body |
+| `tests/features/{grok_host,opencode_host,muse_host,native_backends}/` | 49 | +14,023 | Four packs with fake ACP and MSP peers, a fake opencode server, a fake `wsl.exe` and fake backend HTTP. Grok 4,961 lines, opencode 3,677, Muse 3,906, backends 1,479. The R-25 cases are in `test_grok_host_process_bounds.py`; R-22 and R-24 are in the two `*_turns.py` files. `fake_grok_peer.py` and `fake_muse_peer.py` log each `sent` frame under the writer lock, and their stdin-EOF exit takes that lock first (`7e1f770b`) |
+| `docs/spec/native-grok-opencode-meta-hosts/` | 26 | docs only | Spec r8, request, test plan, review, verify log, pipeline log, stage reports, this body |
 
 These were not touched: `pyproject.toml`, `contracts/`, `lint/`, `.semgrep/`, `vidbyte/__init__.py`, `vidbyte/tools/builtins/__init__.py` and `vidbyte/mcp_server/`. Their diff against `main` is empty (INV-22). The existing `tests/test_mcp_stdio_transport.py` and `tests/test_mcp_studio_server.py` are identical to `main`.
 
 ## Acceptance criteria → proof (all 20 ACs)
 
-S6 re-ran all 73 proof test ids below on Windows with CPython 3.11.0, against the fakes. They expand to 780 parametrized cases: `778 passed, 2 skipped in 126.13s`. The 2 skips are POSIX-only liveness checks, one in AC-3 and one in AC-9. They run in the Linux CI jobs, which pass on 3.11 and 3.12 (see Verification). Test paths are under `tests/features/`.
+S6 re-ran all 73 proof test ids below at `319d714f`, on Windows with CPython 3.11.0, against the fakes. They expand to 780 parametrized cases: `778 passed, 2 skipped in 117.57s`. The 2 skips are POSIX-only liveness checks, one in AC-3 and one in AC-9. They run in the Linux CI jobs, which pass on 3.11 and 3.12 (see Verification). Test paths are under `tests/features/`.
 
 | AC | What is proven | Proof (tests) | Result |
 |---|---|---|---|
@@ -190,23 +190,26 @@ S6 re-ran all 73 proof test ids below on Windows with CPython 3.11.0, against th
 
 ## Verification (gate table)
 
-The last code commit is `e4210fc3`. Every later commit changes only files under `docs/spec/native-grok-opencode-meta-hosts/`. The gates below come from verify-log iteration 6 at that head. CI here is dispatch-only (`workflow_dispatch`), so `gh pr checks` lists no checks.
+The last commit to product code is `3917b49a`. The last commit outside `docs/` is `7e1f770b`, a test-fake fix. The gates below come from verify-log iteration 8 at `3917b49a`, plus the S6 runs at `319d714f`. CI here is dispatch-only (`workflow_dispatch`), so `gh pr checks` lists no checks.
 
 | Gate | Head | Result |
 |---|---|---|
-| RACE-1 regression tests, 10 runs | `e4210fc3` | `12 passed, 61 deselected in 3.15s`, 10 of 10 runs |
-| Four feature packs | `e4210fc3` | `1659 passed, 19 skipped in 215.15s (0:03:35)` |
-| `python lint/run.py` | `e4210fc3` | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS`. No count rose: A001 643/643, A007 255/255, S024 25/25, S062 889/889, A002 577 (579 on `main`) |
-| `python scripts/run_ci.py --stage source` | `e4210fc3` | `5674 passed, 32 skipped in 208.57s (0:03:28)` / `CI passed.` |
-| `python scripts/run_ci.py --stage package` | `e4210fc3` | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
-| Semgrep | `e4210fc3` | `Ran 1 rule on 949 files: 0 findings.` |
-| Public API contract | `e4210fc3` | `contracts/sdk-public-api.json is current … (vidbyte-sdk 0.2.1, 606 exports).` |
-| Remote `ci.yml` run 38450551272 | `e4210fc3` | success. 3.11: `5667 passed, 39 skipped in 151.24s`; 3.12: `5667 passed, 39 skipped, 19 warnings in 157.21s`; package smoke success |
-| Remote `ci.yml` run 38450554202 | `e4210fc3` | success. 3.11: `5667 passed, 39 skipped in 187.43s`; 3.12: `5667 passed, 39 skipped, 19 warnings in 175.17s`; package smoke success |
-| Remote `static-policy.yml` run 38450557318 | `e4210fc3` | success, `Ran 1 rule on 949 files: 0 findings.` |
-| EC-51, a POSIX-only test that once failed on Linux 3.12 (CI-1) | `e4210fc3` | passes on 3.11 and 3.12 in both remote runs |
-| INV-19 and INV-22 | `e4210fc3`; re-checked at `2ef68a17` in S6 | `native/__init__.py` SHA-256 `0374a2c8…497a`; the protected-file diff against `main` is empty |
-| The 20 ACs' 73 proof test ids (S6) | `2ef68a17` | `778 passed, 2 skipped in 126.13s` on Windows; the 2 skips are POSIX-only |
+| R-25 regression tests, 10 runs | `3917b49a` | `7 passed, 15 deselected`, 10 of 10 runs (`in 4.41s` on run 10) |
+| AC-4 cancel test, 30 runs | `3917b49a` | `4 passed`, 30 of 30 runs |
+| RACE-1 and R-19 regression tests | `3917b49a` | `12 passed, 63 deselected in 4.00s` |
+| R-22 and R-24 regression tests, fresh processes | `3917b49a`, then `7e1f770b` | 89 of 90 runs at `3917b49a`. The one failure was a race in the Muse test fake, fixed in `7e1f770b`. After that fix, R-22 passed 60 of 60 runs and R-24 30 of 30 |
+| Four feature packs | `3917b49a`, then `7e1f770b` | `1668 passed, 19 skipped in 182.38s (0:03:02)`; 1668 passed and 19 skipped again after the fake fix |
+| `main`'s MCP transport tests (stdio, studio, bridge), unchanged | `3917b49a` | `59 passed in 2.26s` |
+| `python lint/run.py` | `3917b49a` | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS`. No count rose: A001 643/643, A007 255/255, S019 5/5, S024 25/25, S039 5/5, S045 2/2, S062 889/889, A002 577 (579 on `main`) |
+| `python scripts/run_ci.py --stage source` | `3917b49a` | `5683 passed, 32 skipped in 200.06s (0:03:20)` / `CI passed.` |
+| `python scripts/run_ci.py --stage package` | `3917b49a` | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| Semgrep | `3917b49a` | `Ran 1 rule on 949 files: 0 findings.` |
+| Public API contract | `3917b49a` | `contracts/sdk-public-api.json is current … (vidbyte-sdk 0.2.1, 606 exports).` |
+| Remote `ci.yml` runs 38475662280 and 38475671014 | `3917b49a` | Both succeeded on attempt 1 (3.11, 3.12 and package smoke). 3.11: `5676 passed, 39 skipped`; 3.12: `5676 passed, 39 skipped, 19 warnings` |
+| Remote `static-policy.yml` run 38475673751 | `3917b49a` | success, `Ran 1 rule on 949 files: 0 findings.` |
+| INV-19 and INV-22 | `3917b49a`; re-checked at `319d714f` in S6 | `native/__init__.py` SHA-256 `0374a2c8…497a`; the protected-file diff against `main` is empty |
+| The 20 ACs' 73 proof test ids (S6) | `319d714f` | `778 passed, 2 skipped in 117.57s` on Windows; the 2 skips are POSIX-only |
+| R-25, R-22 and R-24 regression tests (S6) | `319d714f` | `7 passed, 15 deselected in 3.79s`; `2 passed in 1.24s` |
 
 ## Adversarial review
 
@@ -219,13 +222,19 @@ A Blocker or Major counted only after a verifier had reproduced it or confirmed 
 | Re-review, round 1 | `b0e35a32` (code `af3e05e8`) | 2 Majors (R-16, R-17) | 2 (R-M10, R-M11) | MERGEABLE AFTER FIXES. All 21 earlier fixes held |
 | Re-review, round 2 (the last allowed) | `71be15fd` (code `45ad54ec`) | 0 | 1 (R-RR2-1) | SOUND. All 3 fixes from round 1 held |
 | RACE-1, found by remote CI run 38437336454 (attempt 1, Linux 3.11) after round 2 | `df9566fa` | 1 Major (R-18) | 3 (R-19, R-20, R-21) | Fixed in repair iteration 6 |
+| Post-S6 verifier: S6's two open items, plus a blind-spot sweep | `5c22c2f9` (code `e4210fc3`) | 0 | 2 (R-22, R-24) | The verdict stays SOUND. Item (B), the `DEEPSEEK_API_KEY` literal, was refuted: EC-127 requires that exact text, and only DeepSeek can reach the line. R-22 and R-24 were fixed in repair iteration 7 |
+| R-25, found by the full suite in repair iteration 7 | `19582f13` | 1 Major (R-25) | — | Fixed in repair iteration 8, the last allowed |
 
-**RACE-1 was fixed after re-review round 2 had used the cap of 2 rounds, so no third re-review checked it.** The S2 test author checked it instead, by writing blind regression tests at `ba70578e` before the fix. 8 of the 12 cases were red before the fix, and all 12 passed 10 of 10 runs after it. The orchestrator verified the fix too.
+**No third re-review checked the fixes made after re-review round 2.** That covers RACE-1 (R-18 to R-21), R-22, R-24 and R-25. The cap of 2 re-review rounds was used up, and repair used all 8 of its 8 iterations. Instead, each of these fixes was checked in two ways: by blind, deterministic regression tests that were red before the fix and green after it, and by the orchestrator's own verification.
+- **RACE-1.** Tests at `ba70578e`. 8 of the 12 cases were red before the fix, and all 12 passed 10 of 10 runs after it.
+- **R-22 and R-24.** Tests at `c1599d0b`. Both were red before the fix and passed 20 of 20 after it. A race in the Muse test fake then failed R-22's precondition about once in 30 to 90 runs. `7e1f770b` fixed the order in which the fakes write, log and exit, with no product-code change. After that fix, R-22 passed 60 of 60 fresh-process runs and R-24 30 of 30.
+- **R-25.** Tests at `5e4c3c34` and `15fd9332`: 7 cases that force the window, each red 5 of 5 before the fix (`7 failed, 15 deselected` when reproduced in iteration 8). All 7 passed 70 of 70 runs after it.
 
 Totals:
-- **Blocker and Major:** 18 confirmed, 18 fixed.
+- **Blocker and Major:** 19 confirmed, 19 fixed.
 - **CI-1:** one code defect, fixed.
-- **Minor:** 15 in all. 10 are fixed, 5 are follow-ups, and none was waived.
+- **Minor:** 17 in all. 12 are fixed, 5 are follow-ups, and none was waived.
+- **Refuted:** one item, (B), the candidate R-23.
 
 | ID | What was wrong | Fixed at |
 |---|---|---|
@@ -248,6 +257,9 @@ Totals:
 | R-16 | A vendor-returned upper-case Grok or Muse session id was bound verbatim and slipped past the busy check | `1768c3d5` |
 | R-17 | Grok and Muse approval titles were not scrubbed | `1a9bc056` |
 | R-18 | A Muse interrupt that lost the race to `turn/completed` raised `process_exited` | `0284ffe1` |
+| R-25 | On CPython 3.11, `asyncio.wait_for` could drop a cancel (gh-86296) at the transport's two bounded drains and at its answer wait. A cancelled call then waited out its timeout or received a result, against AC-4 and INV-2 | `f5a2c74a`, `3917b49a` |
+| R-22 (Minor) | A failed Muse turn that nobody waited on logged "Task exception was never retrieved" | `48e9343a` |
+| R-24 (Minor) | A Grok host closed during spawn or continue left the `session/prompt` answer future unretrieved | `19582f13` |
 | R-M1, R-M6, R-M9, R-M11, R-RR2-1, R-19, R-20, R-21 (Minor) | Wrapping, header and wording fixes, missing regression tests, and three races | `87217940`, `04be59fa`, `96df0b45`, `45ad54ec`, `df9566fa`, `0e900159`, `85788217`, `241f1966` |
 | R-M2, R-M3 (Minor) | Docs only | spec r8 (`e377b7c2`) |
 
@@ -272,13 +284,17 @@ review.md's S4 heading reads "Confirmed findings — 13". That counts the 2 Bloc
 11. `require_url` lives on `RecordFieldConverter` (`vidbyte/lib/dataclasses/validation.py:220`), not on `RecordFieldValidator`, because a test pins the validator at 13 public methods.
 12. Spec T-6 places the control for vendor prompt injection in `NativeResultEncoder`, as "scrubbed of the host's secrets". §8.5 defines that encoder as static, and in the code it does not scrub. Turn text is returned without scrubbing at `grok/turn.py:121`, `muse/turn.py:300` and `opencode/turn.py:350`. Errors and approval titles are scrubbed. Listed as follow-up 6.
 
-**Corrected in the spec in this PR's final docs commit:**
+**Corrected in the spec in S6 (`16078049`):**
 
 13. The §5 diagrams had drifted from the code. They now say the following:
     - Children get the caller's environment plus a host overlay (D-18), not an "allowlisted env".
     - The launcher is resolved once in `__aenter__`, not at spawn.
     - opencode is either owned or attached, and its turns are polled.
     - Grok's `session/prompt` is written before the driver task starts.
+
+**Found after S6, in repair iteration 8, and not recorded in the spec:**
+
+14. INV-18 says that, with default options, `McpStdioTransport` behaves exactly as at `base_commit`, with the dispatch fix as the one exception. Since R-25, a default `request()` that is cancelled also differs; see follow-up 14.
 
 **Not a deviation:** Muse and opencode approval titles are cut at 200 characters, the §8.4 record cap. S3 had cut them at 128, and repair corrected this.
 
@@ -299,8 +315,14 @@ None of these is fixed in this PR. Each one was left open by decision.
 10. **Iteration-6 observation (Muse).** An earlier stop's grace period can close the peer with no `turn/completed`. A steer or second interrupt still pending then raises `process_exited`. EC-96 and EC-115 do not settle which answer is right.
 11. **Optional INV-13 sentence** (review.md): "`was_running` reports what the host found before sending; an interrupt sent to a running turn raises nothing when the turn ends before the interrupt's write or answer completes, and EC-51 and EC-96 apply only when the peer stopped before the turn's end was reported."
 12. **Optional opencode hardening.** Re-check `driver.done()` after the session probe in `interrupt_opencode_turn` (`opencode/host.py:605`). The RACE-1 verifier found opencode not affected.
-13. **Seen while writing this PR.** `MuseHost._forget_driver` (`muse/host.py:675-678`) never retrieves a finished driver task's exception, as Grok's and opencode's `_forget` callbacks do. So a failed Muse turn that is never waited on can log "Task exception was never retrieved" when it is garbage-collected.
-14. **Seen while writing this PR.** `_check_balance_status` (`backends/profiles.py:286`) names `DEEPSEEK_API_KEY` literally instead of the profile's variable. This is harmless today, because only DeepSeek has a balance URL.
+13. **Close-path waits.** On CPython 3.11, the close path's `asyncio.wait_for(process.wait(), …)` calls can still drop a cancel (`vidbyte/tools/mcp/transport.py:511`, `:537` and `:547`). They were left alone on purpose. Cleanup should finish, and re-raising in the middle of a close could leave a child process unreaped.
+14. **INV-18 nuance** (deviation 14). With default options, `request()` now differs from `main` only for a call that is cancelled:
+    - its pending answer future is popped and cancelled;
+    - on 3.11, the `cancelling()` check raises `CancelledError` where `main` returned the answer.
+
+    A caller that is not cancelled sees no difference, and `main`'s 59 transport tests (stdio, studio, bridge) pass unchanged. INV-18 still needs a sentence that records this.
+15. **Inherited flake from `main`.** `tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport` also fails on slow runners for branches based on `main`: it appeared in 17 failed `ci.yml` runs on 15 other branches. It hit one 3.11 attempt here (run 38465574661, attempt 1), and `rerun --failed` was green. The test file is identical to `main`.
+16. **R-24 narrow edge.** Suppose the `session/prompt` answer future has already failed when `_launch` finds the host closed. Then `answer.cancel()` does nothing, and that exception stays unread. No test reaches this window.
 
 **Known limitations** (spec §10 and §15):
 - **T-1.** A host dropped without `__aexit__` leaves its peers running until the interpreter exits. Always use `async with`.
