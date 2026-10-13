@@ -90,6 +90,10 @@ CLAUDE_WINDOWS_BATCH_SUFFIXES = (".bat", ".cmd")
 CLAUDE_HOME_CLI_PARTS = (".local", "bin", "claude.exe")
 # The places the SDK itself searches on other platforms, in its order, relative to the home folder.
 CLAUDE_POSIX_CLI_LOCATIONS = (".npm-global/bin/claude", "/usr/local/bin/claude", ".local/bin/claude", "node_modules/.bin/claude", ".yarn/bin/claude", ".claude/local/claude")
+# The initialize field that carries the Claude Code version.
+CLAUDE_VERSION_FIELD = "claude_code_version"
+# The initialize field that describes the signed-in account.
+CLAUDE_ACCOUNT_FIELD = "account"
 # Account fields whose value names where the signed-in credential came from.
 CLAUDE_CREDENTIAL_SOURCE_FIELDS = ("tokenSource", "apiKeySource")
 # The account field that is set when the session runs on an API key.
