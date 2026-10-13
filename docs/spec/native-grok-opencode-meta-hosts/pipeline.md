@@ -21,7 +21,7 @@ started: 2026-10-13 01:30 UTC
 | S3 implement | done | 2026-10-13 08:20 UTC | 2026-10-13 13:40 UTC | reports/S3-implementer.md | S3_HEAD de5b7c4c; draft PR #1036; 51 commits; budget 56/56 create, 12/12 modify, 66/66 records, 13/13 enums, 53/53 codes; 1616 passed, 19 skipped (re-run by orchestrator); full gate + Semgrep green; ci.yml 38379243965 dispatched, static-policy 38379248609 success |
 | S4 adversarial review | done | 2026-10-13 13:50 UTC | 2026-10-13 15:10 UTC | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: NEEDS REWORK; confirmed 2 Blocker (R-1, R-2) / 11 Major (R-3..R-15) / 9 Minor (R-M1..R-M9); refuted 0; downgraded 3 (R-V1→Major, R-V2→Major, R-V3→Minor); CI-1 reclassified by orchestrator as a code defect |
 | S5 repair loop | done | 2026-10-13 16:45 UTC | 2026-10-13 23:05 UTC | reports/S5-repair-{1,2,3}.md, verify-log.md | converged in 3/8; all 13 confirmed Blocker/Major + CI-1 + R-M1/R-M6 fixed; code HEAD af3e05e8; remote ci 38418651864 + static-policy 38418656187 green |
-| S5 re-review | running (round 1 done) | 2026-10-13 23:10 UTC | | reports/S5-rereview.md | round 1: MERGEABLE AFTER FIXES; fixes confirmed 21/21; new 0 Blocker / 3 Major (R-RR1..R-RR3) / 1 Minor (R-RR4) → scoped verifier |
+| S5 re-review | done | 2026-10-13 23:10 UTC | 2026-10-14 02:40 UTC | reports/S5-rereview.md, S5-rereview-verifier.md, S5-rereview-2.md | round 1: 21/21 fixes held; R-16/R-17 confirmed, fixed in iteration 4; round 2: SOUND, 3/3 fixes held, 0 Blocker/Major, 1 trivial Minor (R-RR2-1) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -170,6 +170,15 @@ started: 2026-10-13 01:30 UTC
     - my own `run_ci --stage source` gave `5664 passed, 32 skipped in 186.28s` / `CI passed.`;
     - INV-19 holds.
   - **Harness behaviour to note:** the harness refused the repair agent's report file (`reports/S5-repair-4.md`) with "Subagents should return findings as text, not write report files". The agent did not work around it; the full record is in verify-log.md under Iteration 4. Later briefings say: if the report write is refused, return the content inline.
+- 2026-10-14 02:40 — **Re-review round 2 (the last allowed): SOUND.** R-16, R-17 and R-M11 all hold. There are no new Blockers or Majors.
+  - A scratch probe confirmed that opencode ids stay exact and that no busy entry leaks.
+  - Minor R-RR2-1: the PURPOSE header line of `grok/wire.py:3` claims the wire maps only to `grok.*` codes, but `wire.py:245` maps EC-41 to `configuration.invalid_argument`.
+- 2026-10-14 02:40 — **I'm spending iteration 5 of 8 on R-RR2-1 alone.** It is a one-clause docstring fix with the full gate set and CI. Why: A001 header accuracy is a likely human review comment, and S6 cannot change source. Being a trivial Minor, it needs no further re-review. I will verify it myself (a one-line diff, and the AST is unchanged once docstrings are blanked).
+- 2026-10-14 02:40 — **Follow-ups for S6 to list:**
+  - R-M4, R-M5, R-M7 and R-M8 [scope-adding];
+  - R-M10, with the verifier's proposed EC-154/EC-158 wording;
+  - no test pins opencode's exact id comparison (proven only by a scratch probe);
+  - a T-6 spec conflict: T-6 says vendor text is scrubbed in NativeResultEncoder, but §8.5 defines that encoder as static with no factory, and opencode turn text is not scrubbed (`opencode/turn.py:350`).
 
 ## User replies (verbatim)
 (none during the run)
