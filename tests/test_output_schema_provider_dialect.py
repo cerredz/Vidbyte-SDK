@@ -242,7 +242,7 @@ _GEMINI_FUNCTION_TOOL = {"function_declarations": [{"name": "isDone", "descripti
 def _gemini_payload(model: str, *, tools: tuple[dict[str, Any], ...] = (), system: str | None = "Be brief.") -> dict[str, Any]:
     # Builds the Gemini request body an output_schema agent would send, optionally with functions declared.
     config = TextModelConfig(provider=ModelProvider.GEMINI, model=model, response_format=_wire_schema(Ticket), tools=tools)
-    return GeminiProvider(model=model, api_key="k")._create_payload(config, "triage", system, None)
+    return GeminiProvider(model=model, api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT)._create_payload(config, "triage", system, None)
 
 
 class GeminiSchemaWithFunctionsTests(unittest.TestCase):
