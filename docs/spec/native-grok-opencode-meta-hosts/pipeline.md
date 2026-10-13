@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencod
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
 s3_head: de5b7c4c
-s2_head: 91e874b2 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6])
+s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8])
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1036
 until: none
 started: 2026-10-13 01:30 UTC
@@ -20,7 +20,7 @@ started: 2026-10-13 01:30 UTC
 | S2 tests | done | 2026-10-13 05:50 UTC | 2026-10-13 07:35 UTC | reports/S2-test-author.md | 1635 tests (grok 458, opencode 581, muse 458, backends 138), all red; S2_HEAD cfad74f8 |
 | S3 implement | done | 2026-10-13 08:20 UTC | 2026-10-13 13:40 UTC | reports/S3-implementer.md | S3_HEAD de5b7c4c; draft PR #1036; 51 commits; budget 56/56 create, 12/12 modify, 66/66 records, 13/13 enums, 53/53 codes; 1616 passed, 19 skipped (re-run by orchestrator); full gate + Semgrep green; ci.yml 38379243965 dispatched, static-policy 38379248609 success |
 | S4 adversarial review | done | 2026-10-13 13:50 UTC | 2026-10-13 15:10 UTC | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: NEEDS REWORK; confirmed 2 Blocker (R-1, R-2) / 11 Major (R-3..R-15) / 9 Minor (R-M1..R-M9); refuted 0; downgraded 3 (R-V1→Major, R-V2→Major, R-V3→Minor); CI-1 reclassified by orchestrator as a code defect |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 2026-10-13 16:45 UTC | | reports/S5-repair-<k>.md | iteration plan: 1 behaviour+merge, 2 structure, 3 comments |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -91,6 +91,23 @@ started: 2026-10-13 01:30 UTC
 - 2026-10-13 15:55 — **Next step: an S2 test addendum before S5 iteration 1.**
   - New regression tests for R-1, R-2/EC-157, R-5, R-6, R-7 and R-8 (case-insensitive ids, the EC-39 target clause), proven red against HEAD.
   - I granted one test change: AC-1's win32 branch moves to the `grok_command` seam, as spec r8 §14 says. Any other existing test whose assertion now contradicts r8 (EC-157, D-19, AC-1, EC-39, INV-14) may change only with its before and after recorded.
+- 2026-10-13 16:40 — **S2 addendum done.** The tests are at 96df0b45 and the report at 9442dd0b.
+  - 20 new regression tests are red for their stated reasons: R-1 ×5, R-2/EC-157 ×7, R-5 ×1, R-6 ×2, R-7 ×1, R-8 ×4. Two EC-39 lock tests are green.
+  - Grant (a) was used: AC-1 on win32 now uses the `grok_command` seam.
+  - My own re-run: `20 failed, 1618 passed, 19 skipped in 160.51s`. The test-tree diff from 900b1d62 is additions, except the 6 lines removed in `test_grok_host_acceptance.py` (grant a) and inventory lines in the FEATURE.md files.
+  - Not written, both accepted: R-2 case (iii), the fallback to grok.exe, which needs a real `.exe` peer; and the R-8 EC-32 equality case, a near duplicate.
+- 2026-10-13 16:40 — **I re-recorded the S2 addendum's two unpushed commits** (061580cd → 96df0b45, 44cc9677 → 9442dd0b). Their messages had stray `@` lines from PowerShell here-string syntax. I checked that the trees are byte-identical to the originals. Nothing published was rewritten.
+- 2026-10-13 16:40 — **Spec r8 is complete** at cf6b0103. The test author found a gap for R-6, so the spec now has EC-158: an opencode turn the host fails itself first sends one `POST /session/{id}/abort`, bounded by `request_timeout_seconds` and dropped on failure. INV-13 gained a sentence, and EC-87 now says an uncounted poll failure ends the turn at once.
+- 2026-10-13 16:40 — **origin/main moved 36 commits past base.**
+  - The trial merge conflicts in `vidbyte/tools/mcp/transport.py`: main's 80400db5 (#1010, "send notifications/initialized after initialize", +34 lines) overlaps this branch's transport extension. `vidbyte/lib/configs/__init__.py` auto-merges.
+  - Main also changed `tests/test_mcp_stdio_transport.py`.
+  - Iteration 1 merges origin/main first (merge, never rebase) and only then fixes R-3 and CI-1 in that file.
+- 2026-10-13 16:40 — **S5 plan, my scoping decision.** The 15 open findings split into three packets to protect each repair agent's context, and so the comment reflow runs once, last, over stable code:
+  - **Iteration 1:** the merge, then the behaviour, security and conformance fixes (R-1, R-2, R-3 with CI-1, R-4, R-5, R-6, R-7, R-8), plus the trivial R-M1. Mark R-M2, R-M3 and R-M9 resolved by spec r8 and the S2 addendum.
+  - **Iteration 2:** structure (R-9, R-10, R-11, R-12, R-M6).
+  - **Iteration 3:** comments (R-13, R-14, R-15) in a single reflow pass.
+
+  Each iteration's DONE means its packet is closed and every gate is green. Later packets are listed as deferred by me, not as open defects.
 
 ## User replies (verbatim)
 (none during the run)
