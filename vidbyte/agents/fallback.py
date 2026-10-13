@@ -7,7 +7,8 @@ Purpose:
     Lets a developer declare prioritized backup models once at construction so a
     transient provider failure degrades to the next model instead of ending the run.
 Architecture:
-    - AgentFallback: Immutable chain plus advance/transform policy helpers.
+    - AgentFallback: Immutable chain plus advance/transform policy helpers; every
+      backup runner gets the agent's matched ProviderKeys and text-model mode.
     - DEFAULT_FALLBACK_ERRORS: Provider-level exceptions that justify a switch.
 Relations:
     Built by vidbyte.agents.base via AgentFallback.from_spec. Consumed by
@@ -23,8 +24,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.lib.dataclasses.agents import FallbackModel, FallbackTransform
+from vidbyte.lib.dataclasses.agents import FallbackModel, FallbackTransform, ProviderKeys
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.errors import (
     ConfigurationError,
     ProviderConfigurationError,
@@ -57,13 +59,25 @@ DEFAULT_FALLBACK_ERRORS: tuple[type[BaseException], ...] = (
 class AgentFallback:
     """Ordered model chain plus the transforms that route an in-flight run to the next model."""
 
-    def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS, timeout_seconds: float | None = None) -> None:
+    def __init__(
+        self,
+        models: Sequence[FallbackModel],
+        *,
+        fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS,
+        timeout_seconds: float | None = None,
+        api_keys: ProviderKeys = ProviderKeys(),
+        model_mode: TextModelMode = TextModelMode.AUTO,
+    ) -> None:
         # Stores the chain (index 0 is the primary) and caches runners lazily, keyed by chain index.
         if not models:
             raise ConfigurationError("AgentFallback requires at least the primary model in its chain.")
         self.models = tuple(models)
         self.fallback_on = tuple(fallback_on)
         self.timeout_seconds = timeout_seconds
+        # The agent's matched keys and mode, handed to every backup
+        # runner unchanged.
+        self._api_keys = api_keys
+        self._model_mode = model_mode
         self._runner_cache: dict[int, object] = {}
 
     @classmethod
@@ -87,7 +101,26 @@ class AgentFallback:
         # @intent agent-fallback-rejects-a-bare-string
         # Hand the spec over untouched so the settings guard sees a bare string before tuple() splits it into letters.
         settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=spec)
-        return settings.to_fallback(primary=cls._primary_model(runner_config, agent_name), timeout_seconds=runner_config.timeout_seconds)
+        return settings.to_fallback(
+            primary=cls._primary_model(runner_config, agent_name),
+            timeout_seconds=runner_config.timeout_seconds,
+            api_keys=runner_config.api_keys,
+            model_mode=runner_config.model_mode,
+        )
+
+    @staticmethod
+    def providers_in(spec: Sequence[str | FallbackModel] | AgentFallbackSettings | None) -> tuple[str, ...]:
+        """Return the providers a fallback spec names, in order, or () when there is no spec."""
+        from vidbyte.agents.settings import AgentFallbackSettings as _AgentFallbackSettings
+
+        if spec is None:
+            return ()
+        # @intent fallback-providers-are-configured-providers
+        # The agent matches its key list against these providers too, so
+        # a backup's key binds at the root; a bare string is refused, as
+        # from_spec refuses it.
+        settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=spec)
+        return settings.named_providers()
 
     @staticmethod
     def _primary_model(runner_config: AgentRunnerConfig, agent_name: str) -> FallbackModel:
@@ -100,12 +133,7 @@ class AgentFallback:
                 f"Agent {agent_name} declares a fallback chain but no provider/model_name to fall back from.",
                 details={"agent": agent_name, "provider": runner_config.provider, "model_name": runner_config.model_name},
             )
-        return FallbackModel(
-            provider=provider,
-            model=model_name,
-            api_key=runner_config.api_key,
-            temperature=runner_config.temperature,
-        )
+        return FallbackModel(provider=provider, model=model_name, temperature=runner_config.temperature)
 
     def is_model_error(self, error: BaseException) -> bool:
         """Report whether this error is a provider-level failure a different model could survive."""
@@ -164,10 +192,15 @@ class AgentFallback:
             # A backup model gets the agent's own per-request timeout, as the primary runner does;
             # omitted when unset so the model config keeps its own default.
             options = {"timeout_seconds": self.timeout_seconds} if self.timeout_seconds is not None else {}
+            # @intent children-carry-the-matched-keys
+            # The backup runner takes the agent's matched record and
+            # mode as they are, so it sends only the key matched to its
+            # own provider, or none, and never re-matches the list.
             self._runner_cache[index] = Runner.from_model(
                 provider=target.provider,
                 model_name=target.model,
-                api_key=target.api_key,
+                api_keys=self._api_keys,
+                model_mode=self._model_mode,
                 temperature=target.temperature,
                 options=options,
             ).build()
