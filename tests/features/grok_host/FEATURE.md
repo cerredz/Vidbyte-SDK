@@ -97,7 +97,8 @@ These are the failure inventory the tests were chosen from, given as input → w
   - a cancelled spawn, continue, check or list leaves its peer running (AC-4, EC-4);
   - a short-lived peer outlives its read;
   - `__aexit__` leaves turns running (EC-8);
-  - a turn's grandchild survives the turn (EC-10).
+  - a turn's grandchild survives the turn (EC-10);
+  - the host closes while a spawn or continue is starting, after `session/prompt` was written, and the dropped answer future fails when the peer closes, so asyncio logs "Future exception was never retrieved" (R-24; EC-2, EC-8).
 - **Silent wrong model:** Grok falls back to its default for an unknown `--model`, so a turn runs on the wrong model unless `currentModelId` is checked before `session/new` (EC-25, AC-7). An unoffered reasoning effort is accepted silently (EC-26).
 - **Over-permissive approvals:**
   - an `*_always` option is chosen (AC-8);
@@ -137,6 +138,7 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **Re-review round 1 (R-17): approval titles were recorded unscrubbed.** §9.1 says `NativeApprovalDecision.title` is scrubbed; the Grok driver recorded the tool-call title verbatim, so a credential in it reached the result and `wait_grok_turn`'s output. Caught by `test_a_credential_in_a_permission_title_is_scrubbed_from_the_result_and_the_wait_tool` in `test_grok_host_turns.py`.
 - **RACE-1 (R-19): a cancel write that lost the race to Grok's answer raised `grok.process_exited`.** On CPython 3.11 the cancel's drain yields once; if the `session/prompt` answer is handled in that yield, the driver closes the peer and the post-drain check turns a write that reached Grok into `BrokenPipeError`. Caught by `test_interrupt_whose_cancel_write_loses_to_the_turn_end_succeeds` in `test_grok_host_turns.py`, which forces the window with the delegating `cancel_drain_gate` seam. EC-51's POSIX test still guards a peer that exited before answering.
 - **RACE-1 (R-20): an interrupt during the driver's close reported `was_running=True`.** Grok had answered, so nothing was sent, but the host still saw a live task. Caught by `test_interrupt_after_grok_answered_while_the_driver_is_still_closing_sends_nothing` in `test_grok_host_turns.py`.
+- **Post-S6 (R-24): a host closed during spawn left an unretrieved future.** `_launch` wrote `session/prompt`, saw the host closed and raised `grok.process_exited` before any driver started, so nothing read the answer future that the peer close then failed. Caught by `test_host_closed_during_spawn_leaves_no_unretrieved_future` in `test_grok_host_turns.py`, which also requires the spawn to keep raising `grok.process_exited`.
 
 ## Test Suite Map
 
@@ -144,7 +146,7 @@ These are the failure inventory the tests were chosen from, given as input → w
 - `test_grok_host_errors.py`: the table-driven error rows for every (function, code), in host mode and tool mode. It also covers the unopened or closed host, re-entry, invalid primitive arguments, the PATH lookup, and the no-cursor `-32602` api_error (r8, R-1).
 - `test_grok_host_session_id_case.py`: INV-14 case-insensitivity (r8, R-8): a continue busy on the upper-cased id, a fork on an upper-cased source, an upper-cased `new_session_id` that collides, and the two EC-39 locks. Re-review R-16: a continue or fork by the handle's id, or its lower-cased form, after Grok returned an upper-case id is busy.
 - `test_grok_host_windows_launcher.py`: EC-157 (r8, R-2, win32-only): a `grok.cmd` on PATH and an explicit `.cmd`/`.bat` `grok_command` are refused at `__aenter__` and never run.
-- `test_grok_host_turns.py`: approvals and decisions (with a credential in the title scrubbed, re-review R-17), stop reasons, interrupt and ceiling, an interrupt racing Grok's own answer (RACE-1: R-19, R-20), unknown notifications, the text cap, unknown usage, repeated failure, handle scoping, concurrency, wire shapes and peer argv, and a peer that exits mid-write.
+- `test_grok_host_turns.py`: approvals and decisions (with a credential in the title scrubbed, re-review R-17), stop reasons, interrupt and ceiling, an interrupt racing Grok's own answer (RACE-1: R-19, R-20), a host closed during spawn (R-24), unknown notifications, the text cap, unknown usage, repeated failure, handle scoping, concurrency, wire shapes and peer argv, and a peer that exits mid-write.
 - `test_grok_host_reads.py`: readiness, catalog, pages and cursors, casefolded search and its page cap, one-shot and fork results and argv, live model checks, text capping, garbage frames, and the child environment.
 - `test_grok_host_process_bounds.py`: the AC-3 bound with shrunk and default timings, cancellation of each call, cancelled waits, `__aexit__` with live turns or on error or cancellation, grandchild reaping, and the one-shot tree stop.
 - `test_grok_host_records.py`: `RecordFieldValidator`, the shared native records, the Grok settings and request records (EC-23, EC-33), and frozen slotted dataclasses.

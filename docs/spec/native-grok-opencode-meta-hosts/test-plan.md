@@ -572,3 +572,87 @@ With `order` absent, the fake runs the same statements in the same order as befo
   - Key the Muse fix on this turn's own `turn/completed` having been read, not on `running` and not on the answer code.
 - **The R-19 seam is a delegating wrapper, not a mock.** It wraps `NativePeer.notify` (hostkit) and `asyncio.wait_for`, and it always calls the real function. It patches no host class, `McpStdioTransport`, `HttpTransport` or `CliRunner`. This is the one place where the packs wrap an internal seam; it is narrow and deliberate.
 - **A spec observation, with no change requested.** §6.3.5 lists EC-96 and EC-97 as host-wide rows for `interrupt_muse_turn`, with EC-115 for a foreign handle. The R-18 guard relies on EC-102 through §6.3.2's catch-all ("Any other JSON-RPC error"), as the review and the brief decided.
+
+## Addendum 4 — post-S6 regression tests (R-22, R-24)
+
+The S6 PR author noted one gap, and the post-S6 verifier found a second of the same class (`review.md`, "Post-S6 findings"). Both are Minors. No error is lost, but asyncio logs an ERROR with a traceback when an object that holds an unread exception is collected.
+- **R-22 (Muse).** A failed turn that nobody waits on leaves its driver task's exception unretrieved, so asyncio logs "Task exception was never retrieved". Grok and opencode retrieve it when the turn finishes.
+- **R-24 (Grok).** A host closed while a spawn is starting leaves the `session/prompt` answer future's exception unretrieved, so asyncio logs "Future exception was never retrieved".
+
+This addendum adds 2 test functions, one per finding. Both are red against today's code, and the red is an assertion failure. They use only the public API and the §13 fakes, run as real child processes (`muse_command`, `grok_command`). They add no private seam, no fake change and no fixture change. No `vidbyte/` source was read, and no real `grok`, `opencode`, `muse` or `wsl.exe` ran. No existing assertion changed. As in addendum 3, each pack's FEATURE.md gained a failure-mode line, a regression line and a suite-map mention, and each README.md gained a log line.
+
+Both tests read asyncio's own log record, and that record appears only when the object is collected. Each test therefore takes the same three steps:
+1. Run `gc.collect()`, set `caplog` to ERROR for the `asyncio` logger, and clear `caplog`. Garbage left by an earlier test then cannot make this test red or green.
+2. Run the scenario inside a helper coroutine, so every reference dies when the helper returns.
+3. Run `await asyncio.sleep(0)` and `gc.collect()` before asserting, so the record lands in this test and not in the next one.
+
+### Coverage map
+
+| Finding / Spec ID | Test (file → name) | Level | Failure it catches (input + state → wrong output) | How it could pass vacuously, and why it does not |
+|---|---|---|---|---|
+| R-22, EC-119, EC-148, D-9 | `muse_host/test_muse_host_turns.py` → `test_failed_turn_never_waited_logs_no_unretrieved_exception` (helper `leave_a_failed_turn_unwaited`) | R | The scenario is `turn: {terminal: failed, error: {kind: modelError, …}}`. A turn is spawned and ends `failed`, and nobody calls `wait_muse_turn` before the host exits → asyncio logs "Task exception was never retrieved" for the `muse-turn-…` driver task when the host is collected. | **Nothing failed.** A waited twin of the same scenario runs first, in the same host, and must raise `muse.api_error` with `vendor_kind == "modelError"` (EC-119). So the test turns red if a "fix" stops the driver from raising, or if the scenario no longer fails. Before the host exits, the fake must also log exactly two `turn/completed` frames with `terminal == "failed"` (a bounded poll of at most 30 s). **The record lands elsewhere.** The three steps above keep it in this test. The waited twin logs nothing by itself, so today's only record is the unwaited turn's. |
+| R-24, EC-2, EC-8, INV-4 | `grok_host/test_grok_host_turns.py` → `test_host_closed_during_spawn_leaves_no_unretrieved_future` (helper `close_the_host_while_spawn_is_in_flight`) | R | The scenario is `acp.session_prompt: {mode: hold}`. `spawn_grok_session` runs as a task, the test yields one loop step, and then it calls `__aexit__`, which finds no live turn and closes the host. The spawn writes `session/prompt`, sees the host closed and raises. The peer close then fails the dropped answer future → asyncio logs "Future exception was never retrieved" when the future is collected. | **The error is swallowed.** The spawn must still raise `grok.process_exited`, with operation `spawn_grok_session`, the EC-2 token `async with`, and a message containing "closed while the turn was starting". **The window is missed.** The fake must have received exactly one `session/prompt`, which proves the answer future existed. A host that failed earlier would leave no future, and the test reports that as a failed precondition. **A reference survives.** The helper returns nothing, and every check on the error runs inside it. A returned exception would keep `_launch`'s frame alive past `gc.collect()`, and that frame holds the future. |
+
+### Tests deliberately NOT written (addendum 4)
+
+| Candidate | Why it would not earn its keep |
+|---|---|
+| (B), the literal `DEEPSEEK_API_KEY` at `profiles.py:286` | It was refuted. EC-127 requires that exact text, and `test_native_backends_errors.py` already asserts it. |
+| An R-24 twin for `continue_grok_session` | Continue reaches the same `_launch` raise as spawn (review.md: spawn `:217`, continue `:294`), so a second test would prove the same line twice. The review row names the spawn test. |
+| R-22 variants: `exit_before_complete` (EC-120), a turn that fails during `__aexit__`, and eviction from the 64-entry finished table while the host is open | The verifier showed that all of them log through the same missing retrieval (14 of 14), so one fix closes all of them. One deterministic scenario is enough. The others would add run time and timing sensitivity and catch nothing new. |
+| Opencode twins | The verifier found opencode not affected: its `_forget` already retrieves the exception behind a `cancelled()` guard. |
+| Asserting the mechanism: `task.exception()` in `_forget_driver`, `answer.cancel()` in `_launch`, or a wider retrieval in `NativeTurnTable._finish` | The brief says to assert outcomes. Any of these fixes passes both tests. |
+| Capturing with a loop exception handler instead of `caplog` | The verifier's probes used a handler. A user, though, sees the default handler's record on the `asyncio` logger, and `caplog` reads exactly that record. Replacing the handler would test a setup that no caller has. |
+
+### Red run (addendum 4)
+
+Bootstrap: none. The environment is global Python 3.11.0 on win32, reached through `PYTHONPATH=$(pwd)`, with `pytest 8.3.5` and pytest-asyncio 1.3.0 in strict mode. No `pip install` ran. HEAD is `4ecd4012`, and the new tests are staged.
+
+**Each new test alone, 5 runs.** Both tests were red in 5 of 5 runs, every time for the same reason:
+
+| Test | Runs | Observed red reason |
+|---|---|---|
+| R-22 `test_failed_turn_never_waited_logs_no_unretrieved_exception` | 5 / 5 red | `AssertionError: R-22: a failed Muse turn that nobody waited on logged ['Task exception was never retrieved']; …`. The captured record names `MuseTurnDriver.run()` with `NativeHostError('The Muse turn failed with modelError.')`. The twin and precondition assertions passed. |
+| R-24 `test_host_closed_during_spawn_leaves_no_unretrieved_future` | 5 / 5 red | `AssertionError: R-24: a GrokHost closed during spawn logged ['Future exception was never retrieved']; …`. The checks on the spawn's error (code, operation, token, message) and the one-`session/prompt` precondition all passed. |
+
+**The four packs, once:**
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q tests/features/grok_host tests/features/opencode_host tests/features/muse_host tests/features/native_backends
+…
+FAILED tests/features/grok_host/test_grok_host_turns.py::test_host_closed_during_spawn_leaves_no_unretrieved_future
+FAILED tests/features/muse_host/test_muse_host_turns.py::test_failed_turn_never_waited_logs_no_unretrieved_exception
+2 failed, 1659 passed, 19 skipped in 167.82s (0:02:47)
+```
+
+The 2 failures are exactly the 2 new tests, with the same reasons as above. The 1659 passes match the HEAD baseline, and the 19 skips are the same platform guards. Inside the full run, garbage from earlier tests changed neither result, because each test collects and clears before it starts.
+
+**Can the tests pass?** A scratch folder outside the worktree held a shim (nothing committed). The shim loaded each pack's conftest and ran the unchanged test functions from the worktree, in three modes, 5 runs per mode:
+
+| Mode | R-22 | R-24 | Neighbours run alongside |
+|---|---|---|---|
+| no patch | 5 / 5 red | 5 / 5 red | green |
+| wrapper only: the patch in place, without the fix line | 5 / 5 red | 5 / 5 red | green |
+| the review.md "Smallest fix" | 5 / 5 green | 5 / 5 green | green |
+
+- **The R-22 fix.** `MuseHost._forget_driver` pops the driver, then calls `task.exception()` when `not task.cancelled()`.
+- **The R-24 fix.** A wrapper records the futures that `NativePeer.send` returns. When `GrokHost._launch` raises `NativeHostError`, the wrapper cancels the last future if it is still pending. It drops every reference when `_launch` ends.
+- **Why the "wrapper only" mode matters.** It proves that the scratch wrappers keep nothing alive that could hide the record, so the green comes from the fix line alone.
+- **The neighbours.** These were `test_waiting_twice_on_a_failed_turn_raises_the_same_code` (Muse), and `test_turn_peer_wire_shapes` and `test_a_failed_spawn_releases_its_reservation` (Grok). They show that the fix does not change a waited failure, a normal spawn, or a failed spawn's released reservation.
+
+**Lint.** `python lint/run.py` on the staged files gave `SDK-LINT: PASS`. A001 (643), A007 (255), S062 (889) and S024 (25) stay at their baselines.
+
+### Notes for the implementer (addendum 4)
+
+- **The bound names and outcomes:**
+  - `spawn_muse_session`, `wait_muse_turn`, and EC-119's `muse.api_error` with `context["vendor_kind"]`;
+  - `GrokHost.__aenter__`, `__aexit__` and `spawn_grok_session`;
+  - `grok.process_exited` from the spawn, with operation `spawn_grok_session`, the EC-2 next step (token `async with`), and a message containing "closed while the turn was starting";
+  - the fakes' `sent` and `frame` log records.
+- **What must not change:**
+  - A waited failed Muse turn still raises on every wait (EC-148).
+  - The Grok spawn still raises `grok.process_exited` after it writes `session/prompt`.
+  - Grok's normal turns still get their answer, so do not cancel the future on the success path.
+- **Keep the `cancelled()` guard (R-22).** `task.exception()` raises `CancelledError` on a cancelled task, and loop teardown can cancel a driver.
+- **A different R-24 fix moves the window.** Suppose you move the closed-host check before the `session/prompt` write instead of cancelling the future. The one-`session/prompt` precondition then fails, with a message that starts with `precondition:`. That failure means the window moved, not that the fix is wrong. Ask the orchestrator; do not edit the test.
+- **Do not add `gc.collect()` or `caplog` handling to other tests.** The two new tests isolate themselves.

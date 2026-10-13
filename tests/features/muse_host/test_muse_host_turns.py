@@ -1,12 +1,12 @@
 """FILE: tests/features/muse_host/test_muse_host_turns.py
 
-PURPOSE: How MuseTurnDriver runs one turn: approvals decided once per requirement with a denied choice scoped once (D-11, INV-10, EC-121, EC-156), user input cancelled, approval and user-input titles recorded scrubbed (§9.1, INV-6), the turn id taken from the turn/start ack (EC-109), reply text taken only from the turn's agentMessage items (EC-150, view/gap), steer and interrupt on the wire, an interrupt or steer that loses the race to the turn's own turn/completed (RACE-1: INV-13, EC-52, EC-102, EC-115), the turn ceiling (D-10), usage (D-14, INV-15), and the turn table rules (EC-9, EC-112, EC-148, INV-14, INV-17), including a session id that Muse's own session/start returned in upper case.
+PURPOSE: How MuseTurnDriver runs one turn: approvals decided once per requirement with a denied choice scoped once (D-11, INV-10, EC-121, EC-156), user input cancelled, approval and user-input titles recorded scrubbed (§9.1, INV-6), the turn id taken from the turn/start ack (EC-109), reply text taken only from the turn's agentMessage items (EC-150, view/gap), steer and interrupt on the wire, an interrupt or steer that loses the race to the turn's own turn/completed (RACE-1: INV-13, EC-52, EC-102, EC-115), the turn ceiling (D-10), usage (D-14, INV-15), the turn table rules (EC-9, EC-112, EC-148, INV-14, INV-17), including a session id that Muse's own session/start returned in upper case, and a failed turn that nobody waits on, whose driver exception must not be logged as never retrieved (R-22: EC-119, D-9).
 ROLE IN CODEBASE: Proves the Muse half of FR-12 and the turn rules of §6.3.5 for vidbyte.harnesses.native.muse.turn, driven through MuseHost and the fake muse.
 ARCHITECTURE NOTE: The fake plays a turn in a worker thread after the ack: approvals, user input, notifications, foreign-turn events, items, an optional view/gap, then turn/completed, or a hold until the release file or turn/interrupt. Where the fake waits for an answer (approval/decide, userInput/cancel) it logs request_seen or request_missing, so a missing answer shows in the logs as well as in the result.
-FUNCTION INVENTORY: decides lists the approval/decide params the fake received; answer_to finds the host's response to a server request; spawn_and_wait runs one turn to its result; poll_until polls a condition every 10 ms with a 5 s limit; interrupt_expecting_no_error turns a raised interrupt into an INV-13 failure; assert_the_interrupted_turn_stands checks was_running and the recorded INTERRUPTED/CALLER result; the test_* functions are one rule each.
+FUNCTION INVENTORY: decides lists the approval/decide params the fake received; answer_to finds the host's response to a server request; spawn_and_wait runs one turn to its result; poll_until polls a condition every 10 ms with a 5 s limit; interrupt_expecting_no_error turns a raised interrupt into an INV-13 failure; assert_the_interrupted_turn_stands checks was_running and the recorded INTERRUPTED/CALLER result; leave_a_failed_turn_unwaited fails a waited twin, then leaves one failed turn unwaited, inside its own frame; the test_* functions are one rule each.
 COMMON MODIFICATION PATTERNS: A new turn rule gets a scenario key in fake_muse_peer.py's TurnWorker and one test here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not accept an approved choice or a session or persistent scope as a passing answer; INV-9 and D-11 forbid both. 2. Do not compare commandIds by order; only their shape is stable (spec §13). 3. Do not commit a key-shaped literal or print a secret in an assertion message; the title-scrub test builds its value from uuid4 and names only the surface that leaked. 4. Do not assert the spelling of handle.session_id in the vendor-id busy tests; INV-14 fixes only that both spellings name one session.
-KNOWN EDGE CASES: The RACE-1 tests force the frame order with the fake's turn/interrupt "order" knob, or with a silent answer that the turn's own end overtakes; the two guards (a -32030 for a turn still running, and an interrupt while the driver is closing a completed turn) pass before and after the fix. The outcome recorded for a plain denied decide is not fixed by the spec, so those tests assert only that it is not ALLOWED; EC-156 fixes CANCELLED for a failed or benign-race decide and those tests bind it. The fake's foreign-turn events carry turn id "turn-foreign" and must change nothing. VENDOR_UPPER_SCENARIO lists the vendor id in both spellings, as a Muse that matches ids ignoring case would, so a host that misses the busy check really starts a second turn or fork instead of failing as session_not_found.
+KNOWN EDGE CASES: The RACE-1 tests force the frame order with the fake's turn/interrupt "order" knob, or with a silent answer that the turn's own end overtakes; the two guards (a -32030 for a turn still running, and an interrupt while the driver is closing a completed turn) pass before and after the fix. The outcome recorded for a plain denied decide is not fixed by the spec, so those tests assert only that it is not ALLOWED; EC-156 fixes CANCELLED for a failed or benign-race decide and those tests bind it. The fake's foreign-turn events carry turn id "turn-foreign" and must change nothing. VENDOR_UPPER_SCENARIO lists the vendor id in both spellings, as a Muse that matches ids ignoring case would, so a host that misses the busy check really starts a second turn or fork instead of failing as session_not_found. The R-22 test reads asyncio's "never retrieved" record, which appears only when the task is collected: it runs gc.collect() and clears caplog first, keeps every reference inside a helper coroutine, and runs asyncio.sleep(0) and gc.collect() again before it asserts, or the record lands in a later test.
 RELATED DOCS: tests/features/muse_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §6.3.5, §8.1 D-9 to D-14, §8.5
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host/test_muse_host_turns.py
 """
@@ -14,7 +14,9 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host/test_muse_
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
+import logging
 import re
 import uuid
 from collections.abc import Callable
@@ -48,6 +50,8 @@ ANSWERS_AFTER_TURN_COMPLETED = [
     pytest.param({"error": {"code": -32030, "message": "the turn is no longer running"}}, id="minus-32030"),
     pytest.param({}, id="accepted"),
 ]
+FAILED_MODEL_ERROR = {"turn": {"terminal": "failed", "error": {"kind": "modelError", "message": "model refused", "retryable": False}}}
+NEVER_RETRIEVED = "exception was never retrieved"
 
 
 def decides(muse_fake: Any) -> list[dict[str, Any]]:
@@ -93,6 +97,20 @@ def assert_the_interrupted_turn_stands(interrupted: Any, result: Any, api: Any, 
     assert result.stop_reason == "cancelled"
     assert result.interrupt_source is api.InterruptSource.CALLER
     assert len(muse_fake.received("turn/interrupt")) == 1
+
+
+async def leave_a_failed_turn_unwaited(make_muse_host: Callable[..., Any], api: Any, muse_fake: Any, wait_until: Callable[..., Any]) -> tuple[tuple[str, str | None], bool]:
+    # R-22: runs in its own frame, so the host, its turn table and the unwaited driver task are garbage once it returns.
+    async with make_muse_host(FAILED_MODEL_ERROR) as host:
+        # A waited twin of the same scenario proves the host fails this turn (EC-119), so the test cannot pass because nothing failed.
+        twin = await host.spawn_muse_session(api.MuseTurnRequest(prompt=PROMPT))
+        with pytest.raises(api.NativeHostError) as caught:
+            await host.wait_muse_turn(twin, timeout_seconds=WAIT_SECONDS)
+        twin_failure = (caught.value.failure_code.value, caught.value.context.get("vendor_kind"))
+        # The turn under test fails the same way, and nobody ever waits on it.
+        await host.spawn_muse_session(api.MuseTurnRequest(prompt=PROMPT))
+        both_failed = await wait_until(lambda: [record["frame"]["params"]["terminal"] for record in muse_fake.records("sent") if record["frame"].get("method") == "turn/completed"] == ["failed", "failed"], WAIT_SECONDS)
+    return twin_failure, both_failed
 
 
 @pytest.mark.asyncio
@@ -428,6 +446,23 @@ async def test_waiting_twice_on_a_failed_turn_raises_the_same_code(muse_api, mak
             raised.append(caught.value)
     for value in raised:
         check_native_error(value, code="muse.budget_exhausted", token="continue_muse_session")
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_never_waited_logs_no_unretrieved_exception(muse_api, muse_fake, make_muse_host, fast_stop, wait_until, caplog: pytest.LogCaptureFixture) -> None:
+    # R-22 (EC-119, D-9; parity with Grok and opencode): a failed driver task that nobody waits on must not make asyncio log "Task exception was never retrieved" when it is collected.
+    gc.collect()
+    caplog.set_level(logging.ERROR, logger="asyncio")
+    # Collect earlier tests' garbage first and drop what it logged, so only this test's records count.
+    caplog.clear()
+    twin_failure, both_failed = await leave_a_failed_turn_unwaited(make_muse_host, muse_api, muse_fake, wait_until)
+    # Let the loop run the drivers' last callbacks, then collect the host and its tasks now rather than in a later test.
+    await asyncio.sleep(0)
+    gc.collect()
+    assert twin_failure == ("muse.api_error", "modelError"), f"EC-119: the waited twin of the same scenario must raise muse.api_error with vendor_kind modelError, got {twin_failure}"
+    assert both_failed, "precondition: the fake did not send a failed turn/completed for both turns"
+    unretrieved = [record.getMessage().splitlines()[0] for record in caplog.records if record.name == "asyncio" and NEVER_RETRIEVED in record.getMessage()]
+    assert unretrieved == [], f"R-22: a failed Muse turn that nobody waited on logged {unretrieved}; Grok and opencode retrieve the driver's exception when the turn finishes"
 
 
 @pytest.mark.asyncio

@@ -1,12 +1,12 @@
 """FILE: tests/features/grok_host/test_grok_host_turns.py
 
-PURPOSE: The live-turn behaviour of GrokHost: approvals answered by policy and recorded with a scrubbed title (AC-8, D-11, INV-10, §9.1, INV-6), terminal states and interrupt sources (EC-50, EC-53, D-10, INV-13), an interrupt that loses the race to Grok's own answer (RACE-1: INV-13, EC-52, EC-53), the wire shapes the host sends (§8.5 ACP calls, INV-9), bounded text and decisions (EC-150, INV-16), unknown usage (INV-15), host-scoped handles (INV-17) and the session and live-turn reservations under concurrency (EC-9, INV-14).
+PURPOSE: The live-turn behaviour of GrokHost: approvals answered by policy and recorded with a scrubbed title (AC-8, D-11, INV-10, §9.1, INV-6), terminal states and interrupt sources (EC-50, EC-53, D-10, INV-13), an interrupt that loses the race to Grok's own answer (RACE-1: INV-13, EC-52, EC-53), the wire shapes the host sends (§8.5 ACP calls, INV-9), bounded text and decisions (EC-150, INV-16), unknown usage (INV-15), host-scoped handles (INV-17), the session and live-turn reservations under concurrency (EC-9, INV-14), and a host closed while a spawn is starting, which must still raise and must not leave a session/prompt answer future to be logged as never retrieved (R-24: EC-2, EC-8, INV-4).
 ROLE IN CODEBASE: Covers vidbyte.harnesses.native.grok.turn (GrokTurnDriver) and the turn parts of grok.host through the public methods only.
 ARCHITECTURE NOTE: The fake plays each turn from its scenario: permission requests, extra server requests, notifications, chunks, then an answer or a hold that the test ends with the release file or that the host ends with session/cancel. Assertions read the fake's JSONL log and the NativeTurnResult.
-FUNCTION INVENTORY: spawn_and_wait runs one turn to its result; permission_answers reads the answers the fake logged; poll_until polls a condition every 10 ms with a 5 s limit; CancelDrainGate and the cancel_drain_gate fixture hold the session/cancel drain open until the peer is closed; interrupt_expecting_no_error turns a raised interrupt into an INV-13 failure; the test_* functions each pin one rule.
+FUNCTION INVENTORY: spawn_and_wait runs one turn to its result; permission_answers reads the answers the fake logged; poll_until polls a condition every 10 ms with a 5 s limit; CancelDrainGate and the cancel_drain_gate fixture hold the session/cancel drain open until the peer is closed; interrupt_expecting_no_error turns a raised interrupt into an INV-13 failure; close_the_host_while_spawn_is_in_flight closes an open host one loop step after a spawn starts and checks the spawn's error, inside its own frame; the test_* functions each pin one rule.
 COMMON MODIFICATION PATTERNS: A new turn rule gets a scenario key in fake_grok_peer.py and one test here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not assert interleavings the spec leaves open, such as which of two concurrent calls wins. 2. Do not sleep to wait for a turn; wait_grok_turn or the release file drives every turn. 3. Do not commit a key-shaped literal or print a secret in an assertion message; the title-scrub test builds its value from uuid4 and names only the surface that leaked.
-KNOWN EDGE CASES: The POSIX-only tests (EC-27, EC-51) close the fake's stdin so the host's next write fails at once; Windows reports a write to a closed pipe asynchronously, so there the failure can surface later as EC-48. No frame order through the fake can force RACE-1 R-19, because its window is inside one await of the cancel write, so cancel_drain_gate wraps NativePeer.notify and asyncio.wait_for: it releases the held prompt as session/cancel is sent, then delays only that task's next wait_for until the fake logs stdin EOF, and then calls the real one. It asserts outcomes, never which exception path fired inside, so it holds on CPython 3.11, 3.12+ and Windows.
+KNOWN EDGE CASES: The POSIX-only tests (EC-27, EC-51) close the fake's stdin so the host's next write fails at once; Windows reports a write to a closed pipe asynchronously, so there the failure can surface later as EC-48. No frame order through the fake can force RACE-1 R-19, because its window is inside one await of the cancel write, so cancel_drain_gate wraps NativePeer.notify and asyncio.wait_for: it releases the held prompt as session/cancel is sent, then delays only that task's next wait_for until the fake logs stdin EOF, and then calls the real one. It asserts outcomes, never which exception path fired inside, so it holds on CPython 3.11, 3.12+ and Windows. The R-24 test reads asyncio's "never retrieved" record, which appears only when the future is collected: it runs gc.collect() and clears caplog first, keeps every reference inside a helper coroutine, and runs asyncio.sleep(0) and gc.collect() again before it asserts, or the record lands in a later test.
 RELATED DOCS: tests/features/grok_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §6.1, §6.3.3, §8.5
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host/test_grok_host_turns.py
 """
@@ -14,8 +14,10 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host/test_grok_
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import json
+import logging
 import sys
 import time
 import uuid
@@ -31,6 +33,8 @@ RACE_POLL_SECONDS = 0.01
 RACE_POLL_LIMIT_SECONDS = 5.0
 ALWAYS_OPTIONS = ("opt-allow-always", "opt-reject-always")
 FORBIDDEN_ARGS = ("--always-approve", "--dangerously-skip-permissions", "--yolo", "bypassPermissions", "auto", "allowAll")
+HELD_PROMPT = {"acp": {"session_prompt": {"mode": "hold"}}}
+NEVER_RETRIEVED = "exception was never retrieved"
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows reports a write to a closed pipe asynchronously, so the failure can surface at wait (EC-48) instead")
 
@@ -102,6 +106,21 @@ async def interrupt_expecting_no_error(host: Any, api: Any, handle: Any) -> Any:
         return await host.interrupt_grok_turn(handle)
     except api.NativeHostError as error:
         pytest.fail(f"INV-13: interrupt_grok_turn raised {error.failure_code.value} (reason {error.context.get('reason')!r}) for a session/cancel it sent to a running turn whose own end closed the peer")
+
+
+async def close_the_host_while_spawn_is_in_flight(make_grok_host: Callable[..., Any], api: Any, check_native_error: Callable[..., None]) -> None:
+    # R-24: runs in its own frame, so the caught error, and _launch's frame with the session/prompt answer future, are garbage once it returns.
+    host = make_grok_host(HELD_PROMPT)
+    await host.__aenter__()
+    spawn = asyncio.create_task(host.spawn_grok_session(api.GrokTurnRequest(prompt=PROMPT)))
+    # One loop step: the spawn passes the open check and parks on its first await, so __aexit__ finds no live turn and closes the host under it.
+    await asyncio.sleep(0)
+    await host.__aexit__(None, None, None)
+    with pytest.raises(api.NativeHostError) as caught:
+        await spawn
+    # The fix must not swallow the error: the caller still learns that the host closed while the turn was starting (EC-2: the host has exited, token `async with`).
+    check_native_error(caught.value, code="grok.process_exited", token="async with", operation="spawn_grok_session")
+    assert "closed while the turn was starting" in caught.value.message, f"precondition: the spawn did not fail because the host closed while the turn was starting: {caught.value.message!r}"
 
 
 def permission_answers(grok_fake: Any) -> list[Any]:
@@ -389,6 +408,25 @@ async def test_a_failed_spawn_releases_its_reservation(grok_api, make_grok_host,
             with pytest.raises(grok_api.NativeHostError) as caught:
                 await host.spawn_grok_session(grok_api.GrokTurnRequest(prompt=PROMPT))
             assert caught.value.failure_code is grok_api.FailureCode.GROK_API_ERROR, "the second spawn is not refused as busy"
+
+
+@pytest.mark.asyncio
+async def test_host_closed_during_spawn_leaves_no_unretrieved_future(grok_api, grok_fake, make_grok_host, fast_stop, check_native_error, caplog: pytest.LogCaptureFixture) -> None:
+    # R-24 (EC-2, EC-8, INV-4): the host closes after spawn wrote session/prompt; the dropped answer future, failed when the peer closed, must not make asyncio log "Future exception was never retrieved".
+    gc.collect()
+    caplog.set_level(logging.ERROR, logger="asyncio")
+    # Collect earlier tests' garbage first and drop what it logged, so only this test's records count.
+    caplog.clear()
+    try:
+        await close_the_host_while_spawn_is_in_flight(make_grok_host, grok_api, check_native_error)
+        # Let the loop drop its last reference to the spawn's final step, then collect the future now rather than in a later test.
+        await asyncio.sleep(0)
+        gc.collect()
+    finally:
+        grok_fake.release()
+    assert len(grok_fake.received("session/prompt")) == 1, "precondition: session/prompt was not written before the host closed, so no answer future was left behind"
+    unretrieved = [record.getMessage().splitlines()[0] for record in caplog.records if record.name == "asyncio" and NEVER_RETRIEVED in record.getMessage()]
+    assert unretrieved == [], f"R-24: a GrokHost closed during spawn logged {unretrieved}; the session/prompt answer future must be cancelled or read when the spawn gives up"
 
 
 @pytest.mark.asyncio

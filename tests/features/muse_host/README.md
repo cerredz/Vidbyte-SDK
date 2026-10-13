@@ -57,3 +57,4 @@ The implementations belong here:
 
 - 2026-10-13 - The pack was written red before implementation, from spec r3 (S2 test author). Every test fails at setup or in its first assertion until the modules above exist.
 - 2026-10-13 - Added RACE-1 regression tests (addendum 3, S2 test author) to `test_muse_host_turns.py`: R-18 (an interrupt that loses the race to `turn/completed`) and R-21 (a steer that does), plus two guards. `fake_muse_peer.py` gained the `turn/interrupt` `order` knob, and the old -32013/-32014 interrupt test now uses `answer_first`, because without it the fake raced the answer against the turn's end and the test flaked in CI.
+- 2026-10-13 - Added the post-S6 regression test for R-22 (addendum 4, S2 test author) to `test_muse_host_turns.py`: a failed turn that nobody waits on must not make asyncio log "Task exception was never retrieved". It reads `caplog` after `gc.collect()`, so it collects once before it starts and once before it asserts.

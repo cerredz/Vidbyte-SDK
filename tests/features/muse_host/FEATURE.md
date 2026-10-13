@@ -123,7 +123,8 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **Leaks:**
   - a cancelled spawn, continue, check or list leaves its peer running (AC-4);
   - `__aexit__` leaves turns running (EC-8);
-  - a WSL turn peer's in-distro processes survive (D-23).
+  - a WSL turn peer's in-distro processes survive (D-23);
+  - a failed turn that nobody waits on keeps its driver exception unretrieved, so asyncio logs "Task exception was never retrieved" when the task is collected (R-22; EC-119, D-9).
 - **Wrong turn or text:**
   - the turn id is derived from the `commandId`;
   - another turn's `item/completed` or `turn/completed` is taken as this turn's (EC-109);
@@ -168,6 +169,7 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **Re-review round 1 (R-17): approval and user-input titles were recorded unscrubbed.** §9.1 says `NativeApprovalDecision.title` is scrubbed; the Muse driver recorded both titles verbatim, so a credential in a tool name reached the result and `wait_muse_turn`'s output. Caught by `test_a_credential_in_a_request_title_is_scrubbed_from_the_result_and_the_wait_tool` (both request kinds) in `test_muse_host_turns.py`.
 - **RACE-1 (R-18, CI run 38437336454): an interrupt that lost the race to `turn/completed` raised `muse.process_exited`.** The driver read `turn/completed`, left its loop and closed the peer while `turn/interrupt` was pending, and the closed-transport failure escaped as "The Muse Code process stopped before it answered." The old interrupt test flaked on it because its fake raced the answer against the turn's end. Caught by `test_interrupt_that_loses_to_turn_completed_succeeds` and `test_interrupt_answered_after_turn_completed_succeeds` (-32013, -32014, -32030, accepted) in `test_muse_host_turns.py`; the old test now fixes the answer first (`order: answer_first`). `test_interrupt_rejected_with_32030_while_the_turn_still_runs_raises_api_error` guards EC-102, and the EC-96 and EC-97 rows in `test_muse_host_errors.py` guard a real peer exit or silence.
 - **RACE-1 (R-21): a steer that lost the race to `turn/completed` raised `muse.process_exited`.** EC-115 calls for `muse.turn_not_found`, because the turn is no longer running. Caught by `test_steer_that_loses_to_turn_completed_raises_turn_not_found` in `test_muse_host_turns.py`.
+- **Post-S6 (R-22): a failed turn that nobody waited on logged "Task exception was never retrieved".** Only `wait_muse_turn` read the driver task's exception; the host's done-callback and `__aexit__` never did, unlike Grok and opencode. No error was lost, but asyncio logged the scrubbed failure with a traceback when the task was collected. Caught by `test_failed_turn_never_waited_logs_no_unretrieved_exception` in `test_muse_host_turns.py`, whose waited twin still has to raise `muse.api_error` (EC-119).
 
 ## Test Suite Map
 
@@ -188,7 +190,8 @@ These are the failure inventory the tests were chosen from, given as input → w
   - truncation (EC-150, `view/gap`);
   - usage, the ceiling (D-10), EC-148, INV-17 and EC-9;
   - the INV-14 busy check on an upper-cased id (r8, R-8), and on a continue or fork after Muse returned an upper-case id (re-review R-16);
-  - an interrupt or steer that loses the race to the turn's own `turn/completed` (RACE-1: R-18, R-21), with guards for a -32030 on a running turn and for an interrupt while the driver closes a completed turn.
+  - an interrupt or steer that loses the race to the turn's own `turn/completed` (RACE-1: R-18, R-21), with guards for a -32030 on a running turn and for an interrupt while the driver closes a completed turn;
+  - a failed turn that nobody waits on, which must not be logged as never retrieved (R-22).
 - `test_muse_host_wire.py`:
   - `clientInfo` and `initialized`;
   - every command's members;
