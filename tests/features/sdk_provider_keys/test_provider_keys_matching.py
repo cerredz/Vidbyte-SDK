@@ -422,6 +422,18 @@ class SettingsRootTests(KeySafeAssertions):
         self.assertIn("must be a live key", message)
         self.assertEqual(details.get("error_kind"), CREDENTIAL_ERROR_KIND)
 
+    def test_role_settings_accept_a_padded_vidbyte_key_and_store_what_agent_stores(self) -> None:
+        # INV-26, D-18 (review R-14): a pasted key with surrounding spaces is the same key, so a role must not call it malformed when Agent accepts it.
+        from vidbyte.paradigms.context_minimal_fanout import AgentRoleSettings
+
+        padded = " " + VIDBYTE_KEY + " "
+        with patch.dict(os.environ, {}, clear=True):
+            agent = Agent(name="a", system_prompt="s", provider="deepseek", model_name="deepseek-chat", vidbyte_api_key=padded)
+            role = AgentRoleSettings(name="role", provider="deepseek", model_name="deepseek-chat", vidbyte_api_key=padded)
+        # Agent strips the key before it stores it; the role must store the same value.
+        self.assertEqual(agent.runner_config.api_keys.vidbyte_api_key, VIDBYTE_KEY)
+        self.assertEqual(role.vidbyte_api_key, agent.runner_config.api_keys.vidbyte_api_key)
+
 
 if __name__ == "__main__":
     unittest.main()
