@@ -2,7 +2,7 @@
 spec: native-grok-opencode-meta-hosts
 title: Native Grok, opencode and Muse hosts, plus GLM and DeepSeek backend profiles
 status: implemented      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
-revision: 6
+revision: 7
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
 branch: feat/native-grok-opencode-meta-hosts
@@ -2175,3 +2175,18 @@ The table has 56 CREATE and 12 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 | r4 | 2026-10-13 | S2 test-author ambiguities; tests-written | Settled S2-1 to S2-15, all accepted and stated explicitly: AC-5 redaction targets; all-`=` Grok one-shot and fork argv with the allow, deny, max-turns and permission-mode flags; verbatim next steps without backticks or implementer notes; `set` or `frozenset` of enum members; `available_models`, `vendor_error` and `CALLER` context and sources; the `operation` rule; readiness version formats; EC-87 and EC-153 codes; `total_tokens` never computed; the host after a failed `__aenter__`; cross-field and blank-text rules; Muse launcher signatures, AC-10, D-11, D-14, D-19, EC-115, EC-121 and field mappings; argv fields not converted. Confirmed the transport dispatch change (INV-18) and tightened FR-15. Proof column untouched. Status set to tests-written |
 | r5 | 2026-10-13 | S3 implementer finding | S3-1: the `muse.budget_exhausted` next step now contains its token `continue_muse_session` (§6.3.1; EC-117 inherits it). Status unchanged |
 | r6 | 2026-10-13 | S3 implementer finding | S3-2: read-only `McpStdioTransport.returncode` and `NativePeer.exit_code` so EC-95 can tell exit code 127 apart; INV-18, FR-15, D-3 (size trigger about 200 lines) and rows 22 and 28 updated. Status unchanged |
+| r7 | 2026-10-13 | S3 implement | All 68 §12.3 rows implemented (56 created, 12 modified) at `f7476015`. The 1635 S2 tests (1616 passed, 19 platform skips) and the full suite (5572 passed) are green. `SDK-LINT: PASS`; `run_ci.py` source and package pass; Semgrep is clean. Draft PR #1036. Status implemented. No §6.2 Proof cell was blank, so no commit SHA was added there |
+
+**Implementation deviations (S3).** Each one resolves a point the spec leaves open; the S3 report gives the reasons.
+
+1. **Invalid-argument next step.** `NATIVE_INVALID_ARGUMENT_NEXT_STEP = "Fix the {field} argument and call again."` was added to `vidbyte/lib/constants/native_hosts.py`.
+   - It exists so that a `configuration.invalid_argument` next step contains the argument's name, which is the token EC-1 and EC-138 require.
+   - Every `ConfigurationError` raised by the validator carries `details["field"]`.
+   - Host methods catch `ConfigurationError` between `NativeHostError` and `Exception` and map it through `NativeErrorFactory.from_configuration_error`. This adds a fourth handler to the §12.4 one-try shape.
+2. **New converters.** `RecordFieldConverter.to_enum` accepts an enum member or its exact value. `RecordFieldConverter.to_decimal` accepts a decimal string and refuses a JSON number. Both are used for JSON tool arguments and wire bodies.
+3. **Backend error label.** The backend functions build their `NativeErrorFactory` with `NativeHarness.CLAUDE_CODE` as the harness label. Their own errors use explicit `backend.*` codes.
+4. **Unexpected-error message.** `from_unexpected` produces `"<operation> failed with an unexpected <ErrorType>."`, which names no host.
+5. **Claude model slots.** The `ANTHROPIC_DEFAULT_*_MODEL` slots for each backend are a private map in `backends/profiles.py`. They are not a field of `HarnessBackend`.
+6. **Shared opencode tool base.** The opencode tools share an `OpencodeHostTool` base and their parameter declarations, both in `tools/builtins/opencode/read_tools.py`.
+7. **Wrapped opencode results.** opencode tools wrap tuple results in an object (`models`, `providers`, `sessions`, `files`), so that every tool output is a JSON object.
+8. **No try in `list_harness_backends`.** It returns a module constant and has no `try`, because nothing in it can raise.
