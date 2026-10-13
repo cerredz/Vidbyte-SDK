@@ -63,7 +63,6 @@ class ProviderKeyMatcher:
     # never proves a key. Secondary source, the gitleaks openai rule:
     # https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml
     RESERVED_PREFIXES: ClassVar[tuple[tuple[str, ModelProvider], ...]] = (("sk-svcacct-", ModelProvider.OPENAI),)
-
     DUPLICATE_KEY_MESSAGE: ClassVar[str] = "{field}[{first}] and {field}[{second}] are both {provider} keys; pass one key per provider."  # M-7
 
     @classmethod
