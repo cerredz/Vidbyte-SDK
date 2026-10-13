@@ -193,6 +193,7 @@ All rows are from spec §13, except those marked "(post-rebase straggler)": test
 | `tests/test_jev_agent.py` | `test_normalizes_provider_and_redacts_both_keys` | INV-4 | Rename |
 | `tests/test_jev_run_brief.py` | `_settings`, `test_defaults_and_provider_validation`, `test_uses_main_provider_by_default_and_allows_an_independent_provider` | EC-34, D-13, D-27 | Rename; the writer's own list is its own root |
 | `tests/test_jev_compute.py`, `…_clone.py`, `…_situations.py`, `…_swarm.py` | `_settings` / `_agent` | Rename | `api_keys=["sk-main-key"]` (an `sk-` key the openai primary takes) |
+| `tests/test_jev_compute.py` | `JevComputeCheckpointTests::test_a_chosen_specialist_runs_without_a_checkpoint` (straggler found by S3) | INV-7 | This test alone builds the agent with `_settings(model_mode=TextModelMode.DIRECT)`: it runs without `bind_test_runner`, so the agent builds its own runner, which `AUTO` refuses without a Vidbyte key. The other tests that share `_settings` bind a scripted runner and stay in `AUTO` |
 | `tests/test_codex_failure_recovery.py` | module header | wording | Prose now names `api_keys` |
 | `tests/test_compatible_provider_text.py` | `_PROVIDER_TEST_KEYS`, for main's `test_minimax_inline_thinking_is_not_the_answer` (post-rebase straggler) | D-23, M-12 | MiniMax gets a fake in the per-provider table the `DIRECT` `_text` helper reads |
 | same | `test_glm_network_error_reply_raises_and_keeps_usage` (post-rebase straggler) | D-23, M-12 | Rename, `DIRECT` |
