@@ -21,7 +21,7 @@ started: 2026-10-13 01:30 UTC
 | S3 implement | done | 2026-10-13 08:20 UTC | 2026-10-13 13:40 UTC | reports/S3-implementer.md | S3_HEAD de5b7c4c; draft PR #1036; 51 commits; budget 56/56 create, 12/12 modify, 66/66 records, 13/13 enums, 53/53 codes; 1616 passed, 19 skipped (re-run by orchestrator); full gate + Semgrep green; ci.yml 38379243965 dispatched, static-policy 38379248609 success |
 | S4 adversarial review | done | 2026-10-13 13:50 UTC | 2026-10-13 15:10 UTC | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: NEEDS REWORK; confirmed 2 Blocker (R-1, R-2) / 11 Major (R-3..R-15) / 9 Minor (R-M1..R-M9); refuted 0; downgraded 3 (R-V1→Major, R-V2→Major, R-V3→Minor); CI-1 reclassified by orchestrator as a code defect |
 | S5 repair loop | done | 2026-10-13 16:45 UTC | 2026-10-13 23:05 UTC | reports/S5-repair-{1,2,3}.md, verify-log.md | converged in 3/8; all 13 confirmed Blocker/Major + CI-1 + R-M1/R-M6 fixed; code HEAD af3e05e8; remote ci 38418651864 + static-policy 38418656187 green |
-| S5 re-review | running | 2026-10-13 23:10 UTC | | reports/S5-rereview.md | conformance lens, post-repair focus, HEAD b0e35a32 |
+| S5 re-review | running (round 1 done) | 2026-10-13 23:10 UTC | | reports/S5-rereview.md | round 1: MERGEABLE AFTER FIXES; fixes confirmed 21/21; new 0 Blocker / 3 Major (R-RR1..R-RR3) / 1 Minor (R-RR4) → scoped verifier |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -138,6 +138,13 @@ started: 2026-10-13 01:30 UTC
     - My own `run_ci --stage source` gave `5653 passed, 32 skipped in 179.29s` / `CI passed.`
   - **True A002 counts for S6:** main 8387d666 579, head 577. S3's "703→623" claim was misleading, because 703 is the stale baseline.
   - **Follow-ups left (Minor):** R-M4, R-M5, R-M7, and R-M8 [scope-adding].
+- 2026-10-14 00:00 — **Re-review round 1: MERGEABLE AFTER FIXES.** All 21 fixes hold and the refactors caused no regression. There are 3 new Majors, each reproduced, and 1 Minor.
+  - **R-RR1:** Grok and Muse session ids *returned by the vendor* are bound verbatim, so an upper-case returned UUID slips past the case-insensitive busy check (INV-14).
+  - **R-RR2:** a 404 on a child session's `children` call ends an opencode turn as `session_not_found` with no EC-158 abort.
+  - **R-RR3:** Grok and Muse approval titles are not scrubbed, which §9.1 requires; opencode scrubs them.
+  - **R-RR4 (Minor):** 86 header lines outside RELATED DOCS, plus one docstring, still cite spec ids.
+
+  Per the skill, the new Majors go to a fresh findings verifier scoped to R-RR1 to R-RR4, then back into repair, which counts toward the 8 iterations. Re-review rounds: 1 of 2 used.
 
 ## User replies (verbatim)
 (none during the run)
