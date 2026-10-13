@@ -23,7 +23,7 @@ started: 2026-10-13 01:30 UTC
 | S5 repair loop | done | 2026-10-13 16:45 UTC | 2026-10-13 23:05 UTC | reports/S5-repair-{1,2,3}.md, verify-log.md | converged in 3/8; all 13 confirmed Blocker/Major + CI-1 + R-M1/R-M6 fixed; code HEAD af3e05e8; remote ci 38418651864 + static-policy 38418656187 green |
 | S5 re-review | done | 2026-10-13 23:10 UTC | 2026-10-14 02:40 UTC | reports/S5-rereview.md, S5-rereview-verifier.md, S5-rereview-2.md | round 1: 21/21 fixes held; R-16/R-17 confirmed, fixed in iteration 4; round 2: SOUND, 3/3 fixes held, 0 Blocker/Major, 1 trivial Minor (R-RR2-1) |
 | S5 RACE-1 (post-SOUND) | done | 2026-10-14 03:40 UTC | 2026-10-14 06:10 UTC | review.md RACE-1 section, test-plan Addendum 3, verify-log iteration 6 | R-18..R-21 fixed (0284ffe1, 0e900159, 85788217, 241f1966) + wording e4210fc3; code HEAD e4210fc3; ci 38450551272 + 38450554202 green, static-policy 38450557318 green |
-| S6 PR | body done; reopened for 2 Minors | (see clock note) | | inline (report file refused) | 16078049: title final, draft, pr-open; ci 38454805967 + static-policy 38454808626 green |
+| S6 PR | done | (see clock note) | 2026-10-13 22:47 UTC | inline (report file refused) | head 3c4f532e; title final, draft, pr-open; ci 38479268619 + static-policy 38479272007 green on 6d68effa (later commits docs-only); worktree removed, branch kept |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
@@ -306,6 +306,19 @@ started: 2026-10-13 01:30 UTC
   - **My verification:** only the two fakes and test-plan changed; no `test_*.py` and no `vidbyte/` change; the R-22/R-24 pair passed 12/12 in fresh processes.
   - **The author's own runs:** forced gap 3/3 red before and 3/3 green after; R-22 passed 60/60 and R-24 30/30 in fresh processes; four packs 1668 passed, 19 skipped; lint PASS.
 - 2026-10-13 22:33 UTC — **Next:** the S6 author (SendMessage, context intact) updates the PR body for R-22, R-24, R-25, the refuted (B) and the fake fix. It refreshes the verification table on the final head and adds the spec §17 row. Then it pushes and dispatches CI on the final head.
+- 2026-10-13 22:47 UTC — **S6 second pass done.** Head 3c4f532e.
+  - **The body** covers R-22, R-24 and R-25 as fixed, (B) as refuted, the fake fix, 14 deviations and 16 follow-ups. It states that no third re-review checked the post-cap fixes.
+  - **My verification:**
+    - `gh pr view`: OPEN, draft, base main, head 3c4f532e, no [WIP];
+    - the body has 2 mermaid blocks and the attribution line;
+    - ci 38479268619 (3.11, 3.12 and Package) and static-policy 38479272007 both succeeded on attempt 1 on 6d68effa, and the only later change is `pr-body.md`;
+    - the spec on origin reads pr-open and r8;
+    - INV-19 holds, the INV-22 diff is empty, the tree is clean and nothing is unpushed.
+- 2026-10-13 22:47 UTC — **Ruling on INV-18 (S6 open item):** accepted as documented deviation #14, with no spec rewrite. The default `request()` now differs from main only on a cancelled call (the pending future is popped and cancelled, plus the `cancelling()` check). Why: it is a strict fix to the cancel path; main's 59 transport tests pass unchanged; a spec change would need a new spec-author pass for one sentence the PR body already states.
+- 2026-10-13 22:47 UTC — **Run complete.**
+  - Stages S0–S6. S1 review rounds 2/2. S5 repair iterations 8/8 (cap reached, converged). Re-review rounds 2/2.
+  - 30 subagent launches plus 17 resumes since the invocation.
+  - The worktree is being removed without --force; branch `feat/native-grok-opencode-meta-hosts` is kept for the PR.
 
 ## User replies (verbatim)
 (none during the run)
