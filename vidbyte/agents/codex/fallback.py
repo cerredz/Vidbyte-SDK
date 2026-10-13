@@ -14,7 +14,8 @@ FUNCTION INVENTORY: build(settings) resolves the chain; next_index(decision) ask
 COMMON MODIFICATION PATTERNS: Add a gate to build(); leave the advance decision to
     AgentFallback so the two callers of that policy cannot drift apart.
 WHAT NOT TO DO IN THIS FILE: Do not reimplement is_model_error/advance, do not copy a
-    FallbackModel.api_key into an override or an attempt record, and do not switch models
+    key from the agent's api_keys into an override or an attempt record (fallback models
+    hold no key; they take theirs from the agent's api_keys), and do not switch models
     mid-turn: a running native turn may already have edited files.
 KNOWN EDGE CASES: A chain entry naming another provider is rejected at build, because a
     Codex thread cannot resume on a provider that has never seen it. FallbackModel
@@ -90,8 +91,9 @@ class CodexFallbackCoordinator:
     def attempt(self, index: int, failure_code: str = "") -> CodexFallbackAttempt:
         """Record one credential-free attempt: which model ran and how it ended."""
         # @intent attempt-records-never-carry-credentials
-        # FallbackModel may hold an api_key; an attempt record names only the
-        # provider and model, because these records reach metadata and logs.
+        # Fallback models take their keys from the agent's api_keys, and an
+        # attempt record names only the provider and model, because these
+        # records reach metadata and logs.
         model = self._model_at(index)
         return CodexFallbackAttempt(
             index=index,
