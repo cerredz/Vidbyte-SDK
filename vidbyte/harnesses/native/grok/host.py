@@ -3,7 +3,7 @@
 PURPOSE: Defines GrokHost, the async context manager that drives the user's own Grok Build CLI in one workspace through its ten public methods (check_grok_ready, list_grok_models, spawn_grok_session, run_grok_once, continue_grok_session, fork_grok_session, list_grok_sessions, search_grok_sessions, wait_grok_turn, interrupt_grok_turn), and the module function run_grok_once, which wraps one one-shot run in a host of its own.
 ROLE IN CODEBASE: The public Grok entry point, exported by vidbyte/harnesses/native/grok/__init__.py and wrapped one tool per method by vidbyte/tools/builtins/grok/. It composes GrokCli (argv and CLI runs), GrokWire (params, parsing and row mapping), GrokTurnDriver (one per live turn) and the shared hostkit pieces (NativePeer, NativeTurnTable, NativeErrorFactory, NativeChildEnvironment).
 ARCHITECTURE NOTE: D-2: every live turn runs on its own `grok agent --no-leader ... stdio` peer owned by its driver, and every read starts a short-lived peer that is closed before the method returns. Each public method checks its arguments before any I/O (EC-1), refuses to run outside the async with block (EC-2), and has one try that lets cancellation and NativeHostError through, maps a refused argument to configuration.invalid_argument and any other exception to runtime.error.
-FUNCTION INVENTORY: __aenter__ resolves the launcher; __aexit__ stops every live turn; the ten public methods are narrated main functions. Helpers: _require_open, _reserve, _new_peer, _initialize, _check_model, _call, _list_pages, _check_fork_listing, _launch and the _forget done-callback. Module function run_grok_once.
+FUNCTION INVENTORY: __aenter__ resolves the launcher and refuses a Windows batch launcher; __aexit__ stops every live turn; the ten public methods are narrated main functions. Helpers: _require_open, _reserve, _new_peer, _initialize, _check_model, _call, _list_pages, _check_fork_listing, _launch and the _forget done-callback. Module function run_grok_once.
 COMMON MODIFICATION PATTERNS: A new Grok call is one public method here, its parsing and rows in wire.py, its argv in cli.py and one tool in vidbyte/tools/builtins/grok/tools.py. A new row next step that the catalog does not give is a module constant here or in wire.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read ~/.grok credentials or set approve-everything flags; Grok authenticates itself and permissions follow GrokPermissionMode and allowed_tool_kinds only (INV-9). 2. Do not await between the busy check and the reservation of a turn (EC-9). 3. Do not leave a short-lived peer running after its method returns, on any path (INV-4).
 KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument (EC-3). fork_grok_session spends money, so it first finds the source session in the workspace listing, refuses a taken new id and checks the model, all before the CLI run. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED.
@@ -67,6 +67,7 @@ _AT_CAP_NEXT_STEP = "This host already runs its maximum number of live turns; wa
 _READY_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; this SDK needs ACP session/list and session/resume."
 _RESUME_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; continuing needs ACP session/resume."
 _LIST_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; listing needs ACP session/list."
+_BATCH_LAUNCHER_NEXT_STEP = "On Windows this host does not start a .cmd or .bat launcher; install Grok Build so that ~/.grok/bin/grok.exe exists, or set GrokHostSettings.grok_command to the path of a grok.exe."
 
 
 class GrokHost:
@@ -89,7 +90,8 @@ class GrokHost:
         # @intent grok-host-is-single-use-and-finds-grok-once
         # EC-3: a host serves exactly one async with block. D-19: the
         # launcher is found here, once, so every call starts the same
-        # program; with nothing found the block never starts (EC-11).
+        # program; with nothing found the block never starts (EC-11), and on
+        # Windows a batch launcher is refused before anything runs (EC-157).
         try:
             # A host serves one block only, open or already closed.
             if self._entered:
@@ -98,6 +100,9 @@ class GrokHost:
             # Find grok: the explicit command, then PATH, then the installer's folder.
             if not self._cli.resolve_launcher():
                 self._closed = True
+                # On Windows only a batch file was found, which cmd.exe would run with the prompt on its command line.
+                if self._cli.refused_batch is not None:
+                    raise self._errors.build(self._errors.code("not_installed"), f"The Grok launcher {self._cli.refused_batch} is a batch file, which this host does not start on Windows.", operation=_ENTER, next_step=_BATCH_LAUNCHER_NEXT_STEP)
                 raise self._errors.from_launch_failure(ProcessLaunchFailure.NOT_FOUND, operation=_ENTER)
             return self
         except asyncio.CancelledError:
