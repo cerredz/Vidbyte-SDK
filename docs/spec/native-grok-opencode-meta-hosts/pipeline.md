@@ -22,11 +22,12 @@ started: 2026-10-13 01:30 UTC
 | S4 adversarial review | done | 2026-10-13 13:50 UTC | 2026-10-13 15:10 UTC | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: NEEDS REWORK; confirmed 2 Blocker (R-1, R-2) / 11 Major (R-3..R-15) / 9 Minor (R-M1..R-M9); refuted 0; downgraded 3 (R-V1→Major, R-V2→Major, R-V3→Minor); CI-1 reclassified by orchestrator as a code defect |
 | S5 repair loop | done | 2026-10-13 16:45 UTC | 2026-10-13 23:05 UTC | reports/S5-repair-{1,2,3}.md, verify-log.md | converged in 3/8; all 13 confirmed Blocker/Major + CI-1 + R-M1/R-M6 fixed; code HEAD af3e05e8; remote ci 38418651864 + static-policy 38418656187 green |
 | S5 re-review | done | 2026-10-13 23:10 UTC | 2026-10-14 02:40 UTC | reports/S5-rereview.md, S5-rereview-verifier.md, S5-rereview-2.md | round 1: 21/21 fixes held; R-16/R-17 confirmed, fixed in iteration 4; round 2: SOUND, 3/3 fixes held, 0 Blocker/Major, 1 trivial Minor (R-RR2-1) |
+| S5 RACE-1 (post-SOUND) | done | 2026-10-14 03:40 UTC | 2026-10-14 06:10 UTC | review.md RACE-1 section, test-plan Addendum 3, verify-log iteration 6 | R-18..R-21 fixed (0284ffe1, 0e900159, 85788217, 241f1966) + wording e4210fc3; code HEAD e4210fc3; ci 38450551272 + 38450554202 green, static-policy 38450557318 green |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
-- S5 repair iterations: 5/8
+- S5 repair iterations: 6/8
 - S5 re-review rounds: 2/2 (round 2 launched; last allowed)
 
 ## Decisions the orchestrator made
@@ -209,6 +210,17 @@ started: 2026-10-13 01:30 UTC
     - the four packs: 8 failed, 1651 passed, 19 skipped (1649 baseline plus 2 guards);
     - the red reasons are the stated ones.
   - **Open item carried to iteration 6:** R-21 has not yet been shown to pass under any fix.
+- 2026-10-14 06:15 — **Iteration 6 done.** Head a3472104, code head e4210fc3. Four fix commits plus one wording commit, 5 source files, +55/−15.
+  - **My verification:**
+    - **Changed files.** No test, lint, .semgrep, pyproject, spec or failure.py change since 68cc1a9e. The INV-22 diff is empty. The INV-19 sha256 is `0374a2c8…497a`.
+    - **Pushed state.** local = remote = a3472104. The only commit after e4210fc3 is the docs commit a3472104.
+    - **Tests.** The new tests ran 3 times: 12 passed each time. The four packs: 1659 passed, 19 skipped.
+    - **Remote runs.** ci 38450551272 and 38450554202 are both on e4210fc3; all six jobs (3.11, 3.12, Package ×2) succeeded. static-policy 38450557318 succeeded.
+    - **review.md statuses.** R-18 @0284ffe1, R-19 @0e900159, R-20 @85788217, R-21 @241f1966.
+  - **Decision: no further iteration.** S5 converged in 6/8. Two observations the repair agent noted, both out of scope, become PR follow-ups rather than fixes. Why: they are narrow windows with no test, outside the confirmed findings, and the re-review cap means no reviewer would check a further fix.
+    - (a) **Grok:** a peer that exits with no answer while the driver is still closing gets `was_running=True`, and nothing is sent.
+    - (b) **Muse:** a pending steer or second interrupt after an earlier stop's grace close, with no `turn/completed`, raises `process_exited`. EC-96 and EC-115 are ambiguous here.
+- 2026-10-14 06:15 — Spec status set to `verified` (docs commit). Next: S6.
 
 ## User replies (verbatim)
 (none during the run)

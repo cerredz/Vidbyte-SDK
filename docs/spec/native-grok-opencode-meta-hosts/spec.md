@@ -1,7 +1,7 @@
 ---
 spec: native-grok-opencode-meta-hosts
 title: Native Grok, opencode and Muse hosts, plus GLM and DeepSeek backend profiles
-status: reviewed      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: verified      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 8
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
