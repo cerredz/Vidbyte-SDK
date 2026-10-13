@@ -245,3 +245,85 @@ Each commit was checked before it was made, using the packs and the lint, with t
 **Still open:** nothing from this packet. Follow-ups: R-M4, R-M5, R-M7 and R-M8. For S6:
 - The S3 sentence "A002 improved 703→623" was misleading: 703 is the stale baseline. The true counts are main 579, branch 601 before this iteration (+22) and 577 now (−2).
 - 15 PR functions still pass A002 only through a neighbour's `@intent`; main has 78 such. The rule counts them as covered and never flagged them, so they were left alone. The list is in the report.
+
+## Iteration 4 — 2026-10-13 16:42 UTC — agent report: none (see below)
+
+**Report file:** the harness refused to let this subagent create `reports/S5-repair-4.md` ("Subagents should return findings as text, not write report files"). This entry is therefore the full record of the iteration.
+
+**Defects in:** R-16, R-17, R-M11 (in that order), from the post-repair re-review round 1. The four packs started at `11 failed, 1638 passed, 19 skipped`; the 11 are the regression tests from 5ce6e85d. origin/main 8387d666 was already an ancestor of HEAD f9d062e6, so no merge was needed. review.md bookkeeping: R-16, R-17 and R-M11 are fixed; R-M10 stays a follow-up and was not touched.
+
+**Hypotheses and attempts:**
+- **R-16, reproduced.** All 8 R-16 cases failed with `DID NOT RAISE`.
+  - **Root cause.** Spawn binds the id that Grok's `session/new` or Muse's `session/start` returns, in the vendor's spelling. Continue and fork lower-case their argument (R-8). `NativeTurnTable` compared the two exactly.
+  - **Chosen: fold inside `NativeTurnTable`.** A private `_session_key` lower-cases the id when the table's harness is GROK or MUSE and returns it unchanged otherwise. `reserve`, `bind_session`, `release`, `is_session_busy` and `_finish` key `_busy_sessions` through it. `_reserved`, the handle and every wire frame keep the vendor's spelling. The method awaits nothing and calls no helper, so the reservation stays atomic and the call depth stays at one. It carries `@intent native-uuid-session-ids-ignore-case`.
+  - **Why not the runner-up.** Lower-casing at `GrokWire.parse_session_id` and at the Muse spawn bind would change what the host sends: spawn's own `session/prompt` and `turn/start` would carry a spelling the vendor never produced. The table fix changes no traffic, and every path goes through the table: spawn's bind, continue's reserve, both forks' `is_session_busy`, the release on a failed spawn, and the done-callback. §8.5 also puts the rule on `reserve`.
+  - **Flip condition.** A new harness with UUID ids must be added to the tuple in `_session_key`. If opencode ids ever become case-insensitive, the method can lower-case for every harness.
+  - **opencode stays exact; no test pins it, so it was probed** (scratch script outside the worktree). Grok and Muse with the vendor id `ABCDEF01-…`: `is_busy(lower)=True`, `reserve(lower)` raises, the handle keeps `ABCDEF01-…`, and the key is freed after the driver finishes. opencode `ses_ABCdef0001`: `is_busy(ses_abcdef0001)=False` and `reserve` accepted; the exact spelling is busy. A second probe covered `release` after a bind: Grok and Muse are busy under both spellings before it and under neither after; opencode is busy only under its exact spelling.
+  - **After.** All 8 pass, including the fork cases' "1 `peer` launch, 0 `oneshot`" (Grok) and "1 `turn/start`, no `session/fork`" (Muse). Packs: `3 failed, 1646 passed, 19 skipped` (the 3 R-17 cases).
+- **R-17, reproduced.** The 3 cases failed with "INV-6: the credential leaked into ['decision title', 'tool output']".
+  - **Fix.** `self._errors.scrub(<title>)[: NATIVE_APPROVAL_TITLE_MAX_CHARS]` at `grok/turn.py` `_answer_permission`, and at `muse/turn.py` `_on_approval` and `_on_user_input`. This is the expression opencode's `_reject` uses.
+  - Both drivers hold the host's own factory (`errors=self._errors` at `grok/host.py:557` and `muse/host.py:613`), so a registered secret is scrubbed too.
+  - `scrub` caps at 1000, so the 200 cap still decides the length.
+  - Checked directly: `Edit README.md`, `''` and `'   '` are unchanged. `Run: export OPENAI_API_KEY=sk-proj-FAKE… && make deploy` becomes `Run: export OPENAI_API_KEY=<redacted> && make deploy`.
+  - Packs: `1649 passed, 19 skipped`.
+- **R-M11, measured.** A scratch scanner read every docstring line this PR adds under `vidbyte/` (diff against origin/main), skipping RELATED DOCS and TESTS. It found 103 lines in 43 files:
+  - ARCHITECTURE NOTE 30, WHAT NOT TO DO 23, KNOWN EDGE CASES 21, ROLE IN CODEBASE 11, PURPOSE 8, COMMON MODIFICATION PATTERNS 5, FUNCTION INVENTORY 3;
+  - the two named docstrings.
+
+  The review counted 87, or 101 with `§`. The scanner also matches `Q-` and the `§9.2 rows …` forms.
+- **R-M11, method.** It ran on the 103 listed lines only.
+  1. **Exact hand rewrites,** each asserted to be used once, where the id carried meaning:
+     - the opencode client's "EC-55 to EC-59 rows" became the five codes it raises (`opencode.server_unreachable, process_exited, not_signed_in, protocol_mismatch or api_error`), and "EC-56 from EC-55" became "process_exited from server_unreachable";
+     - the Muse wire's "EC-98 … EC-113" became the failures that `_CODE_PROBLEMS` and `vendor_failure` produce;
+     - "EC-156" became "the two benign decide or cancel races", and "the resume and retry of EC-114" became "one resume and one retry when Muse has not loaded the session";
+     - "a §9.1 record" became "a validated record";
+     - "the grok.* rows of spec §6.3" became "grok.* failure codes";
+     - "outside the spec §13 list" became "Do not add a context key of your own; the keys are a fixed set that callers read";
+     - "EC-92" became `opencode.mcp_server_failed`;
+     - "EC-87", "EC-155's limit" and "EC-158's" became plain words;
+     - "the 18 functions of §8.5" became "18 public methods in all";
+     - "Owned mode follows FR-18 and D-4: argv …" became "In owned mode the argv is …";
+     - "in §9.2 order" became "placed with the tools of its kind as the tuple already groups them", or "in a fixed catalogue order". No test pins the tuple order;
+     - "D-2: every live turn" and "D-9: every live turn" became "Every live turn".
+  2. **Then** a regex removed every parenthetical made only of ids, such as "(D-15)", "(INV-9, D-11)" or "(§9.2 rows 11-14, 20-24 and 27)". Each sentence already stated its rule.
+  3. **Review.** I read every change word by word in a dry run before writing.
+- **R-M11, proof that it is text only.**
+  - With every docstring blanked, `ast.dump` is equal for all 43 files against the parent.
+  - Exactly 45 docstrings changed: the 43 module headers, `MuseHost.track_muse_session_usage` and `_WireRecords`.
+  - A rescan finds 0 lines.
+  - A001, the only reader of module docstrings in `lint/` and the packs, stays at 643/643.
+  - No `#` comment was added or changed, so the 72-column rule does not apply. Header fields stay single lines, as on main.
+- **Rejected or avoided.**
+  - Folding case for all three harnesses. It passes every pack but breaks INV-14 for opencode.
+  - `str(session_id)` in the busy-error context, from a first draft to satisfy narrowing. The check was reordered instead, so the context dict is byte-identical.
+  - Writing the report file through the shell after the harness refused it.
+- **Gate run.** It ran once, in order, as one sequential script with nothing alongside, at 45ad54ec. There were no flakes and no WinError 10055.
+
+**Changes:** R-16 1768c3d5 (`hostkit/turns.py`, +24/−11); R-17 1a9bc056 (`grok/turn.py`, `muse/turn.py`, 3 lines); R-M11 45ad54ec (43 files, +103/−103, docstrings only); review.md statuses and this entry in the verify-log commit. The push from b0e35a32 to 45ad54ec also carried the review, test and addendum commits f69b0bd3 to f9d062e6, which had not been on the remote.
+
+**Gate matrix out (code HEAD 45ad54ec):**
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| packs | gate 1 | PASS | `1649 passed, 19 skipped in 153.45s (0:02:33)` |
+| neighbour suites | gate 2 | PASS | `464 passed, 12 skipped in 17.11s` |
+| full suite | gate 3 | PASS (first run, no flake) | `5664 passed, 32 skipped in 183.96s (0:03:03)` (iteration 3's 5653 plus the 11 new tests) |
+| lint | gate 4 | PASS (A001 643/643, A002 577/703, A007 255/255, S062 889/889; no count rose) | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| source stage | gate 5 | PASS | `5664 passed, 32 skipped in 182.97s (0:03:02)` / `CI passed.` |
+| package stage | gate 6 | PASS | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| semgrep | gate 7 | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| public API | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| spec ids in headers | scratch scanner, added lines vs origin/main | PASS | `COUNTS {} TOTAL 0` (was 103) |
+| docstring-only | AST with docstrings blanked vs 1a9bc056 | PASS | `files=43 code-differs=0 changed-docstrings=45` |
+| remote CI | `gh run view 38432650695` (head 45ad54ec) | PASS (3.11, 3.12 and Package all success) | 3.11: `5657 passed, 39 skipped in 167.48s` / `CI passed.`; 3.12: `5657 passed, 39 skipped, 19 warnings in 188.28s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote static policy | `gh run view 38432655274` (head 45ad54ec) | PASS | `Ran 1 rule on 949 files: 0 findings.` (conclusion success) |
+| PR checks | `gh pr view 1036 --json isDraft` | n/a | `true` (dispatch-only workflows, so `gh pr checks` lists none); the PR is still a draft |
+| invariants | INV-19 / INV-22 / frozen files | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py`, `tests/`, `lint/`, `pyproject.toml` and spec.md unchanged since f9d062e6; origin/main 8387d666 is an ancestor of HEAD; the PR is still a draft |
+
+**Still open:** nothing from this packet. R-M10 stays a follow-up, as the orchestrator decided. R-M4, R-M5, R-M7 and R-M8 remain follow-ups. For re-review round 2:
+- Grok and Muse ids are folded in two places on purpose: the caller's argument (`require_uuid(...).lower()`, R-8) and the busy-table key (R-16).
+  - A spawn handle keeps the vendor's spelling.
+  - Continue and fork return the lower-case spelling, because they reserve with the lower-cased argument.
+  - INV-14 makes both the same session, and the R-16 tests deliberately do not assert the spelling.
+- `_session_key` names GROK and MUSE explicitly, so any harness not listed is compared exactly.
+- The R-M11 wordings a reviewer may want to check against the spec are the opencode client's five codes, the Muse wire's code list, and the toolsets' replacement for "§9.2 order".
