@@ -100,3 +100,9 @@ CLAUDE_ABSENT_SOURCE = "none"
 CLAUDE_PROVIDER_FIELD = "apiProvider"
 # The provider value for Anthropic's own API, the only one that needs a sign-in.
 CLAUDE_FIRST_PARTY_PROVIDER = "firstParty"
+# The operation that starts Claude Code, whose process failures get CLAUDE_START_FAILURE_NEXT_STEP.
+CLAUDE_CONNECT_OPERATION = "connect"
+# The offline session-file reads, whose OSError means the files could not be read (CLAUDE_HISTORY_READ_NEXT_STEP).
+CLAUDE_HISTORY_READ_OPERATIONS = ("list_sessions", "get_session_info", "get_session_messages")
+# The offline fork, whose FileNotFoundError means the source session has no transcript.
+CLAUDE_FORK_OPERATION = "fork_session"
