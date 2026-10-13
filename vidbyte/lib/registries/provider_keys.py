@@ -31,36 +31,26 @@ class ProviderKeyMatcher:
     """Match a list of API keys to the providers a root is configured with."""
 
     # Table F: prefixes that prove a provider, in order; the first rule
-    # that fully matches a stripped key names its provider. Each rule's
-    # literal prefixes are also reserved to that provider.
+    # that fully matches a stripped key names its provider, and each
+    # rule's prefixes are reserved to it. Sources: vendors' own pages.
     KEY_FORMATS: ClassVar[tuple[tuple[ModelProvider, tuple[str, ...], re.Pattern[str]], ...]] = (
-        # Anthropic documents "sk-ant-api..." keys (first-party):
         # https://platform.claude.com/docs/en/manage-claude/authentication
         (ModelProvider.ANTHROPIC, ("sk-ant-",), re.compile(r"sk-ant-[A-Za-z0-9_-]+")),
-        # OpenRouter: "Copy your key (starts with sk-or-...)":
         # https://openrouter.ai/docs/cookbook/coding-agents/codex-cli.md
         (ModelProvider.OPENROUTER, ("sk-or-",), re.compile(r"sk-or-[A-Za-z0-9_-]+")),
-        # OpenAI's own GitHub organization names "an sk-proj key" in its
-        # openai-platform-api-key skill:
-        # https://github.com/openai/plugins
-        # and its API reference shows "sk-admin-1234abcd":
+        # https://github.com/openai/plugins (an sk-proj key)
         # https://developers.openai.com/api/reference/resources/organization/subresources/admin_api_keys/methods/create
         (ModelProvider.OPENAI, ("sk-proj-", "sk-admin-"), re.compile(r"sk-(?:proj|admin)-[A-Za-z0-9_-]+")),
-        # xAI documents export XAI_API_KEY="xai-..." (first-party):
         # https://docs.x.ai/build/overview
         (ModelProvider.XAI, ("xai-",), re.compile(r"xai-[A-Za-z0-9_-]+")),
-        # Google's example key is AIza plus 35 characters:
-        # https://cloud.google.com/docs/authentication/api-keys
-        # and Google's own GitHub organization names "AQ.Ab8..." keys:
+        # https://cloud.google.com/docs/authentication/api-keys (AIza)
         # https://github.com/google-gemini/cookbook/blob/main/tools/README.md
         (ModelProvider.GEMINI, ("AIza", "AQ."), re.compile(r"(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]+)")),
     )
 
     # Table A: these providers issue only keys that carry their table F
     # prefix, so they never take an unproven key.
-    FORMAT_BOUND_PROVIDERS: ClassVar[frozenset[ModelProvider]] = frozenset(
-        {ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER}
-    )
+    FORMAT_BOUND_PROVIDERS: ClassVar[frozenset[ModelProvider]] = frozenset({ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER})
 
     # Table A: every OpenAI key starts with sk-, so openai takes an
     # unproven key only with that prefix. OpenAI's own key check:
@@ -76,35 +66,27 @@ class ProviderKeyMatcher:
     def provider_of(cls, key: str) -> ModelProvider | None:
         """Return the provider whose table F rule fully matches key, or None when no prefix proves one."""
         # @intent key-prefix-decides-provider
-        # Only a vendor-documented prefix proves a provider, so a proven
-        # key can go nowhere else; the first full match in table order
-        # wins, which keeps sk-ant- and sk-or- away from the openai
-        # rule.
-        for provider, _prefixes, pattern in cls.KEY_FORMATS:
-            if pattern.fullmatch(key):
-                return provider
-        return None
+        # Only a vendor-documented prefix proves a provider; the first
+        # full match in table order wins, so sk-ant- and sk-or- keys
+        # never reach the openai rule.
+        return next((provider for provider, _prefixes, pattern in cls.KEY_FORMATS if pattern.fullmatch(key)), None)
 
     @classmethod
     def accepts_unproven(cls, provider: ModelProvider | str, key: str) -> bool:
         """Return True when provider may take key although no prefix proves it (table A)."""
         member = ModelProvider(provider)
         # @intent reserved-prefixes-only-refuse
-        # A prefix reserved to one provider keeps the key from every
-        # other vendor, even when the key does not fully match that
-        # provider's rule. Reserved prefixes never prove a key.
-        reserved = [(prefix, owner) for owner, prefixes, _pattern in cls.KEY_FORMATS for prefix in prefixes]
-        reserved.extend((prefix, owner) for prefix, owner in cls.RESERVED_PREFIXES)
+        # A reserved prefix keeps the key from every other vendor, even
+        # without a full match, and never proves a key.
+        reserved = [(prefix, owner) for owner, prefixes, _pattern in cls.KEY_FORMATS for prefix in prefixes] + list(cls.RESERVED_PREFIXES)
         if any(key.startswith(prefix) and owner is not member for prefix, owner in reserved):
             return False
         # @intent no-shape-guesses
-        # Only the documented families decide: a key's length or
-        # character set never decides its provider.
+        # Only documented families decide; a key's length or character
+        # set never decides its provider.
         if member in cls.FORMAT_BOUND_PROVIDERS:
             return False
-        if member is ModelProvider.OPENAI:
-            return key.startswith(cls.OPENAI_KEY_PREFIX)
-        return True
+        return key.startswith(cls.OPENAI_KEY_PREFIX) if member is ModelProvider.OPENAI else True
 
     @classmethod
     def normalize(cls, api_keys: Iterable[str | None] | None, *, field_name: str = "api_keys") -> tuple[str, ...]:
@@ -112,34 +94,22 @@ class ProviderKeyMatcher:
         return tuple(key for _index, key in cls._entries(api_keys, field_name))
 
     @classmethod
-    def match(
-        cls,
-        api_keys: Iterable[str | None] | ProviderKeys | None,
-        *,
-        primary: ModelProvider | str | tuple[ModelProvider | str, ...] | None,
-        others: Iterable[ModelProvider | str] = (),
-        vidbyte_api_key: str | None = None,
-        field_name: str = "api_keys",
-        require_primary_key: bool = True,
-    ) -> ProviderKeys:
+    def match(cls, api_keys: Iterable[str | None] | ProviderKeys | None, *, primary: ModelProvider | str | tuple[ModelProvider | str, ...] | None, others: Iterable[ModelProvider | str] = (), vidbyte_api_key: str | None = None, field_name: str = "api_keys", require_primary_key: bool = True) -> ProviderKeys:
         """Match a developer's list of keys to the root's configured providers and return the matched record."""
         # @intent provider-keys-import-late
         # This package's __init__ reaches vidbyte.lib.dataclasses.agents
-        # through vidbyte.agents.types, so ProviderKeys and the provider
-        # variable names are imported here, at call time, which keeps
-        # every load order free of an import cycle.
+        # through vidbyte.agents.types, so both imports wait until call
+        # time and no load order can form a cycle.
         from vidbyte.lib.dataclasses.agents import ProviderKeys
         from vidbyte.lib.registries.models import ProviderModelRegistry
 
         # A blank explicit Vidbyte key counts as none, as it always has.
         explicit = (vidbyte_api_key.strip() or None) if isinstance(vidbyte_api_key, str) else vidbyte_api_key
 
-        # Step 1: a record matched earlier passes through after a check
-        # of each key against its provider, and is never matched again.
+        # Step 1: a record matched earlier is checked key by key and
+        # passes through.
         # @intent matched-keys-pass-through
-        # Children receive the root's record; matching it again against
-        # a child's providers could bind an unproven key to another
-        # vendor.
+        # Re-matching a child's record could rebind an unproven key.
         if isinstance(api_keys, ProviderKeys):
             proven_at = tuple(cls.provider_of(key) for key in api_keys.keys)
             accepted_at = tuple(cls.accepts_unproven(provider, key) for provider, key in zip(api_keys.providers, api_keys.keys, strict=True))
@@ -150,19 +120,15 @@ class ProviderKeyMatcher:
                 return api_keys
             if api_keys.vidbyte_api_key is None:
                 return ProviderKeys(api_keys.providers, api_keys.keys, explicit, api_keys.matched_primary, api_keys.matched_others)
-            raise ConfigurationError(
-                f"{field_name} holds a Vidbyte API key that differs from vidbyte_api_key; pass one Vidbyte key.",
-                details={"field": field_name, "error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND},
-            )
+            raise ConfigurationError(f"{field_name} holds a Vidbyte API key that differs from vidbyte_api_key; pass one Vidbyte key.", details={"field": field_name, "error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
 
         # Steps 2 and 3: check the list's shape and each entry, keeping
         # every entry's index in the developer's list for the messages.
         entries = cls._entries(api_keys, field_name)
 
-        # Step 4: sort the entries. A Vidbyte entry is the Vidbyte key,
-        # a key whose prefix proves its provider goes to that provider,
-        # and every other key waits for step 5; identical repeats count
-        # once.
+        # Step 4: a Vidbyte entry is the Vidbyte key, a proven key goes
+        # to its provider, and every other key waits for step 5;
+        # identical repeats count once.
         vidbyte_key = cls._vidbyte_key(entries, explicit, field_name)
         proven = {key: cls.provider_of(key) for _index, key in entries}
         held = cls._bind_proven(entries, proven, field_name)
@@ -179,18 +145,16 @@ class ProviderKeyMatcher:
         accepting = {key: tuple(name for name in configured if cls.accepts_unproven(name, key)) for key in unproven}
         cls._refuse_unaccepted(unproven, accepting, configured, field_name)
         # @intent lone-key-goes-to-its-primary
-        # A lone unproven key that one keyless primary can take is that
-        # primary's key: binding it anywhere else would leave the
-        # primary without a key, which step 6 refuses anyway.
+        # A lone unproven key that one keyless primary can take is its
+        # key; anywhere else, step 6 would refuse the keyless primary.
         if len(unproven) == 1:
             ((lone_key, lone_index),) = unproven.items()
             owners = [name for name in primaries if name not in held and name in accepting[lone_key]]
             if len(owners) == 1:
                 held[owners[0]] = (lone_index, lone_key)
                 unproven = {}
-        # Every remaining unproven key is bound only where it has
-        # exactly one possible owner left, taking the keys in index
-        # order.
+        # Bind every other unproven key where it has exactly one
+        # possible owner left, taking the keys in index order.
         env_vars = ProviderModelRegistry.API_KEY_ENV_VARS
         held = cls._bind_unproven(unproven, accepting, held, field_name, env_vars)
 
@@ -201,47 +165,33 @@ class ProviderKeyMatcher:
 
         # Step 7: return the record, keys in order of first appearance.
         ordered = sorted(held.items(), key=lambda item: item[1][0])
-        return ProviderKeys(
-            providers=tuple(provider for provider, _bound in ordered),
-            keys=tuple(key for _provider, (_index, key) in ordered),
-            vidbyte_api_key=vidbyte_key,
-            matched_primary=primaries,
-            matched_others=other_names,
-        )
+        providers, keys = tuple(provider for provider, _bound in ordered), tuple(key for _provider, (_index, key) in ordered)
+        return ProviderKeys(providers=providers, keys=keys, vidbyte_api_key=vidbyte_key, matched_primary=primaries, matched_others=other_names)
 
     @staticmethod
     def _entries(api_keys: object, field_name: str) -> tuple[tuple[int, str], ...]:
         """Return each usable entry stripped, with its index in the developer's list."""
         # @intent name-lists-reject-bare-strings
         # A bare string would be read one character at a time and a
-        # mapping would match its own keys, so both are refused, never
-        # converted into a list.
+        # mapping would match its own keys, so both are refused.
         if api_keys is None:
             return ()
         if isinstance(api_keys, (str, bytes)):
             raise ConfigurationError(f"{field_name} must be a list of provider API keys, not a single string; wrap it in a list.", details={"field": field_name})
         if isinstance(api_keys, Mapping):
-            raise ConfigurationError(
-                f"{field_name} must be a list of provider API keys, not a mapping; list the keys in any order and the SDK matches each one to its provider.",
-                details={"field": field_name},
-            )
+            raise ConfigurationError(f"{field_name} must be a list of provider API keys, not a mapping; list the keys in any order and the SDK matches each one to its provider.", details={"field": field_name})
         if not isinstance(api_keys, Iterable):
-            type_name = type(api_keys).__name__
-            raise ConfigurationError(f"{field_name} must be a list of provider API keys, got {type_name}.", details={"field": field_name, "type": type_name})
+            raise ConfigurationError(f"{field_name} must be a list of provider API keys, got {type(api_keys).__name__}.", details={"field": field_name, "type": type(api_keys).__name__})
         entries: list[tuple[int, str]] = []
         for index, entry in enumerate(api_keys):
-            # None and blank entries are skipped, so a list built from
-            # os.environ.get calls works.
+            # Skip None and blank entries, which os.environ.get yields.
             if entry is None or (isinstance(entry, str) and not entry.strip()):
                 continue
             if not isinstance(entry, str):
                 raise ConfigurationError(f"{field_name}[{index}] must be a string, got {type(entry).__name__}.", details={"field": field_name, "index": index})
             key = entry.strip()
             if re.fullmatch(VIDBYTE_PROVIDER_KEY_PATTERN, key) is None:
-                raise ConfigurationError(
-                    f"{field_name}[{index}] ({len(key)} characters) contains spaces, line breaks, or characters outside printable ASCII, so it cannot be an API key.",
-                    details={"field": field_name, "index": index, "length": len(key)},
-                )
+                raise ConfigurationError(f"{field_name}[{index}] ({len(key)} characters) contains spaces, line breaks, or characters outside printable ASCII, so it cannot be an API key.", details={"field": field_name, "index": index, "length": len(key)})
             entries.append((index, key))
         return tuple(entries)
 
@@ -249,38 +199,27 @@ class ProviderKeyMatcher:
     def _check_record(record: ProviderKeys, proven_at: tuple[ModelProvider | None, ...], accepted_at: tuple[bool, ...], field_name: str) -> None:
         """Refuse a record whose key does not fit the provider it sits at (M-20)."""
         # @intent records-are-checked-not-rebound
-        # A record built by hand is held to the same rules a matched one
-        # meets: sendable characters, a proven key at its own provider,
-        # an unproven key only where table A allows it, and never the
-        # Vidbyte key as a provider key. It is checked, never re-bound.
+        # A hand-built record meets a matched one's rules: sendable, at
+        # a provider that may take it, never a Vidbyte key; not rebound.
         for index, (provider, key) in enumerate(zip(record.providers, record.keys, strict=True)):
             sendable = re.fullmatch(VIDBYTE_PROVIDER_KEY_PATTERN, key) is not None and not key.startswith(VIDBYTE_API_KEY_PREFIX)
             placed = proven_at[index] is provider if proven_at[index] is not None else accepted_at[index]
             if not (sendable and placed):
-                raise ConfigurationError(
-                    f"{field_name} is a ProviderKeys record whose key {index} does not fit {provider.value}; pass your keys as a list and the SDK matches each one to its provider.",
-                    details={"field": field_name, "index": index, "provider": provider.value},
-                )
+                raise ConfigurationError(f"{field_name} is a ProviderKeys record whose key {index} does not fit {provider.value}; pass your keys as a list and the SDK matches each one to its provider.", details={"field": field_name, "index": index, "provider": provider.value})
 
     @staticmethod
     def _vidbyte_key(entries: tuple[tuple[int, str], ...], explicit: object, field_name: str) -> str | None:
         """Return the one Vidbyte key from the explicit value and the list's Vidbyte entries (M-5)."""
         # @intent vidbyte-entry-is-the-vidbyte-key
-        # An entry with the Vidbyte prefix is the Vidbyte key and never
-        # a provider key, so it only ever reaches the gateway; two
-        # different Vidbyte keys have no right answer, so they raise.
+        # A Vidbyte-prefixed entry is the Vidbyte key, never a provider
+        # key; two different Vidbyte keys have no right answer.
         found, found_index = explicit, None
-        for index, key in entries:
-            if not key.startswith(VIDBYTE_API_KEY_PREFIX):
-                continue
+        for index, key in ((index, key) for index, key in entries if key.startswith(VIDBYTE_API_KEY_PREFIX)):
             if found is None:
                 found, found_index = key, index
             elif key != found:
                 other = "vidbyte_api_key" if found_index is None else f"{field_name}[{found_index}]"
-                raise ConfigurationError(
-                    f"{field_name}[{index}] is a Vidbyte API key that differs from {other}; pass one Vidbyte key.",
-                    details={"field": field_name, "index": index, "error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND},
-                )
+                raise ConfigurationError(f"{field_name}[{index}] is a Vidbyte API key that differs from {other}; pass one Vidbyte key.", details={"field": field_name, "index": index, "error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
         return found  # type: ignore[return-value]
 
     @staticmethod
@@ -291,85 +230,54 @@ class ProviderKeyMatcher:
         # two different keys for one provider have no right answer.
         held: dict[ModelProvider, tuple[int, str]] = {}
         for index, key in entries:
-            provider = proven[key]
-            if provider is None:
+            if (provider := proven[key]) is None:
                 continue
             if provider not in held:
                 held[provider] = (index, key)
             elif held[provider][1] != key:
                 first = held[provider][0]
-                raise ConfigurationError(
-                    f"{field_name}[{first}] and {field_name}[{index}] are both {provider.value} keys; pass one key per provider.",
-                    details={"field": field_name, "indexes": (first, index), "provider": provider.value},
-                )
+                raise ConfigurationError(f"{field_name}[{first}] and {field_name}[{index}] are both {provider.value} keys; pass one key per provider.", details={"field": field_name, "indexes": (first, index), "provider": provider.value})
         return held
 
     @staticmethod
     def _provider_names(names: Iterable[object]) -> tuple[ModelProvider, ...]:
         """Return provider names as members, stripped and casefolded, without None, unknown names, or repeats."""
         # @intent unknown-provider-names-take-no-key
-        # A name the SDK does not know can take no key, so it is left
-        # out here and the root's own provider check reports it. A bare
-        # string would be read one letter at a time, so it is refused.
+        # An unknown name takes no key; the root's own provider check
+        # reports it. A bare string would be read letter by letter.
         if isinstance(names, (str, bytes)):
             raise ConfigurationError("Provider names must be given as a list or tuple, not a single string.")
-        members: list[ModelProvider] = []
-        for name in names:
-            try:
-                member = name if isinstance(name, ModelProvider) else ModelProvider(str(name).strip().casefold())
-            except ValueError:
-                continue
-            if member not in members:
-                members.append(member)
-        return tuple(members)
+        known = {member.value: member for member in ModelProvider}
+        members = (name if isinstance(name, ModelProvider) else known.get(str(name).strip().casefold()) for name in names)
+        return tuple(dict.fromkeys(member for member in members if member is not None))
 
     @staticmethod
     def _refuse_unaccepted(unproven: Mapping[str, int], accepting: Mapping[str, tuple[ModelProvider, ...]], configured: tuple[ModelProvider, ...], field_name: str) -> None:
         """Refuse the lowest-index unproven key that no configured provider can take (M-6)."""
         for key, index in unproven.items():
-            if accepting[key]:
-                continue
-            names = [name.value for name in configured]
-            raise ConfigurationError(
-                f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and none of the providers configured here ({', '.join(names) or 'none'}) can take such a key. Add the model that uses it, or set that provider's own API key environment variable instead.",
-                details={"field": field_name, "index": index, "length": len(key), "providers": names},
-            )
+            if not accepting[key]:
+                names = [name.value for name in configured]
+                raise ConfigurationError(f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and none of the providers configured here ({', '.join(names) or 'none'}) can take such a key. Add the model that uses it, or set that provider's own API key environment variable instead.", details={"field": field_name, "index": index, "length": len(key), "providers": names})
 
     @staticmethod
-    def _bind_unproven(
-        unproven: Mapping[str, int],
-        accepting: Mapping[str, tuple[ModelProvider, ...]],
-        held: Mapping[ModelProvider, tuple[int, str]],
-        field_name: str,
-        env_vars: Mapping[ModelProvider, str],
-    ) -> dict[ModelProvider, tuple[int, str]]:
+    def _bind_unproven(unproven: Mapping[str, int], accepting: Mapping[str, tuple[ModelProvider, ...]], held: Mapping[ModelProvider, tuple[int, str]], field_name: str, env_vars: Mapping[ModelProvider, str]) -> dict[ModelProvider, tuple[int, str]]:
         """Bind each unproven key to its one possible owner, lowest index first, or refuse (M-7, M-19)."""
         # @intent unproven-key-needs-one-owner
-        # An unproven key is bound only where exactly one configured
-        # provider can still take it. Anything else would be a guess
-        # that could send the key to the wrong vendor, so the root
-        # refuses.
-        bound = dict(held)
-        waiting = dict(unproven)
+        # An unproven key binds only where one configured provider can
+        # still take it; anything else is a guess, so the root refuses.
+        bound, waiting = dict(held), dict(unproven)
         while waiting:
             candidates = {key: [name for name in accepting[key] if name not in bound] for key in waiting}
             stuck = next((key for key in waiting if not candidates[key]), None)
             if stuck is not None:
                 owner = accepting[stuck][0]
                 first, second = sorted((bound[owner][0], waiting[stuck]))
-                raise ConfigurationError(
-                    f"{field_name}[{first}] and {field_name}[{second}] are both {owner.value} keys; pass one key per provider.",
-                    details={"field": field_name, "indexes": (first, second), "provider": owner.value},
-                )
+                raise ConfigurationError(f"{field_name}[{first}] and {field_name}[{second}] are both {owner.value} keys; pass one key per provider.", details={"field": field_name, "indexes": (first, second), "provider": owner.value})
             forced = next((key for key in waiting if len(candidates[key]) == 1), None)
             if forced is None:
                 key, index = next(iter(waiting.items()))
-                names = [name.value for name in candidates[key]]
-                variables = [env_vars[name] for name in candidates[key]]
-                raise ConfigurationError(
-                    f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and it could belong to any of {', '.join(names)}. Set it as one of {', '.join(variables)} instead, so the SDK does not have to guess.",
-                    details={"field": field_name, "index": index, "length": len(key), "providers": names},
-                )
+                names, variables = [name.value for name in candidates[key]], [env_vars[name] for name in candidates[key]]
+                raise ConfigurationError(f"{field_name}[{index}] ({len(key)} characters) has no prefix that proves its provider, and it could belong to any of {', '.join(names)}. Set it as one of {', '.join(variables)} instead, so the SDK does not have to guess.", details={"field": field_name, "index": index, "length": len(key), "providers": names})
             bound[candidates[forced][0]] = (waiting.pop(forced), forced)
         return bound
 
@@ -377,17 +285,12 @@ class ProviderKeyMatcher:
     def _require_primary_keys(primaries: tuple[ModelProvider, ...], held: Mapping[ModelProvider, tuple[int, str]], field_name: str, env_vars: Mapping[ModelProvider, str]) -> None:
         """Refuse a list that holds provider keys but none for a primary provider (M-18)."""
         # @intent configured-model-needs-its-key
-        # Keys for other providers but none for the model this root runs
-        # is almost always the wrong key; going Vidbyte-paid instead
-        # would silently bill a call the developer meant to relay.
+        # Keys for others but none for this root's model is almost
+        # always a wrong key; going Vidbyte-paid would bill silently.
         missing = next((name for name in primaries if name not in held), None)
-        if missing is None:
-            return
-        names = [provider.value for provider, _bound in sorted(held.items(), key=lambda item: item[1][0])]
-        raise ConfigurationError(
-            f"{field_name} holds keys for {', '.join(names)} but none for {missing.value}, the provider of a configured model. Add your {missing.value} key to {field_name}, or pass no provider keys to use {env_vars[missing]} or Vidbyte's own {missing.value} account.",
-            details={"field": field_name, "provider": missing.value, "providers": names},
-        )
+        if missing is not None:
+            names = [provider.value for provider, _bound in sorted(held.items(), key=lambda item: item[1][0])]
+            raise ConfigurationError(f"{field_name} holds keys for {', '.join(names)} but none for {missing.value}, the provider of a configured model. Add your {missing.value} key to {field_name}, or pass no provider keys to use {env_vars[missing]} or Vidbyte's own {missing.value} account.", details={"field": field_name, "provider": missing.value, "providers": names})
 
 
 __all__ = ["ProviderKeyMatcher"]
