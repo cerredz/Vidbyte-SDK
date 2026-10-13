@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencod
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
 s3_head: de5b7c4c
-s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests] → ba70578e [RACE-1 R-18..R-21 tests] → c1599d0b [post-S6 R-22, R-24 tests] → 5e4c3c34 + 15fd9332 [3.11 swallowed-cancel tests])
+s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests] → ba70578e [RACE-1 R-18..R-21 tests] → c1599d0b [post-S6 R-22, R-24 tests] → 5e4c3c34 + 15fd9332 [3.11 swallowed-cancel tests] → 7e1f770b [fake write-log-exit ordering])
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1036
 until: none
 started: 2026-10-13 01:30 UTC
@@ -301,6 +301,11 @@ started: 2026-10-13 01:30 UTC
   - the close-path waits `transport.py:473`, `:499` and `:509`;
   - an INV-18 nuance: the default `request()` differs from main only on a cancelled call (the pending future is popped and cancelled), and main's 59 transport tests pass unchanged;
   - the inherited main flake `test_cancelled_waiter_does_not_break_transport`.
+- 2026-10-13 22:33 UTC — **Fake ordering fix done** (7e1f770b, pushed by me). Both fakes now log `sent` under the writer lock. The EOF exit takes that lock first, with a 2 s cap, before `os._exit`.
+  - **The Grok fake:** it had the same race. It never failed, because its only `sent` reader asserts absence.
+  - **My verification:** only the two fakes and test-plan changed; no `test_*.py` and no `vidbyte/` change; the R-22/R-24 pair passed 12/12 in fresh processes.
+  - **The author's own runs:** forced gap 3/3 red before and 3/3 green after; R-22 passed 60/60 and R-24 30/30 in fresh processes; four packs 1668 passed, 19 skipped; lint PASS.
+- 2026-10-13 22:33 UTC — **Next:** the S6 author (SendMessage, context intact) updates the PR body for R-22, R-24, R-25, the refuted (B) and the fake fix. It refreshes the verification table on the final head and adds the spec §17 row. Then it pushes and dispatches CI on the final head.
 
 ## User replies (verbatim)
 (none during the run)
