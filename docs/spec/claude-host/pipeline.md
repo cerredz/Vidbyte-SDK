@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:35 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md | spec r1 21a947a7 (18 sections, §12.3 31 rows); review round 1 launched 03:40 UTC |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -46,6 +46,12 @@ started: 2026-10-13 00:45 UTC
   - The dedicated Semgrep venv `C:/Users/422mi/vidbyte-repos/.venvs/semgrep-1.170.1` (semgrep 1.170.1) is shared by both runs.
   - This run's Python venv is `C:/Users/422mi/vidbyte-repos/.venvs/sdk-claude-host`, created at S2 with the `claude` extra once it exists.
   *Why:* never pip-install into the global Python. Its editable `vidbyte` install points at the canonical checkout, and claude-agent-sdk could move the global `mcp` version under the other run.
+
+- 2026-10-13 03:35 UTC — **S1 r1 spot-check passed.** The frontmatter `base_commit` and `worktree` match, there are 18 `## §` sections, §12.3 (`### 12.3 File-by-file actions`, line 1087) has 31 numbered rows, and the last commit is `docs(spec): add claude-host spec r1` (21a947a7). The orchestrator committed the author's untracked report with this pipeline update.
+- 2026-10-13 03:35 UTC — **Checked the failure.py insertion spots against the shared-file contract.** At the base commit, `CONFIGURATION_INVALID_ARGUMENT` is line 34, the `CODEX_*` block runs from line 35 to line 46, and `CODEX_RUN_OPTION_UNSUPPORTED` (line 46) is last.
+  - Spec r1 puts the `CLAUDE_*` block between lines 34 and 35.
+  - CodexHost appends after line 46.
+  - Lines 35–46 are untouched by both, so the second merge has no conflict there.
 
 ## User replies (verbatim)
 - none yet
@@ -85,3 +91,45 @@ started: 2026-10-13 00:45 UTC
   *source:* S0.
 - **Session history functions are synchronous file readers.** They may run `git worktree list` with a 5 s timeout (`_internal/sessions.py:388-413`), so they block the event loop when called from `async def` tools. *source:* S0 §4.1 item 31.
 - **The MCP server runs tools with no `PermissionPolicy`,** so WRITE tools are ungated over MCP. *source:* S0.
+- **Contract names (spec §4, §8.5).** Rename none of them.
+  - `ClaudeHost`.
+  - `ClaudeSpawnRequest`, with 58 fields in §9.2 order.
+  - `ClaudeSessionHandle`, `ClaudeTurnResult`, `ClaudeUsageSnapshot`, `ClaudeTurnOutcome`.
+  - `ClaudeOperationError(reason, *, failure_code, operation, next_step)`.
+  - `ClaudeTools(host, request=None)`.
+  - Tools are named `<Verb>Claude<Noun>Tool`.
+  - There are 15 coroutines, 15 tools, and 16 `claude.*` codes.
+  *source:* S1 author.
+- **Test seam:** `mock.patch.object(ClaudeSdkLoader, "load", return_value=<fake ClaudeSdkTypes>)`, with `ClaudeSdkLoader` in `vidbyte/harnesses/native/claude/sdk.py`. Copy the pattern of `tests/test_codex_tools.py:264-319`. Skip real-SDK tests when `find_spec("claude_agent_sdk")` is None. *source:* S1 author.
+- **Sibling:** `vidbyte/agents/codex/` is a pattern only. The tool layout copies `vidbyte/tools/builtins/sessions/`, and the toolset copies `vidbyte/tools/toolsets/coding.py`. *source:* S1 author.
+- **Errors:** records raise `ClaudeOperationError` with `configuration.invalid_argument` or `configuration.unsupported_combination` and operation `validate_request`, never `ConfigurationError`. Tool wrappers return an error `ToolResult` and never raise. *source:* S1 author.
+- **D-28:** a `ResultMessage` ends the turn only when its `origin` is absent or `human`. Other origins only update cumulative cost (AC-36, EC-56). *source:* S1 author.
+- **Design (spec r1).**
+  - Each turn owns exactly one `claude` process, from connect to its result, inside the host.
+  - Spawn returns a handle immediately.
+  - Steer interrupts the turn and resends the message after the result.
+  - The time budget is a watchdog that interrupts.
+  - Readiness and models read one initialize probe.
+  - History and fork read session files and start no process.
+  *source:* S1 author.
+- **The S1 author contradicts S0 on three facts.** It says it verified them in the installed CLI 2.1.296, so the minimum CLI version is 2.1.296 and `cli_path` comes from `shutil.which("claude")`.
+  - The CLI reads the env variable `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. The SDK still has no field for it.
+  - `--fallback-model` accepts a comma-separated list.
+  - Plugins can come from a URL or a .zip.
+  These `extra_args` flags exist: `file`, `restricted`, `autocompact`, `name`, `agent`, `bare`, `safe-mode`, `no-session-persistence`, `worktree`, `plugin-url`.
+  *source:* S1 author report §3. Not yet re-verified by a reviewer.
+- **The S1 author's least-sure assumptions:**
+  - A-8/A-9: steer and interrupt run concurrently on one client.
+  - A-6: the initialize probe is free.
+  - A-2: with no prompt handler, a tool needing permission is denied.
+  - A-3: `--no-session-persistence` works in SDK mode.
+  - A-1: images are accepted over `query`.
+  - A-13: `--bare` with no API key reports `apiKeySource` absent or `none`.
+  *source:* S1 author.
+- **The rule most likely to be violated is A001.** After it, in order:
+  - A002;
+  - A007;
+  - C002 and C008 (bool guards written once in `_ClaudeFieldRules`; no verb+primitive helper names);
+  - S012 (name no method `request`);
+  - S045 (parameters are named `timeout_seconds`).
+  *source:* S1 author.
