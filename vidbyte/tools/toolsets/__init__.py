@@ -15,11 +15,17 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.toolsets.coding import CodingAgentTools
+from vidbyte.tools.toolsets.grok import GrokTools
 from vidbyte.tools.toolsets.harness_backends import HarnessBackendTools
+from vidbyte.tools.toolsets.muse import MuseTools
+from vidbyte.tools.toolsets.opencode import OpencodeTools
 from vidbyte.tools.toolsets.paradigm_minimal import ParadigmMinimalToolset
 
 __all__ = [
     "CodingAgentTools",
+    "GrokTools",
     "HarnessBackendTools",
+    "MuseTools",
+    "OpencodeTools",
     "ParadigmMinimalToolset",
 ]
