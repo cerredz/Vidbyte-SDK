@@ -6,7 +6,7 @@ branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
 s3_head: de5b7c4c
 s2_head: 91e874b2 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6])
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1036
 until: none
 started: 2026-10-13 01:30 UTC
 ---
@@ -19,7 +19,7 @@ started: 2026-10-13 01:30 UTC
 | S1 spec + review | done | 2026-10-13 02:22 UTC | 2026-10-13 05:40 UTC | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @f1b2fa31 approved; r1 review SOUND WITH FIXES (15/15 accepted), r2 review SOUND WITH FIXES (11/11 accepted) |
 | S2 tests | done | 2026-10-13 05:50 UTC | 2026-10-13 07:35 UTC | reports/S2-test-author.md | 1635 tests (grok 458, opencode 581, muse 458, backends 138), all red; S2_HEAD cfad74f8 |
 | S3 implement | done | 2026-10-13 08:20 UTC | 2026-10-13 13:40 UTC | reports/S3-implementer.md | S3_HEAD de5b7c4c; draft PR #1036; 51 commits; budget 56/56 create, 12/12 modify, 66/66 records, 13/13 enums, 53/53 codes; 1616 passed, 19 skipped (re-run by orchestrator); full gate + Semgrep green; ci.yml 38379243965 dispatched, static-policy 38379248609 success |
-| S4 adversarial review | pending | | | | |
+| S4 adversarial review | running | 2026-10-13 13:50 UTC | | reports/S4-review-{conformance,conventions,engineering}.md | 3 reviewers launched in parallel on de5b7c4c |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -69,6 +69,7 @@ started: 2026-10-13 01:30 UTC
   The test author fixed all three at 209c4085 (9 test files, +47/−16; I checked the diff against 762b68e7). Two runs gave 1 failed and 1615 passed; the one failure is the EC-95 test. S2_HEAD moves to 91e874b2.
 - 2026-10-13 12:10 — EC-95 (exit code 127 means `muse.not_installed`) needed an exit code that §8.5 did not expose. I approved S3's option 1: spec r6 (f4659a58) adds read-only `McpStdioTransport.returncode` and `NativePeer.exit_code`. The spec author also raised D-3's reversal trigger from about 160 to about 200 changed lines, because the extension now has about 167. I accepted that, but flagged transport size for S4 reviewers to judge independently. Why: the spec row explicitly asks for exit 127, and the 9-line change is already tested.
 - 2026-10-13 12:10 — The harness flagged the S2 author's status message as instruction-shaped ("bypass-permissions"). It only described the test guard rejecting the vendor value `bypassPermissions`. Not an injection; no action taken.
+- 2026-10-13 14:00 — Remote `ci.yml` run 38379243965 on 9d51a3fb ended `failure`. Source / Python 3.11 passed; Source / Python 3.12 failed with 1 failed, 5572 passed, 31 skipped. The failing test is `tests/features/grok_host/test_grok_host_turns.py::test_interrupt_raises_process_exited_when_the_cancel_write_fails` (EC-51, `@posix_only`, so it skips on Windows): `DID NOT RAISE NativeHostError` at line 335. The log is saved at scratchpad `ci-38379243965-failed.log`. I re-ran the failed job (`gh run rerun --failed`) to tell a flaky test from a defect that depends on the Python version. Either way it goes to the S4 verifier as an item to adjudicate, and S5 must make remote CI green. Why: a Linux-only path (closed-stdin write detection under asyncio 3.12) never ran locally.
 
 ## User replies (verbatim)
 (none during the run)
