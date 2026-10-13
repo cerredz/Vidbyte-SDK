@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
-PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state with supplied prior user turns, applies the tool selector, offers the run_bulk_work tool when the gate approved bulk work, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
+PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state with supplied prior user turns, keeps only SAFE and READ tools when the gate judged the request read-only, applies the tool selector, offers the run_bulk_work tool when the gate approved bulk work, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, the JevContinuation, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook by asking the JevContinuation whether to continue.
-ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally. It wraps the whole run in JevUsageAccount.scope(), so every generative and decision call from this agent and every agent it spawns lands in this agent's one usage ledger, checks that ledger at each phase boundary, and fails the run closed when any usage cannot be recorded or priced.
+ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally. When the gate judged the request to ask only for an assessment, every step after the gate runs inside JevReadOnly.ceiling(), a PermissionCeiling scope that every agent the run starts inherits. It wraps the whole run in JevUsageAccount.scope(), so every generative and decision call from this agent and every agent it spawns lands in this agent's one usage ledger, checks that ledger at each phase boundary, and fails the run closed when any usage cannot be recorded or priced.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
 KNOWN EDGE CASES: With a managed decision config, the whole run is one managed run on Vidbyte's gateway and is closed when arun returns or raises. With no done check and no RUN_STATE_RELATION preset there is no JevRunState, so no run state is written and every finish attempt stands. With RUN_STATE_RELATION enabled, the gate reads the persistent run-state record and the run state keeps it for a related request, including one routed to a specialist. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here. With JevRuntimeSettings.compute set, the main agent's run calls the JevComputeController after every tool iteration that continues and takes the catalog it returns, which gains the launch_swarm tool once SWARM is selected; each run builds a new runtime from the agent's own catalog, so the tool never reaches the next run; a specialist's run does not.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-read-only-intent.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-tool-selector.py.
 """
 
@@ -18,7 +18,7 @@ from typing import Any
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.agents.jev.continuation import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
-from vidbyte.agents.jev.gate import JevPreflightGate
+from vidbyte.agents.jev.gate import JevPreflightGate, JevReadOnly
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.preload import JevPreload
 from vidbyte.agents.jev.response import JevResponse
@@ -120,31 +120,50 @@ class JevRuntime(AgentRuntime):
         if not await self.preflight.pass_(message, run_state_record):
             return self.response.stopped(self.usage.settle())
         self.usage.require_accounted()
-        if self.preflight.specialist is not None:
-            return await self._delegate(message, context)
-        context, options = await self._preload_skills(message, context, options)
-        self.usage.require_accounted()
-        if self.compute is not None:
-            self.compute.begin(message)
-        if self.run_state is not None:
-            await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
+        # When the request asks only for an assessment, cap everything from here on at SAFE and READ tools,
+        # so neither this agent nor any agent it starts can write or execute, whatever its own policy says.
+        # @intent a-read-only-run-cannot-write
+        # Hiding tools covers only this agent's catalog; the ceiling also binds the specialist, bulk-work
+        # agents, clones, swarm helpers, forks, and tools added mid-run, because every policy check reads it.
+        with JevReadOnly.ceiling(self.preflight.read_only_requested):
+            if self.preflight.specialist is not None:
+                return await self._delegate(message, context)
+            context, options = await self._preload_skills(message, context, options)
             self.usage.require_accounted()
-            sequence_instructions = self.run_state.agent_instructions()
-            if sequence_instructions:
-                context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
-        context, options, selector_metadata = await self._select_tools(message, context, options)
-        context, options = self._offer_bulk_work(message, context, options)
-        result = await super().arun(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=options,
-            trace_context=trace_context,
-        )
-        if selector_metadata is not None:
-            result = replace(result, metadata={**dict(result.metadata), "jev_tool_selector": selector_metadata})
-        return self.response.finished(result, self.usage.settle())
+            if self.compute is not None:
+                self.compute.begin(message)
+            if self.run_state is not None:
+                await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
+                self.usage.require_accounted()
+                sequence_instructions = self.run_state.agent_instructions()
+                if sequence_instructions:
+                    context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
+            # Hide every tool above READ before the selector runs, so the model is never offered a tool it may not call.
+            context, options = self._keep_read_only_tools(context, options)
+            context, options, selector_metadata = await self._select_tools(message, context, options)
+            context, options = self._offer_bulk_work(message, context, options)
+            result = await super().arun(
+                message,
+                handle=handle,
+                context=context,
+                metadata=metadata,
+                options=options,
+                trace_context=trace_context,
+            )
+            if selector_metadata is not None:
+                result = replace(result, metadata={**dict(result.metadata), "jev_tool_selector": selector_metadata})
+            return self.response.finished(result, self.usage.settle())
+
+    def _keep_read_only_tools(self, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
+        # Narrows this run's user tools to SAFE and READ when the gate judged the request read-only, and
+        # drops the provider tool override so the narrowed catalog is the one the model sees.
+        if not self.preflight.read_only_requested:
+            return context, options
+        self.user_tools = JevReadOnly.tools(self.user_tools)
+        self.tools = with_internal_agent_tools(self.user_tools)
+        run_options = dict(options or {})
+        run_options.pop("tools", None)
+        return replace(context, tools=self.tools.specs()), run_options
 
     async def _select_tools(self, message: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None, dict[str, Any] | None]:
         # @intent selector-is-a-separate-run-phase
