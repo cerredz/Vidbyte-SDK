@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencod
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
 s3_head: de5b7c4c
-s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests] → ba70578e [RACE-1 R-18..R-21 tests])
+s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests] → ba70578e [RACE-1 R-18..R-21 tests] → c1599d0b [post-S6 R-22, R-24 tests])
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1036
 until: none
 started: 2026-10-13 01:30 UTC
@@ -257,6 +257,11 @@ started: 2026-10-13 01:30 UTC
   - **R-24 [verifier], Minor `trivial`:** a Grok host closed during spawn or continue leaves the `session/prompt` answer future unretrieved.
   - **(B), candidate R-23, refuted:** EC-127 requires the literal.
   - **Decision: route R-22 and R-24 to S2 addendum 4, then S5 iteration 7.** Why: both have deterministic public-API recipes, and the fixes are 1–2 lines. Tests first keeps the pattern every earlier fix followed.
+- 2026-10-13 20:07 UTC — **S2 addendum 4 done** (c1599d0b, not pushed): 2 regression tests.
+  - **My spot-check:** no `vidbyte/` change; the only removed lines in test files are module-header text; both tests red in each of 2 runs ("never retrieved" records).
+  - **The author's own runs:** four packs 2 failed, 1659 passed, 19 skipped; scratch fix-shim 5/5 green.
+  - **R-24 token:** R-24 cites EC-2's `async with` token. Today's code already carries it, so it is not a defect.
+  - **Next:** S5 iteration 7 (7/8).
 
 ## User replies (verbatim)
 (none during the run)
