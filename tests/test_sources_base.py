@@ -420,6 +420,12 @@ class SourcesBaseTests(unittest.TestCase):
             (meta_only.encode("shift_jis"), "text/html", meta_only),
             ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=x-bogus", "<p>ünïcode ✓</p>"),
             ("<p>ünïcode ✓</p>".encode("utf-8"), None, "<p>ünïcode ✓</p>"),
+            # Codecs that codecs.lookup knows but that cannot decode text under errors="replace" must fall back too:
+            # bytes-to-bytes codecs raise LookupError, and idna and punycode raise UnicodeError.
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=base64", "<p>ünïcode ✓</p>"),
+            ('<meta charset="hex"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="hex"><p>ünïcode ✓</p>'),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=idna", "<p>ünïcode ✓</p>"),
+            ('<meta charset="punycode"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="punycode"><p>ünïcode ✓</p>'),
         )
         for body, content_type, expected in cases:
             with self.subTest(content_type=content_type, expected=expected[:40]):
