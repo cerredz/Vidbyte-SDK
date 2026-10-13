@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:35 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 21a947a7 → review r1 SOUND WITH FIXES (3B/3M/4m) → spec r2 ac39bb46 (all 10 applied); scoped review round 2 launched 06:25 UTC |
+| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 21a947a7 → review r1 SOUND WITH FIXES (3B/3M/4m) → spec r2 ac39bb46 → review r2 (scoped) SOUND WITH FIXES (1B/2M/5m) → author writing final r3 with status: approved |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -65,6 +65,11 @@ started: 2026-10-13 00:45 UTC
 - 2026-10-13 06:25 UTC — **Launched review round 2 (the last allowed), scoped to the sections r2 changed.**
   - It covers §8 (D-4 interrupt grace, D-5 CLI lookup), §8.5, §9.1–9.3, §10 T-3, and §12.1/12.3/12.4/12.5, plus what depends on them: §6, §13, §14, and §15 A-2/A-3/A-17.
   - Anything still disputed after round 2 becomes a Q-n with its stated default.
+- 2026-10-13 07:05 UTC — **Review round 2: SOUND WITH FIXES, 8 findings** (1 Blocker, 2 Majors, 5 Minors).
+  - Round-1 findings R-1 and R-3 to R-10 are confirmed resolved. R-2 is half resolved: the turn always ends now, but the `claude` process can outlive it.
+  - All eight went to the author for the final revision r3, forwarded by path (lines 1–187 of reports/S1-spec-review-r2.md). In the same message the author was told to set `status: approved`, since the two review rounds are the approval.
+  - R-7's optional `[scope-adding]` control is recorded as a Q-n, default not built: passing external MCP configs as the path of a 0600 temp file.
+  - The S1 review cap (2/2) is reached. Anything the author disputes becomes a Q-n with a stated default.
 
 ## User replies (verbatim)
 - none yet
@@ -164,4 +169,18 @@ started: 2026-10-13 00:45 UTC
 - **Interrupt grace test seam:** patch `vidbyte.harnesses.native.claude.session.CLAUDE_INTERRUPT_GRACE_SECONDS`. Interrupt and steer fakes must emit a result after `interrupt()`, or every such test waits the full 30 s. *source:* S1 author r2.
 - **The Windows CLI lookup is testable on Linux CI:** call `locate_cli(..., windows=True, home=<tmp>)` and patch `shutil.which` through the probe module. On macOS and Linux the lookup is only `which("claude")`. *source:* S1 author r2.
 - **S054 forbids** assigning a string to, or comparing a string with, any name whose words include token, password, pass, pwd or secret. *source:* S1 author r2.
+- **How the SDK closes a client.** `disconnect()` runs a shielded `_close_impl`, which cancels the read task (whose `finally` sends `end`) before `transport.close()`.
+  - A plain `task.cancel()` or `asyncio.wait_for` around it skips terminate/kill (`subprocess_cli.py:979-988`), so the process leaks.
+  - The repo's cancellation-safe close pattern is `MultiAgentCleanup.shielded_close` (`vidbyte/agents/multi/cleanup.py:36-46`).
+  *source:* S1 reviewer r2, R-1.
+- **Interrupt and start timing.**
+  - `Query.interrupt()` waits up to 60 s (`fail_after`), and closing never fails pending control requests.
+  - The agent runtime's tool timeout is a plain `asyncio.wait_for` (`vidbyte/agents/runtime.py:1455`).
+  - An unknown CLI flag fails `connect()` fast with `ProcessError` (`query.py:543-546`).
+  - `open_process(user=...)` errors are wrapped as `CLIConnectionError`, so they map to `process_exited`.
+  *source:* S1 reviewer r2.
+- **Permission flag evidence.** CLI 2.1.296's `--help` treats non-TTY stdout as print mode. `sdk.d.ts:2018-2025` documents `permissionPrompts: 'none'` ("canUseTool is never called"), and `sdk.d.ts:5572` calls `permission_denials` authoritative. *source:* S1 reviewer r2.
+- **Test isolation on this machine.** `~/.local/bin/claude.exe` exists, so a test that patches only `shutil.which` still finds the real CLI. Tests must also point `home` at a temp dir. *source:* S1 reviewer r2, R-8.
+- **pytest 8.3.5 prints secrets in dataclass assertion diffs.** It picks fields by `compare` and prints their `repr`, so `repr=False` does not hide secrets there. Tests must not assert whole records that carry secrets. *source:* S1 reviewer r2.
+- **`.venvs/lint-sdk` has ruff 0.16.4 and pytest 8.3.5.** Run S105 checks with `ruff --isolated --select S105,S106,S107`. Its regex uses underscore word boundaries: `CLAUDE_CREDENTIAL_SOURCE_FIELDS` passes, while `CLAUDE_TOKEN_SOURCE_FIELD = "..."` and `token_source = "..."` are flagged. *source:* S1 reviewer r2.
 - **C016 is unaffected by the new extra and the submodule exports.** It reads only the root `__all__` and the pyproject name and version, so `contracts/sdk-public-api.json` does not change. New packages ship through `packages.find`. *source:* S1 reviewer.
