@@ -50,13 +50,7 @@ _CLAUDE_MODEL_SLOTS: Mapping[HarnessBackendName, tuple[str, ...]] = MappingProxy
     }
 )
 _BASE_URL_VARIABLE = "ANTHROPIC_BASE_URL"
-_KEY_MISSING_STEP = "Set {variable} in the environment to a valid key."
 _KEY_REJECTED_STEP = "DeepSeek rejected {variable}; set a valid key."
-_REJECTED_KEY_STATUSES = frozenset({401, 403})
-_BILLING_STATUS = 402
-_RATE_LIMIT_STATUS = 429
-_SUCCESS_STATUS_FIRST = 200
-_SUCCESS_STATUS_END = 300
 _BODY_FIELD = "body"
 # Backend errors use explicit backend.* codes; the factory's harness only labels
 # process and transport failures, which the backend functions never raise.
@@ -230,7 +224,7 @@ class HarnessBackends:
         # never its value (EC-123).
         key = os.environ.get(profile.auth_env_var, "")
         if not key.strip():
-            raise errors.build(FailureCode.BACKEND_NOT_SIGNED_IN, f"{profile.auth_env_var} is not set in the environment.", operation=operation, next_step=_KEY_MISSING_STEP.format(variable=profile.auth_env_var))
+            raise errors.build(FailureCode.BACKEND_NOT_SIGNED_IN, f"{profile.auth_env_var} is not set in the environment.", operation=operation, next_step=native_host_constants.BACKEND_KEY_MISSING_NEXT_STEP.format(variable=profile.auth_env_var))
         errors.register_secret(key)
         return key
 
@@ -264,13 +258,13 @@ class HarnessBackends:
         # a rate limit; any other non-2xx status, a redirect included, is an
         # unclassified vendor error with its scrubbed text (EC-127 to EC-130).
         status = response.status_code
-        if status in _REJECTED_KEY_STATUSES:
+        if status in native_host_constants.NATIVE_HTTP_SIGNED_OUT_STATUSES:
             raise errors.build(FailureCode.BACKEND_NOT_SIGNED_IN, "DeepSeek rejected the key in DEEPSEEK_API_KEY.", operation=operation, next_step=_KEY_REJECTED_STEP.format(variable="DEEPSEEK_API_KEY"), context={"status_code": str(status)})
-        if status == _BILLING_STATUS:
+        if status == native_host_constants.NATIVE_HTTP_BILLING_STATUS:
             raise errors.build(FailureCode.BACKEND_BILLING_ERROR, "DeepSeek refused the call for billing.", operation=operation, context={"status_code": str(status)})
-        if status == _RATE_LIMIT_STATUS:
+        if status == native_host_constants.NATIVE_HTTP_RATE_LIMIT_STATUS:
             raise errors.build(FailureCode.BACKEND_USAGE_LIMITED, "DeepSeek rate-limited the call.", operation=operation, context={"status_code": str(status)})
-        if not _SUCCESS_STATUS_FIRST <= status < _SUCCESS_STATUS_END:
+        if not native_host_constants.NATIVE_HTTP_SUCCESS_FIRST_STATUS <= status < native_host_constants.NATIVE_HTTP_SUCCESS_END_STATUS:
             context = {"status_code": str(status)}
             vendor_text = HarnessBackends._vendor_text(response.body)
             if vendor_text.strip():

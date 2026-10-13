@@ -55,9 +55,6 @@ from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.enums.native_hosts import InterruptSource, NativeHarness
 from vidbyte.lib.errors import ConfigurationError, NativeHostError
 
-_OPEN_STEP = "Open the host with async with and call it inside the block."
-_NEW_HOST_STEP = "Create a new host object for each async with block."
-_LIVE_TURN_CAP_STEP = "This host already runs its maximum number of live turns; wait for or interrupt one with interrupt_opencode_turn, then retry."
 _NO_PROVIDER_STEP = "Connect a provider with opencode auth login."
 _PROVIDER_PICK_STEP = "Pick a provider id returned by list_opencode_providers."
 _LIVE_TURNS_KEY = "live_turns"
@@ -67,11 +64,7 @@ _MIN_LIST_LIMIT = 1
 _TRUNCATION_PROBE = 1
 _NEWEST_ONE = "1"
 _OLDEST_INDEX = 0
-_MODEL_ID_SPLITS = 1
-_BUSY_STATES = frozenset({"busy", "retry"})
 _FAILED_MCP_STATES = frozenset({"failed", "needs_auth", "needs_client_registration", "disabled"})
-_ASSISTANT_ROLE = "assistant"
-_WAIT_OPERATION = "wait_opencode_turn"
 _EXIT_OPERATION = "__aexit__"
 _CONSTRUCT_OPERATION = "OpencodeHost"
 
@@ -120,7 +113,7 @@ class OpencodeHost:
         operation = "__aenter__"
         # A host is used once, whether it is open or already closed (EC-3).
         if self._entered:
-            raise self._errors.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, "This OpencodeHost was already entered; a host is used for one async with block.", operation=operation, next_step=_NEW_HOST_STEP)
+            raise self._errors.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, "This OpencodeHost was already entered; a host is used for one async with block.", operation=operation, next_step=native_host_constants.NATIVE_REENTER_NEXT_STEP)
         self._entered = True
         try:
             # Start the owned server, or take the attached address, and remember the credentials for every call.
@@ -547,7 +540,7 @@ class OpencodeHost:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
     async def wait_opencode_turn(self, handle: NativeTurnHandle, timeout_seconds: float = native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS) -> NativeTurnResult:
-        operation = _WAIT_OPERATION
+        operation = native_host_constants.OPENCODE_TURN_OPERATION
         try:
             self._require_open(operation)
             RecordFieldConverter.require_instance(handle, "handle", NativeTurnHandle)
@@ -563,7 +556,7 @@ class OpencodeHost:
 
             # A turn cut off while the host closed has no outcome of its own.
             if driver.cancelled():
-                raise self._errors.build(FailureCode.OPENCODE_PROCESS_EXITED, "The host closed before this turn reported its end.", operation=operation, next_step=_OPEN_STEP)
+                raise self._errors.build(FailureCode.OPENCODE_PROCESS_EXITED, "The host closed before this turn reported its end.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
 
             # The result, or the turn's recorded failure, the same on every wait (EC-148).
             return driver.result()
@@ -590,7 +583,7 @@ class OpencodeHost:
 
             # Abort answers 200 even for a missing session, so check the session first (EC-90).
             if not await self._client.probe(("session", handle.session_id), operation=operation):
-                watcher.fail(self._errors.build(FailureCode.OPENCODE_SESSION_NOT_FOUND, "The turn's session was deleted while the turn ran.", operation=_WAIT_OPERATION))
+                watcher.fail(self._errors.build(FailureCode.OPENCODE_SESSION_NOT_FOUND, "The turn's session was deleted while the turn ran.", operation=native_host_constants.OPENCODE_TURN_OPERATION))
                 raise self._errors.build(FailureCode.OPENCODE_SESSION_NOT_FOUND, "The turn's session no longer exists on this server.", operation=operation)
 
             # Send the abort with the CALLER source; the watcher ends the turn INTERRUPTED (EC-88).
@@ -620,7 +613,7 @@ class OpencodeHost:
             messages = self._wire.parse_messages(await self._client.call("GET", ("session", session_id, "message"), operation=operation, query=query, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND), operation=operation)
 
             # Each assistant message that reported usage, newest OPENCODE_TURN_MESSAGE_LIMIT messages only.
-            per_message = tuple(NativeMessageUsage(message_id=message.message_id, usage=message.usage) for message in messages[-limit:] if message.role == _ASSISTANT_ROLE and message.usage is not None)
+            per_message = tuple(NativeMessageUsage(message_id=message.message_id, usage=message.usage) for message in messages[-limit:] if message.role == native_host_constants.OPENCODE_ASSISTANT_ROLE and message.usage is not None)
             return NativeSessionUsage(harness=NativeHarness.OPENCODE, session_id=session.session_id, totals=session.usage, per_message=per_message, truncated=len(messages) > limit)
         except asyncio.CancelledError:
             raise
@@ -669,7 +662,7 @@ class OpencodeHost:
     def _require_open(self, operation: str) -> None:
         # A host that was never entered, has exited, or failed to open starts nothing (EC-2).
         if not self._open:
-            raise self._errors.build(FailureCode.OPENCODE_PROCESS_EXITED, "This OpencodeHost is not open: it was never entered, has exited, or failed to open.", operation=operation, next_step=_OPEN_STEP)
+            raise self._errors.build(FailureCode.OPENCODE_PROCESS_EXITED, "This OpencodeHost is not open: it was never entered, has exited, or failed to open.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
 
     async def _check_health(self, *, operation: str) -> str:
         # GET /global/health: unhealthy is unreachable (EC-55); older than OPENCODE_MIN_VERSION is unsupported (EC-60).
@@ -688,13 +681,13 @@ class OpencodeHost:
         except NativeHostError as exc:
             if _LIVE_TURNS_KEY not in exc.context:
                 raise
-            raise self._errors.build(exc.failure_code, exc.message, operation=operation, next_step=_LIVE_TURN_CAP_STEP, context=dict(exc.context)) from exc
+            raise self._errors.build(exc.failure_code, exc.message, operation=operation, next_step=native_host_constants.NATIVE_AT_CAP_NEXT_STEP.format(tool="interrupt_opencode_turn"), context=dict(exc.context)) from exc
 
     async def _require_idle(self, session_id: str, *, operation: str, include_local: bool) -> None:
         # A session with a live turn on this host, or busy or retrying on the server, is busy (EC-73, EC-78).
         local = include_local and self._turns.is_session_busy(session_id)
         statuses = () if local else self._wire.parse_session_statuses(await self._client.call("GET", ("session", "status"), operation=operation), operation=operation)
-        if local or any(status.session_id == session_id and status.state in _BUSY_STATES for status in statuses):
+        if local or any(status.session_id == session_id and status.state in native_host_constants.OPENCODE_BUSY_STATES for status in statuses):
             raise self._errors.build(FailureCode.OPENCODE_SESSION_BUSY, "The session already has a running turn.", operation=operation, context={"session_id": session_id})
 
     async def _check_model(self, model: str | None, *, operation: str) -> None:
@@ -705,7 +698,7 @@ class OpencodeHost:
         # the offered ids, capped by the error factory.
         if model is None:
             return
-        provider_id, model_id = model.split("/", _MODEL_ID_SPLITS)
+        provider_id, model_id = model.split("/", native_host_constants.OPENCODE_MODEL_ID_SPLITS)
         catalog = self._wire.parse_config_providers(await self._client.call("GET", ("config", "providers"), operation=operation), operation=operation)
         offered = catalog.get(provider_id)
         if offered is not None and any(entry.model_id == model_id for entry in offered):
@@ -741,7 +734,7 @@ class OpencodeHost:
             raise
         except Exception as exc:
             await watcher.abort_before_failing(exc)
-            raise self._errors.from_unexpected(exc, operation=_WAIT_OPERATION) from exc
+            raise self._errors.from_unexpected(exc, operation=native_host_constants.OPENCODE_TURN_OPERATION) from exc
 
     def _forget(self, turn_id: str, driver: asyncio.Task[NativeTurnResult]) -> None:
         # A finished turn's watcher is dropped; its outcome stays with the turn table for later waits.

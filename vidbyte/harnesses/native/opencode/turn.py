@@ -42,10 +42,7 @@ from vidbyte.lib.enums.native_hosts import (
 )
 from vidbyte.lib.errors import NativeHostError
 
-_OPERATION = "wait_opencode_turn"
-_BUSY_STATES = frozenset({"busy", "retry"})
 _USER_ROLE = "user"
-_ASSISTANT_ROLE = "assistant"
 _ABORTED_ERROR = "MessageAbortedError"
 _OUTPUT_LENGTH_ERROR = "MessageOutputLengthError"
 _OUTPUT_LENGTH_STOP = "output_length"
@@ -114,7 +111,7 @@ class OpencodeTurnWatcher:
             try:
                 # Past the ceiling, abort the turn once with the DEADLINE source.
                 if loop.time() >= ceiling and self._source is None:
-                    await self.interrupt(InterruptSource.DEADLINE, operation=_OPERATION)
+                    await self.interrupt(InterruptSource.DEADLINE, operation=native_host_constants.OPENCODE_TURN_OPERATION)
 
                 # Read the statuses, the pending requests and the newest messages, in that order.
                 statuses = await self._read_statuses()
@@ -123,7 +120,7 @@ class OpencodeTurnWatcher:
 
                 # Walk the session tree when a request names an unknown session; past the limit, abort by policy (EC-154).
                 if await self._refresh_tree(permissions, questions) and self._source is None:
-                    await self.interrupt(InterruptSource.POLICY, operation=_OPERATION)
+                    await self.interrupt(InterruptSource.POLICY, operation=native_host_constants.OPENCODE_TURN_OPERATION)
 
                 # Reject every request from the tree and record the answers (D-11).
                 await self._reject(permissions, questions)
@@ -187,27 +184,27 @@ class OpencodeTurnWatcher:
         if isinstance(error, NativeHostError) and error.failure_code is FailureCode.OPENCODE_SESSION_NOT_FOUND:
             return
         with contextlib.suppress(NativeHostError):
-            await self._client.call("POST", ("session", self._session_id, "abort"), operation=_OPERATION)
+            await self._client.call("POST", ("session", self._session_id, "abort"), operation=native_host_constants.OPENCODE_TURN_OPERATION)
 
     async def _read_statuses(self) -> Mapping[str, OpencodeSessionStatus]:
         # GET /session/status as a map of session id to status; an absent session is idle.
-        body = await self._client.call("GET", ("session", "status"), operation=_OPERATION)
-        return {status.session_id: status for status in self._wire.parse_session_statuses(body, operation=_OPERATION)}
+        body = await self._client.call("GET", ("session", "status"), operation=native_host_constants.OPENCODE_TURN_OPERATION)
+        return {status.session_id: status for status in self._wire.parse_session_statuses(body, operation=native_host_constants.OPENCODE_TURN_OPERATION)}
 
     async def _read_requests(self) -> tuple[tuple[OpencodePermissionRequest, ...], tuple[OpencodeQuestionRequest, ...]]:
         # @intent opencode-watcher-reads-every-pending-request
         # Every pending permission and question request on the server is
         # read on each poll, so none from the turn's tree can wait unanswered
         # and stall the turn; which ones belong to the tree is decided later.
-        permissions = self._wire.parse_permission_requests(await self._client.call("GET", ("permission",), operation=_OPERATION), operation=_OPERATION)
-        questions = self._wire.parse_question_requests(await self._client.call("GET", ("question",), operation=_OPERATION), operation=_OPERATION)
+        permissions = self._wire.parse_permission_requests(await self._client.call("GET", ("permission",), operation=native_host_constants.OPENCODE_TURN_OPERATION), operation=native_host_constants.OPENCODE_TURN_OPERATION)
+        questions = self._wire.parse_question_requests(await self._client.call("GET", ("question",), operation=native_host_constants.OPENCODE_TURN_OPERATION), operation=native_host_constants.OPENCODE_TURN_OPERATION)
         return permissions, questions
 
     async def _read_messages(self) -> tuple[OpencodeMessage, ...]:
         # The newest OPENCODE_WATCH_MESSAGE_LIMIT messages; a 404 means the session was deleted mid-turn (EC-86).
         query = {"limit": str(native_host_constants.OPENCODE_WATCH_MESSAGE_LIMIT)}
-        body = await self._client.call("GET", ("session", self._session_id, "message"), operation=_OPERATION, query=query, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
-        return self._wire.parse_messages(body, operation=_OPERATION)
+        body = await self._client.call("GET", ("session", self._session_id, "message"), operation=native_host_constants.OPENCODE_TURN_OPERATION, query=query, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
+        return self._wire.parse_messages(body, operation=native_host_constants.OPENCODE_TURN_OPERATION)
 
     def _track_messages(self, messages: tuple[OpencodeMessage, ...]) -> None:
         # The turn's user message is the first user message newer than the
@@ -219,7 +216,7 @@ class OpencodeTurnWatcher:
         if self._user_message_id is None:
             return
         for message in messages:
-            if message.role == _ASSISTANT_ROLE and message.parent_id == self._user_message_id:
+            if message.role == native_host_constants.OPENCODE_ASSISTANT_ROLE and message.parent_id == self._user_message_id:
                 self._replies[message.message_id] = message
 
     async def _refresh_tree(self, permissions: tuple[OpencodePermissionRequest, ...], questions: tuple[OpencodeQuestionRequest, ...]) -> bool:
@@ -236,8 +233,8 @@ class OpencodeTurnWatcher:
         order = [self._session_id]
         index = _TREE_ROOT_INDEX
         while index < len(order) and len(order) <= limit:
-            body = await self._client.call("GET", ("session", order[index], "children"), operation=_OPERATION, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
-            order.extend(child.session_id for child in self._wire.parse_sessions(body, operation=_OPERATION) if child.session_id not in order)
+            body = await self._client.call("GET", ("session", order[index], "children"), operation=native_host_constants.OPENCODE_TURN_OPERATION, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
+            order.extend(child.session_id for child in self._wire.parse_sessions(body, operation=native_host_constants.OPENCODE_TURN_OPERATION) if child.session_id not in order)
             index += _TREE_STEP
         self._tree = set(order)
         self._outside |= unknown - self._tree
@@ -265,7 +262,7 @@ class OpencodeTurnWatcher:
             if question.session_id in self._tree and question.request_id not in self._answered
         )
         for request_id, route, body, decision in pending:
-            await self._client.call("POST", route, operation=_OPERATION, body=body)
+            await self._client.call("POST", route, operation=native_host_constants.OPENCODE_TURN_OPERATION, body=body)
             self._answered.add(request_id)
             if len(self._decisions) < native_host_constants.NATIVE_MAX_RECORDED_DECISIONS:
                 self._decisions.append(decision)
@@ -297,7 +294,7 @@ class OpencodeTurnWatcher:
         if status.retry_message is not None:
             context["vendor_error"] = status.retry_message
         code = FailureCode.OPENCODE_USAGE_LIMITED if limited else FailureCode.OPENCODE_API_ERROR
-        return self._errors.build(code, f"opencode kept retrying the model call ({status.retry_attempt} attempts), so the turn was aborted.", operation=_OPERATION, context=context)
+        return self._errors.build(code, f"opencode kept retrying the model call ({status.retry_attempt} attempts), so the turn was aborted.", operation=native_host_constants.OPENCODE_TURN_OPERATION, context=context)
 
     def _settled(self, status: OpencodeSessionStatus | None, *, prompt_overdue: bool) -> bool:
         # @intent opencode-watcher-idle-confirmations
@@ -305,11 +302,11 @@ class OpencodeTurnWatcher:
         # status was seen, and only while no reply exists or the newest one
         # has time.completed; OPENCODE_IDLE_CONFIRMATIONS in a row end the
         # turn. Nothing seen within the request deadline is prompt_not_seen.
-        busy = status is not None and status.state in _BUSY_STATES
+        busy = status is not None and status.state in native_host_constants.OPENCODE_BUSY_STATES
         self._active = self._active or busy or self._user_message_id is not None
         if not self._active:
             if prompt_overdue:
-                raise self._errors.build(FailureCode.OPENCODE_API_ERROR, "opencode never showed the prompt as received.", operation=_OPERATION, context={"reason": "prompt_not_seen", "vendor_error": "prompt_not_seen"})
+                raise self._errors.build(FailureCode.OPENCODE_API_ERROR, "opencode never showed the prompt as received.", operation=native_host_constants.OPENCODE_TURN_OPERATION, context={"reason": "prompt_not_seen", "vendor_error": "prompt_not_seen"})
             return False
         newest = max(self._replies.values(), key=lambda message: (message.created_ms, message.message_id), default=None)
         counts = not busy and (newest is None or newest.completed_ms is not None)
@@ -338,9 +335,9 @@ class OpencodeTurnWatcher:
             source = self._source or (InterruptSource.DEADLINE if abort_overdue else InterruptSource.CALLER)
             return NativeTurnResult(handle=self._handle, status=NativeTurnStatus.INTERRUPTED, text=text, text_truncated=truncated, usage=usage, interrupt_source=source, decisions=decisions, decisions_dropped=self._dropped)
         if newest is None:
-            raise self._errors.build(FailureCode.OPENCODE_API_ERROR, "opencode went idle without replying to the turn's prompt.", operation=_OPERATION, context={"reason": "no_reply", "vendor_error": "no_reply"})
+            raise self._errors.build(FailureCode.OPENCODE_API_ERROR, "opencode went idle without replying to the turn's prompt.", operation=native_host_constants.OPENCODE_TURN_OPERATION, context={"reason": "no_reply", "vendor_error": "no_reply"})
         if error is not None and error.name != _OUTPUT_LENGTH_ERROR:
-            raise self._wire.reply_failure(error, operation=_OPERATION)
+            raise self._wire.reply_failure(error, operation=native_host_constants.OPENCODE_TURN_OPERATION)
         stop_reason = _OUTPUT_LENGTH_STOP if error is not None else newest.finish
         if stop_reason is not None:
             stop_reason = stop_reason[: native_host_constants.NATIVE_ID_MAX_CHARS]

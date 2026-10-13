@@ -53,13 +53,9 @@ from vidbyte.lib.errors import ConfigurationError, McpProtocolError, NativeHostE
 _ERRORS = NativeErrorFactory(NativeHarness.MUSE)
 _PARSE_OPERATION = "parse_msp_frame"
 _NANOSECONDS_PER_MILLISECOND = 1_000_000
-_SUCCESS_EXIT_CODE = 0
 _SERVER_VERSION_PATTERN = r"(\d+)\.(\d+)\.(\d+)"
-_FAILED_TERMINAL = "failed"
 _LAST_INDEX = -1
 _USAGE_EVENT_METHOD = "session/tokenUsage"
-_TRUE_TEXT = "true"
-_FALSE_TEXT = "false"
 _COMPACT_SEPARATORS = (",", ":")
 # The EC-101 next step, verbatim from the row.
 _PROMPT_TOO_LARGE_NEXT_STEP = "Shorten the prompt; Muse rejected its size."
@@ -233,7 +229,7 @@ class MuseWire:
         if problem is not None:
             return _ERRORS.build(_ERRORS.code(problem), _PROBLEM_MESSAGES[problem], operation=operation, context=context)
         if isinstance(data.get("retryable"), bool):
-            context["retryable"] = _TRUE_TEXT if data["retryable"] else _FALSE_TEXT
+            context["retryable"] = native_host_constants.NATIVE_TRUE_TEXT if data["retryable"] else native_host_constants.NATIVE_FALSE_TEXT
         context["vendor_error"] = str(error.get("message", ""))
         return _ERRORS.build(_ERRORS.code("api_error"), "Muse Code answered with an error.", operation=operation, context=context)
 
@@ -273,7 +269,7 @@ class MuseWire:
             raise _ERRORS.from_launch_failure(outcome.launch_failure, operation=operation)
         if outcome.timed_out:
             raise _ERRORS.build(_ERRORS.code("server_unreachable"), "muse --version did not finish in time.", operation=operation, context={"reason": "timeout"})
-        if outcome.exit_code != _SUCCESS_EXIT_CODE:
+        if outcome.exit_code != native_host_constants.NATIVE_SUCCESS_EXIT_CODE:
             raise _ERRORS.build(_ERRORS.code("process_exited"), f"muse --version exited with code {outcome.exit_code}.", operation=operation, context={"exit_code": str(outcome.exit_code)})
         match = re.search(native_host_constants.MUSE_VERSION_PATTERN, outcome.stdout)
         if match is None:
@@ -441,7 +437,7 @@ class MuseWire:
         try:
             fields = RecordFieldConverter.require_instance(params, "turn/completed", Mapping)
             terminal = RecordFieldConverter.require_instance(fields.get("terminal"), "terminal", str)
-            error = RecordFieldConverter.require_instance(fields.get("error"), "error", Mapping) if terminal == _FAILED_TERMINAL else {}
+            error = RecordFieldConverter.require_instance(fields.get("error"), "error", Mapping) if terminal == native_host_constants.MUSE_FAILED_TERMINAL else {}
             raw_usage = RecordFieldConverter.require_instance(fields.get("usage"), "usage", Mapping, optional=True)
             usage = None
             if raw_usage is not None:

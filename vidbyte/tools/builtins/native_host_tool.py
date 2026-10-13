@@ -46,7 +46,6 @@ _HANDLE_PARAMETER = "handle"
 _HANDLE_FIELDS = ("harness", "session_id", "turn_id")
 _UNNAMED_PARAMETER = "arguments"
 _RETRYABLE_KEY = "retryable"
-_TRUE_TEXT = "true"
 
 
 class NativeToolArguments:
@@ -186,7 +185,7 @@ class NativeHostTool(BaseTool, Generic[HostT]):
         code = error.failure_code.value
         metadata: dict[str, Any] = {"error": code, "next_step": error.next_step, "hint": error.next_step, "operation": self._TOOL_NAME, "harness": self._HARNESS}
         if _RETRYABLE_KEY in error.context:
-            metadata[_RETRYABLE_KEY] = error.context[_RETRYABLE_KEY] == _TRUE_TEXT
+            metadata[_RETRYABLE_KEY] = error.context[_RETRYABLE_KEY] == native_host_constants.NATIVE_TRUE_TEXT
         return ToolResult.error(self._TOOL_NAME, f"{code}: {error.message} Next step: {error.next_step}", metadata=metadata)
 
     def _refusal(self, exc: ConfigurationError) -> NativeHostError:

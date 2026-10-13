@@ -3,8 +3,8 @@
 PURPOSE: Holds every bound, default, pattern and fixed text the native Grok, opencode and Muse hosts, the GLM and DeepSeek backend profiles, and the canonical process helpers use, including NATIVE_HOST_NEXT_STEPS, the default next step for each of the 53 native failure codes plus configuration.invalid_argument and runtime.error.
 ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/, by NativeHostError in vidbyte/lib/errors/base.py, by vidbyte/lib/process/, by the McpStdioTransport extension in vidbyte/tools/mcp/transport.py, by the hosts under vidbyte/harnesses/native/ and by the tools under vidbyte/tools/builtins/.
 ARCHITECTURE NOTE: Stdlib only, so the error module can import it without a cycle. The timing constants that tests shrink (NATIVE_STOP_GRACE_SECONDS, NATIVE_KILL_WAIT_SECONDS, OPENCODE_POLL_INTERVAL_SECONDS) are read through this module object at call time by their users, never bound by a from-import, so one patch reaches every user.
-FUNCTION INVENTORY: No functions. Constants grouped as shared native bounds, NATIVE_HOST_NEXT_STEPS, Grok, opencode, Muse, and backend values.
-COMMON MODIFICATION PATTERNS: A new bound is a feature-prefixed constant here, used by name everywhere (lint A007). A new failure code adds its default next step to NATIVE_HOST_NEXT_STEPS with its FailureCode value as the key, verbatim from the spec's code catalog.
+FUNCTION INVENTORY: No functions. Constants grouped as shared native bounds, NATIVE_HOST_NEXT_STEPS, the next steps every host words the same way (a {tool} slot takes the host's own tool name), the fixed texts and HTTP statuses more than one host reads, then Grok, opencode, Muse, and backend values.
+COMMON MODIFICATION PATTERNS: A new bound is a feature-prefixed constant here, used by name everywhere (lint A007). A text or code that a second host or module needs moves here instead of being copied. A new failure code adds its default next step to NATIVE_HOST_NEXT_STEPS with its FailureCode value as the key, verbatim from the spec's code catalog.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte; vidbyte.lib.errors imports this module. 2. Do not name a constant with a password, token or secret word and give it a string (lint S054). 3. Do not add a carriage return to MUSE_REAP_SCRIPT; sh in the distro reads it from stdin.
 KNOWN EDGE CASES: NATIVE_HOST_NEXT_STEPS is keyed by the FailureCode value string because this module may not import the enum package. Patterns are plain strings; callers compile them where they use them. MUSE_REAP_SCRIPT runs with the caller's environment, which lacks the peer mark, so it never matches itself.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §6.3.1, §9.3
@@ -108,6 +108,22 @@ NATIVE_HOST_NEXT_STEPS: MappingProxyType[str, str] = MappingProxyType(
 )
 # The configuration.invalid_argument next step with the argument's name filled in, so it holds the row's token (EC-1, EC-138).
 NATIVE_INVALID_ARGUMENT_NEXT_STEP = "Fix the {field} argument and call again."
+# Next steps every host gives in the same words. {tool} is the
+# host's own tool, for example interrupt_grok_turn.
+NATIVE_NOT_OPEN_NEXT_STEP = "Open the host with async with and call it inside the block."
+NATIVE_REENTER_NEXT_STEP = "Create a new host object for each async with block."
+NATIVE_AT_CAP_NEXT_STEP = "This host already runs its maximum number of live turns; wait for or interrupt one with {tool}, then retry."
+NATIVE_STALE_CURSOR_NEXT_STEP = "Call {tool} without a cursor to start again."
+
+# Fixed texts and status codes more than one host reads or writes.
+NATIVE_TRUE_TEXT = "true"
+NATIVE_FALSE_TEXT = "false"
+NATIVE_SUCCESS_EXIT_CODE = 0
+NATIVE_HTTP_SUCCESS_FIRST_STATUS = 200
+NATIVE_HTTP_SUCCESS_END_STATUS = 300
+NATIVE_HTTP_SIGNED_OUT_STATUSES = frozenset({401, 403})
+NATIVE_HTTP_BILLING_STATUS = 402
+NATIVE_HTTP_RATE_LIMIT_STATUS = 429
 
 # Grok Build.
 GROK_MIN_VERSION = (1, 0, 13)
@@ -125,6 +141,9 @@ GROK_MAX_RULES = 32
 GROK_RULE_MAX_CHARS = 200
 GROK_MAX_TURNS_LIMIT = 200
 GROK_MIN_TURNS = 1
+GROK_CLIENT_NAME = "vidbyte-sdk"
+GROK_CLIENT_TITLE = "Vidbyte SDK"
+GROK_TURN_OPERATION = "wait_grok_turn"
 
 # opencode.
 OPENCODE_MIN_VERSION = (1, 18, 31)
@@ -153,6 +172,11 @@ OPENCODE_MESSAGE_ID_PATTERN = r"^msg[0-9A-Za-z_-]{1,128}$"
 OPENCODE_PART_ID_PATTERN = r"^prt[0-9A-Za-z_-]{1,128}$"
 OPENCODE_MCP_NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 OPENCODE_ENV_KEY_PATTERN = r"^[A-Za-z_][A-Za-z0-9_-]{0,127}$"
+OPENCODE_TURN_OPERATION = "wait_opencode_turn"
+OPENCODE_BUSY_STATES = frozenset({"busy", "retry"})
+OPENCODE_RETRY_STATE = "retry"
+OPENCODE_ASSISTANT_ROLE = "assistant"
+OPENCODE_MODEL_ID_SPLITS = 1
 
 # Muse Code.
 MUSE_MIN_VERSION = (1, 0, 1)
@@ -171,6 +195,8 @@ MUSE_UUID_RAND_B_BITS = 62
 MUSE_UUID_RAND_B_MASK = (1 << 62) - 1
 MUSE_DEFAULT_PATH = "/usr/local/bin/muse"
 MUSE_APPROVAL_MODE = "denyUnmatched"
+MUSE_FAILED_TERMINAL = "failed"
+MUSE_TURN_OPERATION = "wait_muse_turn"
 MUSE_PAGE_MAX_LIMIT = 200
 MUSE_USAGE_MAX_PAGES = 10
 MUSE_PEER_MARK_VARIABLE = "VIDBYTE_PEER_MARK"
@@ -208,3 +234,4 @@ exit 0
 # GLM and DeepSeek backend profiles.
 BACKEND_HTTP_TIMEOUT_SECONDS = 15.0
 BACKEND_MAX_RESPONSE_BYTES = 65536
+BACKEND_KEY_MISSING_NEXT_STEP = "Set {variable} in the environment to a valid key."

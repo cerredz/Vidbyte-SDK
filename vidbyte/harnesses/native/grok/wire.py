@@ -44,9 +44,6 @@ from vidbyte.lib.dataclasses.validation import (
 from vidbyte.lib.enums.native_hosts import AcpToolKind
 from vidbyte.lib.errors import ConfigurationError, McpProtocolError, NativeHostError
 
-_TURN_OPERATION = "wait_grok_turn"
-_CLIENT_NAME = "vidbyte-sdk"
-_CLIENT_TITLE = "Vidbyte SDK"
 _AUTH_REQUIRED = -32000
 _RESOURCE_NOT_FOUND = -32002
 _METHOD_NOT_FOUND = -32601
@@ -60,7 +57,6 @@ _TEXT_CONTENT = "text"
 _SELECTED = "selected"
 _CANCELLED = "cancelled"
 _EFFORT_NEXT_STEP = "Pick a reasoning effort list_grok_models shows for this model."
-_STALE_CURSOR_NEXT_STEP = "Call list_grok_sessions without a cursor to start again."
 _ONE_SHOT_TIMEOUT_NEXT_STEP = "The one-shot run was stopped at max_turn_seconds; raise it or use spawn_grok_session for long work."
 
 
@@ -91,7 +87,7 @@ class GrokWire:
         # §8.5: protocol 1, no file system or terminal for the agent, and who
         # the client is; the version is read on each call, as for Muse.
         capabilities = {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False}
-        client = {"name": _CLIENT_NAME, "title": _CLIENT_TITLE, "version": vidbyte.__version__}
+        client = {"name": native_host_constants.GROK_CLIENT_NAME, "title": native_host_constants.GROK_CLIENT_TITLE, "version": vidbyte.__version__}
         return {"protocolVersion": native_host_constants.GROK_ACP_PROTOCOL_VERSION, "clientCapabilities": capabilities, "clientInfo": client}
 
     @staticmethod
@@ -241,7 +237,7 @@ class GrokWire:
         if code == _METHOD_NOT_FOUND:
             return self._errors.build(self._errors.code("capability_missing"), f"This Grok Build release does not serve ACP {method}.", operation=operation, context={"method": method})
         if code == _INVALID_PARAMS and cursor is not None:
-            return self._errors.invalid_argument("cursor", "Grok Build refused the cursor; it is stale or was not issued by list_grok_sessions.", operation=operation, next_step=_STALE_CURSOR_NEXT_STEP)
+            return self._errors.invalid_argument("cursor", "Grok Build refused the cursor; it is stale or was not issued by list_grok_sessions.", operation=operation, next_step=native_host_constants.NATIVE_STALE_CURSOR_NEXT_STEP.format(tool="list_grok_sessions"))
         if isinstance(code, int) and code in _MALFORMED_CODES:
             return self._errors.build(self._errors.code("protocol_mismatch"), f"Grok Build could not read this SDK's {method} request.", operation=operation, context={"vendor_code": str(code), "method": method})
         context = {"vendor_code": str(code), "vendor_error": str(vendor.get("message", "")), **session}
@@ -269,7 +265,7 @@ class GrokWire:
             title = call.get("title")
             return GrokPermissionRequest(request_id=RecordFieldConverter.require_instance(frame.get("id"), "id", (int, str)), session_id=params.get("sessionId"), tool_kind=self._tool_kind(call.get("kind")), title="" if title is None else title, options=options)
         except ConfigurationError as exc:
-            raise self._mismatch(_TURN_OPERATION, "permission_request") from exc
+            raise self._mismatch(native_host_constants.GROK_TURN_OPERATION, "permission_request") from exc
 
     def parse_session_update(self, params: Any) -> GrokSessionUpdate:
         # A session/update notification's params: message text for a chunk, the cost for a usage update, the kind verbatim otherwise (EC-7).
@@ -281,7 +277,7 @@ class GrokWire:
             amount, currency = self._cost(update) if kind == self.USAGE_UPDATE else (None, None)
             return GrokSessionUpdate(session_id=params.get("sessionId"), kind=kind, text=text, cost_amount=amount, cost_currency=currency)
         except ConfigurationError as exc:
-            raise self._mismatch(_TURN_OPERATION, "session_update") from exc
+            raise self._mismatch(native_host_constants.GROK_TURN_OPERATION, "session_update") from exc
 
     def parse_prompt_result(self, result: Mapping[str, Any]) -> GrokPromptResult:
         # The session/prompt answer: a verbatim stopReason (EC-49) and the usage when Grok sent one (D-14).
@@ -290,7 +286,7 @@ class GrokWire:
             usage = result.get("usage")
             return GrokPromptResult(stop_reason=stop_reason, usage=None if usage is None else self._usage(usage))
         except ConfigurationError as exc:
-            raise self._mismatch(_TURN_OPERATION, "prompt_result") from exc
+            raise self._mismatch(native_host_constants.GROK_TURN_OPERATION, "prompt_result") from exc
 
     # ---- CLI outcomes ---------------------------------------------------------
 
@@ -310,7 +306,7 @@ class GrokWire:
             raise self._errors.build(self._errors.code("server_unreachable"), "Grok Build did not finish within control_timeout_seconds.", operation=operation, context={"reason": "timeout"})
         if self._signed_out(outcome):
             raise self._errors.build(self._errors.code("not_signed_in"), "Grok Build is not signed in.", operation=operation)
-        if outcome.exit_code != 0:
+        if outcome.exit_code != native_host_constants.NATIVE_SUCCESS_EXIT_CODE:
             context = {"vendor_code": str(outcome.exit_code), "vendor_error": outcome.stderr.strip() or outcome.stdout.strip(), "exit_code": str(outcome.exit_code)}
             raise self._errors.build(self._errors.code("api_error"), "Grok Build exited with an error.", operation=operation, context=context)
 
@@ -405,7 +401,7 @@ class GrokWire:
         if native_host_constants.GROK_SIGNED_OUT_LINE in {line.strip() for line in outcome.stdout.splitlines()}:
             return True
         text = (outcome.stdout + "\n" + outcome.stderr).casefold()
-        return outcome.exit_code != 0 and any(marker in text for marker in native_host_constants.GROK_NOT_SIGNED_IN_MARKERS)
+        return outcome.exit_code != native_host_constants.NATIVE_SUCCESS_EXIT_CODE and any(marker in text for marker in native_host_constants.GROK_NOT_SIGNED_IN_MARKERS)
 
 
 __all__ = ["GrokWire"]

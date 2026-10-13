@@ -35,7 +35,6 @@ from vidbyte.lib.enums.native_hosts import (
 )
 from vidbyte.lib.errors import McpProtocolError, NativeHostError
 
-_TURN_OPERATION = "wait_muse_turn"
 _SHUTDOWN_OPERATION = "__aexit__"
 _FRAME_POLL_SECONDS = 0.1
 _AGENT_MESSAGE_KIND = "agentMessage"
@@ -45,9 +44,6 @@ _ONCE_SCOPE = "once"
 _APPROVAL_KIND = "muse.approval"
 _USER_INPUT_KIND = "muse.user_input"
 _COMPLETED_TERMINAL = "completed"
-_FAILED_TERMINAL = "failed"
-_TRUE_TEXT = "true"
-_FALSE_TEXT = "false"
 _DEFAULT_FAILURE_PROBLEM = "api_error"
 _NONE_DROPPED = 0
 # turn/completed error kinds with their own rows (EC-117, EC-118); every other kind is api_error (EC-119).
@@ -127,7 +123,7 @@ class MuseTurnDriver:
                 if stop is not None and self._stop_source is None:
                     # Ask Muse to stop the turn; whether or not it answers, the grace period bounds the wait.
                     with contextlib.suppress(NativeHostError):
-                        await self.interrupt(stop, operation=_TURN_OPERATION)
+                        await self.interrupt(stop, operation=native_host_constants.MUSE_TURN_OPERATION)
                     self.close_after_grace(stop)
             # Turn what happened into the result, or into the turn's failure row.
             return self._outcome()
@@ -176,7 +172,7 @@ class MuseTurnDriver:
     async def _on_item(self, frame: Mapping[str, Any]) -> InterruptSource | None:
         # Only this turn's agentMessage items carry reply text; they join
         # with a blank line up to NATIVE_RESULT_TEXT_MAX_CHARS (EC-150).
-        item = MuseWire.parse_item_completed(frame.get("params"), operation=_TURN_OPERATION)
+        item = MuseWire.parse_item_completed(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         if item.kind != _AGENT_MESSAGE_KIND or item.turn_id != self._ack.turn_id:
             return None
         limit = native_host_constants.NATIVE_RESULT_TEXT_MAX_CHARS
@@ -198,7 +194,7 @@ class MuseTurnDriver:
         # scoped once. With no such choice nothing is chosen and the turn is
         # stopped by policy (EC-121); a failed decide stops it too, except
         # for the two benign races (EC-156).
-        request = MuseWire.parse_approval_request(frame.get("params"), operation=_TURN_OPERATION)
+        request = MuseWire.parse_approval_request(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         key = (request.approval_id, request.requirement_approval_id, request.requirement_source_index)
         if key in self._decided:
             return None
@@ -209,7 +205,7 @@ class MuseTurnDriver:
             self._decisions.append(NativeApprovalDecision(request_kind=_APPROVAL_KIND, title=title, outcome=ApprovalOutcome.CANCELLED))
             return InterruptSource.POLICY
         try:
-            await self._peer.call("approval/decide", MuseWire.approval_decide_params(request, choice.choice_id), operation=_TURN_OPERATION)
+            await self._peer.call("approval/decide", MuseWire.approval_decide_params(request, choice.choice_id), operation=native_host_constants.MUSE_TURN_OPERATION)
         except McpProtocolError as exc:
             self._decisions.append(NativeApprovalDecision(request_kind=_APPROVAL_KIND, title=title, outcome=ApprovalOutcome.CANCELLED))
             return None if MuseWire.is_benign_race(exc) else InterruptSource.POLICY
@@ -223,14 +219,14 @@ class MuseTurnDriver:
         # @intent muse-user-input-always-cancelled
         # D-11: a question to the user is always cancelled and recorded as
         # CANCELLED; a failed cancel stops the turn by policy (EC-156).
-        request = MuseWire.parse_user_input_request(frame.get("params"), operation=_TURN_OPERATION)
+        request = MuseWire.parse_user_input_request(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         if request.user_input_id in self._cancelled_inputs:
             return None
         self._cancelled_inputs.add(request.user_input_id)
         title = request.tool_name[: native_host_constants.NATIVE_ID_MAX_CHARS]
         self._decisions.append(NativeApprovalDecision(request_kind=_USER_INPUT_KIND, title=title, outcome=ApprovalOutcome.CANCELLED))
         try:
-            await self._peer.call("userInput/cancel", MuseWire.user_input_cancel_params(request), operation=_TURN_OPERATION)
+            await self._peer.call("userInput/cancel", MuseWire.user_input_cancel_params(request), operation=native_host_constants.MUSE_TURN_OPERATION)
         except McpProtocolError as exc:
             return None if MuseWire.is_benign_race(exc) else InterruptSource.POLICY
         except NativeHostError:
@@ -239,7 +235,7 @@ class MuseTurnDriver:
 
     async def _on_completed(self, frame: Mapping[str, Any]) -> InterruptSource | None:
         # Only the completion of the ack's turn ends this turn; others are ignored (EC-109).
-        completed = MuseWire.parse_turn_completed(frame.get("params"), operation=_TURN_OPERATION)
+        completed = MuseWire.parse_turn_completed(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         if completed.turn_id == self._ack.turn_id:
             self._completed = completed
         return None
@@ -263,12 +259,12 @@ class MuseTurnDriver:
         # is COMPLETED, or INTERRUPTED by whoever stopped it; a cancel the host
         # did not ask for came from another client, so its source is CALLER.
         completed = self._completed
-        if completed is not None and completed.terminal == _FAILED_TERMINAL:
+        if completed is not None and completed.terminal == native_host_constants.MUSE_FAILED_TERMINAL:
             kind = str(completed.error_kind)
-            context = {"vendor_kind": kind, "retryable": _TRUE_TEXT if completed.error_retryable else _FALSE_TEXT, "vendor_error": str(completed.error_message)}
-            raise self._errors.build(self._errors.code(_FAILURE_PROBLEMS.get(kind, _DEFAULT_FAILURE_PROBLEM)), f"The Muse turn failed with {kind}.", operation=_TURN_OPERATION, context=context)
+            context = {"vendor_kind": kind, "retryable": native_host_constants.NATIVE_TRUE_TEXT if completed.error_retryable else native_host_constants.NATIVE_FALSE_TEXT, "vendor_error": str(completed.error_message)}
+            raise self._errors.build(self._errors.code(_FAILURE_PROBLEMS.get(kind, _DEFAULT_FAILURE_PROBLEM)), f"The Muse turn failed with {kind}.", operation=native_host_constants.MUSE_TURN_OPERATION, context=context)
         if completed is None and self._stop_source is None:
-            raise self._errors.build(self._errors.code("process_exited"), "The Muse Code process stopped before the turn completed.", operation=_TURN_OPERATION, context={"reason": "process_exited"})
+            raise self._errors.build(self._errors.code("process_exited"), "The Muse Code process stopped before the turn completed.", operation=native_host_constants.MUSE_TURN_OPERATION, context={"reason": "process_exited"})
         finished = completed is not None and completed.terminal == _COMPLETED_TERMINAL
         cap = native_host_constants.NATIVE_MAX_RECORDED_DECISIONS
         return NativeTurnResult(

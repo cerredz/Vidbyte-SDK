@@ -46,7 +46,6 @@ _BYTE_ORDER_MARK = "\ufeff"
 _DISTRO_NOT_FOUND_MARKER = "WSL_E_DISTRO_NOT_FOUND"
 _NO_SUCH_FILE_MARKER = "No such file or directory"
 _COMMAND_NOT_FOUND_EXIT_CODE = 127
-_SUCCESS_EXIT_CODE = 0
 _WSL_UNAVAILABLE = "wsl_unavailable"
 _NOT_INSTALLED = "not_installed"
 
@@ -154,7 +153,7 @@ class MuseLauncher:
         # naming the listed distros; exit code 127 or the ENOENT text is a
         # muse missing inside the distro. A run that exited 0, or anything
         # else, is no WSL launch failure.
-        if not self.wsl_mode or exit_code == _SUCCESS_EXIT_CODE:
+        if not self.wsl_mode or exit_code == native_host_constants.NATIVE_SUCCESS_EXIT_CODE:
             return None
         text = stderr.replace(_NUL, "")
         if _DISTRO_NOT_FOUND_MARKER in text:

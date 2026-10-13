@@ -37,6 +37,7 @@ from vidbyte.lib.constants.native_hosts import (
     OPENCODE_MCP_TIMEOUT_MAX_MS,
     OPENCODE_MCP_TIMEOUT_MIN_MS,
     OPENCODE_REQUEST_TIMEOUT_SECONDS,
+    OPENCODE_RETRY_STATE,
     OPENCODE_RULE_MAX_CHARS,
     OPENCODE_SESSION_ID_PATTERN,
     OPENCODE_STARTUP_TIMEOUT_SECONDS,
@@ -61,7 +62,6 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _URL_SCHEMES = frozenset({"http", "https"})
 _PERMISSION_REQUEST_PREFIX = "per"
 _QUESTION_REQUEST_PREFIX = "que"
-_RETRY_STATE = "retry"
 
 
 def _require_http_url(value: str, field_name: str, *, allow_extras: bool) -> None:
@@ -459,7 +459,7 @@ class OpencodeSessionStatus:
         RecordFieldConverter.require_instance(self.session_id, "OpencodeSessionStatus.session_id", str)
         RecordFieldConverter.require_instance(self.state, "OpencodeSessionStatus.state", str)
         RecordFieldValidator.require_optional_count(self.retry_attempt, "OpencodeSessionStatus.retry_attempt")
-        if (self.state == _RETRY_STATE) != (self.retry_attempt is not None):
+        if (self.state == OPENCODE_RETRY_STATE) != (self.retry_attempt is not None):
             raise ConfigurationError("OpencodeSessionStatus.retry_attempt must be set exactly when OpencodeSessionStatus.state is retry.")
         RecordFieldConverter.require_instance(self.retry_message, "OpencodeSessionStatus.retry_message", str, optional=True)
         RecordFieldConverter.require_instance(self.retry_reason, "OpencodeSessionStatus.retry_reason", str, optional=True)

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from vidbyte.lib.constants.native_hosts import (
     MUSE_DEFAULT_PATH,
+    MUSE_FAILED_TERMINAL,
     NATIVE_CONTROL_TIMEOUT_MAX_SECONDS,
     NATIVE_CONTROL_TIMEOUT_SECONDS,
     NATIVE_ID_MAX_CHARS,
@@ -41,7 +42,6 @@ _DISTRO_MAX_CHARS = 64
 _MUSE_PATH_PATTERN = r"^/[^\x00\r\n]*$"
 _MUSE_PATH_MAX_CHARS = 4096
 _MODEL_PATTERN = r"^\S+$"
-_FAILED_TERMINAL = "failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,7 +273,7 @@ class MuseTurnCompleted:
         RecordFieldConverter.require_instance(self.error_message, "MuseTurnCompleted.error_message", str, optional=True)
         if self.error_retryable is not None:
             RecordFieldValidator.require_bool(self.error_retryable, "MuseTurnCompleted.error_retryable")
-        failed = self.terminal == _FAILED_TERMINAL
+        failed = self.terminal == MUSE_FAILED_TERMINAL
         error_fields = (self.error_kind, self.error_message, self.error_retryable)
         if failed != all(item is not None for item in error_fields) or (not failed and any(item is not None for item in error_fields)):
             raise ConfigurationError("MuseTurnCompleted.error_kind, MuseTurnCompleted.error_message and MuseTurnCompleted.error_retryable must be set exactly when MuseTurnCompleted.terminal is failed.")

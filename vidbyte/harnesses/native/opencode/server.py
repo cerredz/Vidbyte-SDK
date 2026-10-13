@@ -31,7 +31,6 @@ _SERVE_ARGUMENTS = ("serve", "--hostname", "127.0.0.1", "--port", "0")
 _LOGIN_VARIABLE = "OPENCODE_SERVER_USERNAME"
 _CREDENTIAL_VARIABLE = "OPENCODE_SERVER_PASSWORD"
 _CREDENTIAL_BYTES = 32
-_KEY_MISSING_STEP = "Set {variable} in the environment to a valid key."
 
 
 class OpencodeServer:
@@ -104,7 +103,7 @@ class OpencodeServer:
             provider = build_opencode_backend_provider(backend)
             key = os.environ.get(provider.source_env_var, "")
             if not key.strip():
-                raise self._errors.build(FailureCode.BACKEND_NOT_SIGNED_IN, f"{provider.source_env_var} is not set in the environment.", operation=operation, next_step=_KEY_MISSING_STEP.format(variable=provider.source_env_var))
+                raise self._errors.build(FailureCode.BACKEND_NOT_SIGNED_IN, f"{provider.source_env_var} is not set in the environment.", operation=operation, next_step=native_host_constants.BACKEND_KEY_MISSING_NEXT_STEP.format(variable=provider.source_env_var))
             self._errors.register_secret(key)
             overlay[provider.child_env_var] = key
         return overlay

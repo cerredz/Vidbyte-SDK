@@ -59,11 +59,6 @@ _EXIT = "__aexit__"
 _CONSTRUCT = "GrokHost"
 _ONE_PAGE = 1
 _SEARCH_MIN_LIMIT = 1
-_TRUE_TEXT = "true"
-_FALSE_TEXT = "false"
-_NOT_OPEN_NEXT_STEP = "Open the host with async with and call it inside the block."
-_REENTER_NEXT_STEP = "Create a new host object for each async with block."
-_AT_CAP_NEXT_STEP = "This host already runs its maximum number of live turns; wait for or interrupt one with interrupt_grok_turn, then retry."
 _READY_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; this SDK needs ACP session/list and session/resume."
 _RESUME_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; continuing needs ACP session/resume."
 _LIST_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; listing needs ACP session/list."
@@ -95,7 +90,7 @@ class GrokHost:
         try:
             # A host serves one block only, open or already closed.
             if self._entered:
-                raise self._errors.invalid_argument("host", "This GrokHost was already entered; a host serves one async with block.", operation=_ENTER, next_step=_REENTER_NEXT_STEP)
+                raise self._errors.invalid_argument("host", "This GrokHost was already entered; a host serves one async with block.", operation=_ENTER, next_step=native_host_constants.NATIVE_REENTER_NEXT_STEP)
             self._entered = True
             # Find grok: the explicit command, then PATH, then the installer's folder.
             if not self._cli.resolve_launcher():
@@ -398,7 +393,7 @@ class GrokHost:
         # D-9 / INV-12: the wait is shielded, so its timeout or cancellation
         # never reaches the turn; a FAILED turn raises the same error on
         # every wait.
-        operation = "wait_grok_turn"
+        operation = native_host_constants.GROK_TURN_OPERATION
         try:
             # Check the handle and the time budget before anything is looked up (EC-1).
             RecordFieldConverter.require_instance(handle, "handle", NativeTurnHandle)
@@ -447,7 +442,7 @@ class GrokHost:
         # EC-2: a host serves calls only inside its async with block.
         if self._entered and not self._closed:
             return
-        raise self._errors.build(self._errors.code("process_exited"), "This GrokHost is not open.", operation=operation, next_step=_NOT_OPEN_NEXT_STEP)
+        raise self._errors.build(self._errors.code("process_exited"), "This GrokHost is not open.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
 
     def _reserve(self, session_id: str | None, operation: str) -> str:
         # EC-9: reserves the slot, and the session when known, with no await; at the cap the row's own next step applies (EC-24).
@@ -456,7 +451,7 @@ class GrokHost:
         except NativeHostError as exc:
             if "live_turns" not in exc.context:
                 raise
-            raise self._errors.build(exc.failure_code, "This host already runs its maximum number of live turns.", operation=operation, next_step=_AT_CAP_NEXT_STEP, context=exc.context) from exc
+            raise self._errors.build(exc.failure_code, "This host already runs its maximum number of live turns.", operation=operation, next_step=native_host_constants.NATIVE_AT_CAP_NEXT_STEP.format(tool="interrupt_grok_turn"), context=exc.context) from exc
 
     def _new_peer(self, model: str | None, reasoning_effort: str | None) -> NativePeer:
         # One ACP peer with the caller's environment; the model flags make Grok report the model it will really use (D-12, D-18).
@@ -505,7 +500,7 @@ class GrokHost:
         # EC-35: the source must be in the workspace listing; EC-36: a new id must not name an existing session. Both ignore letter case: the ids arrive lower-cased and the listing is lower-cased here (INV-14).
         known = {session.session_id.lower() for session in listing.sessions}
         if session_id not in known:
-            truncated = _TRUE_TEXT if listing.next_cursor is not None else _FALSE_TEXT
+            truncated = native_host_constants.NATIVE_TRUE_TEXT if listing.next_cursor is not None else native_host_constants.NATIVE_FALSE_TEXT
             raise self._errors.build(self._errors.code("session_not_found"), "The source session is not in this workspace's session list.", operation=operation, context={"session_id": session_id, "truncated": truncated})
         if new_session_id is not None and new_session_id in known:
             raise self._errors.invalid_argument("new_session_id", "new_session_id already names a session in this workspace.", operation=operation)
@@ -518,7 +513,7 @@ class GrokHost:
         # starts no driver, so no turn outlives __aexit__.
         answer = await peer.send(GrokWire.PROMPT, self._wire.prompt_params(session_id, request.prompt), operation=operation)
         if self._closed:
-            raise self._errors.build(self._errors.code("process_exited"), "This GrokHost closed while the turn was starting.", operation=operation, next_step=_NOT_OPEN_NEXT_STEP)
+            raise self._errors.build(self._errors.code("process_exited"), "This GrokHost closed while the turn was starting.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
         handle = NativeTurnHandle(harness=NativeHarness.GROK, session_id=session_id, turn_id=turn_id)
         driver = GrokTurnDriver(peer=peer, wire=self._wire, errors=self._errors, handle=handle, request=request, answer=answer)
         task = asyncio.create_task(driver.run(), name="grok-turn-" + turn_id)

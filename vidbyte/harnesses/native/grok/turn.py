@@ -35,7 +35,6 @@ from vidbyte.lib.enums.native_hosts import (
 )
 from vidbyte.lib.errors import McpProtocolError, NativeHostError
 
-_TURN_OPERATION = "wait_grok_turn"
 _PERMISSION_KIND_PREFIX = "acp.permission:"
 _ALLOW_ONCE = "allow_once"
 _REJECT_ONCE = "reject_once"
@@ -88,7 +87,7 @@ class GrokTurnDriver:
                 # At the turn ceiling the host interrupts the turn itself; a dead pipe is closed below anyway (D-10).
                 if self._source is None and loop.time() >= deadline:
                     with contextlib.suppress(NativeHostError):
-                        await self.interrupt(InterruptSource.DEADLINE, operation=_TURN_OPERATION)
+                        await self.interrupt(InterruptSource.DEADLINE, operation=native_host_constants.GROK_TURN_OPERATION)
                 # Once the stop grace has passed, close the peer; its pending answer then fails and the loop ends.
                 if self._stop_at is not None and loop.time() >= self._stop_at:
                     await self._peer.close()
@@ -215,8 +214,8 @@ class GrokTurnDriver:
         if self._source is not None:
             return True, None, self._cost_usage
         if isinstance(failure, McpProtocolError):
-            raise self._wire.vendor_error(failure, operation=_TURN_OPERATION, method=GrokWire.PROMPT, session_id=self._handle.session_id)
-        raise self._errors.build(self._errors.code("process_exited"), "The Grok Build peer stopped before it answered the prompt.", operation=_TURN_OPERATION, context={"session_id": self._handle.session_id})
+            raise self._wire.vendor_error(failure, operation=native_host_constants.GROK_TURN_OPERATION, method=GrokWire.PROMPT, session_id=self._handle.session_id)
+        raise self._errors.build(self._errors.code("process_exited"), "The Grok Build peer stopped before it answered the prompt.", operation=native_host_constants.GROK_TURN_OPERATION, context={"session_id": self._handle.session_id})
 
 
 __all__ = ["GrokTurnDriver"]

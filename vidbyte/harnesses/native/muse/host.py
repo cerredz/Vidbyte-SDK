@@ -66,11 +66,7 @@ _SERVE = "serve"
 _VERSION_FLAG = "--version"
 _MIN_LIMIT = 1
 _RUNNING_STATUS = "running"
-_NOT_OPEN_NEXT_STEP = "Open the host with `async with` and call it inside the block."
-_REENTER_NEXT_STEP = "Create a new host object for each `async with` block."
-_AT_CAP_NEXT_STEP = "This host already runs its maximum number of live turns; wait for or interrupt one with interrupt_muse_turn, then retry."
 _TURN_NOT_FOUND_NEXT_STEP = "The turn is not running; use continue_muse_session to send a new prompt."
-_STALE_CURSOR_NEXT_STEP = "Call list_muse_sessions without a cursor to start again."
 # The failure rows MuseLauncher.resolve can name at __aenter__ (EC-94, EC-95), with their messages.
 _LAUNCHER_MESSAGES: Mapping[str, str] = MappingProxyType(
     {
@@ -106,7 +102,7 @@ class MuseHost:
         try:
             # A host serves one block only, open or already closed.
             if self._entered:
-                raise self._errors.invalid_argument("host", "This MuseHost was already entered; a host serves one async with block.", operation=operation, next_step=_REENTER_NEXT_STEP)
+                raise self._errors.invalid_argument("host", "This MuseHost was already entered; a host serves one async with block.", operation=operation, next_step=native_host_constants.NATIVE_REENTER_NEXT_STEP)
             self._entered = True
             # Find how muse starts: an explicit command, wsl.exe with a distro, or muse on PATH.
             problem = self._launcher.resolve()
@@ -448,7 +444,7 @@ class MuseHost:
 
     async def wait_muse_turn(self, handle: NativeTurnHandle, timeout_seconds: float = native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS) -> NativeTurnResult:
         """Wait up to timeout_seconds for a Muse turn's result; a timed-out wait leaves the turn running."""
-        operation = "wait_muse_turn"
+        operation = native_host_constants.MUSE_TURN_OPERATION
         try:
             self._require_open(operation)
             seconds = RecordFieldValidator.require_number(timeout_seconds, "timeout_seconds", maximum=native_host_constants.NATIVE_WAIT_MAX_SECONDS)
@@ -499,7 +495,7 @@ class MuseHost:
     def _require_open(self, operation: str) -> None:
         # EC-2: calls are served only inside the async with block.
         if not self._open:
-            raise self._errors.build(self._errors.code("process_exited"), "This MuseHost is not open.", operation=operation, next_step=_NOT_OPEN_NEXT_STEP)
+            raise self._errors.build(self._errors.code("process_exited"), "This MuseHost is not open.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
 
     def _reserve(self, session_id: str | None, operation: str) -> str:
         # The turn table's reservation; at the live-turn cap the error names the EC-107 next step.
@@ -508,7 +504,7 @@ class MuseHost:
         except NativeHostError as exc:
             if "live_turns" not in exc.context:
                 raise
-            raise self._errors.build(exc.failure_code, exc.message, operation=operation, next_step=_AT_CAP_NEXT_STEP, context=exc.context) from exc
+            raise self._errors.build(exc.failure_code, exc.message, operation=operation, next_step=native_host_constants.NATIVE_AT_CAP_NEXT_STEP.format(tool="interrupt_muse_turn"), context=exc.context) from exc
 
     def _turn_task(self, handle: NativeTurnHandle, operation: str) -> asyncio.Task[NativeTurnResult]:
         # The driver task of a handle this host issued; any other handle is EC-115 with its own next step.
@@ -570,7 +566,7 @@ class MuseHost:
         # turn table owns and closes (and reaps) the peer when the turn ends.
         # A host that closed while the turn was starting runs no driver.
         if not self._open:
-            raise self._errors.build(self._errors.code("process_exited"), "This MuseHost closed while the turn was starting.", operation=operation, next_step=_NOT_OPEN_NEXT_STEP)
+            raise self._errors.build(self._errors.code("process_exited"), "This MuseHost closed while the turn was starting.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
         handle = NativeTurnHandle(harness=NativeHarness.MUSE, session_id=session_id, turn_id=turn_id)
         closer = functools.partial(self._discard, peer, mark)
         driver = MuseTurnDriver(peer, handle=handle, ack=ack, max_turn_seconds=request.max_turn_seconds, errors=self._errors, closer=closer)
@@ -585,7 +581,7 @@ class MuseHost:
             result = await peer.call("session/list", MuseWire.session_list_params(self._workspace_root, cursor, limit), operation=operation)
         except McpProtocolError as exc:
             if cursor is not None and MuseWire.is_stale_cursor(exc):
-                raise self._errors.invalid_argument("cursor", "cursor is no longer valid for this session list.", operation=operation, next_step=_STALE_CURSOR_NEXT_STEP) from exc
+                raise self._errors.invalid_argument("cursor", "cursor is no longer valid for this session list.", operation=operation, next_step=native_host_constants.NATIVE_STALE_CURSOR_NEXT_STEP.format(tool="list_muse_sessions")) from exc
             raise MuseWire.vendor_failure(exc, operation=operation) from exc
         return MuseWire.read_session_page(result, operation=operation)
 

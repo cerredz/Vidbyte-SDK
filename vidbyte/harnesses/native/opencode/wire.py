@@ -46,16 +46,9 @@ from vidbyte.lib.errors import ConfigurationError, NativeHostError
 _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
 _TEXT_PART = "text"
 _TEXT_SEPARATOR = "\n"
-_RETRY_STATE = "retry"
 _BODY_MEMBER = "body"
 _PROVIDER_AUTH_ERROR = "ProviderAuthError"
 _API_ERROR = "APIError"
-_SIGNED_OUT_STATUSES = frozenset({401, 403})
-_RATE_LIMIT_STATUS = 429
-_BILLING_STATUS = 402
-_TRUE_TEXT = "true"
-_FALSE_TEXT = "false"
-_MODEL_ID_SPLITS = 1
 
 
 class _Members:
@@ -259,7 +252,7 @@ class _WireRecords:
         # One GET /session/status entry; a retry entry also carries its attempt, message and action reason.
         entry = _Members.mapping(value, "status")
         state = _Members.member(entry, "type", str)
-        if state != _RETRY_STATE:
+        if state != native_host_constants.OPENCODE_RETRY_STATE:
             return OpencodeSessionStatus(session_id=session_id, state=state)
         action: Mapping[str, Any] = _Members.member(entry, "action", Mapping, optional=True) or {}
         return OpencodeSessionStatus(
@@ -299,7 +292,7 @@ class OpencodeWire:
         # POST …/prompt_async: one text part, plus the model split at its first slash, the agent and the system text.
         body: dict[str, object] = {"parts": [{"type": _TEXT_PART, "text": request.prompt}]}
         if request.model is not None:
-            provider_id, model_id = request.model.split("/", _MODEL_ID_SPLITS)
+            provider_id, model_id = request.model.split("/", native_host_constants.OPENCODE_MODEL_ID_SPLITS)
             body["model"] = {"providerID": provider_id, "modelID": model_id}
         if request.agent is not None:
             body["agent"] = request.agent
@@ -482,13 +475,13 @@ class OpencodeWire:
         if error.status_code is not None:
             context["status_code"] = str(error.status_code)
         if error.retryable is not None:
-            context["retryable"] = _TRUE_TEXT if error.retryable else _FALSE_TEXT
+            context["retryable"] = native_host_constants.NATIVE_TRUE_TEXT if error.retryable else native_host_constants.NATIVE_FALSE_TEXT
         api_status = error.status_code if error.name == _API_ERROR else None
-        if error.name == _PROVIDER_AUTH_ERROR or api_status in _SIGNED_OUT_STATUSES:
+        if error.name == _PROVIDER_AUTH_ERROR or api_status in native_host_constants.NATIVE_HTTP_SIGNED_OUT_STATUSES:
             return self._errors.build(FailureCode.OPENCODE_NOT_SIGNED_IN, "The model provider rejected opencode's credentials during the turn.", operation=operation, context=context)
-        if api_status == _RATE_LIMIT_STATUS:
+        if api_status == native_host_constants.NATIVE_HTTP_RATE_LIMIT_STATUS:
             return self._errors.build(FailureCode.OPENCODE_USAGE_LIMITED, "The model provider rate-limited the turn.", operation=operation, context=context)
-        if api_status == _BILLING_STATUS:
+        if api_status == native_host_constants.NATIVE_HTTP_BILLING_STATUS:
             return self._errors.build(FailureCode.OPENCODE_BILLING_ERROR, "The model provider refused the turn for billing.", operation=operation, context=context)
         return self._errors.build(FailureCode.OPENCODE_API_ERROR, "The turn's last reply ended with a model provider error.", operation=operation, context=context)
 

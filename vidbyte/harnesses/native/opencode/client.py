@@ -28,8 +28,6 @@ from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import NativeHostError, ProviderRequestError
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
 
-_SUCCESS_STATUS_FIRST = 200
-_SUCCESS_STATUS_END = 300
 _UNAUTHORIZED_STATUS = 401
 _NOT_FOUND_STATUS = 404
 _CONFLICT_STATUS = 409
@@ -83,7 +81,7 @@ class OpencodeClient:
         response = await self._send(method, self._url(segments, query), body, operation=operation)
 
         # A non-2xx answer becomes its row; the route's own 404 and 409 meanings come from the caller.
-        if not _SUCCESS_STATUS_FIRST <= response.status_code < _SUCCESS_STATUS_END:
+        if not native_host_constants.NATIVE_HTTP_SUCCESS_FIRST_STATUS <= response.status_code < native_host_constants.NATIVE_HTTP_SUCCESS_END_STATUS:
             raise self._status_error(response, operation=operation, not_found=not_found, conflict=conflict, context=context)
 
         # A 2xx body must be JSON (or empty, as for 204).
@@ -97,7 +95,7 @@ class OpencodeClient:
         response = await self._send(_GET, self._url(segments, None), None, operation=operation)
         if response.status_code == _NOT_FOUND_STATUS:
             return False
-        if not _SUCCESS_STATUS_FIRST <= response.status_code < _SUCCESS_STATUS_END:
+        if not native_host_constants.NATIVE_HTTP_SUCCESS_FIRST_STATUS <= response.status_code < native_host_constants.NATIVE_HTTP_SUCCESS_END_STATUS:
             raise self._status_error(response, operation=operation, not_found=None, conflict=None, context=None)
         return True
 
