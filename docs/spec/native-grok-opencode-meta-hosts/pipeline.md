@@ -27,7 +27,7 @@ started: 2026-10-13 01:30 UTC
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
-- S5 repair iterations: 6/8
+- S5 repair iterations: 7/8
 - S5 re-review rounds: 2/2 (round 2 launched; last allowed)
 
 ## Decisions the orchestrator made
@@ -262,6 +262,19 @@ started: 2026-10-13 01:30 UTC
   - **The author's own runs:** four packs 2 failed, 1659 passed, 19 skipped; scratch fix-shim 5/5 green.
   - **R-24 token:** R-24 cites EC-2's `async with` token. Today's code already carries it, so it is not a defect.
   - **Next:** S5 iteration 7 (7/8).
+- 2026-10-13 21:09 UTC — **Iteration 7 returned BLOCKED.** R-22 (48e9343a) and R-24 (19582f13) are fixed.
+  - **My verification:**
+    - 2 source files, +10/−5; frozen files unchanged; INV-19 holds;
+    - local = remote = 33d77cd4;
+    - ci 38465574661 on 19582f13: attempt 2 success on 3.11, 3.12 and Package (attempt 1, 3.11: the inherited main flake `test_cancelled_waiter_does_not_break_transport`, seen on 15 other branches);
+    - static-policy 38465578419: success;
+    - review statuses set.
+  - **The block.** Gate 5 exposed a pre-existing PR defect: on CPython 3.11, `wait_for(stdin.drain(), s)` at `tools/mcp/transport.py:323` and `:423` can swallow a cancel (gh-86296). AC-4/INV-2 `test_cancelling_a_call_propagates_and_stops_what_it_started[list_grok_sessions]` then waits out the control timeout. It fails about 1 run in 12 to 40.
+  - **My own observation.** One of the two new R-22/R-24 tests failed once in 62 isolated runs at 19582f13: about 32 s, timeout-shaped, output not captured. It passed 60 consecutive runs after that. Suspected to be the same class. I pass it to iteration 8 as a lead, not as a finding.
+- 2026-10-13 21:09 UTC — **Decision: I answered the BLOCKED myself and chose option 1: fix it in iteration 8 (8/8, the last).**
+  - Why: it is engineering, not product intent. The spec already settles it (AC-4/INV-2 require a cancel to propagate). The fault is in the PR's own code, and it makes a gate flaky on a CI leg (3.11). The remedy was validated by probe in the iteration 7 verify-log.
+  - **Order:** S2 addendum 5 (a deterministic test forcing the swallow window), then iteration 8, then the S6 body update.
+  - **If iteration 8 does not converge,** I stop and report. I will not raise the cap.
 
 ## User replies (verbatim)
 (none during the run)
