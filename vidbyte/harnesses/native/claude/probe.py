@@ -1,7 +1,7 @@
 """FILE: vidbyte/harnesses/native/claude/probe.py
 
 PURPOSE: Finds the Claude Code executable and probes it with one initialize handshake that sends no prompt, for readiness and the model list.
-ROLE IN CODEBASE: Used by ClaudeHost (host.py). locate_cli resolves the host's CLI path once at entry and screens a request's own cli_path; readiness backs check_claude_ready; initialize, version_ok, signed_in and models back list_claude_models; version_ok also backs the version check a turn runs after it connects (session.py).
+ROLE IN CODEBASE: Used by ClaudeHost (host.py). locate_cli resolves the host's CLI path once at entry and screens a request's own cli_path; readiness backs check_claude_ready and list_claude_models, which reads models from the initialize answer readiness returns with it; version_ok also backs the version check a turn runs after it connects (session.py).
 ARCHITECTURE NOTE: locate_cli only looks paths up with shutil.which and Path.is_file, and never opens or runs a file. initialize starts Claude Code with nothing but cli_path, reads the answer it gave while starting, and always closes it through one disconnect task that a cancellation cannot cut short.
 COMMON MODIFICATION PATTERNS: A new readiness fact adds one read of the initialize answer in readiness and one ClaudeReadiness field. A new install location adds one entry to the CLI path constants in vidbyte/lib/constants/claude.py.
 KNOWN EDGE CASES: On Windows the SDK can start only a native executable, so an npm .cmd or .bat shim is never returned, and a given path naming one screens to "" (claude.not_installed); every suffix test ignores case and trailing dots and spaces. An account whose provider is not Anthropic's own API counts as signed in, because its credentials live outside Claude Code. A disconnect that fails after a probe leaves the probe's answer unchanged.
@@ -97,18 +97,18 @@ class ClaudeProbe:
         return info
 
     @staticmethod
-    async def readiness(sdk: ClaudeSdkTypes, cli_path: str) -> ClaudeReadiness:
-        """Return whether Claude Code at cli_path starts, is new enough and is signed in; a failed check is reported, never raised."""
+    async def readiness(sdk: ClaudeSdkTypes, cli_path: str) -> tuple[ClaudeReadiness, Mapping[str, Any]]:
+        """Return whether Claude Code at cli_path starts, is new enough and is signed in, with the initialize answer ({} when none); a failed check is reported, never raised."""
         # Without an executable there is nothing to start.
         if not cli_path:
             missing = ClaudeFailureMapper.failure(FailureCode.CLAUDE_NOT_INSTALLED, "No Claude Code executable was found or given.")
-            return ClaudeReadiness(cli_path="", cli_version="", signed_in=False, failure=missing)
+            return ClaudeReadiness(cli_path="", cli_version="", signed_in=False, failure=missing), {}
         # Start Claude Code once, with no prompt; a failure to start or answer becomes the readiness failure.
         try:
             info = await ClaudeProbe.initialize(sdk, cli_path)
         except ClaudeOperationError as error:
             failed = ClaudeFailure(code=FailureCode(error.failure_code), reason=error.reason, next_step=error.next_step)
-            return ClaudeReadiness(cli_path=cli_path, cli_version="", signed_in=False, failure=failed)
+            return ClaudeReadiness(cli_path=cli_path, cli_version="", signed_in=False, failure=failed), {}
         # Check the version it reported first, then whether an account or API key is in use.
         version = str(info.get(CLAUDE_VERSION_FIELD) or "")
         account = info.get(CLAUDE_ACCOUNT_FIELD)
@@ -118,7 +118,7 @@ class ClaudeProbe:
             failure = ClaudeFailureMapper.failure(FailureCode.CLAUDE_VERSION_UNSUPPORTED, f"Claude Code reported version {version or 'none'}, older than {CLAUDE_MIN_CLI_VERSION}.")
         elif not signed_in:
             failure = ClaudeFailureMapper.failure(FailureCode.CLAUDE_NOT_SIGNED_IN, "Claude Code reports no signed-in account and no API key.")
-        return ClaudeReadiness(cli_path=cli_path, cli_version=version, signed_in=signed_in, failure=failure)
+        return ClaudeReadiness(cli_path=cli_path, cli_version=version, signed_in=signed_in, failure=failure), info
 
     @staticmethod
     def models(info: Mapping[str, Any]) -> tuple[ClaudeModelInfo, ...]:

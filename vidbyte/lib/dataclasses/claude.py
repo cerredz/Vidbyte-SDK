@@ -83,6 +83,12 @@ class _ClaudeFieldRules:
                 raise _ClaudeFieldRules.invalid(f"{type(record).__name__}.{name} has the wrong type; expected {expected}.")
 
     @staticmethod
+    def text(value: object, name: str) -> None:
+        """Reject a value that is not text, such as a number a model wrote for an id."""
+        if not isinstance(value, str):
+            raise _ClaudeFieldRules.invalid(f"{name} must be text.")
+
+    @staticmethod
     def texts(value: object, name: str) -> None:
         """Reject a value that is not a tuple of non-empty text."""
         if not isinstance(value, tuple) or not all(isinstance(item, str) and item for item in value):
