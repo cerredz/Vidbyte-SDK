@@ -150,7 +150,7 @@ from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.security import PermissionDecision, PermissionPolicy
+from vidbyte.tools.security import PermissionCeiling, PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
 
 
@@ -1420,7 +1420,7 @@ class AgentRuntime:
         decision = self.permission_policy.check(spec, call)
         if decision is PermissionDecision.DENY:
             raise PermissionDeniedError(
-                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
+                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}{PermissionCeiling.denial_note(spec.permission)}",
                 details={"tool_name": spec.name, "permission": spec.permission.value},
             )
 
