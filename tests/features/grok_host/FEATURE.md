@@ -95,6 +95,7 @@ These are the failure inventory the tests were chosen from, given as input → w
   - a CLI run never stops at `max_turn_seconds` (EC-38).
 - **Leaks:**
   - a cancelled spawn, continue, check or list leaves its peer running (AC-4, EC-4);
+  - on CPython 3.11 a cancel that lands just as a bounded write drain finishes is swallowed by `asyncio.wait_for` (gh-86296), so a cancelled spawn, continue or list waits out the control timeout and raises `grok.server_unreachable`, and a cancelled `interrupt_grok_turn` returns a result (AC-4, INV-2). A cancel during the write that does propagate leaves the request's pending answer future for the peer close to fail unseen, so asyncio logs "Future exception was never retrieved".
   - a short-lived peer outlives its read;
   - `__aexit__` leaves turns running (EC-8);
   - a turn's grandchild survives the turn (EC-10);
@@ -139,6 +140,7 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **RACE-1 (R-19): a cancel write that lost the race to Grok's answer raised `grok.process_exited`.** On CPython 3.11 the cancel's drain yields once; if the `session/prompt` answer is handled in that yield, the driver closes the peer and the post-drain check turns a write that reached Grok into `BrokenPipeError`. Caught by `test_interrupt_whose_cancel_write_loses_to_the_turn_end_succeeds` in `test_grok_host_turns.py`, which forces the window with the delegating `cancel_drain_gate` seam. EC-51's POSIX test still guards a peer that exited before answering.
 - **RACE-1 (R-20): an interrupt during the driver's close reported `was_running=True`.** Grok had answered, so nothing was sent, but the host still saw a live task. Caught by `test_interrupt_after_grok_answered_while_the_driver_is_still_closing_sends_nothing` in `test_grok_host_turns.py`.
 - **Post-S6 (R-24): a host closed during spawn left an unretrieved future.** `_launch` wrote `session/prompt`, saw the host closed and raised `grok.process_exited` before any driver started, so nothing read the answer future that the peer close then failed. Caught by `test_host_closed_during_spawn_leaves_no_unretrieved_future` in `test_grok_host_turns.py`, which also requires the spawn to keep raising `grok.process_exited`.
+- **Iteration 7 (3.11 swallowed cancel): a cancel that landed as a bounded write drain finished was lost.** `McpStdioTransport._send` and `_write_frame` drain with `asyncio.wait_for`; on CPython 3.11 it returns the finished drain's result and drops a cancel that arrived before the caller resumed (gh-86296), so `test_cancelling_a_call_propagates_and_stops_what_it_started` failed about 1 run in 12 to 40. Caught deterministically by `test_cancel_landing_as_the_request_drain_finishes_still_propagates` (spawn, continue, list; it also requires no "never retrieved" record) and `test_cancel_landing_as_the_session_cancel_drain_finishes_still_propagates` in `test_grok_host_process_bounds.py`, which force the window with the delegating `drain_window_gate` seam.
 
 ## Test Suite Map
 
@@ -148,7 +150,7 @@ These are the failure inventory the tests were chosen from, given as input → w
 - `test_grok_host_windows_launcher.py`: EC-157 (r8, R-2, win32-only): a `grok.cmd` on PATH and an explicit `.cmd`/`.bat` `grok_command` are refused at `__aenter__` and never run.
 - `test_grok_host_turns.py`: approvals and decisions (with a credential in the title scrubbed, re-review R-17), stop reasons, interrupt and ceiling, an interrupt racing Grok's own answer (RACE-1: R-19, R-20), a host closed during spawn (R-24), unknown notifications, the text cap, unknown usage, repeated failure, handle scoping, concurrency, wire shapes and peer argv, and a peer that exits mid-write.
 - `test_grok_host_reads.py`: readiness, catalog, pages and cursors, casefolded search and its page cap, one-shot and fork results and argv, live model checks, text capping, garbage frames, and the child environment.
-- `test_grok_host_process_bounds.py`: the AC-3 bound with shrunk and default timings, cancellation of each call, cancelled waits, `__aexit__` with live turns or on error or cancellation, grandchild reaping, and the one-shot tree stop.
+- `test_grok_host_process_bounds.py`: the AC-3 bound with shrunk and default timings, cancellation of each call (also as a bounded write drain finishes, the 3.11 swallowed-cancel window, at the request and notification sites), cancelled waits, `__aexit__` with live turns or on error or cancellation, grandchild reaping, and the one-shot tree stop.
 - `test_grok_host_records.py`: `RecordFieldValidator`, the shared native records, the Grok settings and request records (EC-23, EC-33), and frozen slotted dataclasses.
 - `test_grok_host_tools.py`: the toolset table, `read_only`, AC-15, and EC-138 to EC-145.
 - `test_grok_host_shared_contract.py`: the code catalog, `NativeHostError`, `NativeErrorFactory`, `NativeTurnTable`, enums, constants, INV-19, AC-18 and AC-20.

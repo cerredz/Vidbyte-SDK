@@ -656,3 +656,95 @@ The 2 failures are exactly the 2 new tests, with the same reasons as above. The 
 - **Keep the `cancelled()` guard (R-22).** `task.exception()` raises `CancelledError` on a cancelled task, and loop teardown can cancel a driver.
 - **A different R-24 fix moves the window.** Suppose you move the closed-host check before the `session/prompt` write instead of cancelling the future. The one-`session/prompt` precondition then fails, with a message that starts with `precondition:`. That failure means the window moved, not that the fix is wrong. Ask the orchestrator; do not edit the test.
 - **Do not add `gc.collect()` or `caplog` handling to other tests.** The two new tests isolate themselves.
+
+## Addendum 5 — 3.11 swallowed cancel in the bounded drain (AC-4, INV-2)
+
+Repair iteration 7's full-suite run exposed a defect in this PR's transport (verify-log, "Iteration 7"). `McpStdioTransport._send` (`transport.py:323`) and `_write_frame` (`:423`) drain a write that has a deadline with `await asyncio.wait_for(stdin.drain(), seconds)`. On CPython 3.11, `wait_for` runs the drain in an inner task. Suppose the caller is cancelled after that inner task finished but before the caller resumes. Then `wait_for` returns the drain's result, and the cancel is lost (CPython gh-86296). The call goes on, waits out the control timeout on a silent fake, and raises `grok.server_unreachable` ("did not answer in time") instead of `CancelledError`. This breaks AC-4 and INV-2. The existing AC-4 test hits the window about 1 run in 12 to 40. Python 3.12+ builds `wait_for` on `asyncio.timeout` and has no such window.
+
+This addendum adds 2 test functions (4 cases) to `test_grok_host_process_bounds.py`. They force the window every time. They use the public API, the §13 fakes as real child processes, and one delegating seam defined in the file. They change no fixture, no fake default and no existing assertion. As in addendum 4, the pack's FEATURE.md gained a failure-mode line, a regression line and a suite-map mention, and its README.md gained a log line.
+
+**The seam, `drain_window_gate`.** It follows `cancel_drain_gate` (R-19, `test_grok_host_turns.py`): it wraps functions, always calls the real ones, and only chooses the moment of one cancel.
+1. It wraps `NativePeer.call`, `send` and `notify` (spec §8.5 names). When the task under test writes the named frame, the gate is armed.
+2. It wraps `asyncio.wait_for` through the module attribute. The first bounded `wait_for` in that task whose awaitable is a `StreamWriter.drain` coroutine is that frame's drain. The gate passes the real `wait_for` a small coroutine instead, which awaits the real drain and then cancels the caller.
+3. **On 3.11**, that coroutine runs in `wait_for`'s inner task. So the cancel lands just as that task ends, while the caller waits to resume. That is the gh-86296 window, every time.
+4. **On 3.12+**, the coroutine runs in the caller's own task. A task that cancels itself does not receive the cancel at once: the cancel stays pending until the task's next suspension. With the planned fix, the host's cleanup would then receive a second cancel. So on 3.12+ a loop callback cancels the caller, and the cancel is delivered inside the drain, as for a drain that blocks on a full pipe. A stdlib-only simulation (scratch `seam_sim.py`, run on 3.11.0 and 3.13) showed this: with a self-cancel and the fix, the cleanup logged "interrupted by a second cancel"; with the committed gate it did not.
+5. The tests assert that the gate engaged, with a `seam:` message. A fix that stops draining through `asyncio.wait_for` therefore fails loudly instead of passing for nothing.
+
+### Coverage map
+
+| Spec ID | Test (file → name) | Level | Failure it catches (input + state → wrong output) | How it could pass vacuously, and why it does not |
+|---|---|---|---|---|
+| AC-4, INV-2, EC-4 (request site, `_send`) | `grok_host/test_grok_host_process_bounds.py` → `test_cancel_landing_as_the_request_drain_finishes_still_propagates` [spawn_grok_session, continue_grok_session, list_grok_sessions] | R (concurrency, forced window) | The fake is stubborn, with `CANCEL_CASES`' silent `session/new`, `session/resume` or `session/list`, and `control_timeout_seconds=5`. The call is cancelled as the silent request's bounded drain finishes → on 3.11 the call waits 5 s and raises `grok.server_unreachable` instead of `CancelledError`. | **The window is missed.** `drain_window_gate.engaged` must be true: the gate found the bounded drain of that exact frame in the calling task. **A late cancel.** The outcome must be `CancelledError`, not a `NativeHostError` or a result, and it must arrive less than 5 s after the cancel (a stop under `fast_stop` takes at most 1.3 s). **A leak.** On POSIX, every process the call started is gone within `peer_bound`, as in the existing AC-4 test. |
+| INV-2 (remedy step 3: the cancelled write drops its pending future) | the same test, its last assertion | R | A fix re-raises the cancel, but `_send` leaves the request's pending answer future in its map. The peer close then fails that future, and nobody reads it → asyncio logs "Future exception was never retrieved". | It uses addendum 4's technique: `gc.collect()` and `caplog.clear()` first, the call inside the helper coroutine `cancel_in_the_drain_window`, then `asyncio.sleep(0)` and `gc.collect()` before the check. The scratch run below shows the check red 3 of 3 times with the fix minus step 3. |
+| INV-2, FR-7 (notification site, `_write_frame`) | `grok_host/test_grok_host_process_bounds.py` → `test_cancel_landing_as_the_session_cancel_drain_finishes_still_propagates` | R (concurrency, forced window) | A held turn. `interrupt_grok_turn` is cancelled as its `session/cancel` drain finishes → on 3.11 it returns a `NativeInterruptResult` to a cancelled caller. | It requires the same `seam:` engagement and the `CancelledError` outcome. A precondition requires that `session/cancel` reached the fake. A fix applied to `_send` only leaves this test red. |
+
+### Tests deliberately NOT written (addendum 5)
+
+| Candidate | Why it would not earn its keep |
+|---|---|
+| `check_grok_ready` | It runs the CLI and writes no JSON-RPC frame, so it has no bounded drain. |
+| Muse twins of both tests | Muse reaches the same two lines through the same `NativePeer`. A twin would prove the same lines again and add about 20 s of red run. |
+| **The answer wait in `McpStdioTransport.request`** (`await asyncio.wait_for(future, timeout=seconds)`, `transport.py:349`) | It has the same gh-86296 window: a cancel that lands after the answer future resolved, but before the caller resumes, is dropped. A scratch probe (`test_s2_probe_response_wait.py`, not committed) cancelled `list_grok_sessions` from a done-callback on its `session/list` answer future. The call returned a `GrokSessionPage` to the cancelled caller, today **and with the planned remedy**, because the remedy covers only the drains. The briefing requires these tests to pass with the planned remedy, so this test is not committed. It is routed to the orchestrator as an open item. |
+| The close path's bounded `wait_for(process.wait(), …)` (`transport.py:473`, `:499`, `:509`) | These may have the same window inside `NativePeer.close`, for example during a cancelled `__aexit__`. They were not probed: that is outside this brief, and `close()` never raises by design. Listed for the orchestrator. |
+| The default unbounded drain (INV-18) | Existing tests in `tests/test_mcp_stdio_transport.py` pin it, and the briefing rules it out. |
+| Asserting the mechanism: the `_drain` helper, `task.cancelling()`, or `except CancelledError` in `_send` | The tests assert outcomes only. The seam relies on one detail that callers cannot see: the drain still goes through `asyncio.wait_for` with a `StreamWriter.drain` coroutine. The orchestrator already decided to keep `wait_for`, for R-19. |
+
+### Red run (addendum 5)
+
+Bootstrap: none. The environment is global Python 3.11.0 on win32, reached through `PYTHONPATH=$(pwd)`, with `pytest 8.3.5` and pytest-asyncio 1.3.0 in strict mode. No `pip install` ran. HEAD is `32d7ef51`, and the new tests are in the working tree.
+
+**Each new test alone, 5 runs** (`PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q "tests/features/grok_host/test_grok_host_process_bounds.py::<node>"`):
+
+| Test | Runs | Observed red reason |
+|---|---|---|
+| `…request_drain_finishes_still_propagates[continue_grok_session]` | 5 / 5 red, 6.4 to 6.6 s each | `AssertionError: AC-4 / INV-2: continue_grok_session was cancelled as its session/resume drain finished and raised NativeHostError grok.server_unreachable: The Grok Build process did not answer in time.` |
+| `…[list_grok_sessions]` | 5 / 5 red, 6.4 to 6.8 s each | the same, for `session/list` |
+| `…[spawn_grok_session]` | 5 / 5 red, 6.4 to 6.8 s each | the same, for `session/new` |
+| `…session_cancel_drain_finishes_still_propagates` | 5 / 5 red, 1.0 to 1.2 s each | `AssertionError: INV-2: interrupt_grok_turn was cancelled as its session/cancel drain finished and returned NativeInterruptResult` |
+
+In every run the `seam:` assertion passed, so the window was forced, not missed.
+
+**The four packs, once:**
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q tests/features/grok_host tests/features/opencode_host tests/features/muse_host tests/features/native_backends
+…
+FAILED tests/features/grok_host/test_grok_host_process_bounds.py::test_cancel_landing_as_the_request_drain_finishes_still_propagates[continue_grok_session]
+FAILED tests/features/grok_host/test_grok_host_process_bounds.py::test_cancel_landing_as_the_request_drain_finishes_still_propagates[list_grok_sessions]
+FAILED tests/features/grok_host/test_grok_host_process_bounds.py::test_cancel_landing_as_the_request_drain_finishes_still_propagates[spawn_grok_session]
+FAILED tests/features/grok_host/test_grok_host_process_bounds.py::test_cancel_landing_as_the_session_cancel_drain_finishes_still_propagates
+4 failed, 1661 passed, 19 skipped in 182.08s (0:03:02)
+```
+
+The 4 failures are exactly the 4 new cases, with the reasons above. The 1661 passes and 19 skips match the iteration-7 baseline. The existing AC-4 test passed in this run.
+
+**Can the tests pass?** A scratch copy outside the worktree (`git archive HEAD`, plus the new test file) held the verify-log remedy, applied to its copy of `transport.py`. Nothing from it was committed.
+1. One helper, `_drain(process, seconds)`, keeps `asyncio.wait_for`. It reads `current_task().cancelling()` before the drain and raises `CancelledError` if the count rose.
+2. Both bounded drain sites call it.
+3. `_send` gains `except asyncio.CancelledError:`, which pops and cancels the pending future and then re-raises.
+
+| Mode | Request site (3 cases) | Notification site | Other checks |
+|---|---|---|---|
+| today's code | 5 / 5 red (above) | 5 / 5 red | — |
+| full remedy | 5 / 5 green (`4 passed, 15 deselected in 2.39s` to `3.43s`) | 5 / 5 green | R-19, `-k loses_to` on `test_grok_host_turns.py`: `1 passed`, 3 / 3. Both whole files: `43 passed, 7 skipped in 20.96s` |
+| remedy without step 3 | 3 / 3 red, only on the never-retrieved check: `logged ['Future exception was never retrieved']` | 3 / 3 green | — |
+| 3.12+ path emulated on 3.11 (the gate delivers the cancel inside the drain), today's code | the `CancelledError` check passes; the never-retrieved check is red in all 3 cases | — | — |
+| the same emulation, full remedy | green | green | — |
+
+**On 3.12+ (CI's 3.12 leg)** the gh-86296 window does not exist. So the `CancelledError` and timing checks pass before the fix, and so does the notification-site test. The request-site test's never-retrieved check, though, is expected to be **red before the fix** on 3.12+. There the gate delivers the cancel inside the drain, and today's `_send` lets `CancelledError` pass without dropping the pending future. The emulation row above shows this on the real pack, and the stdlib simulation on 3.13 shows it too. Remedy step 3 turns it green. CI's 3.11 leg is the regression guard for the swallow itself. No local 3.12+ interpreter has the test dependencies, so the pack itself was not run on 3.12+.
+
+**Lint.** `python lint/run.py` on the staged files gave `SDK-LINT: PASS`. A001 (643), A007 (255), S024 (25) and S062 (889) stay at their baselines; A009 and S006 are clean.
+
+### Notes for the implementer (addendum 5)
+
+- **The bound names:**
+  - `NativePeer.call`, `send` and `notify` (spec §8.5), called in the task that called the public method;
+  - `asyncio.wait_for`, looked up through the `asyncio` module at call time, with a `StreamWriter.drain` coroutine and a timeout that is not `None`;
+  - `GrokHostSettings.control_timeout_seconds`;
+  - `spawn_grok_session`, `continue_grok_session`, `list_grok_sessions` and `interrupt_grok_turn`.
+- **What must not change:**
+  - Keep `asyncio.wait_for(stdin.drain(), seconds)` in both bounded paths. Do not wrap the drain in another coroutine first, and do not move the write into another task. This gate and R-19's gate both find the drain this way.
+  - The default unbounded drain stays as it is (INV-18).
+- **A `seam:` failure** means the fix stopped draining through `asyncio.wait_for`. Ask the orchestrator; do not edit the test.
+- **Step 3 is required.** If the fix re-raises the cancel but does not pop and cancel the pending future, `_fail_all_pending` fails that future unseen. The request-site test then turns red, on 3.11 and on 3.12+.
+- **Timing.** A red request-site case takes about 6.5 s, because it waits out the 5 s control timeout. A green one takes under 1 s.
