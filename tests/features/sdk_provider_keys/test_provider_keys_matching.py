@@ -268,6 +268,33 @@ class ConfiguredPrimaryTests(KeySafeAssertions):
         self.assertIn("xai", message)
         self.assertIn("deepseek", message)
 
+    def test_m18_offers_vidbytes_own_account_only_for_a_provider_the_gateway_serves(self) -> None:
+        # M-18 (review R-13, re-review R-C2): the gateway cannot serve mistral, so "Vidbyte's own mistral account" is a remedy that cannot work.
+        # An unserved primary reaches M-18 only in DIRECT; a gateway-mode TextModelConfig refuses it first with M-12 (R-6).
+        from vidbyte.lib.config import TextModelMode
+
+        unserved = {
+            "TextModelConfig DIRECT": lambda: TextModelConfig(provider="mistral", model="mistral-large-latest", api_keys=[K_XAI], mode=TextModelMode.DIRECT),
+            "Agent DIRECT": lambda: Agent(name="a", system_prompt="s", provider="mistral", model_name="mistral-large-latest", api_keys=[K_XAI], model_mode=TextModelMode.DIRECT),
+        }
+        for root, build in unserved.items():
+            with self.subTest(root=root, primary="mistral"), patch.dict(os.environ, {}, clear=True):
+                message, details = self.refused(build, K_XAI)
+                self.assertEqual(details.get("provider"), "mistral")
+                for fact in ("mistral", "xai", "MISTRAL_API_KEY"):
+                    self.assertIn(fact, message)
+                self.assertNotRegex(message, r"(?i)Vidbyte\W?s own")
+        # A served primary keeps the clause. The default mode is used, where the clause is true; DIRECT also keeps it (an accepted limitation), so DIRECT is not asserted either way.
+        served = {
+            "TextModelConfig": lambda: TextModelConfig(provider="openai", model="gpt-5.5", api_keys=[K_XAI]),
+            "Agent": lambda: Agent(name="a", system_prompt="s", provider="openai", model_name="gpt-5.5", api_keys=[K_XAI], vidbyte_api_key=VIDBYTE_KEY),
+        }
+        for root, build in served.items():
+            with self.subTest(root=root, primary="openai"), patch.dict(os.environ, {}, clear=True):
+                message, details = self.refused(build, K_XAI, VIDBYTE_KEY)
+                self.assertEqual(details.get("provider"), "openai")
+                self.assertIn("Vidbyte's own openai account", message)
+
     def test_require_primary_key_off_accepts_a_list_without_the_primarys_key(self) -> None:
         # D-30: only BaseAgent.restore turns the check off, for a fork child resumed with its own key.
         record = matcher().match([K_OPENAI], primary="deepseek", others=("openai",), require_primary_key=False)

@@ -40,6 +40,7 @@ Each line is input + state → wrong output. The test that catches it is in the 
 - A `VIDBYTE_MANAGED` call answered 402 → the message says to add a key to `api_keys`, which that mode ignores (INV-5, D-15, review R-17).
 - `AgentRoleSettings(vidbyte_api_key=" vb_live_… ")` → refused as malformed although `Agent` accepts and strips the same value (INV-26, review R-14).
 - A dump of a relay request's headers → `X-Vidbyte-Provider-Key` is not a credential name, so the provider key survives redaction while the bearer is scrubbed (NFR-1, INV-22, review R-15).
+- A `DIRECT` config or agent on an unserved provider (mistral) with only another provider's key → M-18 tells the developer to fall back to "Vidbyte's own mistral account", which the gateway cannot serve (M-18, review R-13, re-review R-C2).
 
 ## Contract
 
