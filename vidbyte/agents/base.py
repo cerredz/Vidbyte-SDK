@@ -44,15 +44,16 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration, ProviderKeys
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
-from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
+from vidbyte.lib.enums import AgentRuntimeType, ModelProvider, TextModelMode
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
@@ -94,7 +95,9 @@ class BaseAgent(McpAttachableMixin):
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
         middleware: Sequence[AgentMiddleware] = (),
-        api_key: str | None = None,
+        api_keys: ProviderKeys | Iterable[str | None] | None = None,
+        vidbyte_api_key: str | None = None,
+        model_mode: TextModelMode = TextModelMode.AUTO,
         provider: ModelProvider | str | None = None,
         model_name: str | None = None,
         temperature: float | None = None,
@@ -170,17 +173,23 @@ class BaseAgent(McpAttachableMixin):
             )
 
         provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
+        # Match the developer's keys once, against this agent's model
+        # and every model its fallback chain names, so every child
+        # carries the same matching.
+        from vidbyte.agents.fallback import AgentFallback
+        primary_provider = Runner._normalize_provider_and_model(provider, model_name)[0]
+        matched_keys = ProviderKeyMatcher.match(api_keys, primary=primary_provider, others=AgentFallback.providers_in(fallback), vidbyte_api_key=vidbyte_api_key, field_name="api_keys")
         self.runner_config = AgentRunnerConfig(
-            api_key=api_key,
+            api_keys=matched_keys,
             provider=provider_str,
             model_name=model_name,
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             run_id=run_id,
+            model_mode=model_mode,
         )
         self.name = name
         self._fallback_spec = fallback
-        from vidbyte.agents.fallback import AgentFallback
         self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
         # @intent nested-tool-catalogs-are-flattened
@@ -542,10 +551,19 @@ class BaseAgent(McpAttachableMixin):
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None) -> BaseAgent:
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_keys: ProviderKeys | Iterable[str | None] | None = None, vidbyte_api_key: str | None = None) -> BaseAgent:
         """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
+        # Match the list against the providers the root matched, so a
+        # fork child binds each key as its root did; only a child on
+        # another provider skips the configured-model check. Older
+        # states match as a root.
+        stored = state.runtime_config.get("key_providers")
+        if isinstance(stored, Mapping):
+            primaries = tuple(stored.get("primary") or ())
+            own_provider = Runner._normalize_provider_and_model(state.provider, state.model_name)[0]
+            api_keys = ProviderKeyMatcher.match(api_keys, primary=primaries, others=tuple(stored.get("others") or ()), vidbyte_api_key=vidbyte_api_key, field_name="api_keys", require_primary_key=bool(primaries) and own_provider == primaries[0])
         agent_metadata = AgentMetadata(**{key: str(state.agent_metadata.get(key, "")) for key in ("name", "description", "use_cases")})
         child = cls(
             name=state.agent_name,
@@ -556,7 +574,9 @@ class BaseAgent(McpAttachableMixin):
             provider=state.provider,
             model_name=state.model_name,
             temperature=state.temperature,
-            api_key=api_key,
+            api_keys=api_keys,
+            vidbyte_api_key=vidbyte_api_key,
+            model_mode=TextModelMode(state.runtime_config.get("model_mode", TextModelMode.AUTO.value)),
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
             timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
@@ -585,6 +605,11 @@ class BaseAgent(McpAttachableMixin):
             "compaction_trigger_tokens": self.runtime_config.compaction_trigger_tokens,
             "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
             "runner_timeout_seconds": self.runner_config.timeout_seconds,
+            "model_mode": self.runner_config.model_mode.value,
+            # @intent resume-matches-like-the-root
+            # Names only, never a key: a restore matches the list it
+            # is given against these names again.
+            "key_providers": {"primary": [p.value for p in self.runner_config.api_keys.matched_primary], "others": [p.value for p in self.runner_config.api_keys.matched_others]},
         }
         if self.fallback is not None:
             # @intent resume-keeps-fallback-chain
@@ -1559,7 +1584,8 @@ class BaseAgent(McpAttachableMixin):
         utility = Runner.from_model(
             provider=self.runner_config.provider,
             model_name=self.runner_config.model_name,
-            api_key=self.runner_config.api_key,
+            api_keys=self.runner_config.api_keys,
+            model_mode=self.runner_config.model_mode,
             temperature=self.runner_config.temperature,
             options=options,
         )
