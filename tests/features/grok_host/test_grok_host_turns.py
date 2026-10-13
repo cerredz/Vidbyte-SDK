@@ -1,12 +1,12 @@
 """FILE: tests/features/grok_host/test_grok_host_turns.py
 
-PURPOSE: The live-turn behaviour of GrokHost: approvals answered by policy and recorded with a scrubbed title (AC-8, D-11, INV-10, §9.1, INV-6), terminal states and interrupt sources (EC-50, EC-53, D-10, INV-13), the wire shapes the host sends (§8.5 ACP calls, INV-9), bounded text and decisions (EC-150, INV-16), unknown usage (INV-15), host-scoped handles (INV-17) and the session and live-turn reservations under concurrency (EC-9, INV-14).
+PURPOSE: The live-turn behaviour of GrokHost: approvals answered by policy and recorded with a scrubbed title (AC-8, D-11, INV-10, §9.1, INV-6), terminal states and interrupt sources (EC-50, EC-53, D-10, INV-13), an interrupt that loses the race to Grok's own answer (RACE-1: INV-13, EC-52, EC-53), the wire shapes the host sends (§8.5 ACP calls, INV-9), bounded text and decisions (EC-150, INV-16), unknown usage (INV-15), host-scoped handles (INV-17) and the session and live-turn reservations under concurrency (EC-9, INV-14).
 ROLE IN CODEBASE: Covers vidbyte.harnesses.native.grok.turn (GrokTurnDriver) and the turn parts of grok.host through the public methods only.
 ARCHITECTURE NOTE: The fake plays each turn from its scenario: permission requests, extra server requests, notifications, chunks, then an answer or a hold that the test ends with the release file or that the host ends with session/cancel. Assertions read the fake's JSONL log and the NativeTurnResult.
-FUNCTION INVENTORY: spawn_and_wait runs one turn to its result; permission_answers reads the answers the fake logged; the test_* functions each pin one rule.
+FUNCTION INVENTORY: spawn_and_wait runs one turn to its result; permission_answers reads the answers the fake logged; poll_until polls a condition every 10 ms with a 5 s limit; CancelDrainGate and the cancel_drain_gate fixture hold the session/cancel drain open until the peer is closed; interrupt_expecting_no_error turns a raised interrupt into an INV-13 failure; the test_* functions each pin one rule.
 COMMON MODIFICATION PATTERNS: A new turn rule gets a scenario key in fake_grok_peer.py and one test here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not assert interleavings the spec leaves open, such as which of two concurrent calls wins. 2. Do not sleep to wait for a turn; wait_grok_turn or the release file drives every turn. 3. Do not commit a key-shaped literal or print a secret in an assertion message; the title-scrub test builds its value from uuid4 and names only the surface that leaked.
-KNOWN EDGE CASES: The POSIX-only tests (EC-27, EC-51) close the fake's stdin so the host's next write fails at once; Windows reports a write to a closed pipe asynchronously, so there the failure can surface later as EC-48.
+KNOWN EDGE CASES: The POSIX-only tests (EC-27, EC-51) close the fake's stdin so the host's next write fails at once; Windows reports a write to a closed pipe asynchronously, so there the failure can surface later as EC-48. No frame order through the fake can force RACE-1 R-19, because its window is inside one await of the cancel write, so cancel_drain_gate wraps NativePeer.notify and asyncio.wait_for: it releases the held prompt as session/cancel is sent, then delays only that task's next wait_for until the fake logs stdin EOF, and then calls the real one. It asserts outcomes, never which exception path fired inside, so it holds on CPython 3.11, 3.12+ and Windows.
 RELATED DOCS: tests/features/grok_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §6.1, §6.3.3, §8.5
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host/test_grok_host_turns.py
 """
@@ -14,10 +14,12 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host/test_grok_
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -25,6 +27,8 @@ import pytest
 KNOWN_SESSION = "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b"
 PROMPT = "List the top-level folders."
 WAIT_SECONDS = 30.0
+RACE_POLL_SECONDS = 0.01
+RACE_POLL_LIMIT_SECONDS = 5.0
 ALWAYS_OPTIONS = ("opt-allow-always", "opt-reject-always")
 FORBIDDEN_ARGS = ("--always-approve", "--dangerously-skip-permissions", "--yolo", "bypassPermissions", "auto", "allowAll")
 
@@ -34,6 +38,70 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows reports
 async def spawn_and_wait(host: Any, api: Any, **request_fields: Any) -> Any:
     handle = await host.spawn_grok_session(api.GrokTurnRequest(prompt=PROMPT, **request_fields))
     return await host.wait_grok_turn(handle, timeout_seconds=WAIT_SECONDS)
+
+
+async def poll_until(predicate: Callable[[], bool]) -> bool:
+    # Bounded polling at 10 ms, fine enough to land inside the driver's close; never a fixed sleep.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + RACE_POLL_LIMIT_SECONDS
+    while loop.time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(RACE_POLL_SECONDS)
+    return predicate()
+
+
+class CancelDrainGate:
+    """Holds one session/cancel write open until the turn's own end has closed the peer (RACE-1 R-19)."""
+
+    def __init__(self, grok_fake: Any) -> None:
+        self.grok_fake = grok_fake
+        self.task: asyncio.Task[Any] | None = None
+        self.engaged = False
+        self.peer_closed_in_window = False
+
+    def arm(self) -> None:
+        # Called as the host sends session/cancel: Grok may now answer end_turn, and this task's next bounded wait is the cancel's drain.
+        if self.task is None:
+            self.task = asyncio.current_task()
+            self.grok_fake.release()
+
+    async def hold(self) -> None:
+        # Delays only; the real wait_for runs afterwards. The fake logs "eof" only once the host has closed the peer's stdin.
+        if self.task is None or self.engaged or asyncio.current_task() is not self.task:
+            return
+        self.engaged = True
+        self.peer_closed_in_window = await poll_until(lambda: bool(self.grok_fake.records("eof")))
+
+
+@pytest.fixture
+def cancel_drain_gate(grok_fake: Any, monkeypatch: pytest.MonkeyPatch) -> CancelDrainGate:
+    # A delegating seam: nothing is replaced, so the same window is forced on CPython 3.11 (wait_for wraps the drain in a task), 3.12+ and Windows Proactor.
+    peer_class = importlib.import_module("vidbyte.harnesses.native.hostkit").NativePeer
+    real_notify = peer_class.notify
+    real_wait_for = asyncio.wait_for
+    gate = CancelDrainGate(grok_fake)
+
+    async def notify(self: Any, method: str, params: Any, *, operation: str) -> Any:
+        if method == "session/cancel":
+            gate.arm()
+        return await real_notify(self, method, params, operation=operation)
+
+    async def wait_for(awaitable: Any, timeout: Any, *args: Any, **kwargs: Any) -> Any:
+        await gate.hold()
+        return await real_wait_for(awaitable, timeout, *args, **kwargs)
+
+    monkeypatch.setattr(peer_class, "notify", notify)
+    monkeypatch.setattr(asyncio, "wait_for", wait_for)
+    return gate
+
+
+async def interrupt_expecting_no_error(host: Any, api: Any, handle: Any) -> Any:
+    # INV-13 (RACE-1): an interrupt the host sent to a turn it found running raises nothing, even when the turn's own end wins the race.
+    try:
+        return await host.interrupt_grok_turn(handle)
+    except api.NativeHostError as error:
+        pytest.fail(f"INV-13: interrupt_grok_turn raised {error.failure_code.value} (reason {error.context.get('reason')!r}) for a session/cancel it sent to a running turn whose own end closed the peer")
 
 
 def permission_answers(grok_fake: Any) -> list[Any]:
@@ -172,6 +240,37 @@ async def test_interrupt_returns_at_once_and_closes_a_peer_that_ignores_cancel(g
     assert result.status is grok_api.NativeTurnStatus.INTERRUPTED
     assert result.interrupt_source is grok_api.InterruptSource.CALLER
     assert elapsed < fast_stop.grace * 2 + fast_stop.kill_wait * 2 + fast_stop.slack
+
+
+@pytest.mark.asyncio
+async def test_interrupt_whose_cancel_write_loses_to_the_turn_end_succeeds(grok_api, grok_fake, make_grok_host, fast_stop, cancel_drain_gate) -> None:
+    # INV-13 / EC-53 (RACE-1 R-19): session/cancel is in the pipe, Grok answers end_turn, and the driver closes the peer before the cancel's drain finishes; the host closed it, so this is not EC-51.
+    async with make_grok_host({"acp": {"session_prompt": {"mode": "hold"}}}) as host:
+        handle = await host.spawn_grok_session(grok_api.GrokTurnRequest(prompt=PROMPT))
+        interrupted = await interrupt_expecting_no_error(host, grok_api, handle)
+        result = await host.wait_grok_turn(handle, timeout_seconds=WAIT_SECONDS)
+    assert cancel_drain_gate.engaged, "seam: no bounded wait followed the session/cancel write in the interrupting task, so the window was not forced"
+    assert cancel_drain_gate.peer_closed_in_window, "seam: the peer's stdin was not closed while session/cancel was in flight, so the window was not forced"
+    assert interrupted.was_running is True, "INV-13 / EC-53: the host found the turn running and sent session/cancel"
+    assert len(grok_fake.received("session/cancel")) == 1
+    assert result.status is grok_api.NativeTurnStatus.COMPLETED, "EC-53: Grok answered end_turn after the cancel, so the turn records COMPLETED"
+    assert result.stop_reason == "end_turn"
+    assert result.interrupt_source is None
+
+
+@pytest.mark.asyncio
+async def test_interrupt_after_grok_answered_while_the_driver_is_still_closing_sends_nothing(grok_api, grok_fake, make_grok_host, fast_stop) -> None:
+    # EC-52 (RACE-1 R-20): Grok answered end_turn and the driver is inside its close, because the fake ignores stdin EOF; the turn is finished, so nothing is sent.
+    async with make_grok_host({"ignore_eof": True}) as host:
+        handle = await host.spawn_grok_session(grok_api.GrokTurnRequest(prompt=PROMPT))
+        assert await poll_until(lambda: bool(grok_fake.records("eof"))), "the driver never closed the peer's stdin after Grok answered"
+        interrupted = await host.interrupt_grok_turn(handle)
+        result = await host.wait_grok_turn(handle, timeout_seconds=WAIT_SECONDS)
+    assert interrupted.was_running is False, "EC-52: Grok had answered, so the turn was finished and nothing is sent"
+    assert grok_fake.received("session/cancel") == []
+    assert result.status is grok_api.NativeTurnStatus.COMPLETED
+    assert result.stop_reason == "end_turn"
+    assert result.interrupt_source is None
 
 
 @pytest.mark.asyncio

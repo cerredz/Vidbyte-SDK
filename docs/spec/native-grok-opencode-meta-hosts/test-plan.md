@@ -472,3 +472,103 @@ The 11 failures are exactly the 11 new cases. 1638 passed is the baseline, uncha
 | R-17 Grok (1), Muse (2) | `AssertionError: INV-6: the credential leaked into ['decision title', 'tool output']` |
 
 Lint ran on the staged files: `python lint/run.py` → `SDK-LINT: PASS`. A007 stays at 255, S062 at 889 and S024 at 25.
+
+## Addendum 3 — RACE-1 regression tests
+
+Remote CI run 38437336454 flaked once on Linux 3.11 in `test_interrupt_answered_interrupted_or_cancelled_counts_as_success[interrupted]`, with "The Muse Code process stopped before it answered." The verifier confirmed a class of races (`review.md`, "Post-SOUND finding — interrupt racing completion (RACE-1)"). In each one, an interrupt or steer raises a spurious "process exited" error, because the turn's own end beat it and the host's driver closed the peer:
+- **R-18 (Muse, Major).** `turn/completed` reaches the host before the `turn/interrupt` answer, or the answer never comes.
+- **R-19 (Grok, Minor).** Grok answers `end_turn` while `session/cancel` is still being drained.
+- **R-20 (Grok, Minor).** The host reports `was_running=True` for an answered turn whose driver is still closing the peer.
+- **R-21 (Muse, Minor).** A steer loses the same race.
+
+The expected outcomes were decided by the orchestrator (INV-13, EC-52, EC-53, EC-115). An interrupt the host sent to a turn it found running returns `was_running=True` and raises nothing, and the recorded terminal state stands. An interrupt that finds the turn already answered sends nothing and returns `False`. EC-51, EC-96 and EC-97 still raise.
+
+This addendum adds 10 test cases in 7 functions: 8 red cases and 2 green guards. It also adds one fake knob and makes one granted scenario change to an existing test. The tests bind to the spec names, plus the R-19 seam names that the verifier's prototype used: `NativePeer.notify` from `vidbyte.harnesses.native.hostkit`, and `asyncio.wait_for`. They run through the §13 fakes as real child processes. No `vidbyte/` source was read, and no real `grok`, `muse` or `wsl.exe` ran. No existing assertion changed, and no fake default changed.
+
+### Coverage map
+
+| Finding / Spec ID | Test (file → name [params]) | Level | Failure it catches (input + state → wrong output) | How it could pass vacuously, and why it does not |
+|---|---|---|---|---|
+| R-18, INV-13, EC-52 | `muse_host/test_muse_host_turns.py` → `test_interrupt_that_loses_to_turn_completed_succeeds` | X, R | The turn is held, and the fake never answers `turn/interrupt` but ends the turn `cancelled` because of it. The driver closes the peer while the call is pending → `interrupt_muse_turn` raises `muse.process_exited` (reason `closed`). | It uses existing knobs only. The scenario differs from the EC-97 row (`test_muse_host_errors.py:364`) only by the absence of `on_interrupt: "ignore"`, and that row must still raise `muse.server_unreachable`. The test needs `was_running is True`, INTERRUPTED with `stop_reason == "cancelled"` and source CALLER, and exactly one `turn/interrupt`. So a fix that sends nothing, or reports `False`, fails it. A raise becomes a `pytest.fail` that names the code and the reason. |
+| R-18, INV-13 (the CI frame order) | `muse_host/test_muse_host_turns.py` → `test_interrupt_answered_after_turn_completed_succeeds[minus-32013, minus-32014, minus-32030, accepted]` | X, R | The fake writes `turn/completed` first and then the answer, whatever the answer is → `muse.process_exited` today. If a host read the -32030 answer before its close, it would raise `muse.api_error` instead; the same assertion catches that. | It first asserts that the fake logged exactly one `interrupt_order` record with `completed_sent=True`. That proves the knob was read, and that this turn's own `turn/completed` went out before the answer: a foreign turn's completion never sets the event. The outcome assertions are the same as the row above. |
+| R-18 guard, EC-102 | `muse_host/test_muse_host_turns.py` → `test_interrupt_rejected_with_32030_while_the_turn_still_runs_raises_api_error` | C, R, **guard** | A fix keyed on the answer code (-32030), or on `running`, instead of on this turn's own `turn/completed` silently swallows a real rejection of a running turn. | It is green today and must stay green. It needs `muse.api_error`, token `vendor_error`, operation `interrupt_muse_turn` and `vendor_code == "-32030"`. It also asserts that the fake sent no `turn/completed` at all, which proves the turn was still running when the answer arrived. No existing test covered -32030 on a running interrupt: the pack has only the EC-96, EC-97 and EC-115 interrupt rows. |
+| R-18 (c), §6.3.5 `interrupt_muse_turn` | `muse_host/test_muse_host_turns.py` → `test_interrupt_answered_interrupted_or_cancelled_counts_as_success[interrupted, cancelled]` (granted scenario change) | C, **existing** | The CI flake itself. Without `order`, the fake set `interrupt_event` before answering, so the turn thread could write `turn/completed` first, and the test then tested the race instead of the -32013/-32014 mapping. | With `"order": "answer_first"`, the answer is written before the turn thread may end the turn. Every run therefore tests the mapping, and the race belongs to the two R-18 tests above. It is green before and after the fix, 5 of 5 here. |
+| R-19, INV-13, EC-53 | `grok_host/test_grok_host_turns.py` → `test_interrupt_whose_cancel_write_loses_to_the_turn_end_succeeds` (fixture `cancel_drain_gate`, in the same file) | X, R | The cancel frame is in the pipe and Grok answers `end_turn`. The driver closes the peer before the cancel's drain finishes, so the post-drain check fails the write → `grok.process_exited` (reason `stdin_write_failed`), although the fake did receive the cancel. | No frame order through the fake can force this window, so a delegating seam does. When `NativePeer.notify` is called for `session/cancel`, the seam releases the held prompt. It then delays only that task's next `asyncio.wait_for` until the fake logs stdin `eof`, and then calls the real `wait_for`. Nothing is replaced. The test asserts two seam preconditions (`engaged`, `peer_closed_in_window`), so a seam that no longer engages fails loudly instead of passing. It then needs `was_running is True`, exactly one `session/cancel`, and COMPLETED with `end_turn` and no interrupt source. EC-51's POSIX test (`close_stdin_hold`: no answer, the peer stopped reading) stays the guard that a real peer failure still raises. |
+| R-20, EC-52 | `grok_host/test_grok_host_turns.py` → `test_interrupt_after_grok_answered_while_the_driver_is_still_closing_sends_nothing` | X, R | Grok answered `end_turn`, and the fake ignores stdin EOF, so the driver sits in its close for the grace period. The interrupt sends nothing but returns `was_running=True` today. | It polls `grok_fake.records("eof")` every 10 ms, for at most 5 s. That record exists only once the host has closed the peer's stdin after the answer, and the fake then stays alive, so the driver is still closing for at least `NATIVE_STOP_GRACE_SECONDS` (0.3 s with `fast_stop`). It needs `was_running is False`, no `session/cancel`, and COMPLETED/`end_turn`. |
+| R-20 Muse twin, EC-52 | `muse_host/test_muse_host_turns.py` → `test_interrupt_after_turn_completed_while_the_driver_is_still_closing_sends_nothing` | X, **guard** | It guards Grok/Muse parity in the same window: a Muse fix must not start sending `turn/interrupt` to a completed turn whose driver is closing. | It is green today and must stay green. It uses the same `eof` poll. It needs `was_running is False`, no `turn/interrupt`, and COMPLETED with no interrupt source. |
+| R-21, EC-115 | `muse_host/test_muse_host_turns.py` → `test_steer_that_loses_to_turn_completed_raises_turn_not_found` | X, R | The fake is silent on `turn/steer`, and the test releases the turn while the steer is pending. The driver closes the peer after `turn/completed` → `muse.process_exited` (token `check_muse_ready`) instead of EC-115's `muse.turn_not_found`. | The steer runs as a task, and the release happens only once the fake has logged `turn/steer` (a bounded 10 ms poll), so the steer is pending when the turn ends. The test needs `muse.turn_not_found`, token `continue_muse_session` and operation `steer_muse_turn`, and the turn must record COMPLETED. The EC-96 and EC-97 steer rows in `test_muse_host_errors.py` still need `process_exited` and `server_unreachable` for a real exit or silence. |
+
+### Tests deliberately NOT written (addendum 3)
+
+| Candidate | Why it would not earn its keep |
+|---|---|
+| An opencode twin of any RACE-1 test | Decided out of scope. The verifier found opencode not affected: there is no peer to close, and abort answers `200 true` for an idle session. |
+| A Grok twin of the -32030 guard | `session/cancel` is a notification and gets no answer, so Grok has no answer code a fix could key on. EC-51 is the Grok guard. |
+| A second EC-51, EC-96 or EC-97 test | Those rows already exist (`test_grok_host_turns.py`, POSIX-only; `test_muse_host_errors.py:363-364` and the steer rows) and must stay green unchanged. A copy would prove nothing new. |
+| R-21 with the steer answer written after `turn/completed` | That would need an `order` knob on `turn/steer`. The brief grants one fake extension (the interrupt knob), and the -32030-after-finish steer path is EC-115's own third clause, which the R-21 fix leaves as it is. |
+| Asserting which exception fired inside R-19 (`BrokenPipeError` from the post-drain check, or an error from the drain itself) | That is a mechanism, and it differs by version: CPython 3.11 wraps the drain in a task and 3.12+ does not, while Windows Proactor raises in the drain. The test asserts outcomes only. |
+| A unit test of the fake's `order` knob | The knob is proven where it is used. R-18 (b) asserts the `interrupt_order` record with `completed_sent=True`, and R-18 (c) turns a CI flake into 5 of 5 green runs. |
+| Re-checking `driver.done()` after the opencode probe (the verifier's optional hardening) | It is not a finding and not in scope. |
+
+### Red run (addendum 3)
+
+Bootstrap: none. The environment is global Python 3.11.0 on win32, reached through `PYTHONPATH=$(pwd)`, with `pytest 8.3.5` and pytest-asyncio 1.3.0 in strict mode. No `pip install` ran. HEAD is `05d45151`, and the new tests are staged.
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q tests/features/grok_host tests/features/opencode_host tests/features/muse_host tests/features/native_backends
+…
+8 failed, 1651 passed, 19 skipped in 155.03s (0:02:35)
+```
+
+The 8 failures are exactly the 8 new race cases. The 1651 passes are the 1649 baseline plus the two new guards, so every existing test still passes, including the two R-18 (c) cases. The 19 skips are the same platform guards; EC-51's test is among them on this Windows host.
+
+**Determinism.** The new tests and R-18 (c) ran 5 times alone, with `-k "loses_to or answered_after_turn_completed or rejected_with_32030 or still_closing or interrupt_answered_interrupted_or_cancelled"`. Every run gave `8 failed, 4 passed`, and the reasons were identical in all 5 runs:
+
+| Test | Runs | Observed red reason (or green) |
+|---|---|---|
+| R-18 (a) `test_interrupt_that_loses_to_turn_completed_succeeds` | 5 / 5 red | `Failed: INV-13: interrupt_muse_turn raised muse.process_exited (reason 'closed') …` |
+| R-18 (b) `test_interrupt_answered_after_turn_completed_succeeds` ×4 | 20 / 20 red | the same, for -32013, -32014, -32030 and accepted |
+| R-19 `test_interrupt_whose_cancel_write_loses_to_the_turn_end_succeeds` | 5 / 5 red | `Failed: INV-13: interrupt_grok_turn raised grok.process_exited (reason 'stdin_write_failed') …` |
+| R-20 `test_interrupt_after_grok_answered_while_the_driver_is_still_closing_sends_nothing` | 5 / 5 red | `AssertionError: EC-52: Grok had answered, so the turn was finished and nothing is sent` (`was_running` is True) |
+| R-21 `test_steer_that_loses_to_turn_completed_raises_turn_not_found` | 5 / 5 red | `expected muse.turn_not_found, got muse.process_exited` |
+| R-18 (c) `…counts_as_success[interrupted, cancelled]` | 10 / 10 green | — |
+| R-18 guard (-32030 on a running turn) | 5 / 5 green | — |
+| R-20 Muse twin | 5 / 5 green | — |
+
+**Can the tests pass?** In a scratch folder outside the worktree (nothing committed), a shim loaded both packs' conftests and the unchanged test modules. It applied the verifier's proposed-fix monkeypatches from `test_fix_probe_{muse,grok}.py`: the `_completed` guard in `MuseTurnDriver.interrupt`, and `GrokTurnDriver.ended` with its two uses. Over 5 runs, every R-18 (a), R-18 (b), R-18 (c), R-19 and R-20 case passed 5 of 5, and so did both guards. So did the EC-96, EC-97 and EC-115 `interrupt_muse_turn` rows (host and tool) and the existing Grok interrupt tests. The R-19 precondition assertions held, so the seam engaged and saw the peer close in every run. R-21 stayed red, because the probes carry no steer fix. Its passing was not checked.
+
+**Lint.** `python lint/run.py` on the staged files gave `SDK-LINT: PASS`. A001 (643), A007 (255), S062 (889) and S024 (25) stay at their baselines.
+
+### Granted test changes (before → after)
+
+Only R-18 (c) is used: the scenario dict of `test_interrupt_answered_interrupted_or_cancelled_counts_as_success` (`test_muse_host_turns.py`) gains `"order": "answer_first"`. Its comment and its two assertions are byte-for-byte unchanged.
+
+Before:
+```python
+    scenario = {"turn": {"mode": "hold"}, "msp": {"turn/interrupt": {"error": {"code": code, "message": "already stopping"}}}}
+```
+After:
+```python
+    scenario = {"turn": {"mode": "hold"}, "msp": {"turn/interrupt": {"order": "answer_first", "error": {"code": code, "message": "already stopping"}}}}
+```
+
+The fake extension in `fake_muse_peer.py` adds three things:
+- `MspPeer.completed_sent`, a `threading.Event`;
+- `TurnWorker.send_completed`, which sets that event after writing a `turn/completed` whose `turnId` is the ack's own turn;
+- the `order` branch in `MspPeer.turn_interrupt`, which logs an `interrupt_order` record.
+
+With `order` absent, the fake runs the same statements in the same order as before (it sets `interrupt_event`, then calls `step`), so no other test changes behavior. The 1649 baseline passes unchanged.
+
+### Notes for the implementer (addendum 3)
+
+- **The bound names and outcomes:**
+  - `interrupt_muse_turn` and `interrupt_grok_turn` return `NativeInterruptResult.was_running`, and `steer_muse_turn` raises `muse.turn_not_found` (token `continue_muse_session`, operation `steer_muse_turn`).
+  - `wait_*_turn` returns `NativeTurnResult.status`, `stop_reason` and `interrupt_source`.
+  - The fake's `msp["turn/interrupt"]["order"]` and its `interrupt_order` log record are part of the test contract.
+- **The R-19 seam depends on two paths staying as they are.** The host must send `session/cancel` through `NativePeer.notify`, in the task that called `interrupt_grok_turn`, and the transport must await the cancel's drain through `asyncio.wait_for` in that same task. The verifier's smallest fix (`GrokTurnDriver.ended`, plus `except NativeHostError: if not self.ended: raise` around the cancel write) keeps both. If a different fix sends the cancel from another task, or stops using `asyncio.wait_for`, the test fails with a message that starts with `seam:`. That means the window is no longer forced. It does not mean the fix is wrong, so ask the orchestrator; do not edit the test.
+- **What must not change:**
+  - EC-51 (Grok, POSIX), EC-96 and EC-97 (Muse, interrupt and steer) must still raise: their peer stopped before the vendor reported the turn's end.
+  - A -32030 answer to a turn that Muse has not ended must still raise `muse.api_error`.
+  - Key the Muse fix on this turn's own `turn/completed` having been read, not on `running` and not on the answer code.
+- **The R-19 seam is a delegating wrapper, not a mock.** It wraps `NativePeer.notify` (hostkit) and `asyncio.wait_for`, and it always calls the real function. It patches no host class, `McpStdioTransport`, `HttpTransport` or `CliRunner`. This is the one place where the packs wrap an internal seam; it is narrow and deliberate.
+- **A spec observation, with no change requested.** §6.3.5 lists EC-96 and EC-97 as host-wide rows for `interrupt_muse_turn`, with EC-115 for a foreign handle. The R-18 guard relies on EC-102 through §6.3.2's catch-all ("Any other JSON-RPC error"), as the review and the brief decided.

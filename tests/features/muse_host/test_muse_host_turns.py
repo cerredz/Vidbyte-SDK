@@ -1,12 +1,12 @@
 """FILE: tests/features/muse_host/test_muse_host_turns.py
 
-PURPOSE: How MuseTurnDriver runs one turn: approvals decided once per requirement with a denied choice scoped once (D-11, INV-10, EC-121, EC-156), user input cancelled, approval and user-input titles recorded scrubbed (§9.1, INV-6), the turn id taken from the turn/start ack (EC-109), reply text taken only from the turn's agentMessage items (EC-150, view/gap), steer and interrupt on the wire, the turn ceiling (D-10), usage (D-14, INV-15), and the turn table rules (EC-9, EC-112, EC-148, INV-14, INV-17), including a session id that Muse's own session/start returned in upper case.
+PURPOSE: How MuseTurnDriver runs one turn: approvals decided once per requirement with a denied choice scoped once (D-11, INV-10, EC-121, EC-156), user input cancelled, approval and user-input titles recorded scrubbed (§9.1, INV-6), the turn id taken from the turn/start ack (EC-109), reply text taken only from the turn's agentMessage items (EC-150, view/gap), steer and interrupt on the wire, an interrupt or steer that loses the race to the turn's own turn/completed (RACE-1: INV-13, EC-52, EC-102, EC-115), the turn ceiling (D-10), usage (D-14, INV-15), and the turn table rules (EC-9, EC-112, EC-148, INV-14, INV-17), including a session id that Muse's own session/start returned in upper case.
 ROLE IN CODEBASE: Proves the Muse half of FR-12 and the turn rules of §6.3.5 for vidbyte.harnesses.native.muse.turn, driven through MuseHost and the fake muse.
 ARCHITECTURE NOTE: The fake plays a turn in a worker thread after the ack: approvals, user input, notifications, foreign-turn events, items, an optional view/gap, then turn/completed, or a hold until the release file or turn/interrupt. Where the fake waits for an answer (approval/decide, userInput/cancel) it logs request_seen or request_missing, so a missing answer shows in the logs as well as in the result.
-FUNCTION INVENTORY: decides lists the approval/decide params the fake received; answer_to finds the host's response to a server request; spawn_and_wait runs one turn to its result; the test_* functions are one rule each.
+FUNCTION INVENTORY: decides lists the approval/decide params the fake received; answer_to finds the host's response to a server request; spawn_and_wait runs one turn to its result; poll_until polls a condition every 10 ms with a 5 s limit; interrupt_expecting_no_error turns a raised interrupt into an INV-13 failure; assert_the_interrupted_turn_stands checks was_running and the recorded INTERRUPTED/CALLER result; the test_* functions are one rule each.
 COMMON MODIFICATION PATTERNS: A new turn rule gets a scenario key in fake_muse_peer.py's TurnWorker and one test here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not accept an approved choice or a session or persistent scope as a passing answer; INV-9 and D-11 forbid both. 2. Do not compare commandIds by order; only their shape is stable (spec §13). 3. Do not commit a key-shaped literal or print a secret in an assertion message; the title-scrub test builds its value from uuid4 and names only the surface that leaked. 4. Do not assert the spelling of handle.session_id in the vendor-id busy tests; INV-14 fixes only that both spellings name one session.
-KNOWN EDGE CASES: The outcome recorded for a plain denied decide is not fixed by the spec, so those tests assert only that it is not ALLOWED; EC-156 fixes CANCELLED for a failed or benign-race decide and those tests bind it. The fake's foreign-turn events carry turn id "turn-foreign" and must change nothing. VENDOR_UPPER_SCENARIO lists the vendor id in both spellings, as a Muse that matches ids ignoring case would, so a host that misses the busy check really starts a second turn or fork instead of failing as session_not_found.
+KNOWN EDGE CASES: The RACE-1 tests force the frame order with the fake's turn/interrupt "order" knob, or with a silent answer that the turn's own end overtakes; the two guards (a -32030 for a turn still running, and an interrupt while the driver is closing a completed turn) pass before and after the fix. The outcome recorded for a plain denied decide is not fixed by the spec, so those tests assert only that it is not ALLOWED; EC-156 fixes CANCELLED for a failed or benign-race decide and those tests bind it. The fake's foreign-turn events carry turn id "turn-foreign" and must change nothing. VENDOR_UPPER_SCENARIO lists the vendor id in both spellings, as a Muse that matches ids ignoring case would, so a host that misses the busy check really starts a second turn or fork instead of failing as session_not_found.
 RELATED DOCS: tests/features/muse_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §6.3.5, §8.1 D-9 to D-14, §8.5
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host/test_muse_host_turns.py
 """
@@ -40,6 +40,14 @@ NO_DENY_ONCE = [
     {"choiceId": "choice-approve-session", "decision": "approvedForSession", "label": "Approve for session", "scope": "session"},
     {"choiceId": "choice-deny-persistent", "decision": "denied", "label": "Always deny", "scope": "localPersistent"},
 ]
+RACE_POLL_SECONDS = 0.01
+RACE_POLL_LIMIT_SECONDS = 5.0
+ANSWERS_AFTER_TURN_COMPLETED = [
+    pytest.param({"error": {"code": -32013, "message": "interrupted"}}, id="minus-32013"),
+    pytest.param({"error": {"code": -32014, "message": "cancelled"}}, id="minus-32014"),
+    pytest.param({"error": {"code": -32030, "message": "the turn is no longer running"}}, id="minus-32030"),
+    pytest.param({}, id="accepted"),
+]
 
 
 def decides(muse_fake: Any) -> list[dict[str, Any]]:
@@ -57,6 +65,34 @@ def answer_to(muse_fake: Any, request_id: str) -> dict[str, Any] | None:
 async def spawn_and_wait(host: Any, api: Any, **fields: Any) -> Any:
     handle = await host.spawn_muse_session(api.MuseTurnRequest(prompt=PROMPT, **fields))
     return await host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS)
+
+
+async def poll_until(predicate: Callable[[], bool]) -> bool:
+    # Bounded polling at 10 ms, fine enough to land inside the driver's close; never a fixed sleep.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + RACE_POLL_LIMIT_SECONDS
+    while loop.time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(RACE_POLL_SECONDS)
+    return predicate()
+
+
+async def interrupt_expecting_no_error(host: Any, api: Any, handle: Any) -> Any:
+    # INV-13 (RACE-1): an interrupt the host sent to a turn it found running raises nothing, even when the turn's own end wins the race.
+    try:
+        return await host.interrupt_muse_turn(handle)
+    except api.NativeHostError as error:
+        pytest.fail(f"INV-13: interrupt_muse_turn raised {error.failure_code.value} (reason {error.context.get('reason')!r}) for an interrupt it sent to a running turn whose own end won the race")
+
+
+def assert_the_interrupted_turn_stands(interrupted: Any, result: Any, api: Any, muse_fake: Any) -> None:
+    # The fake ends the turn cancelled because of the interrupt, so the recorded INTERRUPTED/CALLER state stands and was_running reports the pre-send check.
+    assert interrupted.was_running is True, "INV-13 / EC-52: the host found the turn running and sent turn/interrupt"
+    assert result.status is api.NativeTurnStatus.INTERRUPTED
+    assert result.stop_reason == "cancelled"
+    assert result.interrupt_source is api.InterruptSource.CALLER
+    assert len(muse_fake.received("turn/interrupt")) == 1
 
 
 @pytest.mark.asyncio
@@ -239,13 +275,81 @@ async def test_interrupt_names_the_ack_turn(muse_api, muse_fake, make_muse_host,
 @pytest.mark.parametrize("code", [-32013, -32014], ids=["interrupted", "cancelled"])
 async def test_interrupt_answered_interrupted_or_cancelled_counts_as_success(code: int, muse_api, muse_fake, make_muse_host, fast_stop) -> None:
     # §6.3.5 interrupt_muse_turn: -32013 and -32014 mean the turn is already stopping.
-    scenario = {"turn": {"mode": "hold"}, "msp": {"turn/interrupt": {"error": {"code": code, "message": "already stopping"}}}}
+    scenario = {"turn": {"mode": "hold"}, "msp": {"turn/interrupt": {"order": "answer_first", "error": {"code": code, "message": "already stopping"}}}}
     async with make_muse_host(scenario) as host:
         handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
         interrupted = await host.interrupt_muse_turn(handle)
         result = await host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS)
     assert interrupted.was_running is True
     assert result.status is muse_api.NativeTurnStatus.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_interrupt_that_loses_to_turn_completed_succeeds(muse_api, muse_fake, make_muse_host, fast_stop) -> None:
+    # INV-13 (RACE-1 R-18): Muse never answers turn/interrupt but ends the turn cancelled, so the driver closes the peer while the call is pending; that close is the host's own, not a peer exit (EC-96).
+    scenario = {"turn": {"mode": "hold"}, "msp": {"turn/interrupt": {"mode": "silent"}}}
+    async with make_muse_host(scenario) as host:
+        handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        interrupted = await interrupt_expecting_no_error(host, muse_api, handle)
+        result = await host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS)
+    assert_the_interrupted_turn_stands(interrupted, result, muse_api, muse_fake)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ANSWERS_AFTER_TURN_COMPLETED)
+async def test_interrupt_answered_after_turn_completed_succeeds(answer: dict[str, Any], muse_api, muse_fake, make_muse_host, fast_stop) -> None:
+    # INV-13 (RACE-1 R-18, the CI frame order): turn/completed is written before the interrupt's answer, whatever that answer is; the interrupt still succeeds.
+    scenario = {"turn": {"mode": "hold"}, "msp": {"turn/interrupt": {"order": "completed_first", **answer}}}
+    async with make_muse_host(scenario) as host:
+        handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        interrupted = await interrupt_expecting_no_error(host, muse_api, handle)
+        result = await host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS)
+    assert [record["completed_sent"] for record in muse_fake.records("interrupt_order")] == [True], "the fake wrote turn/completed before the interrupt's answer"
+    assert_the_interrupted_turn_stands(interrupted, result, muse_api, muse_fake)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_rejected_with_32030_while_the_turn_still_runs_raises_api_error(muse_api, muse_fake, make_muse_host, fast_stop, check_native_error) -> None:
+    # Guard (EC-102) for the RACE-1 fix: Muse has not ended the turn, so a -32030 answer is a real rejection; a fix keyed on the answer code instead of the turn's own end breaks this.
+    scenario = {"turn": {"mode": "hold", "on_interrupt": "ignore"}, "msp": {"turn/interrupt": {"error": {"code": -32030, "message": "command rejected"}}}}
+    async with make_muse_host(scenario) as host:
+        handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        with pytest.raises(muse_api.NativeHostError) as caught:
+            await host.interrupt_muse_turn(handle)
+    check_native_error(caught.value, code="muse.api_error", token="vendor_error", operation="interrupt_muse_turn")
+    assert caught.value.context.get("vendor_code") == "-32030"
+    completions = [record for record in muse_fake.records("sent") if record["frame"].get("method") == "turn/completed"]
+    assert completions == [], "the turn was still running when the -32030 answer arrived"
+
+
+@pytest.mark.asyncio
+async def test_interrupt_after_turn_completed_while_the_driver_is_still_closing_sends_nothing(muse_api, muse_fake, make_muse_host, fast_stop) -> None:
+    # Guard (EC-52 parity with Grok's RACE-1 R-20): the turn completed and the driver is inside its close, because the fake ignores stdin EOF; the interrupt finds the turn finished.
+    async with make_muse_host({"ignore_eof": True}) as host:
+        handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        assert await poll_until(lambda: bool(muse_fake.records("eof"))), "the driver never closed the peer's stdin after turn/completed"
+        interrupted = await host.interrupt_muse_turn(handle)
+        result = await host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS)
+    assert interrupted.was_running is False, "EC-52: the turn had completed, so nothing is sent"
+    assert muse_fake.received("turn/interrupt") == []
+    assert result.status is muse_api.NativeTurnStatus.COMPLETED
+    assert result.interrupt_source is None
+
+
+@pytest.mark.asyncio
+async def test_steer_that_loses_to_turn_completed_raises_turn_not_found(muse_api, muse_fake, make_muse_host, fast_stop, check_native_error) -> None:
+    # EC-115 (RACE-1 R-21): the turn completes while turn/steer waits for its answer, and the driver closes the peer; the turn is no longer running, so this is turn_not_found, not process_exited.
+    scenario = {"turn": {"mode": "hold"}, "msp": {"turn/steer": {"mode": "silent"}}}
+    async with make_muse_host(scenario) as host:
+        handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        steer = asyncio.create_task(host.steer_muse_turn(handle, STEER_TEXT))
+        assert await poll_until(lambda: bool(muse_fake.received("turn/steer"))), "turn/steer never reached the fake"
+        muse_fake.release()
+        with pytest.raises(muse_api.NativeHostError) as caught:
+            await steer
+        result = await host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS)
+    check_native_error(caught.value, code="muse.turn_not_found", token="continue_muse_session", operation="steer_muse_turn")
+    assert result.status is muse_api.NativeTurnStatus.COMPLETED
 
 
 @pytest.mark.asyncio

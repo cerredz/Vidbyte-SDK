@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: argv[1] is the scenario path. Everything after it is what Mus
 FUNCTION INVENTORY: main dispatches on the appended argv; claim_launch_number gives each process its launch number; FakeLog appends one JSON record per line to a file named after it; FrameWriter serialises stdout frames; MspPeer answers the MSP requests the host may send and enforces the schema members spec §8.5 lists; TurnWorker plays one turn after its turn/start ack; run_version, run_wsl_list and run_reap play the one-shot forms; held waits for the release file, a stop event or the hold limit.
 COMMON MODIFICATION PATTERNS: Add a scenario key with its default in conftest.py's default_scenario, read it here with .get, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library; the child gets the caller's environment, not the test's sys.path. 2. Do not contact the network, the real muse or the real wsl.exe; this file replaces them. 3. Do not log the value of META_API_KEY; log only whether it is set.
-KNOWN EDGE CASES: A held turn or a stubborn peer exits by itself after HOLD_LIMIT_SECONDS, so a broken run cannot leak it for long. Requests before the `initialized` notification get -32600 notInitialized, and an `initialize` without clientInfo name and version gets -32602, as the MSP 1.0.1 schema requires (review R-16).
+KNOWN EDGE CASES: A held turn or a stubborn peer exits by itself after HOLD_LIMIT_SECONDS, so a broken run cannot leak it for long. Requests before the `initialized` notification get -32600 notInitialized, and an `initialize` without clientInfo name and version gets -32602, as the MSP 1.0.1 schema requires (review R-16). The turn/interrupt answer and the turn thread's turn/completed race unless msp["turn/interrupt"]["order"] is set (RACE-1): "answer_first" writes the answer before the turn thread may end the turn, and "completed_first" holds the answer until the ack's own turn/completed is written (MspPeer.completed_sent; a foreign turn's completion does not count). Both log an interrupt_order record; without the key nothing changes.
 RELATED DOCS: tests/features/muse_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5, §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host
 """
@@ -231,6 +231,9 @@ class TurnWorker(threading.Thread):
         if usage is not None:
             params["usage"] = usage
         self.peer.writer.send({"jsonrpc": "2.0", "method": "turn/completed", "params": params})
+        # Only the ack's own turn counts for the "completed_first" interrupt order; a foreign turn's completion does not.
+        if params["turnId"] == self.turn_id:
+            self.peer.completed_sent.set()
 
 
 class MspPeer:
@@ -246,6 +249,7 @@ class MspPeer:
         self.requests: list[dict[str, Any]] = []
         self.condition = threading.Condition()
         self.interrupt_event = threading.Event()
+        self.completed_sent = threading.Event()
         self.counters: dict[str, int] = {}
 
     def run(self) -> None:
@@ -487,8 +491,19 @@ class MspPeer:
         self.step("turn/steer", frame, {"commandId": params["commandId"], "status": "accepted", "turnId": self.turn_id})
 
     def turn_interrupt(self, frame: dict[str, Any], params: dict[str, Any]) -> None:
+        # Without "order" the answer races the turn thread's turn/completed, as on a real peer; "order" fixes which reaches the host first.
+        order = self.msp.get("turn/interrupt", {}).get("order")
+        ack = {"commandId": params["commandId"], "status": "accepted", "turnId": params.get("turnId", self.turn_id)}
+        if order == "answer_first":
+            self.log.write("interrupt_order", order=order)
+            self.step("turn/interrupt", frame, ack)
+            self.interrupt_event.set()
+            return
         self.interrupt_event.set()
-        self.step("turn/interrupt", frame, {"commandId": params["commandId"], "status": "accepted", "turnId": params.get("turnId", self.turn_id)})
+        if order == "completed_first":
+            completed = self.completed_sent.wait(ANSWER_WAIT_SECONDS)
+            self.log.write("interrupt_order", order=order, completed_sent=completed)
+        self.step("turn/interrupt", frame, ack)
 
     def await_request(self, method: str, matches: Any) -> dict[str, Any] | None:
         deadline = time.monotonic() + ANSWER_WAIT_SECONDS

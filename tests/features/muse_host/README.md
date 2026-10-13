@@ -37,7 +37,7 @@ The implementations belong here:
   - `--version`: the version check;
   - `serve`: an MSP 1.0.1 peer that enforces the schema's required members;
   - after `--as-wsl`, the WSL forms: `-l -q`, `-d <distro> -e <muse_path> ...`, and the reap `-d <distro> -e sh -s <mark>`.
-  It logs every argv, frame, overlay variable and reap script to JSONL files.
+  It logs every argv, frame, overlay variable and reap script to JSONL files. `msp["turn/interrupt"]["order"]` fixes whether the interrupt's answer or the turn's own `turn/completed` reaches the host first; without it the two race.
 - `test_muse_host_acceptance.py`: AC-6, AC-11 and AC-12, plus the spawn, continue and interrupt happy paths. Start here for a caller-visible regression.
 - `test_muse_host_errors.py`: one table-driven case per (function, code) from §6.3.2 and §6.3.5, run against the host and against the matching tool. It also covers EC-1, EC-2 and EC-3.
 - `test_muse_host_turns.py`: live-turn behaviour:
@@ -56,3 +56,4 @@ The implementations belong here:
 ## Logs
 
 - 2026-10-13 - The pack was written red before implementation, from spec r3 (S2 test author). Every test fails at setup or in its first assertion until the modules above exist.
+- 2026-10-13 - Added RACE-1 regression tests (addendum 3, S2 test author) to `test_muse_host_turns.py`: R-18 (an interrupt that loses the race to `turn/completed`) and R-21 (a steer that does), plus two guards. `fake_muse_peer.py` gained the `turn/interrupt` `order` knob, and the old -32013/-32014 interrupt test now uses `answer_first`, because without it the fake raced the answer against the turn's end and the test flaked in CI.

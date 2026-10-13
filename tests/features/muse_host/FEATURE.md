@@ -150,6 +150,10 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **Busy check and secrets:**
   - a spawn binds an upper-case id from Muse's `session/start`, and a continue or fork by the handle's own id then misses the busy check, so a second turn or a fork starts on a live session (INV-14, EC-112);
   - a credential in an `approval/requested` or `userInput/requested` tool name is recorded verbatim in `NativeApprovalDecision.title` and reaches `wait_muse_turn`'s output (§9.1, INV-6).
+- **Races with the turn's own end (RACE-1):**
+  - `turn/completed` reaches the host before the `turn/interrupt` answer, or the answer never comes, and the driver's own close of the peer makes `interrupt_muse_turn` raise `muse.process_exited` for an interrupt it sent to a running turn (INV-13);
+  - a fix keyed on the answer code instead of the turn's own end lets a -32030 for a turn that is still running pass silently (EC-102), or swallows a real peer exit (EC-96, EC-97);
+  - the turn completes while `turn/steer` waits, and the steer raises `muse.process_exited` instead of `muse.turn_not_found` (EC-115).
 - **Usage:**
   - an unreported field becomes 0;
   - cost is set;
@@ -162,6 +166,8 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **r8 (S4 review R-8 / S4-6): the busy check compared session ids case-sensitively.** INV-14 says Muse ids compare ignoring letter case. Caught by `test_continue_on_the_upper_cased_id_of_a_live_session_is_busy` in `test_muse_host_turns.py`.
 - **Re-review round 1 (R-16): the busy check missed a vendor-chosen upper-case id.** Spawn bound the id from `session/start` verbatim, but continue and fork lower-cased their argument and the turn table compared exactly, so a continue or fork by the handle's own `session_id` (or its lower-cased form) started a second turn or a fork. Caught by `test_continue_on_a_live_session_whose_vendor_id_is_upper_case_is_busy` and `test_fork_of_a_live_session_whose_vendor_id_is_upper_case_is_busy` in `test_muse_host_turns.py`.
 - **Re-review round 1 (R-17): approval and user-input titles were recorded unscrubbed.** §9.1 says `NativeApprovalDecision.title` is scrubbed; the Muse driver recorded both titles verbatim, so a credential in a tool name reached the result and `wait_muse_turn`'s output. Caught by `test_a_credential_in_a_request_title_is_scrubbed_from_the_result_and_the_wait_tool` (both request kinds) in `test_muse_host_turns.py`.
+- **RACE-1 (R-18, CI run 38437336454): an interrupt that lost the race to `turn/completed` raised `muse.process_exited`.** The driver read `turn/completed`, left its loop and closed the peer while `turn/interrupt` was pending, and the closed-transport failure escaped as "The Muse Code process stopped before it answered." The old interrupt test flaked on it because its fake raced the answer against the turn's end. Caught by `test_interrupt_that_loses_to_turn_completed_succeeds` and `test_interrupt_answered_after_turn_completed_succeeds` (-32013, -32014, -32030, accepted) in `test_muse_host_turns.py`; the old test now fixes the answer first (`order: answer_first`). `test_interrupt_rejected_with_32030_while_the_turn_still_runs_raises_api_error` guards EC-102, and the EC-96 and EC-97 rows in `test_muse_host_errors.py` guard a real peer exit or silence.
+- **RACE-1 (R-21): a steer that lost the race to `turn/completed` raised `muse.process_exited`.** EC-115 calls for `muse.turn_not_found`, because the turn is no longer running. Caught by `test_steer_that_loses_to_turn_completed_raises_turn_not_found` in `test_muse_host_turns.py`.
 
 ## Test Suite Map
 
@@ -181,7 +187,8 @@ These are the failure inventory the tests were chosen from, given as input → w
   - steer and interrupt wire;
   - truncation (EC-150, `view/gap`);
   - usage, the ceiling (D-10), EC-148, INV-17 and EC-9;
-  - the INV-14 busy check on an upper-cased id (r8, R-8), and on a continue or fork after Muse returned an upper-case id (re-review R-16).
+  - the INV-14 busy check on an upper-cased id (r8, R-8), and on a continue or fork after Muse returned an upper-case id (re-review R-16);
+  - an interrupt or steer that loses the race to the turn's own `turn/completed` (RACE-1: R-18, R-21), with guards for a -32030 on a running turn and for an interrupt while the driver closes a completed turn.
 - `test_muse_host_wire.py`:
   - `clientInfo` and `initialized`;
   - every command's members;
