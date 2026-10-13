@@ -122,16 +122,17 @@ class MuseLauncher:
 
     def peer_environment(self, mark: str | None) -> dict[str, str]:
         # @intent muse-wsl-forwards-only-the-key-and-mark
-        # The caller's environment, plus, for a WSL peer, its mark and the
-        # WSLENV entries that carry the mark and (only when it is set)
-        # META_API_KEY into the distro; the caller's own entries stay first.
-        if mark is None:
+        # The caller's environment. In WSL mode every peer, short-lived
+        # reads included, also gets the WSLENV entry that carries
+        # META_API_KEY into the distro when it is set (D-18), and a turn
+        # peer gets its mark and the mark's entry; the caller's own entries
+        # stay first. Nothing to forward leaves the environment unchanged.
+        marked = {} if mark is None else {native_host_constants.MUSE_PEER_MARK_VARIABLE: mark}
+        forwarded = [name + _UNIX_PATH_FLAG for name in (_META_KEY_VARIABLE,) if name in os.environ] + [name + _UNIX_PATH_FLAG for name in marked]
+        if not self.wsl_mode or not forwarded:
             return NativeChildEnvironment.build({})
         entries = [entry for entry in os.environ.get(_WSLENV_VARIABLE, "").split(_WSLENV_SEPARATOR) if entry]
-        if _META_KEY_VARIABLE in os.environ:
-            entries.append(_META_KEY_VARIABLE + _UNIX_PATH_FLAG)
-        entries.append(native_host_constants.MUSE_PEER_MARK_VARIABLE + _UNIX_PATH_FLAG)
-        return NativeChildEnvironment.build({native_host_constants.MUSE_PEER_MARK_VARIABLE: mark, _WSLENV_VARIABLE: _WSLENV_SEPARATOR.join(entries)})
+        return NativeChildEnvironment.build({**marked, _WSLENV_VARIABLE: _WSLENV_SEPARATOR.join(entries + forwarded)})
 
     async def list_distros(self) -> tuple[str, ...]:
         # `wsl.exe -l -q` once, within the control timeout; a run that fails
