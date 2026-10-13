@@ -173,6 +173,8 @@ text blocks silently drops image, audio, and structured results.
 - `exit_grace_seconds` lets the peer exit by itself after stdin closes, and
   `stop_process_tree=True` starts it in its own process group and always stops the whole tree
   through `ProcessStopper.stop_tree`, with bounded waits before the pipes are closed.
+- `returncode` is the child's exit code once it has exited, and `None` while it runs. It is
+  kept after `close()`, so a host can tell why a peer stopped before it answered.
 
 With the defaults (`on_message=None`, `exit_grace_seconds=None`, `stop_process_tree=False`) MCP
 behaviour is unchanged. Native peers pass the caller's environment as the `env` overlay, because
