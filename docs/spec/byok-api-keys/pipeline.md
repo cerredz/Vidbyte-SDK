@@ -19,13 +19,13 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | S2 tests | done | 2026-10-12 | 2026-10-13 | reports/S2-test-author.md | S2_HEAD c88f2d32 on origin/main 595a7260 (23 commits ahead, unpushed); 117 new tests red; 36 superseded files + 8 post-rebase straggler files; full 308F/3786P/13S/7E (orchestrator re-run identical); main baseline 3984P/0F |
 | S3 implement | done | 2026-10-13 | 2026-10-13 | reports/S3-implementer.md | S3_HEAD 23dff561 (code at 3481ed66); draft PR #1027; 41 rows; full 4101P/13S/0F; pack 117/117; SDK-LINT PASS (A001 643→641); run_ci source+package PASS; semgrep 0; remote CI + Static policy success @3481ed66; budget 1 file/3 classes/0 deps, base.py +26/30 |
 | S4 adversarial review | done | 2026-10-13 | 2026-10-13 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker / 9 Major / 8 Minor; refuted 0 (3 sub-claims corrected) |
-| S5 repair loop | running | 2026-10-13 | | reports/S5-test-author-1.md, reports/S5-repair-*.md | test pass 1 HEAD 57596097 (T-2..T-10, no T-8; red targets T-6, T-7, T-9, T-10) |
+| S5 repair loop | converged | 2026-10-13 | 2026-10-13 | reports/S5-test-author-1.md, reports/S5-repair-1.md, verify-log.md | test pass 1 57596097; repair 1 HEAD 36897094 (code at 6ac82305); full 4107P/13S; 0 open findings (R-18 deferred) |
 | S5 live E2E (both repos) | pending | | | | |
-| S5 re-review | pending | | | | |
+| S5 re-review | running | 2026-10-13 | | reports/S5-rereview-conformance-1.md | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2 (running)
 
 ## Decisions the orchestrator made
 - 2026-10-12 16:20 — Run backend and SDK as two parallel pipelines, joined by a wire contract fixed in request.md §C — the user asked for both repos; the contract is small and fixing it lets both proceed at once.
@@ -119,4 +119,21 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - 2026-10-13 — Routing for S5 iteration 1. First, a fresh test agent adds T-2..T-6 exactly as review.md specifies (T-6 red until R-6 lands). This is a fresh agent, not the S2 author, because ListAgents shows no resumable S2 agent. Then a fresh repair agent fixes R-1, R-6, R-7, R-8, R-9, R-10 and R-17 in one iteration (most of them edit model_configs.py), plus trivial Minors R-11..R-15. R-16 only if provider_keys.py stays ≤ 300 lines. The two agents run in sequence so they never commit to the shared worktree at the same time.
 - 2026-10-13 — S5 test pass 1 done at 57596097 (pushed). Orchestrator spot-check: tree clean; diff c5076f91..HEAD touches only `tests/` and `docs/spec/byok-api-keys/` (269 insertions, 0 deletions); pack 4 failed / 119 passed at HEAD (exactly T-6, T-7, T-9, T-10). Re-ran mutants kk and o via `scratchpad/s5-mut/s5_mut.py`: each gives 5 failed / 118 passed (its own target plus the 4 reds), with `vidbyte.__file__` inside the mutant tree. Test commits: R-2 f1f6a4f4, R-3 e6ae4990, R-4 32cf23e5, R-5 d971f491, R-6 8b158ed7, R-17 6f282122, R-14 e213bcfd, R-15 963881dd.
 - Niche fact: `PYTHONPATH=<mutant tree>` run from the worktree root still imports the worktree's `vidbyte`, because sys.path[0] is the cwd. Run from inside the tree; `scratchpad/s5-mut/s5_mut.py <name> <target>` does this. — *source:* S5 test author 1
+- 2026-10-13 — Repair iteration 1 converged. Orchestrator spot-check at 36897094:
+  - tree clean and pushed; `tests/` unchanged since 8fcc8c63;
+  - verify-log "## Iteration 1" exists; review.md has 0 `open` rows;
+  - re-ran `run_ci.py --stage source`: `4107 passed, 13 skipped`, `CI passed.`, `SDK-LINT: PASS`;
+  - remote CI and Static policy succeeded on 6ac82305 and on 36897094.
+
+  Fix SHAs:
+  - R-1 66bfa272, R-6 bae3534e, R-7 c72387d3, R-10 f4e4c16c;
+  - R-8 ab841c1f, R-9 e164d700, R-17 9150b3cf;
+  - R-11 54cb16de, R-12 a07219f8, R-13 940ff97c, R-14 fcc98f17, R-15 15907973, R-16 6ac82305.
+- 2026-10-13 — R-1 residual ruled acceptable. Two chains remain, `validate`/`resolved_api_key` → `credentials` → `normalized_provider` (a leaf). That is the shape spec §12.4 sanctions, and review.md's refuted sub-claim for R-1 already said so. Removing them would mean validating the provider in `__post_init__` for every mode, which changes when a DIRECT config with an unknown provider fails. That behaviour change is not worth a structural nicety.
+- 2026-10-13 — Accepted as a stated limitation (no control added): in DIRECT, M-18 still mentions "Vidbyte's own <provider> account" for a served provider, because the matcher never learns the mode. The advice holds if the developer switches mode.
+- Niche facts:
+  - `provider_keys.py` is now exactly 300 lines (the NFR-4 cap).
+  - A002 is 580 (base 584). `fallback._validate_error_types` passes only because the new `named_providers` @intent is within 20 lines.
+  - `s014_mut.py` ends with `git checkout -- .`, so run it only on a git-archive copy that has its own `git init`.
+  - Source: S5 repair 1.
 
