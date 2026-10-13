@@ -42,7 +42,8 @@ from vidbyte.lib.enums.native_hosts import NativeHarness
 from vidbyte.lib.errors import ConfigurationError, NativeHostError, ProviderRequestError
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
 
-# The Claude Code variables build_claude_backend_env fills with the chosen model (spec §9.1 profile table).
+# The Claude Code variables build_claude_backend_env fills
+# with the chosen model.
 _CLAUDE_MODEL_SLOTS: Mapping[HarnessBackendName, tuple[str, ...]] = MappingProxyType(
     {
         HarnessBackendName.GLM: ("ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"),
@@ -52,8 +53,9 @@ _CLAUDE_MODEL_SLOTS: Mapping[HarnessBackendName, tuple[str, ...]] = MappingProxy
 _BASE_URL_VARIABLE = "ANTHROPIC_BASE_URL"
 _KEY_REJECTED_STEP = "DeepSeek rejected {variable}; set a valid key."
 _BODY_FIELD = "body"
-# Backend errors use explicit backend.* codes; the factory's harness only labels
-# process and transport failures, which the backend functions never raise.
+# Backend errors use explicit backend.* codes; the factory's harness
+# only labels process and transport failures, which the backend
+# functions never raise.
 _ERROR_HARNESS = NativeHarness.CLAUDE_CODE
 
 
@@ -62,7 +64,8 @@ class HarnessBackends:
 
     @staticmethod
     def list_harness_backends() -> tuple[HarnessBackend, ...]:
-        # The declared profiles in HarnessBackendName order; no key and no I/O.
+        # The declared profiles in HarnessBackendName
+        # order; no key and no I/O.
         return HARNESS_BACKENDS
 
     @staticmethod
@@ -70,17 +73,20 @@ class HarnessBackends:
         operation = "build_claude_backend_env"
         errors = NativeErrorFactory(_ERROR_HARNESS)
         try:
-            # Resolve the backend and the model before anything else, so a bad argument fails first.
+            # Resolve the backend and the model before anything else, so
+            # a bad argument fails first.
             profile = HarnessBackends._profile(backend)
             chosen = HarnessBackends._claude_model(profile, model, errors, operation=operation)
 
             # Refuse a backend whose terms do not cover Claude Code.
             HarnessBackends._require_harness(profile, NativeHarness.CLAUDE_CODE, errors, operation=operation)
 
-            # Read the key now, on every call, so a changed variable takes effect at once.
+            # Read the key now, on every call, so a changed variable
+            # takes effect at once.
             key = HarnessBackends._key(profile, errors, operation=operation)
 
-            # The public pairs are the endpoint, the profile's fixed pairs and the model slots; the key stays apart.
+            # The public pairs are the endpoint, the profile's fixed
+            # pairs and the model slots; the key stays apart.
             public_env = {_BASE_URL_VARIABLE: profile.anthropic_base_url, **profile.claude_env, **dict.fromkeys(_CLAUDE_MODEL_SLOTS[profile.name], chosen)}
             return ClaudeBackendEnv(backend=profile.name, model=chosen, public_env=public_env, auth_token=key)
         except NativeHostError:
@@ -93,9 +99,10 @@ class HarnessBackends:
     @staticmethod
     async def check_backend_ready(backend: HarnessBackendName | str) -> BackendReadiness:
         # @intent backend-ready-without-spending
-        # Readiness never spends tokens or money (D-17): GLM is checked by its
-        # key variable alone, DeepSeek by its free balance read, and an account
-        # that reports is_available=false is a billing error, not readiness.
+        # Readiness never spends tokens or money: GLM is checked by
+        # its key variable alone, DeepSeek by its free balance read,
+        # and an account that reports is_available=false is a billing
+        # error, not readiness.
         operation = "check_backend_ready"
         errors = NativeErrorFactory(_ERROR_HARNESS)
         try:
@@ -103,14 +110,17 @@ class HarnessBackends:
             profile = HarnessBackends._profile(backend)
             key = HarnessBackends._key(profile, errors, operation=operation)
 
-            # GLM has no free endpoint to verify a key, so the variable is the whole check (D-17).
+            # GLM has no free endpoint to verify a key, so the variable
+            # is the whole check.
             if profile.balance_url is None:
                 return BackendReadiness(backend=profile.name, remote_verified=False)
 
-            # DeepSeek's balance read verifies the key without spending anything.
+            # DeepSeek's balance read verifies the key without
+            # spending anything.
             balance = await HarnessBackends._read_balance(profile.balance_url, key, errors, operation=operation)
 
-            # An account that cannot serve calls is not ready, whatever its listed balances.
+            # An account that cannot serve calls is not ready, whatever
+            # its listed balances.
             if not balance.is_available:
                 currencies = errors.listing(entry.currency for entry in balance.balances)
                 raise errors.build(FailureCode.BACKEND_BILLING_ERROR, "DeepSeek reports that the account cannot serve calls.", operation=operation, context={"vendor_error": f"is_available=false; currencies={currencies}"})
@@ -127,20 +137,22 @@ class HarnessBackends:
     @staticmethod
     def check_backend_compat(backend: HarnessBackendName | str, request: BackendCompatRequest) -> None:
         # @intent backend-compat-harness-before-features
-        # The harness is checked before the features: a harness the backend's
-        # terms forbid is the first thing to fix, whatever features the
-        # request lists (spec §6.3.6). No key and no I/O.
+        # The harness is checked before the features: a harness the
+        # backend's terms forbid is the first thing to fix, whatever
+        # features the request lists. No key and no I/O.
         operation = "check_backend_compat"
         errors = NativeErrorFactory(_ERROR_HARNESS)
         try:
-            # Resolve the backend and make sure the request is the record this check reads.
+            # Resolve the backend and make sure the request is the
+            # record this check reads.
             profile = HarnessBackends._profile(backend)
             compat = RecordFieldConverter.require_instance(request, "request", BackendCompatRequest)
 
             # Refuse a harness the backend's terms do not allow.
             HarnessBackends._require_harness(profile, compat.harness, errors, operation=operation)
 
-            # Refuse features the endpoint would silently ignore, naming every one of them.
+            # Refuse features the endpoint would silently ignore, naming
+            # every one of them.
             ignored = sorted(feature.value for feature in compat.features & profile.unsupported_features)
             if ignored:
                 raise errors.build(FailureCode.BACKEND_FEATURE_UNSUPPORTED, f"The {profile.name.value} endpoint silently ignores these request features.", operation=operation, context={"features": errors.listing(ignored)})
@@ -156,11 +168,13 @@ class HarnessBackends:
         operation = "get_deepseek_balance"
         errors = NativeErrorFactory(_ERROR_HARNESS)
         try:
-            # Only DeepSeek has a balance endpoint; its key is the only one this call reads.
+            # Only DeepSeek has a balance endpoint; its key is the only
+            # one this call reads.
             profile = HarnessBackends._profile(HarnessBackendName.DEEPSEEK)
             key = HarnessBackends._key(profile, errors, operation=operation)
 
-            # Read the balance; is_available=false is data here, not an error.
+            # Read the balance; is_available=false is data
+            # here, not an error.
             return await HarnessBackends._read_balance(str(profile.balance_url), key, errors, operation=operation)
         except asyncio.CancelledError:
             raise
@@ -174,17 +188,20 @@ class HarnessBackends:
     @staticmethod
     def build_opencode_backend_provider(backend: HarnessBackendName | str) -> OpencodeBackendProvider:
         # @intent backend-opencode-provider-holds-names-only
-        # The provider wiring names the variable to copy and the variable the
-        # server reads; it never holds or checks a key value, because the
-        # opencode host reads and checks the key itself when it starts.
+        # The provider wiring names the variable to copy and the
+        # variable the server reads; it never holds or checks a key
+        # value, because the opencode host reads and checks the key
+        # itself when it starts.
         operation = "build_opencode_backend_provider"
         errors = NativeErrorFactory(_ERROR_HARNESS)
         try:
-            # Resolve the backend and refuse one whose terms do not cover opencode.
+            # Resolve the backend and refuse one whose terms do
+            # not cover opencode.
             profile = HarnessBackends._profile(backend)
             HarnessBackends._require_harness(profile, NativeHarness.OPENCODE, errors, operation=operation)
 
-            # Name opencode's built-in provider, the key variable to copy from and into, and the models.
+            # Name opencode's built-in provider, the key variable to
+            # copy from and into, and the models.
             return OpencodeBackendProvider(backend=profile.name, provider_id=profile.opencode_provider_id, source_env_var=profile.auth_env_var, child_env_var=profile.opencode_key_env_var, model_ids=profile.opencode_models)
         except NativeHostError:
             raise
@@ -195,13 +212,15 @@ class HarnessBackends:
 
     @staticmethod
     def _profile(backend: object) -> HarnessBackend:
-        # The declared profile for a HarnessBackendName member or its exact value string (EC-122).
+        # The declared profile for a HarnessBackendName member or its
+        # exact value string.
         name = RecordFieldConverter.to_enum(backend, HarnessBackendName, "backend")
         return next(profile for profile in HARNESS_BACKENDS if profile.name is name)
 
     @staticmethod
     def _claude_model(profile: HarnessBackend, model: object, errors: NativeErrorFactory, *, operation: str) -> str:
-        # The profile's first model when none is given; otherwise a declared model of this profile (EC-124, EC-125).
+        # The profile's first model when none is given; otherwise a
+        # declared model of this profile.
         if model is None:
             return profile.claude_models[0]
         chosen = RecordFieldValidator.require_text(model, "model", max_chars=native_host_constants.NATIVE_ID_MAX_CHARS)
@@ -211,17 +230,17 @@ class HarnessBackends:
 
     @staticmethod
     def _require_harness(profile: HarnessBackend, harness: NativeHarness, errors: NativeErrorFactory, *, operation: str) -> None:
-        # Refuses a harness outside the profile's allowed_harnesses (EC-126, EC-135, EC-137).
+        # Refuses a harness outside the profile's allowed_harnesses.
         if harness not in profile.allowed_harnesses:
             raise errors.build(FailureCode.BACKEND_HARNESS_NOT_ALLOWED, f"The {profile.name.value} backend's terms do not allow the {harness.value} harness.", operation=operation)
 
     @staticmethod
     def _key(profile: HarnessBackend, errors: NativeErrorFactory, *, operation: str) -> str:
         # @intent backend-key-read-per-call-and-registered-secret
-        # The key comes from os.environ on every call and is registered with
-        # the error factory, so any vendor text that echoes it is redacted.
-        # A blank value counts as unset, and the error names the variable,
-        # never its value (EC-123).
+        # The key comes from os.environ on every call and is registered
+        # with the error factory, so any vendor text that echoes it is
+        # redacted. A blank value counts as unset, and the error names
+        # the variable, never its value.
         key = os.environ.get(profile.auth_env_var, "")
         if not key.strip():
             raise errors.build(FailureCode.BACKEND_NOT_SIGNED_IN, f"{profile.auth_env_var} is not set in the environment.", operation=operation, next_step=native_host_constants.BACKEND_KEY_MISSING_NEXT_STEP.format(variable=profile.auth_env_var))
@@ -230,7 +249,7 @@ class HarnessBackends:
 
     @staticmethod
     async def _read_balance(url: str, key: str, errors: NativeErrorFactory, *, operation: str) -> DeepseekBalance:
-        # One GET, then the status rows, then the body's relied-on
+        # One GET, then the status checks, then the body's relied-on
         # members. The vendor's own error text is read here so a refused
         # call can carry it.
         response = await HarnessBackends._send_balance_request(url, key, errors, operation=operation)
@@ -241,11 +260,12 @@ class HarnessBackends:
     @staticmethod
     async def _send_balance_request(url: str, key: str, errors: NativeErrorFactory, *, operation: str) -> HttpResponse:
         # @intent backend-balance-request-bounded-no-retry
-        # One GET through HttpTransport with the backend deadline and body cap,
-        # the key only in the Bearer header, no retry and no redirect. A failure
-        # with no status means the endpoint was not reached (EC-131); one with
-        # a status is a body over the cap (EC-132). The transport's own text is
-        # never surfaced, because it can echo the request.
+        # One GET through HttpTransport with the backend deadline
+        # and body cap, the key only in the Bearer header, no retry
+        # and no redirect. A failure with no status means the
+        # endpoint was not reached; one with a status is a body over
+        # the cap. The transport's own text is never surfaced,
+        # because it can echo the request.
         headers = {"authorization": f"Bearer {key}", "accept": "application/json"}
         try:
             return await HttpTransport().request(method="GET", url=url, headers=headers, timeout_seconds=native_host_constants.BACKEND_HTTP_TIMEOUT_SECONDS, max_response_bytes=native_host_constants.BACKEND_MAX_RESPONSE_BYTES)
@@ -256,10 +276,11 @@ class HarnessBackends:
 
     @staticmethod
     def _check_balance_status(response: HttpResponse, vendor_text: str, errors: NativeErrorFactory, *, operation: str) -> None:
-        # @intent backend-balance-status-rows
-        # 401 and 403 mean the key was rejected, 402 an empty balance and 429
-        # a rate limit; any other non-2xx status, a redirect included, is an
-        # unclassified vendor error with its scrubbed text (EC-127 to EC-130).
+        # @intent backend-balance-status-failures
+        # 401 and 403 mean the key was rejected, 402 an empty
+        # balance and 429 a rate limit; any other non-2xx status,
+        # a redirect included, is an unclassified vendor error
+        # with its scrubbed text.
         status = response.status_code
         if status in native_host_constants.NATIVE_HTTP_SIGNED_OUT_STATUSES:
             raise errors.build(FailureCode.BACKEND_NOT_SIGNED_IN, "DeepSeek rejected the key in DEEPSEEK_API_KEY.", operation=operation, next_step=_KEY_REJECTED_STEP.format(variable="DEEPSEEK_API_KEY"), context={"status_code": str(status)})
@@ -275,7 +296,8 @@ class HarnessBackends:
 
     @staticmethod
     def _vendor_text(body: str) -> str:
-        # The error envelope's message when the body has one, else the body text; the factory scrubs and caps it.
+        # The error envelope's message when the body has one, else the
+        # body text; the factory scrubs and caps it.
         try:
             payload = json.loads(body)
         except ValueError:
@@ -287,10 +309,11 @@ class HarnessBackends:
     @staticmethod
     def _parse_balance(body: str, errors: NativeErrorFactory, *, operation: str) -> DeepseekBalance:
         # @intent backend-balance-relied-on-members
-        # Only the members this SDK relies on are read: a bool is_available, a
-        # list balance_infos, and per entry a currency string and three decimal
-        # strings. Anything else missing or mistyped is protocol_mismatch
-        # naming the member, never a raw parsing error (EC-132, D-13).
+        # Only the members this SDK relies on are read: a bool
+        # is_available, a list balance_infos, and per entry a
+        # currency string and three decimal strings. Anything else
+        # missing or mistyped is protocol_mismatch naming the member,
+        # never a raw parsing error.
         try:
             payload: Any = RecordFieldConverter.require_instance(json.loads(body), _BODY_FIELD, Mapping)
             is_available = RecordFieldValidator.require_bool(payload.get("is_available"), "is_available")

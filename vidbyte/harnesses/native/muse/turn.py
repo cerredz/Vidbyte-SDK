@@ -45,7 +45,8 @@ _USER_INPUT_KIND = "muse.user_input"
 _COMPLETED_TERMINAL = "completed"
 _DEFAULT_FAILURE_PROBLEM = "api_error"
 _NONE_DROPPED = 0
-# turn/completed error kinds with their own rows (EC-117, EC-118); every other kind is api_error (EC-119).
+# turn/completed error kinds with a failure of their own; every
+# other kind is api_error.
 _FAILURE_PROBLEMS: Mapping[str, str] = MappingProxyType({"stepLimit": "budget_exhausted", "environmentError": "sandbox_not_ready"})
 
 
@@ -91,7 +92,7 @@ class MuseTurnDriver:
 
     @property
     def turn_id(self) -> str:
-        # The turn's MSP id, always the ack's turnId (EC-109).
+        # The turn's MSP id, always the ack's turnId.
         return self._ack.turn_id
 
     @property
@@ -103,28 +104,33 @@ class MuseTurnDriver:
         # @intent muse-turn-driver-owns-its-peer
         # The driver owns the peer from the ack on: it reads the turn's
         # frames until turn/completed, a stop's grace period ends or the
-        # peer goes away, and it always closes the peer (and reaps it in WSL
-        # mode) on the way out, whatever the outcome.
+        # peer goes away, and it always closes the peer (and reaps it in
+        # WSL mode) on the way out, whatever the outcome.
         loop = asyncio.get_running_loop()
         ceiling = loop.time() + self._max_turn_seconds
         try:
             while self._completed is None and not self._grace_over(loop.time()):
-                # Take the next frame in arrival order, waiting only briefly so a gone peer is noticed.
+                # Take the next frame in arrival order, waiting only
+                # briefly so a gone peer is noticed.
                 frame = await self._next_frame()
-                # Past the turn ceiling the turn must stop (D-10).
+                # Past the turn ceiling the turn must stop.
                 stop = InterruptSource.DEADLINE if loop.time() >= ceiling else None
                 if frame is not None:
-                    # Hand the frame to its method's handler; a handler that must stop the turn names who stops it.
+                    # Hand the frame to its method's handler; a handler
+                    # that must stop the turn names who stops it.
                     stop = await self._handlers.get(str(frame.get("method")), self._on_other)(frame) or stop
                 elif self._peer.closed and self._peer.inbox.empty():
-                    # The peer closed its output and every frame it sent was read: it is gone (EC-120).
+                    # The peer closed its output and every frame it sent
+                    # was read: it is gone.
                     break
                 if stop is not None and self._stop_source is None:
-                    # Ask Muse to stop the turn; whether or not it answers, the grace period bounds the wait.
+                    # Ask Muse to stop the turn; whether or not it
+                    # answers, the grace period bounds the wait.
                     with contextlib.suppress(NativeHostError):
                         await self.interrupt(stop, operation=native_host_constants.MUSE_TURN_OPERATION)
                     self.close_after_grace(stop)
-            # Turn what happened into the result, or into the turn's failure row.
+            # Turn what happened into the result, or into
+            # the turn's failure.
             return self._outcome()
         finally:
             self._running = False
@@ -132,10 +138,11 @@ class MuseTurnDriver:
 
     async def interrupt(self, source: InterruptSource, *, operation: str, timeout_seconds: float | None = None) -> None:
         # @intent muse-turn-interrupt-starts-the-grace-period
-        # turn/interrupt for the ack's turn id. -32013 and -32014 mean the
-        # turn is already stopping, which counts as success. Once Muse has
-        # the interrupt, the turn gets NATIVE_STOP_GRACE_SECONDS to finish
-        # before the driver closes the peer.
+        # turn/interrupt for the ack's turn id. -32013 and
+        # -32014 mean the turn is already stopping, which
+        # counts as success. Once Muse has the interrupt, the
+        # turn gets NATIVE_STOP_GRACE_SECONDS to finish before
+        # the driver closes the peer.
         params = MuseWire.turn_interrupt_params(self._handle.session_id, self._ack.turn_id)
         try:
             await self._peer.call("turn/interrupt", params, operation=operation, timeout_seconds=timeout_seconds)
@@ -147,21 +154,23 @@ class MuseTurnDriver:
             self._stop_deadline = asyncio.get_running_loop().time() + native_host_constants.NATIVE_STOP_GRACE_SECONDS
 
     def close_after_grace(self, source: InterruptSource) -> None:
-        # Records who stops the turn and closes the peer after the grace period, even when no interrupt reached Muse.
+        # Records who stops the turn and closes the peer after the grace
+        # period, even when no interrupt reached Muse.
         self._stop_source = self._stop_source or source
         if self._stop_deadline is None:
             self._stop_deadline = asyncio.get_running_loop().time() + native_host_constants.NATIVE_STOP_GRACE_SECONDS
 
     async def shut_down(self) -> None:
-        # EC-8: the host is closing, so ask Muse to stop the turn within the
-        # grace period and let the driver close the peer when it ends; the
-        # turn finishes INTERRUPTED with source HOST_CLOSED.
+        # The host is closing, so ask Muse to stop the turn within the
+        # grace period and let the driver close the peer when it ends;
+        # the turn finishes INTERRUPTED with source HOST_CLOSED.
         with contextlib.suppress(NativeHostError):
             await self.interrupt(InterruptSource.HOST_CLOSED, operation=_SHUTDOWN_OPERATION, timeout_seconds=native_host_constants.NATIVE_STOP_GRACE_SECONDS)
         self.close_after_grace(InterruptSource.HOST_CLOSED)
 
     async def _next_frame(self) -> Mapping[str, Any] | None:
-        # One frame from the inbox, or None when none arrives within the poll interval.
+        # One frame from the inbox, or None when none arrives
+        # within the poll interval.
         try:
             async with asyncio.timeout(native_host_constants.MUSE_FRAME_POLL_SECONDS):
                 return await self._peer.inbox.get()
@@ -169,8 +178,8 @@ class MuseTurnDriver:
             return None
 
     async def _on_item(self, frame: Mapping[str, Any]) -> InterruptSource | None:
-        # Only this turn's agentMessage items carry reply text; they join
-        # with a blank line up to NATIVE_RESULT_TEXT_MAX_CHARS (EC-150).
+        # Only this turn's agentMessage items carry reply text; they
+        # join with a blank line up to NATIVE_RESULT_TEXT_MAX_CHARS.
         item = MuseWire.parse_item_completed(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         if item.kind != _AGENT_MESSAGE_KIND or item.turn_id != self._ack.turn_id:
             return None
@@ -183,16 +192,17 @@ class MuseTurnDriver:
         return None
 
     async def _on_gap(self, frame: Mapping[str, Any]) -> InterruptSource | None:
-        # A view gap may have dropped a reply item, so the text may be incomplete.
+        # A view gap may have dropped a reply item, so the
+        # text may be incomplete.
         self._text_truncated = True
         return None
 
     async def _on_approval(self, frame: Mapping[str, Any]) -> InterruptSource | None:
         # @intent muse-approval-denied-once-per-requirement
-        # D-11: each requirement is decided once with the denied choice
-        # scoped once. With no such choice nothing is chosen and the turn is
-        # stopped by policy (EC-121); a failed decide stops it too, except
-        # for the two benign races (EC-156).
+        # Each requirement is decided once with the denied choice scoped
+        # once. With no such choice nothing is chosen and the turn is
+        # stopped by policy; a failed decide stops it too, except for
+        # the two benign races.
         request = MuseWire.parse_approval_request(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         key = (request.approval_id, request.requirement_approval_id, request.requirement_source_index)
         if key in self._decided:
@@ -216,8 +226,8 @@ class MuseTurnDriver:
 
     async def _on_user_input(self, frame: Mapping[str, Any]) -> InterruptSource | None:
         # @intent muse-user-input-always-cancelled
-        # D-11: a question to the user is always cancelled and recorded as
-        # CANCELLED; a failed cancel stops the turn by policy (EC-156).
+        # A question to the user is always cancelled and recorded as
+        # CANCELLED; a failed cancel stops the turn by policy.
         request = MuseWire.parse_user_input_request(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         if request.user_input_id in self._cancelled_inputs:
             return None
@@ -233,7 +243,8 @@ class MuseTurnDriver:
         return None
 
     async def _on_completed(self, frame: Mapping[str, Any]) -> InterruptSource | None:
-        # Only the completion of the ack's turn ends this turn; others are ignored (EC-109).
+        # Only the completion of the ack's turn ends this turn;
+        # others are ignored.
         completed = MuseWire.parse_turn_completed(frame.get("params"), operation=native_host_constants.MUSE_TURN_OPERATION)
         if completed.turn_id == self._ack.turn_id:
             self._completed = completed
@@ -241,22 +252,24 @@ class MuseTurnDriver:
 
     async def _on_other(self, frame: Mapping[str, Any]) -> InterruptSource | None:
         # @intent muse-unknown-server-request-gets-method-not-found
-        # Any other server request is answered -32601 (D-11); an unknown
-        # notification is ignored, because MSP vocabularies are open (EC-7).
+        # Any other server request is answered -32601; an unknown
+        # notification is ignored, because MSP vocabularies are open.
         if "id" in frame:
             with contextlib.suppress(McpProtocolError):
                 await self._peer.answer(frame["id"], error=MuseWire.method_not_found_error())
         return None
 
     def _grace_over(self, now: float) -> bool:
-        # True once a stop's grace period has passed without turn/completed.
+        # True once a stop's grace period has passed
+        # without turn/completed.
         return self._stop_deadline is not None and now >= self._stop_deadline
 
     def _outcome(self) -> NativeTurnResult:
-        # D-9: a failed turn raises its row (EC-117 to EC-119) and a peer that
-        # went away unasked raises process_exited (EC-120). Otherwise the turn
-        # is COMPLETED, or INTERRUPTED by whoever stopped it; a cancel the host
-        # did not ask for came from another client, so its source is CALLER.
+        # A failed turn raises its muse.* failure and a peer that
+        # went away unasked raises process_exited. Otherwise the turn
+        # is COMPLETED, or INTERRUPTED by whoever stopped it; a
+        # cancel the host did not ask for came from another client,
+        # so its source is CALLER.
         completed = self._completed
         if completed is not None and completed.terminal == native_host_constants.MUSE_FAILED_TERMINAL:
             kind = str(completed.error_kind)

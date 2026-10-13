@@ -64,38 +64,44 @@ class GrokTurnDriver:
 
     async def run(self) -> NativeTurnResult:
         # @intent grok-turn-driver-owns-its-peer
-        # The driver serves the peer until Grok answers session/prompt, so
-        # every server request is answered while the turn runs (INV-10), and
+        # The driver serves the peer until Grok answers session/prompt,
+        # so every server request is answered while the turn runs, and
         # it closes the peer and its whole process tree however the turn
-        # ends (D-23). A failed turn raises its grok.* error, which every
-        # wait_grok_turn re-raises (D-9).
+        # ends. A failed turn raises its grok.* error, which every
+        # wait_grok_turn re-raises.
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._ceiling
         try:
             while not self._answer.done():
-                # Take the next thing the peer sent, or wake for the ceiling, the stop grace or an interrupt.
+                # Take the next thing the peer sent, or wake for the
+                # ceiling, the stop grace or an interrupt.
                 frame = await self._next_frame(deadline) or {}
                 method = frame.get("method")
-                # Answer permission requests by policy, refuse every other server request, and collect updates.
+                # Answer permission requests by policy, refuse every
+                # other server request, and collect updates.
                 if method == GrokWire.REQUEST_PERMISSION and "id" in frame:
                     self._record(await self._answer_permission(frame))
                 elif method == GrokWire.SESSION_UPDATE:
                     self._take_update(frame)
                 elif isinstance(method, str) and method and "id" in frame:
                     self._record(await self._refuse(frame))
-                # At the turn ceiling the host interrupts the turn itself; a dead pipe is closed below anyway (D-10).
+                # At the turn ceiling the host interrupts the turn
+                # itself; a dead pipe is closed below anyway.
                 if self._source is None and loop.time() >= deadline:
                     with contextlib.suppress(NativeHostError):
                         await self.interrupt(InterruptSource.DEADLINE, operation=native_host_constants.GROK_TURN_OPERATION)
-                # Once the stop grace has passed, close the peer; its pending answer then fails and the loop ends.
+                # Once the stop grace has passed, close the peer; its
+                # pending answer then fails and the loop ends.
                 if self._stop_at is not None and loop.time() >= self._stop_at:
                     await self._peer.close()
-            # Grok writes a turn's updates before its answer, so take the ones still queued.
+            # Grok writes a turn's updates before its answer, so take
+            # the ones still queued.
             while not self._peer.inbox.empty():
                 queued = self._peer.inbox.get_nowait()
                 if queued.get("method") == GrokWire.SESSION_UPDATE:
                     self._take_update(queued)
-            # Read the answer, then report the turn with its capped text, usage and decisions.
+            # Read the answer, then report the turn with its capped
+            # text, usage and decisions.
             interrupted, stop_reason, usage = self._outcome()
             return NativeTurnResult(
                 handle=self._handle,
@@ -109,18 +115,19 @@ class GrokTurnDriver:
                 decisions_dropped=self._dropped,
             )
         finally:
-            # The turn is over either way: stop the peer, and mark a failed answer as seen so it is not logged as lost.
+            # The turn is over either way: stop the peer, and mark a
+            # failed answer as seen so it is not logged as lost.
             await self._peer.close()
             if self._answer.done() and not self._answer.cancelled():
                 self._answer.exception()
 
     async def interrupt(self, source: InterruptSource, *, operation: str) -> None:
         # @intent grok-interrupt-is-cancel-then-grace
-        # EC-53 / D-10: an interrupt sends ACP session/cancel once and
-        # returns at once; Grok then ends the turn itself, and if it has not
-        # NATIVE_STOP_GRACE_SECONDS later the driver closes the peer. The
-        # first source wins, and a cancel that cannot be written raises
-        # process_exited (EC-51) while the stop timer still runs.
+        # An interrupt sends ACP session/cancel once and returns at
+        # once; Grok then ends the turn itself, and if it has not
+        # NATIVE_STOP_GRACE_SECONDS later the driver closes the peer.
+        # The first source wins, and a cancel that cannot be written
+        # raises process_exited while the stop timer still runs.
         if self._source is not None or self._answer.done():
             return
         self._source = source
@@ -130,11 +137,13 @@ class GrokTurnDriver:
         await self._peer.notify(GrokWire.CANCEL, self._wire.cancel_params(self._handle.session_id), operation=operation)
 
     async def close(self) -> None:
-        # Stops the peer now; the pending answer fails and run ends the turn (EC-8).
+        # Stops the peer now; the pending answer fails
+        # and run ends the turn.
         await self._peer.close()
 
     async def _next_frame(self, deadline: float) -> Mapping[str, Any] | None:
-        # Waits for one peer frame or the prompt answer until the next timer: the stop grace once interrupted, the ceiling before.
+        # Waits for one peer frame or the prompt answer until the next
+        # timer: the stop grace once interrupted, the ceiling before.
         loop = asyncio.get_running_loop()
         wake_at = self._stop_at if self._stop_at is not None else deadline
         reader = asyncio.create_task(self._peer.inbox.get())
@@ -150,11 +159,11 @@ class GrokTurnDriver:
 
     async def _answer_permission(self, frame: Mapping[str, Any]) -> NativeApprovalDecision:
         # @intent grok-permission-policy
-        # D-11: allow_once for a tool kind in allowed_tool_kinds, otherwise
-        # reject_once, or the cancelled outcome when Grok offered no reject
-        # option; never an *_always option, and the request is always
-        # answered. A failed write means the peer is gone, which the prompt
-        # answer reports.
+        # Answer allow_once for a tool kind in allowed_tool_kinds,
+        # otherwise reject_once, or the cancelled outcome when Grok
+        # offered no reject option; never an *_always option, and the
+        # request is always answered. A failed write means the peer is
+        # gone, which the prompt answer reports.
         permission = self._wire.parse_permission_request(frame)
         allowing = permission.tool_kind in self._allowed
         allow = next((option.option_id for option in permission.options if option.kind == _ALLOW_ONCE), None) if allowing else None
@@ -168,7 +177,8 @@ class GrokTurnDriver:
         return NativeApprovalDecision(request_kind=kind, title=permission.title[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS], outcome=outcome)
 
     async def _refuse(self, frame: Mapping[str, Any]) -> NativeApprovalDecision:
-        # INV-10: any other server request gets JSON-RPC -32601 and is recorded as not supported.
+        # Any other server request gets JSON-RPC -32601 and is
+        # recorded as not supported.
         method = str(frame.get("method"))[: native_host_constants.NATIVE_ID_MAX_CHARS]
         with contextlib.suppress(McpProtocolError):
             await self._peer.answer(frame["id"], error=self._wire.method_not_found())
@@ -176,10 +186,10 @@ class GrokTurnDriver:
 
     def _take_update(self, frame: Mapping[str, Any]) -> None:
         # @intent grok-turn-text-and-cost
-        # INV-16: message text is kept up to NATIVE_RESULT_TEXT_MAX_CHARS
-        # and the rest only flagged; D-14: the latest usage_update's cost is
-        # the turn's usage when Grok's answer has none, and only a USD cost
-        # counts. Other update kinds change nothing (EC-7).
+        # Message text is kept up to NATIVE_RESULT_TEXT_MAX_CHARS and
+        # the rest only flagged; the latest usage_update's cost is the
+        # turn's usage when Grok's answer has none, and only a USD cost
+        # counts. Other update kinds change nothing.
         update = self._wire.parse_session_update(frame.get("params"))
         if update.kind == GrokWire.USAGE_UPDATE:
             self._cost_usage = NativeTokenUsage(cost_usd=update.cost_amount) if update.cost_currency == _USD and update.cost_amount is not None else None
@@ -191,7 +201,8 @@ class GrokTurnDriver:
             self._text_chars += len(kept)
 
     def _record(self, decision: NativeApprovalDecision) -> None:
-        # INV-16: at most NATIVE_MAX_RECORDED_DECISIONS decisions are kept; the rest are counted.
+        # At most NATIVE_MAX_RECORDED_DECISIONS decisions are kept;
+        # the rest are counted.
         if len(self._decisions) < native_host_constants.NATIVE_MAX_RECORDED_DECISIONS:
             self._decisions.append(decision)
         else:
@@ -199,11 +210,11 @@ class GrokTurnDriver:
 
     def _outcome(self) -> tuple[bool, str | None, NativeTokenUsage | None]:
         # @intent grok-turn-outcome
-        # EC-50: a "cancelled" stopReason or a -32800 answer ends the turn
-        # interrupted, and any other stopReason completes it verbatim. A peer
-        # that stopped after an interrupt also ends it interrupted; without
-        # one the turn fails with process_exited (EC-48), and any other
-        # JSON-RPC error fails it with its own row (EC-45 to EC-47).
+        # A "cancelled" stopReason or a -32800 answer ends the turn
+        # interrupted, and any other stopReason completes it verbatim. A
+        # peer that stopped after an interrupt also ends it interrupted;
+        # without one the turn fails with process_exited, and any other
+        # JSON-RPC error fails it with its own grok.* failure.
         failure = None if self._answer.cancelled() else self._answer.exception()
         if not self._answer.cancelled() and failure is None:
             prompt = self._wire.parse_prompt_result(self._answer.result())

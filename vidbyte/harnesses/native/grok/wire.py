@@ -79,11 +79,11 @@ class GrokWire:
     def __init__(self, errors: NativeErrorFactory) -> None:
         self._errors = errors
 
-    # ---- ACP request params -------------------------------------------------
+    # ---- ACP request params ------------------------------------------
 
     @staticmethod
     def initialize_params() -> dict[str, Any]:
-        # §8.5: protocol 1, no file system or terminal for the agent, and who
+        # Protocol 1, no file system or terminal for the agent, and who
         # the client is; the version is read on each call, as for Muse.
         capabilities = {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False}
         client = {"name": native_host_constants.GROK_CLIENT_NAME, "title": native_host_constants.GROK_CLIENT_TITLE, "version": vidbyte.__version__}
@@ -91,7 +91,8 @@ class GrokWire:
 
     @staticmethod
     def new_session_params(cwd: Path) -> dict[str, Any]:
-        # A session in the workspace with no MCP servers and never a _meta block (INV-9).
+        # A session in the workspace with no MCP servers and
+        # never a _meta block.
         return {"cwd": str(cwd), "mcpServers": []}
 
     @staticmethod
@@ -101,7 +102,8 @@ class GrokWire:
 
     @staticmethod
     def list_sessions_params(cwd: Path, cursor: str | None) -> dict[str, Any]:
-        # One page of the workspace's sessions; the cursor is passed back verbatim.
+        # One page of the workspace's sessions; the cursor is
+        # passed back verbatim.
         params: dict[str, Any] = {"cwd": str(cwd)}
         if cursor is not None:
             params["cursor"] = cursor
@@ -120,22 +122,24 @@ class GrokWire:
     @staticmethod
     def permission_answer(option_id: str | None) -> dict[str, Any]:
         # @intent grok-permission-answer-shape
-        # D-11: the host answers with the one option it chose, or with the
-        # cancelled outcome when no option fits, never an option it was not
-        # offered.
+        # The host answers with the one option it chose, or with
+        # the cancelled outcome when no option fits, never an
+        # option it was not offered.
         if option_id is None:
             return {"outcome": {"outcome": _CANCELLED}}
         return {"outcome": {"outcome": _SELECTED, "optionId": option_id}}
 
     @staticmethod
     def method_not_found() -> dict[str, Any]:
-        # INV-10: the JSON-RPC answer to any server request the host does not serve.
+        # The JSON-RPC answer to any server request the
+        # host does not serve.
         return {"code": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_CODE, "message": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_TEXT}
 
-    # ---- ACP answers ----------------------------------------------------------
+    # ---- ACP answers -------------------------------------------------
 
     def check_initialize(self, result: Mapping[str, Any], *, operation: str) -> None:
-        # The peer must speak this SDK's ACP version, and its agent version must be supported (EC-17).
+        # The peer must speak this SDK's ACP version, and its agent
+        # version must be supported.
         try:
             version = RecordFieldConverter.require_instance(result.get("protocolVersion"), "protocolVersion", int)
             agent = RecordFieldConverter.require_instance(self._meta(result).get("agentVersion"), "agentVersion", str, optional=True)
@@ -150,7 +154,7 @@ class GrokWire:
             raise self._errors.build(self._errors.code("version_unsupported"), "This Grok Build agent is older than this SDK supports.", operation=operation, context={"version": agent or ""})
 
     def require_session_capability(self, result: Mapping[str, Any], capability: str, *, operation: str, next_step: str) -> None:
-        # The ACP session capability this call needs must be offered (EC-20, EC-30, EC-40).
+        # The ACP session capability this call needs must be offered.
         capabilities = result.get("agentCapabilities")
         session = capabilities.get("sessionCapabilities") if isinstance(capabilities, Mapping) else None
         if isinstance(session, Mapping) and session.get(capability) is not None:
@@ -159,7 +163,8 @@ class GrokWire:
         raise self._errors.build(self._errors.code("capability_missing"), f"This Grok Build release does not offer ACP {method}.", operation=operation, next_step=next_step, context={"method": method})
 
     def parse_model_catalog(self, result: Mapping[str, Any], *, operation: str) -> GrokModelCatalog:
-        # D-12: the models and their reasoning efforts come from initialize's _meta.modelState (EC-22).
+        # The models and their reasoning efforts come from
+        # initialize's _meta.modelState.
         try:
             state = RecordFieldConverter.require_instance(self._meta(result).get("modelState"), "modelState", Mapping)
             entries = RecordFieldConverter.to_tuple(state.get("availableModels"), "availableModels", item_type=Mapping)
@@ -169,10 +174,11 @@ class GrokWire:
 
     def require_model(self, catalog: GrokModelCatalog, model: str | None, reasoning_effort: str | None, *, operation: str) -> None:
         # @intent grok-live-model-check
-        # D-12: the peer was started with --model, and Grok silently falls
-        # back to its default for an id it does not know, so the requested
-        # model must be the current one; an effort must be one the current
-        # model lists. Both are checked before anything spends money.
+        # The peer was started with --model, and Grok silently falls
+        # back to its default for an id it does not know, so the
+        # requested model must be the current one; an effort must be
+        # one the current model lists. Both are checked before
+        # anything spends money.
         if model is not None and catalog.current_model_id != model:
             offered = self._errors.listing(entry.model_id for entry in catalog.models)
             raise self._errors.build(self._errors.code("model_unknown"), f"Grok Build does not offer the model {model}.", operation=operation, context={"available_models": offered})
@@ -184,7 +190,7 @@ class GrokWire:
             raise self._errors.build(self._errors.code("capability_missing"), message, operation=operation, next_step=_EFFORT_NEXT_STEP)
 
     def parse_readiness(self, version: str, result: Mapping[str, Any], *, operation: str) -> GrokReadiness:
-        # FR-1: the CLI version plus what initialize reported.
+        # The CLI version plus what initialize reported.
         try:
             meta = self._meta(result)
             state = RecordFieldConverter.require_instance(meta.get("modelState"), "modelState", Mapping)
@@ -200,14 +206,14 @@ class GrokWire:
             raise self._mismatch(operation, "initialize") from exc
 
     def parse_session_id(self, result: Mapping[str, Any], *, operation: str) -> str:
-        # session/new answers with the new session's id (EC-14).
+        # session/new answers with the new session's id.
         try:
             return RecordFieldValidator.require_text(result.get("sessionId"), "sessionId", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=_SESSION_ID_PATTERN)
         except ConfigurationError as exc:
             raise self._mismatch(operation, "session_id") from exc
 
     def parse_session_page(self, result: Mapping[str, Any], *, operation: str) -> GrokSessionPage:
-        # One session/list page; every entry needs an id and a cwd (EC-42).
+        # One session/list page; every entry needs an id and a cwd.
         try:
             entries = RecordFieldConverter.to_tuple(result.get("sessions"), "sessions", item_type=Mapping)
             sessions = tuple(GrokSession(session_id=entry.get("sessionId"), cwd=entry.get("cwd"), title=entry.get("title"), updated_at=entry.get("updatedAt")) for entry in entries)
@@ -216,12 +222,12 @@ class GrokWire:
             raise self._mismatch(operation, "session_list") from exc
 
     def vendor_error(self, exc: McpProtocolError, *, operation: str, method: str, session_id: str | None = None, cursor: str | None = None) -> NativeHostError:
-        # @intent grok-json-rpc-codes-to-rows
-        # §6.3.3: ACP -32000 is authentication, -32002 or an FS_NOT_FOUND
-        # payload is a missing session, -32601 a missing method, -32602 on a
-        # cursor a stale cursor (EC-41), -32700 and -32600 a protocol
-        # mismatch, and every other code, -32602 without a cursor included,
-        # an api_error carrying the vendor code and message (EC-16). A
+        # @intent grok-json-rpc-codes-to-failures
+        # ACP -32000 is authentication, -32002 or an FS_NOT_FOUND
+        # payload is a missing session, -32601 a missing method, -32602
+        # on a cursor a stale cursor, -32700 and -32600 a protocol
+        # mismatch, and every other code, -32602 without a cursor
+        # included, an api_error carrying the vendor code and message. A
         # failure without a JSON-RPC error is a transport one.
         vendor = exc.details.get("error")
         if not isinstance(vendor, Mapping):
@@ -244,18 +250,19 @@ class GrokWire:
 
     @staticmethod
     def is_cancel_answer(exc: McpProtocolError) -> bool:
-        # True when a session/prompt was answered with JSON-RPC -32800, the request-cancelled code.
+        # True when a session/prompt was answered with JSON-RPC -32800,
+        # the request-cancelled code.
         vendor = exc.details.get("error")
         return isinstance(vendor, Mapping) and vendor.get("code") == _REQUEST_CANCELLED
 
-    # ---- Turn frames ----------------------------------------------------------
+    # ---- Turn frames -------------------------------------------------
 
     def parse_permission_request(self, frame: Mapping[str, Any]) -> GrokPermissionRequest:
         # @intent grok-permission-request-is-a-record
         # A session/request_permission server request becomes a record
-        # before the driver decides on it; a missing or unknown tool kind is
-        # OTHER (§9.1), and any other wrong shape fails the turn rather than
-        # being answered on a guess.
+        # before the driver decides on it; a missing or unknown tool
+        # kind is OTHER, and any other wrong shape fails the turn rather
+        # than being answered on a guess.
         try:
             params = RecordFieldConverter.require_instance(frame.get("params"), "params", Mapping)
             call = RecordFieldConverter.require_instance(params.get("toolCall"), "toolCall", Mapping)
@@ -267,7 +274,9 @@ class GrokWire:
             raise self._mismatch(native_host_constants.GROK_TURN_OPERATION, "permission_request") from exc
 
     def parse_session_update(self, params: Any) -> GrokSessionUpdate:
-        # A session/update notification's params: message text for a chunk, the cost for a usage update, the kind verbatim otherwise (EC-7).
+        # A session/update notification's params: message text
+        # for a chunk, the cost for a usage update, the kind
+        # verbatim otherwise.
         try:
             params = RecordFieldConverter.require_instance(params, "params", Mapping)
             update = RecordFieldConverter.require_instance(params.get("update"), "update", Mapping)
@@ -279,7 +288,8 @@ class GrokWire:
             raise self._mismatch(native_host_constants.GROK_TURN_OPERATION, "session_update") from exc
 
     def parse_prompt_result(self, result: Mapping[str, Any]) -> GrokPromptResult:
-        # The session/prompt answer: a verbatim stopReason (EC-49) and the usage when Grok sent one (D-14).
+        # The session/prompt answer: a verbatim stopReason and the usage
+        # when Grok sent one.
         try:
             stop_reason = RecordFieldValidator.require_text(result.get("stopReason"), "stopReason", max_chars=native_host_constants.NATIVE_ID_MAX_CHARS)
             usage = result.get("usage")
@@ -287,16 +297,16 @@ class GrokWire:
         except ConfigurationError as exc:
             raise self._mismatch(native_host_constants.GROK_TURN_OPERATION, "prompt_result") from exc
 
-    # ---- CLI outcomes ---------------------------------------------------------
+    # ---- CLI outcomes ------------------------------------------------
 
     def check_cli(self, outcome: CliOutcome, *, operation: str, one_shot: bool) -> None:
-        # @intent grok-cli-outcome-to-rows
-        # A missing program is not_installed and any other launch failure
-        # process_exited; a run past its bound is turn_timed_out for a
-        # one-shot or fork run (EC-38) and server_unreachable otherwise; the
-        # signed-out line or a sign-in marker on a failed run is
-        # not_signed_in; any other non-zero exit is api_error with the exit
-        # code as vendor_code.
+        # @intent grok-cli-outcome-to-failures
+        # A missing program is not_installed and any other launch
+        # failure process_exited; a run past its bound is turn_timed_out
+        # for a one-shot or fork run and server_unreachable otherwise;
+        # the signed-out line or a sign-in marker on a failed run is
+        # not_signed_in; any other non-zero exit is api_error with the
+        # exit code as vendor_code.
         if outcome.launch_failure is not None:
             raise self._errors.from_launch_failure(outcome.launch_failure, operation=operation)
         if outcome.timed_out and one_shot:
@@ -310,7 +320,8 @@ class GrokWire:
             raise self._errors.build(self._errors.code("api_error"), "Grok Build exited with an error.", operation=operation, context=context)
 
     def parse_version(self, outcome: CliOutcome, *, operation: str) -> str:
-        # grok --version must name a release of at least GROK_MIN_VERSION (EC-18, EC-19).
+        # grok --version must name a release of at
+        # least GROK_MIN_VERSION.
         found = re.search(native_host_constants.GROK_VERSION_PATTERN, outcome.stdout)
         if found is None:
             raise self._mismatch(operation, "version_output")
@@ -320,7 +331,8 @@ class GrokWire:
         return version
 
     def parse_one_shot(self, outcome: CliOutcome, *, operation: str) -> GrokOneShotResult:
-        # The --output-format json object; text past NATIVE_RESULT_TEXT_MAX_CHARS is cut and flagged (INV-16).
+        # The --output-format json object; text past
+        # NATIVE_RESULT_TEXT_MAX_CHARS is cut and flagged.
         cap = native_host_constants.NATIVE_RESULT_TEXT_MAX_CHARS
         try:
             body = RecordFieldConverter.require_instance(json.loads(outcome.stdout), "output", Mapping)
@@ -331,26 +343,31 @@ class GrokWire:
             raise self._mismatch(operation, "one_shot_output") from exc
 
     def check_fork_result(self, result: GrokOneShotResult, *, source: str, target: str | None, operation: str) -> None:
-        # A fork must report a session other than its source, and the requested one when it was named (EC-39); UUIDs compare ignoring letter case (INV-14).
+        # A fork must report a session other than its source, and
+        # the requested one when it was named; UUIDs compare
+        # ignoring letter case.
         returned = result.session_id.lower()
         if returned == source.lower() or (target is not None and returned != target.lower()):
             raise self._mismatch(operation, "fork_session_id")
 
-    # ---- Single-step helpers --------------------------------------------------
+    # ---- Single-step helpers -----------------------------------------
 
     def _mismatch(self, operation: str, reason: str) -> NativeHostError:
-        # grok.protocol_mismatch naming which part of Grok's answer could not be read.
+        # grok.protocol_mismatch naming which part of Grok's
+        # answer could not be read.
         return self._errors.build(self._errors.code("protocol_mismatch"), "Grok Build sent an answer this SDK cannot read.", operation=operation, context={"reason": reason})
 
     @staticmethod
     def _meta(result: Mapping[str, Any]) -> Mapping[str, Any]:
-        # The answer's _meta object; absent means empty, any other type is refused.
+        # The answer's _meta object; absent means empty, any
+        # other type is refused.
         meta = result.get("_meta")
         return {} if meta is None else RecordFieldConverter.require_instance(meta, "_meta", Mapping)
 
     @staticmethod
     def _model(entry: Mapping[str, Any]) -> GrokModel:
-        # One availableModels entry with the efforts listed in its own _meta.reasoningEfforts.
+        # One availableModels entry with the efforts listed in its own
+        # _meta.reasoningEfforts.
         meta = entry.get("_meta")
         meta = {} if meta is None else RecordFieldConverter.require_instance(meta, "_meta", Mapping)
         efforts = RecordFieldConverter.to_tuple(meta.get("reasoningEfforts", []), "reasoningEfforts", item_type=str)
@@ -358,13 +375,14 @@ class GrokWire:
 
     @staticmethod
     def _tool_kind(value: Any) -> AcpToolKind:
-        # §9.1: a missing or unknown ACP tool kind counts as OTHER.
+        # A missing or unknown ACP tool kind counts as OTHER.
         members = {member.value: member for member in AcpToolKind}
         return members.get(value, AcpToolKind.OTHER) if isinstance(value, str) else AcpToolKind.OTHER
 
     @staticmethod
     def _chunk_text(update: Mapping[str, Any]) -> str:
-        # The text of an agent_message_chunk; a non-text content block adds no text.
+        # The text of an agent_message_chunk; a non-text content
+        # block adds no text.
         content = RecordFieldConverter.require_instance(update.get("content"), "content", Mapping)
         if content.get("type") != _TEXT_CONTENT:
             return ""
@@ -372,7 +390,8 @@ class GrokWire:
 
     @staticmethod
     def _cost(update: Mapping[str, Any]) -> tuple[Decimal | None, str | None]:
-        # The cost of a usage_update as a Decimal read from its text form, with its currency.
+        # The cost of a usage_update as a Decimal read from its text
+        # form, with its currency.
         cost = update.get("cost")
         if cost is None:
             return None, None
@@ -383,7 +402,8 @@ class GrokWire:
 
     @staticmethod
     def _usage(value: Any) -> NativeTokenUsage:
-        # ACP PromptResponse.usage; a count Grok left out stays None, never zero (INV-15).
+        # ACP PromptResponse.usage; a count Grok left out
+        # stays None, never zero.
         usage = RecordFieldConverter.require_instance(value, "usage", Mapping)
         return NativeTokenUsage(
             input_tokens=usage.get("inputTokens"),
@@ -396,7 +416,8 @@ class GrokWire:
 
     @staticmethod
     def _signed_out(outcome: CliOutcome) -> bool:
-        # The exact signed-out line on stdout, or a sign-in marker in the output of a failed run.
+        # The exact signed-out line on stdout, or a sign-in marker in
+        # the output of a failed run.
         if native_host_constants.GROK_SIGNED_OUT_LINE in {line.strip() for line in outcome.stdout.splitlines()}:
             return True
         text = (outcome.stdout + "\n" + outcome.stderr).casefold()

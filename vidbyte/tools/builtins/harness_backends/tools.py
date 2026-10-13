@@ -58,7 +58,8 @@ class CheckBackendReadyTool(HarnessBackendTool):
     _PARAMETERS: ClassVar[tuple[ToolParameter, ...]] = (ToolParameter(name=_BACKEND_PARAMETER, type="string", description=BACKEND_PARAMETER_DESCRIPTION, required=True),)
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The backend must be a string; the function refuses any name but the declared ones.
+        # The backend must be a string; the function refuses any name
+        # but the declared ones.
         backend = NativeToolArguments.text(call, _BACKEND_PARAMETER, required=True)
         return await HarnessBackends.check_backend_ready(str(backend))
 
@@ -71,7 +72,8 @@ class GetDeepseekBalanceTool(HarnessBackendTool):
     _DESCRIPTION: ClassVar[str] = GET_DEEPSEEK_BALANCE_DESCRIPTION
 
     async def _invoke(self, call: ToolCall) -> object:
-        # No arguments: one read-only balance request with the DeepSeek key.
+        # No arguments: one read-only balance request
+        # with the DeepSeek key.
         return await HarnessBackends.get_deepseek_balance()
 
 

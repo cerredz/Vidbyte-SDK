@@ -43,9 +43,10 @@ class OpencodeClient:
     def __init__(self, *, server: OpencodeServer, workspace: Path, request_timeout_seconds: float, errors: NativeErrorFactory) -> None:
         # @intent opencode-client-one-bounded-transport
         # Every call goes through one HttpTransport with the host's
-        # request_timeout_seconds and a body cap, scoped to the workspace by
-        # the directory query; no call is retried here, because the watcher
-        # owns the only retry budget (EC-87) and a write must not repeat.
+        # request_timeout_seconds and a body cap, scoped to the
+        # workspace by the directory query; no call is retried
+        # here, because the watcher owns the only retry budget and
+        # a write must not repeat.
         self._server = server
         self._directory = str(workspace)
         self._timeout_seconds = request_timeout_seconds
@@ -55,7 +56,8 @@ class OpencodeClient:
         self._headers: dict[str, str] = {"accept": "application/json"}
 
     def connect(self, base_url: str, credentials: tuple[str, str] | None) -> None:
-        # The server's address, and the basic-auth header when the server needs credentials.
+        # The server's address, and the basic-auth header when the
+        # server needs credentials.
         self._base_url = base_url.rstrip("/")
         if credentials is not None:
             pair = f"{credentials[0]}:{credentials[1]}".encode()
@@ -75,12 +77,13 @@ class OpencodeClient:
     ) -> Any:
         # @intent opencode-client-one-bounded-request
         # One request to one listed route, bounded by the host's request
-        # deadline and the response size cap, with every failure mapped to
-        # its §6.3.4 row before the caller sees it.
+        # deadline and the response size cap, with every failure mapped
+        # to its opencode.* failure before the caller sees it.
         # Build the address with the workspace in the query and send it.
         response = await self._send(method, self._url(segments, query), body, operation=operation)
 
-        # A non-2xx answer becomes its row; the route's own 404 and 409 meanings come from the caller.
+        # A non-2xx answer becomes its failure; the route's own 404 and
+        # 409 meanings come from the caller.
         if not native_host_constants.NATIVE_HTTP_SUCCESS_FIRST_STATUS <= response.status_code < native_host_constants.NATIVE_HTTP_SUCCESS_END_STATUS:
             raise self._status_error(response, operation=operation, not_found=not_found, conflict=conflict, context=context)
 
@@ -89,9 +92,9 @@ class OpencodeClient:
 
     async def probe(self, segments: tuple[str, ...], *, operation: str) -> bool:
         # @intent opencode-client-existence-probe
-        # A GET whose 404 answers "not there" instead of raising, for the
-        # checks a route cannot do itself (abort answers 200 for a missing
-        # session, EC-90); every other failure still raises its row.
+        # A GET whose 404 answers "not there" instead of raising, for
+        # the checks a route cannot do itself (abort answers 200 for a
+        # missing session); every other failure still raises.
         response = await self._send(_GET, self._url(segments, None), None, operation=operation)
         if response.status_code == _NOT_FOUND_STATUS:
             return False
@@ -100,16 +103,18 @@ class OpencodeClient:
         return True
 
     def _url(self, segments: tuple[str, ...], query: Mapping[str, str] | None) -> str:
-        # Each path segment is quoted whole, so an id can never add a path step (T-2); directory is always sent.
+        # Each path segment is quoted whole, so an id can never add a
+        # path step; directory is always sent.
         path = "/".join(quote(segment, safe="") for segment in segments)
         parameters = {**(query or {}), _DIRECTORY_QUERY: self._directory}
         return f"{self._base_url}/{path}?{urlencode(parameters)}"
 
     async def _send(self, method: str, url: str, body: Mapping[str, object] | None, *, operation: str) -> HttpResponse:
         # @intent opencode-client-transport-failures
-        # No answer at all is EC-56 once the owned server's exit is known and
-        # EC-55 before that; an answer over the size cap is EC-58. The
-        # transport's text is never copied, because it can echo the request.
+        # No answer at all is process_exited once the owned server's
+        # exit is known and server_unreachable before that; an answer
+        # over the size cap is protocol_mismatch. The transport's text
+        # is never copied, because it can echo the request.
         try:
             return await self._transport.request(method=method, url=url, headers=self._headers, json_body=body, timeout_seconds=self._timeout_seconds, max_response_bytes=native_host_constants.OPENCODE_MAX_RESPONSE_BYTES)
         except ProviderRequestError as exc:
@@ -121,11 +126,11 @@ class OpencodeClient:
             raise self._errors.build(FailureCode.OPENCODE_SERVER_UNREACHABLE, "The opencode server did not answer within the request deadline.", operation=operation) from exc
 
     def _status_error(self, response: HttpResponse, *, operation: str, not_found: FailureCode | None, conflict: FailureCode | None, context: Mapping[str, str] | None) -> NativeHostError:
-        # @intent opencode-client-status-rows
-        # 401 is a credential mismatch (EC-57), 503 a server that cannot serve
-        # yet (EC-55), 404 and 409 mean what the route says or else a protocol
-        # mismatch (EC-58), and any other status is an API error carrying the
-        # vendor's name and scrubbed message (EC-59).
+        # @intent opencode-client-status-failures
+        # 401 is a credential mismatch, 503 a server that cannot serve
+        # yet, 404 and 409 mean what the route says or else a protocol
+        # mismatch, and any other status is an API error carrying the
+        # vendor's name and scrubbed message.
         status = response.status_code
         if status == _UNAUTHORIZED_STATUS:
             return self._errors.build(FailureCode.OPENCODE_NOT_SIGNED_IN, "The opencode server answered 401 Unauthorized.", operation=operation, next_step=_SIGNED_OUT_STEP, context={"status_code": str(status)})

@@ -532,7 +532,8 @@ class NativeHostError(AgentExecutionError):
         error_type: str = "",
         context: Mapping[str, str] | None = None,
     ) -> None:
-        # A code without a catalog entry falls back to the runtime.error text, so next_step is never empty.
+        # A code without a catalog entry falls back to the runtime.error
+        # text, so next_step is never empty.
         fallback = NATIVE_HOST_NEXT_STEPS[FailureCode.RUNTIME_ERROR.value]
         default_step = NATIVE_HOST_NEXT_STEPS.get(getattr(failure_code, "value", ""), fallback)
         self.failure_code = failure_code

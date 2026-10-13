@@ -38,25 +38,29 @@ class ManagedProcess:
 
     @property
     def exit_code(self) -> int | None:
-        # The reaped exit code, or None while running or when the process never started.
+        # The reaped exit code, or None while running or when the
+        # process never started.
         return None if self._process is None else self._process.returncode
 
     async def start(self, ready_pattern: re.Pattern[str]) -> ProcessStartOutcome:
         # @intent managed-start-is-bounded-and-never-raises
-        # A server that never prints its ready line, or dies at boot, must
-        # end the start within the invocation's timeout with the reason in
-        # the outcome; a cancelled start stops the child before propagating.
+        # A server that never prints its ready line, or dies at boot,
+        # must end the start within the invocation's timeout with the
+        # reason in the outcome; a cancelled start stops the child
+        # before propagating.
         # Start the child with the null device as stdin, so a server can
         # never read a stdio MCP client's stream; stdin_text is ignored.
         self._process, failure = await CliRunner.launch(self._invocation, stdin=asyncio.subprocess.DEVNULL)
         if self._process is None:
             return ProcessStartOutcome(ready_line=None, launch_failure=failure, exit_code=None, timed_out=False, stderr_tail="")
-        # Watch stdout for the ready line while stderr drains into a bounded tail.
+        # Watch stdout for the ready line while stderr drains
+        # into a bounded tail.
         self._ready = asyncio.get_running_loop().create_future()
         self._stdout_task = asyncio.create_task(self._watch_stdout(ready_pattern), name="managed-process-stdout")
         self._stderr_task = asyncio.create_task(self._drain_stderr(), name="managed-process-stderr")
         try:
-            # Wait for the ready line, an exit, or the deadline, whichever comes first.
+            # Wait for the ready line, an exit, or the deadline,
+            # whichever comes first.
             ready_line, timed_out = await self._settle()
         except asyncio.CancelledError:
             await self.stop()
@@ -70,7 +74,8 @@ class ManagedProcess:
         )
 
     async def stop(self) -> int | None:
-        # Stops the whole tree once, gives the drain tasks one kill-wait, and returns the exit code.
+        # Stops the whole tree once, gives the drain tasks one
+        # kill-wait, and returns the exit code.
         if self._process is None or self._stopped:
             return self.exit_code
         self._stopped = True
@@ -85,7 +90,8 @@ class ManagedProcess:
         return self.exit_code
 
     async def _watch_stdout(self, ready_pattern: re.Pattern[str]) -> None:
-        # Splits stdout into lines until one matches, then keeps reading to EOF so the pipe never fills.
+        # Splits stdout into lines until one matches, then keeps reading
+        # to EOF so the pipe never fills.
         process, ready = self._process, self._ready
         if process is None or process.stdout is None or ready is None:
             return
@@ -104,7 +110,8 @@ class ManagedProcess:
             ready.set_result(None)
 
     async def _drain_stderr(self) -> None:
-        # Keeps only the newest max_output_bytes of stderr for error reports.
+        # Keeps only the newest max_output_bytes of
+        # stderr for error reports.
         process = self._process
         if process is None or process.stderr is None:
             return
@@ -114,7 +121,8 @@ class ManagedProcess:
                 del self._stderr_tail[: -self._invocation.max_output_bytes]
 
     async def _settle(self) -> tuple[str | None, bool]:
-        # Returns (ready line, timed out); an early exit returns (None, False) once stderr has been read.
+        # Returns (ready line, timed out); an early exit returns (None,
+        # False) once stderr has been read.
         process, ready = self._process, self._ready
         if process is None or ready is None:
             return None, False

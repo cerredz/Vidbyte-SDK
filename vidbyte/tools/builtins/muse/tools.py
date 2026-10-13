@@ -84,10 +84,10 @@ class MuseHostTool(NativeHostTool[MuseHost]):
 
     def spec(self) -> ToolSpec:
         # @intent muse-effort-schema-lists-its-values
-        # reasoning_effort takes only MuseReasoningEffort's values, so the
-        # input schema lists them as an enum, as the repo's other categorical
-        # tool parameters do; a tool without it keeps the schema its
-        # parameters build.
+        # reasoning_effort takes only MuseReasoningEffort's values, so
+        # the input schema lists them as an enum, as the repo's other
+        # categorical tool parameters do; a tool without it keeps the
+        # schema its parameters build.
         spec = super().spec()
         schema = ToolsFormatter.input_schema(spec)
         effort = schema["properties"].get(_REASONING_EFFORT)
@@ -132,7 +132,7 @@ class SpawnMuseSessionTool(MuseHostTool):
     async def _invoke(self, call: ToolCall) -> object:
         # @intent muse-spawn-tool-builds-the-turn-request
         # The turn record checks every value; a ceiling left out is the
-        # record's default, and no approval setting can be passed (INV-9).
+        # record's default, and no approval setting can be passed.
         seconds = NativeToolArguments.number(call, _MAX_TURN_SECONDS)
         request = MuseTurnRequest(
             prompt=str(NativeToolArguments.text(call, _PROMPT, required=True)),
@@ -154,7 +154,7 @@ class ContinueMuseSessionTool(MuseHostTool):
     async def _invoke(self, call: ToolCall) -> object:
         # @intent muse-continue-tool-builds-the-turn-request
         # The session id is checked by the host, the rest by the turn
-        # record; no approval setting can be passed (INV-9).
+        # record; no approval setting can be passed.
         session_id = str(NativeToolArguments.text(call, _SESSION_ID, required=True))
         seconds = NativeToolArguments.number(call, _MAX_TURN_SECONDS)
         request = MuseTurnRequest(
@@ -228,7 +228,8 @@ class PageMuseSessionTool(MuseHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The direction is the exact MuseViewDirection value; left out, the page reads forward.
+        # The direction is the exact MuseViewDirection value; left out,
+        # the page reads forward.
         session_id = str(NativeToolArguments.text(call, _SESSION_ID, required=True))
         limit = NativeToolArguments.integer(call, _LIMIT)
         direction = NativeToolArguments.choice(call, _DIRECTION, MuseViewDirection)
@@ -252,7 +253,8 @@ class SteerMuseTurnTool(MuseHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The handle object the spawn or continue result carried; the text is checked by the host.
+        # The handle object the spawn or continue result carried; the
+        # text is checked by the host.
         handle = NativeToolArguments.handle(call)
         return await self._host.steer_muse_turn(handle, str(NativeToolArguments.text(call, _TEXT, required=True)))
 
@@ -282,7 +284,8 @@ class WaitMuseTurnTool(MuseHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The wait blocks the tool call, so it is capped at the tool limit (EC-144); a timed-out wait leaves the turn running.
+        # The wait blocks the tool call, so it is capped at the tool
+        # limit; a timed-out wait leaves the turn running.
         handle = NativeToolArguments.handle(call)
         seconds = NativeToolArguments.seconds(call, _TIMEOUT_SECONDS, default=native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS)
         return await self._host.wait_muse_turn(handle, timeout_seconds=seconds)

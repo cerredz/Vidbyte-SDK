@@ -72,12 +72,12 @@ class OpencodeHost:
 
     def __init__(self, settings: OpencodeHostSettings) -> None:
         # @intent opencode-host-registers-injected-secrets
-        # Building a host starts nothing and sends nothing (EC-1). Every value
-        # the host may inject (MCP environment and header values, the attached
-        # server password) is registered before any call, so vendor text that
-        # echoes one is scrubbed to <redacted> on every path (INV-6, AC-2).
-        # A settings value of the wrong type is a NativeHostError, as in the
-        # Grok and Muse hosts.
+        # Building a host starts nothing and sends nothing. Every value
+        # the host may inject (MCP environment and header values, the
+        # attached server password) is registered before any call, so
+        # vendor text that echoes one is scrubbed to <redacted> on every
+        # path. A settings value of the wrong type is a NativeHostError,
+        # as in the Grok and Muse hosts.
         self._errors = NativeErrorFactory(NativeHarness.OPENCODE)
         try:
             RecordFieldConverter.require_instance(settings, "settings", OpencodeHostSettings)
@@ -92,7 +92,7 @@ class OpencodeHost:
         self._server_url = ""
         self._entered = False
         self._open = False
-        # Every value the host may inject is scrubbed from vendor text (INV-6).
+        # Every value the host may inject is scrubbed from vendor text.
         for config in settings.mcp_servers.values():
             for value in (*config.environment.values(), *config.headers.values()):
                 self._errors.register_secret(value)
@@ -102,24 +102,25 @@ class OpencodeHost:
     @property
     def mcp_servers(self) -> Mapping[str, OpencodeMcpServerConfig]:
         # @intent opencode-mcp-registry-is-developer-owned
-        # The MCP servers the developer registered, read-only; the add tool
-        # looks a model-given name up here and never builds a config from
-        # model text, so no command, URL or header comes from a model (T-2).
+        # The MCP servers the developer registered, read-only; the
+        # add tool looks a model-given name up here and never builds
+        # a config from model text, so no command, URL or header
+        # comes from a model.
         return self._settings.mcp_servers
 
     async def __aenter__(self) -> OpencodeHost:
         operation = "__aenter__"
-        # A host is used once, whether it is open or already closed (EC-3).
+        # A host is used once, whether it is open or already closed.
         if self._entered:
             raise self._errors.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, "This OpencodeHost was already entered; a host is used for one async with block.", operation=operation, next_step=native_host_constants.NATIVE_REENTER_NEXT_STEP)
         self._entered = True
         try:
-            # Start the owned server, or take the attached address, and remember the credentials for every call.
+            # Start or attach to the server and keep its credentials.
             base_url, credentials = await self._server.start(operation=operation)
             self._client.connect(base_url, credentials)
             self._server_url = base_url
 
-            # The server must be healthy and new enough before the host opens (EC-55, EC-60).
+            # The server must be healthy and new enough to open.
             await self._check_health(operation=operation)
             self._open = True
             return self
@@ -132,20 +133,20 @@ class OpencodeHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
         finally:
-            # A failed or cancelled enter stops and reaps what it started; the host stays closed (EC-2).
+            # On failure or cancel, reap what started and stay closed.
             if not self._open:
                 await self._server.stop()
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None) -> None:
         # @intent opencode-host-exit-interrupts-and-stops
-        # Later calls see a closed host (EC-2). Every live turn is aborted as
-        # HOST_CLOSED and given NATIVE_STOP_GRACE_SECONDS to settle, stragglers
-        # are cancelled, and the owned server is stopped and reaped on every
-        # path. Nothing but cancellation is raised and the body's exception
-        # is never suppressed (EC-8).
+        # Later calls see a closed host. Every live turn is aborted as
+        # HOST_CLOSED and given NATIVE_STOP_GRACE_SECONDS to settle,
+        # stragglers are cancelled, and the owned server is stopped and
+        # reaped on every path. Nothing but cancellation is raised and
+        # the body's exception is never suppressed.
         self._open = False
         try:
-            # Abort every live turn at once, and let the turns settle within the grace.
+            # Abort every live turn and wait out the grace period.
             closers = [asyncio.create_task(self._close_turn(watcher)) for watcher in list(self._watchers.values())]
             pending = {*closers, *self._turns.live_tasks()}
             if pending:
@@ -155,22 +156,23 @@ class OpencodeHost:
                 if late:
                     await asyncio.wait(late, timeout=native_host_constants.NATIVE_KILL_WAIT_SECONDS)
         finally:
-            # Stop and reap the owned server; an attached server is left running.
+            # Stop the owned server; leave an attached one running.
             await self._server.stop()
 
     async def check_opencode_ready(self) -> OpencodeReadiness:
         # @intent opencode-ready-needs-a-connected-provider
-        # Readiness means a healthy, supported server with at least one
-        # connected provider; with none, no turn can run, so it is reported
-        # as not signed in with the login step rather than as ready (EC-63).
+        # Readiness means a healthy, supported server with at
+        # least one connected provider; with none, no turn can
+        # run, so it is reported as not signed in with the login
+        # step rather than as ready.
         operation = "check_opencode_ready"
         try:
             self._require_open(operation)
 
-            # The server must be healthy and new enough (EC-55, EC-60).
+            # The server must be healthy and new enough.
             version = await self._check_health(operation=operation)
 
-            # With no connected provider no turn can run (EC-63).
+            # With no connected provider no turn can run.
             body = await self._client.call("GET", ("provider",), operation=operation)
             readiness = self._wire.parse_readiness(body, version=version, server_url=self._server_url, operation=operation)
             if not readiness.connected_providers:
@@ -185,22 +187,24 @@ class OpencodeHost:
 
     async def list_opencode_models(self, provider_id: str | None = None) -> tuple[OpencodeModel, ...]:
         # @intent opencode-models-come-from-connected-providers
-        # Only connected providers can serve a turn, so models come from
-        # GET /config/providers; an unknown provider id is model_unknown with
-        # the offered ids, never an empty list that looks like success (EC-65).
+        # Only connected providers can serve a turn, so models come
+        # from GET /config/providers; an unknown provider id is
+        # model_unknown with the offered ids, never an empty list that
+        # looks like success.
         operation = "list_opencode_models"
         try:
             self._require_open(operation)
-            # A provider id is one path-free name (EC-64).
+            # A provider id is one path-free name.
             if provider_id is not None:
                 RecordFieldValidator.require_text(provider_id, "provider_id", max_chars=native_host_constants.OPENCODE_PROVIDER_ID_MAX_CHARS, pattern=_PROVIDER_ID_PATTERN)
 
-            # GET /config/providers lists only the connected providers and their models.
+            # GET /config/providers lists connected providers only.
             catalog = self._wire.parse_config_providers(await self._client.call("GET", ("config", "providers"), operation=operation), operation=operation)
             if provider_id is None:
                 return tuple(model for models in catalog.values() for model in models)
 
-            # A provider the server does not offer is model_unknown with the offered ids (EC-65).
+            # A provider the server does not offer is model_unknown
+            # with the offered ids.
             if provider_id not in catalog:
                 raise self._errors.build(FailureCode.OPENCODE_MODEL_UNKNOWN, "The opencode server has no connected provider with that id.", operation=operation, next_step=_PROVIDER_PICK_STEP, context={"available_providers": self._errors.listing(catalog)})
             return catalog[provider_id]
@@ -217,7 +221,8 @@ class OpencodeHost:
         operation = "list_opencode_providers"
         try:
             self._require_open(operation)
-            # GET /provider lists every known provider; keys and options are never read (INV-6).
+            # GET /provider lists every known provider; keys and
+            # options are never read.
             body = await self._client.call("GET", ("provider",), operation=operation)
             return self._wire.parse_providers(body, operation=operation)
         except asyncio.CancelledError:
@@ -229,12 +234,13 @@ class OpencodeHost:
 
     async def get_opencode_provider_auth(self) -> tuple[OpencodeProviderAuth, ...]:
         # @intent opencode-provider-auth-is-read-only
-        # Only the catalogue of auth methods is read; nothing is connected
-        # or stored, and the open set of method types is copied verbatim.
+        # Only the catalogue of auth methods is read; nothing is
+        # connected or stored, and the open set of method types
+        # is copied verbatim.
         operation = "get_opencode_provider_auth"
         try:
             self._require_open(operation)
-            # GET /provider/auth maps each provider to its auth methods, copied verbatim.
+            # GET /provider/auth lists each provider's auth methods.
             body = await self._client.call("GET", ("provider", "auth"), operation=operation)
             return self._wire.parse_provider_auth(body, operation=operation)
         except asyncio.CancelledError:
@@ -246,10 +252,11 @@ class OpencodeHost:
 
     async def spawn_opencode_session(self, request: OpencodeSpawnRequest) -> NativeTurnHandle:
         # @intent opencode-spawn-reserves-before-any-io
-        # The live-turn slot is taken before the first await and released on
-        # every path that does not start the turn (EC-9); the session carries
-        # only the caller's rules (D-11); a cancel after the prompt may have
-        # been sent aborts that turn, since no caller could reach it (EC-4).
+        # The live-turn slot is taken before the first await and
+        # released on every path that does not start the turn; the
+        # session carries only the caller's rules; a cancel after
+        # the prompt may have been sent aborts that turn, since no
+        # caller could reach it.
         operation = "spawn_opencode_session"
         turn_id: str | None = None
         session_id: str | None = None
@@ -259,23 +266,24 @@ class OpencodeHost:
             self._require_open(operation)
             RecordFieldConverter.require_instance(request, "request", OpencodeSpawnRequest)
 
-            # Take a live-turn slot before the first await, so concurrent spawns cannot pass the cap (EC-9, EC-67).
+            # Take a live-turn slot before the first await, so
+            # concurrent spawns cannot pass the cap.
             turn_id = self._reserve(None, operation=operation)
 
-            # Check the model against the connected providers before anything is created (EC-68).
+            # Check the model before anything is created.
             await self._check_model(request.turn.model, operation=operation)
 
-            # Create the session with its title and the caller's permission rules only (D-11, EC-69).
+            # Create the session with only the caller's permissions.
             created = await self._client.call("POST", ("session",), operation=operation, body=OpencodeWire.session_body(request))
             session_id = self._wire.parse_session(created, operation=operation).session_id
             self._turns.bind_session(turn_id, session_id)
 
-            # Send the prompt; a new session has no earlier messages to skip (EC-70, EC-72).
+            # Send the prompt; a new session has nothing to skip.
             watcher = self._watcher(turn_id, session_id, request.turn, snapshot_id=None)
             prompt_sent = True
             await self._client.call("POST", ("session", session_id, "prompt_async"), operation=operation, body=OpencodeWire.prompt_body(request.turn), not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND, context={"session_id": session_id})
 
-            # Hand the watcher to the turn table and return the handle while the turn runs (INV-11).
+            # Register the turn and return its handle while it runs.
             driver = asyncio.create_task(self._drive(watcher), name="opencode-turn")
             handle = self._turns.activate(turn_id, driver)
             activated = True
@@ -283,7 +291,8 @@ class OpencodeHost:
             driver.add_done_callback(functools.partial(self._forget, turn_id))
             return handle
         except asyncio.CancelledError:
-            # The caller can never reach a turn whose prompt may already be on the server, so abort it (EC-4).
+            # The caller can never reach a turn whose prompt may already
+            # be on the server, so abort it.
             if prompt_sent and not activated and session_id is not None:
                 await self._abandon(session_id, operation=operation)
             raise
@@ -294,16 +303,17 @@ class OpencodeHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
         finally:
-            # A spawn that did not start its turn frees the slot it took (EC-9).
+            # A spawn that did not start its turn frees its slot.
             if turn_id is not None and not activated:
                 self._turns.release(turn_id)
 
     async def continue_opencode_session(self, session_id: str, request: OpencodePromptRequest) -> NativeTurnHandle:
         # @intent opencode-continue-reserves-the-session
-        # The session and a slot are reserved before the first await, so two
-        # continues on one session cannot both pass (EC-9, EC-73); the newest
-        # message id is taken before the prompt so an earlier turn's reply is
-        # never read as this turn's; a cancel after sending aborts it (EC-4).
+        # The session and a slot are reserved before the first
+        # await, so two continues on one session cannot both pass;
+        # the newest message id is taken before the prompt so an
+        # earlier turn's reply is never read as this turn's; a
+        # cancel after sending aborts it.
         operation = "continue_opencode_session"
         turn_id: str | None = None
         prompt_sent = False
@@ -313,23 +323,26 @@ class OpencodeHost:
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
             RecordFieldConverter.require_instance(request, "request", OpencodePromptRequest)
 
-            # Reserve the session and a slot before the first await, so two continues cannot both pass (EC-9, EC-73).
+            # Reserve the session and a slot before the first await, so
+            # two continues cannot both pass.
             turn_id = self._reserve(session_id, operation=operation)
 
-            # The session must exist (EC-72), must not be busy on the server (EC-73), and the model must be offered (EC-68).
+            # The session must exist, must not be busy on the server,
+            # and the model must be offered.
             await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             await self._require_idle(session_id, operation=operation, include_local=False)
             await self._check_model(request.model, operation=operation)
 
-            # Remember the newest message, so a reply to an earlier turn is never taken for this one (§8.5 step 1).
+            # Remember the newest message, so a reply to an earlier turn
+            # is never taken for this one.
             snapshot_id = await self._newest_message_id(session_id, operation=operation)
 
-            # Send the prompt; a 404 now means the session was deleted after the check (EC-70, EC-72).
+            # Send the prompt; a 404 now means the session was deleted.
             watcher = self._watcher(turn_id, session_id, request, snapshot_id=snapshot_id)
             prompt_sent = True
             await self._client.call("POST", ("session", session_id, "prompt_async"), operation=operation, body=OpencodeWire.prompt_body(request), not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND, context={"session_id": session_id})
 
-            # Hand the watcher to the turn table and return the handle while the turn runs (INV-11).
+            # Register the turn and return its handle while it runs.
             driver = asyncio.create_task(self._drive(watcher), name="opencode-turn")
             handle = self._turns.activate(turn_id, driver)
             activated = True
@@ -337,7 +350,8 @@ class OpencodeHost:
             driver.add_done_callback(functools.partial(self._forget, turn_id))
             return handle
         except asyncio.CancelledError:
-            # The caller can never reach a turn whose prompt may already be on the server, so abort it (EC-4).
+            # The caller can never reach a turn whose prompt may already
+            # be on the server, so abort it.
             if prompt_sent and not activated:
                 await self._abandon(session_id, operation=operation)
             raise
@@ -348,7 +362,7 @@ class OpencodeHost:
         except Exception as exc:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
         finally:
-            # A continue that did not start its turn frees its session and slot (EC-9).
+            # A continue that did not start frees its session and slot.
             if turn_id is not None and not activated:
                 self._turns.release(turn_id)
 
@@ -359,15 +373,15 @@ class OpencodeHost:
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
             RecordFieldValidator.require_optional_text(message_id, "message_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_MESSAGE_ID_PATTERN)
 
-            # The session must exist (EC-72) and have no running turn here or on the server (EC-73).
+            # The session must exist and be idle here and on the server.
             await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             await self._require_idle(session_id, operation=operation, include_local=True)
 
-            # A fork point must be a message of this session (EC-75).
+            # A fork point must be a message of this session.
             if message_id is not None:
                 await self._client.call("GET", ("session", session_id, "message", message_id), operation=operation, not_found=FailureCode.OPENCODE_MESSAGE_NOT_FOUND)
 
-            # Fork; a 404 here means the session was deleted after the check (EC-76).
+            # Fork; a 404 here means the session was just deleted.
             body: dict[str, object] = {} if message_id is None else {"messageID": message_id}
             forked = await self._client.call("POST", ("session", session_id, "fork"), operation=operation, body=body, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             return self._wire.parse_session(forked, operation=operation)
@@ -388,12 +402,14 @@ class OpencodeHost:
             RecordFieldValidator.require_text(message_id, "message_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_MESSAGE_ID_PATTERN)
             RecordFieldValidator.require_optional_text(part_id, "part_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_PART_ID_PATTERN)
 
-            # The session must exist (EC-72), be idle here and on the server (EC-78), and hold the message (EC-75).
+            # The session must exist, be idle here and on the server,
+            # and hold the message.
             await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             await self._require_idle(session_id, operation=operation, include_local=True)
             await self._client.call("GET", ("session", session_id, "message", message_id), operation=operation, not_found=FailureCode.OPENCODE_MESSAGE_NOT_FOUND)
 
-            # Revert; a 409 SessionBusyError is session_busy (EC-78) and the vendor's revert block comes back (EC-79).
+            # Revert; a 409 SessionBusyError is session_busy and the
+            # vendor's revert block comes back.
             body: dict[str, object] = {"messageID": message_id} if part_id is None else {"messageID": message_id, "partID": part_id}
             reverted = await self._client.call("POST", ("session", session_id, "revert"), operation=operation, body=body, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND, conflict=FailureCode.OPENCODE_SESSION_BUSY)
             return self._wire.parse_session(reverted, operation=operation)
@@ -412,11 +428,11 @@ class OpencodeHost:
             self._require_open(operation)
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
 
-            # The session must exist (EC-72) and be idle here and on the server (EC-78).
+            # The session must exist and be idle here and on the server.
             await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             await self._require_idle(session_id, operation=operation, include_local=True)
 
-            # Unrevert; with nothing to restore the session comes back unchanged (A-7).
+            # Unrevert; with nothing to restore, nothing changes.
             restored = await self._client.call("POST", ("session", session_id, "unrevert"), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND, conflict=FailureCode.OPENCODE_SESSION_BUSY)
             return self._wire.parse_session(restored, operation=operation)
         except asyncio.CancelledError:
@@ -434,10 +450,11 @@ class OpencodeHost:
             self._require_open(operation)
             RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
 
-            # The server returns at most `limit` sessions, so a long history stays under the body cap.
+            # The server returns at most `limit` sessions, so a long
+            # history stays under the body cap.
             body = await self._client.call("GET", ("session",), operation=operation, query={"limit": str(limit)})
 
-            # Sort by last update, newest first, whatever order the server used.
+            # Sort newest update first, whatever the server's order.
             sessions = self._wire.parse_sessions(body, operation=operation)
             return tuple(sorted(sessions, key=lambda session: session.updated_ms, reverse=True))
         except asyncio.CancelledError:
@@ -455,7 +472,7 @@ class OpencodeHost:
             self._require_open(operation)
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
 
-            # One Session object; a 404 means the session is not on this server (EC-72).
+            # One Session object; a 404 means it is not on this server.
             body = await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             return self._wire.parse_session(body, operation=operation)
         except asyncio.CancelledError:
@@ -475,7 +492,8 @@ class OpencodeHost:
             RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
             RecordFieldValidator.require_optional_text(before, "before", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_MESSAGE_ID_PATTERN)
 
-            # Read one page back from `before`; a 404 means the session is not on this server (EC-72).
+            # Read one page back from `before`; a 404 means the session
+            # is not on this server.
             query = {"limit": str(limit)} if before is None else {"limit": str(limit), "before": before}
             body = await self._client.call("GET", ("session", session_id, "message"), operation=operation, query=query, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             messages = self._wire.parse_messages(body, operation=operation)
@@ -499,7 +517,8 @@ class OpencodeHost:
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
             RecordFieldValidator.require_text(message_id, "message_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_MESSAGE_ID_PATTERN)
 
-            # The session first, because a missing session and a missing message both answer 404 (EC-72, EC-75).
+            # The session first, because a missing session and a missing
+            # message both answer 404.
             await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             body = await self._client.call("GET", ("session", session_id, "message", message_id), operation=operation, not_found=FailureCode.OPENCODE_MESSAGE_NOT_FOUND)
             return self._wire.parse_message(body, operation=operation)
@@ -519,12 +538,13 @@ class OpencodeHost:
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
             RecordFieldValidator.require_optional_text(message_id, "message_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_MESSAGE_ID_PATTERN)
 
-            # The diff route answers 200 [] for a missing session or message, so both are checked first (EC-72, EC-75).
+            # The diff route answers 200 [] for a missing session or
+            # message, so both are checked first.
             await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
             if message_id is not None:
                 await self._client.call("GET", ("session", session_id, "message", message_id), operation=operation, not_found=FailureCode.OPENCODE_MESSAGE_NOT_FOUND)
 
-            # Read the diff; long patches are cut at OPENCODE_PATCH_MAX_CHARS.
+            # Read the diff; cut patches at OPENCODE_PATCH_MAX_CHARS.
             query = {} if message_id is None else {"messageID": message_id}
             body = await self._client.call("GET", ("session", session_id, "diff"), operation=operation, query=query)
             return self._wire.parse_diffs(body, operation=operation)
@@ -544,19 +564,20 @@ class OpencodeHost:
             RecordFieldConverter.require_instance(handle, "handle", NativeTurnHandle)
             RecordFieldValidator.require_number(timeout_seconds, "timeout_seconds", maximum=native_host_constants.NATIVE_WAIT_MAX_SECONDS)
 
-            # Only a handle this host issued is found, live or recently finished (EC-80).
+            # Find only handles this host issued, live or just finished.
             driver = self._turns.lookup(handle, operation=operation)
 
-            # Wait without ever touching the turn: a timeout or a cancelled wait leaves it running (EC-81, INV-12).
+            # Wait without ever touching the turn: a timeout or a
+            # cancelled wait leaves it running.
             done, _running = await asyncio.wait({driver}, timeout=timeout_seconds)
             if not done:
                 raise self._errors.build(FailureCode.OPENCODE_TURN_TIMED_OUT, "The turn is still running at the end of the wait.", operation=operation)
 
-            # A turn cut off while the host closed has no outcome of its own.
+            # A turn cut off by closing has no outcome of its own.
             if driver.cancelled():
                 raise self._errors.build(FailureCode.OPENCODE_PROCESS_EXITED, "The host closed before this turn reported its end.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
 
-            # The result, or the turn's recorded failure, the same on every wait (EC-148).
+            # The result or recorded failure, the same on every wait.
             return driver.result()
         except asyncio.CancelledError:
             raise
@@ -573,18 +594,19 @@ class OpencodeHost:
             self._require_open(operation)
             RecordFieldConverter.require_instance(handle, "handle", NativeTurnHandle)
 
-            # Only a handle this host issued is found (EC-80); a finished turn was not running (INV-13).
+            # Only a handle this host issued is found; a finished
+            # turn was not running.
             driver = self._turns.lookup(handle, operation=operation)
             watcher = self._watchers.get(handle.turn_id)
             if driver.done() or watcher is None:
                 return NativeInterruptResult(handle=handle, was_running=False)
 
-            # Abort answers 200 even for a missing session, so check the session first (EC-90).
+            # Abort answers 200 for a missing session; check it first.
             if not await self._client.probe(("session", handle.session_id), operation=operation):
                 watcher.fail(self._errors.build(FailureCode.OPENCODE_SESSION_NOT_FOUND, "The turn's session was deleted while the turn ran.", operation=native_host_constants.OPENCODE_TURN_OPERATION))
                 raise self._errors.build(FailureCode.OPENCODE_SESSION_NOT_FOUND, "The turn's session no longer exists on this server.", operation=operation)
 
-            # Send the abort with the CALLER source; the watcher ends the turn INTERRUPTED (EC-88).
+            # Abort as CALLER; the watcher ends the turn INTERRUPTED.
             await watcher.interrupt(InterruptSource.CALLER, operation=operation)
             return NativeInterruptResult(handle=handle, was_running=True)
         except asyncio.CancelledError:
@@ -602,15 +624,17 @@ class OpencodeHost:
             self._require_open(operation)
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
 
-            # The totals come from the Session object itself (D-14, EC-72).
+            # The totals come from the Session object itself.
             session = self._wire.parse_session(await self._client.call("GET", ("session", session_id), operation=operation, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND), operation=operation)
 
-            # Read one message past the limit, so a longer history is reported as truncated.
+            # Read one message past the limit, so a longer history is
+            # reported as truncated.
             limit = native_host_constants.OPENCODE_TURN_MESSAGE_LIMIT
             query = {"limit": str(limit + _TRUNCATION_PROBE)}
             messages = self._wire.parse_messages(await self._client.call("GET", ("session", session_id, "message"), operation=operation, query=query, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND), operation=operation)
 
-            # Each assistant message that reported usage, newest OPENCODE_TURN_MESSAGE_LIMIT messages only.
+            # Each assistant message that reported usage, newest
+            # OPENCODE_TURN_MESSAGE_LIMIT messages only.
             per_message = tuple(NativeMessageUsage(message_id=message.message_id, usage=message.usage) for message in messages[-limit:] if message.role == native_host_constants.OPENCODE_ASSISTANT_ROLE and message.usage is not None)
             return NativeSessionUsage(harness=NativeHarness.OPENCODE, session_id=session.session_id, totals=session.usage, per_message=per_message, truncated=len(messages) > limit)
         except asyncio.CancelledError:
@@ -624,24 +648,27 @@ class OpencodeHost:
 
     async def add_opencode_mcp_server(self, config: OpencodeMcpServerConfig) -> OpencodeMcpStatus:
         # @intent opencode-mcp-add-reports-only-connected
-        # The config's environment and header values are secrets registered
-        # before the request, so an echo is scrubbed (INV-6); only a reported
-        # connected state is success, and a missing, failed, auth-needing or
-        # disabled server is mcp_server_failed, never a silent success (EC-92).
+        # The config's environment and header values are secrets
+        # registered before the request, so an echo is scrubbed; only
+        # a reported connected state is success, and a missing,
+        # failed, auth-needing or disabled server is
+        # mcp_server_failed, never a silent success.
         operation = "add_opencode_mcp_server"
         try:
             self._require_open(operation)
             RecordFieldConverter.require_instance(config, "config", OpencodeMcpServerConfig)
 
-            # The config's environment and header values are injected secrets, scrubbed from any answer (INV-6).
+            # The config's environment and header values are injected
+            # secrets, scrubbed from any answer.
             for value in (*config.environment.values(), *config.headers.values()):
                 self._errors.register_secret(value)
 
-            # Register the server; a non-2xx answer is an API error (EC-93).
+            # Register the server; a non-2xx answer is an API error.
             answer = await self._client.call("POST", ("mcp",), operation=operation, body=OpencodeWire.mcp_body(config))
             status, vendor_error = self._wire.parse_mcp_status(answer, config.name, operation=operation)
 
-            # A missing name, or a failed, auth-needing or disabled server, did not connect (EC-92).
+            # A missing name, or a failed, auth-needing or disabled
+            # server, did not connect.
             if status is None:
                 raise self._errors.build(FailureCode.OPENCODE_MCP_SERVER_FAILED, "The opencode server did not report a status for the MCP server.", operation=operation)
             if status in _FAILED_MCP_STATES:
@@ -658,12 +685,14 @@ class OpencodeHost:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
     def _require_open(self, operation: str) -> None:
-        # A host that was never entered, has exited, or failed to open starts nothing (EC-2).
+        # A host that was never entered, has exited, or failed to
+        # open starts nothing.
         if not self._open:
             raise self._errors.build(FailureCode.OPENCODE_PROCESS_EXITED, "This OpencodeHost is not open: it was never entered, has exited, or failed to open.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
 
     async def _check_health(self, *, operation: str) -> str:
-        # GET /global/health: unhealthy is unreachable (EC-55); older than OPENCODE_MIN_VERSION is unsupported (EC-60).
+        # GET /global/health: unhealthy is unreachable; older than
+        # OPENCODE_MIN_VERSION is unsupported.
         body = await self._client.call("GET", ("global", "health"), operation=operation)
         healthy, version, numbers = self._wire.parse_health(body, operation=operation)
         if not healthy:
@@ -673,7 +702,8 @@ class OpencodeHost:
         return version
 
     def _reserve(self, session_id: str | None, *, operation: str) -> str:
-        # Reserves synchronously; at the live-turn cap the error carries the EC-67 next step.
+        # Reserves synchronously; at the live-turn cap the error tells
+        # the caller to wait for or interrupt a running turn.
         try:
             return self._turns.reserve(session_id, operation=operation)
         except NativeHostError as exc:
@@ -682,7 +712,8 @@ class OpencodeHost:
             raise self._errors.build(exc.failure_code, exc.message, operation=operation, next_step=native_host_constants.NATIVE_AT_CAP_NEXT_STEP.format(tool="interrupt_opencode_turn"), context=dict(exc.context)) from exc
 
     async def _require_idle(self, session_id: str, *, operation: str, include_local: bool) -> None:
-        # A session with a live turn on this host, or busy or retrying on the server, is busy (EC-73, EC-78).
+        # A session with a live turn on this host, or busy or retrying
+        # on the server, is busy.
         local = include_local and self._turns.is_session_busy(session_id)
         statuses = () if local else self._wire.parse_session_statuses(await self._client.call("GET", ("session", "status"), operation=operation), operation=operation)
         if local or any(status.session_id == session_id and status.state in native_host_constants.OPENCODE_BUSY_STATES for status in statuses):
@@ -690,10 +721,10 @@ class OpencodeHost:
 
     async def _check_model(self, model: str | None, *, operation: str) -> None:
         # @intent opencode-model-checked-before-spending
-        # A requested provider/model must be offered by a connected provider
-        # before a session is created or a prompt sent, so a typo never
-        # spends money or leaves an empty session (EC-68); the context lists
-        # the offered ids, capped by the error factory.
+        # A requested provider/model must be offered by a connected
+        # provider before a session is created or a prompt sent, so a
+        # typo never spends money or leaves an empty session; the
+        # context lists the offered ids, capped by the error factory.
         if model is None:
             return
         provider_id, model_id = model.split("/", native_host_constants.OPENCODE_MODEL_ID_SPLITS)
@@ -706,23 +737,23 @@ class OpencodeHost:
         raise self._errors.build(FailureCode.OPENCODE_MODEL_UNKNOWN, "The requested model is not offered by a connected provider.", operation=operation, context={"available_models": available})
 
     async def _newest_message_id(self, session_id: str, *, operation: str) -> str | None:
-        # The session's newest message id before the prompt, or None for an empty session.
+        # The session's newest message id, or None if it is empty.
         body = await self._client.call("GET", ("session", session_id, "message"), operation=operation, query={"limit": _NEWEST_ONE}, not_found=FailureCode.OPENCODE_SESSION_NOT_FOUND)
         messages = self._wire.parse_messages(body, operation=operation)
         return messages[-1].message_id if messages else None
 
     def _watcher(self, turn_id: str, session_id: str, request: OpencodePromptRequest, *, snapshot_id: str | None) -> OpencodeTurnWatcher:
-        # One watcher per turn, sharing this host's client, codec and error factory.
+        # One watcher per turn, sharing this host's client and codec.
         handle = NativeTurnHandle(harness=NativeHarness.OPENCODE, session_id=session_id, turn_id=turn_id)
         return OpencodeTurnWatcher(handle=handle, request=request, snapshot_id=snapshot_id, client=self._client, wire=self._wire, errors=self._errors, request_timeout_seconds=self._settings.request_timeout_seconds)
 
     async def _drive(self, watcher: OpencodeTurnWatcher) -> NativeTurnResult:
         # @intent opencode-turn-driver-names-defects
-        # The driver task's outcome is what wait_opencode_turn returns or
-        # raises, so a defect inside the watcher becomes runtime.error naming
-        # only its class, under the wait operation (EC-5, S2-6). Before any
-        # failure is recorded the watcher stops the turn at the server, when
-        # the host and not opencode ended it (EC-158).
+        # The driver task's outcome is what wait_opencode_turn returns
+        # or raises, so a defect inside the watcher becomes
+        # runtime.error naming only its class, under the wait operation.
+        # Before any failure is recorded the watcher stops the turn at
+        # the server, when the host and not opencode ended it.
         try:
             return await watcher.run()
         except asyncio.CancelledError:
@@ -735,21 +766,23 @@ class OpencodeHost:
             raise self._errors.from_unexpected(exc, operation=native_host_constants.OPENCODE_TURN_OPERATION) from exc
 
     def _forget(self, turn_id: str, driver: asyncio.Task[NativeTurnResult]) -> None:
-        # A finished turn's watcher is dropped; its outcome stays with the turn table for later waits.
+        # A finished turn's watcher is dropped; its outcome stays with
+        # the turn table for later waits.
         self._watchers.pop(turn_id, None)
         if not driver.cancelled():
             driver.exception()
 
     async def _abandon(self, session_id: str, *, operation: str) -> None:
         # @intent opencode-cancelled-prompt-is-aborted
-        # A cancelled spawn or continue may already have delivered its prompt;
-        # the turn is aborted, best effort and bounded by the request
-        # deadline, because no caller can ever reach it (EC-4).
+        # A cancelled spawn or continue may already have delivered its
+        # prompt; the turn is aborted, best effort and bounded by the
+        # request deadline, because no caller can ever reach it.
         with contextlib.suppress(NativeHostError):
             await self._client.call("POST", ("session", session_id, "abort"), operation=operation)
 
     async def _close_turn(self, watcher: OpencodeTurnWatcher) -> None:
-        # Aborts one live turn as HOST_CLOSED; closing never raises a vendor failure (EC-8).
+        # Aborts one live turn as HOST_CLOSED; closing never
+        # raises a vendor failure.
         with contextlib.suppress(NativeHostError):
             await watcher.interrupt(InterruptSource.HOST_CLOSED, operation=_EXIT_OPERATION)
 

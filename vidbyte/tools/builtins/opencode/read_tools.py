@@ -81,8 +81,9 @@ class ListOpencodeModelsTool(OpencodeHostTool):
 
     async def _invoke(self, call: ToolCall) -> object:
         # @intent opencode-models-tool-provider-filter
-        # The provider id is only a filter the host checks before any request;
-        # the models come back under one key, so the result is a JSON object.
+        # The provider id is only a filter the host checks before
+        # any request; the models come back under one key, so the
+        # result is a JSON object.
         return {"models": await self._host.list_opencode_models(NativeToolArguments.text(call, _PROVIDER_ID))}
 
 
@@ -94,7 +95,8 @@ class ListOpencodeProvidersTool(OpencodeHostTool):
     _DESCRIPTION: ClassVar[str] = LIST_OPENCODE_PROVIDERS_DESCRIPTION
 
     async def _invoke(self, call: ToolCall) -> object:
-        # No arguments: the providers come back under one key, without keys or options.
+        # No arguments: the providers come back under one key,
+        # without keys or options.
         return {"providers": await self._host.list_opencode_providers()}
 
 
@@ -107,8 +109,9 @@ class GetOpencodeProviderAuthTool(OpencodeHostTool):
 
     async def _invoke(self, call: ToolCall) -> object:
         # @intent opencode-provider-auth-tool-reads-only
-        # No arguments and nothing connected: each provider's auth methods
-        # come back under one key, so the result is a JSON object.
+        # No arguments and nothing connected: each
+        # provider's auth methods come back under one key,
+        # so the result is a JSON object.
         return {"providers": await self._host.get_opencode_provider_auth()}
 
 
@@ -121,7 +124,8 @@ class ListOpencodeSessionsTool(OpencodeHostTool):
     _PARAMETERS: ClassVar[tuple[ToolParameter, ...]] = (ToolParameter(name=_LIMIT, type=INTEGER, description=SESSIONS_LIMIT_PARAMETER_DESCRIPTION, required=False),)
 
     async def _invoke(self, call: ToolCall) -> object:
-        # A limit left out is the host's default page size; the sessions come back under one key.
+        # A limit left out is the host's default page size; the sessions
+        # come back under one key.
         limit = NativeToolArguments.integer(call, _LIMIT)
         sessions = await self._host.list_opencode_sessions(native_host_constants.NATIVE_LIST_DEFAULT_LIMIT if limit is None else limit)
         return {"sessions": sessions}
@@ -153,7 +157,8 @@ class GetOpencodeSessionMessagesTool(OpencodeHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # A limit left out is the host's default page size; before pages back from a message id.
+        # A limit left out is the host's default page size; before pages
+        # back from a message id.
         session_id = str(NativeToolArguments.text(call, SESSION_ID, required=True))
         limit = NativeToolArguments.integer(call, _LIMIT)
         before = NativeToolArguments.text(call, _BEFORE)
@@ -172,7 +177,8 @@ class GetOpencodeMessageTool(OpencodeHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # Both ids are required; the host checks the session before the message.
+        # Both ids are required; the host checks the session
+        # before the message.
         session_id = str(NativeToolArguments.text(call, SESSION_ID, required=True))
         message_id = str(NativeToolArguments.text(call, MESSAGE_ID, required=True))
         return await self._host.get_opencode_message(session_id, message_id)
@@ -187,7 +193,8 @@ class GetOpencodeSessionDiffTool(OpencodeHostTool):
     _PARAMETERS: ClassVar[tuple[ToolParameter, ...]] = (SESSION_ID_PARAMETER, _DIFF_MESSAGE_ID_PARAMETER)
 
     async def _invoke(self, call: ToolCall) -> object:
-        # An optional message id narrows the diff; the changed files come back under one key.
+        # An optional message id narrows the diff; the changed files
+        # come back under one key.
         session_id = str(NativeToolArguments.text(call, SESSION_ID, required=True))
         return {"files": await self._host.get_opencode_session_diff(session_id, NativeToolArguments.text(call, MESSAGE_ID))}
 

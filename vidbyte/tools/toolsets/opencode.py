@@ -41,8 +41,9 @@ class OpencodeTools(Tools):
     """Catalog of the 18 tools over one OpencodeHost."""
 
     def __init__(self, host: OpencodeHost) -> None:
-        # The readiness, model and provider checks first, then the ways to start or change work,
-        # then the session reads, the turn controls, the usage report and the MCP registration.
+        # The readiness, model and provider checks first, then the ways
+        # to start or change work, then the session reads, the turn
+        # controls, the usage report and the MCP registration.
         super().__init__(
             (
                 CheckOpencodeReadyTool(host),
@@ -68,7 +69,8 @@ class OpencodeTools(Tools):
 
     @staticmethod
     def read_only(host: OpencodeHost) -> Tools:
-        # Only the eleven READ tools, so nothing in the catalog can start, change or stop work (T-5).
+        # Only the eleven READ tools, so nothing in the catalog can
+        # start, change or stop work.
         return Tools(
             (
                 CheckOpencodeReadyTool(host),

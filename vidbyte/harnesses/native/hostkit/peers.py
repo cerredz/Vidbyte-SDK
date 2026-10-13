@@ -32,10 +32,10 @@ class NativeChildEnvironment:
     @staticmethod
     def build(overlay: Mapping[str, str]) -> dict[str, str]:
         # @intent native-child-env-inherits-the-callers-environment
-        # A vendor CLI is the user's own tool and authenticates through its
-        # own environment variables, so it runs as if started in the user's
-        # terminal: the caller's environment plus the host's overlay, never
-        # editing os.environ itself (D-18).
+        # A vendor CLI is the user's own tool and authenticates through
+        # its own environment variables, so it runs as if started in the
+        # user's terminal: the caller's environment plus the host's
+        # overlay, never editing os.environ itself.
         return {**os.environ, **dict(overlay)}
 
 
@@ -63,8 +63,9 @@ class NativePeer:
 
     async def start(self, *, operation: str) -> None:
         # @intent native-peer-launch-failures-are-typed
-        # A missing executable is not_installed and any other launch failure
-        # is process_exited, so no raw OSError leaves a host method.
+        # A missing executable is not_installed and any other
+        # launch failure is process_exited, so no raw OSError
+        # leaves a host method.
         try:
             await self._transport.start()
         except FileNotFoundError as exc:
@@ -78,14 +79,15 @@ class NativePeer:
 
     async def call(self, method: str, params: Mapping[str, Any], *, operation: str, timeout_seconds: float | None = None) -> Mapping[str, Any]:
         # @intent native-peer-vendor-errors-stay-protocol-errors
-        # A JSON-RPC error answer is re-raised unchanged for the host's wire
-        # codec to map to a row; a transport failure (timeout, dead pipe)
-        # becomes NativeHostError here.
+        # A JSON-RPC error answer is re-raised unchanged for the host's
+        # wire codec to map to its failure; a transport failure
+        # (timeout, dead pipe) becomes NativeHostError here.
         # @intent native-peer-writes-name-their-deadline
-        # Every write names a deadline, the control timeout unless the
-        # caller gave one, because the transport bounds a write and refuses
-        # a pipe that closed under it only for a call that names one; a
-        # peer that stopped reading must surface as process_exited (EC-51).
+        # Every write names a deadline, the control timeout unless
+        # the caller gave one, because the transport bounds a
+        # write and refuses a pipe that closed under it only for a
+        # call that names one; a peer that stopped reading must
+        # surface as process_exited.
         seconds = self._control_timeout_seconds if timeout_seconds is None else timeout_seconds
         try:
             return await self._transport.request(method, params, timeout_seconds=seconds)
@@ -95,7 +97,12 @@ class NativePeer:
             raise self._errors.from_protocol_error(exc, operation=operation) from exc
 
     async def send(self, method: str, params: Mapping[str, Any], *, operation: str, timeout_seconds: float | None = None) -> asyncio.Future[Mapping[str, Any]]:
-        # Writes a request and returns its future at once; the caller bounds the wait and reads vendor errors from it.
+        # @intent native-peer-send-returns-before-the-answer
+        # A host hands back a turn handle while the turn's prompt
+        # request is still pending, so this returns the answer's
+        # future as soon as the frame is written. The write has a
+        # deadline; the caller bounds the wait and reads vendor
+        # errors from the future.
         seconds = self._control_timeout_seconds if timeout_seconds is None else timeout_seconds
         try:
             return await self._transport.send_request(method, params, timeout_seconds=seconds)
@@ -103,28 +110,32 @@ class NativePeer:
             raise self._errors.from_protocol_error(exc, operation=operation) from exc
 
     async def notify(self, method: str, params: Mapping[str, Any], *, operation: str) -> None:
-        # Writes a notification within the control timeout; a dead or closed pipe becomes process_exited.
+        # Writes a notification within the control timeout; a dead or
+        # closed pipe becomes process_exited.
         try:
             await self._transport.notify(method, params, timeout_seconds=self._control_timeout_seconds)
         except McpProtocolError as exc:
             raise self._errors.from_protocol_error(exc, operation=operation) from exc
 
     async def answer(self, request_id: int | str, *, result: Mapping[str, Any] | None = None, error: Mapping[str, Any] | None = None) -> None:
-        # Replies to a server request within the control timeout; a failed write stays McpProtocolError for the driver to judge.
+        # Replies to a server request within the control timeout; a
+        # failed write stays McpProtocolError for the driver to judge.
         await self._transport.respond(request_id, result=result, error=error, timeout_seconds=self._control_timeout_seconds)
 
     async def close(self) -> None:
         # @intent native-peer-close-never-raises
-        # Stdin EOF, the grace period, then a whole-tree stop with bounded
-        # waits (D-23). Close runs in finally blocks and __aexit__, so a
-        # failure here must never replace the error or cancellation in flight.
+        # Stdin EOF, the grace period, then a whole-tree stop with
+        # bounded waits. Close runs in finally blocks and __aexit__,
+        # so a failure here must never replace the error or
+        # cancellation in flight.
         with contextlib.suppress(Exception):
             await self._transport.close()
 
     @property
     def exit_code(self) -> int | None:
         # The transport's returncode: the child's exit code once it has
-        # exited, None while it runs. The Muse host reads it for EC-95.
+        # exited, None while it runs. The Muse host reads it to spot a
+        # muse missing inside WSL.
         return self._transport.returncode
 
     def stderr_tail(self) -> str:

@@ -54,7 +54,8 @@ class RecordFieldValidator:
 
     @staticmethod
     def require_number(value: Any, field_name: str, *, maximum: float) -> float:
-        # An int or float, not bool, finite, greater than 0 and at most maximum.
+        # An int or float, not bool, finite, greater than 0
+        # and at most maximum.
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or value > maximum:
             raise ConfigurationError(f"{field_name} must be a finite number greater than 0 and at most {maximum}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return value
@@ -91,7 +92,8 @@ class RecordFieldValidator:
 
     @staticmethod
     def require_enum_set(value: Any, enum_type: type[EnumT], field_name: str) -> frozenset[EnumT]:
-        # A set or frozenset whose items are all enum_type members, stored as a frozenset.
+        # A set or frozenset whose items are all enum_type members,
+        # stored as a frozenset.
         if not isinstance(value, (set, frozenset)) or not all(isinstance(item, enum_type) for item in value):
             raise ConfigurationError(f"{field_name} must be a set or frozenset of {enum_type.__name__} members; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return frozenset(value)
@@ -105,7 +107,8 @@ class RecordFieldValidator:
 
     @staticmethod
     def require_text_mapping(value: Any, field_name: str, *, key_pattern: str, max_items: int) -> Mapping[str, str]:
-        # A mapping of str to str with keys fully matching key_pattern and at most max_items entries; values are never quoted.
+        # A mapping of str to str with keys fully matching key_pattern
+        # and at most max_items entries; values are never quoted.
         if not isinstance(value, Mapping) or len(value) > max_items:
             raise ConfigurationError(f"{field_name} must be a mapping of at most {max_items} text entries; got {type(value).__name__} with {len(value) if isinstance(value, Mapping) else 'no'} entries.", details={"field": field_name})
         if not all(isinstance(key, str) and re.fullmatch(key_pattern, key) is not None for key in value):
@@ -147,7 +150,8 @@ class RecordFieldValidator:
     @staticmethod
     def _received(value: Any, field_name: str) -> str:
         # @intent validator-messages-never-quote-secrets
-        # Quotes a short non-secret scalar or text; otherwise names only the type, so secrets and long text never reach a message.
+        # Quotes a short non-secret scalar or text; otherwise names only
+        # the type, so secrets and long text never reach a message.
         secret = CredentialKeyPolicy.is_secret_key(field_name.rsplit(".", 1)[-1])
         quotable = value is None or isinstance(value, (bool, int, float, Decimal, Enum, str))
         if secret or not quotable or len(repr(value)) > NATIVE_QUOTED_VALUE_MAX_CHARS:
@@ -160,7 +164,9 @@ class RecordFieldConverter:
 
     @staticmethod
     def to_tuple(value: Any, field_name: str, *, item_type: type[Any] | tuple[type[Any], ...], max_items: int | None = None) -> tuple[Any, ...]:
-        # A tuple or list whose items are all item_type instances, stored as a tuple; a str is refused because it is not a list of items.
+        # A tuple or list whose items are all item_type
+        # instances, stored as a tuple; a str is refused because
+        # it is not a list of items.
         if not isinstance(value, (tuple, list)) or not all(isinstance(item, item_type) and not isinstance(item, bool) for item in value):
             raise ConfigurationError(f"{field_name} must be a tuple of {RecordFieldConverter._type_names(item_type)} items; got a value of type {type(value).__name__}.", details={"field": field_name})
         if max_items is not None and len(value) > max_items:
@@ -169,14 +175,16 @@ class RecordFieldConverter:
 
     @staticmethod
     def to_mapping(value: Any, field_name: str) -> MappingProxyType[str, str]:
-        # A read-only copy of a mapping of text to text; values are never quoted.
+        # A read-only copy of a mapping of text to text;
+        # values are never quoted.
         if not isinstance(value, Mapping) or not all(isinstance(key, str) and isinstance(item, str) for key, item in value.items()):
             raise ConfigurationError(f"{field_name} must be a mapping of text keys to text values; got a value of type {type(value).__name__}.", details={"field": field_name})
         return MappingProxyType(dict(value))
 
     @staticmethod
     def to_enum(value: Any, enum_type: type[EnumT], field_name: str) -> EnumT:
-        # A member of enum_type, or the exact value string of one, returned as the member; case is not folded.
+        # A member of enum_type, or the exact value string of one,
+        # returned as the member; case is not folded.
         if isinstance(value, enum_type):
             return value
         members = {str(member.value): member for member in enum_type}
@@ -186,7 +194,8 @@ class RecordFieldConverter:
 
     @staticmethod
     def to_decimal(value: Any, field_name: str) -> Decimal:
-        # A decimal string parsed to a finite Decimal; a JSON number is refused because it may already have lost digits.
+        # A decimal string parsed to a finite Decimal; a JSON number is
+        # refused because it may already have lost digits.
         parsed: Decimal | None = None
         if isinstance(value, str):
             try:
@@ -199,7 +208,8 @@ class RecordFieldConverter:
 
     @staticmethod
     def require_instance(value: Any, field_name: str, expected: type[Any] | tuple[type[Any], ...], *, optional: bool = False) -> Any:
-        # An instance of expected (never a bool standing in for an int), or None when optional.
+        # An instance of expected (never a bool standing in for an int),
+        # or None when optional.
         if value is None and optional:
             return None
         if not isinstance(value, expected) or (isinstance(value, bool) and bool not in RecordFieldConverter._types(expected)):

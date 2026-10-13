@@ -92,7 +92,8 @@ class ClaudeBackendEnv:
         RecordFieldConverter.require_instance(self.auth_token, "ClaudeBackendEnv.auth_token", str)
 
     def as_environ(self) -> dict[str, str]:
-        # The public pairs plus the key under the variable Claude Code reads.
+        # The public pairs plus the key under the
+        # variable Claude Code reads.
         return {**self.public_env, _AUTH_ENV_KEY: self.auth_token}
 
 

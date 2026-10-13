@@ -56,7 +56,8 @@ class _Members:
 
     @staticmethod
     def member(container: Mapping[str, Any], key: str, expected: type[Any] | tuple[type[Any], ...], *, optional: bool = False) -> Any:
-        # The member's value when it has the expected type, or None for an absent optional member.
+        # The member's value when it has the expected type, or None for
+        # an absent optional member.
         return RecordFieldConverter.require_instance(container.get(key), key, expected, optional=optional)
 
     @staticmethod
@@ -76,7 +77,8 @@ class _WireRecords:
 
     @staticmethod
     def usage(info: Mapping[str, Any]) -> NativeTokenUsage | None:
-        # The cost and tokens of a Session or an AssistantMessage; None when neither was reported (INV-15).
+        # The cost and tokens of a Session or an AssistantMessage; None
+        # when neither was reported.
         tokens = _Members.member(info, "tokens", Mapping, optional=True)
         cost = _Members.member(info, "cost", (int, Decimal), optional=True)
         if tokens is None and cost is None:
@@ -95,7 +97,8 @@ class _WireRecords:
 
     @staticmethod
     def session(value: Any) -> OpencodeSession:
-        # A Session object: ids, title, folder, times, usage and the revert point when one is set.
+        # A Session object: ids, title, folder, times, usage and the
+        # revert point when one is set.
         entry = _Members.mapping(value, "session")
         times = _Members.mapping(entry.get("time"), "time")
         revert: Mapping[str, Any] = _Members.member(entry, "revert", Mapping, optional=True) or {}
@@ -113,7 +116,9 @@ class _WireRecords:
 
     @staticmethod
     def assistant_error(value: Any) -> OpencodeAssistantError:
-        # An AssistantMessage error: the name verbatim, and data.message, data.statusCode and data.isRetryable when present.
+        # An AssistantMessage error: the name verbatim, and
+        # data.message, data.statusCode and
+        # data.isRetryable when present.
         entry = _Members.mapping(value, "error")
         data: Mapping[str, Any] = _Members.member(entry, "data", Mapping, optional=True) or {}
         return OpencodeAssistantError(
@@ -125,7 +130,8 @@ class _WireRecords:
 
     @staticmethod
     def message(value: Any) -> OpencodeMessage:
-        # A {info, parts} message: the text parts joined and capped, the times, the parent and the usage.
+        # A {info, parts} message: the text parts joined and capped, the
+        # times, the parent and the usage.
         entry = _Members.mapping(value, "message")
         info = _Members.mapping(entry.get("info"), "info")
         times = _Members.mapping(info.get("time"), "time")
@@ -155,7 +161,8 @@ class _WireRecords:
         # Model ids are the keys the provider lists them under, copied
         # verbatim, because the prompt body sends them back unchanged; a
         # malformed entry fails the whole parse as protocol_mismatch.
-        # Every model of one Provider object, keyed by the model id the provider lists it under.
+        # Every model of one Provider object, keyed by the model id the
+        # provider lists it under.
         entry = _Members.mapping(value, "provider")
         provider_id = _Members.member(entry, "id", str)
         catalog = _Members.mapping(entry.get("models"), "models")
@@ -178,10 +185,10 @@ class _WireRecords:
     @staticmethod
     def provider(value: Any, connected: frozenset[str], defaults: Mapping[str, Any]) -> OpencodeProvider:
         # @intent opencode-wire-provider-drops-keys
-        # A Provider object carries the provider's key and options; only the
-        # id, name, source, variable names, model ids and default are read,
-        # so no key can reach a record or a tool result (INV-6).
-        # One Provider object without its key or options (INV-6).
+        # A Provider object carries the provider's key and options; only
+        # the id, name, source, variable names, model ids and default
+        # are read, so no key can reach a record or a tool result.
+        # One Provider object without its key or options.
         entry = _Members.mapping(value, "provider")
         provider_id = _Members.member(entry, "id", str)
         catalog = _Members.mapping(entry.get("models"), "models")
@@ -198,8 +205,9 @@ class _WireRecords:
     @staticmethod
     def provider_auth(provider_id: str, value: Any) -> OpencodeProviderAuth:
         # @intent opencode-wire-auth-methods-verbatim
-        # The method types form an open set, so type and label are copied
-        # verbatim instead of mapped to an enum that would refuse a new one.
+        # The method types form an open set, so type and label
+        # are copied verbatim instead of mapped to an enum that
+        # would refuse a new one.
         # One provider's auth methods, type and label verbatim.
         methods = _Members.items(value, "methods")
         return OpencodeProviderAuth(provider_id=provider_id, methods=tuple(OpencodeAuthMethod(method_type=_Members.member(method, "type", str), label=_Members.member(method, "label", str)) for method in methods))
@@ -222,9 +230,10 @@ class _WireRecords:
     @staticmethod
     def permission_request(value: Any) -> OpencodePermissionRequest:
         # @intent opencode-wire-permission-request-shape
-        # A pending permission request keeps its id, session and patterns so
-        # the watcher rejects exactly that request; a malformed one fails the
-        # poll as protocol_mismatch instead of being skipped unanswered.
+        # A pending permission request keeps its id, session and
+        # patterns so the watcher rejects exactly that request; a
+        # malformed one fails the poll as protocol_mismatch instead of
+        # being skipped unanswered.
         # One GET /permission entry.
         entry = _Members.mapping(value, "permission")
         return OpencodePermissionRequest(
@@ -237,8 +246,9 @@ class _WireRecords:
     @staticmethod
     def question_request(value: Any) -> OpencodeQuestionRequest:
         # @intent opencode-wire-question-request-shape
-        # A pending question keeps its id and session so the watcher rejects
-        # exactly that question; a malformed one fails the poll, never skipped.
+        # A pending question keeps its id and session so the watcher
+        # rejects exactly that question; a malformed one fails the
+        # poll, never skipped.
         # One GET /question entry.
         entry = _Members.mapping(value, "question")
         return OpencodeQuestionRequest(request_id=_Members.member(entry, "id", str), session_id=_Members.member(entry, "sessionID", str))
@@ -246,10 +256,11 @@ class _WireRecords:
     @staticmethod
     def session_status(session_id: str, value: Any) -> OpencodeSessionStatus:
         # @intent opencode-wire-retry-status
-        # A retry status carries the vendor's attempt number, message and
-        # reason, which the watcher compares with its attempt limit (EC-155);
+        # A retry status carries the vendor's attempt number, message
+        # and reason, which the watcher compares with its attempt limit;
         # any other status carries only its state.
-        # One GET /session/status entry; a retry entry also carries its attempt, message and action reason.
+        # One GET /session/status entry; a retry entry also carries its
+        # attempt, message and action reason.
         entry = _Members.mapping(value, "status")
         state = _Members.member(entry, "type", str)
         if state != native_host_constants.OPENCODE_RETRY_STATE:
@@ -273,10 +284,11 @@ class OpencodeWire:
     @staticmethod
     def session_body(request: OpencodeSpawnRequest) -> dict[str, object]:
         # @intent opencode-wire-session-rules-from-caller
-        # The session body carries only the title and the caller's validated
-        # rules; no allow-everything rule is ever added, and with no rules
-        # the permission member is absent (D-11, INV-9).
-        # POST /session: the title when given and the request's permission rules, never more (D-11).
+        # The session body carries only the title and the caller's
+        # validated rules; no allow-everything rule is ever added, and
+        # with no rules the permission member is absent.
+        # POST /session: the title when given and the request's
+        # permission rules, never more.
         body: dict[str, object] = {}
         if request.title is not None:
             body["title"] = request.title
@@ -287,9 +299,11 @@ class OpencodeWire:
     @staticmethod
     def prompt_body(request: OpencodePromptRequest) -> dict[str, object]:
         # @intent opencode-wire-prompt-body
-        # The prompt goes as one text part; the model, already checked by the
-        # record, is split at its first slash into provider and model ids.
-        # POST …/prompt_async: one text part, plus the model split at its first slash, the agent and the system text.
+        # The prompt goes as one text part; the model, already
+        # checked by the record, is split at its first slash into
+        # provider and model ids.
+        # POST …/prompt_async: one text part, plus the model split at
+        # its first slash, the agent and the system text.
         body: dict[str, object] = {"parts": [{"type": _TEXT_PART, "text": request.prompt}]}
         if request.model is not None:
             provider_id, model_id = request.model.split("/", native_host_constants.OPENCODE_MODEL_ID_SPLITS)
@@ -303,10 +317,11 @@ class OpencodeWire:
     @staticmethod
     def mcp_body(config: OpencodeMcpServerConfig) -> dict[str, object]:
         # @intent opencode-wire-mcp-body-from-registration
-        # The body is built only from a registered config, copied into plain
-        # dicts the transport can encode; its environment and header values
-        # are secrets the host registered before sending (INV-6, T-2).
-        # POST /mcp: a local command with its environment, or a remote URL with its headers, and the timeout when set.
+        # The body is built only from a registered config, copied into
+        # plain dicts the transport can encode; its environment and
+        # header values are secrets the host registered before sending.
+        # POST /mcp: a local command with its environment, or a remote
+        # URL with its headers, and the timeout when set.
         server: dict[str, object] = {"type": config.kind.value}
         if config.kind is OpencodeMcpKind.LOCAL:
             server["command"] = list(config.command)
@@ -321,7 +336,8 @@ class OpencodeWire:
         return {"name": config.name, "config": server}
 
     def parse_health(self, body: Any, *, operation: str) -> tuple[bool, str, tuple[int, ...]]:
-        # GET /global/health: healthy, the version verbatim, and its numeric parts for the EC-60 check.
+        # GET /global/health: healthy, the version verbatim, and its
+        # numeric parts for the minimum version check.
         try:
             entry = _Members.mapping(body, _BODY_MEMBER)
             healthy = _Members.member(entry, "healthy", bool)
@@ -334,7 +350,8 @@ class OpencodeWire:
         return healthy, version, tuple(int(part) for part in found.groups())
 
     def parse_readiness(self, body: Any, *, version: str, server_url: str, operation: str) -> OpencodeReadiness:
-        # GET /provider: the connected provider ids and the default model of each provider.
+        # GET /provider: the connected provider ids and the default
+        # model of each provider.
         try:
             entry = _Members.mapping(body, _BODY_MEMBER)
             _Members.items(entry.get("all"), "all")
@@ -346,9 +363,11 @@ class OpencodeWire:
 
     def parse_providers(self, body: Any, *, operation: str) -> tuple[OpencodeProvider, ...]:
         # @intent opencode-wire-providers-without-keys
-        # Every known provider, marked connected from the server's list; keys
-        # and options are never read, and a malformed body is protocol_mismatch.
-        # GET /provider: every provider in `all`, marked connected from `connected`.
+        # Every known provider, marked connected from the server's
+        # list; keys and options are never read, and a malformed body
+        # is protocol_mismatch.
+        # GET /provider: every provider in `all`, marked
+        # connected from `connected`.
         try:
             entry = _Members.mapping(body, _BODY_MEMBER)
             providers = _Members.items(entry.get("all"), "all")
@@ -360,9 +379,10 @@ class OpencodeWire:
 
     def parse_config_providers(self, body: Any, *, operation: str) -> dict[str, tuple[OpencodeModel, ...]]:
         # @intent opencode-wire-connected-catalog
-        # GET /config/providers lists only connected providers, so this map is
-        # the one source for model checks (EC-68) and the model list (EC-65).
-        # GET /config/providers: each connected provider id with its models, in server order.
+        # GET /config/providers lists only connected providers, so this
+        # map is the one source for model checks and the model list.
+        # GET /config/providers: each connected provider id with its
+        # models, in server order.
         try:
             entry = _Members.mapping(body, _BODY_MEMBER)
             providers = _Members.items(entry.get("providers"), "providers")
@@ -372,8 +392,9 @@ class OpencodeWire:
 
     def parse_provider_auth(self, body: Any, *, operation: str) -> tuple[OpencodeProviderAuth, ...]:
         # @intent opencode-wire-provider-auth-map
-        # A map of provider id to methods, kept in server order; a malformed
-        # body is protocol_mismatch rather than an empty, misleading list.
+        # A map of provider id to methods, kept in server order; a
+        # malformed body is protocol_mismatch rather than an
+        # empty, misleading list.
         # GET /provider/auth: a map of provider id to its auth methods.
         try:
             entry = _Members.mapping(body, _BODY_MEMBER)
@@ -403,7 +424,8 @@ class OpencodeWire:
             raise self._mismatch(exc, operation=operation) from exc
 
     def parse_messages(self, body: Any, *, operation: str) -> tuple[OpencodeMessage, ...]:
-        # A list of {info, parts} messages, oldest first as the server sends them.
+        # A list of {info, parts} messages, oldest first as
+        # the server sends them.
         try:
             return tuple(_WireRecords.message(item) for item in _Members.items(body, _BODY_MEMBER))
         except ConfigurationError as exc:
@@ -418,9 +440,10 @@ class OpencodeWire:
 
     def parse_mcp_status(self, body: Any, name: str, *, operation: str) -> tuple[str | None, str | None]:
         # @intent opencode-wire-mcp-status-by-name
-        # Only the entry for the added name counts; a missing name returns
-        # (None, None) so the host reports mcp_server_failed (EC-92).
-        # POST /mcp answers a map of server name to {status, error?}; a missing name gives (None, None).
+        # Only the entry for the added name counts; a missing name
+        # returns (None, None) so the host reports mcp_server_failed.
+        # POST /mcp answers a map of server name to {status, error?}; a
+        # missing name gives (None, None).
         try:
             entry = _Members.mapping(body, _BODY_MEMBER)
             if name not in entry:
@@ -434,7 +457,8 @@ class OpencodeWire:
         # @intent opencode-wire-permission-requests-all
         # Every pending permission request on the server, not only the
         # turn's; the watcher decides which belong to its session tree.
-        # GET /permission: every pending permission request on the server.
+        # GET /permission: every pending permission
+        # request on the server.
         try:
             return tuple(_WireRecords.permission_request(item) for item in _Members.items(body, _BODY_MEMBER))
         except ConfigurationError as exc:
@@ -451,7 +475,8 @@ class OpencodeWire:
             raise self._mismatch(exc, operation=operation) from exc
 
     def parse_session_statuses(self, body: Any, *, operation: str) -> tuple[OpencodeSessionStatus, ...]:
-        # GET /session/status: a map of session id to its status; a session absent from it is idle.
+        # GET /session/status: a map of session id to its status; a
+        # session absent from it is idle.
         try:
             entry = _Members.mapping(body, _BODY_MEMBER)
             return tuple(_WireRecords.session_status(str(session_id), value) for session_id, value in entry.items())
@@ -466,11 +491,11 @@ class OpencodeWire:
             raise self._mismatch(exc, operation=operation) from exc
 
     def reply_failure(self, error: OpencodeAssistantError, *, operation: str) -> NativeHostError:
-        # @intent opencode-reply-error-to-row
-        # The newest reply's error decides a failed turn: a provider auth
-        # error or an API 401/403 means not signed in, 429 a usage limit, 402
-        # billing, anything else an API error. The vendor's own name and
-        # message travel scrubbed in vendor_error (EC-82 to EC-85, D-9).
+        # @intent opencode-reply-error-to-failure
+        # The newest reply's error decides a failed turn: a provider
+        # auth error or an API 401/403 means not signed in, 429 a usage
+        # limit, 402 billing, anything else an API error. The vendor's
+        # own name and message travel scrubbed in vendor_error.
         context = {"vendor_error": f"{error.name}: {error.message}" if error.message else error.name}
         if error.status_code is not None:
             context["status_code"] = str(error.status_code)
@@ -486,7 +511,8 @@ class OpencodeWire:
         return self._errors.build(FailureCode.OPENCODE_API_ERROR, "The turn's last reply ended with a model provider error.", operation=operation, context=context)
 
     def _mismatch(self, exc: ConfigurationError, *, operation: str) -> NativeHostError:
-        # protocol_mismatch naming only the member that was missing or mistyped (D-13).
+        # protocol_mismatch naming only the member that was
+        # missing or mistyped.
         member = str(exc.details.get("field", _BODY_MEMBER)).rsplit(".", 1)[-1]
         return self._errors.build(FailureCode.OPENCODE_PROTOCOL_MISMATCH, f"The opencode server sent an answer whose {member} member this SDK cannot read.", operation=operation, context={"field": member})
 

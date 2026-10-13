@@ -52,7 +52,8 @@ NATIVE_PROCESS_MAX_OUTPUT_BYTES = 67108864
 NATIVE_PROCESS_TRUNCATION_PROBE_BYTES = 1
 NATIVE_PROCESS_READ_CHUNK_BYTES = 65536
 
-# Default next step per failure code value, verbatim from the spec's code catalog.
+# Default next step per failure code value. The shared contract tests
+# compare these texts word for word, so change both together.
 NATIVE_HOST_NEXT_STEPS: MappingProxyType[str, str] = MappingProxyType(
     {
         "grok.not_installed": "Install Grok Build 1.0.13 or newer, or set GrokHostSettings.grok_command.",
@@ -112,7 +113,8 @@ NATIVE_HOST_NEXT_STEPS: MappingProxyType[str, str] = MappingProxyType(
         "runtime.error": "This is a defect in the SDK host; report it with error.context['error_type'].",
     }
 )
-# The configuration.invalid_argument next step with the argument's name filled in, so it holds the row's token (EC-1, EC-138).
+# The configuration.invalid_argument next step with the argument's name
+# filled in, so the caller knows which argument to fix.
 NATIVE_INVALID_ARGUMENT_NEXT_STEP = "Fix the {field} argument and call again."
 # Next steps every host gives in the same words. {tool} is the
 # host's own tool, for example interrupt_grok_turn.
@@ -220,8 +222,8 @@ MUSE_PEER_MARK_PATTERN = r"^[0-9a-f]{32}$"
 MUSE_REAP_TIMEOUT_SECONDS = 10.0
 # The in-distro reap, read by `sh -s <mark>` from stdin. It finds every
 # process whose environment holds the exact mark entry, adds their
-# descendants from the PPid line of /proc/<pid>/status until a pass finds
-# nothing new, kills them all except itself, and always exits 0.
+# descendants from the PPid line of /proc/<pid>/status until a pass
+# finds nothing new, kills them all except itself, and always exits 0.
 MUSE_REAP_SCRIPT = """targets=""
 for d in /proc/[0-9]*; do
   p=${d#/proc/}

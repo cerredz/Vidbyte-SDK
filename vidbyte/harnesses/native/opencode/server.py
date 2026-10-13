@@ -43,39 +43,46 @@ class OpencodeServer:
 
     @property
     def exit_code(self) -> int | None:
-        # The owned server's collected exit code; None while it runs, before it started, or when attached.
+        # The owned server's collected exit code; None while it runs,
+        # before it started, or when attached.
         return None if self._process is None else self._process.exit_code
 
     async def start(self, *, operation: str) -> tuple[str, tuple[str, str] | None]:
         # @intent opencode-server-credentials-stay-in-child-env
-        # The owned server's password is fresh per host and registered as a
-        # secret before the child starts; it and the backend keys travel only
-        # in the child's environment, never on argv or in os.environ (INV-6).
-        # An attached server is used as configured, with the caller's credentials if any.
+        # The owned server's password is fresh per host and registered
+        # as a secret before the child starts; it and the backend keys
+        # travel only in the child's environment, never on argv or in
+        # os.environ. An attached server is used as configured, with the
+        # caller's credentials if any.
         if self._settings.server_url is not None:
             return self._attached()
 
-        # Find the executable and every backend key before anything starts (EC-54, EC-61, EC-62).
+        # Find the executable and every backend key
+        # before anything starts.
         command = self._command(operation=operation)
         overlay = self._backend_overlay(operation=operation)
 
-        # A fresh random password for this host only, known to the child through its environment (FR-18).
+        # A fresh random password for this host only, known to the child
+        # through its environment.
         credential = secrets.token_urlsafe(_CREDENTIAL_BYTES)
         self._errors.register_secret(credential)
         overlay[_LOGIN_VARIABLE] = native_host_constants.OPENCODE_SERVER_LOGIN
         overlay[_CREDENTIAL_VARIABLE] = credential
 
-        # Start `opencode serve` on loopback and use the address it prints.
+        # Start `opencode serve` on loopback and use
+        # the address it prints.
         base_url = await self._launch(command, overlay, operation=operation)
         return base_url, (native_host_constants.OPENCODE_SERVER_LOGIN, credential)
 
     async def stop(self) -> None:
-        # Stops and reaps an owned server's whole tree, once; an attached server is left alone.
+        # Stops and reaps an owned server's whole tree, once; an
+        # attached server is left alone.
         if self._process is not None:
             await self._process.stop()
 
     def _attached(self) -> tuple[str, tuple[str, str] | None]:
-        # The attached URL without a trailing slash, and the caller's credentials when both are set.
+        # The attached URL without a trailing slash, and the caller's
+        # credentials when both are set.
         url = str(self._settings.server_url).rstrip("/")
         username, credential = self._settings.server_username, self._settings.server_password
         if username is None or credential is None:
@@ -84,7 +91,7 @@ class OpencodeServer:
         return url, (username, credential)
 
     def _command(self, *, operation: str) -> tuple[str, ...]:
-        # The configured launcher, or `opencode` found on PATH (EC-54).
+        # The configured launcher, or `opencode` found on PATH.
         if self._settings.opencode_command is not None:
             return self._settings.opencode_command
         found = shutil.which(_EXECUTABLE)
@@ -94,10 +101,11 @@ class OpencodeServer:
 
     def _backend_overlay(self, *, operation: str) -> dict[str, str]:
         # @intent opencode-backend-keys-child-env-only
-        # Each backend's key is read from the caller's environment, refused
-        # when unset or blank before any process starts (EC-61), registered
-        # as a secret, and copied under the variable opencode's built-in
-        # provider reads, in the child's environment only (D-16, D-18).
+        # Each backend's key is read from the caller's
+        # environment, refused when unset or blank before any
+        # process starts, registered as a secret, and copied under
+        # the variable opencode's built-in provider reads, in the
+        # child's environment only.
         overlay: dict[str, str] = {}
         for backend in self._settings.backends:
             provider = build_opencode_backend_provider(backend)
@@ -110,10 +118,10 @@ class OpencodeServer:
 
     async def _launch(self, command: tuple[str, ...], overlay: dict[str, str], *, operation: str) -> str:
         # @intent opencode-owned-server-start-stops-on-failure
-        # The child starts inside a try/finally that stops and reaps it on
-        # every path that does not end with its address: a launch failure, an
-        # early exit, a silent server past startup_timeout_seconds, or a
-        # cancelled start (INV-3, INV-4).
+        # The child starts inside a try/finally that stops and reaps it
+        # on every path that does not end with its address: a launch
+        # failure, an early exit, a silent server past
+        # startup_timeout_seconds, or a cancelled start.
         invocation = CliInvocation(
             argv=(*command, *_SERVE_ARGUMENTS),
             env=NativeChildEnvironment.build(overlay),

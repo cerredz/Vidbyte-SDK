@@ -25,7 +25,8 @@ class HarnessBackendTools(Tools):
     """Catalog of the three READ tools over the backend profiles."""
 
     def __init__(self) -> None:
-        # List the profiles first, then the readiness check, then the DeepSeek balance read.
+        # List the profiles first, then the readiness check, then the
+        # DeepSeek balance read.
         super().__init__((ListHarnessBackendsTool(), CheckBackendReadyTool(), GetDeepseekBalanceTool()))
 
 

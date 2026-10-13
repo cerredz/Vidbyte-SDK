@@ -53,7 +53,8 @@ class NativeToolArguments:
 
     @staticmethod
     def text(call: ToolCall, name: str, *, required: bool = False) -> str | None:
-        # A JSON string, or None when the parameter is optional and left out or null.
+        # A JSON string, or None when the parameter is optional
+        # and left out or null.
         value = call.arguments.get(name)
         if value is None and not required:
             return None
@@ -61,7 +62,8 @@ class NativeToolArguments:
 
     @staticmethod
     def integer(call: ToolCall, name: str) -> int | None:
-        # A JSON integer (never a bool or a float), or None when left out or null.
+        # A JSON integer (never a bool or a float), or None
+        # when left out or null.
         value = call.arguments.get(name)
         if value is None:
             return None
@@ -69,7 +71,8 @@ class NativeToolArguments:
 
     @staticmethod
     def number(call: ToolCall, name: str) -> float | None:
-        # A JSON number (never a bool), or None when left out or null; ranges are the record's to check.
+        # A JSON number (never a bool), or None when left out or null;
+        # ranges are the record's to check.
         value = call.arguments.get(name)
         if value is None:
             return None
@@ -78,9 +81,10 @@ class NativeToolArguments:
     @staticmethod
     def seconds(call: ToolCall, name: str, *, default: float) -> float:
         # @intent native-tools-cap-blocking-waits
-        # A tool call that blocks (a wait, or a one-shot run) may last at
-        # most NATIVE_TOOL_WAIT_MAX_SECONDS, so it ends before the calling
-        # agent's own tool cutoff (EC-144); left out or null means default.
+        # A tool call that blocks (a wait, or a one-shot run) may
+        # last at most NATIVE_TOOL_WAIT_MAX_SECONDS, so it ends
+        # before the calling agent's own tool cutoff; left out or
+        # null means default.
         value = call.arguments.get(name)
         if value is None:
             return default
@@ -88,7 +92,8 @@ class NativeToolArguments:
 
     @staticmethod
     def choice(call: ToolCall, name: str, enum_type: type[EnumT]) -> EnumT | None:
-        # The enum member whose exact value the model sent, or None when left out or null.
+        # The enum member whose exact value the model sent, or None
+        # when left out or null.
         value = call.arguments.get(name)
         if value is None:
             return None
@@ -96,8 +101,9 @@ class NativeToolArguments:
 
     @staticmethod
     def handle(call: ToolCall) -> NativeTurnHandle:
-        # The handle object {harness, session_id, turn_id} of strings (EC-145);
-        # any other shape is refused as the handle parameter, whichever part is wrong.
+        # The handle object {harness, session_id, turn_id} of strings;
+        # any other shape is refused as the handle parameter,
+        # whichever part is wrong.
         value = call.arguments.get(_HANDLE_PARAMETER)
         try:
             fields = RecordFieldConverter.require_instance(value, _HANDLE_PARAMETER, Mapping)
@@ -113,7 +119,7 @@ class NativeResultEncoder:
 
     @staticmethod
     def encode(value: object) -> tuple[str, bool]:
-        # Returns the JSON text and whether it was clipped (EC-143).
+        # Returns the JSON text and whether it was clipped.
         text = json.dumps(NativeResultEncoder.plain(value), sort_keys=True, ensure_ascii=False)
         encoded = text.encode("utf-8")
         limit = native_host_constants.NATIVE_TOOL_OUTPUT_MAX_BYTES
@@ -123,9 +129,10 @@ class NativeResultEncoder:
 
     @staticmethod
     def plain(value: object) -> Any:
-        # Enums as values, Decimal as text, tuples as lists, frozensets as lists
-        # sorted by value, mappings as objects and records as objects of their
-        # shown fields; a repr=False field holds a secret and is left out.
+        # Enums as values, Decimal as text, tuples as lists, frozensets
+        # as lists sorted by value, mappings as objects and records as
+        # objects of their shown fields; a repr=False field holds a
+        # secret and is left out.
         if isinstance(value, Enum):
             return value.value
         if isinstance(value, Decimal | PurePath):
@@ -155,14 +162,16 @@ class NativeHostTool(BaseTool, Generic[HostT]):
 
     def spec(self) -> ToolSpec:
         # @intent native-tools-declare-catalog-permission
-        # The permission is the catalog's READ or WRITE tag, so the default
-        # PermissionPolicy denies every WRITE tool before execute (EC-142).
+        # The permission is the catalog's READ or WRITE tag,
+        # so the default PermissionPolicy denies every WRITE
+        # tool before execute.
         return ToolSpec(name=self._TOOL_NAME, description=self._DESCRIPTION, parameters=self._PARAMETERS, permission=self._PERMISSION)
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Parse the arguments and call the one host function this tool wraps.
-        # Every failure becomes an error result the model can act on; only
-        # cancellation passes through, so a cancelled caller stops at once.
+        # Parse the arguments and call the one host function this tool
+        # wraps. Every failure becomes an error result the model can
+        # act on; only cancellation passes through, so a cancelled
+        # caller stops at once.
         try:
             value = await self._invoke(call)
         except NativeHostError as exc:
@@ -172,16 +181,17 @@ class NativeHostTool(BaseTool, Generic[HostT]):
         except Exception as exc:
             return self._failure(self._defect(exc))
 
-        # Encode the record as sorted-key JSON, clipped to the output cap.
+        # Encode the record as sorted-key JSON,
+        # clipped to the output cap.
         output, truncated = NativeResultEncoder.encode(value)
         return ToolResult.success(self._TOOL_NAME, output, metadata={"harness": self._HARNESS, "operation": self._TOOL_NAME, "truncated": truncated})
 
     def _failure(self, error: NativeHostError) -> ToolResult:
         # @intent native-tools-error-shape
-        # INV-7: "<code>: <message> Next step: <next_step>", with the code,
-        # the next step (also as hint), the operation and the harness in the
-        # metadata, and retryable only when the error knows it. Metadata
-        # never carries vendor text.
+        # An error result reads "<code>: <message> Next step:
+        # <next_step>", with the code, the next step (also as hint), the
+        # operation and the harness in the metadata, and retryable only
+        # when the error knows it. Metadata never carries vendor text.
         code = error.failure_code.value
         metadata: dict[str, Any] = {"error": code, "next_step": error.next_step, "hint": error.next_step, "operation": self._TOOL_NAME, "harness": self._HARNESS}
         if _RETRYABLE_KEY in error.context:
@@ -189,15 +199,17 @@ class NativeHostTool(BaseTool, Generic[HostT]):
         return ToolResult.error(self._TOOL_NAME, f"{code}: {error.message} Next step: {error.next_step}", metadata=metadata)
 
     def _refusal(self, exc: ConfigurationError) -> NativeHostError:
-        # A refused argument names its parameter from details["field"]
-        # ("GrokTurnRequest.model" names "model"); its text is not copied.
+        # A refused argument names its parameter from
+        # details["field"] ("GrokTurnRequest.model" names "model");
+        # its text is not copied.
         field = str(exc.details.get("field", "")).rsplit(".", 1)[-1] or _UNNAMED_PARAMETER
         step = native_host_constants.NATIVE_INVALID_ARGUMENT_NEXT_STEP.format(field=field)
         message = f"The {field} argument of {self._TOOL_NAME} is not valid; check its type and range in the parameter description."
         return NativeHostError(message, failure_code=FailureCode.CONFIGURATION_INVALID_ARGUMENT, operation=self._TOOL_NAME, next_step=step, context={"field": field})
 
     def _defect(self, exc: Exception) -> NativeHostError:
-        # A defect names only the exception class; its text may hold paths or secrets.
+        # A defect names only the exception class; its text may
+        # hold paths or secrets.
         error_type = type(exc).__name__
         message = f"{self._TOOL_NAME} failed with an unexpected {error_type}."
         return NativeHostError(message, failure_code=FailureCode.RUNTIME_ERROR, operation=self._TOOL_NAME, error_type=error_type, context={"error_type": error_type})

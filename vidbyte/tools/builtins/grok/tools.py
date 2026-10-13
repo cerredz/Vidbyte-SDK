@@ -115,7 +115,8 @@ class SpawnGrokSessionTool(GrokHostTool):
     _PARAMETERS: ClassVar[tuple[ToolParameter, ...]] = (_TURN_PROMPT, _MODEL_PARAMETER, _EFFORT_PARAMETER, _TURN_SECONDS)
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The turn record checks every value; a ceiling left out is the record's default, and no tool kind is allowed.
+        # The turn record checks every value; a ceiling left out is the
+        # record's default, and no tool kind is allowed.
         seconds = NativeToolArguments.number(call, _MAX_TURN_SECONDS)
         turn = GrokTurnRequest(
             prompt=str(NativeToolArguments.text(call, _PROMPT, required=True)),
@@ -135,7 +136,8 @@ class RunGrokOnceTool(GrokHostTool):
     _PARAMETERS: ClassVar[tuple[ToolParameter, ...]] = (_ONE_SHOT_PROMPT, _MODEL_PARAMETER, _EFFORT_PARAMETER, _MAX_TURNS_PARAMETER, _ONE_SHOT_SECONDS)
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The run blocks the tool call, so its time is capped at the tool limit (EC-144); the permission mode stays Grok's default.
+        # The run blocks the tool call, so its time is capped at the
+        # tool limit; the permission mode stays Grok's default.
         one_shot = GrokOneShotRequest(
             prompt=str(NativeToolArguments.text(call, _PROMPT, required=True)),
             model=NativeToolArguments.text(call, _MODEL),
@@ -155,7 +157,8 @@ class ContinueGrokSessionTool(GrokHostTool):
     _PARAMETERS: ClassVar[tuple[ToolParameter, ...]] = (_SESSION_ID_PARAMETER, _TURN_PROMPT, _MODEL_PARAMETER, _EFFORT_PARAMETER, _TURN_SECONDS)
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The session id must be text; the host checks its form before anything starts.
+        # The session id must be text; the host checks its form
+        # before anything starts.
         session_id = str(NativeToolArguments.text(call, _SESSION_ID, required=True))
         seconds = NativeToolArguments.number(call, _MAX_TURN_SECONDS)
         turn = GrokTurnRequest(
@@ -184,7 +187,8 @@ class ForkGrokSessionTool(GrokHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The fork blocks the tool call, so its time is capped at the tool limit (EC-144); the host checks both ids.
+        # The fork blocks the tool call, so its time is capped at the
+        # tool limit; the host checks both ids.
         session_id = str(NativeToolArguments.text(call, _SESSION_ID, required=True))
         new_session_id = NativeToolArguments.text(call, _NEW_SESSION_ID)
         one_shot = GrokOneShotRequest(
@@ -222,7 +226,8 @@ class SearchGrokSessionsTool(GrokHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The query is required text; a limit left out is the host's default.
+        # The query is required text; a limit left out is
+        # the host's default.
         query = str(NativeToolArguments.text(call, _QUERY, required=True))
         limit = NativeToolArguments.integer(call, _LIMIT)
         return await self._host.search_grok_sessions(query, limit=native_host_constants.GROK_SEARCH_DEFAULT_LIMIT if limit is None else limit)
@@ -240,7 +245,8 @@ class WaitGrokTurnTool(GrokHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The wait blocks the tool call, so it is capped at the tool limit (EC-144); cancelling it leaves the turn running.
+        # The wait blocks the tool call, so it is capped at the tool
+        # limit; cancelling it leaves the turn running.
         handle = NativeToolArguments.handle(call)
         seconds = NativeToolArguments.seconds(call, _TIMEOUT_SECONDS, default=native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS)
         return await self._host.wait_grok_turn(handle, timeout_seconds=seconds)

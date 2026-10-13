@@ -40,9 +40,10 @@ class NativeTurnTable:
 
     def reserve(self, session_id: str | None, *, operation: str) -> str:
         # @intent native-turn-reservation-is-synchronous
-        # The busy check and the reservation happen with no await between
-        # them, so two concurrent calls on one session cannot both pass, and
-        # the live-turn cap counts reservations as well as live turns.
+        # The busy check and the reservation happen with no await
+        # between them, so two concurrent calls on one session cannot
+        # both pass, and the live-turn cap counts reservations as
+        # well as live turns.
         if session_id is not None and session_id in self._busy_sessions:
             raise self._busy(f"Session {session_id} already has a live turn on this host.", operation, {"session_id": session_id})
         live = len(self._reserved) + len(self._live)
@@ -55,12 +56,14 @@ class NativeTurnTable:
         return turn_id
 
     def bind_session(self, turn_id: str, session_id: str) -> None:
-        # Spawn learns its session id only after the vendor created the session.
+        # Spawn learns its session id only after the vendor
+        # created the session.
         self._reserved[turn_id] = session_id
         self._busy_sessions[session_id] = turn_id
 
     def activate(self, turn_id: str, driver: asyncio.Task[NativeTurnResult]) -> NativeTurnHandle:
-        # Turns a bound reservation into a live turn and gives the table ownership of the driver task.
+        # Turns a bound reservation into a live turn and gives the table
+        # ownership of the driver task.
         session_id = self._reserved.pop(turn_id, None)
         if session_id is None:
             raise self._errors.build(FailureCode.RUNTIME_ERROR, "A turn was activated before its session was bound; this is a defect in the host.", operation="activate")
@@ -70,13 +73,15 @@ class NativeTurnTable:
         return handle
 
     def release(self, turn_id: str) -> None:
-        # Frees a reservation whose turn never started, so its session and slot are usable again.
+        # Frees a reservation whose turn never started, so its session
+        # and slot are usable again.
         session_id = self._reserved.pop(turn_id, None)
         if session_id is not None and self._busy_sessions.get(session_id) == turn_id:
             del self._busy_sessions[session_id]
 
     def lookup(self, handle: NativeTurnHandle, *, operation: str) -> asyncio.Task[NativeTurnResult]:
-        # A handle is found only when it equals the handle this table issued, live or finished.
+        # A handle is found only when it equals the handle this table
+        # issued, live or finished.
         entry = self._live.get(handle.turn_id) or self._finished.get(handle.turn_id)
         if entry is None or entry[0] != handle:
             raise self._not_found(operation)
@@ -87,11 +92,13 @@ class NativeTurnTable:
         return session_id in self._busy_sessions
 
     def live_tasks(self) -> tuple[asyncio.Task[NativeTurnResult], ...]:
-        # The drivers of every live turn, for interrupting them at __aexit__.
+        # The drivers of every live turn, for
+        # interrupting them at __aexit__.
         return tuple(task for _handle, task in self._live.values())
 
     def _finish(self, turn_id: str, _driver: asyncio.Task[NativeTurnResult]) -> None:
-        # Moves a finished driver to the bounded first-in-first-out table and frees its session.
+        # Moves a finished driver to the bounded first-in-first-out
+        # table and frees its session.
         entry = self._live.pop(turn_id, None)
         if entry is None:
             return

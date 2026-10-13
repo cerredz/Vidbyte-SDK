@@ -55,8 +55,9 @@ class MusePathTranslator:
 
     @staticmethod
     def to_wsl(path: PureWindowsPath) -> str:
-        # C:\w\repo becomes /mnt/c/w/repo. A UNC path, a drive-relative path
-        # or a path without a drive has no /mnt form, so it is refused.
+        # C:\w\repo becomes /mnt/c/w/repo. A UNC path, a
+        # drive-relative path or a path without a drive has no /mnt
+        # form, so it is refused.
         if re.fullmatch(_DRIVE_PATTERN, path.drive) is None or path.root != _WINDOWS_ROOT:
             raise ConfigurationError("workspace must be an absolute Windows path on a drive letter; UNC and drive-less paths have no /mnt form inside WSL.", details={"field": _WORKSPACE_FIELD})
         return PurePosixPath(_WSL_MOUNT_ROOT, path.drive[0].lower(), *path.parts[1:]).as_posix()
@@ -74,19 +75,20 @@ class MuseLauncher:
 
     @property
     def wsl_mode(self) -> bool:
-        # WSL mode is chosen by naming a distro (D-19).
+        # WSL mode is chosen by naming a distro.
         return self._settings.wsl_distro is not None
 
     @property
     def prefix(self) -> tuple[str, ...]:
-        # The resolved launcher argv prefix; empty until resolve succeeds.
+        # The resolved launcher argv prefix; empty
+        # until resolve succeeds.
         return self._prefix
 
     def resolve(self) -> str | None:
-        # D-19: an explicit muse_command wins; a wsl_distro means
-        # `wsl.exe -d <distro> -e <muse_path>`; otherwise muse on PATH, which
-        # on win32 is not an option (EC-94). Returns the failure row's
-        # problem name when no launcher can be found, else None.
+        # An explicit muse_command wins; a wsl_distro means `wsl.exe -d
+        # <distro> -e <muse_path>`; otherwise muse on PATH, which on
+        # win32 is not an option. Returns the failure's problem name
+        # when no launcher can be found, else None.
         settings = self._settings
         if settings.muse_command is not None:
             self._prefix = settings.muse_command
@@ -106,26 +108,30 @@ class MuseLauncher:
         return None
 
     def argv(self, *arguments: str) -> tuple[str, ...]:
-        # The launcher prefix plus what this launch appends, such as serve or --version.
+        # The launcher prefix plus what this launch appends, such as
+        # serve or --version.
         return (*self._prefix, *arguments)
 
     def workspace_root(self) -> str:
-        # The workspace as muse sees it: its /mnt form inside WSL, else the path itself.
+        # The workspace as muse sees it: its /mnt form inside WSL,
+        # else the path itself.
         if self.wsl_mode:
             return MusePathTranslator.to_wsl(PureWindowsPath(self._settings.workspace))
         return str(self._settings.workspace)
 
     def new_mark(self) -> str | None:
-        # A fresh random mark for one WSL peer (not a secret); native peers need none.
+        # A fresh random mark for one WSL peer (not a secret);
+        # native peers need none.
         return uuid.uuid4().hex if self.wsl_mode else None
 
     def peer_environment(self, mark: str | None) -> dict[str, str]:
         # @intent muse-wsl-forwards-only-the-key-and-mark
-        # The caller's environment. In WSL mode every peer, short-lived
-        # reads included, also gets the WSLENV entry that carries
-        # META_API_KEY into the distro when it is set (D-18), and a turn
-        # peer gets its mark and the mark's entry; the caller's own entries
-        # stay first. Nothing to forward leaves the environment unchanged.
+        # The caller's environment. In WSL mode every peer,
+        # short-lived reads included, also gets the WSLENV entry that
+        # carries META_API_KEY into the distro when it is set, and a
+        # turn peer gets its mark and the mark's entry; the caller's
+        # own entries stay first. Nothing to forward leaves the
+        # environment unchanged.
         marked = {} if mark is None else {native_host_constants.MUSE_PEER_MARK_VARIABLE: mark}
         forwarded = [name + _UNIX_PATH_FLAG for name in (_META_KEY_VARIABLE,) if name in os.environ] + [name + _UNIX_PATH_FLAG for name in marked]
         if not self.wsl_mode or not forwarded:
@@ -134,8 +140,9 @@ class MuseLauncher:
         return NativeChildEnvironment.build({**marked, _WSLENV_VARIABLE: _WSLENV_SEPARATOR.join(entries + forwarded)})
 
     async def list_distros(self) -> tuple[str, ...]:
-        # `wsl.exe -l -q` once, within the control timeout; a run that fails
-        # lists nothing, which the host reports as EC-94 naming no distros.
+        # `wsl.exe -l -q` once, within the control timeout; a run that
+        # fails lists nothing, which the host reports as
+        # wsl_unavailable naming no distros.
         invocation = CliInvocation(
             argv=(self._wsl_executable, *_LIST_ARGUMENTS),
             env=NativeChildEnvironment.build({}),
@@ -148,11 +155,11 @@ class MuseLauncher:
         return self._distros
 
     def launch_failure(self, stderr: str, exit_code: int | None, *, errors: NativeErrorFactory, operation: str) -> NativeHostError | None:
-        # EC-94 and EC-95 in WSL mode: a process that ended before answering
-        # may say why. wsl.exe's distro-not-found text is wsl_unavailable,
-        # naming the listed distros; exit code 127 or the ENOENT text is a
-        # muse missing inside the distro. A run that exited 0, or anything
-        # else, is no WSL launch failure.
+        # In WSL mode, a process that ended before answering may say
+        # why. wsl.exe's distro-not-found text is wsl_unavailable,
+        # naming the listed distros; exit code 127 or the ENOENT text is
+        # a muse missing inside the distro. A run that exited 0, or
+        # anything else, is no WSL launch failure.
         if not self.wsl_mode or exit_code == native_host_constants.NATIVE_SUCCESS_EXIT_CODE:
             return None
         text = stderr.replace(_NUL, "")
@@ -164,11 +171,11 @@ class MuseLauncher:
 
     async def reap(self, mark: str) -> None:
         # @intent muse-wsl-reap-kills-the-marked-tree
-        # D-23: after a WSL turn peer closes, kill every in-distro process
-        # carrying its mark, and their descendants. The script arrives on
-        # stdin and runs with the caller's environment, which lacks the mark,
-        # so it never matches itself. A failed or timed-out reap is not
-        # raised, because closing never raises.
+        # After a WSL turn peer closes, kill every in-distro process
+        # carrying its mark, and their descendants. The script arrives
+        # on stdin and runs with the caller's environment, which lacks
+        # the mark, so it never matches itself. A failed or timed-out
+        # reap is not raised, because closing never raises.
         distro = self._settings.wsl_distro
         if distro is None or not self._wsl_executable or re.fullmatch(native_host_constants.MUSE_PEER_MARK_PATTERN, mark) is None:
             return

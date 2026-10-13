@@ -57,7 +57,7 @@ _SERVER_VERSION_PATTERN = r"(\d+)\.(\d+)\.(\d+)"
 _LAST_INDEX = -1
 _USAGE_EVENT_METHOD = "session/tokenUsage"
 _COMPACT_SEPARATORS = (",", ":")
-# The EC-101 next step, verbatim from the row.
+# The next step for a prompt that Muse rejects as too large.
 _PROMPT_TOO_LARGE_NEXT_STEP = "Shorten the prompt; Muse rejected its size."
 _PROMPT_TOO_LARGE_CODE = -32002
 _FORK_BOUNDARY_CODE = -32023
@@ -66,7 +66,8 @@ _NOT_LOADED_CODES = frozenset({-32024})
 _ALREADY_STOPPING_CODES = frozenset({-32013, -32014})
 _BENIGN_RACE_CODES = frozenset({-32051, -32053})
 _COMMAND_REJECTED_CODES = frozenset({-32030})
-# JSON-RPC codes that map to one failure row each; every other code is muse.api_error (EC-102).
+# JSON-RPC codes that each map to one failure; every other
+# code is muse.api_error.
 _CODE_PROBLEMS: Mapping[int, str] = MappingProxyType(
     {
         -32700: "protocol_mismatch",
@@ -93,8 +94,9 @@ class MuseWire:
 
     @staticmethod
     def new_command_id() -> str:
-        # An RFC 9562 UUIDv7: 48-bit unix_ts_ms, version 7, 12 bits rand_a,
-        # variant 0b10, 62 bits rand_b, all 74 random bits from one call.
+        # An RFC 9562 UUIDv7: 48-bit unix_ts_ms, version 7, 12
+        # bits rand_a, variant 0b10, 62 bits rand_b, all 74 random
+        # bits from one call.
         random_bits = secrets.randbits(native_host_constants.MUSE_UUID_RANDOM_BITS)
         unix_ts_ms = time.time_ns() // _NANOSECONDS_PER_MILLISECOND
         value = (
@@ -108,14 +110,15 @@ class MuseWire:
 
     @staticmethod
     def initialize_params() -> dict[str, Any]:
-        # clientInfo needs both members; the version is read now, never copied at import time.
+        # clientInfo needs both members; the version is read now, never
+        # copied at import time.
         return {"clientInfo": {"name": native_host_constants.MUSE_CLIENT_NAME, "version": vidbyte.__version__}}
 
     @staticmethod
     def session_start_params(workspace_root: str, model: str | None) -> dict[str, Any]:
         # @intent muse-session-start-denies-unmatched-approvals
-        # approvalMode is always denyUnmatched: the user's own Muse rules
-        # still apply and everything else is denied (D-11, INV-9).
+        # approvalMode is always denyUnmatched: the user's own Muse
+        # rules still apply and everything else is denied.
         params: dict[str, Any] = {"commandId": MuseWire.new_command_id(), "workspaceRoot": workspace_root, "approvalMode": native_host_constants.MUSE_APPROVAL_MODE}
         if model is not None:
             params["modelId"] = model
@@ -127,7 +130,8 @@ class MuseWire:
 
     @staticmethod
     def session_fork_params(session_id: str, last_turn_id: str | None) -> dict[str, Any]:
-        # The cut point travels only as cutPoint.lastTurnId; a top-level lastTurnId is not a schema member.
+        # The cut point travels only as cutPoint.lastTurnId; a top-level
+        # lastTurnId is not a schema member.
         params: dict[str, Any] = {"commandId": MuseWire.new_command_id(), "sessionId": session_id}
         if last_turn_id is not None:
             params["cutPoint"] = {"lastTurnId": last_turn_id}
@@ -163,7 +167,8 @@ class MuseWire:
 
     @staticmethod
     def approval_decide_params(request: MuseApprovalRequest, choice_id: str) -> dict[str, Any]:
-        # requirementId echoes the approval's latest currentRequirementId object.
+        # requirementId echoes the approval's latest
+        # currentRequirementId object.
         requirement = {"approvalId": request.requirement_approval_id, "sourceIndex": request.requirement_source_index}
         return {"commandId": MuseWire.new_command_id(), "sessionId": request.session_id, "approvalId": request.approval_id, "requirementId": requirement, "choiceId": choice_id}
 
@@ -173,14 +178,15 @@ class MuseWire:
 
     @staticmethod
     def method_not_found_error() -> dict[str, Any]:
-        # The answer to any server request the host does not handle (D-11).
+        # The answer to any server request the host does not handle.
         return {"code": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_CODE, "message": native_host_constants.NATIVE_JSONRPC_METHOD_NOT_FOUND_TEXT}
 
     @staticmethod
     async def exchange(peer: NativePeer, method: str, params: Mapping[str, Any], *, operation: str, timeout_seconds: float | None = None) -> Mapping[str, Any]:
         # @intent muse-wire-maps-every-error-answer
         # One MSP call on the peer; a transport failure is already a
-        # NativeHostError, and a JSON-RPC error answer is mapped to its row.
+        # NativeHostError, and a JSON-RPC error answer is mapped to
+        # its muse.* failure.
         try:
             return await peer.call(method, params, operation=operation, timeout_seconds=timeout_seconds)
         except McpProtocolError as exc:
@@ -189,10 +195,10 @@ class MuseWire:
     @staticmethod
     async def exchange_loaded(peer: NativePeer, method: str, build_params: Callable[[], Mapping[str, Any]], session_id: str, *, operation: str) -> Mapping[str, Any]:
         # @intent muse-wire-resumes-an-unloaded-session-once
-        # EC-114: a session-scoped call answered -32024 sessionNotLoaded gets
-        # one session/resume and one retry with freshly built params (a new
-        # commandId); a second -32024, or any other error answer, is mapped
-        # to its row like every other call.
+        # A session-scoped call answered -32024 sessionNotLoaded gets
+        # one session/resume and one retry with freshly built params (a
+        # new commandId); a second -32024, or any other error answer, is
+        # mapped to its failure like every other call.
         try:
             return await peer.call(method, build_params(), operation=operation)
         except McpProtocolError as exc:
@@ -206,11 +212,12 @@ class MuseWire:
 
     @staticmethod
     def vendor_failure(exc: McpProtocolError, *, operation: str) -> NativeHostError:
-        # @intent muse-wire-error-code-to-row
-        # Maps an MSP error answer: -32002 to the prompt row (EC-101),
-        # -32023 to the fork boundary row (EC-113), the codes in
-        # _CODE_PROBLEMS to their rows, and every other code to api_error
-        # with the vendor's code, kind, retryable flag and scrubbed message.
+        # @intent muse-wire-error-code-to-failure
+        # Maps an MSP error answer: -32002 to an invalid prompt
+        # argument, -32023 to an invalid last_turn_id (the fork
+        # boundary), the codes in _CODE_PROBLEMS to their failures, and
+        # every other code to api_error with the vendor's code, kind,
+        # retryable flag and scrubbed message.
         try:
             error = RecordFieldConverter.require_instance(exc.details.get("error"), "error", Mapping)
         except ConfigurationError:
@@ -234,36 +241,43 @@ class MuseWire:
 
     @staticmethod
     def vendor_code(exc: McpProtocolError) -> int | None:
-        # The JSON-RPC code of an error answer, or None when the answer has none.
+        # The JSON-RPC code of an error answer, or None when
+        # the answer has none.
         error = exc.details.get("error")
         code = error.get("code") if isinstance(error, Mapping) else None
         return code if isinstance(code, int) else None
 
     @staticmethod
     def is_stale_cursor(exc: McpProtocolError) -> bool:
-        # -32602 invalidParams, which means a stale cursor when a cursor was sent.
+        # -32602 invalidParams, which means a stale cursor
+        # when a cursor was sent.
         return MuseWire.vendor_code(exc) in _STALE_CURSOR_CODES
 
     @staticmethod
     def is_already_stopping(exc: McpProtocolError) -> bool:
-        # -32013 interrupted or -32014 cancelled: an interrupt that finds the turn stopping succeeded.
+        # -32013 interrupted or -32014 cancelled: an interrupt that
+        # finds the turn stopping succeeded.
         return MuseWire.vendor_code(exc) in _ALREADY_STOPPING_CODES
 
     @staticmethod
     def is_benign_race(exc: McpProtocolError) -> bool:
-        # -32051 approvalAlreadyResolved or -32053 approvalRequirementStale (EC-156, D-11).
+        # -32051 approvalAlreadyResolved or -32053
+        # approvalRequirementStale: a decision that lost a
+        # race, which is harmless.
         return MuseWire.vendor_code(exc) in _BENIGN_RACE_CODES
 
     @staticmethod
     def is_command_rejected(exc: McpProtocolError) -> bool:
-        # -32030 commandRejected, which for a steer means the turn is no longer running.
+        # -32030 commandRejected, which for a steer means the turn
+        # is no longer running.
         return MuseWire.vendor_code(exc) in _COMMAND_REJECTED_CODES
 
     @staticmethod
     def read_cli_version(outcome: CliOutcome, *, operation: str) -> str:
-        # `<launcher> --version`: a launch failure, a timeout or a non-zero
-        # exit is a process row; output without MUSE_VERSION_PATTERN is
-        # EC-104 and a version below MUSE_MIN_VERSION is EC-103.
+        # `<launcher> --version`: a launch failure, a timeout or a
+        # non-zero exit is a process failure; output without
+        # MUSE_VERSION_PATTERN is protocol_mismatch and a version below
+        # MUSE_MIN_VERSION is version_unsupported.
         if outcome.launch_failure is not None:
             raise _ERRORS.from_launch_failure(outcome.launch_failure, operation=operation)
         if outcome.timed_out:
@@ -280,8 +294,9 @@ class MuseWire:
 
     @staticmethod
     def read_server_version(result: object, *, operation: str) -> str:
-        # The initialize result must carry schema.version == MUSE_SCHEMA_VERSION
-        # and a string serverInfo.version of at least MUSE_MIN_VERSION (EC-98, EC-99).
+        # The initialize result must carry schema.version ==
+        # MUSE_SCHEMA_VERSION and a string serverInfo.version of at
+        # least MUSE_MIN_VERSION.
         try:
             fields = RecordFieldConverter.require_instance(result, "initialize", Mapping)
             schema = RecordFieldConverter.require_instance(fields.get("schema"), "schema", Mapping)
@@ -299,7 +314,8 @@ class MuseWire:
 
     @staticmethod
     def read_model_catalog(result: object, *, operation: str) -> MuseModelCatalog:
-        # model/list: the models in order (an empty list is not an error) and the provider, profile and source verbatim.
+        # model/list: the models in order (an empty list is not an
+        # error) and the provider, profile and source verbatim.
         try:
             fields = RecordFieldConverter.require_instance(result, "model/list", Mapping)
             entries = [RecordFieldConverter.require_instance(entry, "models", Mapping) for entry in RecordFieldConverter.require_instance(fields.get("models"), "models", list)]
@@ -310,7 +326,8 @@ class MuseWire:
 
     @staticmethod
     def read_session_result(result: object, *, operation: str) -> MuseSession:
-        # session/start, session/resume, session/read and session/fork all carry the session under "session".
+        # session/start, session/resume, session/read and session/fork
+        # all carry the session under "session".
         try:
             fields = RecordFieldConverter.require_instance(result, "result", Mapping)
             return MuseWire._session(fields.get("session"), "session")
@@ -319,7 +336,8 @@ class MuseWire:
 
     @staticmethod
     def read_session_page(result: object, *, operation: str) -> MuseSessionPage:
-        # session/list: the sessions in order and the vendor's next cursor verbatim.
+        # session/list: the sessions in order and the vendor's
+        # next cursor verbatim.
         try:
             fields = RecordFieldConverter.require_instance(result, "session/list", Mapping)
             entries = RecordFieldConverter.require_instance(fields.get("sessions"), "sessions", list)
@@ -330,7 +348,8 @@ class MuseWire:
 
     @staticmethod
     def read_view_page(session_id: str, result: object, *, operation: str) -> MusePage:
-        # view/page: each event as compact sorted JSON, cut at NATIVE_EVENT_MAX_CHARS and marked when cut.
+        # view/page: each event as compact sorted JSON, cut at
+        # NATIVE_EVENT_MAX_CHARS and marked when cut.
         limit = native_host_constants.NATIVE_EVENT_MAX_CHARS
         try:
             fields = RecordFieldConverter.require_instance(result, "view/page", Mapping)
@@ -343,9 +362,10 @@ class MuseWire:
 
     @staticmethod
     def read_latest_usage(result: object, *, operation: str) -> NativeTokenUsage | None:
-        # D-14: the last session/tokenUsage event of the page (events ascend
-        # in both directions); promptTokens, outputTokens and totalTokens
-        # map to input, output and total. Cost is never reported (NG-14).
+        # The last session/tokenUsage event of the page (events
+        # ascend in both directions); promptTokens,
+        # outputTokens and totalTokens map to input, output and
+        # total. Cost is never reported.
         try:
             fields = RecordFieldConverter.require_instance(result, "view/page", Mapping)
             entries = [RecordFieldConverter.require_instance(entry, "events", Mapping) for entry in RecordFieldConverter.require_instance(fields.get("events"), "events", list)]
@@ -360,7 +380,8 @@ class MuseWire:
 
     @staticmethod
     def parse_turn_start_result(result: object, *, operation: str = _PARSE_OPERATION) -> MuseTurnAck:
-        # The ack's turnId is the turn's MSP id from now on (EC-109); turn/start requires a disposition.
+        # The ack's turnId is the turn's MSP id from now on; turn/start
+        # requires a disposition.
         try:
             fields = RecordFieldConverter.require_instance(result, "turn/start", Mapping)
             disposition = RecordFieldConverter.require_instance(fields.get("disposition"), "disposition", str)
@@ -370,7 +391,8 @@ class MuseWire:
 
     @staticmethod
     def parse_turn_steer_result(result: object, *, operation: str = _PARSE_OPERATION) -> MuseTurnAck:
-        # A steer ack has no disposition; its status is returned verbatim.
+        # A steer ack has no disposition; its status
+        # is returned verbatim.
         try:
             fields = RecordFieldConverter.require_instance(result, "turn/steer", Mapping)
             return MuseTurnAck(command_id=fields.get("commandId"), turn_id=fields.get("turnId"), status=fields.get("status"))
@@ -380,9 +402,9 @@ class MuseWire:
     @staticmethod
     def parse_approval_request(params: object, *, operation: str = _PARSE_OPERATION) -> MuseApprovalRequest:
         # @intent muse-approval-frame-names-the-current-requirement
-        # approval/requested and approval/updated: the requirement to decide
-        # is currentRequirementId, and every offered choice is kept so the
-        # driver can find the denied choice scoped once.
+        # approval/requested and approval/updated: the requirement to
+        # decide is currentRequirementId, and every offered choice is
+        # kept so the driver can find the denied choice scoped once.
         try:
             fields = RecordFieldConverter.require_instance(params, "approval", Mapping)
             requirement = RecordFieldConverter.require_instance(fields.get("currentRequirementId"), "currentRequirementId", Mapping)
@@ -413,7 +435,8 @@ class MuseWire:
 
     @staticmethod
     def parse_item_completed(params: object, *, operation: str = _PARSE_OPERATION) -> MuseItemCompleted:
-        # item/completed is read from its item; truncated defaults to False only when Muse leaves it out.
+        # item/completed is read from its item; truncated defaults to
+        # False only when Muse leaves it out.
         try:
             fields = RecordFieldConverter.require_instance(params, "item/completed", Mapping)
             item = RecordFieldConverter.require_instance(fields.get("item"), "item", Mapping)
@@ -430,9 +453,9 @@ class MuseWire:
 
     @staticmethod
     def parse_turn_completed(params: object, *, operation: str = _PARSE_OPERATION) -> MuseTurnCompleted:
-        # turn/completed: the error is read only for a failed turn, and the
-        # usage maps as D-14 says (cache reads from cacheReadTokens, else
-        # cachedTokens; no total, because TokenUsage has none).
+        # turn/completed: the error is read only for a failed turn, and
+        # the usage takes cache reads from cacheReadTokens, else
+        # cachedTokens, with no total, because TokenUsage has none.
         try:
             fields = RecordFieldConverter.require_instance(params, "turn/completed", Mapping)
             terminal = RecordFieldConverter.require_instance(fields.get("terminal"), "terminal", str)
@@ -462,8 +485,9 @@ class MuseWire:
 
     @staticmethod
     def _session(value: object, field: str) -> MuseSession:
-        # One MSP Session object, refused as field when it is not an object;
-        # forkedFrom is a ForkProvenance object whose sessionId names the source.
+        # One MSP Session object, refused as field when it is not an
+        # object; forkedFrom is a ForkProvenance object whose
+        # sessionId names the source.
         fields = RecordFieldConverter.require_instance(value, field, Mapping)
         forked = fields.get("forkedFrom")
         forked_from = forked.get("sessionId") if isinstance(forked, Mapping) else forked
@@ -482,7 +506,7 @@ class MuseWire:
 
     @staticmethod
     def _mismatch(source: str, field: object, operation: str) -> NativeHostError:
-        # EC-98 / D-13: a relied-on member is missing or has the wrong type.
+        # A relied-on member is missing or has the wrong type.
         name = str(field or source).rsplit(".", 1)[-1]
         message = f"Muse Code sent a {source} frame whose {name} member is missing or has the wrong type."
         return _ERRORS.build(FailureCode.MUSE_PROTOCOL_MISMATCH, message, operation=operation, context={"method": source, "field": name})

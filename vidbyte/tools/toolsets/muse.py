@@ -35,7 +35,9 @@ class MuseTools(Tools):
     """Catalog of the twelve tools over one MuseHost."""
 
     def __init__(self, host: MuseHost) -> None:
-        # The readiness and model checks first, then the three ways to start or copy work, then the session reads, the turn controls and usage.
+        # The readiness and model checks first, then the three ways to
+        # start or copy work, then the session reads, the turn
+        # controls and usage.
         super().__init__(
             (
                 CheckMuseReadyTool(host),
@@ -55,7 +57,8 @@ class MuseTools(Tools):
 
     @staticmethod
     def read_only(host: MuseHost) -> Tools:
-        # Only the seven READ tools, so nothing in the catalog can start, copy, steer or stop a turn (T-5).
+        # Only the seven READ tools, so nothing in the catalog can
+        # start, copy, steer or stop a turn.
         return Tools(
             (
                 CheckMuseReadyTool(host),

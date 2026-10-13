@@ -53,17 +53,18 @@ class NativeErrorFactory:
 
     def register_secret(self, value: str) -> None:
         # @intent native-errors-scrub-injected-secrets
-        # Every value the host injected (server password, API keys, MCP env
-        # and header values) is replaced in all vendor text, because a vendor
-        # may echo it back in an error.
+        # Every value the host injected (server password, API keys, MCP
+        # env and header values) is replaced in all vendor text, because
+        # a vendor may echo it back in an error.
         if isinstance(value, str) and value:
             self._secrets.add(value)
 
     def scrub(self, text: str) -> str:
         # @intent native-errors-redact-before-cap
-        # Registered values go first, on the full text, so the cap cannot cut
-        # one in half; then the shared redactor scrubs credential assignments
-        # and the result is capped at NATIVE_VENDOR_MESSAGE_MAX_CHARS.
+        # Registered values go first, on the full text, so the cap
+        # cannot cut one in half; then the shared redactor scrubs
+        # credential assignments and the result is capped at
+        # NATIVE_VENDOR_MESSAGE_MAX_CHARS.
         limit = native_host_constants.NATIVE_VENDOR_MESSAGE_MAX_CHARS
         for secret in sorted(self._secrets, key=len, reverse=True):
             text = text.replace(secret, REDACTED)
@@ -73,53 +74,60 @@ class NativeErrorFactory:
 
     @staticmethod
     def listing(items: Iterable[str]) -> str:
-        # Joins ids or names for a context value, keeping the first NATIVE_CONTEXT_LIST_MAX_ITEMS in their given order.
+        # Joins ids or names for a context value, keeping the first
+        # NATIVE_CONTEXT_LIST_MAX_ITEMS in their given order.
         kept = [str(item) for item in items][: native_host_constants.NATIVE_CONTEXT_LIST_MAX_ITEMS]
         return _SEPARATOR.join(kept)
 
     def code(self, problem: str) -> FailureCode:
-        # The "<harness>.<problem>" member, for example grok.not_installed.
+        # The "<harness>.<problem>" member, for example
+        # grok.not_installed.
         return FailureCode(f"{self._harness.value}.{problem}")
 
     def build(self, code: FailureCode, message: str, *, operation: str, next_step: str | None = None, context: Mapping[str, str] | None = None) -> NativeHostError:
-        # Scrubs the message and every context value, then builds the error; never raises.
+        # Scrubs the message and every context value, then builds the
+        # error; never raises.
         safe_context = {key: self.scrub(str(value)) for key, value in (context or {}).items()}
         return NativeHostError(self.scrub(message), failure_code=code, operation=operation, next_step=next_step, context=safe_context)
 
     def invalid_argument(self, field: str, message: str, *, operation: str, next_step: str | None = None) -> NativeHostError:
-        # An argument failed its check before any I/O (EC-1): the next step
-        # names the argument, which is the row's required token, unless the
-        # row gives its own text; context["field"] carries the name too.
+        # An argument failed its check before any I/O: the next step
+        # names the argument unless the caller passes its own text;
+        # context["field"] carries the name too.
         step = next_step or native_host_constants.NATIVE_INVALID_ARGUMENT_NEXT_STEP.format(field=field)
         return self.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, message, operation=operation, next_step=step, context={"field": field})
 
     def from_configuration_error(self, exc: ConfigurationError, *, operation: str) -> NativeHostError:
-        # A validator or record refusal names its field in details["field"]
-        # ("GrokTurnRequest.model" names the argument "model"); the message is
-        # the SDK's own text, which quotes only short non-secret values.
+        # A validator or record refusal names its field in
+        # details["field"] ("GrokTurnRequest.model" names the argument
+        # "model"); the message is the SDK's own text, which quotes only
+        # short non-secret values.
         field = str(exc.details.get("field", "argument")).rsplit(".", 1)[-1]
         next_step = native_host_constants.NATIVE_INVALID_ARGUMENT_NEXT_STEP.format(field=field)
         return self.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, exc.message, operation=operation, next_step=next_step, context={"field": field})
 
     def from_unexpected(self, exc: Exception, *, operation: str) -> NativeHostError:
         # @intent native-errors-defects-name-only-the-class
-        # A defect reports only the exception's class name; its text may hold
-        # paths, payloads or secrets and is never copied into the error.
+        # A defect reports only the exception's class name; its
+        # text may hold paths, payloads or secrets and is never
+        # copied into the error.
         error_type = type(exc).__name__
         message = f"{operation} failed with an unexpected {error_type}."
         return NativeHostError(message, failure_code=FailureCode.RUNTIME_ERROR, operation=operation, error_type=error_type, context={"error_type": error_type})
 
     def from_launch_failure(self, failure: ProcessLaunchFailure, *, operation: str) -> NativeHostError:
-        # A missing executable means not installed; any other launch failure means the process could not run.
+        # A missing executable means not installed; any other launch
+        # failure means the process could not run.
         if failure is ProcessLaunchFailure.NOT_FOUND:
             return self.build(self.code("not_installed"), f"The {self._label} executable was not found.", operation=operation)
         return self.build(self.code("process_exited"), f"The {self._label} executable could not be started ({failure.value}).", operation=operation, context={"reason": failure.value})
 
     def from_protocol_error(self, exc: McpProtocolError, *, operation: str) -> NativeHostError:
-        # @intent native-errors-transport-reason-to-row
-        # A timeout means the peer did not answer in time (server_unreachable);
-        # a closed or dead pipe means it stopped (process_exited). A vendor
-        # error answer is normally mapped by the host's wire codec first.
+        # @intent native-errors-transport-reason-to-failure
+        # A timeout means the peer did not answer in time
+        # (server_unreachable); a closed or dead pipe means it stopped
+        # (process_exited). A vendor error answer is normally mapped by
+        # the host's wire codec first.
         details = exc.details
         reason = str(details.get("reason", ""))
         if reason == "timeout":

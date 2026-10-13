@@ -85,7 +85,8 @@ class SpawnOpencodeSessionTool(OpencodeHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The records check every value; a ceiling left out is the record's default, and no permission rules are ever passed (D-11).
+        # The records check every value; a ceiling left out is the
+        # record's default, and no permission rules are ever passed.
         seconds = NativeToolArguments.number(call, _MAX_TURN_SECONDS)
         turn = OpencodePromptRequest(
             prompt=str(NativeToolArguments.text(call, _PROMPT, required=True)),
@@ -105,7 +106,8 @@ class ContinueOpencodeSessionTool(OpencodeHostTool):
     _PARAMETERS: ClassVar[tuple[ToolParameter, ...]] = (SESSION_ID_PARAMETER, _PROMPT_PARAMETER, _MODEL_PARAMETER, _AGENT_PARAMETER, _TURN_SECONDS_PARAMETER)
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The host checks the session id; the record checks the turn's values, with the record's default ceiling.
+        # The host checks the session id; the record checks the turn's
+        # values, with the record's default ceiling.
         session_id = str(NativeToolArguments.text(call, SESSION_ID, required=True))
         seconds = NativeToolArguments.number(call, _MAX_TURN_SECONDS)
         turn = OpencodePromptRequest(
@@ -129,7 +131,8 @@ class ForkOpencodeSessionTool(OpencodeHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # An optional fork point; the host checks both ids before it sends anything.
+        # An optional fork point; the host checks both ids
+        # before it sends anything.
         session_id = str(NativeToolArguments.text(call, SESSION_ID, required=True))
         return await self._host.fork_opencode_session(session_id, NativeToolArguments.text(call, MESSAGE_ID))
 
@@ -147,7 +150,8 @@ class RevertOpencodeSessionTool(OpencodeHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The revert message is required and the part optional; the host checks all three ids.
+        # The revert message is required and the part optional; the host
+        # checks all three ids.
         session_id = str(NativeToolArguments.text(call, SESSION_ID, required=True))
         message_id = str(NativeToolArguments.text(call, MESSAGE_ID, required=True))
         return await self._host.revert_opencode_session(session_id, message_id, NativeToolArguments.text(call, _PART_ID))
@@ -178,7 +182,8 @@ class WaitOpencodeTurnTool(OpencodeHostTool):
     )
 
     async def _invoke(self, call: ToolCall) -> object:
-        # The wait blocks the tool call, so it is capped at the tool limit (EC-144); a timed-out wait leaves the turn running.
+        # The wait blocks the tool call, so it is capped at the tool
+        # limit; a timed-out wait leaves the turn running.
         handle = NativeToolArguments.handle(call)
         seconds = NativeToolArguments.seconds(call, _TIMEOUT_SECONDS, default=native_host_constants.NATIVE_WAIT_DEFAULT_SECONDS)
         return await self._host.wait_opencode_turn(handle, seconds)
@@ -209,7 +214,7 @@ class AddOpencodeMcpServerTool(OpencodeHostTool):
         # @intent opencode-mcp-tool-registered-only
         # The model names a server; its command, URL, environment and
         # headers come only from the developer's registration, so an
-        # unregistered name is refused before anything is sent (EC-146, T-2).
+        # unregistered name is refused before anything is sent.
         name = str(NativeToolArguments.text(call, _NAME, required=True))
         config = self._host.mcp_servers.get(name)
         if config is None:

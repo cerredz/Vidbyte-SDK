@@ -33,10 +33,11 @@ class ProcessStopper:
     @staticmethod
     async def stop_tree(process: asyncio.subprocess.Process, *, grace_seconds: float) -> int | None:
         # @intent stop-tree-always-reaches-the-group
-        # The leader may already have exited while a grandchild in its group
-        # still runs and holds the pipes, so the group is always signalled,
-        # whatever returncode says. A cancellation part-way still sends the
-        # KILL and closes the pipes in the finally block.
+        # The leader may already have exited while a grandchild in
+        # its group still runs and holds the pipes, so the group is
+        # always signalled, whatever returncode says. A
+        # cancellation part-way still sends the KILL and closes the
+        # pipes in the finally block.
         finished = False
         killer: asyncio.subprocess.Process | None = None
         try:
@@ -47,11 +48,13 @@ class ProcessStopper:
                 killer = await ProcessStopper._start_taskkill(process.pid)
                 await ProcessStopper._wait_taskkill(killer, grace_seconds)
             else:
-                # Ask the whole group to stop, give it the grace period, then kill it.
+                # Ask the whole group to stop, give it the grace
+                # period, then kill it.
                 ProcessStopper._signal_group(process.pid, signal.SIGTERM)
                 await ProcessStopper._bounded_wait(process, grace_seconds)
                 ProcessStopper._signal_group(process.pid, signal.SIGKILL)
-            # Kill the leader itself if it is somehow still running, then reap it within the bound.
+            # Kill the leader itself if it is somehow still running,
+            # then reap it within the bound.
             ProcessStopper._kill_leader(process)
             await ProcessStopper._bounded_wait(process, grace_seconds)
             finished = True
@@ -60,14 +63,16 @@ class ProcessStopper:
                 ProcessStopper._signal_group(process.pid, signal.SIGKILL)
             if not finished:
                 ProcessStopper._kill_leader(process)
-            # Release our end of the pipes even if a grandchild still holds the other end.
+            # Release our end of the pipes even if a grandchild still
+            # holds the other end.
             ProcessStopper._close_pipes(process)
             ProcessStopper._close_pipes(killer)
         return process.returncode
 
     @staticmethod
     def _signal_group(pid: int, signal_number: int) -> None:
-        # The group id is the leader's pid because every helper starts children in a new session; Windows has no process groups.
+        # The group id is the leader's pid because every helper starts
+        # children in a new session; Windows has no process groups.
         if sys.platform == "win32":
             return
         with contextlib.suppress(ProcessLookupError, PermissionError):
@@ -105,7 +110,10 @@ class ProcessStopper:
 
     @staticmethod
     async def _bounded_wait(process: asyncio.subprocess.Process, seconds: float) -> None:
-        # Waits for the exit at most seconds; Python 3.12+ also waits for the pipes here.
+        # @intent stop-tree-exit-wait-is-bounded
+        # Waits for the exit at most seconds, so a process that ignores
+        # its kill can never hang a stop; Python 3.12+ also waits for
+        # the pipes here.
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(process.wait(), seconds)
 
@@ -125,11 +133,13 @@ class CliRunner:
 
     async def run(self, invocation: CliInvocation) -> CliOutcome:
         # @intent cli-run-is-bounded-and-never-raises
-        # A CLI run can hang, flood its output or leave a grandchild behind,
-        # so every run is time-bounded, its output capped while still read to
-        # the end, and its whole tree stopped on timeout or cancellation.
-        # Failures are fields of the outcome; only cancellation propagates.
-        # Start the program in its own session, with stdin as a pipe or the null device.
+        # A CLI run can hang, flood its output or leave a grandchild
+        # behind, so every run is time-bounded, its output capped while
+        # still read to the end, and its whole tree stopped on timeout
+        # or cancellation. Failures are fields of the outcome; only
+        # cancellation propagates.
+        # Start the program in its own session, with stdin as a pipe
+        # or the null device.
         stdin = asyncio.subprocess.PIPE if invocation.stdin_text is not None else asyncio.subprocess.DEVNULL
         process, launch_failure = await CliRunner.launch(invocation, stdin=stdin)
         if process is None:
@@ -141,21 +151,26 @@ class CliRunner:
         )
         timed_out = False
         try:
-            # Hand over the standard-input text, then read both streams to the end and wait for the exit, all within the time bound.
+            # Hand over the standard-input text, then read both
+            # streams to the end and wait for the exit, all
+            # within the time bound.
             async with asyncio.timeout(invocation.timeout_seconds):
                 await self._feed_stdin(process, invocation.stdin_text)
                 await asyncio.wait(readers)
                 await process.wait()
         except TimeoutError:
-            # The run passed its bound: stop and reap the whole tree, keeping the output read so far.
+            # The run passed its bound: stop and reap the whole tree,
+            # keeping the output read so far.
             timed_out = True
             await ProcessStopper.stop_tree(process, grace_seconds=native_host_constants.NATIVE_KILL_WAIT_SECONDS)
         except asyncio.CancelledError:
-            # The caller gave up: stop and reap the tree before the cancellation goes on.
+            # The caller gave up: stop and reap the tree before the
+            # cancellation goes on.
             await ProcessStopper.stop_tree(process, grace_seconds=native_host_constants.NATIVE_KILL_WAIT_SECONDS)
             await self._finish_readers(readers)
             raise
-        # Collect whatever the readers still hold, then report the outcome.
+        # Collect whatever the readers still hold, then
+        # report the outcome.
         await self._finish_readers(readers)
         return self._outcome(process, stdout, stderr, invocation.max_output_bytes, timed_out)
 
@@ -192,7 +207,8 @@ class CliRunner:
         return process, None
 
     async def _feed_stdin(self, process: asyncio.subprocess.Process, stdin_text: str | None) -> None:
-        # Writes the text and closes the pipe so the child reads to EOF; a child that exits early is not an error.
+        # Writes the text and closes the pipe so the child reads to EOF;
+        # a child that exits early is not an error.
         if process.stdin is None:
             return
         with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
@@ -202,7 +218,9 @@ class CliRunner:
             process.stdin.close()
 
     async def _drain(self, stream: asyncio.StreamReader | None, buffer: bytearray, limit_bytes: int) -> None:
-        # Keeps the first limit_bytes plus a one-byte truncation probe and reads past them until EOF, so the child never blocks on a full pipe.
+        # Keeps the first limit_bytes plus a one-byte truncation
+        # probe and reads past them until EOF, so the child never
+        # blocks on a full pipe.
         if stream is None:
             return
         with contextlib.suppress(OSError, ValueError):
@@ -210,7 +228,8 @@ class CliRunner:
                 buffer.extend(chunk[: limit_bytes + native_host_constants.NATIVE_PROCESS_TRUNCATION_PROBE_BYTES - len(buffer)])
 
     async def _finish_readers(self, readers: tuple[asyncio.Task[None], ...]) -> None:
-        # Gives the readers one kill-wait to reach EOF, then cancels any that a surviving grandchild keeps open.
+        # Gives the readers one kill-wait to reach EOF, then cancels any
+        # that a surviving grandchild keeps open.
         _done, pending = await asyncio.wait(readers, timeout=native_host_constants.NATIVE_KILL_WAIT_SECONDS)
         for task in pending:
             task.cancel()
@@ -218,7 +237,8 @@ class CliRunner:
             await asyncio.wait(pending)
 
     def _outcome(self, process: asyncio.subprocess.Process, stdout: bytearray, stderr: bytearray, limit_bytes: int, timed_out: bool) -> CliOutcome:
-        # Decodes each stream within the byte cap, trimming a partly kept character.
+        # Decodes each stream within the byte cap, trimming a
+        # partly kept character.
         out_text = bytes(stdout[:limit_bytes]).decode("utf-8", errors="replace").encode("utf-8")[:limit_bytes].decode("utf-8", errors="ignore")
         err_text = bytes(stderr[:limit_bytes]).decode("utf-8", errors="replace").encode("utf-8")[:limit_bytes].decode("utf-8", errors="ignore")
         return CliOutcome(

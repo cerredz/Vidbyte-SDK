@@ -47,14 +47,15 @@ class GrokCli:
 
     def resolve_launcher(self) -> bool:
         # @intent grok-launcher-resolution-order
-        # D-19: an explicit grok_command wins, otherwise grok on PATH, then
-        # the installer's ~/.grok/bin/grok. On POSIX an explicit command is
-        # never checked, because a launch failure is mapped when it runs. On
-        # Windows the program is looked up through PATH and PATHEXT, as a
-        # launch would look it up, and that path is kept; a batch file is
-        # never kept, because cmd.exe re-reads the argv and would run parts
-        # of a prompt as commands (EC-157, T-2). False means nothing
-        # runnable was found, and refused_batch then names a refused batch.
+        # An explicit grok_command wins, otherwise grok on PATH, then
+        # the installer's ~/.grok/bin/grok. On POSIX an explicit
+        # command is never checked, because a launch failure is mapped
+        # when it runs. On Windows the program is looked up through
+        # PATH and PATHEXT, as a launch would look it up, and that path
+        # is kept; a batch file is never kept, because cmd.exe re-reads
+        # the argv and would run parts of a prompt as commands. False
+        # means nothing runnable was found, and refused_batch then
+        # names a refused batch.
         explicit = self._settings.grok_command
         if explicit and sys.platform == "win32":
             program = shutil.which(explicit[0]) or explicit[0]
@@ -72,7 +73,8 @@ class GrokCli:
         return bool(self._launcher)
 
     def peer_argv(self, model: str | None, reasoning_effort: str | None) -> tuple[str, ...]:
-        # D-2: agent --no-leader [--model=<id>] [--reasoning-effort=<effort>] stdio.
+        # The peer's arguments: agent --no-leader [--model=<id>]
+        # [--reasoning-effort=<effort>] stdio.
         flags = self._model_flags(model, reasoning_effort)
         return (*self._launcher, *_PEER_PREFIX, *flags, *_PEER_SUFFIX)
 
@@ -85,20 +87,23 @@ class GrokCli:
         return (*self._launcher, *_MODELS_ARGS)
 
     def one_shot_argv(self, one_shot: GrokOneShotRequest) -> tuple[str, ...]:
-        # One headless run in the workspace with JSON output and the run's own permission mode and rules.
+        # One headless run in the workspace with JSON output and the
+        # run's own permission mode and rules.
         return (*self._launcher, *self._run_flags(one_shot), "--single=" + one_shot.prompt)
 
     def fork_argv(self, session_id: str, one_shot: GrokOneShotRequest, new_session_id: str | None) -> tuple[str, ...]:
-        # A one-shot run that resumes the source session as a fork, under new_session_id when one is given.
+        # A one-shot run that resumes the source session as a fork,
+        # under new_session_id when one is given.
         target = ("--session-id=" + new_session_id,) if new_session_id is not None else ()
         fork = ("--resume=" + session_id, _FORK_FLAG, *target)
         return (*self._launcher, *fork, *self._run_flags(one_shot), "--single=" + one_shot.prompt)
 
     async def run(self, argv: tuple[str, ...], *, timeout_seconds: float) -> CliOutcome:
         # @intent grok-cli-runs-are-bounded
-        # Every CLI run is time-bounded and its output capped by CliRunner,
-        # which stops the whole tree on timeout or cancellation; the child
-        # gets the caller's environment and the workspace as its folder.
+        # Every CLI run is time-bounded and its output capped by
+        # CliRunner, which stops the whole tree on timeout or
+        # cancellation; the child gets the caller's environment and the
+        # workspace as its folder.
         invocation = CliInvocation(
             argv=argv,
             env=NativeChildEnvironment.build({}),
@@ -111,9 +116,9 @@ class GrokCli:
     def _run_flags(self, one_shot: GrokOneShotRequest) -> tuple[str, ...]:
         # @intent grok-one-shot-permissions-come-from-the-record
         # The flags a one-shot and a fork run share, every value in
-        # --name=value form; the permission mode and the allow and deny rules
-        # come only from the validated record, never an approve-everything
-        # flag (INV-9, T-2).
+        # --name=value form; the permission mode and the allow and deny
+        # rules come only from the validated record, never an
+        # approve-everything flag.
         fixed = (_JSON_OUTPUT, "--permission-mode=" + one_shot.permission_mode.value, "--cwd=" + str(self._settings.workspace))
         rules = tuple("--allow=" + rule for rule in one_shot.allow_rules) + tuple("--deny=" + rule for rule in one_shot.deny_rules)
         turns = ("--max-turns=" + str(one_shot.max_turns),) if one_shot.max_turns is not None else ()
@@ -123,9 +128,9 @@ class GrokCli:
 
     @staticmethod
     def _is_batch(program: str) -> bool:
-        # A Windows batch file, named as Windows reads the name: trailing
-        # dots and spaces dropped, the suffix in any letter case. On POSIX a
-        # file named grok.cmd is an ordinary program.
+        # A Windows batch file, named as Windows reads the name:
+        # trailing dots and spaces dropped, the suffix in any letter
+        # case. On POSIX a file named grok.cmd is an ordinary program.
         name = program.rstrip(_WINDOWS_DROPPED_TAIL).casefold()
         return sys.platform == "win32" and name.endswith(_BATCH_SUFFIXES)
 

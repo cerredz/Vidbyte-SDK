@@ -66,7 +66,8 @@ _SERVE = "serve"
 _VERSION_FLAG = "--version"
 _RUNNING_STATUS = "running"
 _TURN_NOT_FOUND_NEXT_STEP = "The turn is not running; use continue_muse_session to send a new prompt."
-# The failure rows MuseLauncher.resolve can name at __aenter__ (EC-94, EC-95), with their messages.
+# The failures MuseLauncher.resolve can report at
+# __aenter__, with their messages.
 _LAUNCHER_MESSAGES: Mapping[str, str] = MappingProxyType(
     {
         "wsl_unavailable": "Muse Code needs WSL on Windows: set MuseHostSettings.wsl_distro or muse_command, and make sure wsl.exe is installed.",
@@ -94,25 +95,28 @@ class MuseHost:
 
     async def __aenter__(self) -> MuseHost:
         # @intent muse-host-is-single-use-and-finds-muse-once
-        # EC-3: a host serves exactly one async with block. D-19: the
-        # launcher is found here, once, and in WSL mode the distro must be
-        # listed by `wsl.exe -l -q` (EC-94); no muse process starts here.
+        # A host serves exactly one async with block. The launcher is
+        # found here, once, and in WSL mode the distro must be listed by
+        # `wsl.exe -l -q`; no muse process starts here.
         operation = _ENTER
         try:
             # A host serves one block only, open or already closed.
             if self._entered:
                 raise self._errors.invalid_argument("host", "This MuseHost was already entered; a host serves one async with block.", operation=operation, next_step=native_host_constants.NATIVE_REENTER_NEXT_STEP)
             self._entered = True
-            # Find how muse starts: an explicit command, wsl.exe with a distro, or muse on PATH.
+            # Find how muse starts: an explicit command, wsl.exe with a
+            # distro, or muse on PATH.
             problem = self._launcher.resolve()
             if problem is not None:
                 raise self._errors.build(self._errors.code(problem), _LAUNCHER_MESSAGES[problem], operation=operation)
-            # In WSL mode the named distro must exist; the error lists the ones that do.
+            # In WSL mode the named distro must exist; the error
+            # lists the ones that do.
             if self._launcher.wsl_mode:
                 distros = await self._launcher.list_distros()
                 if self._settings.wsl_distro not in distros:
                     raise self._errors.build(self._errors.code("wsl_unavailable"), "wsl.exe does not list the configured distro.", operation=operation, context={"distros": self._errors.listing(distros)})
-            # The workspace as muse sees it, translated to /mnt inside WSL.
+            # The workspace as muse sees it, translated
+            # to /mnt inside WSL.
             self._workspace_root = self._launcher.workspace_root()
             self._open = True
             return self
@@ -127,23 +131,25 @@ class MuseHost:
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None) -> None:
         # @intent muse-host-exit-stops-every-turn
-        # EC-8, NFR-2: refuse every later call, ask each live turn to stop
-        # as HOST_CLOSED, give the turns NATIVE_STOP_GRACE_SECONDS to end,
+        # Refuse every later call, ask each live turn to stop as
+        # HOST_CLOSED, give the turns NATIVE_STOP_GRACE_SECONDS to end,
         # then close the remaining peers all at once, which also fails a
-        # call still waiting on a silent peer, and wait for the drivers to
-        # record the ending and reap. It raises nothing of its own and never
-        # suppresses the body's error.
+        # call still waiting on a silent peer, and wait for the drivers
+        # to record the ending and reap. It raises nothing of its own
+        # and never suppresses the body's error.
         self._open = False
         drivers = list(self._drivers.values())
         tasks = self._turns.live_tasks()
         if not drivers or not tasks:
             return None
-        # Interrupt every live turn at once, so many turns cost no more than one.
+        # Interrupt every live turn at once, so many turns
+        # cost no more than one.
         with contextlib.suppress(Exception):
             await asyncio.gather(*(driver.shut_down() for driver in drivers))
         # Give the turns the grace period to end by themselves.
         await asyncio.wait(tasks, timeout=native_host_constants.NATIVE_STOP_GRACE_SECONDS)
-        # Close every peer at once, so a peer silent on approval/decide cannot hold exit, then let the drivers finish.
+        # Close every peer at once, so a peer silent on approval/decide
+        # cannot hold exit, then let the drivers finish.
         closers = [asyncio.create_task(driver.peer.close()) for driver in drivers]
         await asyncio.wait(closers)
         await asyncio.wait(tasks)
@@ -154,7 +160,8 @@ class MuseHost:
         operation = "check_muse_ready"
         try:
             self._require_open(operation)
-            # Ask the launcher for its version first; an unreadable or too old release needs no peer (EC-103, EC-104).
+            # Ask the launcher for its version first; an unreadable or
+            # too old release needs no peer.
             invocation = CliInvocation(
                 argv=self._launcher.argv(_VERSION_FLAG),
                 env=self._launcher.peer_environment(None),
@@ -162,18 +169,21 @@ class MuseHost:
                 max_output_bytes=native_host_constants.NATIVE_PROCESS_MAX_OUTPUT_BYTES,
             )
             outcome = await self._runner.run(invocation)
-            # In WSL mode a failed run may name a missing distro or a missing in-distro muse (EC-94, EC-95).
+            # In WSL mode a failed run may name a missing distro or a
+            # missing in-distro muse.
             failure = self._launcher.launch_failure(outcome.stderr, outcome.exit_code, errors=self._errors, operation=operation)
             if failure is not None:
                 raise failure
             version = MuseWire.read_cli_version(outcome, operation=operation)
-            # Run the MSP handshake on a short-lived peer that is closed before the answer is built.
+            # Run the MSP handshake on a short-lived peer that is closed
+            # before the answer is built.
             peer = self._new_peer(None)
             try:
                 await self._handshake(peer, operation)
             finally:
                 await peer.close()
-            # MSP 1.0.1 has no sign-in probe, so signed_in stays unknown (EC-105).
+            # MSP 1.0.1 has no sign-in probe, so
+            # signed_in stays unknown.
             return MuseReadiness(version=version, schema_version=native_host_constants.MUSE_SCHEMA_VERSION, signed_in=None, launcher=self._launcher.prefix, wsl_distro=self._settings.wsl_distro)
         except asyncio.CancelledError:
             raise
@@ -187,7 +197,8 @@ class MuseHost:
         operation = "list_muse_models"
         try:
             self._require_open(operation)
-            # A short-lived peer answers model/list and is closed before the catalog is returned.
+            # A short-lived peer answers model/list and is closed before
+            # the catalog is returned.
             peer = self._new_peer(None)
             try:
                 await self._handshake(peer, operation)
@@ -205,30 +216,36 @@ class MuseHost:
     async def spawn_muse_session(self, request: MuseTurnRequest) -> NativeTurnHandle:
         """Start a new Muse session with one prompt and return the turn handle while the turn runs."""
         # @intent muse-spawn-returns-while-the-turn-runs
-        # INV-11: the handle comes back once turn/start is accepted; the
-        # turn's peer is closed and reaped on every path that does not reach
+        # The handle comes back once turn/start is accepted; the turn's
+        # peer is closed and reaped on every path that does not reach
         # its driver, and the reservation is released with it.
         operation = "spawn_muse_session"
         try:
             # Refuse a bad request and a closed host before any I/O.
             self._require_open(operation)
             RecordFieldConverter.require_instance(request, "request", MuseTurnRequest)
-            # Take a live-turn slot before the first await, so the cap holds under concurrency (EC-107).
+            # Take a live-turn slot before the first await, so the cap
+            # holds under concurrency.
             turn_id = self._reserve(None, operation)
-            # The turn gets its own peer, marked in WSL mode so its in-distro tree can be reaped.
+            # The turn gets its own peer, marked in WSL mode so its
+            # in-distro tree can be reaped.
             mark = self._launcher.new_mark()
             peer = self._new_peer(mark)
             try:
                 await self._handshake(peer, operation)
-                # A named model must be one Muse offers, checked before any session exists (EC-108).
+                # A named model must be one Muse offers, checked before
+                # any session exists.
                 await self._check_model(peer, request.model, operation)
-                # Create the session; every approval it raises outside the user's own rules is denied (D-11).
+                # Create the session; every approval it raises outside
+                # the user's own rules is denied.
                 started = await MuseWire.exchange(peer, "session/start", MuseWire.session_start_params(self._workspace_root, request.model), operation=operation)
                 session = MuseWire.read_session_result(started, operation=operation)
                 self._turns.bind_session(turn_id, session.session_id)
-                # Send the prompt; the ack's turnId names the turn from now on (EC-109).
+                # Send the prompt; the ack's turnId names the
+                # turn from now on.
                 ack = await self._start_turn(peer, session.session_id, request, operation)
-                # Hand the peer to a driver that runs the turn after this call returns.
+                # Hand the peer to a driver that runs the turn after
+                # this call returns.
                 return self._launch(peer, mark, turn_id, session.session_id, ack, request, operation)
             except BaseException:
                 self._turns.release(turn_id)
@@ -246,23 +263,27 @@ class MuseHost:
     async def continue_muse_session(self, session_id: str, request: MuseTurnRequest) -> NativeTurnHandle:
         """Send one more prompt to an existing Muse session and return the turn handle while the turn runs."""
         # @intent muse-continue-reserves-the-session-first
-        # EC-9: the session is reserved before the first await, so of two
+        # The session is reserved before the first await, so of two
         # concurrent continues on it exactly one reaches turn/start; the
         # other raises session_busy and starts no process.
         operation = "continue_muse_session"
         try:
-            # Refuse bad arguments and a closed host before any I/O; a session id is a UUID, used in lower case so the busy check ignores letter case (INV-14).
+            # Refuse bad arguments and a closed host before any I/O; a
+            # session id is a UUID, used in lower case so the busy check
+            # ignores letter case.
             self._require_open(operation)
             session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             RecordFieldConverter.require_instance(request, "request", MuseTurnRequest)
-            # Reserve the session before the first await, so two calls on it cannot both pass (EC-9, EC-112).
+            # Reserve the session before the first await, so two calls
+            # on it cannot both pass.
             turn_id = self._reserve(session_id, operation)
             mark = self._launcher.new_mark()
             peer = self._new_peer(mark)
             try:
                 await self._handshake(peer, operation)
                 await self._check_model(peer, request.model, operation)
-                # Load the session; one that is running a turn elsewhere is busy (EC-111, EC-112).
+                # Load the session; one that is running a turn
+                # elsewhere is busy.
                 await self._resume(peer, session_id, operation)
                 ack = await self._start_turn(peer, session_id, request, operation)
                 return self._launch(peer, mark, turn_id, session_id, ack, request, operation)
@@ -283,15 +304,19 @@ class MuseHost:
         """Copy a Muse session, whole or up to last_turn_id, into a new session and return the copy."""
         operation = "fork_muse_session"
         try:
-            # Refuse bad arguments and a closed host before any I/O; a session id is a UUID, used in lower case so the busy check ignores letter case (INV-14).
+            # Refuse bad arguments and a closed host before any I/O; a
+            # session id is a UUID, used in lower case so the busy check
+            # ignores letter case.
             self._require_open(operation)
             session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             if last_turn_id is not None:
                 RecordFieldValidator.require_text(last_turn_id, "last_turn_id", max_chars=native_host_constants.NATIVE_ID_MAX_CHARS)
-            # A session with a live turn on this host is not forked mid-turn (EC-112).
+            # A session with a live turn on this host is
+            # not forked mid-turn.
             if self._turns.is_session_busy(session_id):
                 raise self._errors.build(self._errors.code("session_busy"), "The source session has a live turn on this host.", operation=operation, context={"session_id": session_id})
-            # A short-lived peer forks the session, resuming it once if Muse has not loaded it (EC-114).
+            # A short-lived peer forks the session, resuming it once if
+            # Muse has not loaded it.
             peer = self._new_peer(None)
             try:
                 await self._handshake(peer, operation)
@@ -318,7 +343,8 @@ class MuseHost:
             if cursor is not None:
                 RecordFieldValidator.require_text(cursor, "cursor", max_chars=native_host_constants.NATIVE_CURSOR_MAX_CHARS)
             RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
-            # A short-lived peer reads the page; a cursor Muse no longer knows is refused as an argument.
+            # A short-lived peer reads the page; a cursor Muse no longer
+            # knows is refused as an argument.
             peer = self._new_peer(None)
             try:
                 await self._handshake(peer, operation)
@@ -340,7 +366,8 @@ class MuseHost:
         try:
             self._require_open(operation)
             session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
-            # A short-lived peer reads the session, resuming it once if Muse has not loaded it (EC-114).
+            # A short-lived peer reads the session, resuming it once if
+            # Muse has not loaded it.
             peer = self._new_peer(None)
             try:
                 await self._handshake(peer, operation)
@@ -368,14 +395,16 @@ class MuseHost:
         """Read one page of a Muse session's view events as compact JSON."""
         operation = "page_muse_session"
         try:
-            # Refuse bad arguments and a closed host before any I/O; a session id is a UUID, sent in lower case (INV-14).
+            # Refuse bad arguments and a closed host before any I/O; a
+            # session id is a UUID, sent in lower case.
             self._require_open(operation)
             session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             if cursor is not None:
                 RecordFieldValidator.require_text(cursor, "cursor", max_chars=native_host_constants.NATIVE_CURSOR_MAX_CHARS)
             RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.MUSE_PAGE_MAX_LIMIT)
             RecordFieldConverter.require_instance(direction, "direction", MuseViewDirection)
-            # A short-lived peer reads the page, resuming the session once if Muse has not loaded it (EC-114).
+            # A short-lived peer reads the page, resuming the session
+            # once if Muse has not loaded it.
             peer = self._new_peer(None)
             try:
                 await self._handshake(peer, operation)
@@ -397,12 +426,13 @@ class MuseHost:
         """Add text to a running Muse turn and return Muse's acceptance status."""
         operation = "steer_muse_turn"
         try:
-            # Refuse bad arguments before looking the handle up (EC-1, EC-110).
+            # Refuse bad arguments before looking the handle up.
             self._require_open(operation)
             RecordFieldValidator.require_text(text, "text", max_chars=native_host_constants.NATIVE_PROMPT_MAX_CHARS)
             RecordFieldConverter.require_instance(handle, "handle", NativeTurnHandle)
             task = self._turn_task(handle, operation)
-            # Only a running turn can be steered; a finished one needs a new prompt (EC-115).
+            # Only a running turn can be steered; a finished one
+            # needs a new prompt.
             driver = self._drivers.get(handle.turn_id)
             if task.done() or driver is None or not driver.running:
                 raise self._errors.build(self._errors.code("turn_not_found"), "The turn has finished, so it cannot be steered.", operation=operation, next_step=_TURN_NOT_FOUND_NEXT_STEP)
@@ -425,11 +455,12 @@ class MuseHost:
             self._require_open(operation)
             RecordFieldConverter.require_instance(handle, "handle", NativeTurnHandle)
             task = self._turn_task(handle, operation)
-            # A finished turn is left alone and nothing is sent (INV-13).
+            # A finished turn is left alone and nothing is sent.
             driver = self._drivers.get(handle.turn_id)
             if task.done() or driver is None or not driver.running:
                 return NativeInterruptResult(handle=handle, was_running=False)
-            # turn/interrupt on the turn's own peer; the driver closes the peer after the grace period.
+            # turn/interrupt on the turn's own peer; the driver closes
+            # the peer after the grace period.
             await driver.interrupt(InterruptSource.CALLER, operation=operation)
             return NativeInterruptResult(handle=handle, was_running=True)
         except asyncio.CancelledError:
@@ -449,14 +480,17 @@ class MuseHost:
             seconds = RecordFieldValidator.require_number(timeout_seconds, "timeout_seconds", maximum=native_host_constants.NATIVE_WAIT_MAX_SECONDS)
             RecordFieldConverter.require_instance(handle, "handle", NativeTurnHandle)
             task = self._turn_task(handle, operation)
-            # Wait without cancelling the driver, so a timed-out or cancelled wait never stops the turn (INV-12).
+            # Wait without cancelling the driver, so a timed-out or
+            # cancelled wait never stops the turn.
             done, _pending = await asyncio.wait({task}, timeout=seconds)
             if not done:
                 raise self._errors.build(self._errors.code("turn_timed_out"), "The turn is still running after timeout_seconds.", operation=operation, context={"session_id": handle.session_id})
-            # A driver that was cancelled recorded no outcome; report its peer as gone rather than cancelling the caller.
+            # A driver that was cancelled recorded no outcome; report
+            # its peer as gone rather than cancelling the caller.
             if task.cancelled():
                 raise self._errors.build(self._errors.code("process_exited"), "The turn's driver stopped before the turn completed.", operation=operation, context={"reason": "cancelled"})
-            # The recorded result, or the turn's failure row, the same on every wait (EC-148).
+            # The recorded result, or the turn's recorded failure, the
+            # same on every wait.
             return task.result()
         except asyncio.CancelledError:
             raise
@@ -473,14 +507,15 @@ class MuseHost:
         try:
             self._require_open(operation)
             session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
-            # A short-lived peer pages the view backward until it finds a usage event or reaches the page limit.
+            # A short-lived peer pages the view backward until it finds
+            # a usage event or reaches the page limit.
             peer = self._new_peer(None)
             try:
                 await self._handshake(peer, operation)
                 totals, truncated = await self._latest_usage(peer, session_id, operation)
             finally:
                 await peer.close()
-            # Muse reports no cost, so cost_usd stays None (NG-14).
+            # Muse reports no cost, so cost_usd stays None.
             return NativeSessionUsage(harness=NativeHarness.MUSE, session_id=session_id, totals=totals, truncated=truncated)
         except asyncio.CancelledError:
             raise
@@ -492,12 +527,13 @@ class MuseHost:
             raise self._errors.from_unexpected(exc, operation=operation) from exc
 
     def _require_open(self, operation: str) -> None:
-        # EC-2: calls are served only inside the async with block.
+        # Calls are served only inside the async with block.
         if not self._open:
             raise self._errors.build(self._errors.code("process_exited"), "This MuseHost is not open.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
 
     def _reserve(self, session_id: str | None, operation: str) -> str:
-        # The turn table's reservation; at the live-turn cap the error names the EC-107 next step.
+        # The turn table's reservation; at the live-turn cap the error
+        # tells the caller to wait for or interrupt a running turn.
         try:
             return self._turns.reserve(session_id, operation=operation)
         except NativeHostError as exc:
@@ -506,23 +542,26 @@ class MuseHost:
             raise self._errors.build(exc.failure_code, exc.message, operation=operation, next_step=native_host_constants.NATIVE_AT_CAP_NEXT_STEP.format(tool="interrupt_muse_turn"), context=exc.context) from exc
 
     def _turn_task(self, handle: NativeTurnHandle, operation: str) -> asyncio.Task[NativeTurnResult]:
-        # The driver task of a handle this host issued; any other handle is EC-115 with its own next step.
+        # The driver task of a handle this host issued; any other handle
+        # is turn_not_found, with a next step that points to
+        # continue_muse_session.
         try:
             return self._turns.lookup(handle, operation=operation)
         except NativeHostError as exc:
             raise self._errors.build(exc.failure_code, exc.message, operation=operation, next_step=_TURN_NOT_FOUND_NEXT_STEP) from exc
 
     def _new_peer(self, mark: str | None) -> NativePeer:
-        # `<launcher> serve` with the caller's environment plus, for a WSL turn peer, its mark (D-18, D-23).
+        # `<launcher> serve` with the caller's environment plus, for a
+        # WSL turn peer, its mark.
         return NativePeer(self._launcher.argv(_SERVE), env=self._launcher.peer_environment(mark), control_timeout_seconds=self._settings.control_timeout_seconds, errors=self._errors)
 
     async def _handshake(self, peer: NativePeer, operation: str) -> None:
         # @intent muse-peer-handshake-before-any-request
-        # Start the peer, send initialize with clientInfo, check the schema
-        # and server version (EC-98, EC-99), then send `initialized` before
-        # any other request. A WSL peer that exits before answering may say
-        # why on stderr or by exit code 127: a missing distro or a missing
-        # muse (EC-94, EC-95). The exit code is known once close reaps it.
+        # Start the peer, send initialize with clientInfo, check the
+        # schema and server version, then send `initialized` before any
+        # other request. A WSL peer that exits before answering may say
+        # why on stderr or by exit code 127: a missing distro or a
+        # missing muse. The exit code is known once close reaps it.
         try:
             await peer.start(operation=operation)
             result = await MuseWire.exchange(peer, "initialize", MuseWire.initialize_params(), operation=operation)
@@ -538,8 +577,8 @@ class MuseHost:
             raise failure from exc
 
     async def _check_model(self, peer: NativePeer, model: str | None, operation: str) -> None:
-        # EC-108: a named model must be in model/list; an empty list cannot
-        # refuse anything, so the id passes through to Muse (A-12).
+        # A named model must be in model/list; an empty list cannot
+        # refuse anything, so the id passes through to Muse.
         if model is None:
             return
         result = await MuseWire.exchange(peer, "model/list", {}, operation=operation)
@@ -548,22 +587,25 @@ class MuseHost:
             raise self._errors.build(self._errors.code("model_unknown"), "Muse Code does not offer the requested model.", operation=operation, context={"available_models": self._errors.listing(offered)})
 
     async def _resume(self, peer: NativePeer, session_id: str, operation: str) -> None:
-        # session/resume loads the session; one that is running a turn for another client is busy (EC-112).
+        # session/resume loads the session; one that is running a turn
+        # for another client is busy.
         result = await MuseWire.exchange(peer, "session/resume", MuseWire.session_resume_params(session_id), operation=operation)
         session = MuseWire.read_session_result(result, operation=operation)
         if session.status == _RUNNING_STATUS or session.active_turn_id is not None:
             raise self._errors.build(self._errors.code("session_busy"), "The Muse session is running a turn for another client.", operation=operation, context={"session_id": session_id, "status": session.status})
 
     async def _start_turn(self, peer: NativePeer, session_id: str, request: MuseTurnRequest, operation: str) -> MuseTurnAck:
-        # turn/start with one text part; a prompt Muse finds too large is refused as the prompt argument (EC-101).
+        # turn/start with one text part; a prompt Muse finds too large
+        # is refused as the prompt argument.
         result = await MuseWire.exchange(peer, "turn/start", MuseWire.turn_start_params(session_id, request.prompt, request.reasoning_effort), operation=operation)
         return MuseWire.parse_turn_start_result(result, operation=operation)
 
     def _launch(self, peer: NativePeer, mark: str | None, turn_id: str, session_id: str, ack: MuseTurnAck, request: MuseTurnRequest, operation: str) -> NativeTurnHandle:
         # @intent muse-host-hands-the-peer-to-a-driver
-        # The driver owns the peer from here: it runs the turn as a task the
-        # turn table owns and closes (and reaps) the peer when the turn ends.
-        # A host that closed while the turn was starting runs no driver.
+        # The driver owns the peer from here: it runs the turn as a
+        # task the turn table owns and closes (and reaps) the peer
+        # when the turn ends. A host that closed while the turn was
+        # starting runs no driver.
         if not self._open:
             raise self._errors.build(self._errors.code("process_exited"), "This MuseHost closed while the turn was starting.", operation=operation, next_step=native_host_constants.NATIVE_NOT_OPEN_NEXT_STEP)
         handle = NativeTurnHandle(harness=NativeHarness.MUSE, session_id=session_id, turn_id=turn_id)
@@ -575,7 +617,8 @@ class MuseHost:
         return self._turns.activate(turn_id, task)
 
     async def _list_page(self, peer: NativePeer, cursor: str | None, limit: int, operation: str) -> MuseSessionPage:
-        # session/list; -32602 for a call that sent a cursor means the cursor went stale.
+        # session/list; -32602 for a call that sent a cursor means
+        # the cursor went stale.
         try:
             result = await peer.call("session/list", MuseWire.session_list_params(self._workspace_root, cursor, limit), operation=operation)
         except McpProtocolError as exc:
@@ -585,9 +628,10 @@ class MuseHost:
         return MuseWire.read_session_page(result, operation=operation)
 
     async def _steer(self, driver: MuseTurnDriver, text: str, operation: str) -> MuseTurnAck:
-        # turn/steer naming the ack's turn. A -32030 refusal is turn_not_found
-        # only when the turn has finished here too (EC-115); while the turn
-        # still runs locally it is a vendor error like any other (EC-102).
+        # turn/steer naming the ack's turn. A -32030 refusal is
+        # turn_not_found only when the turn has finished here
+        # too; while the turn still runs locally it is a vendor
+        # error like any other.
         try:
             result = await driver.peer.call("turn/steer", MuseWire.turn_steer_params(driver.session_id, driver.turn_id, text), operation=operation)
         except McpProtocolError as exc:
@@ -597,9 +641,10 @@ class MuseHost:
         return MuseWire.parse_turn_steer_result(result, operation=operation)
 
     async def _latest_usage(self, peer: NativePeer, session_id: str, operation: str) -> tuple[NativeTokenUsage | None, bool]:
-        # D-14: page the view backward, MUSE_PAGE_MAX_LIMIT events at a time,
-        # until a page holds a session/tokenUsage event or the history ends.
-        # Returns the usage and whether MUSE_USAGE_MAX_PAGES stopped the search.
+        # Page the view backward, MUSE_PAGE_MAX_LIMIT events at a time,
+        # until a page holds a session/tokenUsage event or the history
+        # ends. Returns the usage and whether MUSE_USAGE_MAX_PAGES
+        # stopped the search.
         cursor: str | None = None
         for _page in range(native_host_constants.MUSE_USAGE_MAX_PAGES):
             params = functools.partial(MuseWire.view_page_params, session_id, cursor, native_host_constants.MUSE_PAGE_MAX_LIMIT, MuseViewDirection.BACKWARD)
@@ -612,16 +657,17 @@ class MuseHost:
 
     async def _discard(self, peer: NativePeer, mark: str | None) -> None:
         # @intent muse-turn-peer-close-and-reap
-        # D-23: close a turn peer, then, in WSL mode, kill whatever its mark
-        # left running inside the distro. Closing runs on error and cancel
-        # paths, so a failed reap is never raised.
+        # Close a turn peer, then, in WSL mode, kill whatever its mark
+        # left running inside the distro. Closing runs on error and
+        # cancel paths, so a failed reap is never raised.
         await peer.close()
         if mark is not None:
             with contextlib.suppress(Exception):
                 await self._launcher.reap(mark)
 
     def _forget_driver(self, turn_id: str, _task: asyncio.Task[NativeTurnResult]) -> None:
-        # A finished driver is dropped; its task stays in the turn table for later waits.
+        # A finished driver is dropped; its task stays in the turn
+        # table for later waits.
         self._drivers.pop(turn_id, None)
 
 

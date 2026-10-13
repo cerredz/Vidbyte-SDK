@@ -33,7 +33,8 @@ class GrokTools(Tools):
     """Catalog of the ten tools over one GrokHost."""
 
     def __init__(self, host: GrokHost) -> None:
-        # The readiness and model checks first, then the four ways to start work, then the session reads and the turn controls.
+        # The readiness and model checks first, then the four ways to
+        # start work, then the session reads and the turn controls.
         super().__init__(
             (
                 CheckGrokReadyTool(host),
@@ -51,7 +52,8 @@ class GrokTools(Tools):
 
     @staticmethod
     def read_only(host: GrokHost) -> Tools:
-        # Only the five READ tools, so nothing in the catalog can start or stop a turn (T-5).
+        # Only the five READ tools, so nothing in the catalog can
+        # start or stop a turn.
         return Tools((CheckGrokReadyTool(host), ListGrokModelsTool(host), ListGrokSessionsTool(host), SearchGrokSessionsTool(host), WaitGrokTurnTool(host)))
 
 

@@ -231,7 +231,8 @@ class McpStdioTransport:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=child_env,
-                # A peer whose tree is stopped at close leads its own process group on POSIX.
+                # A peer whose tree is stopped at close leads its own
+                # process group on POSIX.
                 start_new_session=self.stop_process_tree and sys.platform != "win32",
                 # @intent mcp-stdio-reads-large-lines
                 # Raise the stdout line limit so one large result does not close the transport for good.
@@ -256,11 +257,12 @@ class McpStdioTransport:
         """Send a JSON-RPC request and return its result object."""
         # @intent mcp-stdio-request-is-send-then-bounded-wait
         # One deadline per call, request_timeout or this call's
-        # timeout_seconds, bounds the wait for the answer. Only an explicit
-        # timeout_seconds also bounds the write; without one the write is
-        # the plain drain MCP callers had before the peer extension.
-        # None keeps request_timeout; any other value must pass the
-        # shared check.
+        # timeout_seconds, bounds the wait for the answer. Only an
+        # explicit timeout_seconds also bounds the write; without
+        # one the write is the plain drain MCP callers had before
+        # the peer extension.
+        # None keeps request_timeout; any other value must
+        # pass the shared check.
         timeout = self.request_timeout if timeout_seconds is None else self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
         write_seconds = None if timeout_seconds is None else timeout
         request_id, future = await self._send(method, params, write_seconds)
@@ -269,8 +271,9 @@ class McpStdioTransport:
     async def _send(self, method: str, params: Mapping[str, Any] | None, seconds: float | None) -> tuple[int, asyncio.Future[Mapping[str, Any]]]:
         """Register a pending future under a fresh id, then write the request frame, checked within seconds when given."""
         # @intent mcp-stdio-pending-before-write
-        # The future is registered before the frame is written, so an answer
-        # that arrives at once still finds it; a failed write removes it.
+        # The future is registered before the frame is written,
+        # so an answer that arrives at once still finds it; a
+        # failed write removes it.
         if self._closed:
             raise McpProtocolError(
                 "MCP transport is closed",
@@ -308,11 +311,12 @@ class McpStdioTransport:
             try:
                 self._process.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
                 # @intent mcp-stdio-checked-write-has-a-deadline
-                # Without a deadline this is MCP's plain drain. With one the
-                # drain is bounded, and a pipe already closing afterwards
-                # raises: on a broken pipe asyncio marks the pipe closing at
-                # once but tells drain only a loop turn later, so drain alone
-                # can return as if the frame had been written.
+                # Without a deadline this is MCP's plain drain. With
+                # one the drain is bounded, and a pipe already closing
+                # afterwards raises: on a broken pipe asyncio marks
+                # the pipe closing at once but tells drain only a loop
+                # turn later, so drain alone can return as if the
+                # frame had been written.
                 if seconds is None:
                     await self._process.stdin.drain()
                 else:
@@ -338,8 +342,9 @@ class McpStdioTransport:
     async def _answer(self, method: str, request_id: int, future: asyncio.Future[Mapping[str, Any]], seconds: float) -> Mapping[str, Any]:
         """Wait for one request's answer within its deadline."""
         # @intent mcp-stdio-answer-wait-is-bounded
-        # On timeout or cancellation the pending entry is removed, so a late
-        # answer is dropped instead of resolving a forgotten future.
+        # On timeout or cancellation the pending entry is
+        # removed, so a late answer is dropped instead of
+        # resolving a forgotten future.
         try:
             return await asyncio.wait_for(future, timeout=seconds)
         except TimeoutError as exc:
@@ -370,9 +375,10 @@ class McpStdioTransport:
     async def send_request(self, method: str, params: Mapping[str, Any] | None = None, *, timeout_seconds: float | None = None) -> asyncio.Future[Mapping[str, Any]]:
         """Write one JSON-RPC request and return the future its answer resolves; the caller bounds that wait."""
         # @intent mcp-stdio-send-returns-after-drain
-        # A host returns a turn handle while a long request (an ACP
-        # session/prompt) is still pending, so this returns once the frame is
-        # written and drained, within timeout_seconds when given.
+        # A host returns a turn handle while a long request (an
+        # ACP session/prompt) is still pending, so this returns
+        # once the frame is written and drained, within
+        # timeout_seconds when given.
         write_seconds = None if timeout_seconds is None else self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
         _request_id, future = await self._send(method, params, write_seconds)
         return future
@@ -388,8 +394,9 @@ class McpStdioTransport:
     async def respond(self, request_id: int | str, *, result: Mapping[str, Any] | None = None, error: Mapping[str, Any] | None = None, timeout_seconds: float | None = None) -> None:
         """Answer one server request with exactly one of a result or an error."""
         # @intent mcp-stdio-respond-is-checked-before-writing
-        # A response with both or neither of result and error is refused as
-        # invalid_call before anything is written, so the peer never sees it.
+        # A response with both or neither of result and error is
+        # refused as invalid_call before anything is written, so the
+        # peer never sees it.
         write_seconds = None if timeout_seconds is None else self._seconds_or_invalid_call(timeout_seconds, "timeout_seconds")
         if (result is None) == (error is None):
             raise McpProtocolError("An MCP response needs exactly one of result and error.", details={"reason": "invalid_call", "request_id": request_id})
@@ -408,8 +415,8 @@ class McpStdioTransport:
             try:
                 process.stdin.write((json.dumps(frame) + "\n").encode("utf-8"))
                 # @intent mcp-stdio-checked-write-has-a-deadline
-                # The same write as _send: plain without a deadline, bounded
-                # and refused on a closing pipe with one.
+                # The same write as _send: plain without a deadline,
+                # bounded and refused on a closing pipe with one.
                 if seconds is None:
                     await process.stdin.drain()
                 else:
@@ -423,9 +430,10 @@ class McpStdioTransport:
     @staticmethod
     def _seconds_or_invalid_call(value: object, name: str) -> float:
         """Check a new seconds value with the shared validator, as an MCP protocol error."""
-        # The shared record validator refuses bool, NaN, inf and values <= 0,
-        # and a refusal is McpProtocolError(invalid_call), the error type MCP
-        # callers already catch; nothing is written for an invalid call.
+        # The shared record validator refuses bool, NaN, inf and
+        # values <= 0, and a refusal is
+        # McpProtocolError(invalid_call), the error type MCP callers
+        # already catch; nothing is written for an invalid call.
         try:
             return RecordFieldValidator.require_number(value, name, maximum=NATIVE_STDIO_MAX_WAIT_SECONDS)
         except ConfigurationError as exc:
@@ -480,12 +488,12 @@ class McpStdioTransport:
     async def _stop_peer(self, process: asyncio.subprocess.Process) -> None:
         """Give the child its exit grace, then stop it or its whole tree, with every wait bounded."""
         # @intent mcp-stdio-bounded-tree-stop
-        # A peer gets exit_grace_seconds after stdin EOF to finish by itself.
-        # With stop_process_tree its whole group is then stopped whatever
-        # returncode says, because a grandchild can outlive the child and
-        # hold its pipes. Waits after a kill are bounded by shutdown_timeout
-        # and the pipes are closed afterwards, so a surviving grandchild
-        # cannot hang close.
+        # A peer gets exit_grace_seconds after stdin EOF to finish by
+        # itself. With stop_process_tree its whole group is then stopped
+        # whatever returncode says, because a grandchild can outlive the
+        # child and hold its pipes. Waits after a kill are bounded by
+        # shutdown_timeout and the pipes are closed afterwards, so a
+        # surviving grandchild cannot hang close.
         if self.exit_grace_seconds is not None:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(process.wait(), timeout=self.exit_grace_seconds)
@@ -500,7 +508,8 @@ class McpStdioTransport:
                     stop()
                     await asyncio.wait_for(process.wait(), timeout=self.shutdown_timeout)
         finally:
-            # getattr degrades to a pipe leak on a Python without the private attribute instead of raising.
+            # getattr degrades to a pipe leak on a Python without the
+            # private attribute instead of raising.
             pipes = getattr(process, "_transport", None)
             if pipes is not None:
                 with contextlib.suppress(PermissionError, ProcessLookupError, OSError, RuntimeError):
@@ -585,10 +594,11 @@ class McpStdioTransport:
         if "method" in message:
             # @intent mcp-stdio-callback-cannot-kill-reader
             # A frame that carries "method" is a server request or
-            # notification, never an answer, so it must not resolve a pending
-            # request even when its id collides with one. The callback is the
-            # caller's code: an Exception from it drops this frame only, and
-            # the reader keeps serving the other requests.
+            # notification, never an answer, so it must not resolve
+            # a pending request even when its id collides with one.
+            # The callback is the caller's code: an Exception from
+            # it drops this frame only, and the reader keeps serving
+            # the other requests.
             if isinstance(message["method"], str) and self.on_message is not None:
                 with contextlib.suppress(Exception):
                     self.on_message(message)
