@@ -124,3 +124,30 @@ Spec r2 is committed at 01b0bcf6. The frontmatter keeps `status: draft` for a sc
 - In r1, row 16 was `lib/dataclasses/agents.py`. It is now row 3, and r1 rows 3–15 shift down by one.
 
 The ID self-check is clean: no undefined references, no gaps except struck IDs, every EC guarded, and one CREATE row against a budget of one new file.
+
+## Addendum r3 (2026-10-12): revision after the round-2 review
+
+Spec r3 is committed at 74f0b83d with `status: approved`. All nine round-2 findings (R-7 to R-15) were applied as the orchestrator ruled, plus ruling 10 on prefix sources.
+
+**What changed in the design:**
+
+- **R-7: a record passed in is checked, not re-bound.** Step 1 checks each key against its provider (D-31, M-20). It never applies INV-24. Docs show developers only the list form.
+- **R-8: every model an aggregate runs on is a primary.** Every spec-built proposer and the spec-built aggregator count as primaries for INV-24. `match` takes `primary` as a tuple for this. Prebuilt children add no primary.
+- **R-9: restore matches the way the root did.** `ProviderKeys` carries `matched_primary` and `matched_others`. Checkpoints store them as `runtime_config["key_providers"]` (names only). `restore` re-matches against them, with `require_primary_key=False` when the restored agent's provider differs from the stored primary (D-30). A checkpoint from before this change matches as a root (EC-53). `BaseAgent` growth stays within the 30-line cap.
+- **R-11: Q-7 = yes.** A lone unproven key binds to the one keyless primary that accepts it (D-29).
+- **R-12: M-6 and M-7 split.** M-6 fires only when no configured provider accepts the key. M-7 fires when every provider that accepts it already holds a key. Keys are taken in index order.
+- **R-13: provider keys must be sendable.** Two new constants (`VIDBYTE_PROVIDER_KEY_PATTERN`, `VIDBYTE_PROVIDER_KEY_MAX_LENGTH = 512`) and M-21 (D-32).
+- **R-10 and R-15: wording and order.** R-10 states the wrong-vendor residual for unproven keys and adds Q-6 (default no). R-15 fixes the §12.6 order and adds row 41, the dataclasses package export.
+- **Ruling 10: routing rules need first-party sources.** These now have them: `sk-ant-` (platform.claude.com), `sk-or-` (openrouter.ai docs), `sk-admin-` (OpenAI's API reference), `sk-proj-` (OpenAI's GitHub organization), `xai-` (docs.x.ai), and `AIza` + 35 (Google's example on cloud.google.com).
+  - `sk-svcacct-` and `AQ.` stop routing.
+  - A new refuse-only list, `RESERVED_PREFIXES`, stops either from being bound to another vendor by unique assignment. Without it, removing them would have opened a new path for a key to reach the wrong vendor.
+  - `AQ.` keys in the list are refused (A-11), but `GEMINI_API_KEY` still works.
+
+**R-14 evidence.** The Jev run-brief writer is built inside `JevAgent.__init__`, through the compute controller and the brief keeper (agent.py:51, keeper.py:31), so its match already runs before any request. The ruling's suggested `JevAgentSettings.__post_init__` check could not see the brief, because the brief lives in `JevRuntimeSettings.compute.brief`. `AgentRoleSettings` gained the two-line construction check.
+
+**Other facts checked.**
+
+- `SessionSerializer` drops a name only if it contains `API_KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, or `AUTH`, so `key_providers` survives a checkpoint.
+- AC-32 was rewritten, because under D-29 a deepseek agent with a lone unproven key and a kimi fallback now binds the key to deepseek.
+
+**Self-check.** No undefined IDs. No gaps except the struck NG-13, A-2, A-3, Q-1, Q-2, and Q-7. Every EC is guarded, and table columns are consistent. There is one CREATE row against a budget of one new file. New names appear in both §8.5 and §12.3.
