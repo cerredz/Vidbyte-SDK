@@ -15,8 +15,8 @@ started: 2026-10-13 00:45 UTC
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:27 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
 | S1 spec + review | done | 2026-10-13 01:35 UTC | 2026-10-13 11:25 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 81a71d00, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
-| S2 tests | in progress | 2026-10-13 11:30 UTC | | reports/S2-test-author.md | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-13 11:30 UTC | 2026-10-13 16:35 UTC | reports/S2-test-author.md | S2_HEAD 1d110811 (tests 46f1a9db, proof 55f01f44, report 1d110811); 101 tests in tests/features/codex_host/, all red (`101 failed` in the [dev,codex] venv; CI view `35 failed, 66 skipped`); spec r4 38e3a820 pins the S2 spec defects; spec status: tests-written |
+| S3 implement | in progress | 2026-10-13 16:40 UTC | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -96,6 +96,22 @@ started: 2026-10-13 00:45 UTC
   - Q-9: no ceilings; model-supplied values replace defaults.
 - 2026-10-13 11:30 UTC — **S2 environment:** `C:/Users/422mi/vidbyte-repos/.venvs/sdk-codex-host` with `pip install -e "<W>[dev,codex]"`.
   *Why:* spec §13 builds fake responses from openai-codex's real generated models, so host tests need openai-codex locally and are gated with `skipUnless(find_spec("openai_codex"))` for CI, which installs only `.[dev]`. The test author must also show which tests still run with openai_codex blocked, which is the CI view.
+
+- 2026-10-13 16:35 UTC — **S2 spot-check passed.**
+  - All of AC-1..AC-37 are cited in test-plan.md.
+  - The red run is quoted for both views.
+  - I re-ran `test_codex_host_turns.py` myself and got `13 failed in 1.05s`, all `ModuleNotFoundError`.
+  - The test author made three commits, and the tree is clean. No bytecode is tracked.
+  - The pack imports `tests.features.codex_host.*`, so when it runs from outside this worktree's root, it needs `python -P -m pytest … --rootdir=<worktree> -c <worktree>/pyproject.toml` with `PYTHONPATH=<worktree>`. Otherwise another checkout's `tests` package shadows it.
+  *Why:* the S2 spot-check rule.
+- 2026-10-13 16:35 UTC — **Sent the three S2 spec defects to the spec author in Revision mode (r4) before S3.** Lines 210–219 of the S2 report and test-plan.md from line 218 were forwarded by path.
+  - r4 (38e3a820) adds D-33 (handles owned by value: a registered `(thread_id, turn_id)`, late-accepted turns included), D-34 (`limit_reached` is `rateLimits.rateLimitReachedType`, or `""`) and D-35 (a late-accepted interrupted turn carries no problem code).
+  - I verified that only spec.md and the author report changed, that the §6.2 Proof column hashes the same before and after, and that there is no test diff since S2_HEAD.
+  *Why:* the skill resolves spec defects before the implementer meets them.
+- 2026-10-13 16:35 UTC — **Routed the INV-11 coverage gap to the S4 engineering reviewer, not back to the test author.** The gap is late acceptance for goal start (`cancel_goal_operation` exactly once), continue and launch.
+  - The test author covered INV-11 through spawn and review (AC-32), following the doctrine's "single test per inventory entry".
+  - The two tests it flagged as able to pass without exercising their case (the EC-78 queued start, and the goal update after completion with its 0.2 s wait) go to S4 as well.
+  *Why:* S4 engineering exists to find "plausible bugs no test catches". Reopening S2 would delay S3 for a path that shares the spawn mechanism. If S4 confirms a defect, the test change goes to the test author then.
 
 ## User replies (verbatim)
 - none yet
@@ -225,3 +241,32 @@ started: 2026-10-13 00:45 UTC
   - Run one file with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_<topic>.py`.
   *source:* spec r3 §13.
 - **openai_codex must load lazily.** Nothing reachable from `import vidbyte`, or from `vidbyte.tools.builtins` (which the YAML component registry scans), may import openai_codex at module level. The precedent is `CodexTransport._load_sdk` (transport.py:215-259). CI installs only `.[dev]`, so SDK-dependent tests skip there (`skipUnless`). The global Python 3.11 has openai-codex 0.162.1. *source:* S0.
+- **S2 seam, from the test author.**
+  - Tests patch `vidbyte.harnesses.native.codex.connection.CodexClient` with a subclass of the real openai-codex client.
+  - `connection.py` binds `CodexClient` and `CodexConfig` at module level, and only the host's open may import `connection`, or the AC-2 probe fails.
+  *source:* S2 test author.
+- **Values the tests patch in the connection module's namespace.** Read every one at call time, not import time.
+  - `CODEX_HOST_WORKER_THREADS`, read at open; set to 1 as an ordering barrier.
+  - `CODEX_HOST_REQUEST_TIMEOUT_SECONDS`, set to 0.3.
+  - `CODEX_HOST_CLOSE_INTERRUPT_SECONDS`, set to 60.
+  - `shutil.which` and `sys.platform`, patched on their modules.
+  *source:* S2 test author.
+- **Threads.** Requests run only on the host's own workers, never on `MainThread` or on a thread named `asyncio_*`. `client.close()` runs on a daemon thread. The goal watcher reads through `client.next_goal_notification(state)`. *source:* S2 test author.
+- **Goal cleanup order:**
+  - start failure: cancel, finish, unregister;
+  - finished run: finish, wake, unregister;
+  - close: cancel, finish, wake, unregister.
+  *source:* S2 test author.
+- **Errors.** Raise every mapped error `from None`, because the privacy tests scan the visible exception chain. *source:* S2 test author.
+- **Messages the tests check:**
+  - `model_unknown` lists `gpt-5.5` and `gpt-5.5-codex-latest`;
+  - a launch that fails partway says a standalone `2`;
+  - the user-reviewer refusal, the request-bound `api_error` and the close-wins `process_exited` each name the thread id.
+  *source:* S2 test author.
+- **The test most likely to catch a real bug** is `test_codex_host_turns.py::test_the_output_cap_counts_only_the_turns_own_tokens_and_interrupts_once`. Codex's `total` usage counts the whole thread, so a cap compared against it interrupts every continued turn. *source:* S2 test author.
+- **CI coverage.** 66 of the 101 tests are gated on openai-codex and skip in CI, which installs `.[dev]` only. S3–S5 must run the pack in the `[dev,codex]` venv `C:/Users/422mi/vidbyte-repos/.venvs/sdk-codex-host` (openai-codex 0.162.1). The CI view, run with `sys.modules['openai_codex']=None`, must show 66 skipped and 0 failed. *source:* S2 test author.
+- **r4 pins.**
+  - D-33: handles are owned by value. A `CodexTurnHandle` rebuilt from ids equals the returned one.
+  - D-34: `limit_reached` comes from `GetAccountRateLimitsResponse.rate_limits.rate_limit_reached_type`, which is optional, or `""`.
+  - D-35: a late-acceptance interrupt records no stop reason, so the turn ends INTERRUPTED with `problem=None`, and a later timeout or cap adds no label and sends no second interrupt.
+  *source:* spec r4.
