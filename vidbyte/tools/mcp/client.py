@@ -96,7 +96,16 @@ class McpClient:
                 {"name": name, "arguments": dict(arguments)},
             )
         except Exception as exc:
-            return ToolResult.error(name, f"MCP tool call failed: {exc}", metadata={"error": "mcp_error"})
+            # @intent mcp-protocol-error-reason-reaches-the-model
+            # MCP reports invalid arguments and unknown tools as JSON-RPC errors whose message is the only
+            # explanation, and SDK tool errors forward full detail to the model, so keep the server's message.
+            details = getattr(exc, "details", None)
+            remote = details.get("error") if isinstance(details, Mapping) else None
+            reason = remote.get("message") if isinstance(remote, Mapping) else None
+            output = f"MCP tool call failed: {exc}"
+            if isinstance(reason, str) and reason.strip():
+                output = f"{output}: {reason}"
+            return ToolResult.error(name, output, metadata={"error": "mcp_error"})
         text = self._content_to_text(result)
         if len(text) > self.max_output_chars:
             text = text[: self.max_output_chars] + "\n...[truncated]"
