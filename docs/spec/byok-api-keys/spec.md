@@ -1,7 +1,7 @@
 ---
 spec: byok-api-keys
 title: Agents take vidbyte_api_key and a list of provider api_keys, and text calls relay the caller's own key through the Vidbyte gateway
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys
@@ -1477,6 +1477,7 @@ The algorithm tests in `tests/test_multi_provider_agentic_grader.py` mock `Modal
 | r4 | 2026-10-12 | S1 spec | Applied the orchestrator's r4 rulings on the r3 open items. Gemini `AQ.` keys route to gemini (table F row 5), on Google's GitHub organization and Google staff replies; A-13 records Google's own 401 on some REST paths. `RESERVED_PREFIXES` holds only `sk-svcacct-`, and table F's literal prefixes still keep near-miss keys from other vendors. Status: approved |
 | r5 | 2026-10-13 | S1 spec | Wording only, to match the S2 tests (S2-1 to S2-8). Equal match results mean the same mapping and Vidbyte key, not the same tuple order. AC-24 groups the `create_runner` surfaces under M-17. An impossible `TextCredentials` raises `ConfigurationError`. AC-22's cases live in the new pack. The timeout test runs in `DIRECT` under its own class. `match` normalizes provider names. Stragglers are found by a static search. INV-4 drops `AgentFallbackSettings`. No new names and no design change; the §6.2 Proof column is untouched |
 | r5 | 2026-10-13 | S3 implement | Implemented all 41 §12.3 rows in §12.6 order on `feat/byok-api-keys` (cbf79d5f to d1eef1aa, plus the S014 lint fix 1b302cee), draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1027. Full gate green; no spec content changed. Deviations are listed below |
+| r5 | 2026-10-13 | S6 PR | Finalized for review: §5 checked against the code with no drift, the PR body written to `pr-body.md`, and the stage report in `reports/S6-pr-author-2.md` |
 
 **Implementation deviations (S3, r5).** The full list, with evidence, is in `reports/S3-implementer.md` §3.
 
