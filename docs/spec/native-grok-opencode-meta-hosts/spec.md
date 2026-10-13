@@ -2,7 +2,7 @@
 spec: native-grok-opencode-meta-hosts
 title: Native Grok, opencode and Muse hosts, plus GLM and DeepSeek backend profiles
 status: draft            # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
-revision: 1
+revision: 2
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
 branch: feat/native-grok-opencode-meta-hosts
@@ -100,7 +100,7 @@ This PR is the first slice. The non-★ catalog functions, a public `AcpHost` an
   — *Why not:* none is a ★ function, and each adds wire surface that would need its own error rows.
 - **NG-13** — These Grok one-shot flags and bridges: `--json-schema`, `--prompt-file`, `--prompt-json`, `--agents`, `--rules`, `--system-prompt-override`, `--sandbox`, `--tools` and `--disallowed-tools`, plus the ACP fs, terminal and elicitation bridges. — *Why not:* none is ★. The host advertises no fs or terminal capability (request.md Q-4 default).
 - **NG-14** — Muse 1.4-only methods (`usage/read`, `session/rename`, `setReasoningEffort` and the rest). — *Why not:* request.md Q-9 uses version floor 1.0.1. Muse cost is therefore always `None`.
-- **NG-15** — Killing a process tree for long-lived ACP and MSP peers. These peers stop through the protocol, then stdin EOF, then a grace period, then a kill of the direct child. Tree kill covers only `CliRunner` and `ManagedProcess`. — *Why not:* `McpStdioTransport.close()` kills only the direct child (`transport.py:321-336`). Changing that for MCP is out of scope. Recorded as limitation EC-9.
+- **NG-15** — ~~Killing a process tree for long-lived ACP and MSP peers.~~ *Withdrawn in r2 (review R-4).* request.md Q-8's default asks for a tree kill and then a kill inside the distro, so both are built (D-23, EC-10).
 - **NG-16** — Rewriting stale `REPO_MAP.md` text, such as the toolsets entry that says "one such bundle". — *Why not:* indexes are append-only (request.md:200).
 - **NG-17** — A failure-classification table for the new codes. — *Why not:* only `codex.*` codes are required to have one (`tests/test_codex_failure_recovery.py:192-202`; code-map §4.4).
 
@@ -156,7 +156,7 @@ flowchart TD
   H -->|notifications and server requests| J[answer approvals: allow by policy else reject, record]
   H -->|result, error, ceiling or interrupt| K[NativeTurnResult or failure in turn table]
   K -->|wait_*_turn| L[result, raised NativeHostError, or turn_timed_out]
-  H -->|finally| M[peer closed: protocol stop, stdin EOF, grace, kill, reap]
+  H -->|finally| M[peer closed: protocol stop, stdin EOF, grace, tree stop, reap]
 ```
 
 ```mermaid
@@ -176,7 +176,7 @@ sequenceDiagram
   P->>H: session/request_permission (kind edit)
   H->>P: reject_once unless kind in allowed_tool_kinds
   P-->>H: session/prompt result {stopReason}
-  H->>P: stdin EOF, grace, then kill if still alive
+  H->>P: stdin EOF, grace, then stop the whole tree if still alive
   C->>H: wait_grok_turn(handle, timeout_seconds)
   H-->>C: NativeTurnResult(status=completed)
 ```
@@ -213,13 +213,14 @@ The two diagrams walk through these steps:
   - an HTTP call uses `request_timeout_seconds`, or `BACKEND_HTTP_TIMEOUT_SECONDS` for backends;
   - a CLI run uses its invocation's `timeout_seconds`;
   - server startup uses `startup_timeout_seconds`;
-  - a process stop uses `NATIVE_STOP_GRACE_SECONDS` plus a bounded final wait;
+  - a process stop uses `NATIVE_STOP_GRACE_SECONDS` plus a bounded final wait, and the in-distro reap uses `MUSE_REAP_TIMEOUT_SECONDS`;
   - `wait_*_turn` uses its `timeout_seconds`.
 
   Every poll loop compares against a deadline taken from the clock (S064).
 - **INV-4** — Every process a host starts is reaped on every path: success, raised error, timeout, cancellation, turn end and host exit. That covers a turn peer, a short-lived control peer, a CLI run, and the owned `opencode serve`. Reaped means the process's exit status was collected.
   - A turn peer is closed when its turn ends.
   - A short-lived peer is closed before the method that started it returns or raises.
+  - A Grok or Muse peer stops in this order (D-23): the protocol interrupt when a turn is live, stdin EOF, up to `NATIVE_STOP_GRACE_SECONDS` for the peer to exit by itself, then a stop of the peer's whole process tree with a bounded final wait. After a Muse turn peer launched through WSL closes, the host also kills, inside the distro, every process carrying that peer's mark, and their descendants.
   - `__aexit__` interrupts every live turn, waits at most `NATIVE_STOP_GRACE_SECONDS`, then closes every peer and stops the owned server. It does this even when `__aexit__` runs because of cancellation.
 - **INV-5** — Inputs are checked before any process starts or any request that can spend money:
   - Records check fields, types, ranges and closed sets in `__post_init__`.
@@ -234,7 +235,7 @@ The two diagrams walk through these steps:
   - Every exact occurrence of a secret value the host itself injected is replaced with `<redacted>`.
   - opencode `Provider.key` and `Provider.options` are never copied into a result.
   - New modules add no logging calls.
-- **INV-7** — A tool's `execute` never raises anything except `asyncio.CancelledError`. Every failure becomes `ToolResult.error(tool_name, output, metadata=...)`. The metadata holds `error` (the code value), `next_step`, `operation` and `harness`. The output is `"<code>: <message> Next step: <next_step>"`.
+- **INV-7** — A tool's `execute` never raises anything except `asyncio.CancelledError`. Every failure becomes `ToolResult.error(tool_name, output, metadata=...)`. The metadata holds `error` (the code value), `next_step`, `hint` (the same text as `next_step`, because `ToolsFormatter` forwards `hint`, `retryable` and `detail` as structured fields), `operation` and `harness`, plus `retryable` (a bool) when the vendor reported one (`context["retryable"]`). The output is `"<code>: <message> Next step: <next_step>"`.
 - **INV-8** — Every `NativeHostError` has a non-empty `next_step`. Its `failure_code` is one of the 53 codes in §6.3.1, `configuration.invalid_argument` or `runtime.error`. `NATIVE_HOST_NEXT_STEPS` holds a default next step for each of the 53 codes and for both existing ones. Every new code value starts with `grok.`, `opencode.`, `muse.` or `backend.`.
 
 **Safety and liveness**
@@ -244,8 +245,8 @@ The two diagrams walk through these steps:
   - `--yolo` and `allowAll`.
 - **INV-10** — No live turn waits on an approval nobody will answer. The host answers every vendor request inside the turn within `control_timeout_seconds` of receiving it:
   - ACP `session/request_permission`;
-  - opencode permission and question requests for the host's own sessions;
-  - MSP `approval/requested` and `userInput/requested`;
+  - opencode permission and question requests for the turn's session and its descendant sessions (EC-154);
+  - MSP `approval/requested`, `approval/updated` for an approval that is still pending, and `userInput/requested`;
   - any other server request, which gets JSON-RPC error -32601.
 
   The host never chooses an "always" or "session" scope. It records every answer in the turn result, keeping at most `NATIVE_MAX_RECORDED_DECISIONS` and counting any overflow.
@@ -269,7 +270,7 @@ The two diagrams walk through these steps:
 - **INV-17** — Handles are host-scoped. A handle whose `harness` does not match the host, or whose `turn_id` was never issued by this host or has since been evicted, raises `<host>.turn_not_found`.
 
 **Must not regress:**
-- **INV-18** — `McpStdioTransport` behaves exactly as at `base_commit` when the new options are left at their defaults (`on_message=None`, `exit_grace_seconds=0.0`, and `request(...)` without `timeout_seconds`). The one exception is the dispatch fix: a frame with a `method` member is never used to resolve a pending request. Every existing test in `tests/test_mcp_stdio_transport.py` and `tests/test_mcp_studio_server.py` passes unchanged. *Today:* `vidbyte/tools/mcp/transport.py:112-473`.
+- **INV-18** — `McpStdioTransport` behaves exactly as at `base_commit` when the new options are left at their defaults (`on_message=None`, `exit_grace_seconds=None`, `stop_process_tree=False`, and `request(...)` without `timeout_seconds`). The one exception is the dispatch fix: a frame with a `method` member is never used to resolve a pending request. Every existing test in `tests/test_mcp_stdio_transport.py` and `tests/test_mcp_studio_server.py` passes unchanged. *Today:* `vidbyte/tools/mcp/transport.py:112-473`.
 - **INV-19** — `vidbyte/harnesses/native/__init__.py` matches the bytes at request.md:175-186 exactly. The committed blob's SHA-256 is `0374a2c899318e4fdb31c065d951266feaffff5aa736ecde616c4a66942f497a`.
 - **INV-20** — Existing `FailureCode` members and their order are unchanged. Every value contains `.` (`tests/test_session_failures.py:139`). No `codex.*` code is added, so `tests/test_codex_failure_recovery.py:192-202` is unaffected.
 - **INV-21** — `import vidbyte` imports no vendor SDK and starts no process. It imports the new toolsets and, through them, the host modules: plain Python built only on `vidbyte.lib`, `vidbyte.tools` and `vidbyte.harnesses.serialization`. *Today:* `vidbyte/__init__.py:611`.
@@ -299,6 +300,7 @@ The two diagrams walk through these steps:
 | AC-17 | the new codes | the vocabulary is inspected | `NATIVE_HOST_NEXT_STEPS` has a non-empty entry for every one of the 53 new codes and for both existing ones. Every new value starts with its host prefix. | P0 | |
 | AC-18 | a fresh interpreter | `import vidbyte` runs | no child process starts and no vendor SDK module (`acp`, `muse_code_sdk`, `opencode_ai`) is in `sys.modules` | P1 | |
 | AC-19 | the §6.1 invariant INV-9 | each request record, the toolset parameters and each host's argv and wire builders are checked | no field, parameter or argv can carry an approve-everything value. Constructing an opencode rule with permission `*`, pattern `*` and action `ALLOW` raises `ConfigurationError`. | P0 | |
+| AC-20 | the branch head, with each module below imported first in its own fresh interpreter | `import vidbyte`, `import vidbyte.agents`, `import vidbyte.tools.toolsets`, `import vidbyte.harnesses.native.grok`, `import vidbyte.harnesses.native.opencode`, `import vidbyte.harnesses.native.muse` and `import vidbyte.harnesses.native.backends` each run | every import succeeds, whatever the order in which the package chain `vidbyte.agents` → `vidbyte.tools.toolsets` → `vidbyte.tools.builtins.<host>` → `vidbyte.harnesses` → `vidbyte.sessions` → `vidbyte.agents.types` is entered (D-3) | P0 | |
 
 ### 6.3 Edge cases and failure modes
 
@@ -398,7 +400,7 @@ Nor are these codes added: Grok `usage_limited` and `billing_error`, and Muse `n
 | EC-7 | A peer sends a notification or `session/update` variant the host does not know. | The host ignores it: vendor vocabularies are open, and MSP marks its enums `open`. | nothing | D-13 |
 | EC-8 | `__aexit__` runs while turns are live, on success, error or cancellation. | The host interrupts each live turn, waits at most `NATIVE_STOP_GRACE_SECONDS`, then closes every peer and the owned server and reaps them. Each such turn finishes as `INTERRUPTED` with source `HOST_CLOSED`. `__aexit__` never raises anything except `CancelledError`, and never suppresses the exception it was given. | later calls raise EC-2 | INV-4 |
 | EC-9 | Two tasks call methods on the same host at once. | Allowed. The host reserves the session and live-turn slot synchronously before its first `await`, and releases them if the call fails. So two `continue_*` calls on one session cannot both pass the busy check. | the second caller gets `<host>.session_busy` | INV-14 |
-| EC-10 | On Windows, a Grok or Muse peer must be killed after the grace period. | Only the direct child is killed (NG-15). Any grandchildren the vendor started, such as a tool's shell, may survive. Before killing, the host sends the protocol interrupt, closes stdin and waits out the grace period. For Muse, killing `wsl.exe` was verified to leave no orphan in the distro while idle (A-9). | nothing; a limitation | INV-4, NG-15 |
+| EC-10 | A Grok or Muse peer is still running when the grace period after stdin EOF ends, for example because a tool's shell is mid-command. | The transport stops the peer's whole process tree with `ProcessStopper.stop_tree` (POSIX: the peer's own process group; Windows: `taskkill /T /F`), bounds every wait after the kill by `shutdown_timeout`, and then closes the pipes, so a grandchild holding a pipe cannot block the close. For a Muse turn peer launched through WSL, the host then runs the in-distro reap (D-23): every process carrying the peer's random mark, and every descendant of one, is killed. A failed or timed-out reap is not raised, because closing never raises. Residual: a POSIX grandchild that left the process group (`setsid`), or an in-distro process that both dropped the mark and lost its parent link before the reap, may survive (A-9). | nothing; the turn's own outcome | INV-4, D-23 |
 
 #### 6.3.3 GrokHost
 
@@ -440,7 +442,7 @@ Nor are these codes added: Grok `usage_limited` and `billing_error`, and Muse `n
 |---|---|---|---|---|
 | EC-23 | *record*: `GrokTurnRequest` is built with any of these: a prompt that is empty, whitespace or longer than `NATIVE_PROMPT_MAX_CHARS`; a `model` or `reasoning_effort` that is empty, longer than 128 characters, contains whitespace or starts with `-`; a `max_turn_seconds` that is a bool, NaN or ±inf, or not in (0, `NATIVE_TURN_MAX_SECONDS`]; or `allowed_tool_kinds` that is not a `frozenset` of `AcpToolKind`. | `ConfigurationError` names the field. No host call is made. | the field name | INV-5 |
 | EC-24 | The host already has `max_live_turns` live turns. | Raises `grok.session_busy` with `context["live_turns"]`. No process starts. | "This host already runs its maximum number of live turns; wait for or interrupt one with interrupt_grok_turn, then retry."; token `interrupt_grok_turn` | INV-16 |
-| EC-25 | `request.model` is set, and the turn peer, launched as `grok agent -m <model> stdio`, reports a `currentModelId` other than that model after `initialize`. Grok silently falls back to its default for an unknown id; this was verified on 2026-10-12. | The peer is closed and `session/new` is never sent. Raises `grok.model_unknown`, with `context["available_models"]` holding at most 20 ids. | *default*; token `list_grok_models` | INV-5, D-12 |
+| EC-25 | `request.model` is set, and the turn peer, launched as `grok agent --no-leader --model=<model> stdio`, reports a `currentModelId` other than that model after `initialize`. Grok silently falls back to its default for an unknown id; this was verified on 2026-10-12. | The peer is closed and `session/new` is never sent. Raises `grok.model_unknown`, with `context["available_models"]` holding at most 20 ids. | *default*; token `list_grok_models` | INV-5, D-12 |
 | EC-26 | `request.reasoning_effort` is set, the selected model's `_meta.reasoningEfforts` list is present, and the list lacks that effort. Grok accepts any `--reasoning-effort` value silently, as verified. | The peer is closed. Raises `grok.capability_missing`. | "Pick a reasoning effort list_grok_models shows for this model."; token `list_grok_models` | INV-5 |
 | EC-27 | `session/new` succeeds, but the `session/prompt` write fails because the peer exited. | The peer is closed. Raises `grok.process_exited`. The session created by `session/new` stays in Grok's history, as described under Rollback below. | *default* | INV-4 |
 
@@ -470,8 +472,8 @@ Before spending, the host checks existence with a short-lived peer's `session/li
 | EC-34 | This host has a live turn on `session_id`. | Raises `grok.session_busy`. | *default* | INV-14 |
 | EC-35 | `session_id` is not among the `session/list` results for the workspace within `GROK_LIST_MAX_PAGES` pages. | Raises `grok.session_not_found` with `context["truncated"]`. Nothing is spent. | *default*; token `list_grok_sessions` | INV-5 |
 | EC-36 | `new_session_id` already appears in that listing. | Raises `configuration.invalid_argument`, because Grok refuses an existing id. | token `new_session_id` | INV-5 |
-| EC-37 | `request.model` or `request.reasoning_effort` fails the live check (a short-lived peer launched with `-m`), as in EC-25 and EC-26. | Raises `grok.model_unknown` or `grok.capability_missing`. | *default* | INV-5 |
-| EC-38 | The CLI run takes longer than `request.max_turn_seconds`. | `ProcessStopper` stops and reaps the process tree. Raises `grok.turn_timed_out`. The fork may or may not exist. | "The one-shot run was stopped at max_turn_seconds; raise it or use spawn_grok_session for long work."; token `max_turn_seconds` | INV-3, INV-4 |
+| EC-37 | `request.model` or `request.reasoning_effort` fails the live check (a short-lived peer launched with `--model=<model>`), as in EC-25 and EC-26. | Raises `grok.model_unknown` or `grok.capability_missing`. | *default* | INV-5 |
+| EC-38 | The CLI run takes longer than `request.max_turn_seconds`. | `ProcessStopper` stops and reaps the process tree. Raises `grok.turn_timed_out`. The fork may or may not exist (and A-18 applies). | "The one-shot run was stopped at max_turn_seconds; raise it or use spawn_grok_session for long work."; token `max_turn_seconds` | INV-3, INV-4 |
 | EC-39 | The output JSON lacks `sessionId`, or its `sessionId` equals `session_id`. | Raises `grok.protocol_mismatch`. | *default* | D-13 |
 
 **`run_grok_once(request: GrokOneShotRequest)` → `GrokOneShotResult`.** This exists both as a method and as the module function `run_grok_once(request, *, settings)`. Shared rows: EC-2, EC-4 and EC-5, plus EC-3, EC-8 and EC-11 for the module function's own host. Host-wide rows: EC-11 to EC-17. Rows EC-33, EC-37 and EC-38 also apply. If `text` is longer than `NATIVE_RESULT_TEXT_MAX_CHARS`, it is cut and `text_truncated=True`; this is not an error.
@@ -583,7 +585,7 @@ A failed turn raises the same error on every wait, until the turn is evicted fro
 
 **`unrevert_opencode_session(session_id: str)` → `OpencodeSession`.** Shared rows: EC-1, EC-2, EC-4 and EC-5. Host-wide rows: EC-55 to EC-59. Rows EC-71, EC-72 and EC-78 apply, with EC-78's 409 coming from `POST …/unrevert`. If there is nothing to unrevert, the session comes back unchanged; this is not an error (A-7).
 
-**`list_opencode_sessions(limit: int = 50)` → `tuple[OpencodeSession, ...]`.** Shared rows: EC-1 (a `limit` outside 1..`NATIVE_LIST_MAX_LIMIT`), EC-2, EC-4 and EC-5. Host-wide rows: EC-55 to EC-59. The function sorts `GET /session` by `time.updated`, newest first, and keeps the first `limit` sessions.
+**`list_opencode_sessions(limit: int = 50)` → `tuple[OpencodeSession, ...]`.** Shared rows: EC-1 (a `limit` outside 1..`NATIVE_LIST_MAX_LIMIT`), EC-2, EC-4 and EC-5. Host-wide rows: EC-55 to EC-59. The function calls `GET /session` with `limit` in the `urlencode` query, so the server returns at most `limit` sessions; its OpenAPI says the list is "sorted by most recently updated". The host still sorts the result by `time.updated`, newest first. Without the server-side `limit`, a user with hundreds of sessions would exceed `OPENCODE_MAX_RESPONSE_BYTES`.
 
 **`get_opencode_session(session_id: str)` → `OpencodeSession`.** Shared rows: EC-1, EC-2, EC-4 and EC-5. Host-wide rows: EC-55 to EC-59. Rows EC-71 and EC-72 also apply.
 
@@ -602,11 +604,13 @@ A failed turn raises the same error on every wait, until the turn is evicted fro
 | EC-82 | The turn's assistant message has `error.name == "ProviderAuthError"`, or `APIError` with `statusCode` 401 or 403. | Raises `opencode.not_signed_in`. | *default*; token `opencode auth login` | D-9 |
 | EC-83 | `APIError` with `statusCode` 429. | Raises `opencode.usage_limited`. | *default*; token `reset` | D-9 |
 | EC-84 | `APIError` with `statusCode` 402. | Raises `opencode.billing_error`. | *default*; token `billing` | D-9 |
-| EC-85 | Any other assistant `error.name` except `MessageAbortedError` and `MessageOutputLengthError`; or the session is idle for `OPENCODE_IDLE_CONFIRMATIONS` polls in a row with no assistant reply to the turn's user message. | Raises `opencode.api_error` with `vendor_error`. | *default* | D-9 |
+| EC-85 | Any of these: any other assistant `error.name` except `MessageAbortedError` and `MessageOutputLengthError`; the session is idle for `OPENCODE_IDLE_CONFIRMATIONS` polls in a row after the turn's user message (or a `busy` or `retry` status) was seen, with no assistant message whose `parentID` is that user message; or neither the user message nor a `busy` or `retry` status is seen within `request_timeout_seconds` after `prompt_async` answered 204. The turn's user message is the first `user` message newer than the snapshot the host took before `prompt_async` (§8.5, `OpencodeTurnWatcher`), so a reply to an earlier turn is never taken for this turn's reply. | Raises `opencode.api_error` with `vendor_error`, and `context["reason"]` set to `no_reply` or `prompt_not_seen` for the last two cases. | *default* | D-9 |
 | EC-86 | A watcher poll gets 404 for the session, because it was deleted mid-turn. | Raises `opencode.session_not_found`. | *default* | D-9 |
 | EC-87 | The watcher's polls fail as in EC-55 or EC-56 for `OPENCODE_POLL_FAILURE_LIMIT` polls in a row. | Raises `opencode.server_unreachable` or `opencode.process_exited`. | *default* | INV-3 |
 | EC-88 | Not an error: `MessageAbortedError`, the ceiling passing (the watcher sends `POST …/abort`), or the host closing. | Returns `INTERRUPTED`. | the result | INV-13 |
 | EC-89 | Not an error: the assistant has `MessageOutputLengthError`. | Returns `COMPLETED` with `stop_reason="output_length"`. | the result | D-9 |
+| EC-154 | A pending permission or question request names a child session of the turn's session. opencode's `task` tool runs a subagent in a child session whose `parentID` is the turn's session, and the request carries the child's `sessionID`. | The watcher keeps the turn's session tree: the turn's session plus its descendants from `GET /session/{id}/children`, walked breadth-first and refreshed whenever a pending request names a session not yet in the tree. It rejects requests from any session in the tree exactly as for the turn's own session, and records each answer. Requests from sessions outside every live turn's tree are left alone, because on an attached server they may belong to the user. If the tree would pass `OPENCODE_MAX_SESSION_TREE` sessions, the watcher sends `POST …/abort`, and the turn ends `INTERRUPTED` with source `POLICY`. A failed `children` call counts as a failed poll (EC-87). | the result's decisions | INV-10, D-11 |
+| EC-155 | `GET /session/status` shows the turn's session as `retry` with `attempt` ≥ `OPENCODE_RETRY_ATTEMPT_LIMIT`, for example a provider answering 429 in opencode's retry loop. | The watcher sends `POST …/abort` and records the turn as `FAILED`: `opencode.usage_limited` when the retry `message` or `action.reason`, casefolded, contains an entry of `OPENCODE_RATE_LIMIT_MARKERS` (A-17); otherwise `opencode.api_error`. The context carries `retry_attempt`, `reason` (the verbatim `action.reason`, when present) and the scrubbed retry message as `vendor_error`. | *default*; token `reset` for `usage_limited` | D-9, INV-3 |
 
 **`interrupt_opencode_turn(handle: NativeTurnHandle)` → `NativeInterruptResult`.** Shared rows: EC-1, EC-2, EC-4 and EC-5. Host-wide rows: EC-55 to EC-59. Row EC-80 also applies. A finished turn returns `was_running=False`.
 
@@ -700,6 +704,7 @@ A failed turn raises the same error on every wait, until the turn is evicted fro
 | EC-119 | `error.kind` is `modelError`, `configError`, `launchError`, `workflowLaunchError`, `projectionError`, `logError` or an unknown kind. | Raises `muse.api_error` with `vendor_kind`, `retryable` and the scrubbed `vendor_error`. | *default* | D-9, INV-6 |
 | EC-120 | The peer exits before `turn/completed` arrives. | Raises `muse.process_exited`. | *default* | D-9 |
 | EC-121 | Not an error: `terminal` is `completed` or `cancelled`; or `approval/requested` offers no `denied` choice with scope `once`. | Returns `COMPLETED` or `INTERRUPTED`. In the last case the host sends `turn/interrupt`, and the turn ends `INTERRUPTED` with source `POLICY`. | the result | INV-10 |
+| EC-156 | `approval/decide` or `userInput/cancel` is answered with a JSON-RPC error (for example -32052 for a choice no longer offered), or gets no answer within `control_timeout_seconds`. A `decide` result with `terminal: false` is not this row: the approval stays pending, and the host answers the `approval/updated` that follows with its new `currentRequirementId`. | The driver records the decision with outcome `CANCELLED`, sends `turn/interrupt`, and the turn ends `INTERRUPTED` with source `POLICY`, so it never waits on an approval nobody answered. | the result's decisions | INV-10, D-11 |
 
 **`track_muse_session_usage(session_id: str)` → `NativeSessionUsage`.** Shared rows: EC-1, EC-2, EC-4 and EC-5. Host-wide rows: EC-94 to EC-102. Rows EC-110, EC-111 and EC-114 also apply. If no `session/tokenUsage` event appears within the last `MUSE_USAGE_MAX_PAGES` backward pages, the usage fields are `None` and `truncated=True`. Cost is always `None` (NG-14). Neither case is an error.
 
@@ -760,7 +765,7 @@ Every function in §9.2's tool table has exactly one tool, named after the funct
 
 | ID | Trigger (input + state) | System behavior | User sees | Guarded by |
 |---|---|---|---|---|
-| EC-138 | Turning the tool's arguments into a record or primitive fails: a required parameter is missing, a JSON type is wrong, an enum value is unknown, a value is out of range, or record construction raises `ConfigurationError`. | Returns `ToolResult.error` with `metadata["error"] = "configuration.invalid_argument"` and the parameter's name. | the parameter's name | INV-7 |
+| EC-138 | Inside `execute`, turning the tool's arguments into a record or primitive fails: a JSON type is wrong, an enum value is unknown, a value is out of range, record construction raises `ConfigurationError`, or a required parameter is missing because `execute` was called directly. Under `ToolExecutor`, a missing required parameter never reaches `execute`: `BaseTool.validate_call` reports it first, and the executor returns its own `metadata["error"] = "validation_error"` result. That executor behaviour is unchanged. | Returns `ToolResult.error` with `metadata["error"] = "configuration.invalid_argument"` and the parameter's name. | the parameter's name | INV-7 |
 | EC-139 | The host raises `NativeHostError`. | Returns `ToolResult.error` carrying that code, message and next step (INV-7). | the row's next step | INV-7 |
 | EC-140 | The tool's own code raises any other `Exception`. | Returns `ToolResult.error` with `runtime.error`, naming only the exception class. The text is never built from `str(exc)` (S017). | *default*; token `error_type` | INV-7 |
 | EC-141 | The tool call is cancelled. | `CancelledError` propagates. It is the only exception a tool lets through. | cancellation | INV-2 |
@@ -808,7 +813,7 @@ Every function in §9.2's tool table has exactly one tool, named after the funct
 | FR-12 | The host answers every approval, permission, question or user-input request during a live turn according to the request's own policy, records each answer, and never leaves a turn waiting (INV-10). | P0 | request.md Q-4 |
 | FR-13 | No approve-everything setting is reachable from Python or from a tool (INV-9). | P0 | request.md:142-147, Q-12 |
 | FR-14 | `wait_*_turn` and `track_*_session_usage` report tokens, plus dollars where the vendor gives them. Unknown values are `None` (INV-15). | P1 | request.md Q-6; catalog §2.1 "Usage in $" |
-| FR-15 | `McpStdioTransport` gains an `on_message` callback, `send_request`, `notify`, `respond`, a per-call `timeout_seconds` and `exit_grace_seconds`, without changing its default behavior (INV-18). | P0 | request.md Q-3 |
+| FR-15 | `McpStdioTransport` gains an `on_message` callback, `send_request`, `notify`, `respond`, a per-call `timeout_seconds`, `exit_grace_seconds` and `stop_process_tree`, without changing its default behavior (INV-18). | P0 | request.md Q-3, Q-8 |
 | FR-16 | `vidbyte.lib.process` provides `CliRunner`, `ManagedProcess` and `ProcessStopper`, used for every one-shot CLI run and for the owned opencode server. | P0 | field guide `cli-backed-source-integrations.md`; FR-9 |
 | FR-17 | A module-level `run_grok_once(request, *, settings)` wraps the one-shot ★ function. | P1 | request.md:98 |
 | FR-18 | `OpencodeHost` owns one `opencode serve` per host. The server is bound to 127.0.0.1 on a free port, uses a random per-host password passed through env, and stops on every exit path. Alternatively the host attaches to `server_url` with credentials. | P0 | request.md Q-5 |
@@ -820,7 +825,7 @@ Every function in §9.2's tool table has exactly one tool, named after the funct
 | ID | Requirement | Priority | Target |
 |---|---|---|---|
 | NFR-1 | Default deadlines | P0 | control request 30 s; HTTP 30 s; opencode startup 20 s; backend HTTP 15 s; stop grace 5 s; wait 60 s by default (Python cap 3600 s, tool cap 240 s); turn ceiling 1800 s by default (max 14400 s) |
-| NFR-2 | Reaping | P0 | No process started by a call outlives it, except a live turn's peer. When `__aexit__` returns, no process the host started is alive. Both hold within `NATIVE_STOP_GRACE_SECONDS` + 2 s. |
+| NFR-2 | Reaping | P0 | No process started by a call outlives it, except a live turn's peer. When `__aexit__` returns, no process the host started is alive. Both hold within `NATIVE_STOP_GRACE_SECONDS` + 2 s, plus `MUSE_REAP_TIMEOUT_SECONDS` for a Muse turn peer launched through WSL (D-23). |
 | NFR-3 | Bounded memory | P0 | INV-16 caps: result text 100,000 characters; decisions 100; finished turns 64; live turns 4 by default (16 max); list and page limit 200; opencode body 8 MiB; backend body 64 KiB; CLI output 4 MiB; tool output 64,000 bytes |
 | NFR-4 | Module size | P0 | Every new module at most 800 lines; no touched file over 1,000 lines (AGENTS.md principle 3) |
 | NFR-5 | Dependencies and import cost | P0 | No new dependency. `import vidbyte` starts no process and imports no vendor SDK (INV-21). |
@@ -855,8 +860,8 @@ The design has four layers. Lower layers never import higher ones (AGENTS.md pri
 | ID | Decision | Deciding reason | Runner-up | Flips if |
 |---|---|---|---|---|
 | D-1 | There is one host class per harness: an async context manager used once, serving one workspace directory. Functions are methods named `<verb>_<host>_<noun>`. The one-shot ★ function `run_grok_once` also has a module-level wrapper. Tools cannot choose a directory. | This follows the upstream ledger (request.md:96-101). One workspace per host removes per-request `cwd`, so a tool cannot redirect a harness (T-2). opencode already runs one server per directory (request.md Q-5). "One-shot" in the catalog means the `-p`/`exec`/`run` row (catalog §2.1), and only `run_grok_once` is ★. | Module-level wrappers for every stateless read | the Codex and Claude host PRs merge module-level wrappers for reads; then add matching wrappers in a follow-up |
-| D-2 | Grok and Muse start **one peer process per live turn**, plus a short-lived peer for each read. opencode uses **one owned `opencode serve` per host**, or attaches to `server_url`. | Grok picks the model and reasoning effort per process (`grok agent -m X stdio`). Probes on 2026-10-12 showed `currentModelId` follows `-m`, and that unknown ids silently fall back. Per-turn peers make reaping, crash isolation and notification routing trivial, and both protocols keep sessions on disk (`sessionDurability: "durable"`; ACP `session/resume`). | One long-lived multiplexed peer per host | measured peer start-up exceeds 5 s per turn, or Grok exposes model choice per session over ACP |
-| D-3 | ACP and MSP framing reuse `McpStdioTransport`, extended additively (request.md Q-3, option 1). The extension adds: an `on_message` callback for frames that carry `method`; `send_request()` (returns once the frame is written, so `spawn_grok_session` can return while `session/prompt` is still pending); `notify()` and `respond()`; `request(..., timeout_seconds=)`; `exit_grace_seconds`; and a dispatch fix so a frame with `method` never resolves a pending request. | AGENTS.md principle 5: extend a close helper rather than copy it. The transport already owns NDJSON framing, id demultiplexing, the bounded stderr buffer, the env allowlist and the Windows launcher. A006 allows `harnesses → tools.mcp` (code-map §1.3). | A private `_jsonrpc.py` under `native/` shared by Grok and Muse | an existing MCP test regresses, or the extension grows past about 120 changed lines |
+| D-2 | Grok and Muse start **one peer process per live turn**, plus a short-lived peer for each read. opencode uses **one owned `opencode serve` per host**, or attaches to `server_url`. | Grok picks the model and reasoning effort per process (`grok agent --no-leader --model=X stdio`). Probes on 2026-10-12 showed `currentModelId` follows the model flag, and that unknown ids silently fall back. `--no-leader` is always passed (present on 1.0.13 and 1.0.52): leader mode defaults to the user's `[cli] use_leader` config, and a peer attached to a shared leader would ignore its own model and effort and outlive its own kill. Per-turn peers make reaping, crash isolation and notification routing trivial, and both protocols keep sessions on disk (`sessionDurability: "durable"`; ACP `session/resume`). | One long-lived multiplexed peer per host | measured peer start-up exceeds 5 s per turn, or Grok exposes model choice per session over ACP |
+| D-3 | ACP and MSP framing reuse `McpStdioTransport`, extended additively (request.md Q-3, option 1). The extension adds: an `on_message` callback for frames that carry `method`; `send_request()` (returns once the frame is written, so `spawn_grok_session` can return while `session/prompt` is still pending); `notify()` and `respond()`; `request(..., timeout_seconds=)`; `exit_grace_seconds`; `stop_process_tree` (D-23); and a dispatch fix so a frame with `method` never resolves a pending request.<br>**Package edge.** This makes the dependency between the `tools` and `harnesses` packages two-way, with no module cycle: `vidbyte.harnesses.native` imports `vidbyte.tools.mcp.transport`, while `vidbyte.tools.builtins.<host>` and `vidbyte.tools.toolsets` import `vidbyte.harnesses.native`. Because `vidbyte.agents` imports `vidbyte.tools.toolsets` (through `vidbyte.agents.coding`), `import vidbyte.agents` now also loads the hosts, `vidbyte.harnesses` and `vidbyte.sessions`, and `vidbyte.sessions` imports `vidbyte.agents.types` back. AC-20 proves every entry import works in a fresh interpreter. | AGENTS.md principle 5: extend a close helper rather than copy it. The transport already owns NDJSON framing, id demultiplexing, the bounded stderr buffer, the env allowlist and the Windows launcher. A006 allows `harnesses → tools.mcp` and finds no concrete-module cycle (code-map §1.3). The two-way package edge is accepted because the alternative copies the framing (runner-up). | A JSON-RPC stdio peer in `vidbyte.lib.process`, leaving `McpStdioTransport` untouched | an existing MCP test regresses; the extension grows past about 160 changed lines; or AC-20 cannot pass without a function-level import |
 | D-4 | One-shot CLI runs and the owned server run through a new canonical package, `vidbyte.lib.process`. `CliRunner.run` handles timeout, output bound and tree stop on timeout or cancel. `ManagedProcess` handles start, waiting for a matching line, draining output, and stop. `ProcessStopper.stop_tree` uses POSIX `killpg` with `start_new_session=True`, or Windows `taskkill /T /F /PID` followed by `kill()`. | Field guide `cli-backed-source-integrations.md`: "centralize process execution in one library runner". No such runner exists (code-map §2.1). Three hosts need one. | Inline subprocess code in each host | a canonical runner lands on `main` first; then adopt it |
 | D-5 | opencode HTTP goes through `HttpTransport.request` with `timeout_seconds=request_timeout_seconds`, `max_response_bytes=OPENCODE_MAX_RESPONSE_BYTES` and `retry_count=0`. Query strings are built with `urllib.parse.urlencode`, and basic auth goes in a header. | S011 forbids importing `httpx` elsewhere (code-map §4.1), so `HttpTransport` is the canonical route. A retry could duplicate a `prompt_async`, `fork` or `revert`, so there are none. | Adding query-param support to `HttpTransport` | a second caller needs query params |
 | D-6 | There is one error type: `NativeHostError(AgentExecutionError)` in `vidbyte.lib.errors.base`. It carries `failure_code: FailureCode`, `operation`, `next_step` (defaulting from `NATIVE_HOST_NEXT_STEPS`), `error_type` and `context: Mapping[str, str]`, plus the A003 `DIAGNOSTIC_FIELDS`. | It follows the `CodexAgentError` precedent (`base.py:129-153`). One type gives callers one `except`, and `FailureCode.from_exception` already reads `failure_code` (`failure.py:166-172`). | A class per host under `harnesses/native/` | the Codex or Claude PR lands a shared host error first; then subclass or alias it at merge |
@@ -864,9 +869,9 @@ The design has four layers. Lower layers never import higher ones (AGENTS.md pri
 | D-8 | Validation has three parts:<ul><li>Records validate in `__post_init__` and raise `ConfigurationError`.</li><li>Every numeric, bool, text and enum check goes through one canonical validator, `vidbyte.lib.dataclasses.validation` (`RecordFieldValidator`).</li><li>Host methods validate primitive arguments with the same validator and raise `NativeHostError(configuration.invalid_argument)`.</li></ul> | AGENTS.md principle 4. The validator file is the one place where C008 exempts verb-plus-primitive helpers (`lint/rules/c008…`; code-map §1.3). Inside it the checked variable is called `value`, a name exempt from C002, so no `isinstance(timeout_seconds, bool)` duplicate is created. It also rejects bool, NaN and ±inf first (C006). | Per-record private `_require_*` helpers | — (C008 would flag them) |
 | D-9 | `wait_*_turn` returns `NativeTurnResult` for `COMPLETED` and `INTERRUPTED` turns. It raises the turn's mapped code for `FAILED` turns, and raises `<host>.turn_timed_out` when the wait passes its deadline; the turn itself is shielded and unaffected. | A failed turn ("usage limited", "not signed in") is the error the user asked to be told about. Interruption is an outcome the caller requested. `asyncio.shield` keeps the wait from cancelling the turn, including under Codex's 300 s cut (code-map §4.8). | Returning `FAILED` results instead of raising | callers need the partial text of failed turns; then add it to the error's context |
 | D-10 | Every live turn has a ceiling, `max_turn_seconds` (default 1800 s, max 14400 s). At the ceiling the host interrupts the turn, waits out the grace period and closes the peer. The result is `INTERRUPTED` with source `DEADLINE`. | INV-3 requires a deadline on the turn's own I/O. Without one, a hung peer holds a process forever. | No ceiling; rely on callers to interrupt | — |
-| D-11 | **Approvals.** The host answers every request inside a turn and records each answer.<ul><li>**Grok:** `allow_once` for tool kinds in `request.allowed_tool_kinds`; otherwise `reject_once`, or the `cancelled` outcome when no reject option exists.</li><li>**opencode:** the session is created with the request's `permission_rules`, and the allow-everything rule is refused. The turn's watcher rejects every pending permission (`reply: "reject"`) and question (`/reject`) for its own session on each poll.</li><li>**Muse:** fixed `approvalMode: "denyUnmatched"`. The host answers `approval/requested` with a `denied` choice scoped `once`, cancels `userInput/requested`, and returns -32601 for any other server request.</li></ul>Tools never pass permission fields; tool-built requests use the record defaults. | request.md Q-4 default: deny unless the request allows it, record it, and never hang. Tools cannot widen permissions (§10 T-2). `denyUnmatched` keeps the user's own Muse rules and denies everything else. | Per-call policies passed through tools | the user asks for a permission ceiling that developers can set on tool-spawned turns (Q-14) |
-| D-12 | The model and effort are checked against the vendor's live list before anything is spent.<ul><li>**Grok:** the turn peer is started with `-m`, and its `currentModelId` echo must match. `_meta.reasoningEfforts` is checked too.</li><li>**opencode:** `GET /config/providers`.</li><li>**Muse:** `model/list`, when it is non-empty.</li></ul>Model strings are vendor-defined and stay `str` fields on `*Request` records, which are not C012 owner classes. No lint file is edited. | The vendors silently ignore unknown values (verified for Grok). C012 scopes only `Settings`/`Config`/`Configuration`/`Spec`/`Descriptor`/`Options` owners (code-map §1.3), and its strict catalog lacks these vendor ids (code-map §4.14). | Registry validation through `ProviderModelRegistry` | the SDK model registry gains vendor-harness catalogs |
-| D-13 | Wire parsing is strict about what the host relies on and tolerant of everything else. A missing or wrongly typed relied-on member raises `<host>.protocol_mismatch`; parsers never silently fall back. Unknown members, notifications and enum values are ignored. Values from open vendor vocabularies (stop reasons, MSP status and kind, opencode auth method types and error names) are kept as verbatim `str`. SDK-owned closed sets are enums. | The Semgrep `typed-mapping-boundary-policy` forbids `if not isinstance(x, Mapping): return …` under `harnesses/` and `tools/builtins/` (code-map §1.3). MSP marks its enums `x-msp-openness: open` (schema), so an enum would break on the vendor's next release. | Enums for vendor values | a vendor publishes a closed, versioned set |
+| D-11 | **Approvals.** The host answers every request inside a turn and records each answer.<ul><li>**Grok:** `allow_once` for tool kinds in `request.allowed_tool_kinds`; otherwise `reject_once`, or the `cancelled` outcome when no reject option exists.</li><li>**opencode:** the session is created with the request's `permission_rules`, and the allow-everything rule is refused. The turn's watcher rejects every pending permission (`reply: "reject"`) and question (`/reject`) whose `sessionID` is the turn's session or one of its descendant sessions (EC-154) on each poll.</li><li>**Muse:** fixed `approvalMode: "denyUnmatched"`. The host answers `approval/requested`, and `approval/updated` while the approval is still pending, with `approval/decide` choosing a `denied` choice scoped `once`, and answers `userInput/requested` with `userInput/cancel`; both commands carry every field the schema requires (§8.5), and a failed answer stops the turn (EC-156). It returns -32601 for any other server request.</li></ul>Tools never pass permission fields; tool-built requests use the record defaults. | request.md Q-4 default: deny unless the request allows it, record it, and never hang. Tools cannot widen permissions (§10 T-2). `denyUnmatched` keeps the user's own Muse rules and denies everything else. | Per-call policies passed through tools | the user asks for a permission ceiling that developers can set on tool-spawned turns (Q-14) |
+| D-12 | The model and effort are checked against the vendor's live list before anything is spent.<ul><li>**Grok:** the turn peer is started with `--model=<id>`, and its `currentModelId` echo must match. `_meta.reasoningEfforts` is checked too.</li><li>**opencode:** `GET /config/providers`.</li><li>**Muse:** `model/list`, when it is non-empty.</li></ul>Model strings are vendor-defined and stay `str` fields on `*Request` records, which are not C012 owner classes. No lint file is edited. | The vendors silently ignore unknown values (verified for Grok). C012 scopes only `Settings`/`Config`/`Configuration`/`Spec`/`Descriptor`/`Options` owners (code-map §1.3), and its strict catalog lacks these vendor ids (code-map §4.14). | Registry validation through `ProviderModelRegistry` | the SDK model registry gains vendor-harness catalogs |
+| D-13 | Wire parsing is strict about what the host relies on and tolerant of everything else. Every inbound frame or body is parsed by the host's `*Wire` into a §9.1 record before any decision reads it; that includes the *inbound* records for permission and approval requests, session updates, turn completions, session statuses and assistant errors. Drivers and watchers dispatch on the frame's `method` string only and never read a raw mapping (field guide `class-bound-helpers.md:47`, `strict-config-dataclasses.md:39`). A missing or wrongly typed relied-on member raises `<host>.protocol_mismatch` in the parser; parsers never silently fall back. Unknown members, notifications and enum values are ignored. Values from open vendor vocabularies (stop reasons, MSP status and kind, opencode auth method types and error names) are kept as verbatim `str`. SDK-owned closed sets are enums. | The Semgrep `typed-mapping-boundary-policy` forbids `if not isinstance(x, Mapping): return …` under `harnesses/` and `tools/builtins/` (code-map §1.3). MSP marks its enums `x-msp-openness: open` (schema), so an enum would break on the vendor's next release. | Enums for vendor values | a vendor publishes a closed, versioned set |
 | D-14 | **Usage.** Each source sets only the fields the vendor reports; unknown is `None`.<ul><li>**Grok:** `PromptResponse.usage`, or else the latest `usage_update` (`cost` only when the currency is `USD`).</li><li>**opencode:** `Session.cost` and `tokens`, plus each `AssistantMessage`'s cost and tokens.</li><li>**Muse:** `turn/completed.usage`, plus the latest `session/tokenUsage.cumulative` found by paging backward. Cost is `None`.</li></ul> | request.md Q-6, Q-9 and INV-15. | Reading `~/.grok/sessions/*/summary.json` | Grok documents usage in ACP stable |
 | D-15 | Tools live in `vidbyte.tools.builtins.<host>` but are **not** exported from the `vidbyte.tools.builtins` package. The toolsets are exported from `vidbyte.tools.toolsets`. The root `vidbyte` package's exports are unchanged, so no contract regeneration is needed. | `ComponentRegistry` makes every class exported from `builtins` YAML-declarable (`components.py:101-124`). Host tools need a live `host` argument and cannot be built from YAML. Leaving them out keeps WRITE tools out of YAML. Leaving the root and contract alone avoids the two-commit C016 dance (code-map §4.16). request.md:173 says hosts are imported from their own subpackage. | Exporting from `builtins` and root | the user wants root-level `from vidbyte import GrokHost`; then add exports and regenerate the contract |
 | D-16 | **Backends.**<ul><li>Profiles are declared in `vidbyte.lib.configs.harness_backends` as `HARNESS_BACKENDS`.</li><li>The functions are `@staticmethod`s on `HarnessBackends`, re-exported as module functions.</li><li>GLM uses Z.ai's Anthropic-compatible endpoint `https://api.z.ai/api/anthropic` and reads `GLM_API_KEY` (request.md Q-13).</li><li>The opencode route uses opencode's built-in providers: `zai-coding-plan`, where the host copies `GLM_API_KEY` into `ZHIPU_API_KEY` in the server's env, and `deepseek` with `DEEPSEEK_API_KEY`.</li></ul> | Fixed capability data goes in `lib/configs/` (field guide `declarative-config-resolution.md`). A live probe on 2026-10-12 found `zai-coding-plan` (env `ZHIPU_API_KEY`, models `glm-5.3`, `glm-5.3-flash`) and `deepseek` (env `DEEPSEEK_API_KEY`, models `deepseek-flash`, `deepseek-v4-pro`) built into opencode 1.18.31. That needs no guessed base URLs. | A custom provider injected through `OPENCODE_CONFIG_CONTENT` (verified to work) | the built-in provider ignores the env key when `auth.json` has one (A-4); then switch to the custom provider |
@@ -876,6 +881,7 @@ The design has four layers. Lower layers never import higher ones (AGENTS.md pri
 | D-20 | No new dependency; `pyproject.toml` is unchanged. | request.md Q-2 default. `pyproject.toml` is reserved (request.md:202). ACP and MSP are NDJSON JSON-RPC, which the extended transport speaks. | `agent-client-protocol` and `muse-code-sdk` extras | the user asks for the vendor SDKs |
 | D-21 | No `vidbyte.mcp_server` change. `McpStudioServer(tools=GrokTools(host))` already serves a toolset. Because the MCP server skips `PermissionPolicy`, this is a documented limitation (T-5): developers expose reads with `Tools.subset(...)`. | request.md:94: "Add code there only if it cannot already serve a toolset". code-map §4.5 confirms that `handlers.py:84-88` has no policy check. | Adding permission enforcement to the MCP server | the user asks for MCP-side enforcement (a separate PR) |
 | D-22 | Plumbing that all three hosts need lives once, in `vidbyte.harnesses.native.hostkit`: `NativeErrorFactory` (builds and scrubs errors), `NativeTurnTable` (live and finished turns, session reservations) and `NativePeer` (one JSON-RPC stdio peer with an inbox, used by Grok and Muse). It is internal and exports nothing public. | AGENTS.md principle 5. Three users means it is not a one-implementation base (request.md:150). It cannot go in `vidbyte.lib`, because scrubbing uses `HarnessRedactor` from `vidbyte.harnesses.serialization` and `lib` may not import upward (A006). The folder name belongs to this PR only, so it cannot collide with the Codex or Claude PRs' files under `native/`. | One copy of the turn table and error builder per host | the Codex or Claude PR lands a shared module under `native/` first; then fold `hostkit` into it in a follow-up |
+| D-23 | **Peer stop sequence** (added in r2). A Grok or Muse peer stops in this order:<ul><li>the protocol interrupt, when a turn is live (`session/cancel` or `turn/interrupt`);</li><li>stdin EOF;</li><li>up to `NATIVE_STOP_GRACE_SECONDS` for the peer to exit by itself;</li><li>`ProcessStopper.stop_tree` on the peer's whole tree, through the transport option `stop_process_tree=True` (the peer starts in its own session on POSIX; Windows uses `taskkill /T /F`). Every wait after a kill is bounded by `shutdown_timeout`, and the pipes are then closed;</li><li>for a Muse turn peer launched through WSL, the in-distro reap. `MuseLauncher` gives every WSL peer a random mark, `VIDBYTE_PEER_MARK=<uuid4 hex>`, forwarded into the distro through `WSLENV`. After the turn peer closes, it runs `wsl.exe -d <distro> -e sh -c <MUSE_REAP_SCRIPT> vidbyte_reap <mark>` through `CliRunner` with `MUSE_REAP_TIMEOUT_SECONDS` and no stdin. The script kills every process in the distro whose environment carries the mark, and every descendant of such a process found through parent ids.</li></ul> | request.md Q-8's default: "send MSP interrupt and close, then kill the process tree, then kill inside the distro", to "guarantee no orphaned process inside the distro". A tree stop reaches a tool's shell that a direct kill misses. The mark is random per peer, so the reap cannot hit the user's other Muse sessions; that was r1's objection to an in-distro kill (review R-4). Short-lived read peers run no tools, so they skip the reap. | A direct kill of the peer only (r1) | a reviewer shows the mark reaching a process outside the peer's tree, or Muse adds a kill command for a session's processes |
 
 **request.md open questions, resolved:**
 
@@ -888,7 +894,7 @@ The design has four layers. Lower layers never import higher ones (AGENTS.md pri
 | Q-5 opencode server | D-2, FR-18 |
 | Q-6 Grok usage | D-14 |
 | Q-7 Busy continue | EC-73 |
-| Q-8 Muse through WSL | D-19, FR-19 |
+| Q-8 Muse through WSL | D-19, D-23, FR-19 |
 | Q-9 Version floors | FR-20 |
 | Q-10 Backend readiness | D-17 |
 | Q-11 Live smoke tests | no (NG-7) |
@@ -924,10 +930,10 @@ A second, smaller alternative is the **per-host JSON-RPC client** (request.md Q-
 ### 8.4 Complexity budget
 | Item | Count | Justification for each |
 |---|---|---|
-| New files | 56 under `vidbyte/` (test files are the test author's budget); 11 modified (§12.3) | **lib:** 15. Enums 3, dataclasses 7, constants 1, configs 1, `process/` 3.<br>**harnesses/native:** 23. The fixed `__init__`. `hostkit` 4 (`__init__`, `errors`, `turns`, `peers`). Grok 5 (`__init__`, `host`, `turn`, `wire`, `cli`). opencode 6 (`__init__`, `host`, `client`, `server`, `turn`, `wire`). Muse 5 (`__init__`, `host`, `turn`, `wire`, `launcher`). backends 2 (`__init__`, `profiles`).<br>**tools/builtins:** 14. `native_host_tool.py`. Grok 3 (`__init__`, `descriptions`, `tools`). opencode 4 (`__init__`, `descriptions`, `session_tools`, `read_tools`). Muse 3. `harness_backends` 3.<br>**toolsets:** 4.<br>Splits follow the 1,000-line rule and the one-job-per-class rule. |
-| New classes/modules | 3 host classes; `HarnessBackends`; `GrokTurnDriver`, `OpencodeTurnWatcher`, `MuseTurnDriver`; `GrokWire`, `OpencodeWire`, `MuseWire`; `GrokCli`, `OpencodeServer`, `OpencodeClient`, `MuseLauncher`, `MusePathTranslator`; `NativeErrorFactory`, `NativeTurnTable`, `NativePeer`, `NativeChildEnvironment`; `CliRunner`, `ManagedProcess`, `ProcessStopper`; `RecordFieldValidator`; `NativeHostError`; `NativeHostTool`, `HarnessBackendTool`, `NativeToolArguments`, `NativeResultEncoder`; 43 tool classes; 4 toolsets; 52 records (§9.1); 13 enums (§9.1) | One per subsystem (AGENTS.md principle 3). |
+| New files | 56 under `vidbyte/` (test files are the test author's budget); 12 modified (§12.3) | **lib:** 15. Enums 3, dataclasses 7, constants 1, configs 1, `process/` 3.<br>**harnesses/native:** 23. The fixed `__init__`. `hostkit` 4 (`__init__`, `errors`, `turns`, `peers`). Grok 5 (`__init__`, `host`, `turn`, `wire`, `cli`). opencode 6 (`__init__`, `host`, `client`, `server`, `turn`, `wire`). Muse 5 (`__init__`, `host`, `turn`, `wire`, `launcher`). backends 2 (`__init__`, `profiles`).<br>**tools/builtins:** 14. `native_host_tool.py`. Grok 3 (`__init__`, `descriptions`, `tools`). opencode 4 (`__init__`, `descriptions`, `session_tools`, `read_tools`). Muse 3. `harness_backends` 3.<br>**toolsets:** 4.<br>Splits follow the 1,000-line rule and the one-job-per-class rule. |
+| New classes/modules | 3 host classes; `HarnessBackends`; `GrokTurnDriver`, `OpencodeTurnWatcher`, `MuseTurnDriver`; `GrokWire`, `OpencodeWire`, `MuseWire`; `GrokCli`, `OpencodeServer`, `OpencodeClient`, `MuseLauncher`, `MusePathTranslator`; `NativeErrorFactory`, `NativeTurnTable`, `NativePeer`, `NativeChildEnvironment`; `CliRunner`, `ManagedProcess`, `ProcessStopper`; `RecordFieldValidator`; `NativeHostError`; `NativeHostTool`, `HarnessBackendTool`, `NativeToolArguments`, `NativeResultEncoder`; 43 tool classes; 4 toolsets; 64 records (§9.1), of which 12 are *inbound* wire records added in r2 (review R-2; they go in the existing per-host dataclass modules, so no file is added); 13 enums (§9.1) | One per subsystem (AGENTS.md principle 3). |
 | New dependencies | 0 | D-20 |
-| New config keys | 0 environment variables owned by the SDK. Settings fields as in §9.3. The host only reads `GLM_API_KEY`, `DEEPSEEK_API_KEY` and `META_API_KEY`, and only sets the child-only `OPENCODE_SERVER_USERNAME`, `OPENCODE_SERVER_PASSWORD`, `ZHIPU_API_KEY` and `WSLENV`. | the vendors' own variables |
+| New config keys | 0 environment variables owned by the SDK. Settings fields as in §9.3. The host only reads `GLM_API_KEY`, `DEEPSEEK_API_KEY` and `META_API_KEY`, and only sets the child-only `OPENCODE_SERVER_USERNAME`, `OPENCODE_SERVER_PASSWORD`, `ZHIPU_API_KEY`, `WSLENV` and `VIDBYTE_PEER_MARK` (D-23). | the vendors' own variables |
 | New collections/tables | 0 persistent. In memory: one turn table per host (live turns plus a 64-entry finished queue). | INV-16 |
 | New public endpoints/commands | 46 functions, 43 tools, 4 toolsets, and 0 CLI commands | FR-1 to FR-5 |
 
@@ -952,7 +958,8 @@ class McpStdioTransport:
         shutdown_timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT,
         stderr_max_bytes: int = _DEFAULT_STDERR_MAX_BYTES,
         on_message: MessageCallback | None = None,      # NEW: frames that carry "method"
-        exit_grace_seconds: float = 0.0,                # NEW: wait after stdin EOF before terminate
+        exit_grace_seconds: float | None = None,        # NEW: wait after stdin EOF before stopping the child
+        stop_process_tree: bool = False,                # NEW: own session on POSIX; whole-tree stop at close
     ) -> None: ...
 
     async def request(
@@ -977,9 +984,14 @@ class McpStdioTransport:
     ) -> None: ...                                      # NEW: exactly one of result / error
 ```
 
-- `request` is `send_request` followed by a bounded wait on the returned future. Errors keep today's `McpProtocolError` and `details["reason"]` values (`closed`, `stdin_write_failed`, `timeout`, `process_exited`, `reader_failed`). An invalid `timeout_seconds` (bool, NaN, ±inf, ≤ 0), or a `respond` call with both or neither of `result` and `error`, raises `McpProtocolError` with reason `invalid_call` (S016 forbids `ValueError` here).
+- `request` is `send_request` followed by a bounded wait on the returned future. Errors keep today's `McpProtocolError` and `details["reason"]` values (`closed`, `stdin_write_failed`, `timeout`, `process_exited`, `reader_failed`).
+- **Checks on the new values.** A per-call `timeout_seconds` and a non-`None` `exit_grace_seconds` are checked with `RecordFieldValidator.require_number(value, name, maximum=NATIVE_STDIO_MAX_WAIT_SECONDS)`, which rejects bool, NaN, ±inf and values ≤ 0. `stop_process_tree` is checked with `require_bool`. The validator's `ConfigurationError` is re-raised as `McpProtocolError` with reason `invalid_call`, chained with `from`; this includes the constructor. A `respond` call with both or neither of `result` and `error` raises the same. No new inline `isinstance(…, bool)` guard and no `ValueError` is written in the transport, because C002 already counts the bool identity in `vidbyte.workflows.validation`, C006 judges `__init__` guards, and S016 forbids builtin raises under `vidbyte/tools/mcp/`. The existing constructor checks stay as they are.
 - `_dispatch_stdout_line`: a JSON object frame with a string `method` goes to `on_message`, or is dropped when `on_message` is `None`. It never resolves a pending request. A frame without `method` and with an int `id` resolves the pending request as today. The callback is called inside one `try` under `# @intent mcp-stdio-callback-cannot-kill-reader`; an `Exception` from it drops that frame and the reader keeps going.
-- `close()`: when `exit_grace_seconds > 0`, after closing stdin it waits up to that long for the child to exit by itself, then continues with today's terminate, wait and kill path.
+- `start()`: when `stop_process_tree` is true, the child starts with `start_new_session=True` on POSIX, so it leads its own process group. Windows needs nothing at start, because `taskkill /T` follows parent ids.
+- `close()`, with both new options at their defaults, is today's path unchanged (INV-18). Otherwise:
+  - after closing stdin, it waits up to `exit_grace_seconds` (when set) for the child to exit by itself;
+  - if the child is still running, it stops it with `ProcessStopper.stop_tree(process, grace_seconds=shutdown_timeout)` when `stop_process_tree` is true, or else with today's terminate, wait and kill;
+  - every wait after a kill is bounded by `shutdown_timeout`, after which the subprocess pipe transport is closed. This is the `vidbyte.tools.builtins.bash` `_stop` pattern: on Python 3.12+ `process.wait()` also waits for the pipes, which a surviving grandchild can hold open forever.
 
 **Error type** (`vidbyte.lib.errors.base`, D-6).
 
@@ -1016,14 +1028,16 @@ class NativeHostError(AgentExecutionError):
 ```python
 class CliRunner:
     async def run(self, invocation: CliInvocation) -> CliOutcome: ...
-        # Starts argv with create_subprocess_exec (start_new_session=True on POSIX), feeds stdin_text,
-        # reads stdout/stderr up to max_output_bytes each, and stops the tree at timeout_seconds.
+        # Starts argv with create_subprocess_exec (start_new_session=True on POSIX). stdin is a pipe
+        # that receives stdin_text and is then closed when stdin_text is set, and DEVNULL otherwise.
+        # Reads stdout/stderr up to max_output_bytes each, and stops the tree at timeout_seconds.
         # On cancellation it stops and reaps the tree, then re-raises.
 
 class ManagedProcess:
     def __init__(self, invocation: CliInvocation) -> None: ...
     async def start(self, ready_pattern: re.Pattern[str]) -> ProcessStartOutcome: ...
-        # Starts the process and reads stdout lines until one matches, the process exits,
+        # Starts the process with stdin=DEVNULL (and start_new_session=True on POSIX), and ignores
+        # invocation.stdin_text. Reads stdout lines until one matches, the process exits,
         # or invocation.timeout_seconds passes; then keeps draining stdout and stderr into
         # bounded buffers so the child never blocks on a full pipe.
     @property
@@ -1033,9 +1047,14 @@ class ManagedProcess:
 class ProcessStopper:
     @staticmethod
     async def stop_tree(process: asyncio.subprocess.Process, *, grace_seconds: float) -> int | None: ...
-        # POSIX: killpg SIGTERM, wait grace, killpg SIGKILL. Windows: `taskkill /T /F /PID <pid>` with a
-        # grace_seconds deadline, then process.kill(). Always a bounded final wait; returns the exit code.
+        # POSIX: killpg SIGTERM, wait grace, killpg SIGKILL; killpg is used only when the process leads
+        # its own group (os.getpgid(pid) == pid), and otherwise only the process itself is signalled, so
+        # the SDK's own group is never hit. Windows: `taskkill /T /F /PID <pid>` with a grace_seconds
+        # deadline, then process.kill(). Always a bounded final wait, then the pipe transport is closed;
+        # returns the exit code.
 ```
+
+**Standard input.** No child inherits the caller's stdin. When a toolset is served over stdio MCP (D-21), the parent's stdin is the MCP client's JSON-RPC stream; a child that read it would corrupt the session, and a CLI waiting on piped stdin would block until its timeout. JSON-RPC peers get a pipe from the transport, `CliRunner` gets a pipe or `DEVNULL`, and `ManagedProcess` always gets `DEVNULL`.
 
 **Shared host plumbing** (`vidbyte.harnesses.native.hostkit`, D-22). Internal; not re-exported.
 
@@ -1074,7 +1093,7 @@ class NativePeer:                               # hostkit/peers.py; Grok and Mus
     async def notify(self, method: str, params: Mapping[str, Any], *, operation: str) -> None: ...
     async def answer(self, request_id: int | str, *, result: Mapping[str, Any] | None = None,
                      error: Mapping[str, Any] | None = None) -> None: ...
-    async def close(self) -> None: ...                       # never raises; stdin EOF, grace, kill, reap
+    async def close(self) -> None: ...                       # never raises; stdin EOF, grace, tree stop, reap (D-23)
     def stderr_tail(self) -> str: ...                        # scrubbed
 
 class NativeChildEnvironment:                   # hostkit/peers.py
@@ -1082,7 +1101,7 @@ class NativeChildEnvironment:                   # hostkit/peers.py
     def build(overlay: Mapping[str, str]) -> dict[str, str]: ...   # os.environ plus overlay (D-18)
 ```
 
-`NativePeer.call` and `send` map a JSON-RPC error answer to nothing themselves. They re-raise it as `McpProtocolError`, and each host's `wire.py` maps `details["error"]["code"]` to a row. Transport failures are mapped through `NativeErrorFactory.from_protocol_error`.
+`NativePeer` builds its `McpStdioTransport` with `exit_grace_seconds=NATIVE_STOP_GRACE_SECONDS` and `stop_process_tree=True` (D-23). Its `inbox` holds the decoded frames exactly as the transport delivers them; the driver passes each one straight to its host's `*Wire` parser and reads only the returned record (D-13). `NativePeer.call` and `send` map a JSON-RPC error answer to nothing themselves. They re-raise it as `McpProtocolError`, and each host's `wire.py` maps `details["error"]["code"]` to a row. Transport failures are mapped through `NativeErrorFactory.from_protocol_error`.
 
 **GrokHost** (`vidbyte.harnesses.native.grok.host`; exported from `vidbyte.harnesses.native.grok`).
 
@@ -1109,7 +1128,7 @@ async def run_grok_once(request: GrokOneShotRequest, *, settings: GrokHostSettin
     # Opens a GrokHost, calls run_grok_once, closes it (FR-17).
 ```
 
-Internal collaborators: `GrokTurnDriver` (`grok.turn`) runs one live turn on its peer: the inbox loop, approvals, text and usage accumulation, the ceiling and the interrupt. `GrokWire` (`grok.wire`) builds ACP params and the `_meta`-free `session/new`, parses results into records, and maps JSON-RPC codes and CLI output to rows. `GrokCli` (`grok.cli`) builds the argv for `--version`, `models`, one-shot and fork runs, and runs them through `CliRunner`.
+Internal collaborators: `GrokTurnDriver` (`grok.turn`) runs one live turn on its peer: the inbox loop, approvals, text and usage accumulation, the ceiling and the interrupt. `GrokWire` (`grok.wire`) builds ACP params and the `_meta`-free `session/new`, parses results into records, and maps JSON-RPC codes and CLI output to rows. Its inbound parsers are `parse_permission_request(frame) -> GrokPermissionRequest`, `parse_session_update(params) -> GrokSessionUpdate` and `parse_prompt_result(result) -> GrokPromptResult`; each raises `grok.protocol_mismatch` for a missing or wrongly typed relied-on member (D-13). `GrokCli` (`grok.cli`) builds the argv for `--version`, `models`, one-shot and fork runs, and runs them through `CliRunner`. Every peer argv is `<grok_command> agent --no-leader [--model=<id>] [--reasoning-effort=<effort>] stdio`; values are always passed in `--name=value` form (T-2).
 
 ACP calls the host makes, and only these: `initialize` (with `protocolVersion: 1`, `clientCapabilities: {fs: {readTextFile: false, writeTextFile: false}, terminal: false}`, `clientInfo`), `session/new` (`cwd`, `mcpServers: []`), `session/resume` (`sessionId`, `cwd`, `mcpServers: []`), `session/list` (`cwd`, `cursor`), `session/prompt` (one text block), `session/cancel` (notification), and responses to `session/request_permission`. `session/new` never carries `_meta` (INV-9).
 
@@ -1145,9 +1164,16 @@ class OpencodeHost:
     async def add_opencode_mcp_server(self, config: OpencodeMcpServerConfig) -> OpencodeMcpStatus: ...
 ```
 
-Internal collaborators: `OpencodeServer` (`opencode.server`) starts and stops the owned `opencode serve` through `ManagedProcess`, or records an attached `server_url`. `OpencodeClient` (`opencode.client`) owns every HTTP call: it builds the URL with `urllib.parse.urlencode` (always including `directory=<workspace>`), adds the basic-auth header, calls `HttpTransport.request` (D-5), and maps transport failures and status codes to the EC-55 to EC-59 rows. `OpencodeTurnWatcher` (`opencode.turn`) polls one turn to its end and answers permissions and questions. `OpencodeWire` (`opencode.wire`) parses bodies into records and maps assistant `error` objects to rows.
+Internal collaborators: `OpencodeServer` (`opencode.server`) starts and stops the owned `opencode serve` through `ManagedProcess`, or records an attached `server_url`. `OpencodeClient` (`opencode.client`) owns every HTTP call: it builds the URL with `urllib.parse.urlencode` (always including `directory=<workspace>`), adds the basic-auth header, calls `HttpTransport.request` (D-5), and maps transport failures and status codes to the EC-55 to EC-59 rows. `OpencodeTurnWatcher` (`opencode.turn`) polls one turn to its end and answers permissions and questions. It works in this order:
+1. Before `prompt_async`, the host records the id of the session's newest message (`GET /session/{id}/message?limit=1`), or none for a new session.
+2. Every `OPENCODE_POLL_INTERVAL_SECONDS`, the watcher reads `GET /session/status`, `GET /permission`, `GET /question` and the newest `OPENCODE_WATCH_MESSAGE_LIMIT` messages (A-16).
+3. The turn's user message is the first `user` message newer than the snapshot. The turn's reply is the assistant message whose `parentID` is that user message's id.
+4. Idle confirmations (EC-85) start only once the user message, or a `busy` or `retry` status, has been seen.
+5. Pending requests from the turn's session tree are rejected (EC-154), and a long `retry` loop ends the turn (EC-155).
 
-HTTP routes the host calls, and only these: `GET /global/health`, `GET /provider`, `GET /provider/auth`, `GET /config/providers`, `POST /session`, `GET /session`, `GET /session/status`, `GET /session/{id}`, `POST /session/{id}/prompt_async`, `POST /session/{id}/fork`, `POST /session/{id}/revert`, `POST /session/{id}/unrevert`, `POST /session/{id}/abort`, `GET /session/{id}/message` (`limit`, `before`), `GET /session/{id}/message/{messageID}`, `GET /session/{id}/diff` (`messageID`), `GET /permission`, `POST /permission/{requestID}/reply` (`reply: "reject"`), `GET /question`, `POST /question/{requestID}/reject`, and `POST /mcp`.
+`OpencodeWire` (`opencode.wire`) parses bodies into records and maps assistant `error` objects to rows. Its inbound parsers are `parse_permission_requests(body) -> tuple[OpencodePermissionRequest, ...]`, `parse_question_requests(body) -> tuple[OpencodeQuestionRequest, ...]`, `parse_session_statuses(body) -> tuple[OpencodeSessionStatus, ...]` and `parse_assistant_error(error) -> OpencodeAssistantError`; each raises `opencode.protocol_mismatch` for a missing or wrongly typed relied-on member (D-13).
+
+HTTP routes the host calls, and only these: `GET /global/health`, `GET /provider`, `GET /provider/auth`, `GET /config/providers`, `POST /session`, `GET /session` (`limit`), `GET /session/status`, `GET /session/{id}`, `GET /session/{id}/children`, `POST /session/{id}/prompt_async`, `POST /session/{id}/fork`, `POST /session/{id}/revert`, `POST /session/{id}/unrevert`, `POST /session/{id}/abort`, `GET /session/{id}/message` (`limit`, `before`), `GET /session/{id}/message/{messageID}`, `GET /session/{id}/diff` (`messageID`), `GET /permission`, `POST /permission/{requestID}/reply` (`reply: "reject"`), `GET /question`, `POST /question/{requestID}/reject`, and `POST /mcp`.
 
 **MuseHost** (`vidbyte.harnesses.native.muse.host`; exported from `vidbyte.harnesses.native.muse`).
 
@@ -1175,9 +1201,20 @@ class MuseHost:
     async def track_muse_session_usage(self, session_id: str) -> NativeSessionUsage: ...
 ```
 
-Internal collaborators: `MuseLauncher` (`muse.launcher`) resolves the argv prefix (D-19), lists WSL distros, and extends `WSLENV`. `MusePathTranslator` (same file) is a pure `@staticmethod` class: `to_wsl(path: PureWindowsPath) -> str` maps `C:\w\repo` to `/mnt/c/w/repo`, and refuses UNC and drive-less paths with `configuration.invalid_argument`. `MuseTurnDriver` (`muse.turn`) drives one turn. `MuseWire` (`muse.wire`) builds MSP params and parses results.
+Internal collaborators: `MuseLauncher` (`muse.launcher`) resolves the argv prefix (D-19), lists WSL distros, and extends `WSLENV`. `MusePathTranslator` (same file) is a pure `@staticmethod` class: `to_wsl(path: PureWindowsPath) -> str` maps `C:\w\repo` to `/mnt/c/w/repo`, and refuses UNC and drive-less paths with `configuration.invalid_argument`. `MuseLauncher` also adds each WSL peer's mark to its environment and `WSLENV`, and runs the in-distro reap after a turn peer closes (D-23). `MuseTurnDriver` (`muse.turn`) drives one turn. `MuseWire` (`muse.wire`) builds MSP params and parses results. Its inbound parsers are `parse_approval_request(params) -> MuseApprovalRequest` (for both `approval/requested` and `approval/updated`), `parse_user_input_request(params) -> MuseUserInputRequest` and `parse_turn_completed(params) -> MuseTurnCompleted`; each raises `muse.protocol_mismatch` for a missing or wrongly typed relied-on member (D-13). `MuseWire.new_command_id() -> str` returns a fresh RFC 9562 UUIDv7 built from `time.time_ns()` and `secrets.token_bytes`. The stdlib `uuid.uuid7` exists only from Python 3.14, and the package supports 3.11.
 
-MSP calls the host makes, and only these: `initialize` (`clientInfo.name = "vidbyte_sdk"`), the `initialized` notification, `model/list`, `session/start` (`workspaceRoot`, `modelId`, `approvalMode: "denyUnmatched"`), `session/resume`, `session/fork` (`lastTurnId`), `session/list`, `session/read` (`excludeItems: true`), `view/page`, `turn/start`, `turn/steer`, `turn/interrupt`, `approval/decide`, and `userInput/cancel`. Each `turn/*` command carries a fresh `commandId` (UUID4).
+MSP calls the host makes, and only these, each with every member the MSP 1.0.1 schema marks required:
+- `initialize` (`clientInfo.name = "vidbyte_sdk"`), then the `initialized` notification; `model/list`; `session/list` (`workspaceRoot`, `cursor`, `limit`); `session/read` (`sessionId`, `excludeItems: true`); `view/page` (`sessionId`, `limit`, `cursor`, `direction`).
+- `session/start`: `commandId`, `workspaceRoot`, `modelId` (when set), `approvalMode: "denyUnmatched"`.
+- `session/resume`: `commandId`, `sessionId`.
+- `session/fork`: `commandId`, `sessionId`, and `cutPoint: {lastTurnId}` only when `last_turn_id` is given. Without a cut point, Muse copies every completed turn. A top-level `lastTurnId` is not a schema member, so it is never sent.
+- `turn/start`: `commandId`, `sessionId`, `input` (one text part), and `reasoningEffort` when set. A fresh turn's MSP `turnId` equals its `commandId`, and the driver keeps it for steer and interrupt.
+- `turn/steer`: `commandId`, `sessionId`, `expectedTurnId` (that MSP turn id) and `input`.
+- `turn/interrupt`: `commandId`, `sessionId`, `turnId`.
+- `approval/decide`: `commandId`, `sessionId`, `approvalId`, `requirementId` and `choiceId`. `requirementId` is the approval's latest `currentRequirementId` object `{approvalId, sourceIndex}`, copied from `approval/requested` or a later `approval/updated`. `choiceId` is the chosen `denied` choice scoped `once`.
+- `userInput/cancel`: `commandId`, `sessionId`, `userInputId`.
+
+Every `commandId` is a fresh UUIDv7 from `MuseWire.new_command_id()`; the schema calls it the idempotency handle, and "the server never mints one".
 
 **Backends** (`vidbyte.harnesses.native.backends.profiles`; the functions are re-exported from `vidbyte.harnesses.native.backends`).
 
@@ -1248,6 +1285,7 @@ Each host toolset also has `@staticmethod read_only(host) -> Tools`, which retur
 - Secret fields are declared `field(repr=False)` and never appear in a message (INV-6).
 - "Text ≤ N" means a `str` (never `bool`) that is not empty or whitespace-only and has at most N characters. "Opt." means the field may be `None`, and `None` is the default unless a default is shown.
 - Output records (results the hosts build) validate types and non-negative counts only. Their text is already capped by the host when it builds them.
+- *Inbound* records mirror a vendor frame or body, holding only the members the host relies on. Only the host's `*Wire.parse_*` methods build them, from a decoded frame or body. The parser raises `<host>.protocol_mismatch` for a missing or wrongly typed relied-on member before construction, so the record's own `ConfigurationError` is a backstop that the parser also maps to `protocol_mismatch`. Vendor vocabularies stay verbatim `str` (D-13). Vendor text in them is scrubbed and capped when the host copies it into a result or an error.
 
 **`RecordFieldValidator`** (`vidbyte.lib.dataclasses.validation`). The one canonical validator (D-8). It is a class of `@staticmethod`s, each taking the checked `value` first and `field_name` second, and returning the checked value or raising `ConfigurationError`. The checked variable is always called `value`, so the bool guard exists once in the package (C002).
 
@@ -1316,6 +1354,10 @@ A **vendor id** below means `require_text` with `max_chars = NATIVE_ID_MAX_CHARS
 | `GrokSession` | `session_id: str`; `cwd: str`; `title`: opt. `str`; `updated_at`: opt. `str` | output record |
 | `GrokSessionPage` | `sessions: tuple[GrokSession, ...]`; `next_cursor`: opt. `str` | output record |
 | `GrokSessionSearch` | `query: str`; `sessions: tuple[GrokSession, ...]`; `truncated: bool` | output record |
+| `GrokPermissionOption` | `option_id: str`; `kind: str` | *inbound* (an ACP `PermissionOption`); `kind` verbatim (`allow_once`, `allow_always`, `reject_once`, `reject_always`, open set) |
+| `GrokPermissionRequest` | `request_id: int \| str`; `session_id: str`; `tool_kind: AcpToolKind`; `title: str`; `options: tuple[GrokPermissionOption, ...]` | *inbound* (`session/request_permission`); `request_id` is the JSON-RPC id the answer must echo; a missing or unknown `toolCall.kind` becomes `OTHER`; `title` may be empty |
+| `GrokSessionUpdate` | `session_id: str`; `kind: str`; `text: str = ""`; `cost_amount`: opt. `Decimal`; `cost_currency`: opt. `str` | *inbound* (`session/update`); `kind` is the verbatim `sessionUpdate` value; `text` is set only for an `agent_message_chunk` with text content; the cost fields only for `usage_update` (A-15) |
+| `GrokPromptResult` | `stop_reason: str`; `usage`: opt. `NativeTokenUsage` | *inbound* (the `session/prompt` result); EC-49 when `stopReason` is not a string |
 
 **`vidbyte.lib.dataclasses.opencode`**
 
@@ -1332,10 +1374,14 @@ A **vendor id** below means `require_text` with `max_chars = NATIVE_ID_MAX_CHARS
 | `OpencodeAuthMethod` | `method_type: str`; `label: str` | output record; verbatim vendor values |
 | `OpencodeProviderAuth` | `provider_id: str`; `methods: tuple[OpencodeAuthMethod, ...]` | output record |
 | `OpencodeSession` | `session_id: str`; `title: str`; `directory: str`; `parent_id`: opt. `str`; `created_ms: int`; `updated_ms: int`; `usage`: opt. `NativeTokenUsage`; `revert_message_id`: opt. `str`; `revert_part_id`: opt. `str` | output record |
-| `OpencodeMessage` | `message_id: str`; `session_id: str`; `role: str`; `created_ms: int`; `text: str`; `text_truncated: bool`; `provider_id`, `model_id`, `error_name`, `finish`: opt. `str`; `usage`: opt. `NativeTokenUsage` | output record; `text` joins the message's `text` parts, capped at `NATIVE_RESULT_TEXT_MAX_CHARS` |
+| `OpencodeMessage` | `message_id: str`; `session_id: str`; `role: str`; `created_ms: int`; `text: str`; `text_truncated: bool`; `parent_id`, `provider_id`, `model_id`, `finish`: opt. `str`; `error`: opt. `OpencodeAssistantError`; `usage`: opt. `NativeTokenUsage` | output record; `text` joins the message's `text` parts, capped at `NATIVE_RESULT_TEXT_MAX_CHARS`; `parent_id` is an assistant message's `parentID` (the watcher's reply link, EC-85) |
 | `OpencodeMessagePage` | `session_id: str`; `messages: tuple[OpencodeMessage, ...]`; `next_before`: opt. `str` | output record; `next_before` is the oldest message id when the page is full |
 | `OpencodeFileDiff` | `path: str`; `status: str`; `additions: int`; `deletions: int`; `patch: str`; `patch_truncated: bool` | output record (vendor `FileDiff`) |
 | `OpencodeMcpStatus` | `name: str`; `status: str` | output record; `status` verbatim (`connected` on success) |
+| `OpencodePermissionRequest` | `request_id: str`; `session_id: str`; `permission: str`; `patterns: tuple[str, ...]` | *inbound* (a `GET /permission` entry); `request_id` starts with `per`; `session_id` matches `OPENCODE_SESSION_ID_PATTERN`; `permission` verbatim |
+| `OpencodeQuestionRequest` | `request_id: str`; `session_id: str` | *inbound* (a `GET /question` entry); `request_id` starts with `que` |
+| `OpencodeSessionStatus` | `session_id: str`; `state: str`; `retry_attempt`: opt. `int`; `retry_message`: opt. `str`; `retry_reason`: opt. `str` | *inbound* (one `GET /session/status` entry); `state` verbatim (`idle`, `busy`, `retry`); `retry_attempt` is set exactly when `state == "retry"`, and `retry_reason` only when `action.reason` is present |
+| `OpencodeAssistantError` | `name: str`; `message`: opt. `str`; `status_code`: opt. `int`; `retryable`: opt. `bool` | *inbound* (`AssistantMessage.error`); `name` verbatim; `data.message`, `data.statusCode` and `data.isRetryable` when present (EC-82 to EC-85) |
 
 **`vidbyte.lib.dataclasses.muse`**
 
@@ -1350,6 +1396,10 @@ A **vendor id** below means `require_text` with `max_chars = NATIVE_ID_MAX_CHARS
 | `MuseSessionPage` | `sessions: tuple[MuseSession, ...]`; `next_cursor`: opt. `str` | output record |
 | `MuseViewEvent` | `kind`: opt. `str`; `event_json: str`; `truncated: bool` | output record; `event_json` is the event object as compact sorted JSON, capped at `NATIVE_EVENT_MAX_CHARS` |
 | `MusePage` | `session_id: str`; `events: tuple[MuseViewEvent, ...]`; `next_cursor`: opt. `str` | output record |
+| `MuseApprovalChoice` | `choice_id: str`; `decision: str`; `scope: str` | *inbound* (an `ApprovalChoice`); `decision` and `scope` verbatim, open sets |
+| `MuseApprovalRequest` | `session_id: str`; `approval_id: str`; `requirement_approval_id: str`; `requirement_source_index: int`; `choices: tuple[MuseApprovalChoice, ...]`; `turn_id`: opt. `str`; `tool_name`: opt. `str` | *inbound* (`approval/requested` or `approval/updated`); the two requirement fields come from `currentRequirementId` and are sent back as `requirementId`; `turn_id` and `tool_name` are absent on `approval/updated`; `requirement_source_index` is an int ≥ 0 |
+| `MuseUserInputRequest` | `session_id: str`; `turn_id: str`; `user_input_id: str`; `tool_name: str` | *inbound* (`userInput/requested`) |
+| `MuseTurnCompleted` | `session_id: str`; `turn_id: str`; `terminal: str`; `error_kind`: opt. `str`; `error_message`: opt. `str`; `error_retryable`: opt. `bool`; `usage`: opt. `NativeTokenUsage` | *inbound* (`turn/completed`); `terminal` verbatim (`completed`, `failed`, `cancelled`, open set); the three error fields are set exactly when `terminal == "failed"`, and their absence then is EC-98 |
 
 **`vidbyte.lib.dataclasses.harness_backends`**
 
@@ -1384,7 +1434,7 @@ A **vendor id** below means `require_text` with `max_chars = NATIVE_ID_MAX_CHARS
 
 | Record | Fields | Validation |
 |---|---|---|
-| `CliInvocation` | `argv: tuple[str, ...]`; `env: Mapping[str, str]` (`repr=False`); `timeout_seconds: float`; `max_output_bytes: int`; `cwd`: opt. `Path`; `stdin_text`: opt. `str` (`repr=False`) | `require_argv`; mapping of str; number ≤ `NATIVE_TURN_MAX_SECONDS`; int in 1..`NATIVE_PROCESS_MAX_OUTPUT_BYTES` |
+| `CliInvocation` | `argv: tuple[str, ...]`; `env: Mapping[str, str]` (`repr=False`); `timeout_seconds: float`; `max_output_bytes: int`; `cwd`: opt. `Path`; `stdin_text`: opt. `str` (`repr=False`) | `require_argv`; mapping of str; number ≤ `NATIVE_TURN_MAX_SECONDS`; int in 1..`NATIVE_PROCESS_MAX_OUTPUT_BYTES`. `stdin_text` set means a pipe that receives it and is then closed; `None` means `DEVNULL` (§8.5, standard input) |
 | `CliOutcome` | `exit_code`: opt. `int`; `stdout: str`; `stderr: str`; `stdout_truncated: bool`; `stderr_truncated: bool`; `timed_out: bool`; `launch_failure`: opt. `ProcessLaunchFailure` | output record; `exit_code` is `None` when the process never started |
 | `ProcessStartOutcome` | `ready_line`: opt. `str`; `launch_failure`: opt. `ProcessLaunchFailure`; `exit_code`: opt. `int`; `timed_out: bool`; `stderr_tail: str` | output record |
 
@@ -1444,7 +1494,7 @@ Permissions follow the catalog's R/W tags (request.md:462-696). Every tool's err
 
 **Tool results.**
 - **Success:** `ToolResult.success(name, output, metadata={"harness": <harness value or "backend">, "operation": name, "truncated": bool})`. `output` is the result record as JSON with sorted keys: enums as values, `Decimal` as strings, tuples as lists, `None` as `null`.
-- **Failure:** `ToolResult.error(name, "<code>: <message> Next step: <next_step>", metadata={"error": <code>, "next_step": ..., "operation": name, "harness": ...})` (INV-7).
+- **Failure:** `ToolResult.error(name, "<code>: <message> Next step: <next_step>", metadata={"error": <code>, "next_step": ..., "hint": <next_step>, "operation": name, "harness": ...})`, plus `"retryable": <bool>` when the error's `context["retryable"]` is set (INV-7). `ToolsFormatter` forwards `hint` and `retryable` as structured fields, for example in Gemini's `functionResponse`.
 
 ### 9.3 Configuration and flags
 
@@ -1457,7 +1507,8 @@ Permissions follow the catalog's R/W tags (request.md:462-696). Every tool's err
 | `META_API_KEY` | presence only | `MuseLauncher` | decides whether `WSLENV` gets `META_API_KEY/u` |
 | `OPENCODE_SERVER_USERNAME`, `OPENCODE_SERVER_PASSWORD` | set, owned server's environment only | `OpencodeServer` | basic auth with a fresh `secrets.token_urlsafe(32)` password per host (FR-18) |
 | `ZHIPU_API_KEY` | set, owned server's environment only | `OpencodeServer` | copy of `GLM_API_KEY` for opencode's built-in `zai-coding-plan` provider (D-16) |
-| `WSLENV` | set, Muse peer's environment only | `MuseLauncher` | appends `META_API_KEY/u` to the caller's value, when `META_API_KEY` is set |
+| `WSLENV` | set, Muse peer's environment only | `MuseLauncher` | appends `META_API_KEY/u` to the caller's value when `META_API_KEY` is set, and `VIDBYTE_PEER_MARK/u` in WSL mode |
+| `VIDBYTE_PEER_MARK` (`MUSE_PEER_MARK_VARIABLE`) | set, WSL Muse peer's environment only | `MuseLauncher` | a fresh `uuid4().hex` per peer, not a secret; the in-distro reap kills only processes carrying it (D-23) |
 
 **Constants** (`vidbyte.lib.constants.native_hosts`). Names avoid the S054 password and token words (§11, lint hazards).
 
@@ -1468,6 +1519,7 @@ Permissions follow the catalog's R/W tags (request.md:462-696). Every tool's err
 | `NATIVE_WAIT_DEFAULT_SECONDS` / `NATIVE_WAIT_MAX_SECONDS` | `60.0` / `3600.0` | `wait_*_turn` |
 | `NATIVE_TOOL_WAIT_MAX_SECONDS` | `240.0` | tool waits and one-shot tools (EC-144) |
 | `NATIVE_STOP_GRACE_SECONDS` | `5.0` | process and turn stop grace |
+| `NATIVE_STDIO_MAX_WAIT_SECONDS` | `86400.0` | upper bound for the transport's per-call `timeout_seconds` and `exit_grace_seconds` (§8.5) |
 | `NATIVE_MAX_LIVE_TURNS_DEFAULT` / `NATIVE_MAX_LIVE_TURNS_LIMIT` | `4` / `16` | live-turn cap |
 | `NATIVE_FINISHED_TURN_LIMIT` | `64` | finished-turn table |
 | `NATIVE_LIST_DEFAULT_LIMIT` / `NATIVE_LIST_MAX_LIMIT` | `50` / `200` | list and page limits |
@@ -1500,6 +1552,10 @@ Permissions follow the catalog's R/W tags (request.md:462-696). Every tool's err
 | `OPENCODE_MAX_RESPONSE_BYTES` | `8388608` | HTTP body cap |
 | `OPENCODE_POLL_INTERVAL_SECONDS` / `OPENCODE_IDLE_CONFIRMATIONS` / `OPENCODE_POLL_FAILURE_LIMIT` | `1.0` / `3` / `5` | turn watcher |
 | `OPENCODE_TURN_MESSAGE_LIMIT` | `1000` | usage tracking |
+| `OPENCODE_WATCH_MESSAGE_LIMIT` | `50` | newest messages the watcher reads per poll |
+| `OPENCODE_MAX_SESSION_TREE` | `64` | sessions in one turn's tree (EC-154) |
+| `OPENCODE_RETRY_ATTEMPT_LIMIT` | `5` | `retry` attempts before the watcher ends the turn (EC-155) |
+| `OPENCODE_RATE_LIMIT_MARKERS` | `("rate limit", "rate_limit", "429", "too many requests", "quota", "usage limit")` | EC-155 (A-17) |
 | `OPENCODE_SYSTEM_MAX_CHARS` / `OPENCODE_PATCH_MAX_CHARS` | `20000` / `20000` | prompt system text; diff patch |
 | `OPENCODE_MAX_PERMISSION_RULES` / `OPENCODE_RULE_MAX_CHARS` | `64` / `200` | spawn rules |
 | `OPENCODE_MAX_MCP_SERVERS` / `OPENCODE_MCP_TIMEOUT_MAX_MS` | `16` / `600000` | MCP configs |
@@ -1512,6 +1568,9 @@ Permissions follow the catalog's R/W tags (request.md:462-696). Every tool's err
 | `MUSE_DEFAULT_PATH` | `/usr/local/bin/muse` | settings default |
 | `MUSE_APPROVAL_MODE` | `denyUnmatched` | `session/start` (D-11) |
 | `MUSE_PAGE_MAX_LIMIT` / `MUSE_USAGE_MAX_PAGES` | `200` / `10` | `view/page` |
+| `MUSE_PEER_MARK_VARIABLE` | `VIDBYTE_PEER_MARK` | the WSL peer mark's variable name (D-23) |
+| `MUSE_REAP_TIMEOUT_SECONDS` | `10.0` | the in-distro reap run |
+| `MUSE_REAP_SCRIPT` | a POSIX `sh` script taking the mark as `$1` | kills every distro process whose `/proc/<pid>/environ` holds `VIDBYTE_PEER_MARK=<mark>`, and their descendants by parent id; never kills itself, because its own environment lacks the mark; always exits 0 (D-23) |
 | `BACKEND_HTTP_TIMEOUT_SECONDS` / `BACKEND_MAX_RESPONSE_BYTES` | `15.0` / `65536` | DeepSeek balance call |
 
 Timing constants that tests shrink (`NATIVE_STOP_GRACE_SECONDS`, `OPENCODE_POLL_INTERVAL_SECONDS`) are read through the constants module object at call time (`native_host_constants.NATIVE_STOP_GRACE_SECONDS`), not bound by `from … import` at import time, so one patch reaches every user (§13).
@@ -1535,8 +1594,8 @@ There are no tenants and no server-side endpoints: the SDK runs inside the user'
 | T-4 | Another tenant: another local user or process | Connects to the owned `opencode serve` port and drives the user's agent. | The server binds `127.0.0.1` on a random port (`--port 0`) and requires basic auth with a fresh 32-byte random password (FR-18, AC-9). | `OpencodeServer` |
 | T-5 | Developer exposing host tools over MCP | `McpStudioServer` runs tools with no `PermissionPolicy` (`vidbyte/mcp_server/handlers.py:84-88`), so any MCP client can call WRITE tools that spend money. | No server change (D-21). `GrokTools.read_only(host)`, `OpencodeTools.read_only(host)` and `MuseTools.read_only(host)` return the READ subset for MCP use. The toolset docstrings and the harnesses README say so. | the toolsets; documentation |
 | T-6 | Vendor output carrying prompt injection | A turn's text or a session title tells the calling agent to do something. | Vendor text is returned as data inside JSON tool output, capped (INV-16) and scrubbed of the host's secrets. The host never acts on vendor text. | `NativeResultEncoder` |
-| T-7 | Process leftovers | A killed Grok or Muse peer leaves grandchildren, such as a tool's shell or an in-distro `muse`. | Protocol interrupt, stdin EOF and a grace period come before any kill. CLI runs and the owned server use tree kill (D-4). Killing `wsl.exe` left no orphan when idle (A-9). | `NativePeer`; `ProcessStopper` |
-| T-8 | Over-broad environment sharing into WSL | The host forwards more than the Muse key into the distro. | `WSLENV` is extended with `META_API_KEY/u` only, and only when that variable is set (§9.3). | `MuseLauncher` |
+| T-7 | Process leftovers | A killed Grok or Muse peer leaves grandchildren, such as a tool's shell or an in-distro `muse`. | Protocol interrupt, stdin EOF and a grace period come before any kill. Peers, CLI runs and the owned server are all stopped as a whole process tree with bounded waits (D-4, D-23). A Muse turn peer in WSL mode is followed by the in-distro reap of every process carrying its random mark, and their descendants (D-23). | `NativePeer`; `McpStdioTransport` (`stop_process_tree`); `ProcessStopper`; `MuseLauncher` |
+| T-8 | Over-broad environment sharing into WSL | The host forwards more than the Muse key into the distro. | `WSLENV` is extended with `META_API_KEY/u` only when that variable is set, and with the non-secret `VIDBYTE_PEER_MARK/u` (§9.3). | `MuseLauncher` |
 
 **Residual risks** (documented limitations, carried into the PR body):
 - **T-1:** a host object dropped without `__aexit__` leaves its peers running until the interpreter exits. §4 always uses `async with`.
@@ -1544,7 +1603,7 @@ There are no tenants and no server-side endpoints: the SDK runs inside the user'
 - **T-3 and T-4:** a process running as the same OS user can read a child's environment, for example `/proc/<pid>/environ`, and so the server password. The same holds when the user runs the CLI by hand.
 - **T-5:** a developer who passes a full toolset over MCP grants WRITE access (optional Q-15).
 - **T-6:** the calling agent may still follow instructions in returned text; that is its own trust boundary.
-- **T-7:** Windows grandchildren of an ACP or MSP peer killed after the grace period may survive (EC-10, NG-15, optional Q-16).
+- **T-7:** a POSIX grandchild that leaves the peer's process group (`setsid`), or an in-distro process that both drops the mark and loses its parent link before the reap, may survive the stop (EC-10, A-9).
 
 **Auth and secrets conventions.**
 - **Auth on each command:** every host function runs as the local user with the vendor's own login. Each tool carries its catalog permission, which `ToolExecutor` enforces.
@@ -1695,7 +1754,7 @@ A001 requires non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MOD
 1. **opencode over `httpx`** (request.md:124,153): S011 forbids it outside `vidbyte/lib/http/transport.py`, so opencode goes through `HttpTransport` (D-5).
 2. **"Copy the `builtins/sessions/` layout with `_base.py`"** (request.md:92): one shared `native_host_tool.py` replaces four `_base.py` copies (AGENTS.md principle 5). The sessions folder's A001, S017 and S062 debt is not copied.
 3. **"MuseHost talks MSP through `muse-code-sdk`"** (request.md:598) conflicts with request.md Q-2's no-new-dependency default. Resolved as raw MSP over the extended transport (D-20).
-4. **request.md Q-8, "kill the process tree, then kill inside the distro".** No tree kill exists for long-lived peers, and an in-distro kill could hit the user's other Muse sessions. Resolved as protocol interrupt, stdin EOF, grace period, then direct kill. Limitation EC-10; optional Q-16.
+4. **request.md Q-8, "kill the process tree, then kill inside the distro".** r1 downgraded this to a direct kill, because `McpStdioTransport.close()` kills only the direct child (`transport.py:321-336`) and a pid-blind in-distro kill could hit the user's other Muse sessions. r2 follows the default (review R-4): an additive `stop_process_tree` option stops the peer's whole tree, and a random per-peer mark scopes the in-distro reap to this peer's processes (D-23, EC-10).
 5. **Catalog signatures:**
    - `continue_grok_session(id_or_title, …)` takes an id only (NG-10).
    - `list_grok_sessions(cwd)` uses the host's workspace (D-1).
@@ -1703,13 +1762,14 @@ A001 requires non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MOD
    - `check_backend_ready` "plus a one-token test call" makes no spending call (D-17).
 6. **C012 and vendor model strings** (code-map §4.14): model strings live on `*Request` records, which C012 does not scope, and on `HarnessBackend` fields (`claude_models`, `opencode_models`) whose names C012 does not match. No lint file is edited (D-12).
 7. **`REPO_MAP.md:333`** says every writing tool passes the security boundary, but the MCP server skips `PermissionPolicy`. This stays a T-5 limitation, and the stale text is not rewritten (NG-16).
+8. **`vidbyte/lib/errors/__init__.py` header** says "Add a new base error to both the import tuple and __all__ in alphabetical family order." request.md's shared-file contract makes export lists append-only, and the Codex and Claude host PRs edit the same lists and the area next to `CodexAgentError` in `base.py`. So `NativeHostError` is appended at the end of `base.py` and of both lists, the same choice as `failure.py:144` (§12.3 rows 19 and 20).
 
 **Lint hazards the implementer will meet** (code-map §1.3):
 - **A001:** a seven-field header in every new `.py`, `__init__.py` files included.
 - **A002:** a function whose name or identifiers contain request, send, transport, subprocess, permission, provider, fetch, redact, secret, billing, fallback or similar words needs `# @intent <name>` within 20 lines.
 - **A003:** `NativeHostError` carries the literal 8-tuple `DIAGNOSTIC_FIELDS`.
 - **A007:** every numeric literal near words such as timeout, limit, byte, char, token, status or interval is a named constant (§9.3). That includes parameter defaults.
-- **C002, C006, C007 and C008:** bool, finite and range guards live only in `RecordFieldValidator`, on the generic name `value`.
+- **C002, C006, C007 and C008:** bool, finite and range guards live only in `RecordFieldValidator`, on the generic name `value`. That includes the transport's new `timeout_seconds`, `exit_grace_seconds` and `stop_process_tree` checks: `isinstance(timeout_seconds, bool)` already exists at `vidbyte/workflows/validation.py:172` (C002), and C006 judges `__init__` guards.
 - **S006 (RUF006):** every `asyncio.create_task` result is owned by `NativeTurnTable` or `ManagedProcess`, and is awaited or cancelled.
 - **S012:** every call to a method named `request` passes `timeout=` or `timeout_seconds=`, and no helper is named `request`.
 - **S016 and S017:** under `vidbyte/tools/`, no `ValueError`-style raises and no `str(exc)` in errors or results.
@@ -1734,7 +1794,7 @@ A001 requires non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MOD
 | W-2 | Validated records for every input and output, plus the two backend profiles | FR-10, INV-5, AC-19 | developer |
 | W-3 | One error type, `NativeHostError`, carrying a code and a next step | FR-6, FR-7, INV-1, INV-8 | developer, end user (the next step) |
 | W-4 | A canonical process runner, managed process and tree stopper in `vidbyte.lib.process` | FR-9, FR-16, INV-3, INV-4 | developer |
-| W-5 | `McpStdioTransport` that can carry ACP and MSP: messages, server requests, notifications, per-call deadlines, exit grace | FR-15, INV-18 | developer |
+| W-5 | `McpStdioTransport` that can carry ACP and MSP: messages, server requests, notifications, per-call deadlines, exit grace, and a whole-tree stop | FR-15, INV-18, D-23 | developer |
 | W-6 | Shared host plumbing: scrubbed errors, the turn table, the stdio peer | INV-2, INV-6, INV-12 to INV-17, EC-1 to EC-10 | developer |
 | W-7 | GLM and DeepSeek backend profiles and their six functions | FR-4, G-2, AC-13, AC-14 | developer |
 | W-8 | `GrokHost` with its 10 functions and the module-level `run_grok_once` | FR-1, FR-17, AC-1, AC-6 to AC-8, AC-11, AC-12 | developer |
@@ -1743,7 +1803,7 @@ A001 requires non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MOD
 | W-11 | 43 tools over one shared tool base | FR-5, INV-7, AC-15, EC-138 to EC-147 | agents (model-facing), developer |
 | W-12 | Four toolsets, exported from `vidbyte.tools.toolsets` | FR-5, G-4, INV-21, AC-18 | developer |
 | W-13 | Index and README entries | AGENTS.md "Repository Map" | developer, agents reading the repo |
-| W-14 | Gates green, fixed bytes verified | INV-19, INV-22, INV-23, AC-16, NFR-6 | operator (CI) |
+| W-14 | Gates green, fixed bytes verified, every entry import works in a fresh interpreter | INV-19, INV-22, INV-23, AC-16, AC-20, NFR-6 | operator (CI) |
 
 ### 12.2 Folder and module map
 
@@ -1755,13 +1815,13 @@ A001 requires non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MOD
 | `vidbyte/lib/configs/` | fixed declarations | no | A001 header; append to `__init__` | `vidbyte.lib.dataclasses`, `vidbyte.lib.enums` |
 | `vidbyte/lib/errors/` | SDK exception types (A003 scope) | no | none new | `vidbyte.lib.enums.failure`, `vidbyte.lib.constants.native_hosts`, stdlib |
 | `vidbyte/lib/process/` | canonical helpers (AGENTS.md principle 5) | yes | A001 headers; `lib/README.md` bullet; no folder README needed | `vidbyte.lib.*` and stdlib; never a layer above (A006) |
-| `vidbyte/tools/mcp/` | MCP client transport | no | README section for the new options | `vidbyte.lib.errors`, stdlib |
+| `vidbyte/tools/mcp/` | MCP client transport | no | README section for the new options | `vidbyte.lib.errors`, `vidbyte.lib.process`, `vidbyte.lib.dataclasses.validation`, `vidbyte.lib.constants.native_hosts`, stdlib |
 | `vidbyte/harnesses/native/` | parent package of native hosts | yes | fixed `__init__.py` bytes; no README (request.md:188) | — (imports nothing) |
 | `vidbyte/harnesses/native/hostkit/` | shared host plumbing (D-22) | yes | A001 headers | `vidbyte.lib.*`, `vidbyte.tools.mcp.transport`, `vidbyte.harnesses.serialization` |
 | `vidbyte/harnesses/native/{grok,opencode,muse}/` | one host per package | yes | A001 headers; `harnesses/README.md` bullet | `vidbyte.lib.*`, `vidbyte.tools.mcp.transport`, `vidbyte.harnesses.native.hostkit`; opencode also `vidbyte.harnesses.native.backends`; never `vidbyte.tools.builtins` or the Codex or Claude hosts |
 | `vidbyte/harnesses/native/backends/` | backend profile functions | yes | A001 headers | `vidbyte.lib.*`, `vidbyte.harnesses.native.hostkit` |
-| `vidbyte/tools/builtins/` and its 4 new subpackages | model-facing tools | partly | A001 headers; no README (none exists for sibling subfolders) | `vidbyte.tools.base`, `vidbyte.lib.*`, `vidbyte.harnesses.native.*` |
-| `vidbyte/tools/toolsets/` | tool catalogs | no | A001 headers; append to `__init__` | `vidbyte.tools.catalog`, `vidbyte.tools.builtins.<host>`, `vidbyte.harnesses.native.*` (types) |
+| `vidbyte/tools/builtins/` and its 4 new subpackages | model-facing tools | partly | A001 headers; no README of their own (none exists for sibling subfolders); the `builtins/` bullet in `vidbyte/tools/README.md` names them (row 68) | `vidbyte.tools.base`, `vidbyte.lib.*`, `vidbyte.harnesses.native.*` |
+| `vidbyte/tools/toolsets/` | tool catalogs | no | A001 headers; append to `__init__`; the `toolsets/` bullet in `vidbyte/tools/README.md` names them (row 68) | `vidbyte.tools.catalog`, `vidbyte.tools.builtins.<host>`, `vidbyte.harnesses.native.*` (types) |
 | `tests/features/{grok_host,opencode_host,muse_host,native_backends}/` | test packs (test author) | yes | `FEATURE.md`; `README.md` with `## File Index` (S020) and `## Logs`; A001 headers; no `__init__.py` | anything |
 
 ### 12.3 File-by-file actions
@@ -1775,47 +1835,47 @@ A001 requires non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MOD
 | 5 | MODIFY | `vidbyte/lib/enums/__init__.py` | export list | Append the 13 enums to the imports and the alphabetical `__all__` | AGENTS.md Placement Rules ("every public enum is added to the export list"); request.md append-only lists | W-1 | P1 |
 | 6 | CREATE | `vidbyte/lib/dataclasses/validation.py` | validator | `RecordFieldValidator` with the 13 static methods of §9.1 | AGENTS.md principles 4 and 5; C008 (the one exempt file), C002, C006, C007 | W-1, INV-5 | P1 |
 | 7 | CREATE | `vidbyte/lib/dataclasses/native_hosts.py` | dataclass | `NativeTurnHandle`, `NativeTokenUsage`, `NativeApprovalDecision`, `NativeTurnResult`, `NativeInterruptResult`, `NativeSteerResult`, `NativeMessageUsage`, `NativeSessionUsage` | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; S060 | W-2 | P1 |
-| 8 | CREATE | `vidbyte/lib/dataclasses/grok.py` | dataclass | `GrokHostSettings`, `GrokTurnRequest`, `GrokOneShotRequest`, `GrokOneShotResult`, `GrokReadiness`, `GrokModel`, `GrokModelCatalog`, `GrokSession`, `GrokSessionPage`, `GrokSessionSearch` | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; S060; C012 (no `model` field on a `*Settings` class) | W-2, EC-23, EC-33 | P1 |
-| 9 | CREATE | `vidbyte/lib/dataclasses/opencode.py` | dataclass | The 15 opencode records of §9.1 | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; S060; S054 (`server_password` defaults to `None`) | W-2, EC-66, EC-91, EC-152 | P1 |
-| 10 | CREATE | `vidbyte/lib/dataclasses/muse.py` | dataclass | The 9 Muse records of §9.1 | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; S060 | W-2, EC-106 | P1 |
+| 8 | CREATE | `vidbyte/lib/dataclasses/grok.py` | dataclass | `GrokHostSettings`, `GrokTurnRequest`, `GrokOneShotRequest`, `GrokOneShotResult`, `GrokReadiness`, `GrokModel`, `GrokModelCatalog`, `GrokSession`, `GrokSessionPage`, `GrokSessionSearch`, and the *inbound* `GrokPermissionOption`, `GrokPermissionRequest`, `GrokSessionUpdate`, `GrokPromptResult` | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md` ("Harness bridge functions take validated lib records"); field guide `class-bound-helpers.md:47` (wire-mirroring records); S060; C012 (no `model` field on a `*Settings` class) | W-2, EC-23, EC-33, D-13 | P1 |
+| 9 | CREATE | `vidbyte/lib/dataclasses/opencode.py` | dataclass | The 19 opencode records of §9.1, the *inbound* `OpencodePermissionRequest`, `OpencodeQuestionRequest`, `OpencodeSessionStatus` and `OpencodeAssistantError` among them; `OpencodeMessage` carries `parent_id` and `error` | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; field guide `class-bound-helpers.md:47`; S060; S054 (`server_password` defaults to `None`) | W-2, EC-66, EC-91, EC-152, D-13 | P1 |
+| 10 | CREATE | `vidbyte/lib/dataclasses/muse.py` | dataclass | The 13 Muse records of §9.1, the *inbound* `MuseApprovalChoice`, `MuseApprovalRequest`, `MuseUserInputRequest` and `MuseTurnCompleted` among them | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; field guide `class-bound-helpers.md:47`; S060 | W-2, EC-106, D-13 | P1 |
 | 11 | CREATE | `vidbyte/lib/dataclasses/harness_backends.py` | dataclass | `HarnessBackend`, `ClaudeBackendEnv` (with `as_environ()`), `OpencodeBackendProvider`, `BackendCompatRequest`, `DeepseekBalanceEntry`, `DeepseekBalance`, `BackendReadiness` | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; S060; field guide `strict-config-dataclasses.md` ("Mark key fields `repr=False`") | W-2, EC-134, AC-13 | P1 |
 | 12 | CREATE | `vidbyte/lib/dataclasses/process.py` | dataclass | `CliInvocation`, `CliOutcome`, `ProcessStartOutcome` | AGENTS.md Placement Rules (dataclasses) and principle 4; field guide `strict-config-dataclasses.md`; S060 | W-2 | P1 |
 | 13 | CREATE | `vidbyte/lib/constants/native_hosts.py` | constants | Every constant in §9.3, including `NATIVE_HOST_NEXT_STEPS` (55 entries, verbatim §6.3.1 text) | field guide `strict-config-dataclasses.md` (feature-prefixed bound constants in `vidbyte/lib/constants/`); A007; S054 | W-1, INV-8, AC-17 | P1 |
 | 14 | CREATE | `vidbyte/lib/configs/harness_backends.py` | config declaration | `HARNESS_BACKENDS: tuple[HarnessBackend, ...]`, the two profiles of §9.1 | field guide `declarative-config-resolution.md` (fixed capability tables in `vidbyte/lib/configs/`) | W-2, FR-4 | P1 |
 | 15 | MODIFY | `vidbyte/lib/configs/__init__.py` | export list | Append `HARNESS_BACKENDS` to the imports and `__all__` | the file's existing re-export pattern; request.md append-only lists | W-2 | P1 |
 | 16 | CREATE | `vidbyte/lib/process/__init__.py` | package init | Re-exports `CliRunner`, `ManagedProcess`, `ProcessStopper`; literal `__all__` | A001; S015 | W-4 | P1 |
-| 17 | CREATE | `vidbyte/lib/process/runner.py` | canonical helper | `CliRunner.run`, `ProcessStopper.stop_tree` (§8.5) | AGENTS.md principle 5; field guide `cli-backed-source-integrations.md` ("centralize process execution in one library runner"); S055, S006, S019, A002; pattern `vidbyte/tools/builtins/bash.py:195-234` | W-4, FR-16, INV-4 | P1 |
-| 18 | CREATE | `vidbyte/lib/process/managed.py` | canonical helper | `ManagedProcess.start`, `.exit_code`, `.stop` (§8.5) | same as row 17 | W-4, FR-16, INV-4 | P1 |
-| 19 | MODIFY | `vidbyte/lib/errors/base.py` | error | `NativeHostError` after `CodexAgentError` (§8.5), with attributes `failure_code`, `operation`, `next_step`, `error_type` and `context`; imports `FailureCode` and `NATIVE_HOST_NEXT_STEPS` from their concrete modules | D-6; A003 (`DIAGNOSTIC_FIELDS`; precedent `:129-153`); A006 (no cycle) | W-3, INV-1, INV-8 | P1 |
-| 20 | MODIFY | `vidbyte/lib/errors/__init__.py` | export list | Append `NativeHostError` to the import tuple and `__all__` | the file header's instruction for new base errors; request.md append-only lists | W-3 | P1 |
+| 17 | CREATE | `vidbyte/lib/process/runner.py` | canonical helper | `CliRunner.run` (stdin a closed-after-write pipe or `DEVNULL`), `ProcessStopper.stop_tree` (killpg only for a group leader; pipes closed after the bounded final wait) (§8.5) | AGENTS.md principle 5; field guide `cli-backed-source-integrations.md` ("centralize process execution in one library runner"); S055, S006, S019, A002; pattern `vidbyte/tools/builtins/bash.py:195-234` | W-4, FR-16, INV-4 | P1 |
+| 18 | CREATE | `vidbyte/lib/process/managed.py` | canonical helper | `ManagedProcess.start` (stdin `DEVNULL`), `.exit_code`, `.stop` (§8.5) | same as row 17 | W-4, FR-16, INV-4 | P1 |
+| 19 | MODIFY | `vidbyte/lib/errors/base.py` | error | `NativeHostError` appended at the end of the file, after `SourceSecurityError` (the last class today) (§8.5), with attributes `failure_code`, `operation`, `next_step`, `error_type` and `context`; imports `FailureCode` and `NATIVE_HOST_NEXT_STEPS` from their concrete modules | D-6; A003 (`DIAGNOSTIC_FIELDS`; precedent `:129-153`); A006 (no cycle); request.md shared-file contract (append, away from the `CodexAgentError` area the Codex and Claude PRs edit; §11 conflict 8) | W-3, INV-1, INV-8 | P1 |
+| 20 | MODIFY | `vidbyte/lib/errors/__init__.py` | export list | Append `NativeHostError` at the end of the import tuple and of `__all__` | request.md append-only lists (the shared-file contract wins over the file header's "alphabetical family order"; §11 conflict 8) | W-3 | P1 |
 | 21 | MODIFY | `vidbyte/lib/README.md` | doc | One "Key Modules" bullet: `process/`, the canonical CLI runner, managed process and process-tree stopper | AGENTS.md "Repository Map" (the folder README documents the folder); A009 | W-13 | P5 |
-| 22 | MODIFY | `vidbyte/tools/mcp/transport.py` | transport | The D-3 additions (§8.5): `on_message`, `send_request`, `notify`, `respond`, per-call `timeout_seconds`, `exit_grace_seconds`, and the dispatch fix | AGENTS.md principle 5 ("add the option you need to it rather than copying it"); INV-18; S012; S016 (`McpProtocolError`, not `ValueError`); S039 (no new `asyncio.Lock`); A002 | W-5, FR-15 | P2 |
+| 22 | MODIFY | `vidbyte/tools/mcp/transport.py` | transport | The D-3 additions (§8.5): `on_message`, `send_request`, `notify`, `respond`, per-call `timeout_seconds`, `exit_grace_seconds: float \| None = None`, `stop_process_tree: bool = False` (POSIX `start_new_session`; close through `ProcessStopper.stop_tree`), bounded post-kill waits followed by closing the pipes, and the dispatch fix. New values are checked through `RecordFieldValidator` and re-raised as `McpProtocolError` (`invalid_call`) | AGENTS.md principle 5 ("add the option you need to it rather than copying it"); INV-18; D-23; S012; S016 (`McpProtocolError`, not `ValueError`); C002 and C006 (no inline bool or finite guard; the validator owns them); C007 (`require_bool` for `stop_process_tree`); S039 (no new `asyncio.Lock`); A002; A006 (imports only `vidbyte.lib`); pattern `vidbyte/tools/builtins/bash.py:195-234` | W-5, FR-15, EC-10 | P2 |
 | 23 | MODIFY | `vidbyte/tools/mcp/README.md` | doc | A short section on the new options, stating that the defaults keep MCP behaviour | AGENTS.md "Repository Map" (the folder README documents the folder) | W-13 | P5 |
 | 24 | CREATE | `vidbyte/harnesses/native/__init__.py` | package marker | The exact bytes of request.md:175-186 (SHA-256 `0374a2c8…497a`, LF endings) | request.md shared-file contract; INV-19 | W-14, AC-16 | P2 |
 | 25 | CREATE | `vidbyte/harnesses/native/hostkit/__init__.py` | package init | Re-exports `NativeErrorFactory`, `NativeTurnTable`, `NativePeer`, `NativeChildEnvironment` for the host packages | D-22; A001; S015 | W-6 | P2 |
 | 26 | CREATE | `vidbyte/harnesses/native/hostkit/errors.py` | host plumbing | `NativeErrorFactory` (§8.5) | D-22; INV-6; field guide `provider-api-contracts.md` (one `try`, typed rewrite); reuse `HarnessRedactor` (code-map §2.1); A002 | W-6, INV-6, EC-5 | P2 |
 | 27 | CREATE | `vidbyte/harnesses/native/hostkit/turns.py` | host plumbing | `NativeTurnTable` (§8.5) | D-22; S006; S039; INV-12 to INV-17 | W-6, EC-9, EC-149 | P2 |
-| 28 | CREATE | `vidbyte/harnesses/native/hostkit/peers.py` | host plumbing | `NativePeer`, `NativeChildEnvironment` (§8.5) | D-3, D-18, D-22; INV-3, INV-4; A002 | W-6, EC-6, EC-10 | P2 |
+| 28 | CREATE | `vidbyte/harnesses/native/hostkit/peers.py` | host plumbing | `NativePeer` (transport built with `exit_grace_seconds=NATIVE_STOP_GRACE_SECONDS` and `stop_process_tree=True`), `NativeChildEnvironment` (§8.5) | D-3, D-18, D-22, D-23; INV-3, INV-4; A002 | W-6, EC-6, EC-10 | P2 |
 | 29 | CREATE | `vidbyte/harnesses/native/grok/__init__.py` | package init | Exports `GrokHost` and `run_grok_once` | request.md:173 (hosts are imported from their own subpackage); S015; A001 | W-8 | P3 |
 | 30 | CREATE | `vidbyte/harnesses/native/grok/host.py` | host | `GrokHost` with `__aenter__`, `__aexit__`, `check_grok_ready`, `list_grok_models`, `spawn_grok_session`, `run_grok_once`, `continue_grok_session`, `fork_grok_session`, `list_grok_sessions`, `search_grok_sessions`, `wait_grok_turn`, `interrupt_grok_turn`; module function `run_grok_once` | AGENTS.md principles 1 and 2 (narrated main methods, flat helpers); pattern `vidbyte/agents/codex/transport.py:54-119` | W-8, FR-1, FR-17, AC-1 | P3 |
 | 31 | CREATE | `vidbyte/harnesses/native/grok/turn.py` | turn driver | `GrokTurnDriver` | AGENTS.md principle 3; D-9, D-10, D-11; S006 | W-8, AC-6, AC-8 | P3 |
-| 32 | CREATE | `vidbyte/harnesses/native/grok/wire.py` | wire codec | `GrokWire` | field guide `class-bound-helpers.md` (harness translation; answer server requests in the provider's shape); D-13; Semgrep typed-mapping-boundary-policy | W-8, EC-14 to EC-16 | P3 |
-| 33 | CREATE | `vidbyte/harnesses/native/grok/cli.py` | CLI adapter | `GrokCli` | field guide `cli-backed-source-integrations.md` (command construction in the adapter); D-19; S055 | W-8, EC-18 to EC-21, EC-38 | P3 |
+| 32 | CREATE | `vidbyte/harnesses/native/grok/wire.py` | wire codec | `GrokWire`, with `parse_permission_request`, `parse_session_update` and `parse_prompt_result` returning the §9.1 *inbound* records | field guide `class-bound-helpers.md` (harness translation; answer server requests in the provider's shape; parse raw params into a lib record); D-13; Semgrep typed-mapping-boundary-policy | W-8, EC-14 to EC-16, EC-49 | P3 |
+| 33 | CREATE | `vidbyte/harnesses/native/grok/cli.py` | CLI adapter | `GrokCli`, including the peer argv `agent --no-leader [--model=<id>] [--reasoning-effort=<effort>] stdio` | field guide `cli-backed-source-integrations.md` (command construction in the adapter); D-2, D-19; T-2 (`--name=value` only); S055 | W-8, EC-18 to EC-21, EC-25, EC-38 | P3 |
 | 34 | CREATE | `vidbyte/harnesses/native/opencode/__init__.py` | package init | Exports `OpencodeHost` | request.md:173; S015; A001 | W-9 | P3 |
 | 35 | CREATE | `vidbyte/harnesses/native/opencode/host.py` | host | `OpencodeHost` with its 18 methods plus `__aenter__` and `__aexit__` (§8.5) | AGENTS.md principles 1 and 2 | W-9, FR-2 | P3 |
 | 36 | CREATE | `vidbyte/harnesses/native/opencode/client.py` | HTTP adapter | `OpencodeClient` | D-5; AGENTS.md principle 5 (`HttpTransport`); S011, S012, A002 | W-9, EC-55 to EC-59 | P3 |
 | 37 | CREATE | `vidbyte/harnesses/native/opencode/server.py` | process lifecycle | `OpencodeServer` | FR-18; D-4; request.md Q-5 | W-9, AC-9 | P3 |
-| 38 | CREATE | `vidbyte/harnesses/native/opencode/turn.py` | turn watcher | `OpencodeTurnWatcher` | D-9, D-11; S064; S052 (ASYNC110); S006 | W-9, EC-80 to EC-89 | P3 |
-| 39 | CREATE | `vidbyte/harnesses/native/opencode/wire.py` | wire codec | `OpencodeWire` | field guide `class-bound-helpers.md`; D-13; Semgrep typed-mapping-boundary-policy | W-9 | P3 |
+| 38 | CREATE | `vidbyte/harnesses/native/opencode/turn.py` | turn watcher | `OpencodeTurnWatcher`: the message snapshot, the `parentID` reply link, the session tree and the `retry` limit (§8.5) | D-9, D-11; S064; S052 (ASYNC110); S006 | W-9, EC-80 to EC-89, EC-154, EC-155 | P3 |
+| 39 | CREATE | `vidbyte/harnesses/native/opencode/wire.py` | wire codec | `OpencodeWire`, with `parse_permission_requests`, `parse_question_requests`, `parse_session_statuses` and `parse_assistant_error` | field guide `class-bound-helpers.md`; D-13; Semgrep typed-mapping-boundary-policy | W-9, EC-82 to EC-85 | P3 |
 | 40 | CREATE | `vidbyte/harnesses/native/muse/__init__.py` | package init | Exports `MuseHost` | request.md:173; S015; A001 | W-10 | P3 |
 | 41 | CREATE | `vidbyte/harnesses/native/muse/host.py` | host | `MuseHost` with its 12 methods plus `__aenter__` and `__aexit__` (§8.5) | AGENTS.md principles 1 and 2 | W-10, FR-3 | P3 |
-| 42 | CREATE | `vidbyte/harnesses/native/muse/launcher.py` | launcher | `MuseLauncher`, `MusePathTranslator` | D-19; request.md Q-8 (a pure path function); S055 | W-10, FR-19, AC-10 | P3 |
-| 43 | CREATE | `vidbyte/harnesses/native/muse/turn.py` | turn driver | `MuseTurnDriver` | D-9, D-10, D-11; S006 | W-10, EC-116 to EC-121 | P3 |
-| 44 | CREATE | `vidbyte/harnesses/native/muse/wire.py` | wire codec | `MuseWire` | field guide `class-bound-helpers.md`; D-13; Semgrep typed-mapping-boundary-policy | W-10 | P3 |
+| 42 | CREATE | `vidbyte/harnesses/native/muse/launcher.py` | launcher | `MuseLauncher` (with the WSL peer mark and the in-distro reap through `CliRunner`), `MusePathTranslator` | D-19, D-23; request.md Q-8 (a pure path function; kill the tree, then kill inside the distro); S055 | W-10, FR-19, AC-10, EC-10 | P3 |
+| 43 | CREATE | `vidbyte/harnesses/native/muse/turn.py` | turn driver | `MuseTurnDriver` | D-9, D-10, D-11; S006 | W-10, EC-116 to EC-121, EC-156 | P3 |
+| 44 | CREATE | `vidbyte/harnesses/native/muse/wire.py` | wire codec | `MuseWire`, with the full MSP params of §8.5, `new_command_id()` (UUIDv7), `parse_approval_request`, `parse_user_input_request` and `parse_turn_completed` | field guide `class-bound-helpers.md`; D-13; Semgrep typed-mapping-boundary-policy; AGENTS.md principle 5 (a one-feature helper may stay local) | W-10, EC-98, EC-156 | P3 |
 | 45 | CREATE | `vidbyte/harnesses/native/backends/__init__.py` | package init | Module-level `list_harness_backends`, `build_claude_backend_env`, `check_backend_ready`, `check_backend_compat`, `get_deepseek_balance`, `build_opencode_backend_provider`, bound to `HarnessBackends`; literal `__all__` | field guide `class-bound-helpers.md`; S015; A001 | W-7, FR-4 | P3 |
 | 46 | CREATE | `vidbyte/harnesses/native/backends/profiles.py` | service | `HarnessBackends` (§8.5) | D-16, D-17; field guide `class-bound-helpers.md`; pattern `vidbyte/lib/http/parser.py`; S012 | W-7, AC-13, AC-14 | P3 |
 | 47 | MODIFY | `vidbyte/harnesses/README.md` | doc | One "Key modules" bullet for `native/`: the hosts, `hostkit`, backends, and the T-5 MCP exposure note | request.md append-only lists; AGENTS.md "Repository Map"; A009 | W-13 | P5 |
-| 48 | CREATE | `vidbyte/tools/builtins/native_host_tool.py` | tool base | `NativeHostTool`, `NativeToolArguments`, `NativeResultEncoder` (§8.5) | AGENTS.md principle 5; field guide `cli-backed-source-integrations.md` (thin wrappers, byte clipping); S016, S017, S019; Semgrep typed-mapping-boundary-policy | W-11, INV-7, EC-138 to EC-143 | P4 |
+| 48 | CREATE | `vidbyte/tools/builtins/native_host_tool.py` | tool base | `NativeHostTool` (error metadata with `hint` and, when known, `retryable`), `NativeToolArguments`, `NativeResultEncoder` (§8.5) | AGENTS.md principle 5; field guide `cli-backed-source-integrations.md` (thin wrappers, byte clipping); S016, S017, S019; Semgrep typed-mapping-boundary-policy | W-11, INV-7, EC-138 to EC-143 | P4 |
 | 49 | CREATE | `vidbyte/tools/builtins/grok/__init__.py` | package init | Exports the 10 Grok tool classes | S015; A001; D-15 (not re-exported from the `builtins` package) | W-11 | P4 |
 | 50 | CREATE | `vidbyte/tools/builtins/grok/descriptions.py` | tool descriptions | Description constants for the 10 tools and their parameters | S025; field guide `model-facing-tool-contracts.md`; S062; A001 | W-11 | P4 |
 | 51 | CREATE | `vidbyte/tools/builtins/grok/tools.py` | tool | The 10 Grok tool classes (§9.2 rows 1–10) | pattern `vidbyte/tools/builtins/sessions/checkpoint.py:28-52`; S025; INV-7 | W-11, FR-5, EC-144, EC-145 | P4 |
@@ -1835,8 +1895,9 @@ A001 requires non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MOD
 | 65 | CREATE | `vidbyte/tools/toolsets/harness_backends.py` | toolset | `HarnessBackendTools()` | same as row 62 | W-12 | P4 |
 | 66 | MODIFY | `vidbyte/tools/toolsets/__init__.py` | export list | Append the 4 toolsets to the imports and `__all__` | request.md append-only lists; D-15; INV-21 | W-12, AC-18 | P4 |
 | 67 | MODIFY | `REPO_MAP.md` | doc (index) | Two new entries, no existing text changed: `##### vidbyte/harnesses/native/` between the `vidbyte/harnesses/` entry (`:147-149`) and `##### vidbyte/harnesses/stores/` (`:151`); `##### vidbyte/lib/process/` between `lib/models/` (`:195`) and `lib/providers/` (`:199`) | AGENTS.md "Repository Map"; request.md append-only lists; NG-16 | W-13 | P5 |
+| 68 | MODIFY | `vidbyte/tools/README.md` | doc | Extend the "Key Modules" `builtins/` bullet (`:89`) to name `native_host_tool.py` and the `grok/`, `opencode/`, `muse/` and `harness_backends/` tool subpackages, and the `toolsets/` bullet (`:91`) to name `GrokTools`, `OpencodeTools`, `MuseTools` and `HarnessBackendTools`, with the T-5 `read_only(host)` note for MCP | AGENTS.md ("Each folder's own `README.md` documents that folder"); A009 (≤ 40,000 characters) | W-13 | P5 |
 
-The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__init__.py`, `contracts/sdk-public-api.json`, `vidbyte/tools/builtins/__init__.py`, `vidbyte/lib/dataclasses/__init__.py`, `vidbyte/lib/constants/__init__.py`, `vidbyte/harnesses/__init__.py`, `vidbyte/mcp_server/`, `pyproject.toml`, `lint/`.
+The table has 56 CREATE and 12 MODIFY rows. Not touched (INV-22): `vidbyte/__init__.py`, `contracts/sdk-public-api.json`, `vidbyte/tools/builtins/__init__.py`, `vidbyte/lib/dataclasses/__init__.py`, `vidbyte/lib/constants/__init__.py`, `vidbyte/harnesses/__init__.py`, `vidbyte/mcp_server/`, `pyproject.toml`, `lint/`.
 
 ### 12.4 Standards checklist for this change
 
@@ -1848,6 +1909,8 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 - [ ] Every public host method and backend function has one `try`: `except asyncio.CancelledError: raise`, then `except NativeHostError: raise`, then `except Exception as exc: raise <factory>.from_unexpected(exc, operation=...) from exc`. — *source:* INV-1, INV-2; pattern `vidbyte/agents/codex/transport.py:54-119`
 - [ ] Every `NativeHostError` is built by `NativeErrorFactory`, so vendor text is scrubbed and capped. — *source:* INV-6; D-22
 - [ ] Every process start is inside a `try`/`finally` that stops and reaps it on every path. — *source:* INV-4; pattern `vidbyte/tools/builtins/bash.py:195-234`
+- [ ] No child process inherits the caller's stdin: peers get the transport's pipe, `CliRunner` a pipe or `DEVNULL`, `ManagedProcess` `DEVNULL`. — *source:* §8.5 "Standard input"; D-21 (stdio MCP serving)
+- [ ] Peers are built with `stop_process_tree=True`, and every wait after a kill is bounded and followed by closing the pipes. — *source:* D-23; INV-4; pattern `vidbyte/tools/builtins/bash.py:195-234`
 - [ ] Each §6.3 row's code and required token are produced exactly as written. — *source:* §6.3; FR-6
 - [ ] Every numeric limit is a §9.3 constant, including parameter defaults. — *source:* lint A007
 - [ ] No `asyncio.Lock`, no `TypedDict`, no async parameter named `timeout`, no unowned task, no swallowed cancellation. — *source:* lint S039, S045, S006, S019
@@ -1855,7 +1918,8 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 - [ ] Tool descriptions are at least four general sentences, have no examples, and use no adjacent string literals. — *source:* lint S025, S062; field guide `model-facing-tool-contracts.md`
 - [ ] No `str(exc)` or `repr(exc)` reaches an error or a tool result. — *source:* lint S017; INV-6
 - [ ] No name containing password, pass, pwd, token or secret gets a string literal. — *source:* lint S054
-- [ ] Wire parsing never silently falls back on a wrong shape. — *source:* Semgrep `typed-mapping-boundary-policy`; D-13
+- [ ] Wire parsing never silently falls back on a wrong shape, and every inbound frame or body becomes a §9.1 *inbound* record before a driver or watcher reads it. — *source:* Semgrep `typed-mapping-boundary-policy`; D-13; field guide `class-bound-helpers.md:47`, `strict-config-dataclasses.md:39`
+- [ ] Each module named in AC-20 imports first in a fresh interpreter: `python -c "import <module>"`, once per module, from the worktree with `PYTHONPATH=$(pwd)`. — *source:* AGENTS.md principle 3 (no cycles); D-3 (two-way package edge); AC-20
 - [ ] Export lists and indexes are appended to, never reordered or rewritten. — *source:* request.md shared-file contract
 - [ ] `git show HEAD:vidbyte/harnesses/native/__init__.py | sha256sum` equals INV-19's hash. — *source:* request.md:178
 - [ ] `python lint/run.py` ends `SDK-LINT: PASS` with no baseline count raised; Semgrep is clean after `git add -A`; `python scripts/run_ci.py` passes. — *source:* AGENTS.md "Repository Map"; field guide `local-ci-verification.md`
@@ -1866,6 +1930,7 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 - Add a `process/` Key Modules bullet — `vidbyte/lib/README.md` — *source:* AGENTS.md "Repository Map"
 - Add a section on the new transport options — `vidbyte/tools/mcp/README.md` — *source:* AGENTS.md "Repository Map"
 - Add two File Index entries — `REPO_MAP.md` — *source:* AGENTS.md "Repository Map"; request.md append-only lists
+- Extend the `builtins/` and `toolsets/` Key Modules bullets — `vidbyte/tools/README.md` — *source:* AGENTS.md ("Each folder's own `README.md` documents that folder"); A009
 - Append the enum, error, config and toolset exports — the four `__init__.py` files of §12.3 rows 5, 15, 20 and 66 — *source:* AGENTS.md Placement Rules; request.md append-only lists
 - No public-API contract regeneration, because the root `__all__` is unchanged — `contracts/sdk-public-api.json` — *source:* D-15; lint C016
 - No `pyproject.toml` change and no baseline change — *source:* D-20; request.md "Do not touch"
@@ -1876,12 +1941,12 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 **P1 — Lib** (ships: records, enums, constants, the validator, the error type and the process helpers; nothing calls them yet): rows 1–20.
 **P2 — Transport and plumbing** (ships: the extended transport, with the existing MCP tests unchanged and green, the fixed `native/__init__.py`, and `hostkit`): rows 22, 24–28.
 **P3 — Hosts** (ships: the three hosts and the backends, usable from Python): rows 29–46.
-**P4 — Tools and toolsets** (ships: the 43 tools and 4 toolsets): rows 48–66.
-**P5 — Docs and gates** (ships: the indexes and READMEs, then a green full gate): rows 21, 23, 47 and 67.
+**P4 — Tools and toolsets** (ships: the 43 tools and 4 toolsets; exit check: AC-20's fresh-interpreter imports all succeed): rows 48–66.
+**P5 — Docs and gates** (ships: the indexes and READMEs, then a green full gate): rows 21, 23, 47, 67 and 68.
 
 **Dependency order:** P1 before everything. Within P1, rows 1–5 and 13 come before rows 6–12 and 14–20. Row 22 (transport) before rows 25–28. Rows 25–28 before rows 29–46. Rows 45–46 (backends) before rows 34–39 (opencode). Rows 29–46 before rows 48–66.
 
-**Independent:** row 22 is independent of all of P1; the three hosts (rows 29–33, 34–39, 40–44) are independent of each other; within P4, the four host tool groups are independent; the P5 docs rows are independent of each other.
+**Independent:** row 22 needs only rows 6, 13 and 16–18 of P1; the three hosts (rows 29–33, 34–39, 40–44) are independent of each other; within P4, the four host tool groups are independent; the P5 docs rows are independent of each other.
 
 ## §13 Test seams (facts for the test author — no tests here)
 
@@ -1915,13 +1980,13 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
   - No raw probe output is committed. Fixtures contain no secret, token or absolute user path (request.md:213-219).
 - **Real seams (do not mock):**
   - **Grok and Muse peers.** `GrokHostSettings.grok_command` and `MuseHostSettings.muse_command` are argv prefixes (D-19). Setting either to `(sys.executable, "-u", "<fake peer script>")` runs that script as a real child process over real pipes.
-    - Grok appends `agent [-m <model>] [--reasoning-effort <effort>] stdio` for peers, `--version` and `models` for checks, and the one-shot or fork flags for CLI runs.
+    - Grok appends `agent --no-leader [--model=<id>] [--reasoning-effort=<effort>] stdio` for peers, `--version` and `models` for checks, and the one-shot or fork flags for CLI runs.
     - Muse appends `serve`, or `--version`.
     - The fake receives these in `sys.argv`.
   - **opencode owned mode.** `opencode_command` can be a fake script that prints `opencode server listening on http://127.0.0.1:<port>` and then sleeps until killed.
   - **opencode attached mode.** `server_url` plus credentials, with no process.
   - **HTTP.** Every opencode and DeepSeek call goes through `HttpTransport`, which builds a fresh `httpx.AsyncClient` per call. Patch `vidbyte.lib.http.transport.httpx.AsyncClient` with a factory that returns `AsyncClient(..., transport=httpx.MockTransport(handler))`. Do not mock `HttpTransport`, `McpStdioTransport`, `CliRunner` or the host classes themselves.
-  - **WSL.** The Muse WSL mode is reachable only with a real WSL. `MusePathTranslator.to_wsl` and the argv that `MuseLauncher` builds for a given `wsl_distro` are pure and testable on any OS.
+  - **WSL.** The Muse WSL mode is reachable only with a real WSL. `MusePathTranslator.to_wsl` and the argv that `MuseLauncher` builds for a given `wsl_distro` are pure and testable on any OS. So are the peer environment overlay (the `VIDBYTE_PEER_MARK` value and the `WSLENV` entries) and the reap argv `wsl.exe -d <distro> -e sh -c <MUSE_REAP_SCRIPT> vidbyte_reap <mark>`. Running the reap script itself needs a real distro.
 - **Timing:**
   - Every per-call deadline is a settings or request field, so tests use small values without patching: `control_timeout_seconds`, `startup_timeout_seconds`, `request_timeout_seconds`, `max_turn_seconds` and `timeout_seconds`.
   - `NATIVE_STOP_GRACE_SECONDS` and `OPENCODE_POLL_INTERVAL_SECONDS` are read through the constants module at call time (§9.3), so patching `vidbyte.lib.constants.native_hosts.<NAME>` reaches every user.
@@ -1931,10 +1996,10 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
   - Child environments are `os.environ` plus overlays (D-18). A fake can report its own environment and argv, which shows an overlay reaching the child and never its argv.
 - **Observability:**
   - `NativeTurnResult.decisions` records every approval answer.
-  - `NativeHostError.context` uses these keys, every value a `str`: `reason`, `field`, `vendor_code`, `vendor_error`, `vendor_kind`, `retryable`, `status_code`, `version`, `available_models`, `available_providers`, `live_turns`, `truncated`, `session_id`, `exit_code`, `status`, `features`, `distros`, `method`, `error_type`.
+  - `NativeHostError.context` uses these keys, every value a `str`: `reason`, `field`, `vendor_code`, `vendor_error`, `vendor_kind`, `retryable`, `status_code`, `version`, `available_models`, `available_providers`, `live_turns`, `truncated`, `session_id`, `exit_code`, `status`, `features`, `distros`, `retry_attempt`, `method`, `error_type`.
   - Peers are observed through the fake's own output, such as a file it writes received frames to.
-  - On POSIX, a pid the fake reports can be checked with `os.kill(pid, 0)` after a call returns. Windows has no portable equivalent.
-- **Determinism:** turn ids (`uuid4().hex`), opencode server passwords and Muse `commandId`s are random. Only their shape is stable.
+  - On POSIX, a pid the fake reports, including one of a child the fake started itself, can be checked with `os.kill(pid, 0)` after a call returns. Windows has no portable equivalent.
+- **Determinism:** turn ids (`uuid4().hex`), opencode server passwords, WSL peer marks (`uuid4().hex`) and Muse `commandId`s are random. Muse `commandId`s are RFC 9562 UUIDv7 strings (version nibble `7`, variant `10`), time-ordered. Only their shape is stable.
 - **Must stay green unchanged:**
   - `tests/test_mcp_stdio_transport.py`.
   - `tests/test_mcp_studio_server.py`.
@@ -1959,6 +2024,7 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
   - changing a §8.5 name or signature or a §6.3.1 code or next step;
   - a gate rejecting the fixed `native/__init__.py` bytes (report the rule ID and output, request.md:181);
   - a §6.3 row that conflicts with observed vendor behaviour;
+  - an AC-20 import that fails in a way only a function-level import or a moved export would fix (D-3 flips);
   - the test author modifying any existing test file.
 - **Never:**
   - send a live prompt (`session/prompt`, `turn/start`, `prompt_async`, `POST …/message`, `grok -p`, `opencode run`, `muse exec`);
@@ -1977,17 +2043,20 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 - **A-2** — Grok behaviour verified on 1.0.52 also holds on the 1.0.13 floor: the `_meta.modelState.currentModelId` echo of `-m`, `_meta.reasoningEfforts`, -32603 with `FS_NOT_FOUND`, the `You are not authenticated.` line, and `--name=value` argument parsing. 1.0.13 is no longer installed. — *If wrong:* on an older build EC-22 raises `grok.protocol_mismatch`, and the floor rises to the first build with `_meta.modelState`.
 - **A-3** — ACP `session/list` with `cwd` returns only that directory's sessions, with an opaque cursor (ACP schema; Grok help "under the target session directory"). — *If wrong:* fork and search filter results by `cwd` themselves.
 - **A-4** — opencode's built-in `zai-coding-plan` and `deepseek` providers read `ZHIPU_API_KEY` and `DEEPSEEK_API_KEY` from the server environment when `auth.json` holds no key for them (`GET /provider` `env` lists on 1.18.31). Which source wins when both exist is unverified. — *If wrong:* `build_opencode_backend_provider` switches to a custom provider through `OPENCODE_CONFIG_CONTENT` (the D-16 runner-up, verified to work).
-- **A-5** — In a headless `grok --single` run with `--permission-mode default`, a tool that needs approval is refused, not approved. This cannot be checked without sending a prompt. — *If wrong:* a one-shot run could act without approval, and the record default moves to `GrokPermissionMode.DONT_ASK`.
+- **A-5** — In a headless `grok --single` run with `--permission-mode default`, a tool that needs approval is refused, not approved. The run gets stdin `DEVNULL` (§8.5), so it cannot wait for typed input either. This cannot be checked without sending a prompt. — *If wrong:* a one-shot run could act without approval, and the record default moves to `GrokPermissionMode.DONT_ASK`.
 - **A-6** — `prompt_async` on a busy opencode session either queues or rejects (request.md Q-7 marks it unverified). — *If wrong:* nothing changes, because the host checks `GET /session/status` first (EC-73).
 - **A-7** — opencode `revert` and `unrevert` restore files through snapshots (request.md marks it "verify"). — *If wrong:* the functions still return the vendor's session, and the docs say file restoration is vendor behaviour.
 - **A-8** — MSP -32024 `sessionNotLoaded` on a session-scoped read is fixed by one `session/resume` (MSP schema error table). — *If wrong:* the second -32024 raises `muse.api_error` (EC-114).
-- **A-9** — Killing `wsl.exe` after stdin EOF leaves no `muse` process inside the distro. This was verified only while idle. — *If wrong:* a mid-turn kill may orphan an in-distro process (EC-10; optional Q-16).
+- **A-9** — Killing `wsl.exe` after stdin EOF ends the in-distro `muse serve`; this was verified only while idle. The in-distro reap (D-23) then reaches every process Muse started mid-turn, because each one either inherits Muse's environment, and so the mark, or is still linked to a marked process by its parent id. That reach is unverified, because checking it needs a live turn. — *If wrong:* a process that both cleared its environment and lost its parent link survives (EC-10, T-7 residual).
 - **A-10** — MSP 1.0.1 exposes no sign-in status; the MSP schema has no auth method. — *If wrong:* `MuseReadiness.signed_in` gains a value, and `muse.not_signed_in` is added in a follow-up.
 - **A-11** — Grok sessions are stored per directory and identified by UUIDs (Grok help for `--session-id` and `-r`). — *If wrong:* continue and fork across directories behave differently from EC-31.
 - **A-12** — An empty Muse `model/list` (verified, with source `bundledCatalog`) means the host cannot validate, so the model id is passed through. — *If wrong:* Muse rejects the id at `session/start` with a JSON-RPC error, which becomes `muse.api_error`.
 - **A-13** — Claude Code's model names for the backends are `glm-5.3[1m]`, `glm-5.3-flash[1m]`, `deepseek-flash[1m]` and `deepseek-v4-pro` (request.md research facts). — *If wrong:* only `HARNESS_BACKENDS` changes.
 - **A-14** — `GET /session/status` returns a map from session id to `{type: "idle" | "busy" | "retry"}`, and a session that is absent from it is idle (opencode 1.18.31 OpenAPI). — *If wrong:* EC-73 relies on the local live-turn table only.
 - **A-15** — ACP `usage_update` carries `cost` as `{amount, currency}`, and only `USD` becomes `cost_usd` (ACP schema v1.25.0). — *If wrong:* `cost_usd` stays `None` (INV-15).
+- **A-16** — `GET /session/{id}/message?limit=N` returns the session's newest N messages, oldest first, and message ids sort by creation time. The route pages backwards with `before` (opencode 1.18.31 OpenAPI), and `get_opencode_session_messages` relies on the same reading. — *If wrong:* the watcher's snapshot and reply link (EC-85) must page with `before` until they reach the snapshot id.
+- **A-17** — While opencode retries a rate-limited provider, the `retry` status `message` or `action.reason` contains one of `OPENCODE_RATE_LIMIT_MARKERS`. `action.reason` is a free string in the OpenAPI, and its values are unverified. — *If wrong:* EC-155 reports `opencode.api_error` with the verbatim reason instead of `opencode.usage_limited`.
+- **A-18** — A top-level `grok --single` run (one-shot and fork) does not attach to a shared leader. Grok 1.0.13 has `--no-leader` only under `grok agent`. — *If wrong:* stopping the CLI at `max_turn_seconds` (EC-38) may leave the run going inside the user's leader.
 
 **Open questions** (max 5 blocking; none here blocks). They are numbered from Q-14 so they are not confused with request.md's Q-1 to Q-13, which §8.1 resolves.
 
@@ -1995,15 +2064,31 @@ The table has 56 CREATE and 11 MODIFY rows. Not touched (INV-22): `vidbyte/__ini
 |---|---|---|---|
 | Q-14 | Should a developer be able to set a permission ceiling, such as Grok `allowed_tool_kinds` or opencode rules, that applies to turns a model spawns through the toolsets? | non-blocking | No; tools use the record defaults (D-11). |
 | Q-15 | Should `McpStudioServer` enforce `PermissionPolicy`? | non-blocking | No; that is a separate PR, and `read_only(host)` plus documentation cover it (T-5). |
-| Q-16 | Should `MuseHost` also kill the in-distro `muse` process (`wsl.exe -d <distro> -e kill <pid>`) after the grace period? | non-blocking | No; it could kill the wrong process, and A-9 held while idle. |
+| Q-16 | ~~Should `MuseHost` also kill the in-distro `muse` process after the grace period?~~ *Resolved in r2 (review R-4).* | resolved | Built, scoped by a random per-peer mark (D-23), because request.md Q-8's default asks for it. |
 | Q-17 | Should opencode sessions spawned by a tool default to `ask` rules for `edit` and `bash`, so that the watcher rejects them? | non-blocking | No; the user's own opencode config applies (T-2). |
 | Q-18 | Should Grok usage also be read from `~/.grok/sessions/*/summary.json` when ACP reports none? | non-blocking | No; request.md Q-6 makes it a follow-up. |
 
 ## §16 Review log
 | Round | ID | Severity | Section | Finding (one line) | Disposition | Change made / reason |
 |---|---|---|---|---|---|---|
+| 1 | R-1 | Blocker | §8.5 MSP calls | MSP commands lacked the required `commandId` and other fields, and fork sent a top-level `lastTurnId` | Accepted | §8.5 lists every required member per command (`cutPoint.lastTurnId`, `expectedTurnId`, `requirementId`, `userInputId`), with UUIDv7 from `MuseWire.new_command_id()`; D-11, INV-10, new EC-156, §13 determinism, row 44 |
+| 1 | R-2 | Blocker | §9.1, §8.4 | No records for inbound wire frames | Accepted | 12 *inbound* records in the existing per-host dataclass modules; `*Wire.parse_*` named in §8.5; D-13 and §9.1 common rules; budget raised honestly from 52 to 64 records, with no new file (orchestrator note 2); rows 8-10, 32, 39, 44 |
+| 1 | R-3 | Major | §8.5 transport `close()` | The wait after the kill had no bound | Accepted | On the opt-in path every wait after a kill is bounded by `shutdown_timeout`, then the pipes are closed (the `bash.py` `_stop` pattern); row 22, EC-10 |
+| 1 | R-4 | Major | §11 conflict 4, NG-15, Q-16 | Q-8's default (tree kill, then in-distro kill) was downgraded on idle-only evidence | Accepted (orchestrator note 1: restore the default) | New D-23: `stop_process_tree` stops the peer's whole tree, and a random per-peer mark scopes the in-distro reap, so the r1 wrong-process objection no longer applies. NG-15 withdrawn; EC-10 rewritten (the EC-9 cross-reference is gone); Q-16 resolved; A-9, T-7, T-8, INV-3, INV-4, NFR-2, §9.3, rows 22, 28, 42 |
+| 1 | R-5 | Major | D-11 (opencode) | Permission requests from child sessions were never answered | Accepted, as one rule for both server modes; the extra owned-server reject-all was not added, because the tree rule covers it | New EC-154; `GET /session/{id}/children` in the route list; `OPENCODE_MAX_SESSION_TREE`; INV-10, D-11, row 38 |
+| 1 | R-6 | Major | EC-85, `OpencodeTurnWatcher` | The turn's user message was unidentified, and `retry` was ignored | Accepted | §8.5 watcher steps: snapshot before `prompt_async`, `parentID` reply link, idle confirmations only after the message or a busy or retry status, and `prompt_not_seen`. EC-85 rewritten; new EC-155 for long `retry` loops (`OPENCODE_RETRY_ATTEMPT_LIMIT`, `OPENCODE_RATE_LIMIT_MARKERS`, A-17); `OpencodeMessage.parent_id`; A-16 |
+| 1 | R-7 | Major | D-2, §13 argv | `--no-leader` was missing | Accepted; verified in `grok agent --help` for 1.0.13 | `--no-leader` on every `grok agent` argv: D-2, EC-25, §8.5, §13, row 33. A-18 records that top-level `grok --single` has no such flag |
+| 1 | R-8 | Major | §8.5 process helpers | Children inherited the caller's stdin | Accepted | §8.5 "Standard input": `CliRunner` a pipe or `DEVNULL`, `ManagedProcess` `DEVNULL`; `CliInvocation` row; A-5; §12.4; rows 17-18 |
+| 1 | R-9 | Major | D-3 | Two-way `tools`/`harnesses` package edge and a long import chain | Accepted, option (a) | D-3 records the edge and its reason; new AC-20 (fresh-interpreter imports); P4 exit check; §12.4; §14 Ask-first. Option (b) is now D-3's runner-up |
+| 1 | R-10 | Major | §12.3 row 22 | The transport guards would raise the C002, C006 and S016 counts | Accepted | Checks go through `RecordFieldValidator` and are re-raised as `McpProtocolError` (`invalid_call`). `exit_grace_seconds` became `float \| None = None`, so zero needs no special case. New `NATIVE_STDIO_MAX_WAIT_SECONDS`; row 22 names C002, C006 and C007 |
+| 1 | R-11 | Major | §12.5 | `vidbyte/tools/README.md` was not updated | Accepted | New row 68 (MODIFY, P5); §12.2, §12.5; §8.4 now counts 12 modified files |
+| 1 | R-12 | Minor | INV-7 | `ToolsFormatter` reads `hint` and `retryable`, not `next_step` | Accepted | INV-7 and §9.2 add `hint` and `retryable`; row 48 |
+| 1 | R-13 | Minor | §6.3.4 `list_opencode_sessions` | An unpaged `GET /session` can exceed the body cap | Accepted. The server `limit` is sent; the OpenAPI documents the order, so no assumption is needed. `roots` is not added, because the conversation never asked to hide child sessions | `list_opencode_sessions` paragraph; §8.5 route list |
+| 1 | R-14 | Minor | EC-138, T-2 | The executor's `validation_error` comes before EC-138, and the argv forms conflicted | Accepted | EC-138 is scoped to what reaches `execute`; `--model=` and `--reasoning-effort=` are used everywhere (EC-25, EC-37, D-12, §8.5, §13) |
+| 1 | R-15 | Minor | §12.3 rows 19-20 | The insertion next to `CodexAgentError` risks merge conflicts, and row 20 contradicted a file header | Accepted | `NativeHostError` is appended at the end of `base.py` and of both lists; new §11 conflict 8; rows 19-20 |
 
 ## §17 Revision history
 | Revision | Date | Stage | Summary |
 |---|---|---|---|
 | r1 | 2026-10-12 | S1 spec | Initial spec |
+| r2 | 2026-10-12 | S1 review round 1 | Applied R-1 to R-15: full MSP command params and UUIDv7; inbound wire records (64 records); bounded close; Q-8 tree stop and in-distro reap (D-23); opencode child sessions, turn identification and `retry` (EC-154, EC-155); Muse answer failures (EC-156); `--no-leader`; stdin rules; AC-20; validator-based transport checks; tools README row 68; `hint` and `retryable`; server-side session `limit`; EC-138 scope; append-only error exports |
