@@ -24,6 +24,7 @@ from vidbyte.lib.constants.jev import (
     JEV_RETRY_BACKOFF_SECONDS,
     JEV_STATUS_SERVER_ERROR_FLOOR,
     JEV_STATUS_UNPROCESSABLE,
+    PROVIDER_API_KEY_ENV_VARS,
     VIDBYTE_API_KEY_ENV_VAR,
     VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS,
     VIDBYTE_GENERATIVE_GATEWAY_ENDPOINT,
@@ -92,10 +93,15 @@ class _GatewayAnswer:
         # @intent relayed-refusal-blames-the-callers-own-key
         # On a relay call a provider 401, 402, or 403 answers the
         # caller's own key or account, so the remedy is theirs to fix,
-        # never a Vidbyte wallet, quota, or cap.
+        # never a Vidbyte wallet, quota, or cap. Some providers (xAI,
+        # seen live) answer a wrong key with a 400, so a relayed 400
+        # names the caller's own key as one cause; a Vidbyte-paid 400
+        # answered Vidbyte's own account, so it does not.
         if relays and status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.PAYMENT_REQUIRED, HTTPStatus.FORBIDDEN):
             return f"{provider.value} refused the call made with your own {provider.value} key (HTTP {status}): the key is wrong or revoked, lacks access to this model, or its {provider.value} account cannot pay; the provider's message is withheld, and Vidbyte did not bill the call"
         relayed = f"{provider.value} returned HTTP {status} through the Vidbyte gateway; the provider's message is withheld, and the call was not billed"
+        if relays and status == HTTPStatus.BAD_REQUEST:
+            relayed += f"; some providers answer a wrong API key with HTTP 400, so check your own {provider.value} key in api_keys or {PROVIDER_API_KEY_ENV_VARS[provider]}"
         return f"{relayed}; {retried}" if status in (HTTPStatus.CONFLICT, HTTPStatus.BAD_GATEWAY) else relayed
 
     def gateway_reason(self, status: int, retried: str, provider: ModelProvider, relays: bool) -> str:
