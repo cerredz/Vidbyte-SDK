@@ -37,6 +37,11 @@ class QuoteRecord:
     price: float
 
 
+class Hotel(BaseModel):
+    name: str
+    city: str
+
+
 class Priority(Enum):
     LOW = "low"
     HIGH = "high"
@@ -502,6 +507,25 @@ class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
         result = await self._run(report, output_schema=None)
 
         self.assertEqual(result.output, '{"a": {"z": true}, "b": [1, 2.5, null]}')
+
+    # @intent tool-output-keeps-non-ascii-readable
+    # A dict or model return must hand the model the same characters a str return would, not \uXXXX escapes.
+    async def test_non_ascii_output_stays_readable(self) -> None:
+        def weather() -> dict[str, Any]:
+            return {"city": "Zürich", "stations": ["品川", "新横浜"]}
+
+        def hotel() -> Hotel:
+            return Hotel(name="Hôtel Élysée", city="Zürich")
+
+        weather_result = await self._run(weather, output_schema=None)
+        hotel_result = await self._run(hotel, output_schema=Hotel)
+
+        self.assertEqual(hotel_result.status, ToolStatus.SUCCESS, hotel_result.output)
+        self.assertEqual(weather_result.output, '{"city": "Zürich", "stations": ["品川", "新横浜"]}')
+        self.assertEqual(hotel_result.output, '{"city": "Zürich", "name": "Hôtel Élysée"}')
+        for result, expected in ((weather_result, weather()), (hotel_result, hotel().model_dump())):
+            self.assertNotIn("\\u", result.output)
+            self.assertEqual(json.loads(result.output), expected)
 
     # @intent tool-model-output-round-trips
     # A camelCase API model returned as its own output_schema must pass the check, so models dump by alias.
