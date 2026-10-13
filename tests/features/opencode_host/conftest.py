@@ -42,10 +42,11 @@ OWNED_PORT = 41234
 KNOWN_SESSION = "ses_known0001"
 OTHER_SESSION = "ses_other0002"
 MISSING_SESSION = "ses_missing0003"
-KNOWN_USER_MESSAGE = "msg_00000001"
-KNOWN_REPLY_MESSAGE = "msg_00000002"
+# The fake shares one id counter: KNOWN_SESSION's timestamp takes 1, its history then takes msg 2, prt 3, msg 4 and prt 5.
+KNOWN_USER_MESSAGE = "msg_00000002"
+KNOWN_REPLY_MESSAGE = "msg_00000004"
 MISSING_MESSAGE = "msg_99999999"
-KNOWN_PART = "prt_00000001"
+KNOWN_PART = "prt_00000003"
 PROMPT = "List the top-level folders."
 MODEL = "acme/coder-1"
 BASE_MS = 1_760_000_000_000

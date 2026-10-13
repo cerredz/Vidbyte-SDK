@@ -21,7 +21,7 @@ import pytest
 
 PROMPT = "List the top-level folders."
 KNOWN_SESSION = "ses_known0001"
-KNOWN_MESSAGE = "msg_00000002"
+KNOWN_MESSAGE = "msg_00000004"
 UNISSUED_HANDLE = {"harness": "opencode", "session_id": KNOWN_SESSION, "turn_id": "0" * 32}
 EC146_NEXT_STEP = "Register the MCP server in OpencodeHostSettings.mcp_servers; the tool only adds registered servers."
 # §9.2 rows 11-28: tool name -> (permission, {parameter: required}).

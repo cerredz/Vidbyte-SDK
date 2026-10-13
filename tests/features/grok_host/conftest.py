@@ -113,7 +113,8 @@ class GrokFake:
 
     def records(self, kind: str | None = None) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
-        for path in sorted(self.log_dir.glob("*.jsonl")):
+        # Each fake names its log after its launch number (claim_launch_number), so this reads the processes in launch order.
+        for path in sorted(self.log_dir.glob("*.jsonl"), key=lambda path: int(path.name.split("-", 1)[0])):
             for line in path.read_text(encoding="utf-8").splitlines():
                 if line.strip():
                     record = json.loads(line)

@@ -44,8 +44,12 @@ def assert_name_value_only(argv: list[str], value: str) -> None:
 
 
 def assert_no_approve_everything(argv: list[str]) -> None:
+    # A forbidden flag is caught as its own element or as a "--flag=" prefix; a forbidden mode value as "=value".
+    # Prompt text inside --single= is data, so "--single=--always-approve" is the injection-safe form, not the flag.
     for arg in argv:
-        assert not any(arg == flag or arg.endswith("=" + flag) for flag in FORBIDDEN_ARGS), argv
+        flags = [flag for flag in FORBIDDEN_ARGS if flag.startswith("--") and (arg == flag or arg.startswith(flag + "="))]
+        values = [value for value in FORBIDDEN_ARGS if not value.startswith("--") and (arg == value or arg.endswith("=" + value))]
+        assert not flags and not values, argv
 
 
 def same_folder(left: str, right: Path) -> bool:

@@ -3,7 +3,7 @@
 PURPOSE: A standard-library stand-in for the `grok` executable, scripted by a JSON scenario file, that GrokHost launches through GrokHostSettings.grok_command.
 ROLE IN CODEBASE: Run as a real child process by the grok_host tests and never imported. It plays `grok --version`, `grok models`, the one-shot `--single` run and the `grok agent --no-leader ... stdio` ACP peer, and logs what it received so the tests can assert on it.
 ARCHITECTURE NOTE: argv[1] is the scenario path and everything after it is what GrokHost appended (spec §13). The main thread is the only stdin reader; a turn plays in a worker thread so the peer can send permission requests and still see session/cancel. Each process logs to its own JSONL file under the scenario's log_dir, so two peers never interleave lines.
-FUNCTION INVENTORY: main dispatches on the appended argv; FakeLog appends one JSON record per line; FrameWriter serialises stdout frames; AcpPeer answers initialize, session/new, session/resume, session/list, session/prompt and session/cancel; TurnWorker plays one session/prompt; run_cli plays --version, models and one-shot runs; held waits for the release file, a stop event or the hold limit.
+FUNCTION INVENTORY: main dispatches on the appended argv; claim_launch_number gives each process its launch number; FakeLog appends one JSON record per line to a file named after it; FrameWriter serialises stdout frames; AcpPeer answers initialize, session/new, session/resume, session/list, session/prompt and session/cancel; TurnWorker plays one session/prompt; run_cli plays --version, models and one-shot runs; held waits for the release file, a stop event or the hold limit.
 COMMON MODIFICATION PATTERNS: Add a scenario key with its default in conftest.py's default_scenario, read it here with .get, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library; the child gets the caller's environment, not the test's sys.path. 2. Do not contact the network or the real grok; this file replaces it.
 KNOWN EDGE CASES: A held turn or a stubborn peer exits by itself after HOLD_LIMIT_SECONDS, so a broken run cannot leak it for long. Lines that are not JSON are logged as raw text and ignored. A closed stdout ends the process at once.
@@ -36,11 +36,23 @@ DEFAULT_OPTIONS = [
 ]
 
 
+def claim_launch_number(log_dir: Path) -> int:
+    # Claim the lowest free number with an exclusive create, which is atomic on Windows and POSIX, so no clock is involved.
+    number = 1
+    while True:
+        try:
+            os.close(os.open(log_dir / f"launch-{number:06d}.claim", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return number
+        except FileExistsError:
+            number += 1
+
+
 class FakeLog:
     """Appends one JSON record per line to this process's own log file."""
 
     def __init__(self, log_dir: str, role: str) -> None:
-        self.path = Path(log_dir) / f"{role}-{os.getpid()}-{uuid.uuid4().hex[:8]}.jsonl"
+        # The file name starts with this process's launch number, so the tests read the logs in launch order, never PID order.
+        self.path = Path(log_dir) / f"{claim_launch_number(Path(log_dir)):06d}-{role}-{os.getpid()}.jsonl"
         self.lock = threading.Lock()
         self.sequence = 0
 

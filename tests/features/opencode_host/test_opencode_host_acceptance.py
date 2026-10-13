@@ -23,8 +23,8 @@ import pytest
 
 KNOWN_SESSION = "ses_known0001"
 OTHER_SESSION = "ses_other0002"
-KNOWN_USER_MESSAGE = "msg_00000001"
-KNOWN_REPLY_MESSAGE = "msg_00000002"
+KNOWN_USER_MESSAGE = "msg_00000002"
+KNOWN_REPLY_MESSAGE = "msg_00000004"
 PROMPT = "List the top-level folders."
 MODEL = "acme/coder-1"
 SHORT_WAIT_SECONDS = 0.3
