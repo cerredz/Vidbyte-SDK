@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Keeps strict OpenAI requests and Gemini responseSchema payload
 ARCHITECTURE NOTE: Builds each provider's request payload directly from a TextModelConfig carrying the
     annotated Pydantic schema the agent runtime would send, then inspects the payload dict.
 FUNCTION INVENTORY: OpenAIStrictDialectTests checks both strict-mode rules at every object node for the
-    OpenAI Responses adapter and the compatible NATIVE_SCHEMA tier; GeminiResponseSchemaTests checks refs
+    OpenAI Responses adapter, the compatible NATIVE_SCHEMA tier and Anthropic's output_config; GeminiResponseSchemaTests checks refs
     are expanded; StrictFormatterTests checks explicit additionalProperties choices are kept.
 COMMON MODIFICATION PATTERNS: Add a model per schema shape a provider dialect must accept.
 WHAT NOT TO DO: Do not call real provider endpoints or require API keys from the environment.
@@ -24,6 +24,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict
 
 from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.providers.compatible import MistralProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
@@ -104,6 +105,21 @@ class OpenAIStrictDialectTests(unittest.TestCase):
 
         self.assertIs(json_schema["strict"], True)
         self.assert_strict(json_schema["schema"])
+
+    def test_anthropic_output_config_payload_closes_every_object(self) -> None:
+        """Anthropic's output_config json_schema gets the same strict dialect, without mutating the runtime schema."""
+        # @intent anthropic-structured-output-closes-every-object
+        # Anthropic 400s on any object whose additionalProperties is not false and does not rewrite raw schemas.
+        schema = _wire_schema(Ticket)
+        before = json.dumps(schema, sort_keys=True)
+        config = TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-sonnet-4-5", response_format=schema)
+        payload = AnthropicProvider(model="claude-sonnet-4-5", api_key="k")._create_payload(config, "triage", None, None)
+        sent = payload["output_config"]["format"]["schema"]
+
+        self.assertEqual(payload["output_config"]["format"]["type"], "json_schema")
+        self.assert_strict(sent)
+        self.assertIs(sent["$defs"]["Tag"]["additionalProperties"], False)
+        self.assertEqual(json.dumps(schema, sort_keys=True), before)
 
     def test_strict_does_not_mutate_the_runtime_schema(self) -> None:
         """The runtime's schema is reused for validation and prompts, so strict() works on a copy."""
