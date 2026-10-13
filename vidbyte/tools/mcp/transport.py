@@ -19,9 +19,11 @@ Architecture:
       that closed under it; without one the write is MCP's plain drain.
 Known edge cases:
     CPython 3.11's wait_for can drop a cancel that lands just as its
-    awaitable finishes (gh-86296). The bounded drain compares the task's
-    cancel count before and after the wait and raises CancelledError when
-    it rose, and a cancelled request write drops its pending answer future.
+    awaitable finishes (gh-86296). The bounded drain and the answer wait
+    compare the task's cancel count before and after the wait and raise
+    CancelledError when it rose, and a cancelled request write drops its
+    pending answer future. The close path's bounded waits do not, so a
+    close always finishes.
 Relations:
     Related to vidbyte.tools.mcp.client, vidbyte.tools.mcp.bridge, and
     vidbyte.tools.mcp.attach.
@@ -352,8 +354,17 @@ class McpStdioTransport:
         # On timeout or cancellation the pending entry is
         # removed, so a late answer is dropped instead of
         # resolving a forgotten future.
+        task = asyncio.current_task()
+        cancels = 0 if task is None else task.cancelling()
         try:
-            return await asyncio.wait_for(future, timeout=seconds)
+            answer = await asyncio.wait_for(future, timeout=seconds)
+            # CPython 3.11's wait_for returns an answer that resolved
+            # just before a cancel landed and drops the cancel
+            # (gh-86296), as in _drain_within. Raise it, so the
+            # cancelled caller never receives a result.
+            if task is not None and task.cancelling() > cancels:
+                raise asyncio.CancelledError
+            return answer
         except TimeoutError as exc:
             pending = self._pending.pop(request_id, None)
             if pending is not None and not pending.done():
