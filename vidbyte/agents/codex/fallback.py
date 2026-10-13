@@ -91,9 +91,9 @@ class CodexFallbackCoordinator:
     def attempt(self, index: int, failure_code: str = "") -> CodexFallbackAttempt:
         """Record one credential-free attempt: which model ran and how it ended."""
         # @intent attempt-records-never-carry-credentials
-        # Fallback models take their keys from the agent's api_keys, and an
-        # attempt record names only the provider and model, because these
-        # records reach metadata and logs.
+        # Fallback models take their keys from the agent's api_keys,
+        # and an attempt record names only the provider and model,
+        # because these records reach metadata and logs.
         model = self._model_at(index)
         return CodexFallbackAttempt(
             index=index,
