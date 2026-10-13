@@ -90,3 +90,84 @@ spawn_muse_session {"description": "How much reasoning Muse should spend on this
 | invariants | INV-19 / INV-22 / FailureCode | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py` untouched |
 
 **Still open:** none from this packet. Deferred by the orchestrator: R-9 to R-15 and R-M6 (iteration 2/3). Follow-ups: R-M4, R-M5, R-M7, R-M8.
+
+## Iteration 2 — 2026-10-13 14:05 UTC — agent report: reports/S5-repair-2.md
+
+**Defects in:** R-11, R-9, R-10, R-12, R-M6 (in that order); review.md bookkeeping (R-9 to R-12 and R-M6 fixed; R-13 to R-15 deferred to iteration 3; R-M4, R-M5, R-M7 and R-M8 still follow-ups).
+
+**Hypotheses and attempts:**
+- **R-11.** The three hosts each kept their own copy of the next steps that every host gives, and Muse's copies had drifted to markdown backticks.
+  - The fix puts one copy of each step in `vidbyte/lib/constants/native_hosts.py`: `NATIVE_NOT_OPEN_NEXT_STEP`, `NATIVE_REENTER_NEXT_STEP`, `NATIVE_AT_CAP_NEXT_STEP` and `NATIVE_STALE_CURSOR_NEXT_STEP`. The last two have a `{tool}` slot that each host fills with its own tool name. None of them uses backticks.
+  - The other duplicated literals moved there too:
+    - true and false texts, the success exit code and the HTTP status bounds;
+    - the wait-turn operation names;
+    - Grok's client name and title;
+    - opencode's busy and retry states, assistant role and model-id split;
+    - Muse's failed terminal;
+    - the backend key-missing step.
+  - While checking the R-M6 header claim, I found that the Grok and Muse wires each built the JSON-RPC `-32601` "Method not found" answer from their own literals. Both now read `NATIVE_JSONRPC_METHOD_NOT_FOUND_CODE` and `NATIVE_JSONRPC_METHOD_NOT_FOUND_TEXT` (second R-11 commit).
+  - Vendor error codes that only one wire reads stay private beside it, for example Grok `-32002` resource-not-found versus Muse `-32002` prompt-too-large.
+- **R-9.**
+  - **Bounds.** Every private record and host bound moved to the constants module as a feature-prefixed constant:
+    - approval title 200, steer status 64, URL 2048 and quoted-value 80;
+    - opencode MCP name, MCP map, provider id, provider/model and credential;
+    - Muse path, distro and frame poll;
+    - backend env name and currency;
+    - the list minimum limit, which three hosts shared.
+  - **`allow_blank`.** `RecordFieldValidator.require_text` gained `allow_blank`, so the title and text fields that may be empty (`NativeApprovalDecision.title`, `NativeTurnResult.text` and `OpencodeMessage.text`) go through the validator instead of `require_instance` plus an inline `len` check.
+  - **`require_url`.** The URL rule is now `RecordFieldConverter.require_url`: https only, or plain http only to the hosts the caller names, with optional refusal of user info, query and fragment. It never quotes the URL. opencode uses it for the MCP URL and `server_url`, with loopback-only plain http, and the backend profile uses it for `anthropic_base_url` and `balance_url`, https only.
+    - **Deviation from the review's wording:** the review suggested adding it to `RecordFieldValidator`, but a test pins that class at exactly 13 public static methods. `RecordFieldConverter` is not pinned and already holds the plain instance checks, so the method lives there.
+    - **Rejected:** a regex URL check. It is fragile, and its natural message quotes the URL.
+  - **`details["field"]`.** All 20 remaining inline `raise ConfigurationError(...)` calls in grok.py, muse.py, native_hosts.py, opencode.py and harness_backends.py now carry `details={"field": "<Record>.<field>"}`, naming the first field in the message. The 9 inline length and URL raises were removed, because they now go through the validator. The count of inline raises without a field went from 29 to 0.
+  - **Title cap.** Every driver's approval title is capped with `NATIVE_APPROVAL_TITLE_MAX_CHARS` (200, the record's own cap and spec value). Muse and opencode were at 128. opencode keeps `NATIVE_ID_MAX_CHARS` for `request_kind`.
+- **R-10.**
+  - `CliRunner.launch(invocation, *, stdin)` is the one static launch in `vidbyte/lib/process/runner.py`. It does the win32 `shutil.which` lookup, then `create_subprocess_exec` with piped stdout and stderr, `cwd`, `env` and `start_new_session` on POSIX. It maps launch failures as follows:
+    - `FileNotFoundError` → `NOT_FOUND`
+    - `PermissionError` → `PERMISSION_DENIED`
+    - `(OSError, ValueError)` → `OS_ERROR`
+  - `CliRunner.run` passes PIPE when there is `stdin_text` and DEVNULL otherwise. `ManagedProcess.start` passes DEVNULL. `ManagedProcess._launch` and `CliRunner._start` are gone.
+  - `_READ_CHUNK_BYTES` is now `NATIVE_PROCESS_READ_CHUNK_BYTES` (65536), read by both modules.
+  - The stop path, POSIX `start_new_session=True` and Windows `taskkill /T /F`, is unchanged.
+  - **Rejected:** a new module (no new files allowed) and a module-level function (the package's helpers are classes).
+- **R-12.** The checker (`call_depth.py` over the changed files) went from 16 chains to 11. The five new chains were removed:
+  - `from_configuration_error` builds the next step and calls `build` directly.
+  - `_read_balance` calls `_vendor_text` and passes the text to `_check_balance_status`.
+  - `stop_tree` calls two leaves, `_start_taskkill` and `_wait_taskkill`, and closes the killer's pipes in its own finally block. `_close_pipes` accepts None.
+  - `require_text` and `require_optional_text` each call one leaf, `_text_problem`, and then `_received`. The messages are unchanged.
+  - `request`, `send_request`, `notify` and `respond` call `_seconds_or_invalid_call` directly, and `_call_timeout` is gone. The default unbounded `drain()` path (INV-18) is untouched.
+
+  **Rejected:**
+  - Inlining the `_close_pipes` idiom into the taskkill path, because it would duplicate code.
+  - Giving `require_optional_text` its own copy of the checks, for the same reason.
+
+  **Residual (accepted):**
+  - `build→scrub`, which the review's own smallest fix keeps.
+  - `_read_balance` as the shared balance-read step of two public functions. This is the caller the review's fix names.
+  - The eight transport chains from before this PR and `FailureCode._from_exception_name`. The review excludes them.
+- **R-M6.**
+  - The constants header now says it holds every length, count, size and time limit the native records and hosts check, plus the shared texts, next steps and codes. It also says that a value only one module reads stays beside that reader.
+  - The validation header's PURPOSE and ARCHITECTURE NOTE name `RecordFieldConverter`, and its inventory lists `require_url` and `_text_problem`.
+
+**Changes:** R-11 7f61f927 and 3c896557; R-9 616e8a0f; R-10 0f93301a; R-12 5a7e09de; R-M6 04be59fa; review.md statuses in the verify-log commit.
+
+Each commit was checked before it was made, using the packs and the lint, with the neighbour suites added from R-12 on. The full matrix below was run once, at the final code HEAD.
+
+**Gate matrix out (code HEAD 04be59fa):**
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| packs | gate 1 | PASS | `1638 passed, 19 skipped in 147.35s (0:02:27)` |
+| neighbour suites | gate 2 | PASS | `464 passed, 12 skipped in 16.51s` |
+| full suite | gate 3 | PASS (first run, no flake) | `5653 passed, 32 skipped in 180.45s (0:03:00)` |
+| lint | gate 4 | PASS (A002 601/703 IMPROVED, was 602; A007 255/255; A001, A006, C008, S024, S054 and S062 at their baselines) | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| source stage | gate 5 | PASS | `5653 passed, 32 skipped in 181.83s (0:03:01)` / `CI passed.` |
+| package stage | gate 6 | PASS | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| semgrep | gate 7 | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| public API | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| call depth | `call_depth.py` over changed `vidbyte/*.py` | 16 → 11 chains, 0 nested defs | residuals listed under R-12 |
+| remote CI | `gh run view 38409525140` (head 04be59fa) | PASS (3.11, 3.12 and Package all success) | 3.11: `5646 passed, 39 skipped in 168.87s` / `CI passed.`; 3.12: `5646 passed, 39 skipped, 19 warnings in 186.27s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote static policy | `gh run view 38409529932` (head 04be59fa) | PASS | `Ran 1 rule on 949 files: 0 findings.` (conclusion success) |
+| PR checks | `gh pr checks 1036` | n/a | `no checks reported on the 'feat/native-grok-opencode-meta-hosts' branch` (dispatch-only workflows); the PR is still a draft |
+| invariants | INV-19 / INV-22 / FailureCode | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py` unchanged in this iteration (`git diff 406edb56 HEAD` is empty) |
+
+**Still open:** nothing from this packet. The orchestrator deferred R-13, R-14 and R-15 to iteration 3. R-M4, R-M5, R-M7 and R-M8 remain follow-ups. Reflowing existing comments to 72 columns is iteration 3 work; only new comments were kept to that width.
