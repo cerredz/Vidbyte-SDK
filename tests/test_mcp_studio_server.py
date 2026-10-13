@@ -52,6 +52,21 @@ class FakeEchoTool(BaseTool):
         return ToolResult.success("echo", f"ECHO: {text}")
 
 
+class FakeErrorTextTool(BaseTool):
+    """A tool that succeeds with output that happens to start with "Error:"."""
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="read_log",
+            description="Returns a log whose first line is an error.",
+            parameters=(),
+            permission=ToolPermission.READ,
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult.success("read_log", "Error: disk full on /var\nretrying")
+
+
 class FakeRunner:
     """A fake runner with arun method for BaseAgent to invoke."""
     async def arun(self, message: str, **kwargs: object) -> object:
@@ -162,6 +177,15 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("result", response)
         content_text = response["result"]["content"][0]["text"]
         self.assertIn("ECHO: hello", content_text)
+
+    async def test_tools_call_success_starting_with_error_text_is_not_is_error(self) -> None:
+        server = McpStudioServer(tools=[FakeErrorTextTool()])
+        response = await self._dispatch(server, "tools/call", {
+            "name": "read_log", "arguments": {},
+        })
+        self.assertNotIn("isError", response["result"], response)
+        content_text = response["result"]["content"][0]["text"]
+        self.assertEqual(content_text, "Error: disk full on /var\nretrying")
 
     async def test_unknown_method_returns_error(self) -> None:
         server = McpStudioServer()
