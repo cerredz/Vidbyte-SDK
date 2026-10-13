@@ -10,6 +10,7 @@ from typing import Annotated, Any, get_type_hints
 from pydantic import BaseModel, TypeAdapter, ValidationError, create_model
 from pydantic_core import to_jsonable_python
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import (
     ToolCall,
@@ -75,9 +76,17 @@ class FunctionTool(BaseTool):
                     value = await value
         except Exception as exc:
             # @intent function-tool-errors-share-the-runtime-error-kind
-            # A raising function tool reports the same execution_error kind the runtime gives a raising
-            # BaseTool, so the model and ToolErrorPolicy treat both ways of writing a tool alike.
-            metadata = {"error": "execution_error", "error_type": exc.__class__.__name__}
+            # A raising function tool reports the same error kind the runtime gives a raising BaseTool, so the
+            # model and ToolErrorPolicy treat both ways of writing a tool alike: a raised ToolExecutionError keeps
+            # the kind it declares in its details (rate_limited, timeout, ...), and every other exception is
+            # execution_error.
+            if isinstance(exc, ToolExecutionError):
+                metadata = {
+                    "error": str(exc.details.get("error", "execution_error")),
+                    "error_type": exc.details.get("error_type", exc.__class__.__name__),
+                }
+            else:
+                metadata = {"error": "execution_error", "error_type": exc.__class__.__name__}
             return ToolResult.failure(self.name, str(exc), metadata=metadata)
 
         return ToolResult.success(
