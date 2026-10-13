@@ -309,6 +309,24 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res_malformed.passed)
         self.assertEqual(res_malformed.score, 0.0)
 
+    async def test_json_schema_grader_enforces_type_arrays_and_null(self) -> None:
+        # Tests that an array-form type passes a value matching any listed name, and that "null" is checked.
+        # @intent json-schema-type-may-be-an-array
+        # [Silent Failure] Array-form and "null" types fell through to a pass, so any value graded as valid.
+        case = EvalCase(prompt="t")
+
+        nullable_string = JSONSchemaGrader({"type": ["string", "null"]})
+        self.assertTrue((await nullable_string.agrade(case, '"x"')).passed)
+        self.assertTrue((await nullable_string.agrade(case, "null")).passed)
+        self.assertFalse((await nullable_string.agrade(case, "42")).passed)
+
+        nullable_object = JSONSchemaGrader({"type": ["object", "null"], "required": ["id"]})
+        self.assertFalse((await nullable_object.agrade(case, "{}")).passed)
+        self.assertTrue((await nullable_object.agrade(case, "null")).passed)
+
+        null_only = JSONSchemaGrader({"type": "null"})
+        self.assertFalse((await null_only.agrade(case, "5")).passed)
+
     async def test_eval_template_data_model(self) -> None:
         # Tests EvalCase template fields and structured expected payloads.
         case = EvalCase(prompt="t", expected={"category": "billing"}, templates=(T.structured_json(),))
