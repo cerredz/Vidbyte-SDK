@@ -73,6 +73,7 @@ _FAILED_MCP_STATES = frozenset({"failed", "needs_auth", "needs_client_registrati
 _ASSISTANT_ROLE = "assistant"
 _WAIT_OPERATION = "wait_opencode_turn"
 _EXIT_OPERATION = "__aexit__"
+_CONSTRUCT_OPERATION = "OpencodeHost"
 
 
 class OpencodeHost:
@@ -84,9 +85,14 @@ class OpencodeHost:
         # the host may inject (MCP environment and header values, the attached
         # server password) is registered before any call, so vendor text that
         # echoes one is scrubbed to <redacted> on every path (INV-6, AC-2).
-        RecordFieldConverter.require_instance(settings, "settings", OpencodeHostSettings)
-        self._settings = settings
+        # A settings value of the wrong type is a NativeHostError, as in the
+        # Grok and Muse hosts.
         self._errors = NativeErrorFactory(NativeHarness.OPENCODE)
+        try:
+            RecordFieldConverter.require_instance(settings, "settings", OpencodeHostSettings)
+        except ConfigurationError as exc:
+            raise self._errors.from_configuration_error(exc, operation=_CONSTRUCT_OPERATION) from exc
+        self._settings = settings
         self._wire = OpencodeWire(self._errors)
         self._server = OpencodeServer(settings, self._errors)
         self._client = OpencodeClient(server=self._server, workspace=settings.workspace, request_timeout_seconds=settings.request_timeout_seconds, errors=self._errors)
