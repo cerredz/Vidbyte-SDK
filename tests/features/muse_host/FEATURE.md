@@ -147,6 +147,9 @@ These are the failure inventory the tests were chosen from, given as input → w
   - `META_API_KEY/u` is added when the variable is unset;
   - the reap runs with the peer's overlay, which would kill itself, carries a CR, or runs for read peers;
   - a missing distro or in-distro `muse` gets the wrong code (EC-94, EC-95).
+- **Busy check and secrets:**
+  - a spawn binds an upper-case id from Muse's `session/start`, and a continue or fork by the handle's own id then misses the busy check, so a second turn or a fork starts on a live session (INV-14, EC-112);
+  - a credential in an `approval/requested` or `userInput/requested` tool name is recorded verbatim in `NativeApprovalDecision.title` and reaches `wait_muse_turn`'s output (§9.1, INV-6).
 - **Usage:**
   - an unreported field becomes 0;
   - cost is set;
@@ -157,6 +160,8 @@ These are the failure inventory the tests were chosen from, given as input → w
 - **r8 (S4 review R-5): `__aexit__` held for `control_timeout_seconds` when a peer was silent on `approval/decide`.** `MuseHost.__aexit__` did `await asyncio.wait(tasks)` with no timeout, so a silent decide held exit for the control timeout (up to 600 s) instead of the NFR-2 bound; Grok closed its peers after the grace, Muse never did. Caught by `test_aexit_returns_within_the_bound_when_a_peer_is_silent_on_decide` in `test_muse_host_process_bounds.py`.
 - **r8 (S4 review R-7): WSL read peers never got `META_API_KEY/u` in `WSLENV`.** Only turn peers did, but §9.3/D-18 tie the key entry to the variable being set, not to being a turn peer. Caught by `test_read_peer_forwards_meta_api_key_through_wslenv` in `test_muse_host_wsl.py`.
 - **r8 (S4 review R-8 / S4-6): the busy check compared session ids case-sensitively.** INV-14 says Muse ids compare ignoring letter case. Caught by `test_continue_on_the_upper_cased_id_of_a_live_session_is_busy` in `test_muse_host_turns.py`.
+- **Re-review round 1 (R-16): the busy check missed a vendor-chosen upper-case id.** Spawn bound the id from `session/start` verbatim, but continue and fork lower-cased their argument and the turn table compared exactly, so a continue or fork by the handle's own `session_id` (or its lower-cased form) started a second turn or a fork. Caught by `test_continue_on_a_live_session_whose_vendor_id_is_upper_case_is_busy` and `test_fork_of_a_live_session_whose_vendor_id_is_upper_case_is_busy` in `test_muse_host_turns.py`.
+- **Re-review round 1 (R-17): approval and user-input titles were recorded unscrubbed.** §9.1 says `NativeApprovalDecision.title` is scrubbed; the Muse driver recorded both titles verbatim, so a credential in a tool name reached the result and `wait_muse_turn`'s output. Caught by `test_a_credential_in_a_request_title_is_scrubbed_from_the_result_and_the_wait_tool` (both request kinds) in `test_muse_host_turns.py`.
 
 ## Test Suite Map
 
@@ -170,13 +175,13 @@ These are the failure inventory the tests were chosen from, given as input → w
   - EC-2 for all 12 methods, EC-3, EC-1 and EC-110;
   - the POSIX native `which` check.
 - `test_muse_host_turns.py`:
-  - approvals and user input (D-11, EC-121, EC-156);
+  - approvals and user input (D-11, EC-121, EC-156), with a credential in either title scrubbed (re-review R-17);
   - the -32601 answer;
   - the ack turn id and foreign events (EC-109);
   - steer and interrupt wire;
   - truncation (EC-150, `view/gap`);
   - usage, the ceiling (D-10), EC-148, INV-17 and EC-9;
-  - the INV-14 busy check on an upper-cased id (r8, R-8).
+  - the INV-14 busy check on an upper-cased id (r8, R-8), and on a continue or fork after Muse returned an upper-case id (re-review R-16).
 - `test_muse_host_wire.py`:
   - `clientInfo` and `initialized`;
   - every command's members;

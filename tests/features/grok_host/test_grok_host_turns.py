@@ -1,11 +1,11 @@
 """FILE: tests/features/grok_host/test_grok_host_turns.py
 
-PURPOSE: The live-turn behaviour of GrokHost: approvals answered by policy and recorded (AC-8, D-11, INV-10), terminal states and interrupt sources (EC-50, EC-53, D-10, INV-13), the wire shapes the host sends (§8.5 ACP calls, INV-9), bounded text and decisions (EC-150, INV-16), unknown usage (INV-15), host-scoped handles (INV-17) and the session and live-turn reservations under concurrency (EC-9, INV-14).
+PURPOSE: The live-turn behaviour of GrokHost: approvals answered by policy and recorded with a scrubbed title (AC-8, D-11, INV-10, §9.1, INV-6), terminal states and interrupt sources (EC-50, EC-53, D-10, INV-13), the wire shapes the host sends (§8.5 ACP calls, INV-9), bounded text and decisions (EC-150, INV-16), unknown usage (INV-15), host-scoped handles (INV-17) and the session and live-turn reservations under concurrency (EC-9, INV-14).
 ROLE IN CODEBASE: Covers vidbyte.harnesses.native.grok.turn (GrokTurnDriver) and the turn parts of grok.host through the public methods only.
 ARCHITECTURE NOTE: The fake plays each turn from its scenario: permission requests, extra server requests, notifications, chunks, then an answer or a hold that the test ends with the release file or that the host ends with session/cancel. Assertions read the fake's JSONL log and the NativeTurnResult.
 FUNCTION INVENTORY: spawn_and_wait runs one turn to its result; permission_answers reads the answers the fake logged; the test_* functions each pin one rule.
 COMMON MODIFICATION PATTERNS: A new turn rule gets a scenario key in fake_grok_peer.py and one test here.
-WHAT NOT TO DO IN THIS FILE: 1. Do not assert interleavings the spec leaves open, such as which of two concurrent calls wins. 2. Do not sleep to wait for a turn; wait_grok_turn or the release file drives every turn.
+WHAT NOT TO DO IN THIS FILE: 1. Do not assert interleavings the spec leaves open, such as which of two concurrent calls wins. 2. Do not sleep to wait for a turn; wait_grok_turn or the release file drives every turn. 3. Do not commit a key-shaped literal or print a secret in an assertion message; the title-scrub test builds its value from uuid4 and names only the surface that leaked.
 KNOWN EDGE CASES: The POSIX-only tests (EC-27, EC-51) close the fake's stdin so the host's next write fails at once; Windows reports a write to a closed pipe asynchronously, so there the failure can surface later as EC-48.
 RELATED DOCS: tests/features/grok_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §6.1, §6.3.3, §8.5
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host/test_grok_host_turns.py
@@ -14,8 +14,10 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host/test_grok_
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import time
+import uuid
 from typing import Any
 
 import pytest
@@ -64,6 +66,25 @@ async def test_edit_permission_is_rejected_then_allowed_by_policy(grok_api, grok
     assert rejected.decisions[0].title == "Edit README.md"
     assert rejected.status is grok_api.NativeTurnStatus.COMPLETED and allowed.status is grok_api.NativeTurnStatus.COMPLETED
     assert_no_approve_everything(grok_fake)
+
+
+@pytest.mark.asyncio
+async def test_a_credential_in_a_permission_title_is_scrubbed_from_the_result_and_the_wait_tool(grok_api, grok_tools_api, grok_fake, make_grok_host, fast_stop, tool_by_name) -> None:
+    # §9.1 / INV-6 (re-review R-17): the recorded title is scrubbed, so a credential the agent writes into a tool-call title reaches neither the result nor wait_grok_turn's output.
+    secret = f"sk-proj-FAKE{uuid.uuid4().hex}"
+    title = f"Run: export OPENAI_API_KEY={secret} && make deploy"
+    async with make_grok_host({"acp": {"session_prompt": {"permissions": [{"kind": "execute", "title": title}]}}}) as host:
+        handle = await host.spawn_grok_session(grok_api.GrokTurnRequest(prompt=PROMPT))
+        arguments = {"handle": {"harness": handle.harness.value, "session_id": handle.session_id, "turn_id": handle.turn_id}, "timeout_seconds": WAIT_SECONDS}
+        waited = await tool_by_name(grok_tools_api.GrokTools(host), "wait_grok_turn").execute(grok_tools_api.ToolCall("wait_grok_turn", arguments))
+        result = await host.wait_grok_turn(handle, timeout_seconds=WAIT_SECONDS)
+    assert [decision.request_kind for decision in result.decisions] == ["acp.permission:execute"], "the permission was answered and recorded"
+    assert waited.status is grok_tools_api.ToolStatus.SUCCESS, "the wait tool returned the turn result"
+    recorded = result.decisions[0].title
+    surfaces = {"decision title": recorded, "tool output": waited.output, "tool metadata": json.dumps(dict(waited.metadata), default=str)}
+    leaked = [name for name, text in surfaces.items() if secret in text]
+    assert not leaked, f"INV-6: the credential leaked into {leaked}"
+    assert "<redacted>" in recorded, "§9.1: the title is scrubbed, not dropped"
 
 
 @pytest.mark.asyncio

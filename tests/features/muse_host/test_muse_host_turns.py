@@ -1,12 +1,12 @@
 """FILE: tests/features/muse_host/test_muse_host_turns.py
 
-PURPOSE: How MuseTurnDriver runs one turn: approvals decided once per requirement with a denied choice scoped once (D-11, INV-10, EC-121, EC-156), user input cancelled, the turn id taken from the turn/start ack (EC-109), reply text taken only from the turn's agentMessage items (EC-150, view/gap), steer and interrupt on the wire, the turn ceiling (D-10), usage (D-14, INV-15), and the turn table rules (EC-9, EC-148, INV-17).
+PURPOSE: How MuseTurnDriver runs one turn: approvals decided once per requirement with a denied choice scoped once (D-11, INV-10, EC-121, EC-156), user input cancelled, approval and user-input titles recorded scrubbed (§9.1, INV-6), the turn id taken from the turn/start ack (EC-109), reply text taken only from the turn's agentMessage items (EC-150, view/gap), steer and interrupt on the wire, the turn ceiling (D-10), usage (D-14, INV-15), and the turn table rules (EC-9, EC-112, EC-148, INV-14, INV-17), including a session id that Muse's own session/start returned in upper case.
 ROLE IN CODEBASE: Proves the Muse half of FR-12 and the turn rules of §6.3.5 for vidbyte.harnesses.native.muse.turn, driven through MuseHost and the fake muse.
 ARCHITECTURE NOTE: The fake plays a turn in a worker thread after the ack: approvals, user input, notifications, foreign-turn events, items, an optional view/gap, then turn/completed, or a hold until the release file or turn/interrupt. Where the fake waits for an answer (approval/decide, userInput/cancel) it logs request_seen or request_missing, so a missing answer shows in the logs as well as in the result.
 FUNCTION INVENTORY: decides lists the approval/decide params the fake received; answer_to finds the host's response to a server request; spawn_and_wait runs one turn to its result; the test_* functions are one rule each.
 COMMON MODIFICATION PATTERNS: A new turn rule gets a scenario key in fake_muse_peer.py's TurnWorker and one test here.
-WHAT NOT TO DO IN THIS FILE: 1. Do not accept an approved choice or a session or persistent scope as a passing answer; INV-9 and D-11 forbid both. 2. Do not compare commandIds by order; only their shape is stable (spec §13).
-KNOWN EDGE CASES: The outcome recorded for a plain denied decide is not fixed by the spec, so those tests assert only that it is not ALLOWED; EC-156 fixes CANCELLED for a failed or benign-race decide and those tests bind it. The fake's foreign-turn events carry turn id "turn-foreign" and must change nothing.
+WHAT NOT TO DO IN THIS FILE: 1. Do not accept an approved choice or a session or persistent scope as a passing answer; INV-9 and D-11 forbid both. 2. Do not compare commandIds by order; only their shape is stable (spec §13). 3. Do not commit a key-shaped literal or print a secret in an assertion message; the title-scrub test builds its value from uuid4 and names only the surface that leaked. 4. Do not assert the spelling of handle.session_id in the vendor-id busy tests; INV-14 fixes only that both spellings name one session.
+KNOWN EDGE CASES: The outcome recorded for a plain denied decide is not fixed by the spec, so those tests assert only that it is not ALLOWED; EC-156 fixes CANCELLED for a failed or benign-race decide and those tests bind it. The fake's foreign-turn events carry turn id "turn-foreign" and must change nothing. VENDOR_UPPER_SCENARIO lists the vendor id in both spellings, as a Muse that matches ids ignoring case would, so a host that misses the busy check really starts a second turn or fork instead of failing as session_not_found.
 RELATED DOCS: tests/features/muse_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §6.3.5, §8.1 D-9 to D-14, §8.5
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host/test_muse_host_turns.py
 """
@@ -14,13 +14,19 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host/test_muse_
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import uuid
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 
 KNOWN_SESSION = "2d4c6e8f-1a3b-4c5d-8e7f-9a0b1c2d3e4f"
 NEW_SESSION = "0192f0c4-5b6a-7c8d-9e0f-1a2b3c4d5e6f"
+VENDOR_UPPER_SESSION = "0192F0C4-ABCD-7EF0-8123-456789ABCDEF"
+VENDOR_UPPER_SCENARIO = {"new_session_id": VENDOR_UPPER_SESSION, "sessions": [VENDOR_UPPER_SESSION, VENDOR_UPPER_SESSION.lower()], "turn": {"mode": "hold"}}
+HANDLE_ID_SPELLINGS = [pytest.param(str, id="handle-id"), pytest.param(str.lower, id="lower-cased-handle-id")]
 PROMPT = "List the top-level folders."
 STEER_TEXT = "Also list hidden folders."
 REPLY_TEXT = "alpha\n\nbeta"
@@ -153,6 +159,26 @@ async def test_user_input_request_is_cancelled_and_recorded(muse_api, muse_fake,
     assert result.status is muse_api.NativeTurnStatus.COMPLETED
     assert [decision.request_kind for decision in result.decisions] == ["muse.user_input"]
     assert result.decisions[0].outcome is not muse_api.ApprovalOutcome.ALLOWED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("scenario_key", "request_kind"), [pytest.param("approvals", "muse.approval", id="approval-requested"), pytest.param("user_inputs", "muse.user_input", id="user-input-requested")])
+async def test_a_credential_in_a_request_title_is_scrubbed_from_the_result_and_the_wait_tool(scenario_key: str, request_kind: str, muse_api, muse_tools_api, muse_fake, make_muse_host, fast_stop, tool_by_name) -> None:
+    # §9.1 / INV-6 (re-review R-17): the title recorded for approval/requested and userInput/requested is scrubbed, so a credential in the tool name reaches neither the result nor wait_muse_turn's output.
+    secret = f"sk-proj-FAKE{uuid.uuid4().hex}"
+    named = f"shell OPENAI_API_KEY={secret}"
+    async with make_muse_host({"turn": {scenario_key: [{"tool_name": named}]}}) as host:
+        handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        arguments = {"handle": {"harness": handle.harness.value, "session_id": handle.session_id, "turn_id": handle.turn_id}, "timeout_seconds": WAIT_SECONDS}
+        waited = await tool_by_name(muse_tools_api.MuseTools(host), "wait_muse_turn").execute(muse_tools_api.ToolCall("wait_muse_turn", arguments))
+        result = await host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS)
+    assert [decision.request_kind for decision in result.decisions] == [request_kind], "the request was answered and recorded"
+    assert waited.status is muse_tools_api.ToolStatus.SUCCESS, "the wait tool returned the turn result"
+    recorded = result.decisions[0].title
+    surfaces = {"decision title": recorded, "tool output": waited.output, "tool metadata": json.dumps(dict(waited.metadata), default=str)}
+    leaked = [name for name, text in surfaces.items() if secret in text]
+    assert not leaked, f"INV-6: the credential leaked into {leaked}"
+    assert "<redacted>" in recorded, "§9.1: the title is scrubbed, not dropped"
 
 
 @pytest.mark.asyncio
@@ -335,5 +361,37 @@ async def test_continue_on_the_upper_cased_id_of_a_live_session_is_busy(muse_api
             await host.continue_muse_session(KNOWN_SESSION.upper(), muse_api.MuseTurnRequest(prompt=PROMPT))
         check_native_error(caught.value, code="muse.session_busy", token="interrupt_muse_turn", operation="continue_muse_session")
         assert len(muse_fake.received("turn/start")) == 1, "the upper-cased id names the same live session, so no second turn starts"
+        muse_fake.release()
+        await host.wait_muse_turn(live, timeout_seconds=WAIT_SECONDS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spell", HANDLE_ID_SPELLINGS)
+async def test_continue_on_a_live_session_whose_vendor_id_is_upper_case_is_busy(spell: Callable[[str], str], muse_api, muse_fake, make_muse_host, fast_stop, check_native_error) -> None:
+    # INV-14 / EC-112 (re-review R-16): Muse chose an upper-case id at session/start, so continuing by the handle's own id or its lower-cased form must hit the live turn.
+    async with make_muse_host(VENDOR_UPPER_SCENARIO) as host:
+        live = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        assert live.session_id.lower() == VENDOR_UPPER_SESSION.lower(), "the spawn bound the id the fake's session/start returned"
+        with pytest.raises(muse_api.NativeHostError) as caught:
+            await host.continue_muse_session(spell(live.session_id), muse_api.MuseTurnRequest(prompt=PROMPT))
+        check_native_error(caught.value, code="muse.session_busy", token="interrupt_muse_turn", operation="continue_muse_session")
+        assert len(muse_fake.starts("peer")) == 1, "a busy session must not open a second peer"
+        assert len(muse_fake.received("turn/start")) == 1, "only the live turn started"
+        muse_fake.release()
+        await host.wait_muse_turn(live, timeout_seconds=WAIT_SECONDS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spell", HANDLE_ID_SPELLINGS)
+async def test_fork_of_a_live_session_whose_vendor_id_is_upper_case_is_busy(spell: Callable[[str], str], muse_api, muse_fake, make_muse_host, fast_stop, check_native_error) -> None:
+    # INV-14 / EC-112 for fork (re-review R-16): the local live-turn check ignores case, so it refuses before any peer starts or session/fork is sent.
+    async with make_muse_host(VENDOR_UPPER_SCENARIO) as host:
+        live = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        assert live.session_id.lower() == VENDOR_UPPER_SESSION.lower(), "the spawn bound the id the fake's session/start returned"
+        with pytest.raises(muse_api.NativeHostError) as caught:
+            await host.fork_muse_session(spell(live.session_id))
+        check_native_error(caught.value, code="muse.session_busy", token="interrupt_muse_turn", operation="fork_muse_session")
+        assert muse_fake.received("session/fork") == [], "INV-14: busy is found before anything is sent"
+        assert len(muse_fake.starts("peer")) == 1, "a busy session must not open a fork peer"
         muse_fake.release()
         await host.wait_muse_turn(live, timeout_seconds=WAIT_SECONDS)
