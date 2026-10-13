@@ -35,9 +35,11 @@ from vidbyte.lib.errors import ClaudeOperationError
 
 # Result subtypes that mean the turn used up its turn or dollar budget.
 _BUDGET_SUBTYPES = ("error_max_budget_usd", "error_max_turns")
-# The result subtype that means Claude Code gave up matching output_schema.
+# The result subtype that means Claude Code gave up matching
+# output_schema.
 _SCHEMA_SUBTYPE = "error_max_structured_output_retries"
-# Assistant error kinds that fail a turn, in the order they win over each other.
+# Assistant error kinds that fail a turn, in the order they win over
+# each other.
 _ASSISTANT_ERROR_CODES = (
     ("rate_limit", FailureCode.CLAUDE_USAGE_LIMITED),
     ("billing_error", FailureCode.CLAUDE_BILLING_ERROR),
@@ -52,13 +54,16 @@ class ClaudeFailureMapper:
     @staticmethod
     def from_exception(exc: Exception, *, operation: str, sdk: ClaudeSdkTypes | None) -> ClaudeOperationError:
         """Map an exception one SDK operation raised to its semantic error, naming only the operation and the exception class."""
-        # Take the first row whose class matches; anything the table does not know is a protocol mismatch.
+        # Take the first row whose class matches; anything the table
+        # does not know is a protocol mismatch.
         rows = ClaudeFailureMapper._rows(operation, sdk)
         code = next((mapped for kind, mapped in rows.items() if isinstance(exc, kind)), FailureCode.CLAUDE_PROTOCOL_MISMATCH)
-        # A ResultError carries the failed result's subtype, which picks a budget, schema or API failure like a turn's result does.
+        # A ResultError carries the failed result's subtype, which picks
+        # a budget, schema or API failure like a turn's result does.
         if sdk is not None and isinstance(exc, sdk.result_error):
             code = ClaudeFailureMapper._result_code(getattr(exc, "subtype", None))
-        # A failed start and an unreadable session file get their own next step; every other code keeps its usual one.
+        # A failed start and an unreadable session file get their own
+        # next step; every other code keeps its usual one.
         next_step = ClaudeFailureMapper._next_step(code, operation)
         return ClaudeOperationError(f"{operation} raised {type(exc).__name__}.", failure_code=code.value, operation=operation, next_step=next_step)
 
@@ -66,26 +71,34 @@ class ClaudeFailureMapper:
     def classify_turn(outcome: ClaudeTurnOutcome) -> tuple[ClaudeTurnStatus, ClaudeFailure | None]:
         """Return a finished turn's status and its one failure, taking the first condition that matches in a fixed order."""
         # @intent one-failure-code-per-turn
-        # The checks run in a fixed order and stop at the first match, so a turn
-        # reports exactly one code and permission denials only annotate a success;
-        # reordering them would give the same turn a different code.
-        # A version or login-type check failed after Claude Code started, so no prompt was sent.
+        # The checks run in a fixed order and stop at the first match,
+        # so a turn reports exactly one code and permission denials only
+        # annotate a success; reordering them would give the same turn a
+        # different code.
+        #
+        # A version or login-type check failed after Claude Code
+        # started, so no prompt was sent.
         if outcome.precondition_failure is not None:
             return ClaudeTurnStatus.FAILED, outcome.precondition_failure
-        # The host's time budget stopped the turn; its own interrupt is never reported as the caller's.
+        # The host's time budget stopped the turn; its own interrupt is
+        # never reported as the caller's.
         if outcome.budget_expired:
             return ClaudeTurnStatus.FAILED, ClaudeFailureMapper.failure(FailureCode.CLAUDE_BUDGET_EXHAUSTED, "The turn ran past its timeout_seconds budget, so the host interrupted it.")
-        # The caller, a close or an unanswered steer interrupted the turn, which is a stop rather than a failure.
+        # The caller, a close or an unanswered steer interrupted the
+        # turn, which is a stop rather than a failure.
         if outcome.interrupted:
             return ClaudeTurnStatus.INTERRUPTED, None
-        # A rate limit, an account problem or an error result reported during the turn fails it, even after a success.
+        # A rate limit, an account problem or an error result reported
+        # during the turn fails it, even after a success.
         reported = ClaudeFailureMapper._reported(outcome)
         if reported is not None:
             return ClaudeTurnStatus.FAILED, ClaudeFailureMapper.failure(*reported)
-        # The output ended before the prompt's own result arrived, either with an exception or simply by ending.
+        # The output ended before the prompt's own result arrived,
+        # either with an exception or simply by ending.
         if not outcome.result_seen:
             return ClaudeTurnStatus.FAILED, outcome.stream_failure or ClaudeFailureMapper.failure(FailureCode.CLAUDE_PROCESS_EXITED, "Claude Code's output ended before the turn's result arrived.")
-        # A success whose tool calls were refused still completes, and the failure explains why some work may be missing.
+        # A success whose tool calls were refused still completes, and
+        # the failure explains why some work may be missing.
         if outcome.permission_denials:
             return ClaudeTurnStatus.COMPLETED, ClaudeFailureMapper.failure(FailureCode.CLAUDE_PERMISSION_DENIED, "The turn completed, but Claude Code was refused tool calls; permission_denials lists each one.")
         return ClaudeTurnStatus.COMPLETED, None

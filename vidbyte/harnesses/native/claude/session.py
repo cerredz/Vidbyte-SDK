@@ -55,9 +55,11 @@ from vidbyte.lib.enums.claude import (
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import ClaudeOperationError
 
-# The origin kind of a result that answers the caller's own prompt; any other kind is a turn Claude Code injected (D-28).
+# The origin kind of a result that answers the caller's own prompt; any
+# other kind is a turn Claude Code injected (D-28).
 _HUMAN_ORIGIN = "human"
-# The window types a rate-limit window can be kept under; an event with any other type is skipped (EC-52).
+# The window types a rate-limit window can be kept under; an event with
+# any other type is skipped (EC-52).
 _WINDOW_TYPES = frozenset(kind.value for kind in ClaudeRateLimitType)
 # The operations a turn's failures name, besides connect.
 _INFO_OPERATION = "get_server_info"
@@ -71,14 +73,17 @@ class ClaudeLiveSession:
     """One Claude Code turn: its client, its pump, the tasks that stop it, and the result it publishes once."""
 
     def __init__(self, spawn: ClaudeSpawnRequest, *, cli_path: str, sdk: ClaudeSdkTypes, slots: asyncio.Semaphore | None, on_window: Callable[[ClaudeRateLimitWindow], None]) -> None:
-        # What the turn runs: its request, the CLI to start, the loaded SDK, a launch's slots, and where windows go.
+        # What the turn runs: its request, the CLI to start, the loaded
+        # SDK, a launch's slots, and where windows go.
         self._spawn = spawn
         self._cli_path = cli_path
         self._sdk = sdk
         self._slots = slots
         self._on_window = on_window
-        # A new or forked session runs under the caller's chosen id or a fresh one, which Claude Code is told to use;
-        # a plain resume keeps the resumed id, and a plain continue learns its id from the result (section 9.1, EC-34).
+        # A new or forked session runs under the caller's chosen id or a
+        # fresh one, which Claude Code is told to use; a plain resume
+        # keeps the resumed id, and a plain continue learns its id from
+        # the result (section 9.1, EC-34).
         if spawn.session_id or spawn.fork_session or not (spawn.resume or spawn.continue_conversation):
             self._session_option = spawn.session_id or str(uuid.uuid4())
             session_id = self._session_option
@@ -87,7 +92,8 @@ class ClaudeLiveSession:
             session_id = spawn.resume
         self.handle = ClaudeSessionHandle(handle_id=str(uuid.uuid4()), session_id=session_id)
         self.pump: asyncio.Task[None] | None = None
-        # The published snapshot, what the pump saw for the classification, and the usage figures.
+        # The published snapshot, what the pump saw for the
+        # classification, and the usage figures.
         self._result = ClaudeTurnResult(handle_id=self.handle.handle_id, session_id=session_id, status=ClaudeTurnStatus.QUEUED)
         self._outcome = ClaudeTurnOutcome(
             result_seen=False,
@@ -108,8 +114,10 @@ class ClaudeLiveSession:
         self._cost: float | None = None
         self._models: tuple[ClaudeModelUsage, ...] = ()
         self._tasks: dict[str, ClaudeTaskUsage] = {}
-        # The client, the stop flag, the one pending steer with the numbers of the last steer stored and the last
-        # one sent, and the counts of prompts sent and of their own results read, by which the grace is aimed.
+        # The client, the stop flag, the one pending steer with the
+        # numbers of the last steer stored and the last one sent, and
+        # the counts of prompts sent and of their own results read, by
+        # which the grace is aimed.
         self._client: _ClaudeClient | None = None
         self._connected = False
         self._stopping = False
@@ -118,7 +126,8 @@ class ClaudeLiveSession:
         self._steered = 0
         self._prompts_sent = 0
         self._results_read = 0
-        # Every other task the turn owns: the watchdog, the grace, the one close, and the interrupt tasks.
+        # Every other task the turn owns: the watchdog, the grace, the
+        # one close, and the interrupt tasks.
         self._watchdog: asyncio.Task[None] | None = None
         self._grace: asyncio.Task[None] | None = None
         self._closing: asyncio.Task[None] | None = None
@@ -130,40 +139,51 @@ class ClaudeLiveSession:
 
     async def run(self) -> None:
         """The pump: connect, check the process, send the prompt and any steer, read to the result, then close and publish."""
-        # A launch prompt waits here for one of its launch's slots, which bound how many of its clients run at once.
+        # A launch prompt waits here for one of its launch's slots,
+        # which bound how many of its clients run at once.
         if self._slots is not None:
             await self._slots.acquire()
         try:
-            # An interrupt or a close that arrived while the turn was queued ends it without starting Claude Code.
+            # An interrupt or a close that arrived while the turn was
+            # queued ends it without starting Claude Code.
             if self._stopping:
                 return
-            # Start Claude Code, then check its version and login type, so a turn it cannot run spends nothing.
+            # Start Claude Code, then check its version and login type,
+            # so a turn it cannot run spends nothing.
             client = await self._connect()
             await self._check_process(client)
             if self._stopping or self._outcome.precondition_failure is not None:
                 return
-            # The prompt goes out now, so the turn is running and its time budget starts.
+            # The prompt goes out now, so the turn is running and its
+            # time budget starts.
             self._result = replace(self._result, status=ClaudeTurnStatus.RUNNING)
             if self._spawn.timeout_seconds is not None:
                 self._watchdog = asyncio.create_task(self._watch(client, self._spawn.timeout_seconds))
-            # Send the prompt and read to its own result. A steer stored meanwhile goes out next as one more prompt;
-            # the turn is over once a result arrives with no steer pending, or once the stream ends.
+            # Send the prompt and read to its own result. A steer stored
+            # meanwhile goes out next as one more prompt; the turn is
+            # over once a result arrives with no steer pending, or once
+            # the stream ends.
             prompt: str | AsyncIterable[dict[str, Any]] | None = ClaudeOptionsTranslator.to_prompt(self._spawn)
             stream = client.receive_messages()
             while prompt is not None:
                 await self._query(client, prompt)
                 prompt = self._take_steer() if await self._read(stream) else None
         except ClaudeOperationError as error:
-            # A failed start or a broken stream becomes the turn's failure; the classification decides whether it wins.
+            # A failed start or a broken stream becomes the turn's
+            # failure; the classification decides whether it wins.
             self._outcome = replace(self._outcome, stream_failure=ClaudeFailure(code=FailureCode(error.failure_code), reason=error.reason, next_step=error.next_step))
         finally:
-            # The pump reads no more, so the turn is stopping: drop a pending steer and cancel the watchdog, the grace
-            # and any interrupt still waiting. None of them awaits the close, so cancelling one never cuts a close short.
+            # The pump reads no more, so the turn is stopping: drop a
+            # pending steer and cancel the watchdog, the grace and any
+            # interrupt still waiting. None of them awaits the close, so
+            # cancelling one never cuts a close short.
             self._stopping = True
             self._steer = None
             self._stop_waiting()
-            # Close the client once and wait for that close, through a cancellation too. Only then publish the
-            # terminal status, fire done and free the launch slot, so the session id stays busy until claude is gone.
+            # Close the client once and wait for that close, through a
+            # cancellation too. Only then publish the terminal status,
+            # fire done and free the launch slot, so the session id
+            # stays busy until claude is gone.
             try:
                 await self._await_close(self._start_close())
             finally:
@@ -237,7 +257,8 @@ class ClaudeLiveSession:
     def _on_result(self, message: object) -> bool:
         """Record a result's cumulative usage; for the prompt's own result, also record its fields and return True (D-28)."""
         fields = vars(message)
-        # Every result carries the session's cumulative cost and per-model usage, an injected turn's result too (INV-20).
+        # Every result carries the session's cumulative cost and
+        # per-model usage, an injected turn's result too (INV-20).
         models = tuple(
             ClaudeModelUsage(
                 model=name,
@@ -254,7 +275,8 @@ class ClaudeLiveSession:
         origin = fields.get("origin")
         if origin is not None and origin.get("kind") != _HUMAN_ORIGIN:
             return False
-        # The prompt's own result: build its records first, so a malformed result changes nothing.
+        # The prompt's own result: build its records first, so a
+        # malformed result changes nothing.
         is_error = fields["is_error"]
         denials = tuple(ClaudePermissionDenial(tool_name=denial["tool_name"], tool_use_id=denial["tool_use_id"]) for denial in fields.get("permission_denials") or ())
         result = replace(
@@ -278,7 +300,8 @@ class ClaudeLiveSession:
             structured_output_missing=self._spawn.output_schema is not None and not is_error and result.structured_output is None,
             permission_denials=denials,
         )
-        # Count the result, and stop a grace that was waiting for it, which frees the grace for a later interrupt.
+        # Count the result, and stop a grace that was waiting for it,
+        # which frees the grace for a later interrupt.
         self._result, self._outcome = result, outcome
         self._results_read += 1
         if self._grace is not None:
@@ -331,7 +354,8 @@ class ClaudeLiveSession:
         await asyncio.sleep(seconds)
         if self._stopping:
             return
-        # The budget sets its own flag, never the caller's interrupt flag, so the turn reports budget_exhausted.
+        # The budget sets its own flag, never the caller's interrupt
+        # flag, so the turn reports budget_exhausted.
         self._stopping = True
         self._steer = None
         self._outcome = replace(self._outcome, budget_expired=True)
@@ -342,8 +366,9 @@ class ClaudeLiveSession:
         try:
             await client.interrupt()
         except Exception as exc:
-            # A steer's failed interrupt withdraws only its own unsent message, and the turn goes on;
-            # a failed interrupt from the watchdog or the caller closes the client instead.
+            # A steer's failed interrupt withdraws only its own unsent
+            # message, and the turn goes on; a failed interrupt from the
+            # watchdog or the caller closes the client instead.
             if steer is None:
                 self._start_close()
             elif self._steers == steer and self._steer is not None:
@@ -359,7 +384,8 @@ class ClaudeLiveSession:
 
     async def _expire(self, prompt: int) -> None:
         """Wait the grace period; if prompt number prompt still has no result, drop a pending steer, record the stop and start the close."""
-        # The module's grace name is read here, when the grace starts, so changing it on this module takes effect.
+        # The module's grace name is read here, when the grace starts,
+        # so changing it on this module takes effect.
         await asyncio.sleep(CLAUDE_INTERRUPT_GRACE_SECONDS)
         if self._results_read >= prompt:
             return
@@ -391,7 +417,8 @@ class ClaudeLiveSession:
             await asyncio.wait({closing})
             raise
         except Exception:
-            # A failed disconnect leaves the turn's classification unchanged.
+            # A failed disconnect leaves the turn's classification
+            # unchanged.
             return
 
     def _publish(self) -> None:
@@ -405,7 +432,8 @@ class ClaudeLiveSession:
 
     async def steer(self, message: str) -> None:
         """Store one message and interrupt the running prompt from an interrupt task; the message goes out after that prompt's result (D-3)."""
-        # Only a running turn that is not stopping and has no steer pending takes a message (INV-18).
+        # Only a running turn that is not stopping and has no steer
+        # pending takes a message (INV-18).
         client = self._client
         if client is None or self._result.status is not ClaudeTurnStatus.RUNNING:
             raise self._refused(f"The turn is {self._result.status.value}; only a running turn can be steered.")
@@ -413,18 +441,22 @@ class ClaudeLiveSession:
             raise self._refused("The turn is stopping, so it takes no steer.")
         if self._steer is not None:
             raise self._refused("A steer is already pending on this turn; wait until it is sent.")
-        # Store the message under the next number, then interrupt the prompt from a task the session owns.
+        # Store the message under the next number, then interrupt the
+        # prompt from a task the session owns.
         self._steers += 1
         number = self._steers
         self._steer = message
         task = asyncio.create_task(self._interrupt_client(client, self._prompts_sent, number))
         self._interrupts.add(task)
-        # Wait without cancelling the task, so a caller-side timeout stops only this wait and the task still arms the grace (EC-59).
+        # Wait without cancelling the task, so a caller-side timeout
+        # stops only this wait and the task still arms the grace
+        # (EC-59).
         await asyncio.wait({task})
         error = None if task.cancelled() else task.result()
         if error is not None:
             raise error
-        # The message was dropped before the pump sent it: the turn was interrupted, ran out of time or ended first.
+        # The message was dropped before the pump sent it: the turn was
+        # interrupted, ran out of time or ended first.
         if self._steer is None and self._steered < number:
             raise self._refused("The steer was discarded before it was sent, because the turn was interrupted, ran out of time or ended first.")
 
@@ -433,11 +465,13 @@ class ClaudeLiveSession:
         # A stopping or finished turn sends nothing more (EC-23).
         if self._stopping:
             return self._result
-        # The caller's stop drops a pending steer, and the turn ends INTERRUPTED, which is not a failure.
+        # The caller's stop drops a pending steer, and the turn ends
+        # INTERRUPTED, which is not a failure.
         self._stopping = True
         self._steer = None
         self._outcome = replace(self._outcome, interrupted=True)
-        # With no client nothing has started, so the turn ends here; a connect in flight is finished by the pump.
+        # With no client nothing has started, so the turn ends here; a
+        # connect in flight is finished by the pump.
         if self._client is None:
             self._publish()
         elif self._result.status is ClaudeTurnStatus.RUNNING:
@@ -446,7 +480,8 @@ class ClaudeLiveSession:
 
     async def close(self) -> None:
         """Stop the turn for a closing host and, once its client is connected, wait for the one close the way the pump does."""
-        # A turn that is not stopping yet ends INTERRUPTED; one already stopping keeps the reason it stopped for.
+        # A turn that is not stopping yet ends INTERRUPTED; one already
+        # stopping keeps the reason it stopped for.
         if not self._stopping:
             self._stopping = True
             self._steer = None

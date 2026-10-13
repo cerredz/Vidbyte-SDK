@@ -39,9 +39,9 @@ class SpawnClaudeSessionTool(_ClaudeBuiltinTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # @intent the-model-sets-only-the-prompt
-        # The model's prompt replaces only the prompt of the developer's base
-        # request; a wrong JSON type for it fails the request's own check and
-        # comes back as configuration.invalid_argument.
+        # The model's prompt replaces only the prompt of the developer's
+        # base request; a wrong JSON type for it fails the request's own
+        # check and comes back as configuration.invalid_argument.
         prompt = self._optional_argument(call, "prompt", default=None)
         try:
             handle = await self._host.spawn_claude_session(replace(self._request, prompt=prompt))
@@ -62,9 +62,10 @@ class ContinueClaudeSessionTool(_ClaudeBuiltinTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # @intent continue-keeps-the-developer-settings
-        # The developer's base request goes along whole, so the continued turn
-        # runs with the same settings as a spawned one; the host clears only
-        # its session fields and resumes the named session.
+        # The developer's base request goes along whole, so the
+        # continued turn runs with the same settings as a spawned one;
+        # the host clears only its session fields and resumes the named
+        # session.
         session_id = self._optional_argument(call, "session_id", default=None)
         prompt = self._optional_argument(call, "prompt", default=None)
         try:
@@ -108,9 +109,10 @@ class LaunchClaudeSubagentsTool(_ClaudeBuiltinTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # @intent the-model-sets-only-the-prompts
-        # Every launched session is the developer's base request with one of
-        # the model's prompts; a JSON array becomes the tuple the host takes,
-        # and any other value goes on for the host to refuse.
+        # Every launched session is the developer's base request with
+        # one of the model's prompts; a JSON array becomes the tuple the
+        # host takes, and any other value goes on for the host to
+        # refuse.
         prompts = self._optional_argument(call, "prompts", default=None)
         if isinstance(prompts, list):
             prompts = tuple(prompts)

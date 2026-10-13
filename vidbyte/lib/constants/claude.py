@@ -19,15 +19,18 @@ from vidbyte.lib.enums.failure import FailureCode
 CLAUDE_SDK_EXTRA = "vidbyte-sdk[claude]"
 # The executable name Claude Code installs on every platform.
 CLAUDE_CLI_NAME = "claude"
-# The oldest Claude Code release whose flags and messages the host relies on.
+# The oldest Claude Code release whose flags and messages the host
+# relies on.
 CLAUDE_MIN_CLI_VERSION = "2.1.296"
-# The name of the in-process MCP server that carries a request's own tools.
+# The name of the in-process MCP server that carries a request's own
+# tools.
 CLAUDE_TOOL_SERVER_NAME = "vidbyte"
 # Claude Code names an MCP tool mcp__<server>__<tool>.
 CLAUDE_MCP_TOOL_PREFIX = "mcp__"
 # The SDK's name for Claude Code's own system prompt.
 CLAUDE_SYSTEM_PROMPT_PRESET = "claude_code"
-# A plugin entry containing a scheme is a URL rather than a local folder.
+# A plugin entry containing a scheme is a URL rather than a local
+# folder.
 CLAUDE_PLUGIN_URL_MARKER = "://"
 # The CLI accepts one --file flag per run through extra_args.
 CLAUDE_MAX_FILE_SPECS = 1
@@ -43,13 +46,16 @@ CLAUDE_MAX_OUTPUT_TOKENS_ENV = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
 CLAUDE_MIN_COUNT = 1
 # Amounts such as dollars and seconds must be above zero.
 CLAUDE_MIN_EXCLUSIVE_AMOUNT = 0.0
-# How long a turn waits for Claude Code to answer an interrupt before closing it.
+# How long a turn waits for Claude Code to answer an interrupt before
+# closing it.
 CLAUDE_INTERRUPT_GRACE_SECONDS = 30.0
 # Sent when the developer's live-session cap refuses a new turn.
 CLAUDE_LIVE_CAP_NEXT_STEP = "Wait for a running session to finish, or interrupt one, then spawn again."
-# Sent when Claude Code fails to start, because a respawn would fail the same way.
+# Sent when Claude Code fails to start, because a respawn would fail the
+# same way.
 CLAUDE_START_FAILURE_NEXT_STEP = "Run check_claude_ready to see why Claude Code did not start; if that check fails the same way, reinstall Claude Code or pass cli_path to ClaudeHost."
-# Sent when a session file cannot be read, because listing sessions would fail the same way.
+# Sent when a session file cannot be read, because listing sessions
+# would fail the same way.
 CLAUDE_HISTORY_READ_NEXT_STEP = "Check that this process can read Claude Code's session files, then call again."
 # Sent with configuration.invalid_argument.
 CLAUDE_INVALID_ARGUMENT_NEXT_STEP = "Correct the argument the reason names, then call again."
@@ -80,33 +86,42 @@ CLAUDE_FAILURE_NEXT_STEPS: Mapping[str, str] = {
 }
 # The platform name sys.platform reports on Windows.
 CLAUDE_WINDOWS_PLATFORM = "win32"
-# The native Windows executable, which is the only form the SDK can start there.
+# The native Windows executable, which is the only form the SDK can
+# start there.
 CLAUDE_CLI_EXE_NAME = "claude.exe"
 # Windows suffixes of a file that starts without a shell.
 CLAUDE_WINDOWS_NATIVE_SUFFIXES = (".exe", ".com")
-# Windows suffixes of a shim the SDK cannot start, so a lookup hit with one is skipped.
+# Windows suffixes of a shim the SDK cannot start, so a lookup hit with
+# one is skipped.
 CLAUDE_WINDOWS_BATCH_SUFFIXES = (".bat", ".cmd")
-# Where the native installer puts claude.exe under the home folder on Windows.
+# Where the native installer puts claude.exe under the home folder on
+# Windows.
 CLAUDE_HOME_CLI_PARTS = (".local", "bin", "claude.exe")
-# The places the SDK itself searches on other platforms, in its order, relative to the home folder.
+# The places the SDK itself searches on other platforms, in its order,
+# relative to the home folder.
 CLAUDE_POSIX_CLI_LOCATIONS = (".npm-global/bin/claude", "/usr/local/bin/claude", ".local/bin/claude", "node_modules/.bin/claude", ".yarn/bin/claude", ".claude/local/claude")
 # The initialize field that carries the Claude Code version.
 CLAUDE_VERSION_FIELD = "claude_code_version"
 # The initialize field that describes the signed-in account.
 CLAUDE_ACCOUNT_FIELD = "account"
-# Account fields whose value names where the signed-in credential came from.
+# Account fields whose value names where the signed-in credential came
+# from.
 CLAUDE_CREDENTIAL_SOURCE_FIELDS = ("tokenSource", "apiKeySource")
 # The account field that is set when the session runs on an API key.
 CLAUDE_API_KEY_SOURCE_FIELD = "apiKeySource"
-# The value Claude Code reports for a credential source that is not in use.
+# The value Claude Code reports for a credential source that is not in
+# use.
 CLAUDE_ABSENT_SOURCE = "none"
 # The account field that names the API provider.
 CLAUDE_PROVIDER_FIELD = "apiProvider"
-# The provider value for Anthropic's own API, the only one that needs a sign-in.
+# The provider value for Anthropic's own API, the only one that needs a
+# sign-in.
 CLAUDE_FIRST_PARTY_PROVIDER = "firstParty"
-# The operation that builds the options and starts Claude Code; its process failures get CLAUDE_START_FAILURE_NEXT_STEP.
+# The operation that builds the options and starts Claude Code; its
+# process failures get CLAUDE_START_FAILURE_NEXT_STEP.
 CLAUDE_CONNECT_OPERATION = "connect"
-# The offline fork; its FileNotFoundError means the source session has no transcript.
+# The offline fork; its FileNotFoundError means the source session has
+# no transcript.
 CLAUDE_FORK_OPERATION = "fork_session"
 # The offline read that lists sessions.
 CLAUDE_LIST_OPERATION = "list_sessions"
@@ -114,5 +129,6 @@ CLAUDE_LIST_OPERATION = "list_sessions"
 CLAUDE_INFO_OPERATION = "get_session_info"
 # The offline read of one session's transcript.
 CLAUDE_MESSAGES_OPERATION = "get_session_messages"
-# The offline reads whose OSError means Claude Code's session files could not be read (CLAUDE_HISTORY_READ_NEXT_STEP).
+# The offline reads whose OSError means Claude Code's session files
+# could not be read (CLAUDE_HISTORY_READ_NEXT_STEP).
 CLAUDE_HISTORY_READ_OPERATIONS = (CLAUDE_LIST_OPERATION, CLAUDE_INFO_OPERATION, CLAUDE_MESSAGES_OPERATION)

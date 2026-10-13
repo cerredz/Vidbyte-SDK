@@ -43,21 +43,24 @@ class ClaudeTools(Tools):
 
     def __init__(self, host: ClaudeHost, request: ClaudeSpawnRequest | None = None) -> None:
         # @intent the-base-request-defaults-to-an-empty-request
-        # Without a base request the tools spawn with ClaudeSpawnRequest's own
-        # defaults; either way the model adds only prompts and ids to it, never
-        # a setting of its own (D-13).
-        # Use the developer's base request, or the record's defaults when none is given.
+        # Without a base request the tools spawn with
+        # ClaudeSpawnRequest's own defaults; either way the model adds
+        # only prompts and ids to it, never a setting of its own (D-13).
+        #
+        # Use the developer's base request, or the record's defaults
+        # when none is given.
         base = ClaudeSpawnRequest() if request is None else request
-        # Build the fifteen tools over the one host and base request, in the order the model sees them.
+        # Build the fifteen tools over the one host and base request, in
+        # the order the model sees them.
         super().__init__(self.get_tools(host, base))
 
     @staticmethod
     def get_tools(host: ClaudeHost, request: ClaudeSpawnRequest) -> tuple[BaseTool, ...]:
         """Return the fifteen Claude tools over one host and base request, in the section 9.2 order."""
         # @intent every-tool-shares-one-host
-        # All fifteen tools get the same host and base request, so a handle one
-        # tool returns is known to every other tool, and no tool reaches another
-        # host's turns (D-14).
+        # All fifteen tools get the same host and base request, so a
+        # handle one tool returns is known to every other tool, and no
+        # tool reaches another host's turns (D-14).
         return (
             CheckClaudeReadyTool(host, request),
             ListClaudeModelsTool(host, request),

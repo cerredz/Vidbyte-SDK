@@ -25,7 +25,8 @@ from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 if TYPE_CHECKING:
     from vidbyte.harnesses.native.claude.host import ClaudeHost
 
-# The error_type every Claude tool's error result carries in its metadata (INV-13).
+# The error_type every Claude tool's error result carries in its
+# metadata (INV-13).
 _ERROR_TYPE = "ClaudeOperationError"
 
 
@@ -34,9 +35,10 @@ class _ClaudeBuiltinTool(BaseTool):
 
     def __init__(self, host: ClaudeHost, request: ClaudeSpawnRequest) -> None:
         # @intent the-developer-fixes-every-spawn-setting
-        # The tool keeps the developer's base request, and a model's call adds
-        # at most a prompt to it, so no call can change the permissions, sandbox,
-        # budget or CLI path the developer chose (D-13, T-2).
+        # The tool keeps the developer's base request, and a model's
+        # call adds at most a prompt to it, so no call can change the
+        # permissions, sandbox, budget or CLI path the developer chose
+        # (D-13, T-2).
         self._host = host
         self._request = request
 
@@ -44,12 +46,13 @@ class _ClaudeBuiltinTool(BaseTool):
     def _spec(name: str, description: str, permission: ToolPermission, properties: Mapping[str, Any], required: tuple[str, ...]) -> ToolSpec:
         """Return a tool's spec with a closed input schema, so the model can pass no argument the tool does not name."""
         # @intent every-tool-states-its-permission
-        # The permission is what the agent's PermissionPolicy checks before a
-        # call runs: the tools that start, fork, steer or stop work are WRITE,
-        # so the default policy refuses them until the developer opts in, and the
-        # rest are READ (INV-14). The closed schema keeps every other spawn
-        # setting out of the model's reach (D-13).
-        schema ={"type": "object", "properties": dict(properties), "required": list(required), "additionalProperties": False}
+        # The permission is what the agent's PermissionPolicy checks
+        # before a call runs: the tools that start, fork, steer or stop
+        # work are WRITE, so the default policy refuses them until the
+        # developer opts in, and the rest are READ (INV-14). The closed
+        # schema keeps every other spawn setting out of the model's
+        # reach (D-13).
+        schema = {"type": "object", "properties": dict(properties), "required": list(required), "additionalProperties": False}
         return ToolSpec(name=name, description=description, permission=permission, input_schema=schema)
 
     def _handle(self, call: ToolCall) -> ClaudeSessionHandle:

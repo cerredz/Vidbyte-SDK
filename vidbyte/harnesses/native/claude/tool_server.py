@@ -32,9 +32,10 @@ class ClaudeToolServer:
     def build(tools: tuple[BaseTool, ...], sdk: ClaudeSdkTypes) -> object:
         """Return the SDK server config for these tools, each one run by a handler over one shared ToolExecutor."""
         # @intent request-tools-ride-the-vidbyte-mcp-server
-        # Claude Code asks its own permission layer before it calls a tool, so the
-        # executor allows every permission and only looks up, validates and runs the
-        # call; a stricter policy here would refuse calls Claude Code already approved.
+        # Claude Code asks its own permission layer before it calls a
+        # tool, so the executor allows every permission and only looks
+        # up, validates and runs the call; a stricter policy here would
+        # refuse calls Claude Code already approved.
         executor = ToolExecutor(Tools(tools), permission_policy=PermissionPolicy.allow_all())
         specs = [tool.spec() for tool in tools]
         sdk_tools = [sdk.tool(spec.name, spec.description, ToolsFormatter.to_anthropic_tool(spec)["input_schema"])(ClaudeToolHandler(executor, spec.name)) for spec in specs]
@@ -44,9 +45,10 @@ class ClaudeToolServer:
     def auto_allowed(tools: tuple[BaseTool, ...]) -> tuple[str, ...]:
         """Return the mcp__vidbyte__<name> names of the SAFE and READ tools, which Claude Code may call without asking."""
         # @intent only-read-tools-skip-the-permission-prompt
-        # Vidbyte's default policy allows SAFE and READ tools, so only those are
-        # allowed up front; WRITE and EXECUTE tools stay behind Claude Code's own
-        # permission rules, or a headless turn could change things nobody approved.
+        # Vidbyte's default policy allows SAFE and READ tools, so only
+        # those are allowed up front; WRITE and EXECUTE tools stay
+        # behind Claude Code's own permission rules, or a headless turn
+        # could change things nobody approved.
         prefix = f"{CLAUDE_MCP_TOOL_PREFIX}{CLAUDE_TOOL_SERVER_NAME}__"
         specs = [tool.spec() for tool in tools]
         return tuple(prefix + spec.name for spec in specs if spec.permission in (ToolPermission.SAFE, ToolPermission.READ))
@@ -56,15 +58,17 @@ class ClaudeToolHandler:
     """Runs one Vidbyte tool for Claude Code and answers with MCP text content; it never raises."""
 
     def __init__(self, executor: ToolExecutor, tool_name: str) -> None:
-        # Holds the shared executor and the name of the one tool this handler runs.
+        # Holds the shared executor and the name of the one tool this
+        # handler runs.
         self._executor = executor
         self._tool_name = tool_name
 
     async def __call__(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Run the tool on Claude's arguments and answer with its output as text, marked as an error unless it succeeded."""
-        # One try spans building the call and running it, because a raised error would reach
-        # Claude as the SDK's own error text with the exception's message; a fixed text says
-        # the tool failed instead.
+        # One try spans building the call and running it, because a
+        # raised error would reach Claude as the SDK's own error text
+        # with the exception's message; a fixed text says the tool
+        # failed instead.
         try:
             result = await self._executor.execute_call(ToolCall(tool_name=self._tool_name, arguments=dict(arguments)))
             return {"content": [{"type": "text", "text": result.output}], "is_error": result.status is not ToolStatus.SUCCESS}

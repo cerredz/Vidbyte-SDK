@@ -196,9 +196,10 @@ class ClaudeThinking:
 
     def __post_init__(self) -> None:
         # @intent thinking-settings-apply-only-to-their-mode
-        # A budget belongs to enabled mode only and a display choice cannot
-        # apply when thinking is disabled. Claude Code would ignore either one
-        # without an error, so a caller's mistaken setting fails here instead.
+        # A budget belongs to enabled mode only and a display choice
+        # cannot apply when thinking is disabled. Claude Code would
+        # ignore either one without an error, so a caller's mistaken
+        # setting fails here instead.
         mode = _ClaudeFieldRules.choice(self.mode, ClaudeThinkingMode, "mode")
         object.__setattr__(self, "mode", mode)
         object.__setattr__(self, "display", _ClaudeFieldRules.choice(self.display, ClaudeThinkingDisplay, "display"))
@@ -275,9 +276,9 @@ class ClaudeMcpServer:
 
     def __post_init__(self) -> None:
         # @intent a-server-claude-cannot-start-fails-here
-        # A stdio server needs a command and a URL server needs a url. Without
-        # this check Claude Code would only report the server as failed after
-        # the turn had started.
+        # A stdio server needs a command and a URL server needs a url.
+        # Without this check Claude Code would only report the server as
+        # failed after the turn had started.
         transport = _ClaudeFieldRules.choice(self.transport, ClaudeMcpTransport, "transport")
         object.__setattr__(self, "transport", transport)
         _ClaudeFieldRules.shapes(self, (("name", _TEXT), ("command", _TEXT), ("url", _TEXT)))
@@ -314,9 +315,10 @@ class ClaudeAgentDefinition:
 
     def __post_init__(self) -> None:
         # @intent subagent-settings-are-wire-values
-        # Effort, permission mode and memory are stored as enum members, so
-        # the translator sends only values Claude Code accepts and an unknown
-        # value fails here rather than inside the running subagent.
+        # Effort, permission mode and memory are stored as enum members,
+        # so the translator sends only values Claude Code accepts and an
+        # unknown value fails here rather than inside the running
+        # subagent.
         _ClaudeFieldRules.shapes(self, _AGENT_SHAPES)
         for name in ("disallowed_tools", "mcp_servers"):
             _ClaudeFieldRules.texts(getattr(self, name), name)
@@ -449,15 +451,16 @@ class ClaudeSpawnRequest:
         # Check the counts and amounts against their bounds.
         self._check_numbers()
         # Check the rules that relate several settings: how a session is
-        # chosen, how the prompt and permission prompts fit together, and
-        # what reaches the claude command line.
+        # chosen, how the prompt and permission prompts fit together,
+        # and what reaches the claude command line.
         self._check_sessions()
         self._check_prompting()
         self._check_inputs()
         self._check_extensions()
 
     def _check_fields(self) -> None:
-        # Types first, then tuples of text and records, UUIDs and the env mapping.
+        # Types first, then tuples of text and records, UUIDs and the
+        # env mapping.
         _ClaudeFieldRules.shapes(self, _SPAWN_SHAPES)
         for name in _SPAWN_TEXTS:
             _ClaudeFieldRules.texts(getattr(self, name), name)
@@ -473,7 +476,8 @@ class ClaudeSpawnRequest:
             raise _ClaudeFieldRules.invalid("can_use_tool must be an async callable.")
 
     def _coerce_choices(self) -> None:
-        # Store enum members, so a raw value such as "plan" works like ClaudePermissionMode.PLAN.
+        # Store enum members, so a raw value such as "plan" works like
+        # ClaudePermissionMode.PLAN.
         for name, choices in _SPAWN_CHOICES:
             object.__setattr__(self, name, _ClaudeFieldRules.choice(getattr(self, name), choices, name))
         object.__setattr__(self, "betas", tuple(_ClaudeFieldRules.choice(beta, ClaudeBeta, "betas") for beta in self.betas))
@@ -482,7 +486,8 @@ class ClaudeSpawnRequest:
             object.__setattr__(self, "setting_sources", sources)
 
     def _check_numbers(self) -> None:
-        # Unset numbers stay at the SDK default, so only set ones are checked.
+        # Unset numbers stay at the SDK default, so only set ones are
+        # checked.
         for name in _SPAWN_COUNTS:
             if getattr(self, name) is not None:
                 _ClaudeFieldRules.count(getattr(self, name), name)
@@ -493,7 +498,8 @@ class ClaudeSpawnRequest:
             _ClaudeFieldRules.count(self.autocompact, "autocompact", low=CLAUDE_MIN_AUTOCOMPACT_TOKENS, high=CLAUDE_MAX_AUTOCOMPACT_TOKENS)
 
     def _check_sessions(self) -> None:
-        # The SDK refuses a chosen session id on a resumed or continued session unless that session is forked.
+        # The SDK refuses a chosen session id on a resumed or continued
+        # session unless that session is forked.
         if self.session_id and (self.resume or self.continue_conversation) and not self.fork_session:
             raise _ClaudeFieldRules.conflict("session_id needs fork_session when resume or continue_conversation is set.")
         if self.resume and self.continue_conversation:
@@ -507,9 +513,10 @@ class ClaudeSpawnRequest:
 
     def _check_prompting(self) -> None:
         # @intent permission-prompts-have-exactly-one-answerer
-        # With NONE the CLI denies every prompt itself, so a callback would
-        # never be asked; with HOST and no callback a prompt would wait for an
-        # answer nobody sends. The system prompt options and images must fit too.
+        # With NONE the CLI denies every prompt itself, so a callback
+        # would never be asked; with HOST and no callback a prompt would
+        # wait for an answer nobody sends. The system prompt options and
+        # images must fit too.
         mode = self.system_prompt.mode
         if self.exclude_dynamic_system_prompt_sections and mode is not ClaudeSystemPromptMode.PRESET:
             raise _ClaudeFieldRules.conflict(f"exclude_dynamic_system_prompt_sections applies only to the preset system prompt, not {mode.value}.")
@@ -525,9 +532,10 @@ class ClaudeSpawnRequest:
 
     def _check_inputs(self) -> None:
         # @intent one-value-per-cli-flag
-        # --file and --plugin-url go through extra_args, which holds one value
-        # per flag, and fallback_model is sent comma-joined. A second entry or a
-        # comma inside a model name would be lost or split without an error.
+        # --file and --plugin-url go through extra_args, which holds one
+        # value per flag, and fallback_model is sent comma-joined. A
+        # second entry or a comma inside a model name would be lost or
+        # split without an error.
         if len(self.files) > CLAUDE_MAX_FILE_SPECS:
             raise _ClaudeFieldRules.invalid(f"files takes at most {CLAUDE_MAX_FILE_SPECS} entry.")
         if any(not file_id or not path for file_id, _, path in (spec.partition(":") for spec in self.files)):
@@ -541,9 +549,10 @@ class ClaudeSpawnRequest:
 
     def _check_extensions(self) -> None:
         # @intent the-vidbyte-mcp-server-name-is-reserved
-        # The request's own tools travel on the in-process MCP server named
-        # vidbyte, so an external server of that name would replace them. Tools
-        # are checked by shape, because vidbyte/lib cannot import vidbyte.tools.
+        # The request's own tools travel on the in-process MCP server
+        # named vidbyte, so an external server of that name would
+        # replace them. Tools are checked by shape, because vidbyte/lib
+        # cannot import vidbyte.tools.
         if not all(callable(getattr(tool, "spec", None)) for tool in self.tools):
             raise _ClaudeFieldRules.invalid("tools must hold vidbyte tools, each with a spec() method.")
         _ClaudeFieldRules.unique(tuple(tool.spec().name for tool in self.tools), "tools")

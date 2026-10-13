@@ -210,7 +210,8 @@ class ClaudeOperationError(VidbyteSdkError):
     )
 
     def __init__(self, reason: str, *, failure_code: str, operation: str, next_step: str) -> None:
-        # The reason names the operation and the failing field or exception class, never raw exception text.
+        # The reason names the operation and the failing field or
+        # exception class, never raw exception text.
         self.failure_code = failure_code
         self.operation = operation
         self.reason = reason

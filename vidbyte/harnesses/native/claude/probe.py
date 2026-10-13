@@ -52,39 +52,46 @@ class ClaudeProbe:
     @staticmethod
     def locate_cli(cli_path: str, *, windows: bool, home: Path) -> str:
         """Return the executable to start: a given path as it is, else the first one found, or "" when none can be started."""
-        # A given path is used as it is, except a Windows batch script, which the SDK cannot start.
+        # A given path is used as it is, except a Windows batch script,
+        # which the SDK cannot start.
         if cli_path:
             return "" if windows and ClaudeProbe._suffix(cli_path) in CLAUDE_WINDOWS_BATCH_SUFFIXES else cli_path
         found = shutil.which(CLAUDE_CLI_NAME) or ""
-        # On Windows only a native executable starts without a shell, so an npm shim found first
-        # gives way to claude.exe on the PATH, then to the native installer's copy in the home folder.
+        # On Windows only a native executable starts without a shell, so
+        # an npm shim found first gives way to claude.exe on the PATH,
+        # then to the native installer's copy in the home folder.
         if windows:
             if ClaudeProbe._suffix(found) in CLAUDE_WINDOWS_NATIVE_SUFFIXES:
                 return found
             installed = home.joinpath(*CLAUDE_HOME_CLI_PARTS)
             return shutil.which(CLAUDE_CLI_EXE_NAME) or (str(installed) if installed.is_file() else "")
-        # Elsewhere the PATH hit wins, then the places the SDK itself searches, in its order.
+        # Elsewhere the PATH hit wins, then the places the SDK itself
+        # searches, in its order.
         return found or next((str(home / entry) for entry in CLAUDE_POSIX_CLI_LOCATIONS if (home / entry).is_file()), "")
 
     @staticmethod
     async def initialize(sdk: ClaudeSdkTypes, cli_path: str) -> Mapping[str, Any]:
         """Start Claude Code with only cli_path, return the answer it gave while starting, and close it first; no prompt is sent."""
         # @intent a-probe-always-closes-its-process
-        # The probe's process is closed by one disconnect task that nothing
-        # cancels, and a cancelled caller waits for it again before the
-        # cancellation goes on, so a probe never leaves a claude process running.
+        # The probe's process is closed by one disconnect task that
+        # nothing cancels, and a cancelled caller waits for it again
+        # before the cancellation goes on, so a probe never leaves a
+        # claude process running.
         client: _ClaudeClient = sdk.client_class(options=sdk.options_class(cli_path=cli_path))
         operation = CLAUDE_CONNECT_OPERATION
         try:
-            # Start Claude Code; a failure here is a start failure with its own next step.
+            # Start Claude Code; a failure here is a start failure with
+            # its own next step.
             await client.connect()
-            # Read the version, account and models it reported while starting.
+            # Read the version, account and models it reported while
+            # starting.
             operation = "get_server_info"
             info = dict(await client.get_server_info() or {})
         except Exception as exc:
             raise ClaudeFailureMapper.from_exception(exc, operation=operation, sdk=sdk) from exc
         finally:
-            # Close it through one task nothing cancels; a cancelled caller waits for the close, then goes on cancelling.
+            # Close it through one task nothing cancels; a cancelled
+            # caller waits for the close, then goes on cancelling.
             closing = asyncio.create_task(client.disconnect())
             try:
                 await asyncio.shield(closing)
@@ -103,13 +110,15 @@ class ClaudeProbe:
         if not cli_path:
             missing = ClaudeFailureMapper.failure(FailureCode.CLAUDE_NOT_INSTALLED, "No Claude Code executable was found or given.")
             return ClaudeReadiness(cli_path="", cli_version="", signed_in=False, failure=missing), {}
-        # Start Claude Code once, with no prompt; a failure to start or answer becomes the readiness failure.
+        # Start Claude Code once, with no prompt; a failure to start or
+        # answer becomes the readiness failure.
         try:
             info = await ClaudeProbe.initialize(sdk, cli_path)
         except ClaudeOperationError as error:
             failed = ClaudeFailure(code=FailureCode(error.failure_code), reason=error.reason, next_step=error.next_step)
             return ClaudeReadiness(cli_path=cli_path, cli_version="", signed_in=False, failure=failed), {}
-        # Check the version it reported first, then whether an account or API key is in use.
+        # Check the version it reported first, then whether an account
+        # or API key is in use.
         version = str(info.get(CLAUDE_VERSION_FIELD) or "")
         account = info.get(CLAUDE_ACCOUNT_FIELD)
         signed_in = ClaudeProbe.signed_in(account if isinstance(account, Mapping) else {})
@@ -154,9 +163,10 @@ class ClaudeProbe:
     def signed_in(account: Mapping[str, Any]) -> bool:
         """Return whether the account can call a model: any provider but Anthropic's own API, or a credential source in use."""
         # @intent other-providers-count-as-signed-in
-        # An account on another provider keeps its credentials outside Claude
-        # Code, so it counts as signed in; reading it as signed out would refuse
-        # a turn that the provider's own credentials can run.
+        # An account on another provider keeps its credentials outside
+        # Claude Code, so it counts as signed in; reading it as signed
+        # out would refuse a turn that the provider's own credentials
+        # can run.
         if (account.get(CLAUDE_PROVIDER_FIELD) or CLAUDE_FIRST_PARTY_PROVIDER) != CLAUDE_FIRST_PARTY_PROVIDER:
             return True
         return any(account.get(name) not in (None, CLAUDE_ABSENT_SOURCE) for name in CLAUDE_CREDENTIAL_SOURCE_FIELDS)

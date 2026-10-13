@@ -44,9 +44,10 @@ class ClaudeSdkLoader:
     def load() -> ClaudeSdkTypes:
         """Return the loaded SDK names, or raise claude.sdk_unavailable when the extra is missing."""
         # @intent the-only-claude-agent-sdk-import
-        # This is the single place claude_agent_sdk is imported, so importing
-        # vidbyte never needs the optional extra and a missing extra becomes
-        # one semantic error on first use (create_sdk_mcp_server included).
+        # This is the single place claude_agent_sdk is imported, so
+        # importing vidbyte never needs the optional extra and a missing
+        # extra becomes one semantic error on first use
+        # (create_sdk_mcp_server included).
         try:
             from claude_agent_sdk import (
                 AgentDefinition,
