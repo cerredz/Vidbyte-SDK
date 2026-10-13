@@ -3,10 +3,10 @@
 PURPOSE: Defines RootFileLoader, the shared base of the section loaders that read one named file from a CodingAgent's root folder once, capped, into one context section: AgentsMdLoader (AGENTS.md) and MapMdLoader (MAP.md).
 ROLE IN CODEBASE: Subclassed by vidbyte/agents/coding_context/agents_md.py and map_md.py, whose load() CodingAgent.__init__ (vidbyte/agents/coding.py) calls with the validated CodingAgentSettings; returns a CodingContextSectionText (vidbyte/lib/dataclasses/coding.py) that CodingContextWindow (vidbyte/agents/coding_context/window.py) places after the system prompt.
 ARCHITECTURE NOTE: Plain deterministic code with no model involvement. A subclass sets FILE_NAME, MAX_BYTES, SECTION, and TITLE and returns its own settings switch from _enabled; the finding, reading, decoding, and truncation live here once. Only the root folder's direct children are looked at, never a parent folder. The file is read at construction, so every run of one agent shows the same text, and a later chdir or edit changes nothing until a new agent is built. A missing or blank file means no section; a file that is there but cannot be read fails construction, because a silent skip would hide it.
-FUNCTION INVENTORY: RootFileLoader.load is the narrated main function; _enabled returns the subclass's switch; _find_file picks the file among the root folder's children; _read_capped reads at most the cap and the file's total size; _decode decodes UTF-8 without splitting a character at the cut; _with_truncation_note appends the line that says where the cut is and how to read the rest.
+FUNCTION INVENTORY: RootFileLoader.load is the narrated main function; _enabled returns the subclass's switch; _find_file picks the file among the root folder's children; _read_capped reads at most the cap and the file's total size; _decode decodes UTF-8, or UTF-16 after a UTF-16 BOM, without splitting a character at the cut; _with_truncation_note appends the line that says where the cut is and how to read the rest.
 COMMON MODIFICATION PATTERNS: Another root-file section is a small subclass in its own module that sets the four class attributes and _enabled. A section that is not one root file is its own loader, not a branch here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not walk parent folders or merge nested files. 2. Do not read the file per run. 3. Do not read past the cap; a huge file must never be loaded whole. 4. Do not skip a present-but-broken file silently. 5. Do not name a specific file here; each subclass names its own.
-KNOWN EDGE CASES: The exact FILE_NAME wins over a case variant; with several variants and no exact name, the first in sorted order is used. Invalid UTF-8 becomes U+FFFD and a leading byte-order mark is dropped. A multibyte character that straddles the cap is left out of the shown text. A symlinked file is followed and still capped. A directory, a dangling symlink, or an unreadable file under the name raises ConfigurationError naming the path.
+KNOWN EDGE CASES: The exact FILE_NAME wins over a case variant; with several variants and no exact name, the first in sorted order is used. Invalid UTF-8 becomes U+FFFD and a leading byte-order mark is dropped; a file that starts with a UTF-16 BOM, as Windows PowerShell 5.1 writes, is read as UTF-16. A multibyte character that straddles the cap is left out of the shown text. A symlinked file is followed and still capped. A directory, a dangling symlink, or an unreadable file under the name raises ConfigurationError naming the path.
 RELATED DOCS: docs/design/coding-agent-agents-md.md; docs/design/coding-agent-map-md.md; vidbyte/agents/coding_context/README.md
 TESTS: tests/features/coding_agent/test_coding_agent_agents_md.py and tests/features/coding_agent/test_coding_agent_map_md.py
 """
@@ -101,11 +101,14 @@ class RootFileLoader:
 
     @staticmethod
     def _decode(data: bytes, *, truncated: bool) -> tuple[str, int]:
-        """Return data decoded as UTF-8 and how many of its bytes the text covers."""
+        """Return data decoded as UTF-8, or UTF-16 when it starts with a UTF-16 BOM, and how many of its bytes the text covers."""
         # An incremental decoder keeps a character the cut split in its
         # buffer instead of emitting it, so only whole characters are
-        # shown. Invalid bytes become U+FFFD; "utf-8-sig" drops a BOM.
-        decoder = codecs.getincrementaldecoder("utf-8-sig")(errors="replace")
+        # shown. Invalid bytes become U+FFFD; both codecs drop their BOM.
+        # @intent powershell-utf16-root-files-are-read
+        # Windows PowerShell 5.1's > and Out-File write UTF-16 with a BOM, as the manifest reader already handles.
+        encoding = "utf-16" if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
+        decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
         text = decoder.decode(data, final=not truncated)
         pending, _flag = decoder.getstate()
         return text, len(data) - len(pending)
