@@ -568,6 +568,23 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.output.contains_url())
         self.assertTrue(b.output.url_count(at_least=3, at_most=3))
 
+    def test_output_url_glued_to_cjk_text_counts(self) -> None:
+        # [Silent Failure] Japanese, Chinese and Korean text glues a URL to the word before it; it must still count.
+        glued = (
+            "詳細はhttps://jreast.jp/info をご確認ください。",
+            "文档见https://docs.python.org/zh-cn/3/",
+            "자세한 내용은https://example.kr/a",
+            "詳しくはwww.jr-east.co.jp へ",
+        )
+        for output in glued:
+            with self.subTest(output=output):
+                self.assertEqual(behavior_from_probe(RunProbe(output=output)).output.url_count(), 1)
+        self.assertEqual(behavior_from_probe(RunProbe(output=glued[0])).output.citation_count("url"), 1)
+        # A scheme or www glued to a Latin word is still not a URL start.
+        for output in ("seehttps://docs.python.org/3/", "awww.example.com is not a link"):
+            with self.subTest(output=output):
+                self.assertEqual(behavior_from_probe(RunProbe(output=output)).output.url_count(), 0)
+
     def test_output_citations(self) -> None:
         # [Edge Case / Silent Failure] citation detection supports markdown, bracket, footnote, url, and any.
         self.assertFalse(behavior_from_probe(RunProbe(output="no citations")).output.contains_citation())
