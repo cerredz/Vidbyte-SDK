@@ -584,11 +584,13 @@ class MuseHost:
         return MuseWire.read_session_page(result, operation=operation)
 
     async def _steer(self, driver: MuseTurnDriver, text: str, operation: str) -> MuseTurnAck:
-        # turn/steer naming the ack's turn; -32030 means the turn is no longer running (EC-115).
+        # turn/steer naming the ack's turn. A -32030 refusal is turn_not_found
+        # only when the turn has finished here too (EC-115); while the turn
+        # still runs locally it is a vendor error like any other (EC-102).
         try:
             result = await driver.peer.call("turn/steer", MuseWire.turn_steer_params(driver.session_id, driver.turn_id, text), operation=operation)
         except McpProtocolError as exc:
-            if MuseWire.is_command_rejected(exc):
+            if MuseWire.is_command_rejected(exc) and not driver.running:
                 raise self._errors.build(self._errors.code("turn_not_found"), "Muse refused the steer because the turn is no longer running.", operation=operation, next_step=_TURN_NOT_FOUND_NEXT_STEP) from exc
             raise MuseWire.vendor_failure(exc, operation=operation) from exc
         return MuseWire.parse_turn_steer_result(result, operation=operation)
