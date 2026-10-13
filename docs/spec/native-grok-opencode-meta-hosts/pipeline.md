@@ -23,7 +23,7 @@ started: 2026-10-13 01:30 UTC
 | S5 repair loop | done | 2026-10-13 16:45 UTC | 2026-10-13 23:05 UTC | reports/S5-repair-{1,2,3}.md, verify-log.md | converged in 3/8; all 13 confirmed Blocker/Major + CI-1 + R-M1/R-M6 fixed; code HEAD af3e05e8; remote ci 38418651864 + static-policy 38418656187 green |
 | S5 re-review | done | 2026-10-13 23:10 UTC | 2026-10-14 02:40 UTC | reports/S5-rereview.md, S5-rereview-verifier.md, S5-rereview-2.md | round 1: 21/21 fixes held; R-16/R-17 confirmed, fixed in iteration 4; round 2: SOUND, 3/3 fixes held, 0 Blocker/Major, 1 trivial Minor (R-RR2-1) |
 | S5 RACE-1 (post-SOUND) | done | 2026-10-14 03:40 UTC | 2026-10-14 06:10 UTC | review.md RACE-1 section, test-plan Addendum 3, verify-log iteration 6 | R-18..R-21 fixed (0284ffe1, 0e900159, 85788217, 241f1966) + wording e4210fc3; code HEAD e4210fc3; ci 38450551272 + 38450554202 green, static-policy 38450557318 green |
-| S6 PR | pending | | | | |
+| S6 PR | running | 2026-10-14 06:25 UTC | | reports/S6-pr-author.md | |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
@@ -221,6 +221,10 @@ started: 2026-10-13 01:30 UTC
     - (a) **Grok:** a peer that exits with no answer while the driver is still closing gets `was_running=True`, and nothing is sent.
     - (b) **Muse:** a pending steer or second interrupt after an earlier stop's grace close, with no `turn/completed`, raises `process_exited`. EC-96 and EC-115 are ambiguous here.
 - 2026-10-14 06:15 — Spec status set to `verified` (docs commit). Next: S6.
+- 2026-10-14 06:25 — **S6 PR author launched** at HEAD 1aaa3bc8.
+  - **Decision: how it reads the diff.** It reads every changed `vidbyte/` file in full (67 files, +11,656). Tests (49 files, +13,735) it reads by test name, FEATURE.md and the coverage maps, not line by line. Why: the code is what the PR body describes, and the test plan already maps every test to what it proves.
+  - **Decision: AC-1 is run through its test, never by hand.** The §4 snippet is run only through its AC-1 test, which uses the fakes. Running it by hand would launch the real `grok.exe` on PATH and make a live vendor call, which the request forbids.
+  - **Decision: what the PR body must say about RACE-1.** The RACE-1 fixes came after re-review round 2 (cap 2/2). They were checked by blind regression tests and by my own verification, not by a third re-review.
 
 ## User replies (verbatim)
 (none during the run)
