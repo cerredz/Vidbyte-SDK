@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
-s2_head: 762b68e7 (cfad74f8 → a716c858 after the D-1..D-3 fixes → 762b68e7 after the r5 catalog-row alignment)
+s2_head: 91e874b2 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6])
 pr:
 until: none
 started: 2026-10-13 01:30 UTC
@@ -60,6 +60,14 @@ started: 2026-10-13 01:30 UTC
   The S2 test author fixed them at 66d5c3bb (3 files, 4+/4−). I checked the diff `git diff cfad74f8..HEAD -- tests/`: exactly those 3 files. S2_HEAD moves to a716c858; later test-tree diffs use this base. I ran the fix and S3's resume one after the other, not in parallel, because both agents commit in the same worktree.
 - 2026-10-13 08:55 — The S2 author reports `lint/run.py` SDK-LINT: FAIL. Rule A007 has 263 findings against an allowance of 255, caused by P1 code: `lib/dataclasses/grok.py` 4, `lib/process/runner.py` 4, `lib/process/managed.py` 2. S3 had reported PASS. This was handed to S3 to fix at the source.
 - 2026-10-13 09:40 — S3 reported BLOCKED a second time, at the start of P3: in spec §6.3.1, `muse.budget_exhausted`'s exact next-step text did not contain its own required token `continue_muse_session`. I took the implementer's option 1 and put the token into the text, which matches every other row, where the token names the function to call. The fix went in three steps: spec r5 (254ebc53), a one-line change to the test CATALOG row (762b68e7, verified 1 file, 1+/1−), then resuming S3 to update `NATIVE_HOST_NEXT_STEPS`. S2_HEAD moves to 762b68e7.
+- 2026-10-13 12:10 — S3 reported BLOCKED a third time, after building all 68 rows. I ruled on four items:
+  - D-4: the test's argv guard contradicted itself. The fix makes it match the approve-everything flag only as a whole argv element or as a `--flag=` prefix. Prompt text inside `--single=` is data.
+  - D-5: a flaky fixture ordered peer logs by PID. It now uses an atomic launch counter.
+  - D-6: wrong expected opencode ids. The fake was right.
+
+  The test author fixed all three at 209c4085 (9 test files, +47/−16; I checked the diff against 762b68e7). Two runs gave 1 failed and 1615 passed; the one failure is the EC-95 test. S2_HEAD moves to 91e874b2.
+- 2026-10-13 12:10 — EC-95 (exit code 127 means `muse.not_installed`) needed an exit code that §8.5 did not expose. I approved S3's option 1: spec r6 (f4659a58) adds read-only `McpStdioTransport.returncode` and `NativePeer.exit_code`. The spec author also raised D-3's reversal trigger from about 160 to about 200 changed lines, because the extension now has about 167. I accepted that, but flagged transport size for S4 reviewers to judge independently. Why: the spec row explicitly asks for exit 127, and the 9-line change is already tested.
+- 2026-10-13 12:10 — The harness flagged the S2 author's status message as instruction-shaped ("bypass-permissions"). It only described the test guard rejecting the vendor value `bypassPermissions`. Not an injection; no action taken.
 
 ## User replies (verbatim)
 (none during the run)
