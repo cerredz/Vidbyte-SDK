@@ -19,6 +19,7 @@ from vidbyte.lib.constants.jev import (
     PROVIDER_API_KEY_ENV_VARS,
     VIDBYTE_API_KEY_PREFIX,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
+    VIDBYTE_MANAGED_TEXT_PROVIDERS,
     VIDBYTE_PROVIDER_KEY_PATTERN,
 )
 from vidbyte.lib.enums import ModelProvider
@@ -290,7 +291,8 @@ class ProviderKeyMatcher:
         missing = next((name for name in primaries if name not in held), None)
         if missing is not None:
             names = [provider.value for provider, _bound in sorted(held.items(), key=lambda item: item[1][0])]
-            raise ConfigurationError(f"{field_name} holds keys for {', '.join(names)} but none for {missing.value}, the provider of a configured model. Add your {missing.value} key to {field_name}, or pass no provider keys to use {env_vars[missing]} or Vidbyte's own {missing.value} account.", details={"field": field_name, "provider": missing.value, "providers": names})
+            fallback = f"{env_vars[missing]} or Vidbyte's own {missing.value} account" if missing in VIDBYTE_MANAGED_TEXT_PROVIDERS else env_vars[missing]
+            raise ConfigurationError(f"{field_name} holds keys for {', '.join(names)} but none for {missing.value}, the provider of a configured model. Add your {missing.value} key to {field_name}, or pass no provider keys to use {fallback}.", details={"field": field_name, "provider": missing.value, "providers": names})
 
 
 __all__ = ["ProviderKeyMatcher"]
