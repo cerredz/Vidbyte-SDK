@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencod
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
 s3_head: de5b7c4c
-s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests])
+s2_head: 96df0b45 (cfad74f8 → a716c858 [D-1..D-3] → 762b68e7 [r5 catalog row] → 91e874b2 [D-4..D-6] → 96df0b45 [S4 regression tests, r8] → 5ce6e85d [re-review R-16/R-17 tests] → ba70578e [RACE-1 R-18..R-21 tests])
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1036
 until: none
 started: 2026-10-13 01:30 UTC
@@ -201,11 +201,24 @@ started: 2026-10-13 01:30 UTC
   - Why: today the test passes or fails depending on which frame wins the race, which caused CI run 38437336454's flake. Pinning the order makes it test the -32013/-32014 mapping every run, and the new `completed_first` test covers the other order.
   - Also permitted: green-today *guard* tests (the R-20 Muse twin, the R-18 -32030-on-a-running-turn guard if none exists). They must be labeled as guards in the coverage map.
 - 2026-10-14 04:20 — **S2 addendum 3 launched** at HEAD 9531edcb, scoped to the review.md RACE-1 "Tests to add" table (R-18 a/b/c and guards, R-19, R-20 with the Muse twin, R-21).
+- 2026-10-14 04:50 — **S2 addendum 3 done** (tests ba70578e, report 73d8b43f): 10 cases in 7 functions, plus the fake knob `msp["turn/interrupt"]["order"]`.
+  - **My spot-check:**
+    - nothing under `vidbyte/` changed;
+    - the only removed code lines in `tests/` are the fake's `turn/interrupt` answer, whose default path is unchanged (event set, then answer), and the granted scenario line;
+    - the new tests alone: 8 failed, 4 passed;
+    - the four packs: 8 failed, 1651 passed, 19 skipped (1649 baseline plus 2 guards);
+    - the red reasons are the stated ones.
+  - **Open item carried to iteration 6:** R-21 has not yet been shown to pass under any fix.
 
 ## User replies (verbatim)
 (none during the run)
 
 ## Niche facts accumulated (carried into every later briefing)
+
+### S2 addendum 3 facts
+- To run the new RACE-1 tests alone, use `-k "loses_to or answered_after_turn_completed or rejected_with_32030 or still_closing or interrupt_answered_interrupted_or_cancelled"` on `tests/features/{grok_host/test_grok_host_turns.py,muse_host/test_muse_host_turns.py}`. Today's result is 8 failed, 4 passed. — *source:* S2-a3
+- The R-19 seam wraps `hostkit.NativePeer.notify` and `asyncio.wait_for`, and always calls the real functions. It assumes `session/cancel` is sent and drained through `asyncio.wait_for` in the task that called `interrupt_grok_turn`. If a fix moves that route, the test fails with a `seam:` message. — *source:* S2-a3
+- The fake knob `msp["turn/interrupt"]["order"]` takes `answer_first` or `completed_first`. Without it, the fake behaves as before. — *source:* S2-a3
 
 ### S5 iteration 1 facts
 - `ci.yml` and `static-policy.yml` run only when dispatched; `gh pr checks 1036` shows "no checks reported". Read results with `gh run view <id>` and dispatch with `gh workflow run`. — *source:* S5-1
