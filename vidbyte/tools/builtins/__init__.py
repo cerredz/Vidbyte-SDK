@@ -7,6 +7,7 @@ Purpose:
     environment-specific instances.
 Architecture:
     - Minimal subprocess bash tool from builtins.bash.
+    - Claude Code host tools from builtins.claude.
     - Code search tools from builtins.code_search.
     - Patch/edit tools from builtins.editing.
     - Context compaction tools from builtins.context.
@@ -26,6 +27,23 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.builtins.bash import BashTool
+from vidbyte.tools.builtins.claude import (
+    CheckClaudeReadyTool,
+    ContinueClaudeSessionTool,
+    ForkClaudeSessionTool,
+    GetClaudeRateLimitsTool,
+    GetClaudeSessionInfoTool,
+    GetClaudeSessionMessagesTool,
+    GetClaudeTurnResultTool,
+    InterruptClaudeTurnTool,
+    LaunchClaudeSubagentsTool,
+    ListClaudeModelsTool,
+    ListClaudeSessionsTool,
+    SpawnClaudeSessionTool,
+    SteerClaudeSessionTool,
+    TrackClaudeSessionUsageTool,
+    WaitClaudeTurnTool,
+)
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
 from vidbyte.tools.builtins.context import (
@@ -198,6 +216,7 @@ __all__ = [
     "BrowserbaseSearchTool",
     "BurdenOfProofTool",
     "CausalChainTool",
+    "CheckClaudeReadyTool",
     "CheckpointTool",
     "CircularityTool",
     "CodeExecutionTool",
@@ -219,6 +238,7 @@ __all__ = [
     "ContextStatsTool",
     "ContextUpsertTool",
     "ContextWindowFactory",
+    "ContinueClaudeSessionTool",
     "CotEventParser",
     "CounterexampleTool",
     "CreateContextPrimitiveTool",
@@ -237,20 +257,29 @@ __all__ = [
     "FalsifyTool",
     "FermiEstimateTool",
     "FirecrawlFetchTool",
+    "ForkClaudeSessionTool",
     "ForkConversationTool",
     "ForkTool",
+    "GetClaudeRateLimitsTool",
+    "GetClaudeSessionInfoTool",
+    "GetClaudeSessionMessagesTool",
+    "GetClaudeTurnResultTool",
     "GlobTool",
     "GrepTool",
     "HypothesisTool",
     "IdentityTool",
     "InduceTool",
     "InstantiateTool",
+    "InterruptClaudeTurnTool",
+    "LaunchClaudeSubagentsTool",
     "LettaAddArchivalMemoryTool",
     "LettaDeleteArchivalMemoryTool",
     "LettaGetMemoryBlockTool",
     "LettaSearchArchivalMemoryTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
+    "ListClaudeModelsTool",
+    "ListClaudeSessionsTool",
     "Mem0AddMemoryTool",
     "Mem0DeleteMemoryTool",
     "Mem0GetMemoriesTool",
@@ -298,8 +327,10 @@ __all__ = [
     "SemanticSearchTool",
     "SessionTool",
     "SocraticTool",
+    "SpawnClaudeSessionTool",
     "StatisticalSyllogismTool",
     "SteelmanTool",
+    "SteerClaudeSessionTool",
     "StrawmanTool",
     "SupermemoryAddMemoryTool",
     "SupermemoryDeleteMemoryTool",
@@ -308,9 +339,11 @@ __all__ = [
     "TavilySearchTool",
     "TestimonyTool",
     "ThoughtExperimentTool",
+    "TrackClaudeSessionUsageTool",
     "TrajectoryCheckpointTool",
     "TransitivityTool",
     "UncertaintyTool",
+    "WaitClaudeTurnTool",
     "ZepAddMemoryTool",
     "ZepDeleteSessionTool",
     "ZepGetMemoryTool",
