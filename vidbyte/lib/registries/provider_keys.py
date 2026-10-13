@@ -44,7 +44,7 @@ class ProviderKeyMatcher:
         (ModelProvider.OPENAI, ("sk-proj-", "sk-admin-"), re.compile(r"sk-(?:proj|admin)-[A-Za-z0-9_-]+")),
         # https://docs.x.ai/build/overview
         (ModelProvider.XAI, ("xai-",), re.compile(r"xai-[A-Za-z0-9_-]+")),
-        # https://docs.cloud.google.com/docs/authentication/api-keys (AIza)
+        # https://docs.cloud.google.com/docs/authentication/api-keys
         # https://github.com/google-gemini/cookbook/blob/main/tools/README.md
         (ModelProvider.GEMINI, ("AIza", "AQ."), re.compile(r"(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]+)")),
     )
