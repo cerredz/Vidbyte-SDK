@@ -26,7 +26,7 @@ started: 2026-10-13 01:30 UTC
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
-- S5 repair iterations: 4/8 (converged again after re-review round 1)
+- S5 repair iterations: 5/8
 - S5 re-review rounds: 2/2 (round 2 launched; last allowed)
 
 ## Decisions the orchestrator made
@@ -179,6 +179,13 @@ started: 2026-10-13 01:30 UTC
   - R-M10, with the verifier's proposed EC-154/EC-158 wording;
   - no test pins opencode's exact id comparison (proven only by a scratch probe);
   - a T-6 spec conflict: T-6 says vendor text is scrubbed in NativeResultEncoder, but §8.5 defines that encoder as static with no factory, and opencode turn text is not scrubbed (`opencode/turn.py:350`).
+- 2026-10-14 03:30 — **S5 iteration 5 is DONE and verified by me.** R-RR2-1 is fixed at df9566fa: one line, AST-equal with docstrings blanked. `ci.yml` 38437336454 succeeded on attempt 2; `static-policy.yml` 38437340236 succeeded. HEAD is 3602d057.
+- 2026-10-14 03:30 — **A new defect, RACE-1, came out of CI.** `ci.yml` 38437336454 attempt 1 failed on Linux 3.11 in `tests/features/muse_host/test_muse_host_turns.py::test_interrupt_answered_interrupted_or_cancelled_counts_as_success[interrupted]` with "The Muse Code process stopped before it answered." I confirmed this in the log.
+  - The repair agent's analysis: `turn/completed` can arrive before the `turn/interrupt` answer. MuseTurnDriver.run then closes the peer (`muse/turn.py:135-137`) while `interrupt_muse_turn` still awaits `peer.call("turn/interrupt")` (`:148`), and NativePeer maps the closed pipe to `process_exited` (`hostkit/peers.py:97`).
+  - This violates INV-13: an interrupt on a finished turn returns `was_running=False` and raises nothing. A real Muse can trigger it, and it makes the PR's CI intermittently red.
+- 2026-10-14 03:30 — **My decision: fix RACE-1 rather than list it as a limitation.** The user asked for exhaustive error handling, and a flaky required check is a real cost.
+  - **Order:** a scoped findings verifier covers the interrupt-vs-completion race across all three hosts. Grok may hit it too, via the CI-1 closed-pipe check after a normal completion closes the peer. Next, the S2 author adds deterministic regression tests that drive the fake's ordering. Then iteration 6 fixes it, together with the three wording-only header claims iteration 5 reported in `grok/wire.py`.
+  - **Re-review:** the cap (2/2) is reached, so this fix gets no third re-review round. Its independent check is the S2 author's blind red-to-green regression test, plus my own verification. The final report tells the user this plainly.
 
 ## User replies (verbatim)
 (none during the run)
