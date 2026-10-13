@@ -16,8 +16,8 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-12 16:20 | 2026-10-12 16:50 | reports/S0-scout.md | base 52aab816; code-map 4 sections |
 | S1 spec + review | done | 2026-10-12 16:52 | 2026-10-12 | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); r3 74f0b83d approved; r4 91e69211 approved |
-| S2 tests | running | 2026-10-12 | | reports/S2-test-author.md | pre-rebase S2 at 5671f7a2: 117 new tests red, 36 superseded files; full 295F/3727P/13S/7E; rebase onto origin/main in progress |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-12 | 2026-10-13 | reports/S2-test-author.md | S2_HEAD c88f2d32 on origin/main 595a7260 (23 commits ahead, unpushed); 117 new tests red; 36 superseded files + 8 post-rebase straggler files; full 308F/3786P/13S/7E (orchestrator re-run identical); main baseline 3984P/0F |
+| S3 implement | running | 2026-10-13 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 live E2E (both repos) | pending | | | | |
@@ -68,6 +68,11 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - `HarnessRedactor._ERROR_ASSIGNMENT` (`vidbyte/harnesses/serialization.py:70`) matches `[^\s,;]+`, stopping at a comma: tuples of keys are only partly redacted (R-5). — *source:* S1 reviewer
 - `tests/test_output_schema_provider_dialect.py:102` builds `MistralProvider(..., api_key="k")`. — *source:* S1 reviewer
 
+- Branch rebased twice: onto b53c8811, then onto 595a7260 (#1023). Main's only §12.3-row change is row 16: `HarnessRedactor._ERROR_ASSIGNMENT` now opens with a lookbehind (#993) instead of ``; apply `keys?` and the list/tuple alternatives to that regex and keep the lookbehind. Main also changed adapter files anthropic.py, compatible.py, gemini.py, openai.py, xai.py (vidbyte/providers) and lib/http parser.py, transport.py; none is a §12.3 row. — *source:* S2 rebase
+- Post-rebase stragglers updated in 8 test files (test-plan §5 "(post-rebase straggler)"): compatible (GLM; MiniMax added to `_PROVIDER_TEST_KEYS`), deepseek, openrouter, output_schema_provider_dialect (incl. #1023's openai Responses test), streaming_text_runner, text_model_runner, and new `test_gemini_provider_text.py`. Every Gemini fake is `"AQ" + "." + "x"*40`. — *source:* S2 rebase
+- Spec §13 line numbers for test_output_schema_provider_dialect.py (`:91`, `:102`) and other moved files are stale after the rebases; the tests are the contract. — *source:* S2 rebase
+- Red reason groups (test-plan §3): `AttributeError: DIRECT` 126 (119 + 7 setUp); the rest are behaviour groups. Manual-script test `ManualScriptTests` points at `scripts/test-new-runners.py:315`. — *source:* S2
+
 ## Decisions the orchestrator made (continued)
 - 2026-10-12 21:00 — R-2/Q-2 resolved YES from the user's words (Prompt 5 "makes sure that the user is inputting the correct api key that matches the provider/model"): non-empty `api_keys` with no key for the primary provider raises before any request; children of other providers relay-or-Vidbyte-paid per §B.2.
 - 2026-10-12 21:00 — R-1/Q-1/R-3 resolved inside requested behavior (Prompt 6 "deterministically match", Prompt 5 "dont want developers to have to worry"): format-proven keys by format; unproven keys (generic `sk-`, providers without rules) by deterministic unique assignment against in-use providers, else raise; never route a key on an unsourced shape guess.
@@ -98,3 +103,4 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - 2026-10-12 — Environment hazard: this machine's shell exports `DEEPSEEK_API_KEY` (possibly a real key). `VIDBYTE_API_KEY` and `GROK_API_KEY` are user-scope registry variables, not inherited by Bash. Every test run uses `env -u DEEPSEEK_API_KEY`, and every test clears the environment with `patch.dict(os.environ, {...}, clear=True)`.
 - S2 tests read private seams `TextModelRunner._config` (via `AgentFallback.build_runner(i)._config.credentials()`) and `BaseAgent._runner_for_model()`; keep both. `AgentFallbackSettings.resolved_models(primary=…)` is still called, with a keyless `FallbackModel`. `test_fallback_runner_inherits_the_agent_timeout` runs in DIRECT (a gateway runner floors 300 s to 630 s). `ProposerSpec(" DeepSeek ", …)` must normalize to deepseek. Fake keys are concatenated on purpose (C020, push protection). — *source:* S2
 - AC-28 (`run_ci.py` green and C017 `CLEAN`) is owed by the implementer. — *source:* S2
+- 2026-10-13 — S2 done after two rebases (52aab816 → b53c8811 → 595a7260). Orchestrator re-proved red at c88f2d32: full `308 failed, 3786 passed, 13 skipped, 7 errors`; pack `117 failed`; `import vidbyte` resolves to the worktree with PYTHONPATH. Spec set to `status: tests-written`; S3 launched.
