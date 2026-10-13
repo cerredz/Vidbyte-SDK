@@ -235,6 +235,25 @@ class GatewayShapeTests(unittest.TestCase):
             self.assertIn("TextModelMode.DIRECT", str(refused.exception))
             self.assertEqual([name for name in environment.reads if name.endswith("_API_KEY")], [])
 
+    def test_an_unserved_provider_or_an_endpoint_is_refused_before_another_providers_key_is_matched(self) -> None:
+        # INV-8, D-15 (review R-6): matching first would raise M-18, whose "add your mistral key" remedy still ends in M-12; M-12 or M-13 must come first.
+        from vidbyte.lib.config import TextModelMode
+
+        for mode in (TextModelMode.AUTO, TextModelMode.VIDBYTE_MANAGED):
+            with self.subTest(mode=mode.value, refused="unserved provider"), patch.dict(os.environ, {}, clear=True):
+                with self.assertRaises(UnsupportedProviderError) as caught:
+                    TextModelConfig(provider="mistral", model="mistral-large-latest", api_keys=[K_XAI], mode=mode)
+                # UnsupportedProviderError is not a ConfigurationError subclass, so the exact type separates M-12 from M-18.
+                self.assertIs(type(caught.exception), UnsupportedProviderError)
+                self.assertIn("TextModelMode.DIRECT", str(caught.exception))
+                self.assertNotIn(K_XAI, str(caught.exception) + repr(caught.exception.details))
+            with self.subTest(mode=mode.value, refused="endpoint"), patch.dict(os.environ, {}, clear=True):
+                with self.assertRaises(ConfigurationError) as refused:
+                    TextModelConfig(provider="xai", model="grok-4.5", api_keys=[K_ANTHROPIC], endpoint="https://proxy.example/v1", mode=mode)
+                self.assertIn("custom endpoint", str(refused.exception))
+                self.assertIn("TextModelMode.DIRECT", str(refused.exception))
+                self.assertNotIn(K_ANTHROPIC, str(refused.exception) + repr(refused.exception.details))
+
 
 class StreamingModeTests(unittest.TestCase):
     """AC-6, INV-11, D-10, EC-23, M-15: streaming happens only in DIRECT."""
