@@ -240,3 +240,15 @@ ERROR tests/features/grok_host/test_grok_host_process_helpers.py::test_cli_invoc
 - **D-3 passes.**
 - **D-1 and D-2 still error, for an unrelated reason.** Their shared `grok_api` fixture imports `vidbyte.harnesses.native.grok`, which is not built yet; only P1 is built. They will run once the Grok host lands.
 - **Their test bodies pass.** I ran both bodies outside pytest from a scratch script. The script replaced only the fixture: it gave `ConfigurationError` from `vidbyte.lib.errors`, as `grok_api` does, and used the real `CliInvocation` record. Both printed `body passed`.
+
+## Addendum 2: D-4, D-5 and D-6 (commit `209c4085`)
+
+- **D-4.** The approve-everything guard now matches a forbidden flag as a whole argv element or as a `--flag=` prefix, not as the suffix of another flag's value. Prompt text inside `--single=` is data.
+- **D-5.** The fake log files are named and read by an atomic launch number, not by PID. This is deterministic on Windows and POSIX.
+- **D-6.** The expected opencode history ids are corrected to `msg_00000002`, `msg_00000004` and `prt_00000003`.
+
+I ran the four packs twice:
+- **Run 1:** `1 failed, 1615 passed, 19 skipped in 147.04s`.
+- **Run 2:** `1 failed, 1615 passed, 19 skipped in 148.39s`.
+
+In both runs the only failure was `test_muse_host_wsl.py::test_missing_in_distro_muse_is_not_installed[spawn-exit-127]`, the EC-95 exit-127 case. It is waiting for S3's r6 exit-code accessors.

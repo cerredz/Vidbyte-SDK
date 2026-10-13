@@ -312,3 +312,7 @@ The S3 implementer found three test defects, and the coordinator confirmed them 
 - **D-1.** `test_grok_host_records.py::test_validator_rejects_each_bad_value_naming_the_field` expected `require_enum_set` to refuse a plain set of members, `{AcpToolKind.EDIT}`. §9.1, EC-23, EC-134 and §16 S2-4 say that a `set` is converted. The row now uses a plain set holding the value string, `{"edit"}`, which is refused.
 - **D-2.** `test_grok_host_process_helpers.py::test_cli_invocation_validates_and_hides_env_and_stdin` passed `argv` both by position and by keyword for the `argv` rows. `argv` now goes by keyword only, so every row reaches `CliInvocation`.
 - **D-3.** `test_opencode_host_records.py::test_host_settings_reject_each_bad_field` passed `workspace` twice for the four `workspace-*` rows. `workspace` now goes by keyword, and a row's override replaces it.
+- **D-4, D-5 and D-6** were found at S3 and fixed in commit `209c4085`:
+  - **D-4.** The approve-everything guard in `test_grok_host_reads.py` matches a forbidden flag only as its own element or as a `--flag=` prefix. It no longer matches the suffix of another flag's value, so `--single=--always-approve`, the injection-safe form, holds.
+  - **D-5.** The grok and Muse fakes name each log after a launch number they claim with an exclusive file create, and `records()` reads the logs in that order instead of PID order.
+  - **D-6.** The expected opencode history ids now match the fake's shared counter: `msg_00000002` and `msg_00000004`, with part `prt_00000003`.
