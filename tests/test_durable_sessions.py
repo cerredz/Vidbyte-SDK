@@ -335,12 +335,21 @@ class SettingsNamesSurviveCheckpointTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class AgentStateSeamTests(unittest.TestCase):
     def test_export_captures_config_and_omits_secret(self) -> None:  # [Hidden Assumption]
-        agent = Agent(name="x", system_prompt="sp", provider="openai", model_name="gpt-4.1", api_key="supersecret")
+        # byok-api-keys INV-14, D-30: the state records the mode and the names of the providers the root matched against, never a key.
+        from vidbyte.lib.constants.jev import VIDBYTE_API_KEY_PREFIX
+
+        vidbyte_key = VIDBYTE_API_KEY_PREFIX + "S" * 32
+        agent = Agent(name="x", system_prompt="sp", provider="openai", model_name="gpt-4.1", api_keys=["sk-supersecret"], vidbyte_api_key=vidbyte_key)
         state = agent.export_state()
         self.assertEqual(state.provider, "openai")
         self.assertEqual(state.model_name, "gpt-4.1")
+        self.assertEqual(state.runtime_config["model_mode"], "auto")
+        self.assertEqual(state.runtime_config["key_providers"], {"primary": ["openai"], "others": []})
         cp = Checkpoint(id="c", session_id="s", parent_id=None, seq=0, created_at="t", run_state=state)
-        self.assertNotIn("supersecret", json.dumps(SessionSerializer().checkpoint_to_dict(cp)))
+        serialized = json.dumps(SessionSerializer().checkpoint_to_dict(cp))
+        self.assertNotIn("supersecret", serialized)
+        self.assertNotIn(vidbyte_key, serialized)
+        self.assertIn("key_providers", serialized)
 
     def test_restore_reproduces_prompt_runtime_history(self) -> None:  # [Silent Failure]
         agent = Agent(name="x", system_prompt="sp", provider="openai", model_name="gpt-4.1")
@@ -1074,16 +1083,18 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         # A tenant's branch must authenticate with the tenant's explicit key, not the server's env key, and the key stays out of checkpoints.
         with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
             store = FileSessionStore(root)
-            agent = BaseAgent(name="tenant", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            agent = BaseAgent(name="tenant", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_keys=["sk-tenant-acme"])
             session = Session(agent, store=store)
             session.checkpoint()
 
             branches = [session.fork(), session.batch_fork(1)[0].session]
 
+            # byok-api-keys FR-11, INV-15: a live fork takes the live agent's matched record.
             for branch in branches:
                 config = branch.agent.runner_config
-                self.assertEqual(config.api_key, "sk-tenant-acme")
-                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+                self.assertEqual(config.api_keys, agent.runner_config.api_keys)
+                self.assertEqual(config.api_keys.key_for("deepseek"), "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.find_provider_api_key(config.provider, config.api_keys), "sk-tenant-acme")
             stored = "".join(path.read_text(encoding="utf-8") for path in Path(root).rglob("*") if path.is_file())
             self.assertNotIn("sk-tenant-acme", stored)
 
@@ -1092,16 +1103,18 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         # A tenant's cold resume must authenticate with the re-supplied key, not the server's env key, as fork_from() already does.
         with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
             store = FileSessionStore(root)
-            agent = BaseAgent(name="desk", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            agent = BaseAgent(name="desk", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_keys=["sk-tenant-acme"])
             session = Session(agent, store=store)
             session.checkpoint()
 
-            resumed = [Session.resume(store, session.id, api_key="sk-tenant-acme"), Session.continue_(store, session.id, api_key="sk-tenant-acme")]
+            resumed = [Session.resume(store, session.id, api_keys=["sk-tenant-acme"]), Session.continue_(store, session.id, api_keys=["sk-tenant-acme"])]
 
+            # byok-api-keys FR-11, D-30, AC-19: re-matching the same list against the stored key_providers gives the root's record.
             for live in resumed:
                 config = live.agent.runner_config
-                self.assertEqual(config.api_key, "sk-tenant-acme")
-                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+                self.assertEqual(config.api_keys, agent.runner_config.api_keys)
+                self.assertEqual(config.api_keys.key_for("deepseek"), "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.find_provider_api_key(config.provider, config.api_keys), "sk-tenant-acme")
 
     def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
@@ -1352,7 +1365,7 @@ class ResumeGuardrailTests(unittest.IsolatedAsyncioTestCase):
         chain = ["anthropic/claude-sonnet-4-6", "openrouter/auto", "openrouter/anthropic/claude-sonnet-5"]
         with tempfile.TemporaryDirectory() as root:
             store = FileSessionStore(root)
-            agent = build_test_agent(name="support", system_prompt="Help.", runner=EchoRunner(), provider="deepseek", model_name="deepseek-v4-pro", api_key="sk-primary-secret", fallback=chain)
+            agent = build_test_agent(name="support", system_prompt="Help.", runner=EchoRunner(), provider="deepseek", model_name="deepseek-v4-pro", api_keys=["sk-primary-secret"], fallback=chain)
             session = Session(agent, store=store)
             session.checkpoint()
             saved = "".join(path.read_text(encoding="utf-8") for path in Path(root).rglob("*") if path.is_file())

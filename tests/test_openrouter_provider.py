@@ -28,7 +28,7 @@ import json
 import unittest
 from typing import Mapping
 
-from vidbyte.lib.config import TextModelConfig
+from vidbyte.lib.config import TextModelConfig, TextModelMode
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderResponseError, ProviderRequestError
 from vidbyte.lib.http import HttpResponse, HttpTransport
@@ -70,20 +70,24 @@ class OpenRouterProviderTests(unittest.TestCase):
     def test_empty_model_name_validation(self) -> None:
         # [Edge Case] Verifies that an empty model name triggers a ConfigurationError.
         with self.assertRaises(ConfigurationError):
-            config = TextModelConfig(provider=ModelProvider.OPENROUTER, model=" ", api_key="test-key")
+            config = TextModelConfig(provider=ModelProvider.OPENROUTER, model=" ", api_keys=["sk-or-v1-test-key"], mode=TextModelMode.DIRECT)
             config.validate()
 
     def test_non_string_api_key(self) -> None:
         # [Edge Case] Verifies key resolution when non-string or whitespace key is supplied.
+        with self.assertRaises(ConfigurationError) as raised:
+            config = TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o", api_keys=[12345], mode=TextModelMode.DIRECT)
+            config.validate()
+        self.assertIn("api_keys[0]", str(raised.exception))
         with self.assertRaises(ConfigurationError):
-            config = TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o", api_key="   ")
+            config = TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o", api_keys=["   "], mode=TextModelMode.DIRECT)
             config.validate()
 
     def test_invalid_response_status(self) -> None:
         # [Hidden Failure] Verifies HTTP error translation into standard exception.
         transport = FakeTransport(json.dumps({"error": {"message": "Invalid API Key"}}), status_code=401)
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_keys=["sk-or-v1-test-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
         with self.assertRaises(Exception):
@@ -93,7 +97,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         # [Hidden Failure] Verifies response exception on corrupted response payload.
         transport = FakeTransport("{invalid-json", status_code=200)
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_keys=["sk-or-v1-test-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
         with self.assertRaises(ProviderRequestError):
@@ -103,7 +107,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         # [Silent Failure] Verifies that empty choices in response returns an exception.
         transport = FakeTransport(json.dumps({"choices": []}), status_code=200)
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_keys=["sk-or-v1-test-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
         with self.assertRaises(ProviderResponseError):
@@ -133,7 +137,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         # [Silent Failure] Verifies that HTTP-Referer and X-OpenRouter-Title client headers are set.
         transport = FakeTransport(json.dumps({"choices": [{"message": {"role": "assistant", "content": "hello"}}]}))
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_keys=["sk-or-v1-test-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
         response = runner.run("Hello")

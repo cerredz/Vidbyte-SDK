@@ -5,11 +5,13 @@ import unittest
 from collections.abc import Iterator
 from typing import Mapping
 
-from vidbyte.lib.config import TextModelConfig
+from vidbyte.lib.config import TextModelConfig, TextModelMode
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderRequestError, UnsupportedProviderError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import StreamingTextModelRunner
+
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 
 
 class FakeStreamingTransport:
@@ -37,7 +39,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         lines = [_openai_delta("Hello"), _openai_delta(" world")]
         transport = FakeStreamingTransport(lines)
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -48,7 +50,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
     def test_openai_stream_sends_to_responses_endpoint(self) -> None:
         transport = FakeStreamingTransport([_openai_delta("hi")])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -59,7 +61,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
     def test_openai_stream_sends_stream_true_in_payload(self) -> None:
         transport = FakeStreamingTransport([_openai_delta("ok")])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -76,7 +78,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         ]
         transport = FakeStreamingTransport(lines)
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -87,7 +89,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
     def test_openai_stream_empty_response_yields_nothing(self) -> None:
         transport = FakeStreamingTransport([])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -98,7 +100,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
     def test_openai_stream_includes_system_prompt_as_instructions(self) -> None:
         transport = FakeStreamingTransport([_openai_delta("hi")])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -112,7 +114,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         lines = [_anthropic_delta("Hello"), _anthropic_delta(" Claude")]
         transport = FakeStreamingTransport(lines)
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -123,7 +125,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
     def test_anthropic_stream_sends_to_messages_endpoint(self) -> None:
         transport = FakeStreamingTransport([_anthropic_delta("hi")])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -134,7 +136,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
     def test_anthropic_stream_sends_stream_true_in_payload(self) -> None:
         transport = FakeStreamingTransport([_anthropic_delta("ok")])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -151,7 +153,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         ]
         transport = FakeStreamingTransport(lines)
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -162,27 +164,27 @@ class StreamingTextRunnerTests(unittest.TestCase):
     def test_anthropic_stream_uses_x_api_key_header(self) -> None:
         transport = FakeStreamingTransport([_anthropic_delta("hi")])
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="anthro_key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=["sk-ant-anthro-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
         list(runner.stream("Test"))
 
-        self.assertEqual(transport.requests[0]["headers"].get("x-api-key"), "anthro_key")
+        self.assertEqual(transport.requests[0]["headers"].get("x-api-key"), "sk-ant-anthro-key")
 
     # --- Unsupported providers ---
 
     def test_gemini_provider_raises_unsupported_provider_error_at_init(self) -> None:
         with self.assertRaises(UnsupportedProviderError):
             StreamingTextModelRunner(
-                TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-2.0-flash", api_key="key"),
+                TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-2.0-flash", api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT),
                 transport=FakeStreamingTransport([]),
             )
 
     def test_xai_provider_raises_unsupported_provider_error_at_init(self) -> None:
         with self.assertRaises(UnsupportedProviderError):
             StreamingTextModelRunner(
-                TextModelConfig(provider=ModelProvider.XAI, model="grok-2", api_key="key"),
+                TextModelConfig(provider=ModelProvider.XAI, model="grok-2", api_keys=["xai-key"], mode=TextModelMode.DIRECT),
                 transport=FakeStreamingTransport([]),
             )
 
@@ -195,7 +197,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
 
     def test_model_name_returns_configured_model(self) -> None:
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=FakeStreamingTransport([]),
         )
 
@@ -206,7 +208,8 @@ class StreamingTextRunnerTests(unittest.TestCase):
         runner = StreamingTextModelRunner(
             provider=ModelProvider.OPENAI,
             model="gpt-4o",
-            api_key="key",
+            api_keys=["sk-key"],
+            mode=TextModelMode.DIRECT,
             transport=transport,
         )
 
@@ -219,7 +222,7 @@ class StreamingTextRunnerTests(unittest.TestCase):
         lines = ["not-json", _openai_delta("valid"), "{broken"]
         transport = FakeStreamingTransport(lines)
         runner = StreamingTextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -232,14 +235,14 @@ class StreamingTextRunnerTests(unittest.TestCase):
         # event object, so it must be skipped like malformed JSON instead of crashing the stream
         odd_lines = ["null", "42", "[]"]
         cases = [
-            (ModelProvider.OPENAI, "gpt-4o", _openai_delta),
-            (ModelProvider.ANTHROPIC, "claude-3-haiku-20240307", _anthropic_delta),
+            (ModelProvider.OPENAI, "gpt-4o", _openai_delta, "sk-key"),
+            (ModelProvider.ANTHROPIC, "claude-3-haiku-20240307", _anthropic_delta, "sk-ant-key"),
         ]
-        for provider, model, delta in cases:
+        for provider, model, delta, provider_key in cases:
             with self.subTest(provider=provider.value):
                 transport = FakeStreamingTransport([delta("first"), *odd_lines, delta("second")])
                 runner = StreamingTextModelRunner(
-                    TextModelConfig(provider=provider, model=model, api_key="key"),
+                    TextModelConfig(provider=provider, model=model, api_keys=[provider_key], mode=TextModelMode.DIRECT),
                     transport=transport,
                 )
 

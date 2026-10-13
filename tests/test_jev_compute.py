@@ -61,7 +61,7 @@ def lookup(topic: str) -> str:
 
 
 def _settings(**overrides: Any) -> JevAgentSettings:
-    values: dict[str, Any] = {"name": "researcher", "system_prompt": "Research carefully.", "provider": "openai", "model_name": "gpt-4.1", "api_key": "main-key", "tools": (lookup,)}
+    values: dict[str, Any] = {"name": "researcher", "system_prompt": "Research carefully.", "provider": "openai", "model_name": "gpt-4.1", "api_keys": ["sk-main-key"], "tools": (lookup,)}
     values.update(overrides)
     return JevAgentSettings(**values)
 

@@ -46,7 +46,7 @@ class RecordingRunner:
 
 
 def _settings() -> JevAgentSettings:
-    return JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_key="main-key", tools=(lookup,))
+    return JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_keys=["sk-main-key"], tools=(lookup,))
 
 
 def _agent(runner: RecordingRunner, *, clones: int = 2, every: int = 3) -> JevAgent:
@@ -82,7 +82,7 @@ class JevCloneSettingsTests(unittest.TestCase):
 
     def test_a_clone_leaves_the_main_agents_bound_tools_bound_to_the_main_agent(self) -> None:
         pause, queue = PauseAgentTool(), RunPromptsSequentiallyTool()
-        settings = JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_key="main-key", tools=(pause, queue))
+        settings = JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_keys=["sk-main-key"], tools=(pause, queue))
         agent = JevAgent(settings)
         clone = JevCloneAgent(settings, 1)
         self.assertIs(pause._agent, agent)

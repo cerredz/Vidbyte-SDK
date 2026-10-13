@@ -24,12 +24,14 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.providers.compatible import MistralProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
 from vidbyte.providers.output_schema import OutputSchemaFormatter
+
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 
 
 class Priority(str, Enum):
@@ -114,7 +116,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         # @intent strict-mode-closes-every-object
         # OpenAI rejects strict json_schema with 400 invalid_json_schema unless both rules hold everywhere.
         config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", response_format=_wire_schema(Ticket))
-        payload = OpenAIProvider(model="gpt-5.4-mini", api_key="k")._create_text_payload(config, "triage", None, None)
+        payload = OpenAIProvider(model="gpt-5.4-mini", api_keys=["sk-k"], mode=TextModelMode.DIRECT)._create_text_payload(config, "triage", None, None)
         fmt = payload["text"]["format"]
 
         self.assertIs(fmt["strict"], True)
@@ -125,7 +127,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
     def test_compatible_native_schema_payload_closes_every_object(self) -> None:
         """The compatible adapter's NATIVE_SCHEMA tier sends the same strict dialect."""
         config = TextModelConfig(provider=ModelProvider.MISTRAL, model="mistral-large-latest", response_format=_wire_schema(Ticket))
-        payload = MistralProvider(model="mistral-large-latest", api_key="k")._create_payload(config, "triage", None, None)
+        payload = MistralProvider(model="mistral-large-latest", api_keys=["k"], mode=TextModelMode.DIRECT)._create_payload(config, "triage", None, None)
         json_schema = payload["response_format"]["json_schema"]
 
         self.assertIs(json_schema["strict"], True)
@@ -224,7 +226,7 @@ class GeminiResponseSchemaTests(unittest.TestCase):
         """Nested models and Enums are inlined instead of sent as $defs/$ref, which Gemini rejects."""
         # @intent response-schema-speaks-gemini-openapi-subset
         config = TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-3.5-flash", response_format=_wire_schema(Ticket))
-        payload = GeminiProvider(model="gemini-3.5-flash", api_key="k")._create_payload(config, "triage", None, None)
+        payload = GeminiProvider(model="gemini-3.5-flash", api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT)._create_payload(config, "triage", None, None)
         schema = payload["generationConfig"]["responseSchema"]
         wire = json.dumps(schema)
 
