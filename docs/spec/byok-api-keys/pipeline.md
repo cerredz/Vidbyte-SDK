@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys
 branch: feat/byok-api-keys
 base_commit: 52aab816ab922f3d47de926e2c8a2506c2542d86
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1027
 until: none
 started: 2026-10-12 16:20
 companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-byok-fee-relay (cerredz/Vidbyte)
@@ -17,8 +17,8 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | S0 worktree + capture + recon | done | 2026-10-12 16:20 | 2026-10-12 16:50 | reports/S0-scout.md | base 52aab816; code-map 4 sections |
 | S1 spec + review | done | 2026-10-12 16:52 | 2026-10-12 | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); r3 74f0b83d approved; r4 91e69211 approved |
 | S2 tests | done | 2026-10-12 | 2026-10-13 | reports/S2-test-author.md | S2_HEAD c88f2d32 on origin/main 595a7260 (23 commits ahead, unpushed); 117 new tests red; 36 superseded files + 8 post-rebase straggler files; full 308F/3786P/13S/7E (orchestrator re-run identical); main baseline 3984P/0F |
-| S3 implement | running | 2026-10-13 | | reports/S3-implementer.md | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-13 | 2026-10-13 | reports/S3-implementer.md | S3_HEAD 23dff561 (code at 3481ed66); draft PR #1027; 41 rows; full 4101P/13S/0F; pack 117/117; SDK-LINT PASS (A001 643→641); run_ci source+package PASS; semgrep 0; remote CI + Static policy success @3481ed66; budget 1 file/3 classes/0 deps, base.py +26/30 |
+| S4 adversarial review | running | 2026-10-13 | | reports/S4-review-*.md | |
 | S5 repair loop | pending | | | | |
 | S5 live E2E (both repos) | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -73,6 +73,11 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - Spec §13 line numbers for test_output_schema_provider_dialect.py (`:91`, `:102`) and other moved files are stale after the rebases; the tests are the contract. — *source:* S2 rebase
 - Red reason groups (test-plan §3): `AttributeError: DIRECT` 126 (119 + 7 setUp); the rest are behaviour groups. Manual-script test `ManualScriptTests` points at `scripts/test-new-runners.py:315`. — *source:* S2
 
+- S3 deviations to know: provider env-var table moved to `vidbyte/lib/constants/jev.py` `PROVIDER_API_KEY_ENV_VARS` with `ProviderModelRegistry.API_KEY_ENV_VARS` aliasing the same dict (A006 ruling); `lint/rules/s014_provider_model_registry_parity.py` reads that literal (S014 ruling, mutation-proven); two lint follow-up commits (12d8aa74, 24de2be2) and S009/URL fixes (4b23e3d9, d1eef1aa); provider_keys.py 296 lines (NFR-4 ≤ 300); OpenAI admin-key doc URL 404 → row 35 cites OpenAI's raw openapi.yaml; row 20 commit cites AC-21 instead of AC-18. — *source:* S3
+- Global semgrep is broken (global `mcp` 2.3.0); a working semgrep 1.170.1 venv is at scratchpad `semgrep-venv` (put `/c/...` form on PATH). `python lint/run.py --rule X --all` needs `PYTHONIOENCODING=utf-8`. — *source:* S3
+- `scripts/test-async-http-transport.py` and `test-openai-compatible-chat-trace-inputs.py` fail identically at 140b17ed (pre-existing; CI only compiles scripts). — *source:* S3
+- origin/main is 2 commits past 595a7260 (66f8353a) touching none of this branch's files; not rebased. — *source:* S3
+
 ## Decisions the orchestrator made (continued)
 - 2026-10-12 21:00 — R-2/Q-2 resolved YES from the user's words (Prompt 5 "makes sure that the user is inputting the correct api key that matches the provider/model"): non-empty `api_keys` with no key for the primary provider raises before any request; children of other providers relay-or-Vidbyte-paid per §B.2.
 - 2026-10-12 21:00 — R-1/Q-1/R-3 resolved inside requested behavior (Prompt 6 "deterministically match", Prompt 5 "dont want developers to have to worry"): format-proven keys by format; unproven keys (generic `sk-`, providers without rules) by deterministic unique assignment against in-use providers, else raise; never route a key on an unsourced shape guess.
@@ -106,3 +111,4 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - 2026-10-13 — S2 done after two rebases (52aab816 → b53c8811 → 595a7260). Orchestrator re-proved red at c88f2d32: full `308 failed, 3786 passed, 13 skipped, 7 errors`; pack `117 failed`; `import vidbyte` resolves to the worktree with PYTHONPATH. Spec set to `status: tests-written`; S3 launched.
 - 2026-10-13 — S3 BLOCKED at row 17 on lint A006 (37 vs 34): cycle provider_keys → registries.models (M-18/M-19 env-var names) → modality_detector → provider_keys. Ruled option B without asking the user (code placement, answered by artifacts): move the provider→env-var table to `vidbyte/lib/constants/jev.py` (row 2) as `PROVIDER_API_KEY_ENV_VARS`; `ProviderModelRegistry.API_KEY_ENV_VARS` aliases the same dict object (row 6); the matcher imports the constant at module level. Sources: spec row 4 already lists `vidbyte.lib.constants.jev` among the matcher's allowed module-level imports; AGENTS.md puts constants in `vidbyte/lib/constants/`; §8.4 allows no second new file; option A breaks NFR-4's 300-line cap; option C (raise baseline) is forbidden. Both touched files are §12.3 rows.
 - 2026-10-13 — S3 BLOCKED at the Phase 5 gate (all 41 rows committed, HEAD 8eaeb609, unpushed). Two rulings: (1) option B broke lint S014 (provider-model-registry-parity reads `API_KEY_ENV_VARS` as a dict literal in models.py; it is now an alias). Ruled option E: S014 reads the literal from `vidbyte/lib/constants/jev.py` `PROVIDER_API_KEY_ENV_VARS` when the registry attribute is not a literal. Parity stays equally strict (a missing literal still reports every provider). It is a `lint/` file outside §12.3, authorized here because it follows the A006 ruling, on condition of a mutation proof (delete one entry → S014 reports exactly 1) and the rule's own tests. F (two literals) rejected: drift. G (revert B) rejected: brings back the A006 cycle. (2) Straggler `tests/test_jev_compute.py::JevComputeCheckpointTests::test_a_chosen_specialist_runs_without_a_checkpoint` runs AUTO with no Vidbyte key (INV-7). Routed to the S2 test author to add `model_mode: TextModelMode.DIRECT` to that file's `_settings`, the same treatment as the other stragglers. The test checks checkpointing, not credentials.
+- 2026-10-13 — S3 done. Orchestrator spot-check at 23dff561: tree clean and pushed; the only test commit since 140b17ed is S2's c0ab2b0a; lint/baseline.json only lowers A001 643→641; `SDK-LINT: PASS`; full `4101 passed, 13 skipped`; pack `117 passed`; remote CI + Static policy success at 3481ed66 (later commits are docs-only). S4 launched.
