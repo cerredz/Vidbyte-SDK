@@ -336,8 +336,9 @@ class GrokWire:
             raise self._mismatch(operation, "one_shot_output") from exc
 
     def check_fork_result(self, result: GrokOneShotResult, *, source: str, target: str | None, operation: str) -> None:
-        # A fork must report a session other than its source, and the requested one when it was named (EC-39).
-        if result.session_id == source or (target is not None and result.session_id != target):
+        # A fork must report a session other than its source, and the requested one when it was named (EC-39); UUIDs compare ignoring letter case (INV-14).
+        returned = result.session_id.lower()
+        if returned == source.lower() or (target is not None and returned != target.lower()):
             raise self._mismatch(operation, "fork_session_id")
 
     # ---- Single-step helpers --------------------------------------------------

@@ -263,8 +263,9 @@ class GrokHost:
         operation = "continue_grok_session"
         try:
             # Check the arguments and that the host is open, then reserve the session before anything starts.
+            # A session id is a UUID, so its lower-case form names it in the busy check and on the wire (INV-14).
             request = RecordFieldConverter.require_instance(request, "request", GrokTurnRequest)
-            RecordFieldValidator.require_uuid(session_id, "session_id")
+            session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             self._require_open(operation)
             turn_id = self._reserve(session_id, operation)
             peer = self._new_peer(request.model, request.reasoning_effort)
@@ -302,9 +303,12 @@ class GrokHost:
         operation = "fork_grok_session"
         try:
             # Check the arguments, then that the host is open and the source session is not busy here.
+            # Session ids are UUIDs, so they are compared and sent in lower case (INV-14).
             request = RecordFieldConverter.require_instance(request, "request", GrokOneShotRequest)
-            RecordFieldValidator.require_uuid(session_id, "session_id")
-            if new_session_id is not None and RecordFieldValidator.require_uuid(new_session_id, "new_session_id").lower() == session_id.lower():
+            session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
+            if new_session_id is not None:
+                new_session_id = RecordFieldValidator.require_uuid(new_session_id, "new_session_id").lower()
+            if new_session_id == session_id:
                 raise self._errors.invalid_argument("new_session_id", "new_session_id must differ from session_id.", operation=operation)
             self._require_open(operation)
             if self._turns.is_session_busy(session_id):
@@ -498,8 +502,8 @@ class GrokHost:
         return GrokSessionPage(sessions=tuple(sessions), next_cursor=cursor)
 
     def _check_fork_listing(self, listing: GrokSessionPage, session_id: str, new_session_id: str | None, operation: str) -> None:
-        # EC-35: the source must be in the workspace listing; EC-36: a new id must not name an existing session.
-        known = {session.session_id for session in listing.sessions}
+        # EC-35: the source must be in the workspace listing; EC-36: a new id must not name an existing session. Both ignore letter case: the ids arrive lower-cased and the listing is lower-cased here (INV-14).
+        known = {session.session_id.lower() for session in listing.sessions}
         if session_id not in known:
             truncated = _TRUE_TEXT if listing.next_cursor is not None else _FALSE_TEXT
             raise self._errors.build(self._errors.code("session_not_found"), "The source session is not in this workspace's session list.", operation=operation, context={"session_id": session_id, "truncated": truncated})

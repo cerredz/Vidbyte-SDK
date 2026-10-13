@@ -256,9 +256,9 @@ class MuseHost:
         # other raises session_busy and starts no process.
         operation = "continue_muse_session"
         try:
-            # Refuse bad arguments and a closed host before any I/O.
+            # Refuse bad arguments and a closed host before any I/O; a session id is a UUID, used in lower case so the busy check ignores letter case (INV-14).
             self._require_open(operation)
-            RecordFieldValidator.require_uuid(session_id, "session_id")
+            session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             RecordFieldConverter.require_instance(request, "request", MuseTurnRequest)
             # Reserve the session before the first await, so two calls on it cannot both pass (EC-9, EC-112).
             turn_id = self._reserve(session_id, operation)
@@ -288,9 +288,9 @@ class MuseHost:
         """Copy a Muse session, whole or up to last_turn_id, into a new session and return the copy."""
         operation = "fork_muse_session"
         try:
-            # Refuse bad arguments and a closed host before any I/O.
+            # Refuse bad arguments and a closed host before any I/O; a session id is a UUID, used in lower case so the busy check ignores letter case (INV-14).
             self._require_open(operation)
-            RecordFieldValidator.require_uuid(session_id, "session_id")
+            session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             if last_turn_id is not None:
                 RecordFieldValidator.require_text(last_turn_id, "last_turn_id", max_chars=native_host_constants.NATIVE_ID_MAX_CHARS)
             # A session with a live turn on this host is not forked mid-turn (EC-112).
@@ -344,7 +344,7 @@ class MuseHost:
         operation = "read_muse_session"
         try:
             self._require_open(operation)
-            RecordFieldValidator.require_uuid(session_id, "session_id")
+            session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             # A short-lived peer reads the session, resuming it once if Muse has not loaded it (EC-114).
             peer = self._new_peer(None)
             try:
@@ -373,9 +373,9 @@ class MuseHost:
         """Read one page of a Muse session's view events as compact JSON."""
         operation = "page_muse_session"
         try:
-            # Refuse bad arguments and a closed host before any I/O.
+            # Refuse bad arguments and a closed host before any I/O; a session id is a UUID, sent in lower case (INV-14).
             self._require_open(operation)
-            RecordFieldValidator.require_uuid(session_id, "session_id")
+            session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             if cursor is not None:
                 RecordFieldValidator.require_text(cursor, "cursor", max_chars=native_host_constants.NATIVE_CURSOR_MAX_CHARS)
             RecordFieldValidator.require_int(limit, "limit", minimum=_MIN_LIMIT, maximum=native_host_constants.MUSE_PAGE_MAX_LIMIT)
@@ -477,7 +477,7 @@ class MuseHost:
         operation = "track_muse_session_usage"
         try:
             self._require_open(operation)
-            RecordFieldValidator.require_uuid(session_id, "session_id")
+            session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             # A short-lived peer pages the view backward until it finds a usage event or reaches the page limit.
             peer = self._new_peer(None)
             try:
