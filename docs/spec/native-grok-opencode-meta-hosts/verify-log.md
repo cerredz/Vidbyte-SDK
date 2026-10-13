@@ -573,3 +573,87 @@ The A001 headers of all five files were updated where they described behaviour t
   - The validated remedy and its constraint, the R-19 seam, are recorded above.
 - **Inherited from main:** `test_cancelled_waiter_does_not_break_transport` on slow runners.
 - Follow-ups R-M4, R-M5, R-M7, R-M8 and R-M10 are unchanged.
+
+## Iteration 8 — 2026-10-13 22:15 UTC — agent report: reports/S5-repair-8.md
+
+**Defects in:** R-25 [Major], the CPython 3.11 swallowed cancel (gh-86296) in three bounded waits of `vidbyte/tools/mcp/transport.py`: the `_send` drain (`:323`), the `_write_frame` drain (`:423`) and the `_answer` wait (`:349`), lines at a425d3fa. The 7 Addendum 5 cases were red at a425d3fa, reproduced here: `7 failed, 15 deselected in 22.04s`. origin/main 8387d666 was already an ancestor, so no merge was needed. review.md had no row for it; this iteration appended "Post-iteration-7 finding — 3.11 swallowed cancel (R-25)".
+
+**Hypotheses and attempts:**
+- **R-25, the drains (f5a2c74a).** This is the iteration-7 remedy, as the orchestrator ruled.
+  - A new leaf helper, `McpStdioTransport._drain_within(stdin, seconds)`, a `@staticmethod`. It reads `asyncio.current_task().cancelling()`, then calls `asyncio.wait_for(stdin.drain(), seconds)` through the `asyncio` module, in the caller's task, with the drain coroutine passed directly. After the wait it raises `asyncio.CancelledError` when the count rose, then makes the CI-1 `is_closing()` check, which moved into the helper from both call sites.
+  - `_send` gained `except asyncio.CancelledError:`, which pops and cancels the request's pending future and re-raises.
+  - `_write_frame` only calls the helper; it has no pending future to drop.
+  - Result: the 4 drain cases went green at once (`4 passed, 18 deselected in 2.72s`).
+- **R-25, the answer wait (3917b49a).** `_answer` reads the cancel count before its `try`. Inside the `try`, after `asyncio.wait_for(future, timeout=seconds)`, it raises `CancelledError` when the count rose, so the existing `except asyncio.CancelledError` cleanup runs. The wait itself is unchanged in shape. Result: all 7 cases green (`7 passed, 15 deselected in 3.84s`).
+- **Header and comments.** The module header (the older "Context Protocol Header" form, already counted in A001's 643) gained a "Known edge cases:" section on the 3.11 swallow, and its Architecture text names `_drain_within`. The helper carries `# @intent mcp-stdio-bounded-drain-keeps-the-cancel`. Every added `#` line is at most 72 columns. The scratch call-depth checker reports 8 flagged methods before and after: `_send` and `_write_frame` were already in that list, and the helper is a leaf.
+- **Not taken, on purpose:**
+  - `async with asyncio.timeout(seconds)` in place of `wait_for`: it breaks `drain_window_gate`, `answer_window_gate` and R-19's `cancel_drain_gate`, which key on `asyncio.wait_for`.
+  - One generic helper that wraps both the drain and the answer wait: the seams would still engage, but the ruling keeps the answer wait in `_answer`, inside its `try`.
+  - Limiting the `_send` cleanup and the `_answer` check to calls that pass `timeout_seconds`: see the INV-18 note below.
+  - The close-path waits (`:473`, `:499`, `:509`): untouched, by the ruling.
+- **INV-18 note, for the orchestrator.** `_answer` also serves the default `request()` path, and the `_send` cleanup catches a cancel during the plain drain too. With defaults, two things now differ from main, and only for a call that was cancelled:
+  - a cancelled default write no longer leaves its future in `_pending`;
+  - on 3.11, a cancel that lands in the gh-86296 window raises `CancelledError` where main returned the answer.
+
+  Neither is visible to a caller that was not cancelled. The default drain line and the spawn arguments are main's, and main's tests pass unchanged (`tests/test_mcp_stdio_transport.py`, `tests/test_mcp_studio_server.py` and `tests/test_mcp_bridge.py`: `59 passed in 2.26s`; also inside gate 5). Guarding both on `timeout_seconds` would need a flag argument whose only job is to keep main's leak, so it was not done.
+- **The R-22/R-24 pair (the orchestrator's 1-in-62 at 19582f13).**
+  - **Reproduced once.** In the 30-run loop, run 7 failed in 34.42 s. The failing test was R-22's `test_failed_turn_never_waited_logs_no_unretrieved_exception`, on its precondition: `AssertionError: precondition: the fake did not send a failed turn/completed for both turns`. The twin check passed, so the host failed the waited turn correctly. Full output: scratch `s5-repair-8/loops/pair-7.log`.
+  - **Not the swallow class.** The test cancels nothing. The 30 s is the test's own `wait_until(..., WAIT_SECONDS)` on the fake's `sent` records.
+  - **Cause: a race in the fake.** In `fake_muse_peer.py`, `FrameWriter.send` (`:87-95`) flushes the frame to stdout first and writes its `sent` record only afterwards, outside the writer lock. `MspPeer.run` (`:258-265`) calls `os._exit(0)` as soon as it reads stdin EOF. The host's turn driver closes the peer as soon as it reads `turn/completed`, so the fake can exit between the flush and the `sent` record. The record is then lost, and the predicate never sees two `failed` frames.
+  - **Proof, in a scratch copy outside the worktree.** `git archive HEAD` was extracted to scratch `s5-repair-8/copy`, and a `time.sleep(0.2)` was added between the `turn/completed` flush and its `sent` record. The test then failed 3 of 3 runs with the same message, at 31.2 to 31.3 s.
+  - **Proposed fix (a test change, so not applied; routed to the orchestrator).** Write the `sent` record inside the writer lock, and have the EOF branch take the writer lock before `os._exit(0)`:
+    ```diff
+    @@ FrameWriter.send
+                 except (OSError, ValueError):
+                     os._exit(0)
+    -        self.log.write("sent", frame=frame)
+    +            self.log.write("sent", frame=frame)
+    @@ MspPeer.run (EOF branch)
+                     if self.scenario.get("ignore_eof"):
+                         held(self.scenario)
+    +                self.writer.lock.acquire()
+                     os._exit(0)
+    ```
+    With the 0.2 s window kept, this passed 3 of 3 runs (1.51 s each). Without the window, the whole Muse pack in the copy gave `471 passed, 5 skipped in 75.49s`. Diff: scratch `s5-repair-8/fake-fix.diff`.
+  - **Rate.** 1 failure in 90 fresh-process runs this iteration (the 30-run loop, then 60 more with kept logs, all green). 120 repeats inside one session were all green. The Grok fake has the same flush-then-log order (`fake_grok_peer.py:74-76`), but no Grok test has been seen failing from it.
+- **Not tried:** a 3.12+ local run. No local 3.12+ interpreter has pytest-asyncio, and no `pip install` was allowed. CI's 3.12 leg covers it (below).
+
+**Changes:**
+- R-25, drains: f5a2c74a (`tools/mcp/transport.py`)
+- R-25, answer wait: 3917b49a (`tools/mcp/transport.py`); the two commits are +53/−15 together
+- review.md R-25 section, this entry and reports/S5-repair-8.md: in the verify-log commit
+- The push 32d7ef51..3917b49a also carried 5e4c3c34 and 15fd9332 (the tests) and a425d3fa (docs), which had not been on the remote.
+
+**Determinism (code HEAD 3917b49a; scratch `s5-repair-8/loops/`):**
+- The 7 Addendum 5 cases, 10 runs in a loop: `7 passed, 15 deselected` every time (70/70), 4.02 to 4.66 s.
+- RACE-1 and R-19, once: `12 passed, 63 deselected in 4.00s`.
+- The existing AC-4 test, 30 runs: `4 passed` every time (120/120 cases). Runs 5 and 23 took 6.50 s and 6.05 s; the rest took 2.4 to 4.3 s. A swallowed cancel would take about 60 s.
+- The R-22/R-24 pair, 30 runs: 29 green and 1 red (run 7, the fake race above). Then 60 more fresh runs: 60/60 green.
+
+**Gate matrix out (code HEAD 3917b49a).** One sequential script ran gates 1 and 4 to 7, with nothing alongside. Gates 2 and 3 were not run on their own; the source stage runs the full suite.
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests | the orchestrator's `-k "answer_arrives or drain_finishes"` | PASS 10/10 | `7 passed, 15 deselected in 4.41s` (run 10) |
+| RACE-1 / R-19 | the orchestrator's `-k` command | PASS | `12 passed, 63 deselected in 4.00s` |
+| AC-4 | `test_cancelling_a_call_propagates_and_stops_what_it_started`, 30 runs | PASS 30/30 | `4 passed in 2.73s` (run 30) |
+| R-22/R-24 pair | 30 runs, then 60 runs | 89/90 (1 test-fake race, above) | run 7: `1 failed, 1 passed in 34.42s`; run 60 of 60: `2 passed in 1.54s` |
+| packs | gate 1 | PASS | `1668 passed, 19 skipped in 182.38s (0:03:02)` (1661 + 7) |
+| lint | gate 4 | PASS (A001 643/643, A002 577/703, A007 255/255, S006 0 CLEAN, S019 5/5, S024 25/25, S039 5/5, S045 2/2, S062 889/889; no count rose) | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| source stage | gate 5 | PASS | `5683 passed, 32 skipped in 200.06s (0:03:20)` / `CI passed.` |
+| package stage | gate 6 | PASS | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| semgrep | gate 7 | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| public API | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| remote CI #1 | `gh run view 38475662280` (head 3917b49a) | PASS (3.11, 3.12 and Package all success) | 3.11: `5676 passed, 39 skipped in 184.23s` / `CI passed.`; 3.12: `5676 passed, 39 skipped, 19 warnings in 195.64s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote CI #2 | `gh run view 38475671014` (head 3917b49a) | PASS (3.11, 3.12 and Package all success) | 3.11: `5676 passed, 39 skipped in 182.43s` / `CI passed.`; 3.12: `5676 passed, 39 skipped, 19 warnings in 174.85s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote static policy | `gh run view 38475673751` (head 3917b49a) | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| PR | `gh pr view 1036` | n/a | still a draft; dispatch-only workflows, so `gh pr checks` lists none |
+| invariants | INV-19 / INV-22 / frozen files | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py`, `tests/`, `lint/`, `.semgrep/`, `pyproject.toml`, `contracts/` and spec.md unchanged since a425d3fa; the only code change since a425d3fa is `vidbyte/tools/mcp/transport.py` |
+
+The 3.12 legs are green, and on 3.12 the request-site never-retrieved check passes only with the `_send` cleanup (test-plan Addendum 5). So both legs exercised it. Neither CI run hit the inherited `test_cancelled_waiter_does_not_break_transport` flake, so no rerun was needed.
+
+**Still open:**
+- R-25 is fixed.
+- **New, for the orchestrator (a test change, not applied):** the `fake_muse_peer.py` race above. It makes R-22's test fail its precondition about 1 run in 30 to 90, in a fresh process on Windows. The product code is not involved. The proposed two-line fake fix and its validation are above.
+- The INV-18 note above is recorded for adjudication; no change is pending.
+- Follow-ups R-M4, R-M5, R-M7, R-M8 and R-M10 are unchanged. The close-path waits (`:473`, `:499`, `:509` at a425d3fa) remain the decided follow-up.
