@@ -3,10 +3,10 @@
 PURPOSE: Defines NativeTurnTable, which tracks one host's turns: synchronous reservations of a session and a live-turn slot, the live driver tasks, and a first-in-first-out table of the last NATIVE_FINISHED_TURN_LIMIT finished turns, so a handle can be waited on after its turn ended.
 ROLE IN CODEBASE: One table per host (GrokHost, OpencodeHost, MuseHost). spawn_* and continue_* reserve before their first await, bind the vendor session once it is known, and activate the driver task; wait_* and interrupt_* look a handle up here.
 ARCHITECTURE NOTE: Every method is synchronous, so a reservation can never interleave with another task's busy check (EC-9). The table owns every driver task (lint S006): a done-callback moves a finished driver to the finished table and frees its session.
-FUNCTION INVENTORY: reserve takes a session and a slot; bind_session records the session spawn learned; activate turns a reservation into a live handle; release frees a reservation that never started; lookup finds a handle's task; is_session_busy and live_tasks report state; _finish is the driver done-callback; _busy and _not_found build the two errors.
+FUNCTION INVENTORY: reserve takes a session and a slot; bind_session records the session spawn learned; activate turns a reservation into a live handle; release frees a reservation that never started; lookup finds a handle's task; is_session_busy and live_tasks report state; _finish is the driver done-callback; _session_key gives a session id's busy-table key; _busy and _not_found build the two errors.
 COMMON MODIFICATION PATTERNS: A new turn state belongs in the driver's NativeTurnResult, not here; this table only knows reserved, live and finished.
 WHAT NOT TO DO IN THIS FILE: 1. Do not await anywhere in this class; reservation must stay atomic. 2. Do not drop a live task from the table before it finishes; the host's __aexit__ needs it to interrupt the turn.
-KNOWN EDGE CASES: The live-turn cap counts reservations too, so concurrent spawns cannot overshoot it. A handle whose harness, session or turn id differs from the stored handle is not found, so handles are scoped to the host that issued them (INV-17).
+KNOWN EDGE CASES: The live-turn cap counts reservations too, so concurrent spawns cannot overshoot it. A handle whose harness, session or turn id differs from the stored handle is not found, so handles are scoped to the host that issued them (INV-17). A Grok or Muse vendor may return a session id in upper case; the busy table keys it in lower case, so a continue or fork by either spelling finds the live turn, while the handle keeps the vendor's spelling.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (Shared host plumbing), EC-9, EC-24, EC-149, INV-14 to INV-17
 TESTS: tests/features/grok_host/test_grok_host_shared_contract.py
 """
@@ -44,22 +44,23 @@ class NativeTurnTable:
         # between them, so two concurrent calls on one session cannot
         # both pass, and the live-turn cap counts reservations as
         # well as live turns.
-        if session_id is not None and session_id in self._busy_sessions:
+        key = None if session_id is None else self._session_key(session_id)
+        if session_id is not None and key in self._busy_sessions:
             raise self._busy(f"Session {session_id} already has a live turn on this host.", operation, {"session_id": session_id})
         live = len(self._reserved) + len(self._live)
         if live >= self._max_live_turns:
             raise self._busy(f"This host already runs {live} live turns, its limit.", operation, {"live_turns": str(live)})
         turn_id = uuid.uuid4().hex
         self._reserved[turn_id] = session_id
-        if session_id is not None:
-            self._busy_sessions[session_id] = turn_id
+        if key is not None:
+            self._busy_sessions[key] = turn_id
         return turn_id
 
     def bind_session(self, turn_id: str, session_id: str) -> None:
         # Spawn learns its session id only after the vendor
         # created the session.
         self._reserved[turn_id] = session_id
-        self._busy_sessions[session_id] = turn_id
+        self._busy_sessions[self._session_key(session_id)] = turn_id
 
     def activate(self, turn_id: str, driver: asyncio.Task[NativeTurnResult]) -> NativeTurnHandle:
         # Turns a bound reservation into a live turn and gives the table
@@ -76,8 +77,9 @@ class NativeTurnTable:
         # Frees a reservation whose turn never started, so its session
         # and slot are usable again.
         session_id = self._reserved.pop(turn_id, None)
-        if session_id is not None and self._busy_sessions.get(session_id) == turn_id:
-            del self._busy_sessions[session_id]
+        key = None if session_id is None else self._session_key(session_id)
+        if key is not None and self._busy_sessions.get(key) == turn_id:
+            del self._busy_sessions[key]
 
     def lookup(self, handle: NativeTurnHandle, *, operation: str) -> asyncio.Task[NativeTurnResult]:
         # A handle is found only when it equals the handle this table
@@ -89,7 +91,7 @@ class NativeTurnTable:
 
     def is_session_busy(self, session_id: str) -> bool:
         # True while a reservation or a live turn holds the session.
-        return session_id in self._busy_sessions
+        return self._session_key(session_id) in self._busy_sessions
 
     def live_tasks(self) -> tuple[asyncio.Task[NativeTurnResult], ...]:
         # The drivers of every live turn, for
@@ -102,11 +104,22 @@ class NativeTurnTable:
         entry = self._live.pop(turn_id, None)
         if entry is None:
             return
-        if self._busy_sessions.get(entry[0].session_id) == turn_id:
-            del self._busy_sessions[entry[0].session_id]
+        key = self._session_key(entry[0].session_id)
+        if self._busy_sessions.get(key) == turn_id:
+            del self._busy_sessions[key]
         self._finished[turn_id] = entry
         while len(self._finished) > native_host_constants.NATIVE_FINISHED_TURN_LIMIT:
             self._finished.popitem(last=False)
+
+    def _session_key(self, session_id: str) -> str:
+        # @intent native-uuid-session-ids-ignore-case
+        # Grok and Muse session ids are UUIDs, so an id and its
+        # upper-cased form name one session, whichever spelling the
+        # vendor or the caller chose; the busy key is lower case.
+        # opencode ids are case-sensitive vendor ids, kept exact.
+        if self._harness in (NativeHarness.GROK, NativeHarness.MUSE):
+            return session_id.lower()
+        return session_id
 
     def _busy(self, message: str, operation: str, context: dict[str, str]) -> NativeHostError:
         # session_busy with the host's default next step.
