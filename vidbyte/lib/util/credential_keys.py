@@ -73,7 +73,9 @@ class CredentialKeyPolicy:
         "authorization",
         "auth",
     })
-    _SECRET_SUFFIXES = ("_api_key", "_api_keys", "_private_key", "_secret_key", "_access_key", "_access_key_id", "_token", "_secret", "_password")
+    # "_provider_key" covers the relay header X-Vidbyte-Provider-Key,
+    # which carries the caller's own provider key.
+    _SECRET_SUFFIXES = ("_api_key", "_api_keys", "_provider_key", "_private_key", "_secret_key", "_access_key", "_access_key_id", "_token", "_secret", "_password")
 
     @classmethod
     def is_secret_key(cls, key: str) -> bool:
