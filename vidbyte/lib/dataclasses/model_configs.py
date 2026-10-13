@@ -79,7 +79,7 @@ class TextModelConfig:
     vidbyte_api_key: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Reject a bad prompt_index or mode, match the key list, and refuse what the gateway can never serve, as soon as the config is built."""
+        """Reject a bad prompt_index or mode, refuse what the gateway can never serve, and match the key list, as soon as the config is built."""
         # @intent prompt-sits-at-the-run-boundary
         if self.prompt_index is not None and (isinstance(self.prompt_index, bool) or not isinstance(self.prompt_index, int) or self.prompt_index < 0):
             raise ConfigurationError(f"prompt_index must be a non-negative int or None, got {self.prompt_index!r}.")
@@ -88,16 +88,18 @@ class TextModelConfig:
         # the config on every call, so validate() settles the keys once.
         if not isinstance(self.mode, TextModelMode):
             raise ConfigurationError("mode must be a TextModelMode value.")
+        # Every mode but DIRECT goes through the gateway, so a provider
+        # it does not serve, or a custom endpoint, is refused before any
+        # key is read (INV-8); matching first would advise adding a key
+        # that the gateway still could not use.
+        if self.mode is not TextModelMode.DIRECT:
+            self._require_gateway_shape(self.normalized_provider())
         # Match the developer's key list to this config's provider. A
         # record passed back in is only checked, so a rebuilt config
         # keeps the same keys.
         matched = ProviderKeyMatcher.match(self.api_keys, primary=self.provider, vidbyte_api_key=self.vidbyte_api_key, field_name="TextModelConfig.api_keys")
         object.__setattr__(self, "api_keys", matched)
         object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
-        # Every mode but DIRECT goes through the gateway, so a provider
-        # it does not serve, or a custom endpoint, is refused now.
-        if self.mode is not TextModelMode.DIRECT:
-            self._require_gateway_shape(self.normalized_provider())
 
     def normalized_provider(self) -> ModelProvider:
         # Convert strings to the canonical provider enum at the SDK boundary.

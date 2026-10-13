@@ -1486,3 +1486,7 @@ The algorithm tests in `tests/test_multi_provider_agentic_grader.py` mock `Modal
 - Row 35: the `sk-admin-` source is OpenAI's OpenAPI description, because the API-reference page answered 404; Google's API-keys page moved to docs.cloud.google.com. Row 36's conditional sentence was not added (the section lists no agent parameters). Row 37 shows the list form `Sequence[str]`.
 - Follow-up commits fix rows already committed instead of a rebase (lint, NFR-4 compaction, type narrowing, comment width). Row 20's message cites AC-21 instead of AC-18. Row 19 was committed before row 18.
 - This row reuses r5 as briefed, because S3 changes no spec content and the frontmatter `revision` stays 5.
+
+**Repair deviations (S5, iteration 1).** Evidence is in `verify-log.md` and `reports/S5-repair-1.md`.
+
+- Row 7: `TextModelConfig.__post_init__` now runs the gateway shape check (M-12, M-13) before `ProviderKeyMatcher.match`, not after it. INV-8 ("refused when it is built, before any key or environment is read") takes precedence over row 7's sentence order (review R-6).
