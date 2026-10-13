@@ -14,8 +14,8 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:35 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 21a947a7 → review r1 SOUND WITH FIXES (3B/3M/4m) → spec r2 ac39bb46 → review r2 (scoped) SOUND WITH FIXES (1B/2M/5m) → author writing final r3 with status: approved |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-13 01:45 UTC | 2026-10-13 08:15 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 ba522bba, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
+| S2 tests | in progress | 2026-10-13 08:20 UTC | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -70,6 +70,25 @@ started: 2026-10-13 00:45 UTC
   - All eight went to the author for the final revision r3, forwarded by path (lines 1–187 of reports/S1-spec-review-r2.md). In the same message the author was told to set `status: approved`, since the two review rounds are the approval.
   - R-7's optional `[scope-adding]` control is recorded as a Q-n, default not built: passing external MCP configs as the path of a 0600 temp file.
   - The S1 review cap (2/2) is reached. Anything the author disputes becomes a Q-n with a stated default.
+- 2026-10-13 08:15 UTC — **Spec r3 approved; spot-check passed.**
+  - The frontmatter has `revision: 3` and `status: approved`.
+  - §16 has round-2 rows for R-1 to R-8, and the author disputed none.
+  - There are 18 sections and 31 §12.3 rows.
+  - The commit is `docs(spec): revise claude-host spec r3 (review round 2 fixes, approved)` (ba522bba).
+  The "Spec ready" summary was printed to the user, and the run continued to S2 without waiting, as the skill requires.
+- 2026-10-13 08:15 UTC — **Every Q-n takes its stated default of No:**
+  - Q-1: stop spawns on an `allowed_warning` rate-limit window.
+  - Q-2: a permission gate on McpStudioServer.
+  - Q-3: limit history tools to the request's cwd.
+  - Q-4: clip long outputs.
+  - Q-5: a handle scope per toolset.
+  - Q-6: support `prompt_suggestions`.
+  - Q-7: let the model pick model/effort.
+  - Q-8: default caps after measuring memory.
+  - Q-9: forget finished handles before close.
+  - Q-10: root exports.
+  - Q-11: pass MCP configs as a 0600 temp file.
+  None of these is built.
 
 ## User replies (verbatim)
 - none yet
@@ -183,4 +202,20 @@ started: 2026-10-13 00:45 UTC
 - **Test isolation on this machine.** `~/.local/bin/claude.exe` exists, so a test that patches only `shutil.which` still finds the real CLI. Tests must also point `home` at a temp dir. *source:* S1 reviewer r2, R-8.
 - **pytest 8.3.5 prints secrets in dataclass assertion diffs.** It picks fields by `compare` and prints their `repr`, so `repr=False` does not hide secrets there. Tests must not assert whole records that carry secrets. *source:* S1 reviewer r2.
 - **`.venvs/lint-sdk` has ruff 0.16.4 and pytest 8.3.5.** Run S105 checks with `ruff --isolated --select S105,S106,S107`. Its regex uses underscore word boundaries: `CLAUDE_CREDENTIAL_SOURCE_FIELDS` passes, while `CLAUDE_TOKEN_SOURCE_FIELD = "..."` and `token_source = "..."` are flagged. *source:* S1 reviewer r2.
+- **Closing and interrupting (spec r3).**
+  - Each session has one close task that nothing cancels, awaited through `asyncio.shield`, following the `MultiAgentCleanup.shielded_close` pattern.
+  - The terminal status, done, the session id and the cap slot are released only after the close finishes. The probe closes the same way.
+  - Caller interrupts and steers run `interrupt()` in a task the session owns.
+  - The grace timer is tied to the prompt being interrupted (prompt and result counters) and is cleared when that prompt's result arrives.
+  - AC-25, AC-31 and AC-37 need a slow fake `disconnect()` that is never cancelled.
+  *source:* S1 author r3.
+- **Start failures.** A `ProcessError` or `CLIConnectionError` from `connect` maps to `CLAUDE_START_FAILURE_NEXT_STEP`, which points to `check_claude_ready`, never "Respawn". A steer whose message is discarded before its call returns raises `action.precondition_failed`. *source:* S1 author r3.
+- **CLI lookup on POSIX** checks the SDK's six locations, held in `CLAUDE_POSIX_CLI_LOCATIONS`. `/usr/local/bin/claude` is absolute, so `home / entry` leaves it unchanged; on Windows it resolves to `C:\usr\local\bin\claude`. A request `cli_path` that screens to `""` reports `not_installed` and never falls back to the host's path. For the host-level empty-path case, tests patch `ClaudeProbe.locate_cli` to return `""`. *source:* S1 author r3.
+- **Test layer (spec §13).**
+  - pytest 8.3.5 with pytest-asyncio 1.3.0 (`pyproject.toml:78-81`, `--strict-config --strict-markers`, no `asyncio_mode`).
+  - Most async tests use `unittest.IsolatedAsyncioTestCase`.
+  - The feature pack is `tests/features/claude_host/`, with no `__init__.py` and unique basenames (`test_claude_host_<area>.py`).
+  - A001 and S062 scan tests; ruff rules do not.
+  - Run one file with `PYTHONPATH=$(pwd) python -m pytest tests/features/claude_host/test_claude_host_<area>.py`.
+  *source:* spec r3 §13.
 - **C016 is unaffected by the new extra and the submodule exports.** It reads only the root `__all__` and the pyproject name and version, so `contracts/sdk-public-api.json` does not change. New packages ship through `packages.find`. *source:* S1 reviewer.

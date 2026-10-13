@@ -166,3 +166,32 @@ This is the smallest design that satisfies every ★ live function. Nothing outl
 **New least-sure assumptions:**
 - **A-17:** an acknowledged interrupt yields its result within 30 s.
 - **A-3, now also covering `--permission-prompts`:** its help says "with --print", and the SDK never passes `--print`.
+
+## Addendum: r3 (2026-10-13)
+
+Final revision, committed as `ba522bba` with `status: approved`. It applies review round 2's R-1 to R-8. All eight are accepted and none is disputed, so no dispute Q-n was added.
+
+| Finding | Change |
+|---|---|
+| R-1 | Each session has one close task, which runs `disconnect()` and is never cancelled. Every wait on it goes through `asyncio.shield`, following `MultiAgentCleanup.shielded_close`. The watchdog, grace and interrupt tasks only start it. The pump publishes the terminal status, sets done and frees the session id and slot only after the close completes, and the probe closes the same way. I also applied the reviewer's optional fix: caller interrupts and steers send `interrupt()` from a session-owned task. `interrupt_claude_turn` does not wait for it; `steer_claude_session` waits with `asyncio.wait`. D-4's "always returns" wording is replaced. Adds EC-59, EC-60 and AC-40, plus the glossary entries "stopping" and "close task". |
+| R-2 | The session counts the prompts it has sent and the prompt results it has read. A grace is aimed at the prompt its interrupt stopped. It is never armed once that prompt's result has been read, and it is checked again on expiry. Each prompt result cancels the grace and clears its slot. Adds AC-37 case (d). |
+| R-3 | Adds `CLAUDE_START_FAILURE_NEXT_STEP` and no request field. A `ProcessError` or `CLIConnectionError` from operation `connect` keeps `claude.process_exited` but points to `check_claude_ready`, whose probe passes no flags and so runs the 2.1.296 check. EC-4, EC-3, AC-22, D-6 and A-3 follow. Adds AC-39. |
+| R-4 | INV-7 and INV-18 use the reviewer's wording. The optional failure on the steer case is not added. |
+| R-5 | A non-empty request `cli_path` that screens to `""` reports `not_installed`. It never falls back to the host's path. |
+| R-6 | The POSIX lookup now checks the SDK's six locations, re-read at `subprocess_cli.py:255-339`, through the new `CLAUDE_POSIX_CLI_LOCATIONS`. D-5 and row 9 also say that the `.exe`/`.com` test ignores case. |
+| R-7 | T-3 now states two limits. MCP `env` and `headers`, and inline `settings`, reach the child's argv. `repr=False` does not cover `url`, `args`, `settings` or pytest's assertion diffs. The 0600 temp-file option is Q-11, defaulting to not built. |
+| R-8 | §13 now says to patch `ClaudeProbe.locate_cli` to return `""` for the host-level empty path. |
+
+**Also applied:**
+- The reviewer's EC-44 fact: `user` on Windows is a `CLIConnectionError` start failure. EC-44 is corrected, A-15 is withdrawn (struck through), and the builtin-error mapping row no longer mentions process start.
+- I re-read the SDK close path read-only. `close()` docstring :979-988, `_close_impl` :1184-1207, the `end` sentinel :574 and the 60 s control timeout :706-751 all match the review.
+
+**Choices I made beyond the reviewer's text:**
+- **Interrupt tasks are cancelled at turn end.** The pump's `finally` cancels interrupt tasks that are still waiting. Otherwise a caller interrupt that is in flight when the close starts would wait out the SDK's 60 s control timeout, because `_close_impl` fails no pending control request. A steer whose message was discarded before its call returns raises `action.precondition_failed` instead of reporting success.
+- **One start-failure next step for turns and probes.** Its text ("…; if that check fails the same way, reinstall Claude Code or pass cli_path to ClaudeHost.") stays meaningful when the failing call is `check_claude_ready` itself.
+- **QUEUED interrupts during a connect.** A QUEUED handle interrupted while its connect is in flight becomes terminal only after that connect returns and the close completes. Without this, INV-8 would not hold.
+
+**Least-sure assumptions after r3:**
+- **A-9:** one client is driven from several tasks: the pump reads while interrupt tasks and the close task act. The anyio internals were read, not run.
+- **A-17:** the 30 s grace is enough for an acknowledged interrupt.
+- **A-3:** `--permission-prompts` and `--no-session-persistence` behave without `--print`.
