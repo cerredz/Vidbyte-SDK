@@ -277,3 +277,20 @@
   - the r8 row.
 - `revision: 8` and `status: reviewed` are unchanged.
 - Self-check re-run: 0 tables with a wrong cell count, and every new reference resolves.
+
+**r8, third commit (S4-7, R-6: the test author found the rule unstated).**
+- New EC-158 in the `wait_opencode_turn` table. An opencode turn whose `prompt_async` answered 204 can end `FAILED` because of a failure the host raised itself:
+  - a poll failing as in EC-55, EC-56, EC-58 or EC-59, at once or as EC-87's last counted failure;
+  - EC-85's prompt-never-seen case;
+  - EC-155;
+  - an unexpected exception in the watcher (EC-5).
+- In those cases, the watcher first sends one `POST /session/{id}/abort`. It sends none if the server already answered an abort the host sent for this turn.
+- The abort is best effort and bounded by `request_timeout_seconds`. A failed abort is dropped, as `turn.py:274-275` does on the EC-155 path. It never replaces the turn's code, context or next step.
+- Server-reported ends (EC-82 to EC-86, EC-90) are excluded.
+- **Placement:** the rule lives in EC-158, which cites INV-13 and G-3. INV-13 gains one sentence: a turn the host fails on its own is also stopped at the vendor (Grok and Muse by closing the peer, opencode by EC-158).
+- **EC-87:** it now says that a non-counted failure such as a 500 (EC-59) ends the turn at once. It also says EC-158's abort is not a poll, so it never changes the count or the code. The counting rule otherwise reads as before.
+- **Also updated:** §8.5 watcher step 7, §12.3 row 38, §16 S4-7 and the r8 row.
+- **Two corrections to the request, both stated in S4-7:**
+  - The orchestrator asked for `control_timeout_seconds`. `OpencodeHostSettings` has no such field, and every opencode HTTP call uses `request_timeout_seconds` (D-5), so the abort uses that.
+  - The turn ceiling is not a `FAILED` path: EC-88 already aborts it and ends it as `INTERRUPTED` with source `DEADLINE`.
+- No failure code or next step changed. `revision: 8` and `status: reviewed` are unchanged. Self-check: 0 tables with a wrong cell count, and every new reference resolves.
