@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/process/managed.py
 
 PURPOSE: Defines ManagedProcess, the canonical way to start a long-running child (a local server), wait for the stdout line that says it is ready, keep draining its output so it never blocks, and stop its whole tree exactly once.
-ROLE IN CODEBASE: Used by OpencodeServer (vidbyte/harnesses/native/opencode/server.py) to own `opencode serve`. Stops through ProcessStopper in vidbyte/lib/process/runner.py.
+ROLE IN CODEBASE: Used by OpencodeServer (vidbyte/harnesses/native/opencode/server.py) to own `opencode serve`. Starts through CliRunner.launch and stops through ProcessStopper, both in vidbyte/lib/process/runner.py.
 ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). The child always gets DEVNULL as stdin and starts in its own session on POSIX. start never raises except cancellation (after stopping the child); a launch failure, an early exit or a timeout is a field of the ProcessStartOutcome. stdout is read in chunks and split into lines here, so one very long line cannot break the reader.
-FUNCTION INVENTORY: ManagedProcess.start is the narrated main function; _launch starts the child or reports a launch failure; _watch_stdout finds the ready line and then keeps draining; _drain_stderr keeps a bounded stderr tail; _settle waits for the ready line, the exit or the deadline; exit_code reports the reaped exit code; stop stops the tree once and returns the exit code.
+FUNCTION INVENTORY: ManagedProcess.start is the narrated main function and starts the child through CliRunner.launch; _watch_stdout finds the ready line and then keeps draining; _drain_stderr keeps a bounded stderr tail; _settle waits for the ready line, the exit or the deadline; exit_code reports the reaped exit code; stop stops the tree once and returns the exit code.
 COMMON MODIFICATION PATTERNS: A new readiness rule changes _watch_stdout only; a new stop rule belongs in ProcessStopper so CliRunner and the transport get it too.
 WHAT NOT TO DO IN THIS FILE: 1. Do not give the child the caller's stdin or invocation.stdin_text; a server reads nothing. 2. Do not stop reading stdout or stderr after the ready line; a full pipe would block the server. 3. Do not wait unbounded after a kill.
 KNOWN EDGE CASES: A child that closes stdout but keeps running is waited for until the deadline. stop on a process that never started returns None; a second stop returns the first result without signalling again.
@@ -16,15 +16,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
-import shutil
-import sys
 
 from vidbyte.lib.constants import native_hosts as native_host_constants
 from vidbyte.lib.dataclasses.process import CliInvocation, ProcessStartOutcome
-from vidbyte.lib.enums.process import ProcessLaunchFailure
-from vidbyte.lib.process.runner import ProcessStopper
+from vidbyte.lib.process.runner import CliRunner, ProcessStopper
 
-_READ_CHUNK_BYTES = 65536
 _LINE_BREAK = b"\n"
 
 
@@ -50,8 +46,9 @@ class ManagedProcess:
         # A server that never prints its ready line, or dies at boot, must
         # end the start within the invocation's timeout with the reason in
         # the outcome; a cancelled start stops the child before propagating.
-        # Start the child with the null device as stdin, in its own session.
-        failure = await self._launch()
+        # Start the child with the null device as stdin, so a server can
+        # never read a stdio MCP client's stream; stdin_text is ignored.
+        self._process, failure = await CliRunner.launch(self._invocation, stdin=asyncio.subprocess.DEVNULL)
         if self._process is None:
             return ProcessStartOutcome(ready_line=None, launch_failure=failure, exit_code=None, timed_out=False, stderr_tail="")
         # Watch stdout for the ready line while stderr drains into a bounded tail.
@@ -87,32 +84,6 @@ class ManagedProcess:
                 await asyncio.wait(pending)
         return self.exit_code
 
-    async def _launch(self) -> ProcessLaunchFailure | None:
-        # @intent managed-child-never-inherits-stdin
-        # A server child gets the null device as stdin, so it can never read
-        # a stdio MCP client's stream; invocation.stdin_text is ignored.
-        program, *arguments = self._invocation.argv
-        if sys.platform == "win32":
-            program = shutil.which(program) or program
-        try:
-            self._process = await asyncio.create_subprocess_exec(
-                program,
-                *arguments,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self._invocation.cwd,
-                env=dict(self._invocation.env),
-                start_new_session=sys.platform != "win32",
-            )
-        except FileNotFoundError:
-            return ProcessLaunchFailure.NOT_FOUND
-        except PermissionError:
-            return ProcessLaunchFailure.PERMISSION_DENIED
-        except (OSError, ValueError):
-            return ProcessLaunchFailure.OS_ERROR
-        return None
-
     async def _watch_stdout(self, ready_pattern: re.Pattern[str]) -> None:
         # Splits stdout into lines until one matches, then keeps reading to EOF so the pipe never fills.
         process, ready = self._process, self._ready
@@ -120,7 +91,7 @@ class ManagedProcess:
             return
         pending = bytearray()
         with contextlib.suppress(OSError, ValueError):
-            while chunk := await process.stdout.read(_READ_CHUNK_BYTES):
+            while chunk := await process.stdout.read(native_host_constants.NATIVE_PROCESS_READ_CHUNK_BYTES):
                 if ready.done():
                     continue
                 pending.extend(chunk)
@@ -138,7 +109,7 @@ class ManagedProcess:
         if process is None or process.stderr is None:
             return
         with contextlib.suppress(OSError, ValueError):
-            while chunk := await process.stderr.read(_READ_CHUNK_BYTES):
+            while chunk := await process.stderr.read(native_host_constants.NATIVE_PROCESS_READ_CHUNK_BYTES):
                 self._stderr_tail.extend(chunk)
                 del self._stderr_tail[: -self._invocation.max_output_bytes]
 

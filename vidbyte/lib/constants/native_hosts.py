@@ -50,6 +50,7 @@ NATIVE_TOOL_OUTPUT_MAX_BYTES = 64000
 NATIVE_EVENT_MAX_CHARS = 8000
 NATIVE_PROCESS_MAX_OUTPUT_BYTES = 67108864
 NATIVE_PROCESS_TRUNCATION_PROBE_BYTES = 1
+NATIVE_PROCESS_READ_CHUNK_BYTES = 65536
 
 # Default next step per failure code value, verbatim from the spec's code catalog.
 NATIVE_HOST_NEXT_STEPS: MappingProxyType[str, str] = MappingProxyType(
