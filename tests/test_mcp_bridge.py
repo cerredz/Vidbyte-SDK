@@ -274,3 +274,45 @@ class McpBridgeSchemaTests(unittest.TestCase):
                 parameters = ToolsFormatter.to_openai_tool(spec)["function"]["parameters"]
                 self.assertEqual(parameters["type"], "object")
                 self.assertEqual(parameters["properties"], {})
+
+    def test_optional_ref_and_type_array_parameters_are_documented_by_type_name(self) -> None:
+        """The prompt doc labels Optional, $ref and type-array arguments as @tool does, not as object or a list repr."""
+        schema = {
+            "type": "object",
+            "$defs": {"P": {"type": "string", "enum": ["low", "high"]}},
+            "properties": {
+                "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                "priority": {"$ref": "#/$defs/P"},
+                "owner": {"type": ["string", "null"]},
+                "query": {"type": "string"},
+            },
+            "required": ["query"],
+        }
+        spec = self._bridged(schema).spec()
+        self.assertEqual(
+            [parameter.type for parameter in spec.parameters],
+            ["integer | null", "any", "string | null", "string"],
+        )
+        prompt = spec.to_prompt_str()
+        self.assertIn("- owner (string | null, optional)", prompt)
+        self.assertIn("- query (string, required)", prompt)
+        self.assertNotRegex(prompt, r"\([^)]*\[")
+        self.assertEqual(spec.input_schema, schema)
+
+    def test_non_object_remote_schema_still_sends_json_types(self) -> None:
+        """Without a usable remote schema the provider schema is built from the flat list, so it keeps JSON types."""
+        schema = {
+            "type": "string",
+            "properties": {
+                "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                "owner": {"type": ["string", "null"]},
+                "query": {"type": "string"},
+            },
+        }
+        spec = self._bridged(schema).spec()
+        self.assertIsNone(spec.input_schema)
+        properties = ToolsFormatter.to_openai_tool(spec)["function"]["parameters"]["properties"]
+        json_types = {"string", "integer", "number", "boolean", "array", "object", "null"}
+        for name, prop in properties.items():
+            with self.subTest(name=name):
+                self.assertIn(prop["type"], json_types)
