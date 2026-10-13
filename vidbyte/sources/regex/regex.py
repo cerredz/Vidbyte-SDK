@@ -36,12 +36,24 @@ class DocumentRegex:
     """Regex helpers for generic markdown/text documents."""
 
     H1: ClassVar[re.Pattern[str]] = re.compile(r"^#\s+(?P<title>.+?)\s*$", re.MULTILINE)
+    H1_LINE: ClassVar[re.Pattern[str]] = re.compile(r"#[ \t]+(?P<title>.*?\S)[ \t]*")
+    FENCE: ClassVar[re.Pattern[str]] = re.compile(r" {0,3}(?P<fence>```|~~~)")
 
     @staticmethod
     def first_h1_title(text: str) -> str | None:
-        # Returns the first markdown H1 found in text, or None.
-        match = DocumentRegex.H1.search(text)
-        return match.group("title").strip() if match else None
+        # Returns the first markdown H1 outside fenced code blocks, or None.
+        # @intent h1-title-skips-fenced-code
+        # A "# ..." line inside a fenced code block is code (often a shell comment), not a heading, so it must not title the document.
+        fence: str | None = None
+        for line in text.splitlines():
+            marker = DocumentRegex.FENCE.match(line)
+            if marker is not None and fence in (None, marker.group("fence")[0]):
+                fence = marker.group("fence")[0] if fence is None else None
+                continue
+            match = None if fence is not None else DocumentRegex.H1_LINE.fullmatch(line)
+            if match is not None:
+                return match.group("title").strip()
+        return None
 
 
 class LlmsTxtRegex:
