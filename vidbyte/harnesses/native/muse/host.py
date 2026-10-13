@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every live turn runs on its own `muse serve` peer owned by it
 FUNCTION INVENTORY: __aenter__ resolves the launcher once; __aexit__ stops every live turn; the twelve public methods are narrated main functions. Helpers: _require_open, _reserve, _turn_task, _new_peer, _handshake, _check_model, _resume, _start_turn, _launch, _list_page, _steer, _latest_usage, _discard and the _forget_driver done-callback.
 COMMON MODIFICATION PATTERNS: A new MSP call is one public method here, its params and result reader in wire.py and one tool in vidbyte/tools/builtins/muse/tools.py. A row next step the catalog does not give is a module constant here or in wire.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read Muse credentials or send an approve-everything value; sessions start with approvalMode denyUnmatched and the driver denies every approval. 2. Do not await between the busy check and the reservation of a turn. 3. Do not leave a peer running after its method returns, on any path.
-KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument. On win32 a host needs muse_command or wsl_distro. A WSL peer that exits before answering is classified from its stderr and its exit code, read after close through NativePeer.exit_code: 127 or the ENOENT text is an in-distro muse missing. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED. A steer whose turn completes while it waits for Muse's answer raises turn_not_found, because the driver closes the peer once the turn has ended.
+KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument. On win32 a host needs muse_command or wsl_distro. A WSL peer that exits before answering is classified from its stderr and its exit code, read after close through NativePeer.exit_code: 127 or the ENOENT text is an in-distro muse missing. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED. A steer whose turn completes while it waits for Muse's answer raises turn_not_found, because the driver closes the peer once the turn has ended. A failed turn that nobody waits on is marked as seen when its driver finishes, so asyncio logs no lost exception; wait_muse_turn still raises it.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (MuseHost), §6.3.5 (EC-94 to EC-121, EC-156), D-9 to D-14, D-18, D-19, D-23, FR-19
 TESTS: tests/features/muse_host/test_muse_host_acceptance.py, tests/features/muse_host/test_muse_host_errors.py, tests/features/muse_host/test_muse_host_reads.py, tests/features/muse_host/test_muse_host_turns.py, tests/features/muse_host/test_muse_host_process_bounds.py, tests/features/muse_host/test_muse_host_wsl.py
 """
@@ -672,10 +672,12 @@ class MuseHost:
             with contextlib.suppress(Exception):
                 await self._launcher.reap(mark)
 
-    def _forget_driver(self, turn_id: str, _task: asyncio.Task[NativeTurnResult]) -> None:
-        # A finished driver is dropped; its task stays in the turn
-        # table for later waits.
+    def _forget_driver(self, turn_id: str, task: asyncio.Task[NativeTurnResult]) -> None:
+        # Done-callback: drops the finished driver and marks a failed
+        # turn's error as seen; wait still re-raises it.
         self._drivers.pop(turn_id, None)
+        if not task.cancelled():
+            task.exception()
 
 
 __all__ = ["MuseHost"]
