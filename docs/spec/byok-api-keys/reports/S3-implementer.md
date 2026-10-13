@@ -156,3 +156,16 @@ Lint tests: there is no `lint/tests/`, and no test names S014 or its analyzer. T
 ## 7. Resolved: straggler
 
 `tests/test_jev_compute.py::JevComputeCheckpointTests::test_a_chosen_specialist_runs_without_a_checkpoint` ran `AUTO` with no Vidbyte key, so INV-7 made it raise "Missing Vidbyte API key". The S2 test author fixed it at c0ab2b0a: that one test now builds its agent with `model_mode=TextModelMode.DIRECT`. The full suite is `4101 passed, 13 skipped`. I edited no test.
+
+## 8. Phases 6 and 7
+
+- Pushed with `git push -u origin feat/byok-api-keys` (new branch). origin/main is 2 commits past the base 595a7260 (66f8353a), and none of those commits touches a file this branch changes. The branch was not rebased.
+- Draft PR: https://github.com/cerredz/Vidbyte-SDK/pull/1027. It uses the placeholder body file unchanged.
+- Spec frontmatter: `status: implemented` and `pr: https://github.com/cerredz/Vidbyte-SDK/pull/1027`, committed in 3481ed66 (`docs(spec): record draft PR for byok-api-keys`) and pushed.
+- Dispatched with `gh workflow run CI --ref feat/byok-api-keys` and `gh workflow run "Static policy" --ref feat/byok-api-keys`. I did not wait for them.
+  - CI: https://github.com/cerredz/Vidbyte-SDK/actions/runs/38364826086
+  - Static policy: https://github.com/cerredz/Vidbyte-SDK/actions/runs/38364829117
+- Phase 7, committed in bfb37aa1 (`docs(spec): record implementation proof for byok-api-keys`):
+  - §6.2: AC-28 was the only Proof cell left for the implementer (a gate, not a test). It now records the commit where the gate passed, 1b302cee, and the gate's final lines.
+  - §17: a row `r5 | 2026-10-13 | S3 implement`, followed by an "Implementation deviations (S3, r5)" list.
+  - §17 already had an r5 row (the S1 wording pass). I reused r5 as briefed, because S3 changes no spec content and the frontmatter `revision` stays 5.
