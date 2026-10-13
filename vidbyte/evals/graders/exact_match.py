@@ -37,8 +37,10 @@ class ExactMatchGrader(BaseGrader):
             e = e.strip()
 
         if not self.case_sensitive:
-            a = a.lower()
-            e = e.lower()
+            # @intent caseless-graders-casefold
+            # Case-insensitive grading uses casefold, the caseless-matching form (ß matches SS), as OutputBehavior does.
+            a = a.casefold()
+            e = e.casefold()
 
         passed = (a == e)
         score = 1.0 if passed else 0.0
