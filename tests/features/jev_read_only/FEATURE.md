@@ -33,7 +33,7 @@ JevAgent can opt in to recognizing a request that asks for an assessment (an exp
 
 ## Test Suite Map
 
-- `tests/features/jev_read_only/test_jev_read_only.py` covers the ceiling (absence, denial, restore after an exception, nesting, validation, task inheritance and isolation, `PermissionPolicy` and `ToolExecutor` capping, narrower policies), the eight questions (registration, layout, standalone literals, length, signal mapping), the gate (threshold, per-question veto, missing answers, outages, reset, opt-in absence, the shared request with BULK_WORK), `JevReadOnly`, and the runtime (offered tools, hidden tools, tools added mid-run, vetoed requests, the next run, specialists, bulk-work agents, the tool selector, a raising run, and the response record).
+- `tests/features/jev_read_only/test_jev_read_only.py` covers the ceiling (absence, denial, restore after an exception, nesting, validation, task inheritance and isolation, `PermissionPolicy` and `ToolExecutor` capping, narrower policies), the eight questions (registration, layout, standalone literals, length, signal mapping), the gate (threshold, per-question veto, missing answers, outages, reset, opt-in absence, the shared request with BULK_WORK), `JevReadOnly`, and the runtime (offered tools, a dropped provider tools override, hidden tools, tools added mid-run and their DENIED record, vetoed requests, the next run, specialists, bulk-work agents, the tool selector, a raising run, and the response record).
 - Run `python scripts/test-jev-read-only.py` for the complete offline feature pack.
 
 ## Omitted Testing Strategies

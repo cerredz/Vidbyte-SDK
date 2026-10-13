@@ -29,7 +29,7 @@ from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.constants.jev import JEV_BULK_WORK_TOOL_NAME, JEV_READ_ONLY_THRESHOLD
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
-from vidbyte.lib.dataclasses.tools import ToolCall, ToolPermission
+from vidbyte.lib.dataclasses.tools import ToolCall, ToolCallState, ToolPermission
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.enums.jev import JevPreflightQuestionKey, JevQuestionType
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
@@ -161,12 +161,14 @@ class MainRunner:
     """Scripted model runner: returns each scripted turn in order and keeps every call's keyword arguments and the ceiling it ran under."""
 
     def __init__(self, *responses: object, fail: bool = False) -> None:
+        # Saves the scripted turns, finishing with isDone when the test scripts none.
         self.responses = list(responses) or [_done()]
         self.fail = fail
         self.calls: list[dict[str, Any]] = []
         self.ceilings: list[frozenset[ToolPermission] | None] = []
 
     def run(self, prompt: str, **kwargs: Any) -> object:
+        # Records the call and the active ceiling, then returns the next scripted turn or fails as scripted.
         self.calls.append(kwargs)
         self.ceilings.append(PermissionCeiling.current())
         if self.fail:
@@ -186,6 +188,7 @@ class WorkerRunner:
     """Scripted runner for bulk-work agents: answers each task with text and keeps every call's keyword arguments."""
 
     def __init__(self) -> None:
+        # Starts with no recorded worker calls.
         self.calls: list[dict[str, Any]] = []
 
     async def arun(self, prompt: str, *, system: str = "", **kwargs: Any) -> TextModelResponse:
@@ -201,6 +204,7 @@ class WorkerRunner:
 def _route(main: object, *, workers: object | None = None, specialist: tuple[BaseAgent, object] | None = None) -> Any:
     # Sends a chosen specialist to its own runner, bulk-work agents to the worker runner, and every other agent to the main runner.
     def runner_for(agent: BaseAgent) -> tuple[object, str]:
+        # Picks the scripted runner for one agent by identity or by its bulk-work name.
         if specialist is not None and agent is specialist[0]:
             return specialist[1], RUNNER_TYPE_TEXT
         if workers is not None and "-bulk-" in agent.name:
@@ -278,12 +282,14 @@ class PermissionCeilingTests(unittest.IsolatedAsyncioTestCase):
         seen: dict[str, object] = {}
 
         async def read_only_run() -> None:
+            # Holds a read-only scope open while the sibling run looks, after recording what a child task saw.
             with PermissionCeiling.scope(PermissionCeiling.READ_ONLY):
                 seen["child"] = await asyncio.create_task(asyncio.sleep(0, result=PermissionCeiling.current()))
                 entered.set()
                 await release.wait()
 
         async def ordinary_run() -> None:
+            # Reads the ceiling from a sibling task while the other run's scope is open.
             await entered.wait()
             seen["sibling"] = PermissionCeiling.current()
             release.set()
@@ -482,10 +488,10 @@ class ReadOnlyRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         _EFFECTS.clear()
 
-    async def _run(self, agent: JevAgent, main: MainRunner, decision: ScriptedDecisionRunner, **routes: Any) -> Any:
+    async def _run(self, agent: JevAgent, main: MainRunner, decision: ScriptedDecisionRunner, *, options: dict[str, Any] | None = None, **routes: Any) -> Any:
         # Runs one request with every model and decision call scripted, and returns the reply.
         with _route(main, **routes), patch(_GATE_HELPER, new=_decision_helper(decision)):
-            return await agent.arun(_REQUEST)
+            return await agent.arun(_REQUEST, **(options or {}))
 
     async def test_a_read_only_run_offers_only_safe_and_read_tools(self) -> None:
         # [Silent Failure] The model is offered SAFE and READ tools plus isDone, every model call runs under the ceiling, and the agent keeps its catalog.
@@ -500,6 +506,16 @@ class ReadOnlyRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(main.ceilings, [PermissionCeiling.READ_ONLY, PermissionCeiling.READ_ONLY])
         self.assertEqual(agent.tools.names(), tuple(item.name for item in _ALL_TOOLS))
         self.assertIsNone(PermissionCeiling.current())
+
+    async def test_a_provider_tools_override_is_dropped_on_a_read_only_run(self) -> None:
+        # [Silent Failure] A caller's tools override would re-offer every write tool, so a read-only run drops it, as the selector does; a vetoed run keeps it.
+        override = [{"type": "function", "name": "write_notes", "description": "Override.", "parameters": {"type": "object", "properties": {}}}]
+        main = MainRunner()
+        await self._run(_agent(), main, ScriptedDecisionRunner(), options={"tools": override})
+        self.assertEqual(main.tool_names(0), {"lookup", "read_notes", "isDone"})
+        vetoed = MainRunner()
+        await self._run(_agent(), vetoed, _veto(), options={"tools": override})
+        self.assertEqual(vetoed.tool_names(0), {"write_notes"})
 
     async def test_a_hidden_tool_named_by_the_model_never_executes(self) -> None:
         # [Hidden Failure] A model that names a tool it was not offered gets an error result and nothing is written.
@@ -516,13 +532,17 @@ class ReadOnlyRuntimeTests(unittest.IsolatedAsyncioTestCase):
         @tool
         def enable_writing(reason: str) -> str:
             """Give the agent a tool that writes notes."""
+            # Adds the write tool to the agent's own catalog mid-run, as attach_mcp_server would.
             holder[0].add_tool(write_notes)
             return f"enabled for {reason}"
 
         agent = _agent(_settings(tools=(read_notes, enable_writing)))
         holder.append(agent)
         main = MainRunner(_call("enable_writing", {"reason": "fix"}, "e1"), _write(), _done())
-        await self._run(agent, main, ScriptedDecisionRunner())
+        reply = await self._run(agent, main, ScriptedDecisionRunner())
+        denied = [context for context in reply.metadata["tool_calls"] if context.tool_name == "write_notes"]
+        self.assertEqual([context.state for context in denied], [ToolCallState.DENIED])
+        self.assertEqual((denied[0].result.metadata["error"], denied[0].result.metadata["permission"]), ("permission_denied", "write"))
         self.assertNotIn("write_notes", main.tool_names(0))
         self.assertIn("write_notes", main.tool_names(1))
         self.assertIn(f"Permission denied for tool 'write_notes' requiring write{_CEILING_NOTE}", main.sent(2))

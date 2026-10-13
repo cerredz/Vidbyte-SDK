@@ -442,11 +442,13 @@ All tests are offline. Jev is replaced by a scripted `DecisionModelHelper`, and 
 - `ReadOnlyGateTests` → `test_disabled_preset_asks_no_read_only_question` — [Edge Case]
 - `ReadOnlyGateTests` → `test_read_only_and_bulk_work_share_one_request` — [Hidden Assumption]
 - `ReadOnlyToolsTests` → `test_keeps_only_safe_and_read_tools_in_order` and `test_an_empty_catalog_stays_empty` — [Edge Case]
+- `ReadOnlyToolsTests` → `test_the_ceiling_switch_opens_a_scope_only_for_a_read_only_run` — [Silent Failure]
 
 ### Integration Tests
 - `ReadOnlyRuntimeTests` → `test_a_read_only_run_offers_only_safe_and_read_tools` (main runner's tool schemas) — [Silent Failure]
+- `ReadOnlyRuntimeTests` → `test_a_provider_tools_override_is_dropped_on_a_read_only_run` (FR 6; a vetoed run keeps it) — [Silent Failure]
 - `ReadOnlyRuntimeTests` → `test_a_hidden_tool_named_by_the_model_never_executes` — [Hidden Failure]
-- `ReadOnlyRuntimeTests` → `test_a_write_tool_added_mid_run_is_denied_by_the_ceiling` (proves the second layer) — [Hidden Failure]
+- `ReadOnlyRuntimeTests` → `test_a_write_tool_added_mid_run_is_denied_by_the_ceiling` (proves the second layer, and that the refusal is recorded as a `DENIED` call, FR 8) — [Hidden Failure]
 - `ReadOnlyRuntimeTests` → `test_a_vetoed_request_keeps_the_full_catalog_and_writes` — [Edge Case]
 - `ReadOnlyRuntimeTests` → `test_the_next_run_gets_the_full_catalog_and_no_ceiling` — [Hidden Assumption]
 - `ReadOnlyRuntimeTests` → `test_a_chosen_specialist_cannot_write` — [Hidden Failure]
