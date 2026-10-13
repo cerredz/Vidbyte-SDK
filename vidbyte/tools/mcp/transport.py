@@ -303,6 +303,40 @@ class McpStdioTransport:
             if current is future and future.done():
                 self._pending.pop(request_id, None)
 
+    async def notify(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Send a JSON-RPC notification: no id, and no response is awaited."""
+        if self._closed:
+            raise McpProtocolError(
+                "MCP transport is closed",
+                details={"reason": "closed", "method": method},
+            )
+        await self.start()
+        async with self._write_lock:
+            if self._closed or self._process is None or self._process.stdin is None:
+                raise McpProtocolError(
+                    "MCP transport is closed",
+                    details={"reason": "closed", "method": method},
+                )
+            payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+            if params is not None:
+                payload["params"] = dict(params)
+            try:
+                self._process.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
+                await self._process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                raise McpProtocolError(
+                    "MCP process stdin is not writable",
+                    details={
+                        "method": method,
+                        "stderr_tail": self.stderr_snapshot(),
+                        "reason": "stdin_write_failed",
+                    },
+                ) from exc
+
     async def close(self) -> None:
         """Idempotently fail pendings, terminate the child, and detach state."""
         async with self._close_lock:
