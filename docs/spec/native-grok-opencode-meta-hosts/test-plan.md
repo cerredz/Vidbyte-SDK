@@ -817,3 +817,113 @@ The 7 failures are exactly the addendum's 7 cases: 4 drain cases and 3 answer ca
 - **Keep the answer wait as `asyncio.wait_for(future, timeout=seconds)`**, called through the `asyncio` module, with the answer future itself as the awaitable, in the caller's task. Do not wrap the future in a coroutine or a task first. A `seam:` failure means the wait changed shape; ask the orchestrator.
 - **The check sits inside the existing `try`,** so the raise reuses the `except asyncio.CancelledError` cleanup.
 - **Do not add the check to the close-path waits** (`:473`, `:499`, `:509`); that is the ruling.
+
+## Addendum 6 — fake ordering fix (R-22 precondition flake)
+
+**Symptom.** `test_failed_turn_never_waited_logs_no_unretrieved_exception` (R-22) sometimes failed after about 31 to 34 s with `precondition: the fake did not send a failed turn/completed for both turns`. It failed 1 run in 30 at `3917b49a` and 1 in 62 at `19582f13`, in fresh processes on Windows. Repair iteration 8 found the cause (`reports/S5-repair-8.md`). The product code is not involved.
+
+**Cause.** The cause is a race inside the Muse test fake.
+- `FrameWriter.send` wrote a frame to stdout under its lock, but logged the `sent` record after it released the lock.
+- The turn thread writes `turn/completed`. The host reads it and closes the peer's stdin.
+- The fake's main thread sees stdin EOF and calls `os._exit(0)`. That exit could run before the turn thread logged `sent`, so the record the precondition reads was lost.
+
+**Change.** The orchestrator granted this fixture change. It reorders the write, the log and the exit, and nothing else. No assertion, scenario default or test changed.
+- **The log moves under the lock.** `FrameWriter.send` now logs `sent` inside the same `with self.lock` block as the stdout write.
+- **The exit waits for the lock.** The stdin-EOF exit first calls `self.writer.lock.acquire(timeout=EXIT_WRITER_WAIT_SECONDS)`, with the new constant `EXIT_WRITER_WAIT_SECONDS = 2.0`. A write and its log that are already in flight therefore finish before the process exits.
+- **The wait is bounded.** If a writer is ever stuck on a full stdout pipe, the exit still happens after 2 s, as it did before the change.
+- **It cannot deadlock.**
+  - The EOF path runs on the main thread, which never holds the writer lock when it reaches EOF.
+  - The lock order is always writer lock, then log lock. `FakeLog.write` never takes the writer lock, and no code sends while it holds `self.condition`.
+  - The one `os._exit` inside the lock, on a failed write, ends the process.
+- **The Grok fake gets the same fix.** `fake_grok_peer.py` had the same race. `FrameWriter.send` called `raw()` and logged afterwards, outside the lock, and `AcpPeer.after_eof` called `os._exit(0)` at once, while `TurnWorker` sends the `session/prompt` answer from another thread. No Grok failure was seen, because the only Grok test that reads `sent` (`test_spawn_returns_a_handle_while_the_turn_is_still_running`) checks that a record is absent. Now `raw()` takes an optional keyword `sent=`, which `send` passes, so the record is logged under the lock. `raw()` calls without `sent=` (the garbage lines) log nothing, as before. The same bounded acquire runs before the exit in `after_eof`.
+- **Both file headers** gained one sentence under KNOWN EDGE CASES.
+
+**Before → after.** In `fake_muse_peer.py`:
+```python
+# before
+        with self.lock:
+            try:
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+            except (OSError, ValueError):
+                os._exit(0)
+        self.log.write("sent", frame=frame)
+...
+                if self.scenario.get("ignore_eof"):
+                    held(self.scenario)
+                os._exit(0)
+# after
+        with self.lock:
+            try:
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+            except (OSError, ValueError):
+                os._exit(0)
+            self.log.write("sent", frame=frame)
+...
+                if self.scenario.get("ignore_eof"):
+                    held(self.scenario)
+                # Wait, bounded, for a frame another thread is writing and logging, so the exit never drops its "sent" record.
+                self.writer.lock.acquire(timeout=EXIT_WRITER_WAIT_SECONDS)
+                os._exit(0)
+```
+In `fake_grok_peer.py`:
+```python
+# before
+    def send(self, frame: dict[str, Any]) -> None:
+        self.raw(json.dumps(frame))
+        self.log.write("sent", frame=frame)
+
+    def raw(self, text: str) -> None:
+        ...
+            except (OSError, ValueError):
+                os._exit(0)
+...
+    def after_eof(self) -> None:
+        if self.scenario.get("ignore_eof"):
+            held(self.scenario)
+        os._exit(0)
+# after
+    def send(self, frame: dict[str, Any]) -> None:
+        self.raw(json.dumps(frame), sent=frame)
+
+    def raw(self, text: str, *, sent: dict[str, Any] | None = None) -> None:
+        ...
+            except (OSError, ValueError):
+                os._exit(0)
+            if sent is not None:
+                self.log.write("sent", frame=sent)
+...
+    def after_eof(self) -> None:
+        if self.scenario.get("ignore_eof"):
+            held(self.scenario)
+        # Wait, bounded, for a frame another thread is writing and logging, so the exit never drops its "sent" record.
+        self.writer.lock.acquire(timeout=EXIT_WRITER_WAIT_SECONDS)
+        os._exit(0)
+```
+
+### Proof (addendum 6)
+
+The environment is global Python 3.11.0 on win32, reached through `PYTHONPATH=$(pwd)`. HEAD is `2229bd5a`, and the fake changes are staged.
+
+**1. A forced gap.** Scratch copies of the Muse pack sat outside the worktree. One copy had the HEAD fake and the other the fixed fake, and each had `time.sleep(0.2)` added just before the `sent` log write. R-22 ran 3 times against each copy:
+
+| Fake | Runs | Result |
+|---|---|---|
+| HEAD fake, with the gap | 3 / 3 red | `AssertionError: precondition: the fake did not send a failed turn/completed for both turns`, after about 32.6 s each time. This is the flake's exact message and timing. |
+| fixed fake, with the gap | 3 / 3 green | `1 passed` in about 3.4 s |
+
+**2. Fresh-process loops.** Each run was a new `python -m pytest -p no:cacheprovider -q …` process:
+
+| Test | Runs | Result |
+|---|---|---|
+| R-22 `test_failed_turn_never_waited_logs_no_unretrieved_exception` | 60 | **60 / 60 passed**: no precondition failure, and no other failure |
+| R-24 `test_host_closed_during_spawn_leaves_no_unretrieved_future` (the Grok fake changed too) | 30 | **30 / 30 passed** |
+
+**3. The four packs, once:**
+```
+$ PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q tests/features/grok_host tests/features/opencode_host tests/features/muse_host tests/features/native_backends
+1668 passed, 19 skipped in 167.58s (0:02:47)
+```
+
+**4. Lint.** After `git add`, `python lint/run.py` gave `SDK-LINT: PASS`. A001 (643), A007 (255), S024 (25) and S062 (889) stay at their baselines.

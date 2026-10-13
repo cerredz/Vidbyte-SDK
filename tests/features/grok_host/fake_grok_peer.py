@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: argv[1] is the scenario path and everything after it is what 
 FUNCTION INVENTORY: main dispatches on the appended argv; claim_launch_number gives each process its launch number; FakeLog appends one JSON record per line to a file named after it; FrameWriter serialises stdout frames; AcpPeer answers initialize, session/new, session/resume, session/list, session/prompt and session/cancel; TurnWorker plays one session/prompt; run_cli plays --version, models and one-shot runs; held waits for the release file, a stop event or the hold limit.
 COMMON MODIFICATION PATTERNS: Add a scenario key with its default in conftest.py's default_scenario, read it here with .get, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library; the child gets the caller's environment, not the test's sys.path. 2. Do not contact the network or the real grok; this file replaces it.
-KNOWN EDGE CASES: A held turn or a stubborn peer exits by itself after HOLD_LIMIT_SECONDS, so a broken run cannot leak it for long. Lines that are not JSON are logged as raw text and ignored. A closed stdout ends the process at once.
+KNOWN EDGE CASES: A held turn or a stubborn peer exits by itself after HOLD_LIMIT_SECONDS, so a broken run cannot leak it for long. Lines that are not JSON are logged as raw text and ignored. A closed stdout ends the process at once. FrameWriter logs each "sent" record under the same lock as its stdout write, and the stdin-EOF exit waits up to EXIT_WRITER_WAIT_SECONDS for that lock, because the host may read the turn worker's answer and close stdin before that thread logged it.
 RELATED DOCS: tests/features/grok_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host
 """
@@ -28,6 +28,7 @@ POLL_SECONDS = 0.02
 HOLD_LIMIT_SECONDS = 60.0
 ANSWER_WAIT_SECONDS = 15.0
 GRANDCHILD_SECONDS = 60
+EXIT_WRITER_WAIT_SECONDS = 2.0
 DEFAULT_OPTIONS = [
     {"optionId": "opt-allow-once", "name": "Allow once", "kind": "allow_once"},
     {"optionId": "opt-allow-always", "name": "Always allow", "kind": "allow_always"},
@@ -72,10 +73,9 @@ class FrameWriter:
         self.lock = threading.Lock()
 
     def send(self, frame: dict[str, Any]) -> None:
-        self.raw(json.dumps(frame))
-        self.log.write("sent", frame=frame)
+        self.raw(json.dumps(frame), sent=frame)
 
-    def raw(self, text: str) -> None:
+    def raw(self, text: str, *, sent: dict[str, Any] | None = None) -> None:
         data = (text + "\n").encode("utf-8")
         with self.lock:
             try:
@@ -83,6 +83,8 @@ class FrameWriter:
                 sys.stdout.buffer.flush()
             except (OSError, ValueError):
                 os._exit(0)
+            if sent is not None:
+                self.log.write("sent", frame=sent)
 
 
 def held(scenario: dict[str, Any], stop: threading.Event | None = None) -> str:
@@ -224,6 +226,8 @@ class AcpPeer:
     def after_eof(self) -> None:
         if self.scenario.get("ignore_eof"):
             held(self.scenario)
+        # Wait, bounded, for a frame another thread is writing and logging, so the exit never drops its "sent" record.
+        self.writer.lock.acquire(timeout=EXIT_WRITER_WAIT_SECONDS)
         os._exit(0)
 
     def handle_line(self, raw: bytes) -> None:

@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: argv[1] is the scenario path. Everything after it is what Mus
 FUNCTION INVENTORY: main dispatches on the appended argv; claim_launch_number gives each process its launch number; FakeLog appends one JSON record per line to a file named after it; FrameWriter serialises stdout frames; MspPeer answers the MSP requests the host may send and enforces the schema members spec §8.5 lists; TurnWorker plays one turn after its turn/start ack; run_version, run_wsl_list and run_reap play the one-shot forms; held waits for the release file, a stop event or the hold limit.
 COMMON MODIFICATION PATTERNS: Add a scenario key with its default in conftest.py's default_scenario, read it here with .get, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library; the child gets the caller's environment, not the test's sys.path. 2. Do not contact the network, the real muse or the real wsl.exe; this file replaces them. 3. Do not log the value of META_API_KEY; log only whether it is set.
-KNOWN EDGE CASES: A held turn or a stubborn peer exits by itself after HOLD_LIMIT_SECONDS, so a broken run cannot leak it for long. Requests before the `initialized` notification get -32600 notInitialized, and an `initialize` without clientInfo name and version gets -32602, as the MSP 1.0.1 schema requires (review R-16). The turn/interrupt answer and the turn thread's turn/completed race unless msp["turn/interrupt"]["order"] is set (RACE-1): "answer_first" writes the answer before the turn thread may end the turn, and "completed_first" holds the answer until the ack's own turn/completed is written (MspPeer.completed_sent; a foreign turn's completion does not count). Both log an interrupt_order record; without the key nothing changes.
+KNOWN EDGE CASES: A held turn or a stubborn peer exits by itself after HOLD_LIMIT_SECONDS, so a broken run cannot leak it for long. Requests before the `initialized` notification get -32600 notInitialized, and an `initialize` without clientInfo name and version gets -32602, as the MSP 1.0.1 schema requires (review R-16). The turn/interrupt answer and the turn thread's turn/completed race unless msp["turn/interrupt"]["order"] is set (RACE-1): "answer_first" writes the answer before the turn thread may end the turn, and "completed_first" holds the answer until the ack's own turn/completed is written (MspPeer.completed_sent; a foreign turn's completion does not count). Both log an interrupt_order record; without the key nothing changes. FrameWriter logs each "sent" record under the same lock as its stdout write, and the stdin-EOF exit waits up to EXIT_WRITER_WAIT_SECONDS for that lock, because the host may read a frame and close stdin before the writing thread logged it (the R-22 precondition flake).
 RELATED DOCS: tests/features/muse_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5, §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host
 """
@@ -29,6 +29,7 @@ POLL_SECONDS = 0.02
 HOLD_LIMIT_SECONDS = 60.0
 ANSWER_WAIT_SECONDS = 15.0
 GRANDCHILD_SECONDS = 60
+EXIT_WRITER_WAIT_SECONDS = 2.0
 UUID7_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 CLIENT_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
 SOURCE_RANGE = {"first": {"id": "r-1", "sequence": 1}, "last": {"id": "r-2", "sequence": 2}, "stream": {"id": "s-1", "kind": "session"}}
@@ -92,7 +93,7 @@ class FrameWriter:
                 sys.stdout.buffer.flush()
             except (OSError, ValueError):
                 os._exit(0)
-        self.log.write("sent", frame=frame)
+            self.log.write("sent", frame=frame)
 
 
 def held(scenario: dict[str, Any], stop: threading.Event | None = None) -> str:
@@ -262,6 +263,8 @@ class MspPeer:
                 self.log.write("eof")
                 if self.scenario.get("ignore_eof"):
                     held(self.scenario)
+                # Wait, bounded, for a frame another thread is writing and logging, so the exit never drops its "sent" record.
+                self.writer.lock.acquire(timeout=EXIT_WRITER_WAIT_SECONDS)
                 os._exit(0)
             self.handle_line(raw)
 
