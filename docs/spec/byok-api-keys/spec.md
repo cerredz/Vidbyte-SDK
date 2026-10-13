@@ -1,7 +1,7 @@
 ---
 spec: byok-api-keys
 title: Agents take vidbyte_api_key and a list of provider api_keys, and text calls relay the caller's own key through the Vidbyte gateway
-status: reviewed
+status: verified
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys

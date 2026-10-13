@@ -21,11 +21,11 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | S4 adversarial review | done | 2026-10-13 | 2026-10-13 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1 Blocker / 9 Major / 8 Minor; refuted 0 (3 sub-claims corrected) |
 | S5 repair loop | converged | 2026-10-13 | 2026-10-13 | reports/S5-test-author-1.md, reports/S5-repair-1.md, verify-log.md | test pass 1 57596097; repair 1 HEAD 36897094 (code at 6ac82305); full 4107P/13S; 0 open findings (R-18 deferred) |
 | S5 live E2E (both repos) | done | 2026-10-13 | 2026-10-13 | scratchpad live-e2e/ (launcher, sdk_live, cleanup) | PASS: junk-key probe relayed xAI's own 400 invalid-argument; real runner + agent 200 via relay; 1 FEE_ONLY session, cost 1,723,700 nUSD, 200 bps, billed 1 cent = expected; open 0; second cleanup idempotent |
-| S5 re-review | round 1 done; round 2 pending | 2026-10-13 | | reports/S5-rereview-conformance-1.md | round 1: 13/13 fixes confirmed; new 0 Blocker / 1 Major (R-C1) / 2 Minor |
-| S6 PR | pending | | | | |
+| S5 re-review | done | 2026-10-13 | 2026-10-13 | reports/S5-rereview-conformance-{1,2}.md | round 1: 13/13 confirmed, 0/1/2; round 2: SOUND, 4/4 confirmed, 0/0/2 (R-D1, R-D2 → follow-ups) |
+| S6 PR | running | 2026-10-13 | | reports/S6-pr-author.md | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 running)
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (cap reached; final verdict SOUND)
 
 ## Decisions the orchestrator made
 - 2026-10-12 16:20 — Run backend and SDK as two parallel pipelines, joined by a wire contract fixed in request.md §C — the user asked for both repos; the contract is small and fixing it lets both proceed at once.
@@ -160,4 +160,10 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
   - re-ran `run_ci.py --stage source`: `4110 passed, 13 skipped`, `CI passed.`;
   - remote CI and Static policy succeeded on b1c76a2b.
 - 2026-10-13 — Accepted the LE-1 wording, which adds "or {ENV}". AUTO with no list relays the provider's env-var key, and the transport cannot tell which source the key came from, so naming both is accurate.
+- 2026-10-13 — Re-review round 2 returned SOUND. It confirmed 4/4 fixes; lint finding sets are identical to 36897094; full suite `4110 passed, 13 skipped`. Two new Minors, ruled as follow-ups:
+  - **R-D1:** a relayed-400 test gap (adding the clause to every relayed status, or naming the wrong env var, both survive), plus the stale table-G row in `test_another_relayed_provider_status_keeps_its_unchanged_wording`.
+  - **R-D2:** `CredentialKeyPolicy` misses `providerkey` and `provider_keys`, and §17's row-14 bullet overstates how far the guards agree.
+
+  Why follow-ups and not fixes: re-review rounds are at their cap of 2, and both are Minor. Fixing either would ship unreviewed code. Adding `provider_keys` as a secret name could strip a non-secret field without review. Both go in the PR body's follow-ups.
+- 2026-10-13 — Spec set to `status: verified`. Then the SDK S6 starts. The branch is 14 commits behind origin/main (8387d666). Four files overlap (3 tests plus `vidbyte/lib/registries/__init__.py`), and GitHub reports MERGEABLE with BEHIND. One test main added builds `GeminiProvider(model=model, api_key="k")`, a possible straggler. The S6 author merges with `--no-ff` (no rebase: the branch is pushed and force-push is forbidden), runs the gates, and reports BLOCKED if any test fails, since stragglers go to a test author.
 
