@@ -135,6 +135,23 @@ async def test_browserbase_fetch_asks_browserbase_to_follow_redirects(coding_age
     assert sends[0]["json_body"] == {"url": PAGE_URL, "allowRedirects": True, "proxies": False}
 
 
+def _parallel_beta_extract(send: dict) -> tuple[int, dict]:
+    # Parallel Beta Extract: full_content defaults to false, so a result carries the page text only when asked for it.
+    asked = send["json_body"].get("full_content") is True
+    return 200, {"results": [{"url": FINAL_URL, "excerpts": ["Install the package"], "full_content": PAGE_TEXT if asked else None}]}
+
+
+@pytest.mark.asyncio
+async def test_parallel_extract_requests_full_content_and_returns_the_page(fake_provider_http) -> None:
+    # Beta Extract returns only excerpts unless full_content is true, and ParallelClient keeps only full-text pages.
+    sends = fake_provider_http(_parallel_beta_extract)
+
+    payload = await ParallelClient(_secret_key("parallel_api_key")).extract([PAGE_URL])
+
+    assert sends[0]["json_body"].get("full_content") is True
+    assert [(page.url, page.content) for page in payload.pages] == [(FINAL_URL, PAGE_TEXT)]
+
+
 @pytest.mark.parametrize(
     "metadata",
     [{"sourceURL": PAGE_URL, "url": FINAL_URL}, {"sourceURL": FINAL_URL}],
