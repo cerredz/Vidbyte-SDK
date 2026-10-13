@@ -12,6 +12,7 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
@@ -129,7 +130,7 @@ class JevAgentSettings:
     system_prompt: str
     provider: ModelProvider | str
     model_name: str
-    api_keys: ProviderKeys = field(default_factory=ProviderKeys, repr=False)
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)
     temperature: float | None = None
     timeout_seconds: float | None = None
     tools: tuple[object, ...] = ()
@@ -282,7 +283,7 @@ class JevRunBriefSettings:
 
     provider: ModelProvider | str | None = None
     model_name: str | None = None
-    api_keys: tuple[str, ...] = field(default=(), repr=False)
+    api_keys: Sequence[str | None] = field(default=(), repr=False)
     temperature: float | None = None
     every_iterations: int = JEV_RUN_BRIEF_EVERY_ITERATIONS
     max_iterations: int = JEV_RUN_BRIEF_MAX_ITERATIONS

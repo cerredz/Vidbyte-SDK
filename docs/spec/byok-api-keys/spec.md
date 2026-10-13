@@ -696,7 +696,7 @@ def resolve_vidbyte_api_key(cls, explicit_key: str | None, *, remedy: str | None
 class TextModelConfig:
     provider: ModelProvider | str
     model: str
-    api_keys: ProviderKeys = field(default_factory=ProviderKeys, repr=False)   # accepts a list; replaces api_key, same position
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)   # accepts a list, stored as the matched ProviderKeys; replaces api_key, same position
     # ... system ... timeout_seconds unchanged ...
     mode: TextModelMode = TextModelMode.AUTO
     prompt_index: int | None = None
@@ -749,15 +749,15 @@ class AggregateAgent(BaseAgent):
 
 # vidbyte.agents.jev.settings
 class JevAgentSettings:        # api_keys replaces api_key in place (stored as ProviderKeys); vidbyte_api_key and model_mode appended last
-    api_keys: ProviderKeys = field(default_factory=ProviderKeys, repr=False)
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)
     vidbyte_api_key: str | None = field(default=None, repr=False)
     model_mode: TextModelMode = TextModelMode.AUTO
 class JevRunBriefSettings:     # api_keys replaces api_key in place (normalized tuple; matched by the writer)
-    api_keys: tuple[str, ...] = field(default=(), repr=False)
+    api_keys: Sequence[str | None] = field(default=(), repr=False)
 
 # vidbyte.paradigms.context_minimal_fanout.types
 class AgentRoleSettings:       # api_keys replaces api_key in place; vidbyte_api_key appended last; mode via agent_options["model_mode"]; __post_init__ normalizes the list and format-checks the Vidbyte key
-    api_keys: tuple[str, ...] = field(default=(), repr=False)
+    api_keys: Sequence[str | None] = field(default=(), repr=False)
     vidbyte_api_key: str | None = field(default=None, repr=False)
 
 # vidbyte.sessions.session
@@ -780,7 +780,7 @@ There is no store, collection, or index. Three in-memory records are new or chan
   - `vidbyte_api_key` is `None` or a `str` that full-matches `VIDBYTE_API_KEY_PATTERN` (M-11 or M-10);
   - `matched_primary` and `matched_others` hold `ModelProvider` members, coerced the same way.
 
-  `key_for(provider)` returns the key whose provider equals `ModelProvider(provider)`, or `None`. Its size is bounded: at most one key per `ModelProvider` member, one Vidbyte key, and two short name tuples. `ProviderKeyMatcher.match` builds it from a raw list. It is the form children carry, not a developer input, and the docs show developers only the list (NG-19). **A record built by hand and passed as `api_keys` is treated like a child's record:** matching checks each key against its provider (D-31, M-20) but never re-binds it and never applies INV-24.
+  `key_for(provider)` returns the key whose provider equals `ModelProvider(provider)`, or `None`. Its size is bounded: at most one key per `ModelProvider` member, one Vidbyte key, and two short name tuples. `ProviderKeyMatcher.match` builds it from a raw list. It is the form children carry, not a developer input, and the docs show developers only the list (NG-19). **A record built by hand and passed as `api_keys` is treated like a child's record:** matching checks each key against its provider (D-31, M-20) but never re-binds it and never applies INV-24. So that the list form type-checks, `TextModelConfig.api_keys` and `JevAgentSettings.api_keys` are annotated with the agent entry points' union, `ProviderKeys | Iterable[str | None] | None`, and hold the matched record after `__post_init__`; `JevRunBriefSettings.api_keys` and `AgentRoleSettings.api_keys` are annotated `Sequence[str | None]` and hold the normalized tuple.
 - **`TextCredentials`** is new, frozen, and never persisted. It has three fields:
   - `mode` (required, a `TextModelMode`);
   - `provider_api_key` (`str | None`, hidden from repr);
@@ -1490,3 +1490,4 @@ The algorithm tests in `tests/test_multi_provider_agentic_grader.py` mock `Modal
 **Repair deviations (S5, iteration 1).** Evidence is in `verify-log.md` and `reports/S5-repair-1.md`.
 
 - Row 7: `TextModelConfig.__post_init__` now runs the gateway shape check (M-12, M-13) before `ProviderKeyMatcher.match`, not after it. INV-8 ("refused when it is built, before any key or environment is read") takes precedence over row 7's sentence order (review R-6).
+- §8.5, §9.1: annotations widened to accept the list form; orchestrator ruling R-10. The two `ProviderKeys` fields take `ProviderKeys | Iterable[str | None] | None` and the two tuple fields take `Sequence[str | None]`. Reads narrow inline (`cast` in `credentials()`, `settings.vidbyte_api_key` in the brief writer); no runtime change.

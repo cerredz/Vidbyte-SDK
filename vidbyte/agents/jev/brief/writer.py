@@ -53,7 +53,7 @@ class JevRunBriefWriter(BaseAgent):
         # against its provider; otherwise it carries the main agent's
         # matched record and mode, like every other Jev child.
         provider = brief.provider if brief.provider is not None else settings.provider
-        api_keys = ProviderKeyMatcher.match(brief.api_keys, primary=provider, vidbyte_api_key=settings.api_keys.vidbyte_api_key, field_name="JevRunBriefSettings.api_keys") if brief.api_keys else settings.api_keys
+        api_keys = ProviderKeyMatcher.match(brief.api_keys, primary=provider, vidbyte_api_key=settings.vidbyte_api_key, field_name="JevRunBriefSettings.api_keys") if brief.api_keys else settings.api_keys
         super().__init__(
             name=f"{settings.name}-run-brief",
             system_prompt=Prompts().get(Prompt.JEV_RUN_BRIEF_SYSTEM_PROMPT),

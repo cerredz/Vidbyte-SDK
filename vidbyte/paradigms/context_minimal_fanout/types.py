@@ -427,7 +427,7 @@ class AgentRoleSettings:
     runner: object | None = None
     provider: str | None = None
     model_name: str | Sequence[str] | None = None
-    api_keys: tuple[str, ...] = field(default=(), repr=False)
+    api_keys: Sequence[str | None] = field(default=(), repr=False)
     temperature: float | None = None
     tools: tuple[object, ...] = ()
     middleware: tuple[object, ...] = ()

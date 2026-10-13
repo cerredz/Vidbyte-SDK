@@ -22,9 +22,9 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from vidbyte.lib.constants.jev import (
     JEV_DEFAULT_MODEL,
@@ -55,7 +55,7 @@ TEXT_REMEDY: str = f"Pass vidbyte_api_key or set {VIDBYTE_API_KEY_ENV_VAR}, or u
 class TextModelConfig:
     provider: ModelProvider | str
     model: str
-    api_keys: ProviderKeys = field(default_factory=ProviderKeys, repr=False)
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)
     system: str | None = None
     messages: tuple[Mapping[str, Any], ...] = ()
     temperature: float | None = None
@@ -127,15 +127,17 @@ class TextModelConfig:
         # reads the provider key, so no key is read, or sent, by a mode
         # that has no use for it.
         provider = self.normalized_provider()
+        # __post_init__ always stores the matched record in api_keys.
+        keys = cast(ProviderKeys, self.api_keys)
         match self.mode:
             case TextModelMode.DIRECT:
                 # Straight to the provider with the developer's own
                 # key: no Vidbyte key and no Vidbyte fee, so a missing
                 # provider key stops here and names the keys the list
                 # does hold (M-8).
-                provider_key = ProviderModelRegistry.find_provider_api_key(provider, self.api_keys)
+                provider_key = ProviderModelRegistry.find_provider_api_key(provider, keys)
                 if provider_key is None:
-                    held = ", ".join(member.value for member in self.api_keys.providers)
+                    held = ", ".join(member.value for member in keys.providers)
                     hint = f" (api_keys holds keys for: {held})" if held else ""
                     raise ConfigurationError(
                         f"Missing API key for provider {provider.value}. Pass api_keys or set {ProviderModelRegistry.get_api_key_env_var(provider)}.{hint}",
@@ -152,14 +154,14 @@ class TextModelConfig:
                 # key. The call relays the developer's provider key
                 # when there is one, and is Vidbyte-paid otherwise.
                 vidbyte_key = ProviderModelRegistry.resolve_vidbyte_api_key(self.vidbyte_api_key, remedy=TEXT_REMEDY)
-                provider_key = ProviderModelRegistry.find_provider_api_key(provider, self.api_keys)
+                provider_key = ProviderModelRegistry.find_provider_api_key(provider, keys)
                 # @intent relayed-key-fits-the-gateway-header
                 # The gateway refuses a provider-key header over
                 # its limit, so the call fails here, before any
                 # request; DIRECT sends the key straight to the
                 # vendor, which has no such limit.
                 if provider_key is not None and len(provider_key) > VIDBYTE_PROVIDER_KEY_MAX_LENGTH:
-                    source = "api_keys" if self.api_keys.key_for(provider) is not None else ProviderModelRegistry.get_api_key_env_var(provider)
+                    source = "api_keys" if keys.key_for(provider) is not None else ProviderModelRegistry.get_api_key_env_var(provider)
                     raise ConfigurationError(
                         f"The {provider.value} key from {source} has {len(provider_key)} characters, and the Vidbyte gateway relays keys of at most {VIDBYTE_PROVIDER_KEY_MAX_LENGTH} characters. Use mode=TextModelMode.DIRECT to send it straight to {provider.value}.",
                         details={"provider": provider.value, "source": source, "length": len(provider_key)},
