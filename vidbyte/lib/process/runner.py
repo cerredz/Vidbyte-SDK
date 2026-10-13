@@ -103,7 +103,11 @@ class ProcessStopper:
 
     @staticmethod
     def _kill_leader(process: asyncio.subprocess.Process) -> None:
-        # Kills the leader directly while it has not been reaped.
+        # @intent stop-tree-kills-a-live-leader
+        # The group stop may not reach the leader (on Windows the
+        # taskkill can fail to start or time out), so the leader is
+        # killed directly while it has not been reaped. A failed kill
+        # is ignored, because the stop must never raise.
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                 process.kill()
