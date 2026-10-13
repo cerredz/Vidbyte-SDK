@@ -340,6 +340,10 @@ class AggregateAgent(BaseAgent):
 
     def _build_aggregator(self) -> Any:
         # Resolves the aggregator into a tool-free synthesis agent, defaulting to this agent's own model.
+        # @intent aggregator-carries-the-matched-keys
+        # A spec-built aggregator gets the aggregate's record and mode
+        # as they are, so it sends only the key matched to its own
+        # provider. A prebuilt aggregator is used as given.
         if self._aggregator_input is not None and self._coerce_spec(self._aggregator_input) is None:
             return self._aggregator_input
         spec = self._resolve_aggregator_spec()

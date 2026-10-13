@@ -97,6 +97,11 @@ class AgentFallbackSettings:
 
     def named_providers(self) -> tuple[str, ...]:
         """Return the providers this chain's entries name, in order and without repeats; bare names and a disabled chain name none."""
+        # @intent backup-providers-are-matched-with-the-agent
+        # The agent matches its key list against these names, so a key
+        # for a backup's provider binds to that provider. A bare name
+        # runs on the agent's own provider, already matched, and a
+        # disabled chain makes no call, so neither adds a name.
         if not self.enabled:
             return ()
         names: list[str] = []
@@ -163,7 +168,10 @@ class AgentFallbackSettings:
 
     @staticmethod
     def _inherited_provider(primary: FallbackModel, entry: str, position: int) -> str:
-        # A bare model name only works when the agent itself declares a provider to inherit.
+        # @intent bare-backup-name-needs-the-agent-provider
+        # A bare model name runs on the agent's own provider and so on
+        # the key matched to it. With no provider to inherit there is
+        # no route and no key to choose, so the entry is refused here.
         if not primary.provider:
             raise ConfigurationError(
                 f"AgentFallbackSettings.models[{position}] ({entry!r}) has no provider and the agent declares none; "

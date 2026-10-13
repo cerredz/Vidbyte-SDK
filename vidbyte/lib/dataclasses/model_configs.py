@@ -270,6 +270,10 @@ class TextCredentials:
     @property
     def relays(self) -> bool:
         """Return True when a gateway call carries the developer's own provider key."""
+        # @intent relay-header-only-on-gateway-calls
+        # The transport adds the provider-key header only when this
+        # is True. DIRECT puts its key in the vendor's own auth header,
+        # so a DIRECT call, or a gateway call with no key, never relays.
         return self.uses_gateway and self.provider_api_key is not None
 
 
