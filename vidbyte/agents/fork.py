@@ -42,7 +42,8 @@ class AgentForker:
         child_run_id = cls._run_id(agent, settings.run_id)
         # The child edits its own copy of the parent's managed context window, so branch edits never reach the parent.
         child_manager = cls._context_manager(agent, settings)
-        # Read the vendor the parent really runs on, so the backup check below sees a provider-prefixed model's vendor.
+        # Read the vendor the parent really runs on, so the backup
+        # check below sees a provider-prefixed model's vendor.
         parent_provider = cls._resolved_provider(agent.runner_config.provider, agent.runner_config.model_name)
         # @intent fork-reads-prefixed-child-provider
         # Read the child's vendor the same way: model_name="gemini/gemini-3.5-flash" with no provider runs on Gemini.
@@ -59,9 +60,9 @@ class AgentForker:
             middleware=agent.middleware if settings.middleware is None else settings.middleware,
             system_prompt=agent.system_prompt if settings.system_prompt is None else settings.system_prompt,
             # @intent children-carry-the-matched-keys
-            # The child gets the parent's matched record and mode as they
-            # are; each call sends only the key matched to its own
-            # provider, so no key crosses to another vendor.
+            # The child gets the parent's matched record and mode as
+            # they are; each call sends only the key matched to its
+            # own provider, so no key crosses to another vendor.
             api_keys=agent.runner_config.api_keys,
             model_mode=agent.runner_config.model_mode,
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
