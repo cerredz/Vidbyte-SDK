@@ -148,3 +148,14 @@ Not pushed.
   - `test_managed_text_failures.py` passes 10 of 10.
   - `python lint/run.py` reports SDK-LINT: PASS.
 - **Spec §12.3.** Of the §12.3 files, main changed only `vidbyte/harnesses/serialization.py` (row 16). The leading `\b` of `_ERROR_ASSIGNMENT` became a lookbehind that also redacts prefixed and camelCase credential names (#993). Row 16's changes now apply on top of that.
+
+### 8.1 Second rebase onto origin/main 595a7260 (#1023)
+
+- **Rebase.** Main moved one commit, #1023, which changed `vidbyte/providers/output_schema.py` and added three tests to `test_output_schema_provider_dialect.py`. The rebase merged with no conflict: the §13 `TextModelMode` import and the `DIRECT` edits sit beside main's new `Field` import and tests.
+- **Stragglers.** One of the three new tests is a straggler. `test_openai_responses_payload_unravels_annotated_refs` built `OpenAIProvider(api_key="k")`; it now uses `api_keys=["sk-k"]` and `mode=DIRECT`, like its sibling. Its `TextModelConfig` is openai in `AUTO`, which builds without a key, so it is unchanged. The other two new tests call `OutputSchemaFormatter` directly and stay green. The straggler is recorded in test-plan.md §5.
+- **Red run.**
+  - origin/main `595a7260` baseline: 3984 passed, 13 skipped.
+  - Rebased red run: 308 failed, 3786 passed, 13 skipped, 7 errors. That is the earlier run plus the straggler (`AttributeError: DIRECT`) and the two new passing tests; every other failure is unchanged.
+  - `test_managed_text_failures.py` passes 10 of 10, and lint passes.
+- **Spec §12.3.** `output_schema.py` is not a §12.3 row and touches no key, mode, or credential path. It only rewrites the response schema, inlining `$ref` nodes that carry sibling keywords. So it does not interact with this feature.
+- **Spec §13 line references.** The line numbers §13 cites for this file (`:91`, `:102`) are now stale, because the tests sit lower in the file. Only the line numbers changed; the tests are the same.

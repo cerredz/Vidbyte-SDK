@@ -1,6 +1,6 @@
 # byok-api-keys: test plan (S2)
 
-Spec: `docs/spec/byok-api-keys/spec.md` r4 (approved), now r5 with the S2 wording rulings. Branch `feat/byok-api-keys`, written on base `52aab816` and rebased onto origin/main `b53c8811` on 2026-10-13.
+Spec: `docs/spec/byok-api-keys/spec.md` r4 (approved), now r5 with the S2 wording rulings. Branch `feat/byok-api-keys`, written on base `52aab816` and rebased onto origin/main `b53c8811`, then `595a7260` (#1023), on 2026-10-13.
 New pack: `tests/features/sdk_provider_keys/` (117 tests, 11 files plus fixtures, FEATURE.md, README.md).
 Superseded updates: `tests/features/sdk_managed_text/` and 30 module test files (spec §13), plus post-rebase stragglers in seven module test files, one of them added on main (§5).
 
@@ -102,21 +102,21 @@ Files are abbreviated: `acc` = `test_provider_keys_acceptance.py`, `match` = `�
 
 ## 3. Red run
 
-Command: `env -u DEEPSEEK_API_KEY PYTHONPATH=C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys python -m pytest -q -p no:cacheprovider`, on the branch rebased onto origin/main `b53c8811`, with the post-rebase straggler updates (no production code changed).
+Command: `env -u DEEPSEEK_API_KEY PYTHONPATH=C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-byok-api-keys python -m pytest -q -p no:cacheprovider`, on the branch rebased onto origin/main `595a7260`, with the post-rebase straggler updates (no production code changed).
 
-- Baseline: origin/main `b53c8811` in a scratch worktree, same command with `PYTHONPATH` set to that worktree: **3981 passed, 13 skipped, 0 failed**. So no failure below is pre-existing.
-- Red run: **307 failed, 3784 passed, 13 skipped, 7 errors in 40.58s** (4,111 tests = 3,994 + 117 new).
+- Baseline: origin/main `595a7260` in a scratch worktree, same command with `PYTHONPATH` set to that worktree: **3984 passed, 13 skipped, 0 failed**. So no failure below is pre-existing.
+- Red run: **308 failed, 3786 passed, 13 skipped, 7 errors in 55.09s** (4,114 tests = 3,997 + 117 new).
 - New pack: **117 failed, 0 passed**.
-- Superseded tests: **190 failed + 7 setup errors**, all in the files listed in §5. That is the first run's 178 + 7, plus 12 tests main added: the 11 updated as post-rebase stragglers, and `test_chunked_content_answers_with_its_text_chunks`, which already runs through the `DIRECT` `_text` helper of `test_compatible_provider_text.py`. No failure is in an untouched file.
+- Superseded tests: **191 failed + 7 setup errors**, all in the files listed in §5. That is the first run's 178 + 7, plus 13 tests main added: the 12 updated as post-rebase stragglers, and `test_chunked_content_answers_with_its_text_chunks`, which already runs through the `DIRECT` `_text` helper of `test_compatible_provider_text.py`. No failure is in an untouched file.
 - First run, before the rebase (base `52aab816`, HEAD `661fe8bf`): baseline 3912 passed, 13 skipped; red 295 failed, 3727 passed, 13 skipped, 7 errors. Every test that failed there still fails, for the same reason.
 
-Rebase: three conflicts, all in import blocks where main added imports for its new tests and §13 added `TextModelMode` (`test_compatible_provider_text.py`, `test_deepseek_provider.py`, `test_output_schema_provider_dialect.py`). Each keeps main's imports and the §13 one. The other five edited files main touched merged on their own.
+Rebase: three conflicts, all in import blocks where main added imports for its new tests and §13 added `TextModelMode` (`test_compatible_provider_text.py`, `test_deepseek_provider.py`, `test_output_schema_provider_dialect.py`). Each keeps main's imports and the §13 one. The other five edited files main touched merged on their own. The second rebase, onto `595a7260` (#1023, which added three tests to `test_output_schema_provider_dialect.py`), merged without a conflict.
 
 Failure reasons, grouped (every one is the feature being absent, never a bad import or a typo):
 
 | Count | Reason |
 |---|---|
-| 125 | `AttributeError: DIRECT` (118 in a test, 7 in `setUp`): `TextModelMode.DIRECT` does not exist yet |
+| 126 | `AttributeError: DIRECT` (119 in a test, 7 in `setUp`): `TextModelMode.DIRECT` does not exist yet |
 | 38 + 2 | `JevAgentSettings` / `JevRunBriefSettings` reject `api_keys` |
 | 30 + 6 + 3 | `BaseAgent` rejects `api_keys`, `vidbyte_api_key`, `model_mode` |
 | 28 | `TextModelConfig` rejects `api_keys` / `vidbyte_api_key` |
@@ -199,6 +199,7 @@ All rows are from spec §13, except those marked "(post-rebase straggler)": test
 | `tests/test_deepseek_provider.py` | `test_insufficient_system_resource_reply_raises_and_keeps_usage` (post-rebase straggler) | INV-6 | Rename, `DIRECT` |
 | `tests/test_output_schema_provider_dialect.py` | `test_anthropic_output_config_payload_closes_every_object` (post-rebase straggler) | INV-6 | Rename with an `sk-ant-` fake, `DIRECT` |
 | same | `test_compatible_native_schema_payload_closes_every_object` (post-rebase straggler; a base test the first hunt missed) | D-23, M-12 | The mistral `TextModelConfig` also gets `mode=TextModelMode.DIRECT`; the adapter already had it |
+| same | `test_openai_responses_payload_unravels_annotated_refs`, added by #1023 after the second rebase (post-rebase straggler) | INV-6 | Rename with an `sk-` fake, `DIRECT`, as in its sibling `test_openai_responses_payload_closes_every_object` |
 | `tests/test_openrouter_provider.py` | `test_error_finish_reason_raises_with_usage` (post-rebase straggler) | EC-15, D-23 | Rename with an `sk-or-` fake, `DIRECT`, in both configs |
 | `tests/test_streaming_text_runner.py` | `test_anthropic_error_event_mid_stream_…`, `test_openai_error_event_mid_stream_…`, `test_openai_response_failed_mid_stream_…` (post-rebase straggler) | INV-11 | Rename, `DIRECT` |
 | `tests/test_text_model_runner.py` | `test_openai_responses_reasoning_item_text_is_not_the_answer`, `test_anthropic_joins_adjacent_text_blocks_as_written` (post-rebase straggler) | INV-6 | Rename, `DIRECT` |

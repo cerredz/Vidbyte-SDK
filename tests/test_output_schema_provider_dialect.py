@@ -176,7 +176,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         schema = _wire_schema(AnnotatedTicket)
         before = json.dumps(schema, sort_keys=True)
         config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", response_format=schema)
-        payload = OpenAIProvider(model="gpt-5.4-mini", api_key="k")._create_text_payload(config, "triage", None, None)
+        payload = OpenAIProvider(model="gpt-5.4-mini", api_keys=["sk-k"], mode=TextModelMode.DIRECT)._create_text_payload(config, "triage", None, None)
         sent = payload["text"]["format"]["schema"]
 
         self.assert_strict(sent)
