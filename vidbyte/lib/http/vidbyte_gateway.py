@@ -105,10 +105,13 @@ class _GatewayAnswer:
         # from the status alone, which is all the caller needs to act.
         # Under relay the wallet pays only Vidbyte's fee, no daily cap
         # applies, and no Vidbyte account is behind the call, so those
-        # remedies are worded differently there.
+        # remedies are worded differently there. The transport never
+        # learns the mode, and VIDBYTE_MANAGED ignores api_keys, so a
+        # paid 402 offers a provider key only as a TextModelMode.AUTO
+        # option.
         reasons = {
             VIDBYTE_STATUS_UNAUTHORIZED: f"Vidbyte rejected the Vidbyte API key (HTTP {status}); check {VIDBYTE_API_KEY_ENV_VAR} or vidbyte_api_key",
-            VIDBYTE_STATUS_PAYMENT_REQUIRED: f"your own Vidbyte wallet balance is too low for this call (HTTP {status}, which never means a provider's billing); top up the wallet, or add your own provider key for {provider.value} to api_keys so the wallet pays only Vidbyte's fee",
+            VIDBYTE_STATUS_PAYMENT_REQUIRED: f"your own Vidbyte wallet balance is too low for this call (HTTP {status}, which never means a provider's billing); top up the wallet, or, with mode=TextModelMode.AUTO (the default), add your own provider key for {provider.value} to api_keys so the wallet pays only Vidbyte's fee",
             VIDBYTE_STATUS_FORBIDDEN: f"the Vidbyte API key lacks the models:invoke scope (HTTP {status}); grant that scope to the key",
             HTTPStatus.CONFLICT: f"an earlier attempt of this call is still running at Vidbyte (HTTP {status}) and may still complete and be billed; {retried}, so wait before sending the request again, because a new request may pay twice",
             HTTPStatus.REQUEST_ENTITY_TOO_LARGE: f"the request exceeds the gateway's 2,000,000-byte limit, measured as JSON with non-ASCII characters escaped (HTTP {status}); shorten the context, or use TextModelMode.DIRECT to send it straight to the provider",
