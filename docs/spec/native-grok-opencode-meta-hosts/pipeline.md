@@ -26,7 +26,7 @@ started: 2026-10-13 01:30 UTC
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
-- S5 repair iterations: 0/8
+- S5 repair iterations: 1/8
 - S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
@@ -108,11 +108,29 @@ started: 2026-10-13 01:30 UTC
   - **Iteration 3:** comments (R-13, R-14, R-15) in a single reflow pass.
 
   Each iteration's DONE means its packet is closed and every gate is green. Later packets are listed as deferred by me, not as open defects.
+- 2026-10-13 19:10 — **S5 iteration 1 is DONE and verified by me.** HEAD is 406edb56 and the last code commit is d6733882.
+  - **Commits:** the origin/main merge 3cdd9704 (no rebase; the one conflict, `notify` in transport.py, keeps both the timeout and main's frame without params); R-1 749b7583, R-2 137fa778, R-3 a9223a02, CI-1 eea8cf36, R-6 1e62494b, R-5 93c42f68, R-7 a4d74982, R-8 e70be132, R-4 54d5c17b, R-M1 87217940.
+  - **My checks:**
+    - the tree is clean;
+    - the four packs are byte-identical to S2_HEAD 96df0b45; the only other test change (`tests/features/coding_agent/test_coding_agent_web_fetch.py`) is identical to origin/main and came with the merge;
+    - every packet row in review.md reads `fixed @sha`;
+    - remote `ci.yml` 38401581802 and `static-policy.yml` 38401585901 both succeeded on d6733882 (3.11 and 3.12 each `5646 passed, 39 skipped`);
+    - my own `run_ci --stage source` gave `5653 passed, 32 skipped in 184.27s` / `CI passed.`;
+    - INV-19's hash is intact.
+  - **CI-1's root cause was confirmed in the CPython source** as I had predicted: a bare `drain()` returns normally after EPIPE on 3.12. The fix: a write that names a deadline raises if stdin is closing after drain. The default transport path stays as main's (INV-18).
 
 ## User replies (verbatim)
 (none during the run)
 
 ## Niche facts accumulated (carried into every later briefing)
+
+### S5 iteration 1 facts
+- `ci.yml` and `static-policy.yml` run only when dispatched; `gh pr checks 1036` shows "no checks reported". Read results with `gh run view <id>` and dispatch with `gh workflow run`. — *source:* S5-1
+- On Windows (Proactor), `drain()` raises for a dead pipe in every mode, so pipe-timing bugs only show on remote Linux 3.12. — *source:* S5-1
+- A full-suite WinError 10055 means the machine has thousands of TIME_WAIT sockets; rerun before suspecting code. — *source:* S5-1
+- `ToolsFormatter._parameters_schema` emits only type and description. Categorical values are listed by adding an `input_schema` built from it, as `fork.py` and Muse's `MuseHostTool.spec()` do; do not change `ToolParameter`. — *source:* S5-1
+- S025 resolves f-strings with a placeholder when counting description sentences. `ruff --select I001` reports 223 findings already on main, none in this feature's files. — *source:* S5-1
+- Muse session ids are lower-cased at all five `require_uuid` sites, Grok's at continue and fork; NativeTurnTable stays exact for opencode. — *source:* S5-1
 
 ### Lint and gates
 - **S011 bans `import httpx`** outside `vidbyte/lib/http/transport.py` and `vidbyte/tools/mcp/transport.py` (baseline 0).
