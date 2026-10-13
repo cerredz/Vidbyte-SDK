@@ -32,6 +32,7 @@ _MAX_RESULTS = 20
 # Tavily Extract accepts at most this many URLs in one request.
 _MAX_URLS = 20
 _MAX_SNIPPET_CHARS = 500
+_MAX_QUERY_CHARS = 400
 
 
 class TavilyClient(WebOperationClient):
@@ -43,7 +44,10 @@ class TavilyClient(WebOperationClient):
 
     async def search(self, query: str, *, max_results: int = 5, search_depth: str = "basic") -> SearchPayload:
         """Run one Tavily search and return normalized hits with billing counts."""
-        body = {"query": query, "search_depth": search_depth, "max_results": min(max(1, max_results), _MAX_RESULTS)}
+        # @intent tavily-query-stays-under-the-cap
+        # Tavily's help center says to "keep your query under 400 characters", and a longer one is rejected with
+        # "Query is too long. Max query length is 400 characters.", so only the first 400 characters are sent, as Brave's client does.
+        body = {"query": query[:_MAX_QUERY_CHARS], "search_depth": search_depth, "max_results": min(max(1, max_results), _MAX_RESULTS)}
         payload, attempts = await self.request_json("search", "POST", path="search", headers=self._headers(), json_body=body)
         return SearchPayload(provider=self.provider, query=query, hits=self._hits_from_payload(payload), attempts=attempts, billable_units=1)
 
