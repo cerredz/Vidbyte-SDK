@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Each table row overrides one field of a known-good record, so
 FUNCTION INVENTORY: build_record constructs a record from base fields plus one override; expect_rejected asserts the ConfigurationError shape; the *_CASES tables hold the rows; the test_* functions run them.
 COMMON MODIFICATION PATTERNS: Add a row to the matching table when spec §9.1 adds a check; keep one bad value per row.
 WHAT NOT TO DO IN THIS FILE: 1. Do not assert that a message quotes a value; the spec only says when it may not. 2. Do not test that a plain set or list is refused where §9.1 says it is converted.
-KNOWN EDGE CASES: The spec says set fields are converted to frozenset but EC-23 also says allowed_tool_kinds must be a frozenset of AcpToolKind, so only a frozenset of plain strings is used as the bad value. A long bad value must never be quoted in the message.
+KNOWN EDGE CASES: The spec says set fields are converted to frozenset but EC-23 also says allowed_tool_kinds must be a frozenset of AcpToolKind, so only a set or frozenset of plain value strings is used as the bad value. A long bad value must never be quoted in the message.
 RELATED DOCS: tests/features/grok_host/FEATURE.md; docs/spec/native-grok-opencode-meta-hosts/spec.md §9.1, EC-23, EC-33, D-8
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/grok_host/test_grok_host_records.py
 """
@@ -97,7 +97,7 @@ def validator_rejects(tmp_path: Path, enums: Any) -> list[tuple[str, tuple[Any, 
         ("require_bool", (1, "f"), {}),
         ("require_bool", ("true", "f"), {}),
         ("require_enum", ("grok", enums.NativeHarness, "f"), {}),
-        ("require_enum_set", ({enums.AcpToolKind.EDIT}, enums.AcpToolKind, "f"), {}),
+        ("require_enum_set", ({"edit"}, enums.AcpToolKind, "f"), {}),
         ("require_enum_set", (frozenset({"edit"}), enums.AcpToolKind, "f"), {}),
         ("require_argv", ((), "f"), {}),
         ("require_argv", (("",), "f"), {}),

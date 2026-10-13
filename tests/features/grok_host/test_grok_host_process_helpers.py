@@ -91,7 +91,7 @@ def test_cli_invocation_validates_and_hides_env_and_stdin(process_api, tmp_path:
     ]
     for field_name, bad in bad_values:
         with pytest.raises(grok_api.ConfigurationError) as caught:
-            invocation(process_api, ("grok",), **{field_name: bad})
+            invocation(process_api, **{"argv": ("grok",), field_name: bad})
         assert f"CliInvocation.{field_name}" in str(caught.value), field_name
 
 

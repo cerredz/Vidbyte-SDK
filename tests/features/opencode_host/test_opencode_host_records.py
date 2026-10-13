@@ -278,7 +278,7 @@ def test_host_settings_reject_each_bad_field(records_api, tmp_path) -> None:
     failures = []
     for row_id, field_names, overrides in settings_cases(records_api, tmp_path):
         try:
-            expect_rejected(records_api, "OpencodeHostSettings", field_names, lambda overrides=overrides: attached_settings(records_api, tmp_path, **overrides))
+            expect_rejected(records_api, "OpencodeHostSettings", field_names, lambda overrides=overrides: attached_settings(records_api, **{"workspace": tmp_path, **overrides}))
         except AssertionError as error:
             failures.append(f"{row_id}: {error}")
     assert failures == [], "\n".join(failures)
