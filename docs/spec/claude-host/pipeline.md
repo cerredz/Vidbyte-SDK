@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:35 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1 21a947a7 (18 sections, §12.3 31 rows); review r1: SOUND WITH FIXES, 3 Blockers, 3 Majors, 4 Minors; author revising to r2 |
+| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 21a947a7 → review r1 SOUND WITH FIXES (3B/3M/4m) → spec r2 ac39bb46 (all 10 applied); scoped review round 2 launched 06:25 UTC |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-13 00:45 UTC
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Parallel run
 - **Sibling pipeline:** `codex-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host` on branch `feat/codex-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -58,6 +58,13 @@ started: 2026-10-13 00:45 UTC
   - They were forwarded by report path and line range (FINDINGS, lines 23–186 of reports/S1-spec-review.md), not pasted into the message, to keep the orchestrator's context small. The author reads the verbatim text from disk.
   - The orchestrator added one instruction under rule 11: R-2's bounded stop after an interrupt is a module constant, not a new spawn-request field.
   - R-2, R-3 and R-5 change §8, §8.5, §9.2 and §10, so a scoped round 2 follows the r2 revision.
+- 2026-10-13 06:00 UTC — **Fixed the shared doc text in request.md §C (commit 978ebfa5).** The `REPO_MAP.md` native section and the `vidbyte/harnesses/README.md` bullet now have fixed text that is byte-identical in both runs' request.md (bullet-block SHA-256 `6da4fa77…51277b0`).
+  *Why:* the two specs inserted different text at the same two spots, which would conflict at the second merge. The CodexHost draft text also broke the field guide's `agents-md-map.md` rule.
+  The author was told with a queued SendMessage and adopted the text in r2.
+- 2026-10-13 06:25 UTC — **r2 spot-check passed.** `revision: 2`, §16 holds a disposition row for each of R-1 to R-10, there are 18 sections and 31 §12.3 rows, and the commit is `docs(spec): revise claude-host spec r2 (review round 1 fixes and fixed shared doc texts)` (ac39bb46). The orchestrator committed the author's r2 report addendum.
+- 2026-10-13 06:25 UTC — **Launched review round 2 (the last allowed), scoped to the sections r2 changed.**
+  - It covers §8 (D-4 interrupt grace, D-5 CLI lookup), §8.5, §9.1–9.3, §10 T-3, and §12.1/12.3/12.4/12.5, plus what depends on them: §6, §13, §14, and §15 A-2/A-3/A-17.
+  - Anything still disputed after round 2 becomes a Q-n with its stated default.
 
 ## User replies (verbatim)
 - none yet
@@ -149,4 +156,12 @@ started: 2026-10-13 00:45 UTC
 - **Results from a crash or a startup error may report zero cost:** `total_cost_usd` and `modelUsage` can come back as zero (TS d.ts:5738/5746). *source:* S1 reviewer.
 - **Finding the CLI on Windows.** The SDK's `_find_cli` prefers a native exe and then `~/.local/bin/claude.exe`, and refuses `.cmd`/`.bat` shims with a `CLIConnectionError` at connect. On this machine `which("claude")` returns `C:\users\422mi\.local\bin\claude.EXE`. *source:* S1 reviewer.
 - **The package smoke imports only the root package,** so spec r1's NFR-1 claim about it was false. *source:* S1 reviewer R-7.
+- **Contract names new in spec r2:**
+  - `ClaudeProbe.locate_cli(cli_path, *, windows, home) -> str`;
+  - constants `CLAUDE_INTERRUPT_GRACE_SECONDS` (30.0), `CLAUDE_INVALID_ARGUMENT_NEXT_STEP`, `CLAUDE_UNSUPPORTED_COMBINATION_NEXT_STEP`, `CLAUDE_EMPTY_INPUT_NEXT_STEP`, `CLAUDE_PRECONDITION_NEXT_STEP`;
+  - enum member `ClaudeCliFlag.PERMISSION_PROMPTS`.
+  *source:* S1 author r2.
+- **Interrupt grace test seam:** patch `vidbyte.harnesses.native.claude.session.CLAUDE_INTERRUPT_GRACE_SECONDS`. Interrupt and steer fakes must emit a result after `interrupt()`, or every such test waits the full 30 s. *source:* S1 author r2.
+- **The Windows CLI lookup is testable on Linux CI:** call `locate_cli(..., windows=True, home=<tmp>)` and patch `shutil.which` through the probe module. On macOS and Linux the lookup is only `which("claude")`. *source:* S1 author r2.
+- **S054 forbids** assigning a string to, or comparing a string with, any name whose words include token, password, pass, pwd or secret. *source:* S1 author r2.
 - **C016 is unaffected by the new extra and the submodule exports.** It reads only the root `__all__` and the pyproject name and version, so `contracts/sdk-public-api.json` does not change. New packages ship through `packages.find`. *source:* S1 reviewer.

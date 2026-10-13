@@ -128,3 +128,41 @@ This is the smallest design that satisfies every ★ live function. Nothing outl
 - **Lint slack is unverified.** No gate ran at S1, and A001 has no headroom (643), so every new `.py`, tests included, needs the seven-field header. The first gate run at S2 or S3 must record pre-existing failures.
 
 **Open questions:** Q-1 to Q-10, all non-blocking with default No. None blocks the spec.
+
+## Addendum: r2 (2026-10-13)
+
+- **Commit:** `ac39bb46`, on top of the orchestrator's `978ebfa5`. Only `spec.md` is in it.
+- **Mechanical checks re-run:**
+  - 18 `## §` headings;
+  - digit-led rows only in §12.3 (1–31);
+  - every ID defined, with these maxima: AC 38, EC 58, A 17 (G, NG, INV, FR, NFR, D, T, W and Q unchanged);
+  - every edited table row has its table's column count.
+- **Budget:** unchanged at 22 new files, 9 modified and 69 classes. Only constants were added (row 14).
+
+**Dispositions:** all ten findings were accepted; §16 has one row per R-n.
+
+| Finding | Change |
+|---|---|
+| R-1 | The marker hash uses the committed blob or CRLF-normalized bytes. No `.gitattributes`, per the orchestrator. |
+| R-2 | A grace timer, `CLAUDE_INTERRUPT_GRACE_SECONDS = 30.0`, runs after every interrupt that returns. It is a constant rather than a request field (rule 9). EC-53 is no longer a limitation, and the spec:733 contradiction is resolved. Adds AC-37 and A-17. |
+| R-3 | `repr=False` on the request `env` and the MCP `env` and `headers`. |
+| R-4 | `--permission-prompts none` for NONE. Re-verified in claude.exe 2.1.296: the help text quoted in §11, plus `.default("host")`. |
+| R-5 | `ClaudeProbe.locate_cli` mirrors `_find_cli` minus the bundled CLI, re-read at `subprocess_cli.py:255-316`, with the batch refusal at :415 and :807. Adds EC-57 and AC-38. |
+| R-6 | The S054 line, plus S105-safe constant names for A-7. |
+| R-7 | NFR-1's target is reworded. |
+| R-8 | Four generic next-step constants. |
+| R-9 | Steer wording. DTS:4571 confirms that the interrupt kills background tasks when `perTaskStopAffordance` is absent; the Python SDK never sends that field. |
+| R-10 | Header KNOWN EDGE CASES content for rows 3, 15 and 22. |
+
+**Also applied:**
+- **Orchestrator contract change (`978ebfa5`):** rows 30 and 31 and §12.5 insert the request.md §C REPO_MAP and README texts verbatim. FR-24 and AC-32 needed no change.
+- **Reviewer fact on zeroed crash-result cost (DTS:5738/5746):** stated as limitation EC-58.
+
+**Choices I made beyond the reviewer's text:**
+- **POSIX CLI lookup.** `_find_cli` also probes six home and system locations on POSIX. D-5 keeps only `which` there, because a missing CLI on POSIX gives a clear `not_installed`, not a loop. R-5's evidence and the orchestrator's note were Windows-only.
+- **Grace value of 30 s.** It is my choice; nothing in the repo or the conversation fixes it. A-17 records that it is unverified at runtime.
+- **One precondition next step.** EC-20, EC-21 and EC-25 now carry their specifics in the reason, under one `CLAUDE_PRECONDITION_NEXT_STEP`, instead of three ad hoc next steps.
+
+**New least-sure assumptions:**
+- **A-17:** an acknowledged interrupt yields its result within 30 s.
+- **A-3, now also covering `--permission-prompts`:** its help says "with --print", and the SDK never passes `--print`.
