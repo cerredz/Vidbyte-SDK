@@ -140,7 +140,7 @@ class CodexAgentError(AgentExecutionError):
         "relevant_tests",
     )
 
-    def __init__(self, message: str, *, failure_code: str, operation: str, error_type: str = "") -> None:
+    def __init__(self, message: str, *, failure_code: str, operation: str, error_type: str = "", next_step: str = "") -> None:
         self.failure_code = failure_code
         self.operation = operation
         self.error_kind = failure_code
@@ -148,7 +148,8 @@ class CodexAgentError(AgentExecutionError):
         self.actual = message
         self.safe_runtime_details = {"operation": operation, "error_type": error_type}
         self.likely_causes = ("The Codex SDK rejected input, failed a lifecycle operation, or returned an invalid result.",)
-        self.repair_approaches = ("Inspect the operation and chained exception, then correct the matching Codex settings or runtime state.",)
+        self.next_step = next_step
+        self.repair_approaches = (next_step,) if next_step else ("Inspect the operation and chained exception, then correct the matching Codex settings or runtime state.",)
         self.related_docs = ("https://developers.openai.com/codex/sdk", "https://developers.openai.com/codex/app-server")
         self.relevant_tests = ("python scripts/run_ci.py",)
         super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
