@@ -15,8 +15,8 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-12 16:20 | 2026-10-12 16:50 | reports/S0-scout.md | base 52aab816; code-map 4 sections |
-| S1 spec + review | running | 2026-10-12 16:52 | | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); r3 74f0b83d approved; r4 (AQ. ruling) in progress |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-12 16:52 | 2026-10-12 | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); r3 74f0b83d approved; r4 91e69211 approved |
+| S2 tests | running | 2026-10-12 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -88,3 +88,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
   - `RESERVED_PREFIXES` is accepted as a refuse-only guard, now holding only `sk-svcacct-`.
   - Applied as r4, no review (the cap is reached; the change is narrow).
 - Spec r3 new names: `ProviderKeyMatcher.RESERVED_PREFIXES`; `match(..., require_primary_key=True)` with `primary` as a str or tuple; `ProviderKeys.matched_primary` / `matched_others`; `VIDBYTE_PROVIDER_KEY_PATTERN = r"[!-~]+"`; `VIDBYTE_PROVIDER_KEY_MAX_LENGTH = 512`; `runtime_config["key_providers"]` (names only; the session serializer strips only names containing API_KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL or AUTH). xAI `xai-client-secret.` tokens contain a dot and are refused. — *source:* S1 author r3
+- 2026-10-12 — Accepted r4's near-miss reservation: every table F prefix stays reserved, derived from `KEY_FORMATS`, so a key with a table F prefix that does not fully match, such as a dotted `xai-client-secret.` token, is refused rather than unique-assigned to another vendor. Applying the strict wording of ruling 2 would have opened a wrong-vendor path.
+- 2026-10-12 — Spec approved at r4 after 2 review rounds (cap) and two orchestrator-ruling revisions. Q-3 (streaming in default mode) defaults to no: refuse, naming DIRECT. Q-4 (per-model mode) defaults to no. Q-5 (fail at build without a Vidbyte key) defaults to no. Q-6 (refuse `T3BlbkFJ` for non-openai) defaults to no.
+- 2026-10-12 — S2 straggler plan: stragglers (tests that only fail once INV-7 or INV-24 is enforced) cannot be found by a pre-implementation red run. The S2 author hunts them statically. Any found later by S3/S5 go back to a test-author pass (the implementer may not edit tests), each logged here.
+- 2026-10-12 — Environment hazard: this machine's shell exports `DEEPSEEK_API_KEY` (possibly a real key). `VIDBYTE_API_KEY` and `GROK_API_KEY` are user-scope registry variables, not inherited by Bash. Every test run uses `env -u DEEPSEEK_API_KEY`, and every test clears the environment with `patch.dict(os.environ, {...}, clear=True)`.
