@@ -3,7 +3,7 @@
 PURPOSE: Defines MuseTurnDriver, which runs one live Muse turn on its own peer from the turn/start ack to its end: it collects the reply text from the turn's agentMessage items, answers every approval with a denied choice scoped once (each requirement once) and every user-input request with a cancel, enforces the turn ceiling and the stop grace period, and turns the outcome into a NativeTurnResult or the turn's failure row.
 ROLE IN CODEBASE: MuseHost (vidbyte/harnesses/native/muse/host.py) builds one driver per spawned or continued turn and runs MuseTurnDriver.run as the task NativeTurnTable owns; wait_muse_turn reads that task, and steer_muse_turn and interrupt_muse_turn use the driver's peer, ids and interrupt. Frames are parsed by MuseWire (vidbyte/harnesses/native/muse/wire.py).
 ARCHITECTURE NOTE: run is the narrated main loop. It reads peer.inbox in arrival order with a short bounded wait, so a peer that exits mid-turn is noticed even though no request is pending, and hands each frame to one handler per method. A handler that must stop the turn returns the stop source, and run sends turn/interrupt; every stop then gets NATIVE_STOP_GRACE_SECONDS for turn/completed before the peer is closed. The driver always closes its peer through the host's closer, which also runs the in-distro reap in WSL mode.
-FUNCTION INVENTORY: run drives the turn and closes the peer; interrupt sends turn/interrupt and starts the grace period; close_after_grace starts it without sending; shut_down is __aexit__'s stop; peer, session_id, turn_id and running describe the turn; _next_frame waits for one frame; _on_item, _on_gap, _on_approval, _on_user_input, _on_completed and _on_other handle one method each; _grace_over checks the stop deadline; _outcome builds the result or raises the failure row.
+FUNCTION INVENTORY: run drives the turn and closes the peer; interrupt sends turn/interrupt and starts the grace period; close_after_grace starts it without sending; shut_down is __aexit__'s stop; peer, session_id, turn_id, running and ended describe the turn; _next_frame waits for one frame; _on_item, _on_gap, _on_approval, _on_user_input, _on_completed and _on_other handle one method each; _grace_over checks the stop deadline; _outcome builds the result or raises the failure row.
 COMMON MODIFICATION PATTERNS: A new MSP notification the turn must read is one more handler in _handlers, parsing its frame through a MuseWire parser first; a new failure kind is one more entry in _FAILURE_PROBLEMS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pick an approving choice or a session or persistent scope; with no denied choice scoped once, record CANCELLED and stop the turn. 2. Do not match items or completions by commandId; the ack's turnId is the turn's id. 3. Do not wait on the inbox without a bound; a dead peer sends nothing more.
 KNOWN EDGE CASES: A turn/completed for another turn id, such as a foreign or queued turn, is ignored. A cancelled turn the host did not stop has source CALLER, because another client of the session stopped it. A decide answered -32051 or -32053 lost a benign race and the turn goes on; any other failed decide or cancel stops the turn by policy. An interrupt that fails after the turn's own turn/completed was read raises nothing, because the turn has ended and the driver closes the peer under the pending call. Decisions past NATIVE_MAX_RECORDED_DECISIONS are counted in decisions_dropped.
@@ -99,6 +99,11 @@ class MuseTurnDriver:
     def running(self) -> bool:
         # False once the driver has left its loop.
         return self._running
+
+    @property
+    def ended(self) -> bool:
+        # True once this turn's own turn/completed was read.
+        return self._completed is not None
 
     async def run(self) -> NativeTurnResult:
         # @intent muse-turn-driver-owns-its-peer

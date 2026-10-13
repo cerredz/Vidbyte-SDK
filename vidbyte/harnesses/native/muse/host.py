@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every live turn runs on its own `muse serve` peer owned by it
 FUNCTION INVENTORY: __aenter__ resolves the launcher once; __aexit__ stops every live turn; the twelve public methods are narrated main functions. Helpers: _require_open, _reserve, _turn_task, _new_peer, _handshake, _check_model, _resume, _start_turn, _launch, _list_page, _steer, _latest_usage, _discard and the _forget_driver done-callback.
 COMMON MODIFICATION PATTERNS: A new MSP call is one public method here, its params and result reader in wire.py and one tool in vidbyte/tools/builtins/muse/tools.py. A row next step the catalog does not give is a module constant here or in wire.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read Muse credentials or send an approve-everything value; sessions start with approvalMode denyUnmatched and the driver denies every approval. 2. Do not await between the busy check and the reservation of a turn. 3. Do not leave a peer running after its method returns, on any path.
-KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument. On win32 a host needs muse_command or wsl_distro. A WSL peer that exits before answering is classified from its stderr and its exit code, read after close through NativePeer.exit_code: 127 or the ENOENT text is an in-distro muse missing. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED.
+KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument. On win32 a host needs muse_command or wsl_distro. A WSL peer that exits before answering is classified from its stderr and its exit code, read after close through NativePeer.exit_code: 127 or the ENOENT text is an in-distro muse missing. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED. A steer whose turn completes while it waits for Muse's answer raises turn_not_found, because the driver closes the peer once the turn has ended.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (MuseHost), §6.3.5 (EC-94 to EC-121, EC-156), D-9 to D-14, D-18, D-19, D-23, FR-19
 TESTS: tests/features/muse_host/test_muse_host_acceptance.py, tests/features/muse_host/test_muse_host_errors.py, tests/features/muse_host/test_muse_host_reads.py, tests/features/muse_host/test_muse_host_turns.py, tests/features/muse_host/test_muse_host_process_bounds.py, tests/features/muse_host/test_muse_host_wsl.py
 """
@@ -631,13 +631,20 @@ class MuseHost:
         # turn/steer naming the ack's turn. A -32030 refusal is
         # turn_not_found only when the turn has finished here
         # too; while the turn still runs locally it is a vendor
-        # error like any other.
+        # error like any other. A failed call after the turn's
+        # own turn/completed was read is turn_not_found as well,
+        # because the driver closed the peer once the turn
+        # ended; a peer that stopped first is still raised.
         try:
             result = await driver.peer.call("turn/steer", MuseWire.turn_steer_params(driver.session_id, driver.turn_id, text), operation=operation)
         except McpProtocolError as exc:
             if MuseWire.is_command_rejected(exc) and not driver.running:
                 raise self._errors.build(self._errors.code("turn_not_found"), "Muse refused the steer because the turn is no longer running.", operation=operation, next_step=_TURN_NOT_FOUND_NEXT_STEP) from exc
             raise MuseWire.vendor_failure(exc, operation=operation) from exc
+        except NativeHostError as exc:
+            if not driver.ended:
+                raise
+            raise self._errors.build(self._errors.code("turn_not_found"), "The turn finished before Muse answered the steer.", operation=operation, next_step=_TURN_NOT_FOUND_NEXT_STEP) from exc
         return MuseWire.parse_turn_steer_result(result, operation=operation)
 
     async def _latest_usage(self, peer: NativePeer, session_id: str, operation: str) -> tuple[NativeTokenUsage | None, bool]:
