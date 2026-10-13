@@ -4,6 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-grok-opencode-meta-hosts
 branch: feat/native-grok-opencode-meta-hosts
 base_commit: aa8c380c4cd1d5791526dd545f5ef1020b28a5cc
+s2_head: cfad74f8
 pr:
 until: none
 started: 2026-10-13 01:30 UTC
@@ -15,7 +16,7 @@ started: 2026-10-13 01:30 UTC
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 01:30 UTC | 2026-10-13 02:20 UTC | reports/S0-scout.md | base_commit aa8c380c; code-map.md, 4 sections, 21 notes |
 | S1 spec + review | done | 2026-10-13 02:22 UTC | 2026-10-13 05:40 UTC | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 @f1b2fa31 approved; r1 review SOUND WITH FIXES (15/15 accepted), r2 review SOUND WITH FIXES (11/11 accepted) |
-| S2 tests | pending | | | | |
+| S2 tests | done | 2026-10-13 05:50 UTC | 2026-10-13 07:35 UTC | reports/S2-test-author.md | 1635 tests (grok 458, opencode 581, muse 458, backends 138), all red; S2_HEAD cfad74f8 |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -48,6 +49,10 @@ started: 2026-10-13 01:30 UTC
 
 - 2026-10-13 05:10 — Bootstrap: no `pip install -e` from this worktree. The global Python 3.11.0 has `vidbyte-sdk` 0.2.1 installed editable from the canonical checkout `C:/Users/422mi/vidbyte-repos/vidbyte-sdk`, and its dev tools are already there (pytest 8.3.5, pytest-asyncio 1.3.0, ruff 0.16.4, mypy 2.3.1). Re-pointing that install would break the parallel codex-host and claude-host pipelines and the main checkout. Every stage runs with `PYTHONPATH=<worktree>` instead, as the field guide's `local-ci-verification.md` says. Why: the editable install is shared state across every pipeline.
 - 2026-10-13 05:40 — Spec Q-14, Q-15, Q-17, Q-18 and Q-19 take their stated defaults (no / not built). Request Q-1..Q-13 were resolved in spec §8.1; Q-16 was resolved by building D-23. Why: S1 rule, no planned stop.
+- 2026-10-13 07:35 — S2_HEAD = cfad74f8 (tests at e8289019; spec proof column and S2 report at cfad74f8). Later stages diff `tests/` against this SHA. I re-ran the red proof: `native_backends` 138 errors; `grok_host` 89 failed, 13 skipped, 356 errors.
+- 2026-10-13 07:35 — S2's 14 spec ambiguities go to the spec author for r4, before S3. The spec must state each reading the tests took. Any reading the author thinks is wrong comes back to me and goes to the test author. Why: the skill says to resolve spec defects before S3, and the tests are the contract.
+- 2026-10-13 08:05 — Spec r4 (1f97640b, `status: tests-written`) states the reading the tests took for each of S2's 14 ambiguities, plus S2-15. Nothing was routed back to the test author. The transport's dispatch fix is now named as INV-18's one exception: a server request whose `id` collides with a pending client request is dropped instead of failing that request.
+- 2026-10-13 08:05 — The test author was asked to merge its §6.2 Proof values (put in a 7th cell) into the 6-column table. Why: the spec should render correctly on GitHub, and the test author owns that column.
 
 ## User replies (verbatim)
 (none during the run)
@@ -113,4 +118,10 @@ started: 2026-10-13 01:30 UTC
 - Muse in-distro cleanup is `wsl.exe -d <distro> -e sh -s <mark>`, with the script on stdin. There is deliberately no `--`. The mark is 32 lowercase hex characters checked against `MUSE_PEER_MARK_PATTERN`. The cleanup env is `NativeChildEnvironment.build({})`, never the peer's overlay. The script can be tested on Linux CI. — *source:* S1 r3
 - `stop_tree` assumes `start_new_session=True`. On POSIX it always kills the process group (TERM then KILL), even after the leader has exited. Windows uses `taskkill /T /F`. The residual risk is stated in EC-10, A-9 and T-7. — *source:* S1 r3
 - `muse/wire.py` reads `vidbyte.__version__` at call time through a module-level `import vidbyte`, for MSP `clientInfo.version`. — *source:* S1 r3
+- Timing constants must be read through the module at call time (for example `native_hosts.NATIVE_STOP_GRACE_SECONDS`). Tests patch the module, so a `from … import` copy breaks the time-bound tests. — *source:* S2
+- Resolve `wsl.exe` with `shutil.which`. A bare `wsl.exe` finds System32 before PATH and runs the real one instead of the test fake. — *source:* S2
+- In AC-1 on Windows, `grok` is a `grok.cmd` shim on a PATH limited to that folder plus System32, and HOME/USERPROFILE are empty. The fake grok reads its role from argv: `models`/`agent` must come first, `--version` can appear anywhere, and a one-shot is recognised by `--single=`. — *source:* S2
+- opencode's `abort` returns `200 true` and `diff` returns `200 []` even for a missing session, so the host calls `GET /session/{id}` first. Take the message baseline before `prompt_async`. — *source:* S2
+- AC-18 needs `import vidbyte` to load `vidbyte.tools.toolsets.{grok,opencode,muse,harness_backends}`. `test_method_frames_are_dropped_without_a_callback` is the regression proof for the transport dispatch fix. — *source:* S2
+- The suite runs fast: all four packs red in about 16 s on Windows. The 19 skips are platform guards that should run on Linux CI. — *source:* S2
 

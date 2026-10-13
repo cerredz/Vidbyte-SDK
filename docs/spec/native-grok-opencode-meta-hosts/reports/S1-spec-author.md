@@ -211,3 +211,19 @@
 - No unescaped pipes in table code spans.
 - Constants: every new one is in §9.3.
 - No blocking Q.
+
+## Addendum: revision r4 (S2 test-author ambiguities; commit `1f97640b`)
+
+**Disposition.** All 14 S2 items were accepted and stated explicitly (§16 rows S2-1 to S2-14). In each one, the tests' reading matched the request, the repo rules and the rest of the spec. No item was routed back, and no test was edited. While settling S2-12, I found S2-15: "tuple fields are converted" conflicted with `require_argv`, which accepts only a `tuple`, and `muse_command` had no check. Both are now stated, matching `test_host_settings_reject_each_bad_field_by_name[command-list]` and the list conversion the Grok and backend record tests expect.
+
+**Transport check (S2-T).** §8.5 already specifies that a frame with a string `method` goes to `on_message`, or is dropped without a callback, and never resolves a pending request. INV-18 names this as the one exception to the unchanged default. In r4, FR-15 names the exception, and §8.5 now says what used to happen on an id collision and that a non-string `method` is dropped. Existing callers are unaffected: `attach.py` and the current transport tests send `method` only in notifications without an `id`.
+
+**Judgement calls.**
+- EC-115's custom next step (token `continue_muse_session`) now applies in `interrupt_muse_turn` and `wait_muse_turn`, as the row literally said and as the tests assert.
+- The §6.2 Proof cells were inserted by `cfad74f8` as a 7th cell after an empty one. The rows therefore have 7 cells under a 6-column header, and a GFM renderer hides the Proof text. I left this untouched, as instructed.
+
+**Self-check re-run.**
+- IDs: every reference is defined.
+- §12.3: 68 rows.
+- Constants: unchanged.
+- Proof and Priority cells: byte-identical to `cfad74f8`.
