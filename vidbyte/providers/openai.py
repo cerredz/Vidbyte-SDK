@@ -302,7 +302,9 @@ class OpenAIProvider:
         if config.size:
             payload["size"] = config.size
         if config.seconds:
-            payload["seconds"] = config.seconds
+            # @intent openai-video-seconds-is-a-string
+            # The Videos API types seconds as the string enum "4" | "8" | "12" and rejects an integer; the config keeps an int for validation.
+            payload["seconds"] = str(config.seconds)
         if config.extra_body:
             payload.update(dict(config.extra_body))
         return payload
