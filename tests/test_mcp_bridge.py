@@ -162,6 +162,26 @@ class McpBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, f"exported\n[resource: file:///r.pdf, application/pdf, {len(blob)} base64 chars omitted]")
         self.assertNotIn(blob, text)
 
+    def test_text_embedded_resource_is_shown_as_its_text(self) -> None:
+        """An embedded resource's text reaches the prompt under its uri, not as a dict repr."""
+        client = McpClient(FakeTransport())
+        text = client._content_to_text(
+            {
+                "content": [
+                    {"type": "text", "text": "fetched"},
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///notes.md",
+                            "mimeType": "text/markdown",
+                            "text": "# Notes\n- it's \"quoted\"",
+                        },
+                    },
+                ]
+            }
+        )
+        self.assertEqual(text, "fetched\n[resource: file:///notes.md, text/markdown]\n# Notes\n- it's \"quoted\"")
+
 
 class McpBridgeSchemaTests(unittest.TestCase):
     """Verifies the remote input schema survives into provider tool declarations."""
