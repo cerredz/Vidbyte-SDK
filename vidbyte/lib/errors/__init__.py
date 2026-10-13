@@ -66,6 +66,7 @@ from vidbyte.lib.errors.base import (
     UnsupportedProviderError,
     UsageAccountingError,
     VidbyteSdkError,
+    NativeHostError,
 )
 
 __all__ = [
@@ -113,4 +114,5 @@ __all__ = [
     "UnsupportedProviderError",
     "UsageAccountingError",
     "VidbyteSdkError",
+    "NativeHostError",
 ]

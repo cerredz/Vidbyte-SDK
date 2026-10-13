@@ -43,6 +43,7 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
+    - NativeHostError: Raised by the native Grok, opencode and Muse hosts and the backend profiles with a failure code and a next step.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
@@ -53,7 +54,11 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
+
+from vidbyte.lib.constants.native_hosts import NATIVE_HOST_NEXT_STEPS
+from vidbyte.lib.enums.failure import FailureCode
 
 
 class VidbyteSdkError(Exception):
@@ -501,3 +506,46 @@ class SourceParseError(SourceError):
 
 class SourceSecurityError(SourceError):
     """Raised when a URL is disallowed or a response violates a size/scheme guard."""
+
+
+class NativeHostError(AgentExecutionError):
+    """Carries one native host or backend failure: a closed failure code, the public operation, and a next step."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: FailureCode,
+        operation: str,
+        next_step: str | None = None,
+        error_type: str = "",
+        context: Mapping[str, str] | None = None,
+    ) -> None:
+        # A code without a catalog entry falls back to the runtime.error text, so next_step is never empty.
+        fallback = NATIVE_HOST_NEXT_STEPS[FailureCode.RUNTIME_ERROR.value]
+        default_step = NATIVE_HOST_NEXT_STEPS.get(getattr(failure_code, "value", ""), fallback)
+        self.failure_code = failure_code
+        self.operation = operation
+        self.next_step = next_step if next_step else default_step
+        self.error_type = error_type
+        self.context: Mapping[str, str] = MappingProxyType(dict(context or {}))
+        self.error_kind = getattr(failure_code, "value", "")
+        self.expected = f"Native host operation {operation!r} completing successfully"
+        self.actual = message
+        self.safe_runtime_details = {"operation": operation, "error_type": error_type, **self.context}
+        self.likely_causes = ("The native agent CLI or server is missing, signed out, out of date, or answered with an error the host classified as this code.",)
+        self.repair_approaches = (self.next_step,)
+        self.related_docs = ("docs/spec/native-grok-opencode-meta-hosts/spec.md",)
+        self.relevant_tests = ("tests/features/grok_host", "tests/features/opencode_host", "tests/features/muse_host", "tests/features/native_backends")
+        super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
