@@ -214,8 +214,10 @@ class AggregateAgent(BaseAgent):
         # when the list holds any. Prebuilt agents add no primary.
         primaries = [spec.provider for spec in map(self._coerce_spec, proposers) if spec is not None]
         aggregator_spec = self._coerce_spec(aggregator) if aggregator is not None else None
-        if aggregator_spec is not None or (aggregator is None and provider and model_name):
-            primaries.append(aggregator_spec.provider if aggregator_spec is not None else provider)
+        if aggregator_spec is not None:
+            primaries.append(aggregator_spec.provider)
+        elif aggregator is None and provider and model_name:
+            primaries.append(provider)
         self._api_keys = ProviderKeyMatcher.match(api_keys, primary=tuple(primaries), vidbyte_api_key=vidbyte_api_key, field_name="api_keys")
         self._model_mode = model_mode
         super().__init__(name=name, system_prompt=system_prompt, agent_metadata=agent_metadata, metadata=metadata, tracer=tracer, trace=trace, api_keys=self._api_keys, model_mode=model_mode)
